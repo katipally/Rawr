@@ -1,0 +1,138 @@
+/* Sampled from the running HubSpot app, 00-context.md section 11. Body copy is
+   weight 300; that single detail is what makes the clone read as authentic.
+
+   Light is the HubSpot product palette as measured. Dark is ours, built only from
+   HubSpot's own navy family so it still reads as the same product. */
+
+:root {
+  color-scheme: light;
+
+  --rawr-canvas: #f5f8fa;
+  --rawr-surface: #ffffff;
+  --rawr-surface-raised: #ffffff;
+  --rawr-fill: #f5f8fa;
+  --rawr-fill-hover: #eaf0f6;
+  --rawr-disabled: #eaf0f6;
+
+  --rawr-text: #33475b;
+  --rawr-text-secondary: #516f90;
+  --rawr-text-inverse: #ffffff;
+
+  --rawr-border: #cbd6e2;
+  --rawr-divider: #dfe3eb;
+  --rawr-border-interactive: #7fd1de;
+  --rawr-border-pressed: #99acc2;
+
+  --rawr-link: #0091ae;
+  --rawr-accent: #00a4bd;
+  --rawr-accent-subtle: #e5f5f8;
+  --rawr-cta: #ff7a59;
+  --rawr-cta-hover: #ff8f73;
+  --rawr-cta-subtle: #fff1ee;
+  --rawr-success: #00bda5;
+  --rawr-success-subtle: #e5f8f6;
+  --rawr-error: #f2545b;
+  --rawr-error-subtle: #fdeaeb;
+  --rawr-warning: #f5c26b;
+  --rawr-warning-subtle: #fef8f0;
+
+  --rawr-shadow-panel: 0 1px 2px rgb(51 71 91 / 0.12);
+  --rawr-shadow-overlay: 0 8px 24px rgb(51 71 91 / 0.2);
+
+  --rawr-font-sans: 'Lexend Deca', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+    sans-serif;
+  --rawr-text-body: 0.875rem;
+  --rawr-text-small: 0.75rem;
+  --rawr-weight-body: 300;
+  --rawr-weight-label: 500;
+  --rawr-weight-link: 600;
+
+  /* HubSpot's table is 36px rows with 12px horizontal padding. This is a working
+     tool, not a marketing site. */
+  --rawr-row-height: 2.25rem;
+  --rawr-cell-padding-x: 0.75rem;
+  --rawr-radius: 3px;
+  --rawr-radius-panel: 6px;
+
+  --rawr-duration-fast: 150ms;
+  --rawr-duration-base: 200ms;
+  --rawr-duration-slow: 300ms;
+  --rawr-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* System preference. Guarded so an explicit light choice always wins. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --rawr-canvas: #1b2938;
+    --rawr-surface: #253342;
+    --rawr-surface-raised: #2d3e50;
+    --rawr-fill: #2d3e50;
+    --rawr-fill-hover: #33475b;
+    --rawr-disabled: #33475b;
+
+    --rawr-text: #eaf0f6;
+    --rawr-text-secondary: #99acc2;
+    --rawr-text-inverse: #1b2938;
+
+    --rawr-border: #3f5468;
+    --rawr-divider: #33475b;
+    --rawr-border-interactive: #7fd1de;
+    --rawr-border-pressed: #516f90;
+
+    --rawr-link: #7fd1de;
+    --rawr-accent: #00a4bd;
+    --rawr-accent-subtle: #163b45;
+    --rawr-cta: #ff7a59;
+    --rawr-cta-hover: #ff8f73;
+    --rawr-cta-subtle: #402a26;
+    --rawr-success: #00bda5;
+    --rawr-success-subtle: #123d38;
+    --rawr-error: #f2545b;
+    --rawr-error-subtle: #3f2124;
+    --rawr-warning: #f5c26b;
+    --rawr-warning-subtle: #3d3423;
+
+    --rawr-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4);
+    --rawr-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.55);
+  }
+}
+
+/* Explicit choice. Repeated rather than nested so the toggle wins in both
+   directions, including on a system set to the opposite. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --rawr-canvas: #1b2938;
+  --rawr-surface: #253342;
+  --rawr-surface-raised: #2d3e50;
+  --rawr-fill: #2d3e50;
+  --rawr-fill-hover: #33475b;
+  --rawr-disabled: #33475b;
+
+  --rawr-text: #eaf0f6;
+  --rawr-text-secondary: #99acc2;
+  --rawr-text-inverse: #1b2938;
+
+  --rawr-border: #3f5468;
+  --rawr-divider: #33475b;
+  --rawr-border-interactive: #7fd1de;
+  --rawr-border-pressed: #516f90;
+
+  --rawr-link: #7fd1de;
+  --rawr-accent: #00a4bd;
+  --rawr-accent-subtle: #163b45;
+  --rawr-cta: #ff7a59;
+  --rawr-cta-hover: #ff8f73;
+  --rawr-cta-subtle: #402a26;
+  --rawr-success: #00bda5;
+  --rawr-success-subtle: #123d38;
+  --rawr-error: #f2545b;
+  --rawr-error-subtle: #3f2124;
+  --rawr-warning: #f5c26b;
+  --rawr-warning-subtle: #3d3423;
+
+  --rawr-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4);
+  --rawr-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.55);
+}
