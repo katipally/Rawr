@@ -3,6 +3,9 @@ docs
 Design
 .claude
 
+# Agent tooling, restored from skills-lock.json
+.agents
+
 # Dependencies
 node_modules
 .pnpm-store
