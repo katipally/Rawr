@@ -1,0 +1,23 @@
+{
+  "name": "rawr",
+  "private": true,
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @rawr/web dev",
+    "worker": "pnpm --filter @rawr/worker dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @rawr/db generate",
+    "db:migrate": "pnpm --filter @rawr/db migrate",
+    "db:seed": "pnpm --filter @rawr/db seed",
+    "db:verify": "pnpm --filter @rawr/db verify",
+    "db:verify:guards": "pnpm --filter @rawr/db verify:guards",
+    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards"
+  },
+  "devDependencies": {
+    "typescript": "catalog:"
+  }
+}
