@@ -1,0 +1,28 @@
+{
+  "name": "@rawr/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "migrate": "node --experimental-strip-types --env-file=../../.env.local scripts/migrate.ts",
+    "seed": "node --experimental-strip-types --env-file=../../.env.local scripts/seed.ts",
+    "verify": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-tenancy.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:guards": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-guards.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "postgres": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "drizzle-kit": "catalog:",
+    "typescript": "catalog:",
+    "@types/node": "catalog:"
+  }
+}
