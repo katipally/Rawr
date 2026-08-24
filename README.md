@@ -1,7 +1,8 @@
 # Rawr
 
-Internal HubSpot replacement for Datasaur. The plan lives in `docs/`; read
-`docs/README.md` first. This file is only how to run it.
+Internal HubSpot replacement for Datasaur. The plan lives in `docs/`, which is
+local-only and not in this repo; read `docs/README.md` first if you have it.
+This file is only how to run it.
 
 ```
  apps/web        Next.js: app surfaces + the public edge
@@ -18,6 +19,12 @@ Internal HubSpot replacement for Datasaur. The plan lives in `docs/`; read
  pnpm db:migrate                # schema, then row level security on every table
  pnpm db:seed                   # two workspaces, ~20 records each, edge cases included
 ```
+
+Needs Node 24+ and pnpm 11 (`packageManager` pins the exact version, so
+`corepack enable` is enough). Every script reads `.env.local` directly through
+`node --env-file`, so that file has to exist before any `db:` command.
+`.agents/` holds agent skills pinned by `skills-lock.json` and is not committed;
+Claude Code restores it from that lock.
 
 Both database URLs point at the same Supabase project through different ports:
 `:6543` transaction mode for app queries (`prepare: false` is required there), and
