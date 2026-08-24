@@ -1,0 +1,84 @@
+@import 'tailwindcss';
+@import '@rawr/ui/tokens.css';
+
+/* The design system is a workspace package, so it resolves through node_modules,
+   which Tailwind skips by default. Without this, any utility used only inside a
+   primitive is silently never generated. */
+@source '../../../../packages/ui/src';
+
+/* Tokens are the source of truth; this only teaches Tailwind their names so
+   bg-surface and text-secondary exist as utilities. */
+@theme inline {
+  --color-canvas: var(--rawr-canvas);
+  --color-surface: var(--rawr-surface);
+  --color-surface-raised: var(--rawr-surface-raised);
+  --color-fill: var(--rawr-fill);
+  --color-fill-hover: var(--rawr-fill-hover);
+  --color-disabled: var(--rawr-disabled);
+
+  --color-body: var(--rawr-text);
+  --color-secondary: var(--rawr-text-secondary);
+  --color-inverse: var(--rawr-text-inverse);
+
+  --color-line: var(--rawr-border);
+  --color-divider: var(--rawr-divider);
+  --color-line-interactive: var(--rawr-border-interactive);
+  --color-line-pressed: var(--rawr-border-pressed);
+
+  --color-link: var(--rawr-link);
+  --color-accent: var(--rawr-accent);
+  --color-accent-subtle: var(--rawr-accent-subtle);
+  --color-cta: var(--rawr-cta);
+  --color-cta-hover: var(--rawr-cta-hover);
+  --color-cta-subtle: var(--rawr-cta-subtle);
+  --color-success: var(--rawr-success);
+  --color-success-subtle: var(--rawr-success-subtle);
+  --color-error: var(--rawr-error);
+  --color-error-subtle: var(--rawr-error-subtle);
+  --color-warning: var(--rawr-warning);
+  --color-warning-subtle: var(--rawr-warning-subtle);
+
+  --font-sans: var(--rawr-font-sans);
+  --radius-hs: var(--rawr-radius);
+  --radius-panel: var(--rawr-radius-panel);
+  --shadow-panel: var(--rawr-shadow-panel);
+  --shadow-overlay: var(--rawr-shadow-overlay);
+  --spacing-row: var(--rawr-row-height);
+}
+
+@layer base {
+  html {
+    /* Never a fixed px root size: a user who enlarges text must be obeyed. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--rawr-canvas);
+    color: var(--rawr-text);
+    font-family: var(--rawr-font-sans);
+    font-size: var(--rawr-text-body);
+    font-weight: var(--rawr-weight-body);
+    line-height: 1.5;
+  }
+
+  a {
+    color: var(--rawr-link);
+    font-weight: var(--rawr-weight-link);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--rawr-accent);
+    outline-offset: 2px;
+  }
+
+  /* Long unbroken strings are the normal case here: 500-character company names,
+     pasted URLs, tokens. Nothing may push the page sideways. */
+  th,
+  td,
+  p,
+  h1,
+  h2,
+  h3 {
+    overflow-wrap: anywhere;
+  }
+}
