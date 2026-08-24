@@ -1,0 +1,34 @@
+# Local-only working material
+docs
+Design
+.claude
+
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output
+.next
+dist
+.turbo
+*.tsbuildinfo
+next-env.d.ts
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+
+# Hosting
+.vercel
