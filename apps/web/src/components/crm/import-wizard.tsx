@@ -1,0 +1,310 @@
+'use client'
+
+import { Button, Select, useToast } from '@rawr/ui'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import type { ObjectKey } from '@rawr/db'
+import { api, errorMessage } from '~/lib/rpc.ts'
+
+export type MappableField = { key: string; label: string; isRequired: boolean }
+
+export type ImportWizardProps = {
+  workspace: string
+  runId: string
+  object: ObjectKey
+  filename: string
+  headers: string[]
+  sampleRows: Record<string, string>[]
+  fields: MappableField[]
+  initialMapping: Record<string, string | null>
+  previousMapping: Record<string, string | null> | null
+  totalRows: number
+  state: string
+  processedRows: number
+  counts: { created: number; updated: number; skipped: number; errored: number }
+  errors: { row: number; reason: string; values: Record<string, string> }[]
+}
+
+type Preview = {
+  willCreate: number
+  willUpdate: number
+  willSkip: number
+  willError: number
+  samples: { create: Record<string, string>[]; update: Record<string, string>[]; error: { row: number; reason: string; values: Record<string, string> }[] }
+}
+
+export const ImportWizard = ({
+  workspace,
+  runId,
+  object,
+  filename,
+  headers,
+  sampleRows,
+  fields,
+  initialMapping,
+  previousMapping,
+  totalRows,
+  state,
+  processedRows,
+  counts,
+  errors,
+}: ImportWizardProps) => {
+  const router = useRouter()
+  const toast = useToast()
+  const [mapping, setMapping] = useState(initialMapping)
+  const [preview, setPreview] = useState<Preview | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(processedRows)
+  const [running, setRunning] = useState(false)
+
+  const finished = state === 'done'
+
+  // Two headers on one field is blocked in the mapper, before the dry run.
+  const duplicates = Object.entries(mapping).reduce<Record<string, string[]>>((acc, [header, key]) => {
+    if (!key) return acc
+    acc[key] = [...(acc[key] ?? []), header]
+    return acc
+  }, {})
+  const clashes = Object.entries(duplicates).filter(([, list]) => list.length > 1)
+
+  const runDryRun = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.crm.imports.setMapping.mutate({ id: runId, mapping })
+      const result = await api.crm.imports.dryRun.query({
+        object,
+        mapping,
+        rows: sampleRows,
+      })
+      setPreview(result as Preview)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** One chunk per call, so the run survives a closed tab: the server holds the
+   *  cursor and reopening this page picks it back up. A8. */
+  const run = async () => {
+    setRunning(true)
+    setError(null)
+    try {
+      let done = false
+      let guard = 0
+      while (!done && guard < 10_000) {
+        const result = await api.crm.imports.runChunk.mutate({ id: runId })
+        setProgress(result.processed)
+        done = result.done
+        guard += 1
+      }
+      toast('success', 'Import finished.')
+      router.refresh()
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  if (finished || state === 'running') {
+    const pct = totalRows === 0 ? 100 : Math.round((progress / totalRows) * 100)
+    return (
+      <div className="flex flex-col gap-3">
+        <h2 className="font-medium">{filename}</h2>
+        <p className="tabular-nums">
+          {progress.toLocaleString()} of {totalRows.toLocaleString()} rows ({pct}%)
+        </p>
+        <div
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="h-2 w-full overflow-hidden rounded-hs bg-fill"
+        >
+          <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+        </div>
+
+        <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
+          {[
+            ['Created', counts.created],
+            ['Updated', counts.updated],
+            ['Skipped', counts.skipped],
+            ['With a problem', counts.errored],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <dt className="text-small text-secondary">{label}</dt>
+              <dd className="text-lg">{Number(value).toLocaleString()}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {!finished ? (
+          <div>
+            <Button variant="primary" busy={running} onClick={() => void run()}>
+              {running ? 'Importing' : 'Resume the import'}
+            </Button>
+          </div>
+        ) : null}
+
+        {errors.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="font-medium">Rows that need a person ({counts.errored.toLocaleString()})</h3>
+            <p className="text-secondary">
+              Everything else was imported. Fix these rows and upload just them again.
+            </p>
+            <a href={`/contacts/${workspace}/import/${runId}/errors`} download>
+              <Button>Download the failed rows as CSV</Button>
+            </a>
+            <ul className="flex flex-col rounded-panel border border-line bg-surface">
+              {errors.slice(0, 25).map((row) => (
+                <li key={`${row.row}-${row.reason}`} className="border-b border-divider px-3 py-1.5 last:border-0">
+                  <span className="text-secondary tabular-nums">Row {row.row}: </span>
+                  {row.reason}
+                </li>
+              ))}
+            </ul>
+            {errors.length > 25 ? (
+              <p className="text-secondary">
+                Showing the first 25. The CSV has all {counts.errored.toLocaleString()}.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h2 className="font-medium">{filename}</h2>
+        <p className="text-secondary tabular-nums">
+          {totalRows.toLocaleString()} rows, {headers.length} columns
+        </p>
+      </div>
+
+      {previousMapping ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-hs border border-line bg-fill px-3 py-2">
+          <span className="min-w-0 flex-1">
+            A file with these columns was imported before. Use the mapping it used?
+          </span>
+          <Button onClick={() => setMapping(previousMapping)}>Use it</Button>
+        </div>
+      ) : null}
+
+      <table className="w-full border-collapse text-left">
+        <caption className="sr-only">Map each column in the file to a field</caption>
+        <thead>
+          <tr className="bg-fill">
+            <th scope="col" className="border-b border-line px-3 py-2 text-small font-medium text-secondary">
+              Column in the file
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-small font-medium text-secondary">
+              First value
+            </th>
+            <th scope="col" className="border-b border-line px-3 py-2 text-small font-medium text-secondary">
+              Goes into
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {headers.map((header) => {
+            const target = mapping[header] ?? ''
+            const clashing = target !== '' && (duplicates[target]?.length ?? 0) > 1
+            return (
+              <tr key={header} className="border-b border-divider last:border-0">
+                <td className="px-3 py-1.5 align-middle break-words">{header}</td>
+                <td className="px-3 py-1.5 align-middle text-secondary break-words">
+                  {sampleRows[0]?.[header] || <span className="text-secondary">empty</span>}
+                </td>
+                <td className="px-3 py-1.5 align-middle">
+                  <Select
+                    aria-label={`Field for ${header}`}
+                    aria-invalid={clashing}
+                    value={target}
+                    onChange={(event) =>
+                      setMapping((current) => ({ ...current, [header]: event.target.value || null }))
+                    }
+                  >
+                    <option value="">Do not import</option>
+                    {fields.map((field) => (
+                      <option key={field.key} value={field.key}>
+                        {field.label}
+                        {field.isRequired ? ' (required)' : ''}
+                      </option>
+                    ))}
+                  </Select>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      {clashes.length > 0 ? (
+        <p role="alert" className="text-error">
+          {clashes
+            .map(([key, list]) => `${list.join(' and ')} are both mapped to ${fields.find((f) => f.key === key)?.label ?? key}`)
+            .join('; ')}
+          . Pick one for each.
+        </p>
+      ) : null}
+
+      {error ? (
+        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+          {error}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button busy={busy} disabled={clashes.length > 0} onClick={() => void runDryRun()}>
+          Preview what will happen
+        </Button>
+        {preview ? (
+          <Button variant="primary" busy={running} onClick={() => void run()}>
+            Import {totalRows.toLocaleString()} rows
+          </Button>
+        ) : null}
+      </div>
+
+      {preview ? (
+        <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-3">
+          <h3 className="font-medium">Nothing has been written yet</h3>
+          <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
+            {[
+              ['Will be created', preview.willCreate],
+              ['Will be updated', preview.willUpdate],
+              ['Will be skipped', preview.willSkip],
+              ['Will be refused', preview.willError],
+            ].map(([label, value]) => (
+              <div key={String(label)}>
+                <dt className="text-small text-secondary">{label}</dt>
+                <dd className="text-lg">{Number(value).toLocaleString()}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {preview.samples.error.length > 0 ? (
+            <div>
+              <p className="font-medium">Rows that will be refused</p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {preview.samples.error.map((row) => (
+                  <li key={row.row}>
+                    <span className="text-secondary tabular-nums">Row {row.row}: </span>
+                    {row.reason}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-secondary">
+                A refused row does not stop the run. The rest still import.
+              </p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+    </div>
+  )
+}
