@@ -1,0 +1,1 @@
+ALTER TABLE "import_run" ADD COLUMN "headers" jsonb DEFAULT '[]'::jsonb NOT NULL;

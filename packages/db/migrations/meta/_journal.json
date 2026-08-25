@@ -15,6 +15,41 @@
       "when": 1787553215678,
       "tag": "0001_tenancy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787565940699,
+      "tag": "0002_f1_crm",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787566000000,
+      "tag": "0003_search_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787566100000,
+      "tag": "0004_app_search_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787566200000,
+      "tag": "0005_extensions_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787569241034,
+      "tag": "0006_import_headers",
+      "breakpoints": true
     }
   ]
 }
