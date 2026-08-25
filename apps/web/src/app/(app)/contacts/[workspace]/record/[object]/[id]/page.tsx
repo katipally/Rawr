@@ -9,6 +9,7 @@ import {
   readSubscriptions,
   readTimeline,
   timelineCounts,
+  websiteActivity,
   type ObjectKey,
 } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
@@ -19,6 +20,7 @@ import { PropertyPanel, type PropertySection } from '~/components/crm/property-p
 import { RecordActions } from '~/components/crm/record-actions.tsx'
 import { SubscriptionsPanel } from '~/components/crm/subscriptions-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
+import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value } from '~/components/crm/value.tsx'
 import { objectView } from '~/lib/links.ts'
@@ -91,7 +93,7 @@ const RecordPage = async ({
   }
 
   const entity = { entityType: objectParam, entityId: id }
-  const [timeline, counts, rail, tasks, subscriptions, mergeCandidates] = await Promise.all([
+  const [timeline, counts, rail, tasks, subscriptions, mergeCandidates, activity] = await Promise.all([
     // A hand-edited type in a link is dropped rather than failing the page.
     readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
     timelineCounts(ctx, entity),
@@ -99,6 +101,7 @@ const RecordPage = async ({
     listTasks(ctx, { entity }),
     objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
     listRecords(ctx, { object: objectParam, limit: 200, sorts: [{ key: 'created_at', direction: 'desc' }] }),
+    objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
   ])
 
   const fields = toEditableFields(object, lookups, companies, { includeReadOnly: true })
@@ -169,6 +172,18 @@ const RecordPage = async ({
             sections={SECTIONS[objectParam]}
             canWrite={canWrite}
           />
+          {objectParam === 'contact' && activity ? (
+            <WebsiteActivity
+              workspace={workspace}
+              contactId={id}
+              contactName={record.displayName}
+              siteVisits={activity.siteVisits}
+              pagesViewed={activity.pagesViewed}
+              lastSeenAt={activity.lastSeenAt?.toISOString() ?? null}
+              devices={activity.devices}
+              isAdmin={session.role === 'admin'}
+            />
+          ) : null}
           {objectParam === 'contact' ? (
             <SubscriptionsPanel
               contactId={id}
@@ -183,6 +198,8 @@ const RecordPage = async ({
           <Timeline
             object={objectParam}
             recordId={id}
+            workspace={workspace}
+            recordName={record.displayName}
             initial={timeline.rows.map((row) => ({
               id: row.id,
               type: row.type,
@@ -191,6 +208,7 @@ const RecordPage = async ({
               occurredAt: row.occurredAt.toISOString(),
               actorName: row.actorName,
               actorKind: row.actorKind,
+              payload: row.payload,
             }))}
             initialCursor={
               timeline.nextCursor

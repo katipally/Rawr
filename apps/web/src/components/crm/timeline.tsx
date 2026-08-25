@@ -1,9 +1,11 @@
 'use client'
 
 import { Button, EmptyState, TextArea, cn, useToast } from '@rawr/ui'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
+import { pageViewPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from './value.tsx'
 
@@ -15,12 +17,20 @@ export type TimelineEntry = {
   occurredAt: string
   actorName: string | null
   actorKind: string
+  /** What the entry was written from. Only F4's two types read it, to address the
+   *  page view or event behind them. */
+  payload?: unknown
 }
 
 export type TimelineGroup = { label: string; types: string[] }
 
 export type TimelineProps = {
   object: ObjectKey
+  workspace: string
+  /** Whose record this is. Tracking entries are attributed to the person, the way
+   *  HubSpot reads "Muhammad Owais viewed Data Studio", because "public viewed" or
+   *  "job viewed" describes the mechanism rather than what happened. */
+  recordName: string
   recordId: string
   initial: TimelineEntry[]
   initialCursor: { occurredAt: string; id: string } | null
@@ -55,8 +65,22 @@ const TYPE_LABELS: Record<string, string> = {
 
 const STORAGE_PREFIX = 'rawr.timeline.types.'
 
+/** The two types whose actor is the person the record is about, not a user, a job
+ *  or "public". F4 §4. */
+const TRACKED = new Set(['page_view', 'custom_event'])
+
+/** A page view on the timeline addresses the row behind it, so "viewed Data
+ *  Studio" opens the full URL, the referrer and the rest of that visit. F4 §4. */
+const pageViewIdOf = (entry: TimelineEntry): string | null => {
+  if (entry.type !== 'page_view') return null
+  const id = (entry.payload as { pageViewId?: unknown } | null)?.pageViewId
+  return typeof id === 'string' ? id : null
+}
+
 export const Timeline = ({
   object,
+  workspace,
+  recordName,
   recordId,
   initial,
   initialCursor,
@@ -115,6 +139,7 @@ export const Timeline = ({
         occurredAt: row.occurredAt.toISOString(),
         actorName: row.actorName,
         actorKind: row.actorKind,
+        payload: row.payload,
       }))
       setRows((current) => (append ? [...current, ...mapped] : mapped))
       setCursor(
@@ -239,8 +264,20 @@ export const Timeline = ({
                   {TYPE_LABELS[entry.type] ?? entry.type}
                 </span>
                 <span className="min-w-0 break-words font-medium">
-                  {entry.actorName ? `${entry.actorName} ` : entry.actorKind !== 'user' ? `${entry.actorKind} ` : ''}
-                  {entry.subject ?? ''}
+                  {TRACKED.has(entry.type)
+                    ? `${recordName} `
+                    : entry.actorName
+                      ? `${entry.actorName} `
+                      : entry.actorKind !== 'user'
+                        ? `${entry.actorKind} `
+                        : ''}
+                  {pageViewIdOf(entry) ? (
+                    <Link className="text-link" href={pageViewPath(workspace, pageViewIdOf(entry) as string)}>
+                      {entry.subject ?? ''}
+                    </Link>
+                  ) : (
+                    (entry.subject ?? '')
+                  )}
                 </span>
                 <time
                   dateTime={entry.occurredAt}
