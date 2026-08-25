@@ -129,3 +129,12 @@ export const bookingStateEnum = pgEnum('rawr_booking_state', [
  *  own confirmed bookings so the engine is exercisable end to end before a Google
  *  project exists. It is refused in production. */
 export const calendarProviderEnum = pgEnum('rawr_calendar_provider', ['google', 'dev'])
+
+/** F4 §3. How Rawr learned that a visitor is a person. Stored rather than
+ *  inferred, because a shared browser producing two identifications is a fact
+ *  somebody will need to read back. */
+export const aliasViaEnum = pgEnum('rawr_alias_via', [
+  'form_submission',
+  'booking',
+  'product_signin',
+])
