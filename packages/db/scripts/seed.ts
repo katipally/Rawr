@@ -362,6 +362,13 @@ try {
     )
   }
 
+  // F4. One site per tenant. Nothing is collected until one exists, so the
+  // collector tests and the local embed both need this row to be here.
+  await db.insert(s.site).values([
+    { workspaceId: datasaur, name: 'Marketing site', host: 'datasaur.ai', siteKey: 'datasaur-www' },
+    { workspaceId: probe, name: 'Probe site', host: 'probe.example', siteKey: 'probe-www' },
+  ])
+
   // F2. A round robin across the three non-viewer staff plus a personal link for
   // one of them, on both tenants so the isolation test has a page on each side.
   // Availability is nine to five in three different zones on purpose: a bug that
