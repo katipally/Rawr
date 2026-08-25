@@ -68,6 +68,13 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
    *  carries no role of its own, so a viewer's token reads and cannot write, and
    *  revoking somebody else's is refused inside the layer rather than here. */
   mcp_token: ['admin', 'sales', 'marketing', 'viewer'],
+  /** F4. A site key is what lets a host write into this workspace, so creating one
+   *  is an admin act however harmless the row looks. */
+  site: ['admin'],
+  /** Erasing a person's browsing history is irreversible and is answered to a
+   *  regulator, not to a sales target. Admin only, deliberately narrower than the
+   *  three roles that can delete a contact. */
+  erasure: ['admin'],
 }
 
 export const canWrite = (role: Role, entity: string): boolean =>
