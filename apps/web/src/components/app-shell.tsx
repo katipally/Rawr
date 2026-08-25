@@ -6,28 +6,34 @@ import { useState, type ReactNode } from 'react'
 import { cn } from '@rawr/ui'
 import { ThemeToggle } from './theme.tsx'
 
-export type NavItem = { href: string; label: string }
-
-/** Feature surfaces are added here as they land, so the nav never lists a screen
- *  that does not exist yet. */
-export const NAV: NavItem[] = [
-  { href: '/', label: 'Home' },
-  { href: '/design', label: 'Design' },
-  { href: '/settings/jobs', label: 'Failed jobs' },
-]
+export type NavItem = {
+  href: string
+  label: string
+  /** The path prefix that counts as "you are here". A deals tab stays lit on the
+   *  board as well as the list, which share a prefix but not a href. */
+  match?: string
+}
 
 export type AppShellProps = {
   workspaceName: string
   email: string
   role: string
+  /** Built by the layout from the session's workspace, because every CRM address
+   *  carries its workspace and a hardcoded list could not. */
+  nav: NavItem[]
+  /** The command palette, rendered by the layout so the shell needs no data. */
+  search?: ReactNode
   children: ReactNode
 }
 
-export const AppShell = ({ workspaceName, email, role, children }: AppShellProps) => {
+export const AppShell = ({ workspaceName, email, role, nav, search, children }: AppShellProps) => {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  const isCurrent = (href: string) => (href === '/' ? pathname === '/' : pathname.startsWith(href))
+  const isCurrent = (item: NavItem) => {
+    const prefix = item.match ?? item.href
+    return prefix === '/' ? pathname === '/' : pathname.startsWith(prefix)
+  }
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -57,16 +63,16 @@ export const AppShell = ({ workspaceName, email, role, children }: AppShellProps
             )}
           >
             <ul className="flex flex-wrap gap-1">
-              {NAV.map((item) => (
+              {nav.map((item) => (
                 <li key={item.href}>
                   <Link
                     href={item.href}
-                    aria-current={isCurrent(item.href) ? 'page' : undefined}
+                    aria-current={isCurrent(item) ? 'page' : undefined}
                     onClick={() => setMenuOpen(false)}
                     className={cn(
                       'block rounded-hs px-3 py-1.5 font-medium text-body no-underline',
                       'hover:bg-fill-hover',
-                      isCurrent(item.href) && 'bg-accent-subtle text-link',
+                      isCurrent(item) && 'bg-accent-subtle text-link',
                     )}
                   >
                     {item.label}
@@ -75,6 +81,8 @@ export const AppShell = ({ workspaceName, email, role, children }: AppShellProps
               ))}
             </ul>
           </nav>
+
+          {search ? <div className="order-last w-full min-w-0 sm:order-none sm:w-72">{search}</div> : null}
 
           <div className="hidden min-w-0 items-center gap-3 sm:flex">
             <span className="truncate text-secondary" title={`${email} · ${role}`}>
