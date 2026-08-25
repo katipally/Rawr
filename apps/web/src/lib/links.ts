@@ -75,6 +75,64 @@ export const submissionsPath = (
 export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
 
+/** Booking sits under its own root, the way HubSpot puts scheduling pages under
+ *  /meetings/:portalId rather than inside the contacts app. Same rule as everything
+ *  else: the workspace is in the path, so any screen pastes. */
+export const MEETINGS_ROOT = 'meetings'
+
+export const bookingPagesPath = (workspace: string, id?: string): string =>
+  id ? `/${MEETINGS_ROOT}/${workspace}/pages/${id}` : `/${MEETINGS_ROOT}/${workspace}/pages`
+
+export const bookedPath = (
+  workspace: string,
+  params: { when?: 'upcoming' | 'past'; page?: string; host?: string; state?: string } = {},
+): string => `/${MEETINGS_ROOT}/${workspace}/booked${query(params)}`
+
+/** A person's own working hours, and an admin looking at somebody else's. The user
+ *  is a query parameter rather than a path segment because the default subject is
+ *  always "me", and a link with nobody named still opens on the right person. */
+export const availabilityPath = (workspace: string, params: { user?: string; month?: string } = {}): string =>
+  `/${MEETINGS_ROOT}/${workspace}/availability${query(params)}`
+
+export const calendarsPath = (workspace: string): string =>
+  `/${MEETINGS_ROOT}/${workspace}/calendars`
+
+/** The public booking page. Absolute elsewhere; relative here because the app
+ *  links to it too, from the page editor's preview. */
+export const bookingPublicPath = (
+  workspaceSlug: string,
+  slug: string,
+  params: {
+    month?: string | undefined
+    date?: string | undefined
+    tz?: string | undefined
+    slot?: string | undefined
+    /** Round-trip state for the no-JavaScript path: the confirmation, the instant
+     *  confirmed, the attendee's own manage tokens, a message, and per-field
+     *  errors. All in the URL because a plain form post has nowhere else to put
+     *  them and a redirect is what stops a refresh booking twice. */
+    confirmed?: string | undefined
+    at?: string | undefined
+    r?: string | undefined
+    c?: string | undefined
+    e?: string | undefined
+    err?: string | undefined
+    /** A non-fatal note on an otherwise successful booking, such as a joining
+     *  link that is still being created. */
+    w?: string | undefined
+  } = {},
+): string => `/b/${workspaceSlug}/${slug}${query(params)}`
+
+export const bookingManagePath = (purpose: 'cancel' | 'reschedule', token: string): string =>
+  `/b/manage/${purpose}/${token}`
+
+/** Settings has no workspace segment: a person belongs to one at a time and the
+ *  switcher in the shell is what moves them. Kept as functions anyway so the day
+ *  that changes is one edit here. */
+export const agentAccessPath = (): string => '/settings/agent'
+
+export const failedJobsPath = (): string => '/settings/jobs'
+
 /** A sort is one field and a direction, written the way a person would type it:
  *  `-close_date` for newest first. Kept short because it lives in a URL people
  *  paste into Slack. */
