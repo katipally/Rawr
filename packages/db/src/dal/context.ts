@@ -1,7 +1,7 @@
 export const ROLES = ['admin', 'sales', 'marketing', 'viewer'] as const
 export type Role = (typeof ROLES)[number]
 
-export type ActorKind = 'user' | 'mcp' | 'job' | 'integration'
+export type ActorKind = 'user' | 'mcp' | 'job' | 'integration' | 'public'
 
 /** Everything the data access layer needs to answer "who is asking, on behalf of
  *  which workspace". A request without one of these never reaches the database. */
@@ -46,6 +46,11 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   object_def: ['admin'],
   field_def: ['admin'],
   integration: ['admin'],
+  form: ['admin', 'marketing'],
+  /** Reviewing the spam queue is sales work as much as marketing work: the lead
+   *  being held is somebody's prospect. */
+  form_submission: ['admin', 'sales', 'marketing'],
+  consent_record: ['admin', 'marketing'],
   membership: ['admin'],
 }
 
