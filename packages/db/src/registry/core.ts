@@ -1,18 +1,24 @@
-import type { fieldTypeEnum } from '../schema/enums.ts'
+import type { FieldType } from './types.ts'
 
-type FieldType = (typeof fieldTypeEnum.enumValues)[number]
+export type ObjectKey = 'company' | 'contact' | 'deal'
 
 export type CoreField = {
   key: string
   label: string
   type: FieldType
-  columnName: string
+  /** Set for storage 'column'. Omitted means the field lives in <object>.custom. */
+  columnName?: string
   isRequired?: boolean
+  /** Writing this field writes a field_change activity. Default off, because an
+   *  88,270-row import otherwise writes 371 rows per contact. A3. */
+  trackChanges?: boolean
+  /** select and multi_select only. */
+  options?: string[]
   position: number
 }
 
 export type CoreObject = {
-  key: 'company' | 'contact' | 'deal'
+  key: ObjectKey
   nameSingular: string
   namePlural: string
   icon: string
@@ -20,9 +26,18 @@ export type CoreObject = {
   fields: CoreField[]
 }
 
+/** HubSpot's own vocabulary, kept verbatim so migrated values land as themselves
+ *  rather than as "other". 00-context.md. */
+const LEAD_STATUS = ['New', 'Open', 'In Progress', 'Open Deal', 'Unqualified', 'Attempted to Contact', 'Connected', 'Bad Timing']
+const LEAD_SOURCE = ['Organic Search', 'Paid Search', 'Email Marketing', 'Social Media', 'Referrals', 'Other Campaigns', 'Direct Traffic', 'Offline Sources']
+const MARKETING_STATUS = ['Marketing contact', 'Non-marketing contact']
+const DEAL_TYPE = ['New Business', 'Existing Business', 'Renewal']
+const PRODUCT_OF_INTEREST = ['NLP Labeling', 'LLM Labs', 'Data Studio', 'Audio', 'OCR', 'Professional Services']
+
 /** The registry's starting content. Every column that exists on a core record has a
  *  field_def row, because a surface that cannot see a field in the registry cannot
- *  render, filter or export it. Custom fields are added at runtime as jsonb. */
+ *  render, filter or export it. Fields with no columnName are seeded as custom
+ *  jsonb fields, which is also how a HubSpot custom property migrates. */
 export const CORE_OBJECTS: CoreObject[] = [
   {
     key: 'company',
@@ -39,9 +54,11 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'phone', label: 'Phone number', type: 'phone', columnName: 'phone', position: 5 },
       { key: 'employee_count', label: 'Number of employees', type: 'number', columnName: 'employee_count', position: 6 },
       { key: 'annual_revenue', label: 'Annual revenue', type: 'currency', columnName: 'annual_revenue', position: 7 },
-      { key: 'owner_id', label: 'Company owner', type: 'user', columnName: 'owner_id', position: 8 },
-      { key: 'lifecycle_stage_id', label: 'Lifecycle stage', type: 'relation', columnName: 'lifecycle_stage_id', position: 9 },
-      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 10 },
+      { key: 'owner_id', label: 'Company owner', type: 'user', columnName: 'owner_id', trackChanges: true, position: 8 },
+      { key: 'lifecycle_stage_id', label: 'Lifecycle stage', type: 'relation', columnName: 'lifecycle_stage_id', trackChanges: true, position: 9 },
+      { key: 'original_source', label: 'Original source', type: 'json', columnName: 'original_source', position: 10 },
+      { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 11 },
+      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 12 },
     ],
   },
   {
@@ -57,13 +74,15 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'phone', label: 'Phone number', type: 'phone', columnName: 'phone', position: 3 },
       { key: 'title', label: 'Job title', type: 'text', columnName: 'title', position: 4 },
       { key: 'linkedin_url', label: 'LinkedIn URL', type: 'linkedin', columnName: 'linkedin_url', position: 5 },
-      { key: 'company_id', label: 'Primary company', type: 'relation', columnName: 'company_id', position: 6 },
-      { key: 'owner_id', label: 'Contact owner', type: 'user', columnName: 'owner_id', position: 7 },
-      { key: 'lifecycle_stage_id', label: 'Lifecycle stage', type: 'relation', columnName: 'lifecycle_stage_id', position: 8 },
-      { key: 'lead_status', label: 'Lead status', type: 'select', columnName: 'lead_status', position: 9 },
-      { key: 'lead_source', label: 'Original source', type: 'select', columnName: 'lead_source', position: 10 },
-      { key: 'marketing_status', label: 'Marketing contact status', type: 'select', columnName: 'marketing_status', position: 11 },
-      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 12 },
+      { key: 'company_id', label: 'Primary company', type: 'relation', columnName: 'company_id', trackChanges: true, position: 6 },
+      { key: 'owner_id', label: 'Contact owner', type: 'user', columnName: 'owner_id', trackChanges: true, position: 7 },
+      { key: 'lifecycle_stage_id', label: 'Lifecycle stage', type: 'relation', columnName: 'lifecycle_stage_id', trackChanges: true, position: 8 },
+      { key: 'lead_status', label: 'Lead status', type: 'select', columnName: 'lead_status', options: LEAD_STATUS, trackChanges: true, position: 9 },
+      { key: 'lead_source', label: 'Original source', type: 'select', columnName: 'lead_source', options: LEAD_SOURCE, position: 10 },
+      { key: 'marketing_status', label: 'Marketing contact status', type: 'select', columnName: 'marketing_status', options: MARKETING_STATUS, position: 11 },
+      { key: 'original_source', label: 'Original source details', type: 'json', columnName: 'original_source', position: 12 },
+      { key: 'latest_source', label: 'Latest source details', type: 'json', columnName: 'latest_source', position: 13 },
+      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 14 },
     ],
   },
   {
@@ -75,18 +94,95 @@ export const CORE_OBJECTS: CoreObject[] = [
     fields: [
       { key: 'name', label: 'Deal name', type: 'text', columnName: 'name', isRequired: true, position: 0 },
       { key: 'pipeline_id', label: 'Pipeline', type: 'relation', columnName: 'pipeline_id', isRequired: true, position: 1 },
-      { key: 'stage_id', label: 'Deal stage', type: 'relation', columnName: 'stage_id', isRequired: true, position: 2 },
-      { key: 'amount', label: 'Amount', type: 'currency', columnName: 'amount', position: 3 },
-      { key: 'close_date', label: 'Close date', type: 'date', columnName: 'close_date', position: 4 },
-      { key: 'next_step', label: 'Next step', type: 'text', columnName: 'next_step', position: 5 },
-      { key: 'next_step_date', label: 'Next step date', type: 'date', columnName: 'next_step_date', position: 6 },
-      { key: 'owner_id', label: 'Deal owner', type: 'user', columnName: 'owner_id', position: 7 },
-      { key: 'company_id', label: 'Associated company', type: 'relation', columnName: 'company_id', position: 8 },
-      { key: 'deal_type', label: 'Deal type', type: 'select', columnName: 'deal_type', position: 9 },
-      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 10 },
+      { key: 'stage_id', label: 'Deal stage', type: 'relation', columnName: 'stage_id', isRequired: true, trackChanges: true, position: 2 },
+      { key: 'amount', label: 'Amount', type: 'currency', columnName: 'amount', trackChanges: true, position: 3 },
+      { key: 'currency', label: 'Currency', type: 'select', columnName: 'currency', options: ['USD', 'EUR', 'GBP', 'SGD', 'IDR', 'AUD', 'JPY'], position: 4 },
+      { key: 'close_date', label: 'Close date', type: 'date', columnName: 'close_date', trackChanges: true, position: 5 },
+      { key: 'next_step', label: 'Next step', type: 'long_text', columnName: 'next_step', trackChanges: true, position: 6 },
+      { key: 'next_step_date', label: 'Next step date', type: 'date', columnName: 'next_step_date', trackChanges: true, position: 7 },
+      { key: 'owner_id', label: 'Deal owner', type: 'user', columnName: 'owner_id', trackChanges: true, position: 8 },
+      { key: 'company_id', label: 'Associated company', type: 'relation', columnName: 'company_id', position: 9 },
+      { key: 'deal_type', label: 'Deal type', type: 'select', columnName: 'deal_type', options: DEAL_TYPE, position: 10 },
+      { key: 'original_source', label: 'Original source', type: 'json', columnName: 'original_source', position: 11 },
+      { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 12 },
+      { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 13 },
+      // Custom HubSpot properties. No column, so they migrate straight into custom
+      // jsonb and prove the registry's custom path on day one. A1.
+      { key: 'uttr_pipeline', label: 'UTTR pipeline', type: 'boolean', position: 14 },
+      { key: 'deal_product_of_interest', label: 'Product of interest', type: 'multi_select', options: PRODUCT_OF_INTEREST, position: 15 },
     ],
   },
 ]
+
+export const objectByKey = (key: string): CoreObject | undefined =>
+  CORE_OBJECTS.find((o) => o.key === key)
+
+/** The view tabs every workspace starts with. 'all' is reserved: it is the address
+ *  /objects/:object/views/all/list resolves to and it can never be deleted. */
+export type CoreView = {
+  slug: string
+  name: string
+  kind: 'table' | 'board'
+  columns: string[]
+  filters?: unknown[]
+  sorts?: { key: string; direction: 'asc' | 'desc' }[]
+  groupBy?: string
+  position: number
+}
+
+export const CORE_VIEWS: Record<ObjectKey, CoreView[]> = {
+  contact: [
+    {
+      slug: 'all',
+      name: 'All contacts',
+      kind: 'table',
+      columns: ['first_name', 'last_name', 'email', 'company_id', 'title', 'lead_status', 'owner_id', 'created_at'],
+      sorts: [{ key: 'created_at', direction: 'desc' }],
+      position: 0,
+    },
+    {
+      slug: 'my-contacts',
+      name: 'My contacts',
+      kind: 'table',
+      columns: ['first_name', 'last_name', 'email', 'company_id', 'lead_status', 'created_at'],
+      filters: [{ field: 'owner_id', operator: 'is', value: '@me' }],
+      sorts: [{ key: 'created_at', direction: 'desc' }],
+      position: 1,
+    },
+  ],
+  company: [
+    {
+      slug: 'all',
+      name: 'All companies',
+      kind: 'table',
+      columns: ['name', 'domain', 'industry', 'country', 'employee_count', 'owner_id', 'created_at'],
+      sorts: [{ key: 'created_at', direction: 'desc' }],
+      position: 0,
+    },
+  ],
+  deal: [
+    {
+      slug: 'all',
+      name: 'All deals',
+      kind: 'table',
+      columns: ['name', 'stage_id', 'amount', 'close_date', 'next_step', 'next_step_date', 'owner_id'],
+      sorts: [{ key: 'close_date', direction: 'asc' }],
+      groupBy: 'stage_id',
+      position: 0,
+    },
+    {
+      slug: 'overdue-next-step',
+      name: 'Next step overdue',
+      kind: 'table',
+      columns: ['name', 'stage_id', 'amount', 'next_step', 'next_step_date', 'owner_id'],
+      // The Monday chase. A past next_step_date is the signal, not an error. A9.
+      filters: [{ field: 'next_step_date', operator: 'before', value: '@today' }],
+      sorts: [{ key: 'next_step_date', direction: 'asc' }],
+      groupBy: 'stage_id',
+      position: 1,
+    },
+  ],
+}
 
 /** 00-context.md section 2. Reproduced exactly, probabilities included. */
 export const ENTERPRISE_STAGES = [
