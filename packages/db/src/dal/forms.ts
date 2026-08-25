@@ -15,6 +15,7 @@ import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
 import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
+import { aliasVisitor } from './stitch.ts'
 
 /** The public edge acts with marketing's ceiling: it may create and update
  *  contacts and companies, and it may not touch deals, pipelines, the field
@@ -229,6 +230,17 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
     if (!row) throw new Error('The submission could not be saved.')
 
     if (linked.contactId) {
+      // F4 §3, T1. Written here, inside the transaction that created the contact,
+      // and nothing more: a visitor with 5,000 views must not make a form response
+      // wait for a back-fill. The worker claims this row.
+      if (input.visitorId) {
+        await aliasVisitor(tx, ctx, {
+          visitorId: input.visitorId,
+          contactId: linked.contactId,
+          via: 'form_submission',
+        })
+      }
+
       await recordActivity(tx, ctx, {
         type: 'form_submission',
         subject: `submitted ${input.form.name}`,
@@ -359,9 +371,13 @@ export const recordConsent = async (
   })
 }
 
-/** The workspace a public site key belongs to. The site key is the workspace slug
- *  today; it is resolved through the same security-definer path as a form so the
- *  edge never reads the workspace table unscoped. */
+/** The workspace a public site key belongs to, resolved through the same
+ *  security-definer path as a form so the edge never reads the workspace table
+ *  unscoped.
+ *
+ *  Migration path: a real F4 site key wins, and a workspace slug is still accepted
+ *  for any embed placed before sites existed. Once every embed on datasaur.ai
+ *  carries a site key, the slug branch in rawr.workspace_for_site can go. */
 export const workspaceIdForSite = async (siteKey: string): Promise<string | null> => {
   const rows = await appDb.execute<{ id: string }>(
     sql`select id from rawr.workspace_for_site(${siteKey})`,
@@ -613,6 +629,16 @@ export const releaseSubmission = async (
       .where(eq(formSubmission.id, id))
 
     if (linked.contactId) {
+      // A released lead gets its browsing history too. Held for a week and then
+      // released is still the same person who did the browsing.
+      if (held.visitorId) {
+        await aliasVisitor(tx, ctx, {
+          visitorId: held.visitorId,
+          contactId: linked.contactId,
+          via: 'form_submission',
+        })
+      }
+
       await recordActivity(tx, ctx, {
         type: 'form_submission',
         subject: `submitted ${target.name}`,

@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { ObjectKey } from '../registry/core.ts'
 import { moveActivityLinks, recordActivity, type EntityType } from './activity.ts'
+import { moveVisitorHistory } from './stitch.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { companyNameFromDomain, employerDomainFromEmail } from './domains.ts'
@@ -596,6 +597,16 @@ export const deleteRecord = async (
       sql`update ${sql.raw(`"${object.key}"`)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
     )
 
+    // Views are detached rather than deleted, so aggregate counts stay honest.
+    // Erasure is a separate, explicit action. F4's edge case table.
+    if (object.key === 'contact') {
+      for (const table of ['page_view', 'custom_event', 'visitor'] as const) {
+        await tx.execute(sql`
+          update ${sql.raw(table)} set contact_id = null
+           where workspace_id = ${ctx.workspaceId} and contact_id = ${id}`)
+      }
+    }
+
     return {
       result: undefined,
       audit: {
@@ -679,6 +690,12 @@ export const mergeRecords = async (
       { entityType: object.key, entityId: input.survivorId },
     )
     await moveRelated(tx, ctx, object.key, input.absorbedId, input.survivorId)
+    // A merged contact keeps their browsing history. Without this the visitor
+    // aliases and the denormalised contact_id on both event tables would still
+    // point at the record that no longer exists. F4 §3.
+    if (object.key === 'contact') {
+      await moveVisitorHistory(tx, ctx, input.absorbedId, input.survivorId)
+    }
 
     await writeAudit(tx, ctx, {
       entity: object.key,

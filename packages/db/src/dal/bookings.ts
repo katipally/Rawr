@@ -9,6 +9,7 @@ import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
 import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import { mapAnswersToColumns, upsertCapturedPerson } from './people.ts'
+import { aliasVisitor } from './stitch.ts'
 import {
   computeSlots,
   dayKey,
@@ -596,6 +597,11 @@ export type ConfirmInput = {
   holdToken?: string | null | undefined
   /** Set when this booking replaces another. The old row becomes 'rescheduled'. */
   rescheduleOf?: string | null | undefined
+  /** F4 §3, T1. Present only for the inline widget, which runs in the same page
+   *  context as the embed and can read the first-party cookie. The hosted page is
+   *  on Rawr's origin and has no access to it, so a booking made there identifies
+   *  nobody, correctly. */
+  visitorId?: string | null | undefined
 }
 
 export type ConfirmResult = {
@@ -755,6 +761,14 @@ export const confirmBooking = async (
       await tx.execute(sql`
         update booking set state = 'rescheduled', updated_at = now()
          where id = ${input.rescheduleOf} and state = 'confirmed'`)
+    }
+
+    if (input.visitorId && linked.contactId) {
+      await aliasVisitor(tx, ctx, {
+        visitorId: input.visitorId,
+        contactId: linked.contactId,
+        via: 'booking',
+      })
     }
 
     await recordActivity(tx, ctx, {
