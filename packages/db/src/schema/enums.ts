@@ -2,7 +2,17 @@ import { pgEnum } from 'drizzle-orm/pg-core'
 
 export const roleEnum = pgEnum('rawr_role', ['admin', 'sales', 'marketing', 'viewer'])
 
-export const actorKindEnum = pgEnum('rawr_actor_kind', ['user', 'mcp', 'job', 'integration'])
+/** 'public' is the anonymous visitor acting through the public edge: a form fill, a
+ *  consent choice, a booking. It is deliberately not folded into 'integration',
+ *  which means a named third party like Brevo or Apollo. The audit log is a
+ *  security record, so "a stranger on the internet did this" has to read as itself. */
+export const actorKindEnum = pgEnum('rawr_actor_kind', [
+  'user',
+  'mcp',
+  'job',
+  'integration',
+  'public',
+])
 
 export const fieldStorageEnum = pgEnum('rawr_field_storage', ['column', 'jsonb'])
 
@@ -84,4 +94,13 @@ export const importStateEnum = pgEnum('rawr_import_state', [
   'done',
   'failed',
   'cancelled',
+])
+
+/** F3 §5. Nothing is silently dropped: a rejection is stored with its score and
+ *  reasons, so a false positive is recoverable and a real prospect is never lost. */
+export const spamStateEnum = pgEnum('rawr_spam_state', [
+  'clean',
+  'quarantined',
+  'confirmed_spam',
+  'released',
 ])
