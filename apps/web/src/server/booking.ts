@@ -130,6 +130,8 @@ export type BookInput = {
   }
   holdToken?: string | null
   rescheduleOf?: BookingRecord | null
+  /** Read from the first-party cookie by the inline widget. Never from a URL. */
+  visitorId?: string | null
 }
 
 export type BookOutcome =
@@ -193,6 +195,7 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
         attribution: input.attribution,
         holdToken: input.holdToken ?? null,
         rescheduleOf: input.rescheduleOf?.id ?? null,
+        visitorId: input.visitorId ?? null,
       },
       free,
       provisioner(ctx, input.rescheduleOf ?? null, pending),

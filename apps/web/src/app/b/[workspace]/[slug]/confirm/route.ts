@@ -60,6 +60,7 @@ export const POST = async (
   for (const [key, value] of Object.entries(body)) {
     // Transport, not answers. The validator refuses anything the page did not ask.
     if (key === 'slot' || key === 'timezone' || key === 'hold' || key === 'pagePath') continue
+    if (key === 'vid') continue
     answers[key] = value
   }
 
@@ -74,6 +75,7 @@ export const POST = async (
       userAgent: request.headers.get('user-agent'),
     },
     holdToken: typeof body.hold === 'string' ? body.hold : null,
+    visitorId: typeof body.vid === 'string' ? body.vid : null,
   })
 
   if (!outcome.ok) {

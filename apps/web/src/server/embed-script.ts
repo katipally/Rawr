@@ -110,9 +110,11 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       // every consenting session.
       gtag('event', 'page_view');
       ensureVisitorId();
+      startTracking();
     } else {
       // Declining means nothing was collected, not that something was collected
       // and hidden. The visitor id is removed and collection stops here.
+      stopTracking();
       deleteCookie('rawr_vid');
     }
 
@@ -228,6 +230,112 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       banner();
     });
     document.body.appendChild(button);
+  }
+
+  // ----------------------------------------------------------------- tracking
+
+  // F4. Collection is gated at the source, not at display: with no analytics
+  // consent nothing here ever runs, no beacon is sent, and no visitor id exists.
+
+  var tracking = false;
+  var lastPath = null;
+  var lastSentAt = 0;
+
+  // A path change with no navigation is debounced, so a router that fires three
+  // times for one screen sends one page view.
+  var SPA_DEBOUNCE_MS = 800;
+
+  function beacon(payload) {
+    var site = currentSite();
+    if (!site) return;
+    var vid = readCookie('rawr_vid');
+    if (!vid) return;
+
+    payload.site = site;
+    payload.vid = vid;
+    payload.t = Date.now();
+    payload.url = location.href;
+    payload.ref = document.referrer || '';
+
+    var body = JSON.stringify(payload);
+    var url = BASE + '/e';
+
+    // sendBeacon survives the page unloading, which is exactly when the last page
+    // view of a visit is sent. The two fallbacks exist for browsers that do not
+    // have it and for a blob type it refuses.
+    try {
+      if (navigator.sendBeacon &&
+          navigator.sendBeacon(url, new Blob([body], { type: 'text/plain;charset=UTF-8' }))) {
+        return;
+      }
+    } catch (e) {}
+
+    try {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: body,
+        keepalive: true,
+        mode: 'cors'
+      }).catch(function () { image(url, payload); });
+      return;
+    } catch (e) {}
+
+    image(url, payload);
+  }
+
+  function image(url, payload) {
+    var query = [];
+    for (var key in payload) {
+      if (!Object.prototype.hasOwnProperty.call(payload, key)) continue;
+      var value = payload[key];
+      if (value == null) continue;
+      query.push(encodeURIComponent(key) + '=' +
+        encodeURIComponent(typeof value === 'object' ? JSON.stringify(value) : value));
+    }
+    new Image().src = url + '?' + query.join('&');
+  }
+
+  function pageView() {
+    if (!tracking) return;
+    var now = Date.now();
+    if (location.pathname === lastPath && now - lastSentAt < SPA_DEBOUNCE_MS) return;
+    lastPath = location.pathname;
+    lastSentAt = now;
+    beacon({ title: document.title || '' });
+  }
+
+  function onHistory() {
+    // Both are patched once, and both are restored by nothing: a page that
+    // navigates away discards them with the document.
+    ['pushState', 'replaceState'].forEach(function (method) {
+      var original = history[method];
+      if (original.rawrPatched) return;
+      var patched = function () {
+        var result = original.apply(this, arguments);
+        pageView();
+        return result;
+      };
+      patched.rawrPatched = true;
+      history[method] = patched;
+    });
+    window.addEventListener('popstate', pageView);
+  }
+
+  function startTracking() {
+    if (tracking) return;
+    tracking = true;
+    onHistory();
+    pageView();
+  }
+
+  function stopTracking() {
+    tracking = false;
+  }
+
+  function trackEvent(name, props) {
+    if (!tracking || !name) return;
+    beacon({ name: String(name).slice(0, 120), props: props || {} });
   }
 
   // -------------------------------------------------------------------- forms
@@ -547,7 +655,10 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     loaded: true,
     consent: function () { return storedConsent(); },
     openConsent: function () { deleteCookie(COOKIE); banner(); },
-    mount: renderForm
+    mount: renderForm,
+    // The product app's hook. A no-op without analytics consent, deliberately:
+    // the caller should not have to check, and must not be able to opt around it.
+    track: trackEvent
   };
 
   if (document.readyState === 'loading') {

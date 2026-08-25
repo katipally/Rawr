@@ -57,6 +57,14 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
     catch (e) { return 'UTC'; }
   }
 
+  // Written by embed.js, and only when analytics consent was granted. Read here
+  // rather than shared through a global, so the booking widget works on a page
+  // that does not carry the embed at all.
+  function visitorId() {
+    var parts = ('; ' + document.cookie).split('; rawr_vid=');
+    return parts.length === 2 ? decodeURIComponent(parts.pop().split(';').shift()) : null;
+  }
+
   function monthKey(date) {
     return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
   }
@@ -202,6 +210,11 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
 
       var body = { slot: state.slot.toISOString(), timezone: state.tz, pagePath: location.pathname };
       if (state.hold) body.hold = state.hold;
+      // F4 §3. The widget renders inline, so it is in the same first-party context
+      // as the embed and can read the visitor cookie. Sent in the body, never in a
+      // URL, and absent entirely when consent was declined and no cookie exists.
+      var vid = visitorId();
+      if (vid) body.vid = vid;
       for (var key in state.answers) body[key] = state.answers[key];
 
       state.busy = true;
