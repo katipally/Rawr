@@ -8,6 +8,7 @@ import {
   LIFECYCLE_STAGES,
   SALES_STAGES,
 } from '../src/registry/core.ts'
+import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
 
 /** Roughly 20 of each, covering every state the UI has to survive: empty, one, a
@@ -346,6 +347,21 @@ try {
     }
   }
 
+  // F3. Every workspace gets the same starting forms, including the probe tenant,
+  // so the cross-tenant test has a form on both sides to prove isolation with.
+  for (const ws of [datasaur, probe]) {
+    await db.insert(s.form).values(
+      SEED_FORMS.map((form) => ({
+        workspaceId: ws,
+        name: form.name,
+        slug: form.slug,
+        schema: form.fields,
+        settings: form.settings,
+        isActive: true,
+      })),
+    )
+  }
+
   const counts = await client`
     select 'company' as t, count(*)::int as n from company
     union all select 'contact', count(*)::int from contact
@@ -356,6 +372,7 @@ try {
     union all select 'activity', count(*)::int from activity
     union all select 'task', count(*)::int from task
     union all select 'association', count(*)::int from association
+    union all select 'form', count(*)::int from form
     order by t`
   console.log('seeded:')
   for (const row of counts) console.log(`  ${row.t}: ${row.n}`)
