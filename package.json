@@ -15,8 +15,9 @@
     "db:seed": "pnpm --filter @rawr/db seed",
     "db:verify": "pnpm --filter @rawr/db verify",
     "db:verify:guards": "pnpm --filter @rawr/db verify:guards",
-    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm",
-    "db:verify:crm": "pnpm --filter @rawr/db verify:crm"
+    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm && pnpm db:verify:forms",
+    "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
+    "db:verify:forms": "pnpm --filter @rawr/db verify:forms"
   },
   "devDependencies": {
     "typescript": "catalog:"

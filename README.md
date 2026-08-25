@@ -49,11 +49,40 @@ production.
 ## Checking it still holds
 
 ```
- pnpm verify              typecheck, then both suites below
+ pnpm verify              typecheck, then every suite below
  pnpm db:verify           tenancy: RLS forced everywhere, cross-tenant reads and writes refused
  pnpm db:verify:guards    the role matrix and the audit trail, by calling mutations directly
+ pnpm db:verify:crm       F1: board totals, merge, dedupe, import, search, export
+ pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```
 
-Both suites run against the real database and exit non-zero on failure, so they
+All four suites run against the real database and exit non-zero on failure, so they
 can gate a build. `/design` renders every primitive in its empty, single-row and
 500-character states; `/design?rows=10000` is the large-result check.
+
+## The public edge
+
+F3 adds routes that take no session. The workspace is resolved from the form id
+or the site key through a security-definer function, never from the request.
+
+```
+ GET  /embed.js               the one file datasaur.ai loads: forms + consent
+ GET  /f/:formId/schema       what the embed needs to paint a form
+ POST /f/:formId              a submission
+ GET  /form/:workspace/:slug  hosted page, works with JavaScript disabled
+ GET  /form/:formId           the same page, addressed the way the embed falls back
+ POST /c                      a consent choice
+ POST /w/webflow              Webflow native-form webhook, signature required
+```
+
+To try the embed on a page that is not ours, serve any HTML containing:
+
+```
+ <div data-rawr-form="<form id>"></div>
+ <script src="http://localhost:3000/embed.js" data-rawr-site="datasaur"
+         data-rawr-consent defer></script>
+```
+
+Turnstile, Slack and the Webflow secret are all optional in development. Without
+Turnstile a submission that scores into the challenge band fails closed to the
+review queue rather than being accepted or lost.
