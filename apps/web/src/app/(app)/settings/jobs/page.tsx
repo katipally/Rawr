@@ -1,5 +1,7 @@
 import { listDeadLetters } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
+import Link from 'next/link'
+import { agentAccessPath, sitesPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { DeadLetterTable } from './table.tsx'
 
@@ -20,6 +22,10 @@ const JobsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex shrink-0 gap-4">
+        <Link href={agentAccessPath()}>Agent access</Link>
+        <Link href={sitesPath()}>Tracked sites</Link>
+      </div>
       <div>
         <h1 className="text-base font-medium">Failed jobs</h1>
         <p className="text-secondary">

@@ -3,9 +3,11 @@ import { startBoss, stopBoss } from './boss.ts'
 import { owner, recordDeadLetter } from './db.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
+import { rollUpActivity } from './jobs/roll-up-activity.ts'
+import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
 import { workspaceIdOf, type Job } from './jobs/registry.ts'
 
-const JOBS: Job[] = [createFieldIndex, dispatchFieldIndexes]
+const JOBS: Job[] = [createFieldIndex, dispatchFieldIndexes, dispatchStitches, stitchVisitor, rollUpActivity]
 
 const boss = await startBoss()
 
@@ -61,6 +63,13 @@ for (const job of JOBS) {
 
 // Once a minute: the promotion request writes a pending row, this turns it into work.
 await boss.schedule(dispatchFieldIndexes.name, '* * * * *', {})
+// Same shape for F4: a form fill writes one visitor_alias row, this turns it into
+// a back-fill. A minute is the ceiling on how long a new contact reads as having
+// no browsing history.
+await boss.schedule(dispatchStitches.name, '* * * * *', {})
+// Nightly. Retention is measured in months, so the hour it runs does not matter;
+// that it runs off the request path does.
+await boss.schedule(rollUpActivity.name, '30 3 * * *', {})
 
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, finishing in-flight work.`)
