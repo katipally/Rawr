@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
 import { crmRouter } from './crm.ts'
+import { formsRouter } from './forms.ts'
 
 const PAGE_MAX = 200
 
@@ -19,6 +20,7 @@ const cursor = z.object({ createdAt: z.coerce.date(), id: z.uuid() })
 
 export const appRouter = router({
   crm: crmRouter,
+  forms: formsRouter,
 
   health: publicProcedure.query(() => ({ ok: true as const })),
 

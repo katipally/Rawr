@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavItem } from '~/components/app-shell.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
-import { objectView, importsPath, tasksPath } from '~/lib/links.ts'
+import { objectView, formsPath, importsPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { readSession } from '~/server/session.ts'
 
 const AppLayout = async ({ children }: { children: React.ReactNode }) => {
@@ -16,6 +16,8 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
     { href: objectView(workspace, 'company', 'all'), label: 'Companies', match: `/contacts/${workspace}/objects/company` },
     { href: objectView(workspace, 'deal', 'all'), label: 'Deals', match: `/contacts/${workspace}/objects/deal` },
     { href: tasksPath(workspace), label: 'Tasks' },
+    { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
+    { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Review', match: `/contacts/${workspace}/submissions` },
     { href: importsPath(workspace), label: 'Import' },
   ]
 
