@@ -1,0 +1,175 @@
+'use client'
+
+import { Button, DataTable, EmptyState, cn, type Column } from '@rawr/ui'
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import type { FieldType, ObjectKey } from '@rawr/db'
+import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
+import { Value, isPast } from './value.tsx'
+
+export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
+
+export type TableRow = {
+  id: string
+  displayName: string
+  values: Record<string, unknown>
+  labels: Record<string, string>
+}
+
+export type RecordTableProps = {
+  workspace: string
+  object: ObjectKey
+  view: string
+  columns: TableColumn[]
+  rows: TableRow[]
+  /** Base query for the next-page link, so paging keeps the filters and the sort. */
+  params: ListParams
+  nextCursor: string | undefined
+  sort: { key: string; direction: 'asc' | 'desc' } | null
+  totalHint: number | null
+}
+
+const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
+
+export const RecordTable = ({
+  workspace,
+  object,
+  view,
+  columns,
+  rows,
+  params,
+  nextCursor,
+  sort,
+  totalHint,
+}: RecordTableProps) => {
+  const router = useRouter()
+
+  const sortHref = (key: string): string => {
+    // Clicking the sorted column flips it; clicking another starts descending,
+    // which is what a person wants from a date or an amount.
+    const direction = sort?.key === key && sort.direction === 'desc' ? 'asc' : 'desc'
+    const next: ListParams = { ...params, sort: direction === 'desc' ? `-${key}` : key }
+    delete next.cursor
+    return objectView(workspace, object, view, 'list', next)
+  }
+
+  const tableColumns: Column<TableRow>[] = columns.map((column, index) => ({
+    key: column.key,
+    header: column.label,
+    align: column.numeric ? 'right' : 'left',
+    width: index === 0 ? 240 : column.width,
+    render: (row) => {
+      const value = row.values[column.key]
+      const overdue = OVERDUE_FIELDS.has(column.key) && isPast(value)
+
+      if (index === 0) {
+        // The first column is the way into the record. It shows its own field's
+        // value, falling back to the record's display name when that field is
+        // empty, so a contact with no first name is still openable and still
+        // named rather than rendering an empty link.
+        const own = row.labels[column.key] || (value === null || value === undefined ? '' : String(value))
+        const text = own.trim() || row.displayName
+        return (
+          <Link
+            href={recordPath(workspace, object, row.id)}
+            className="block truncate font-medium"
+            title={text}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {text}
+          </Link>
+        )
+      }
+
+      // Truncated with the full value on hover: a 500-character name must not
+      // rewrite the row height of every other row on the page.
+      const full = row.labels[column.key] || (typeof value === 'string' ? value : '')
+      return (
+        <span
+          title={full || undefined}
+          // A mailto or tel link inside a row that is itself clickable must open
+          // the link, not the record.
+          onClick={(event) => {
+            if ((event.target as HTMLElement).closest('a')) event.stopPropagation()
+          }}
+          className={cn(
+            'block min-w-0 truncate',
+            column.type === 'multi_select' && 'whitespace-normal',
+            overdue && 'font-medium text-error',
+          )}
+        >
+          <Value
+            type={column.type}
+            value={value}
+            label={row.labels[column.key]}
+            currency={String(row.values.currency ?? 'USD')}
+            placeholder="—"
+          />
+        </span>
+      )
+    },
+  }))
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* The header row is its own control strip so the sort links stay reachable
+          by keyboard rather than being buried in the table header. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-secondary">
+        <span>
+          {rows.length === 0
+            ? 'No records'
+            : `${rows.length.toLocaleString()} shown${totalHint !== null ? ` of ${totalHint.toLocaleString()}` : ''}`}
+        </span>
+        <span className="flex flex-wrap items-center gap-1">
+          Sort:
+          {columns.slice(0, 6).map((column) => (
+            <Link
+              key={column.key}
+              href={sortHref(column.key)}
+              scroll={false}
+              className={cn(
+                'rounded-hs px-1.5 py-0.5 no-underline',
+                sort?.key === column.key ? 'bg-accent-subtle text-link' : 'text-secondary',
+              )}
+            >
+              {column.label}
+              {sort?.key === column.key ? (sort.direction === 'desc' ? ' ↓' : ' ↑') : ''}
+            </Link>
+          ))}
+        </span>
+      </div>
+
+      <DataTable
+        columns={tableColumns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        onRowClick={(row) => router.push(recordPath(workspace, object, row.id))}
+        caption={`${object} records in the ${view} view`}
+        empty={
+          <EmptyState
+            title="Nothing matches this view"
+            description={
+              params.q
+                ? `No record matches “${params.q}”. Clear the search, or widen the filters.`
+                : 'This view has no records yet. Import a file, or create one.'
+            }
+          />
+        }
+      />
+
+      {nextCursor ? (
+        <div>
+          <Button
+            onClick={() =>
+              router.push(
+                objectView(workspace, object, view, 'list', { ...params, cursor: nextCursor }),
+              )
+            }
+          >
+            Next page
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
