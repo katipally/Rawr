@@ -71,6 +71,20 @@
       "when": 1787600200000,
       "tag": "0009_workspace_for_site",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787600300000,
+      "tag": "0010_f2_booking",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787600400000,
+      "tag": "0011_f5_mcp",
+      "breakpoints": true
     }
   ]
 }
