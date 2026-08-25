@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
-    "./forms": "./src/dal/form-schema.ts"
+    "./forms": "./src/dal/form-schema.ts",
+    "./templates": "./src/dal/templates.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
@@ -16,7 +17,9 @@
     "typecheck": "tsc --noEmit",
     "verify:guards": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-guards.ts",
     "verify:crm": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-crm.ts",
-    "verify:forms": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-forms.ts"
+    "verify:forms": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-forms.ts",
+    "verify:booking": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-booking.ts",
+    "verify:mcp": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-mcp.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

@@ -29,6 +29,22 @@ const schema = z.object({
   WEBFLOW_CLIENT_SECRET: z.string().default(''),
   /** Bumping this re-prompts everyone whose stored choice predates the change. */
   CONSENT_POLICY_VERSION: z.string().default('2026-08-24'),
+
+  /** --- F2 booking ------------------------------------------------------- */
+  /** 32 bytes, base64 or hex, from a secrets store. It encrypts the calendar and
+   *  mailbox tokens Rawr holds, and must not live in the database it protects
+   *  (02-foundation.md §8, open item 9). */
+  TOKEN_ENCRYPTION_KEY: z.string().default(''),
+  /** Open item 5. A server-to-server OAuth app: one credential for the account,
+   *  no per-user consent. Without it, booking falls back to Google Meet. */
+  ZOOM_ACCOUNT_ID: z.string().default(''),
+  ZOOM_CLIENT_ID: z.string().default(''),
+  ZOOM_CLIENT_SECRET: z.string().default(''),
+  /** Open item 3 is outstanding, so there is no Google project to read free-busy
+   *  from. This lets a host be marked available with Rawr's own bookings as the
+   *  only source of busy time, which is what makes the engine exercisable end to
+   *  end today. It refuses to be reachable in production. */
+  RAWR_DEV_CALENDAR: z.string().optional(),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -49,6 +65,18 @@ export const devLoginEnabled = env.RAWR_DEV_LOGIN === '1' && env.NODE_ENV !== 'p
 export const turnstileConfigured = env.TURNSTILE_SITE_KEY !== '' && env.TURNSTILE_SECRET !== ''
 
 export const slackConfigured = env.SLACK_BOT_TOKEN !== '' || env.SLACK_WEBHOOK_URL !== ''
+
+/** Free-busy and event writing both need a Google project. Until open item 3
+ *  lands this is false and every host falls back to the dev provider or to being
+ *  unavailable, which is the safe direction. */
+export const googleCalendarConfigured = googleConfigured && env.TOKEN_ENCRYPTION_KEY !== ''
+
+export const zoomConfigured =
+  env.ZOOM_ACCOUNT_ID !== '' && env.ZOOM_CLIENT_ID !== '' && env.ZOOM_CLIENT_SECRET !== ''
+
+/** Never in production: a booking confirmed against a calendar nobody checked is
+ *  worse than no booking. */
+export const devCalendarEnabled = env.RAWR_DEV_CALENDAR === '1' && env.NODE_ENV !== 'production'
 
 /** The embed and the hosted page are loaded from another origin, so they need an
  *  absolute base. Falls back to AUTH_URL, which is correct in development. */
