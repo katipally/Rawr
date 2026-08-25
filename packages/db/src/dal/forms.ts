@@ -2,9 +2,8 @@ import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { consentRecord, form, formSubmission } from '../schema/forms.ts'
 import { recordActivity } from './activity.ts'
-import { readAttribution, sourceFrom, type Attribution, type AttributionInput } from './attribution.ts'
+import { readAttribution, type Attribution, type AttributionInput } from './attribution.ts'
 import { assertCanWrite, type Role, type WorkspaceContext } from './context.ts'
-import { employerDomainFromEmail } from './domains.ts'
 import {
   assertSchemaIsUsable,
   readSchema,
@@ -13,6 +12,7 @@ import {
   type FormSettings,
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
+import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
 import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
 
@@ -203,7 +203,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
     const occurredAt = input.occurredAt ?? new Date()
     const linked =
       verdict.state === 'clean'
-        ? await upsertPerson(tx, ctx, { fields, answers, email, attribution, settings })
+        ? await capturePerson(tx, ctx, { fields, answers, email, attribution, settings })
         : { contactId: null, companyId: null }
 
     const [row] = await tx
@@ -305,176 +305,24 @@ type UpsertInput = {
   settings: FormSettings
 }
 
-/** Step 6 and 7 of §4. Upsert the contact on lower(email), file it under the
- *  company its domain implies, and apply the lifecycle stage the form asks for.
- *
- *  The rule that matters: an empty incoming value never overwrites an existing
- *  non-empty one. A short form asking only for an email must not blank out the
- *  job title a longer form collected last month. */
-const upsertPerson = async (
+/** Step 6 and 7 of §4. The upsert itself is shared with booking, because a form
+ *  fill and a booking are the same act to the CRM. What is specific to a form is
+ *  the mapping: which answer means which column. */
+const capturePerson = async (
   tx: Tx,
   ctx: WorkspaceContext,
   input: UpsertInput,
-): Promise<{ contactId: string | null; companyId: string | null }> => {
+): Promise<CapturedPerson> => {
   if (!input.email) return { contactId: null, companyId: null }
-
-  const mapped = mappedValues(input.fields, input.answers)
-  const contactValues = mapped.contact
-  contactValues.email = input.email
-
-  const [existing] = await tx.execute<{ id: string; company_id: string | null }>(
-    sql`select id, company_id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
-  )
-
-  const source = sourceFrom(input.attribution)
-  const domain = employerDomainFromEmail(input.email)
-  const companyId = domain ? await upsertCompany(tx, ctx, domain, mapped.company, source) : null
-
-  if (existing) {
-    const columnNames = Object.keys(contactValues)
-    // Which of the columns this form maps are currently empty. Read inside the
-    // same transaction as the write, so "never blank an existing answer" holds
-    // without casting every column through text to fake it in one statement.
-    const [current] = columnNames.length
-      ? await tx.execute<Record<string, unknown>>(
-          sql`select ${sql.join(columnNames.map((c) => sql.raw(`"${c}"`)), sql`, `)}
-                from contact where id = ${existing.id} limit 1`,
-        )
-      : [undefined]
-
-    const assignments: SQL[] = []
-    for (const [column, value] of Object.entries(contactValues)) {
-      if (value === null || value === undefined || value === '') continue
-      const held = current?.[column]
-      if (held !== null && held !== undefined && held !== '') continue
-      assignments.push(sql`${sql.raw(`"${column}"`)} = ${value as string}`)
-    }
-    assignments.push(sql`"latest_source" = ${JSON.stringify(source)}::jsonb`)
-    assignments.push(sql`"original_source" = coalesce("original_source", ${JSON.stringify(source)}::jsonb)`)
-    if (companyId && !existing.company_id) assignments.push(sql`"company_id" = ${companyId}`)
-    assignments.push(sql`"updated_at" = now()`)
-
-    await tx.execute(
-      sql`update contact set ${sql.join(assignments, sql`, `)} where id = ${existing.id}`,
-    )
-    if (input.settings.lifecycleStageOnSubmit) {
-      await applyLifecycle(tx, ctx, existing.id, input.settings.lifecycleStageOnSubmit)
-    }
-    return { contactId: existing.id, companyId: companyId ?? existing.company_id }
-  }
-
-  const columns: Record<string, unknown> = {
-    ...contactValues,
-    workspace_id: ctx.workspaceId,
-    company_id: companyId,
-    lead_source: source.channel,
-    original_source: source,
-    latest_source: source,
-  }
-
-  const names = Object.keys(columns).map((c) => sql.raw(`"${c}"`))
-  const values = Object.values(columns).map((v) =>
-    v !== null && typeof v === 'object' ? sql`${JSON.stringify(v)}::jsonb` : sql`${v}`,
-  )
-
-  const [created] = await tx.execute<{ id: string }>(sql`
-    insert into contact (${sql.join(names, sql`, `)})
-    values (${sql.join(values, sql`, `)})
-    on conflict do nothing
-    returning id`)
-
-  if (!created) {
-    // Lost a race with a concurrent submission of the same address. The winner's
-    // row is the answer; the lead is not duplicated and not lost.
-    const [raced] = await tx.execute<{ id: string }>(
-      sql`select id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
-    )
-    return { contactId: raced?.id ?? null, companyId }
-  }
-
-  if (input.settings.lifecycleStageOnSubmit) {
-    await applyLifecycle(tx, ctx, created.id, input.settings.lifecycleStageOnSubmit)
-  }
-  return { contactId: created.id, companyId }
-}
-
-const upsertCompany = async (
-  tx: Tx,
-  ctx: WorkspaceContext,
-  domain: string,
-  values: Record<string, unknown>,
-  source: { channel: string; detail: Attribution },
-): Promise<string | null> => {
-  const [existing] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
-  if (existing) return existing.id
-
-  const name = typeof values.name === 'string' && values.name ? values.name : null
-  const [created] = await tx.execute<{ id: string }>(sql`
-    insert into company (workspace_id, name, domain, original_source, latest_source)
-    values (${ctx.workspaceId},
-            ${name ?? domain.split('.')[0]},
-            ${domain},
-            ${JSON.stringify(source)}::jsonb,
-            ${JSON.stringify(source)}::jsonb)
-    on conflict do nothing
-    returning id`)
-  if (created) return created.id
-
-  const [raced] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
-  return raced?.id ?? null
-}
-
-const applyLifecycle = async (
-  tx: Tx,
-  ctx: WorkspaceContext,
-  contactId: string,
-  stageName: string,
-): Promise<void> => {
-  const [stage] = await tx.execute<{ id: string; name: string }>(
-    sql`select id, name from lifecycle_stage where name = ${stageName} limit 1`,
-  )
-  if (!stage) return
-
-  const [before] = await tx.execute<{ lifecycle_stage_id: string | null; label: string }>(
-    sql`select lifecycle_stage_id, coalesce(first_name || ' ' || last_name, email, 'Contact') as label
-          from contact where id = ${contactId} limit 1`,
-  )
-  if (before?.lifecycle_stage_id === stage.id) return
-
-  await tx.execute(
-    sql`update contact set lifecycle_stage_id = ${stage.id}, updated_at = now() where id = ${contactId}`,
-  )
-  await recordActivity(tx, ctx, {
-    type: 'lifecycle_change',
-    subject: `moved ${before?.label ?? 'Contact'} to ${stage.name}`,
+  const mapped = mapAnswersToColumns(input.fields, input.answers)
+  return upsertCapturedPerson(tx, ctx, {
+    email: input.email,
+    contact: mapped.contact,
+    company: mapped.company,
+    attribution: input.attribution,
+    lifecycleStage: input.settings.lifecycleStageOnSubmit,
     source: 'form',
-    payload: { to: stage.id, toLabel: stage.name },
-    links: [{ entityType: 'contact', entityId: contactId }],
   })
-}
-
-/** Splits answers into the contact and company columns their mapping names.
- *  An unmapped answer is not lost: it is already in `values` on the submission. */
-const mappedValues = (
-  fields: FormField[],
-  answers: Record<string, unknown>,
-): { contact: Record<string, unknown>; company: Record<string, unknown> } => {
-  const contact: Record<string, unknown> = {}
-  const company: Record<string, unknown> = {}
-  for (const field of fields) {
-    if (!field.mapsTo) continue
-    const [object, key] = field.mapsTo.split('.')
-    const value = answers[field.key]
-    if (value === undefined || value === null || value === '') continue
-    const target = object === 'company' ? company : object === 'contact' ? contact : null
-    if (!target || !key) continue
-    target[key] = Array.isArray(value) ? value.join('; ') : value
-  }
-  return { contact, company }
 }
 
 /** A consent choice, appended never updated: prior data stays under the consent
@@ -745,7 +593,7 @@ export const releaseSubmission = async (
     const answers = (held.values ?? {}) as Record<string, unknown>
     const email = emailFrom(target.fields, answers)
 
-    const linked = await upsertPerson(tx, ctx, {
+    const linked = await capturePerson(tx, ctx, {
       fields: target.fields,
       answers,
       email,

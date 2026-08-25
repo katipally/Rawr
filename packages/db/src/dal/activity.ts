@@ -3,7 +3,7 @@ import { activity, activityLink } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import type { activityTypeEnum, entityTypeEnum } from '../schema/enums.ts'
 import type { WorkspaceContext } from './context.ts'
-import { withWorkspace, type Tx } from './index.ts'
+import { mutate, withWorkspace, type Tx } from './index.ts'
 
 export type ActivityType = (typeof activityTypeEnum.enumValues)[number]
 export type EntityType = (typeof entityTypeEnum.enumValues)[number]
@@ -82,6 +82,29 @@ export const recordActivity = async (
 
   return row.id
 }
+
+/** The same write, from outside a transaction. `recordActivity` is deliberately
+ *  transaction-only so a committed change can never be missing its timeline entry;
+ *  this is for the caller whose activity IS the change, which today is F5's
+ *  log_activity tool and the "I had a call" it exists for. */
+export const logActivity = async (
+  ctx: WorkspaceContext,
+  entry: NewActivity,
+): Promise<{ id: string }> =>
+  mutate(ctx, 'activity', async (tx) => {
+    const id = await recordActivity(tx, ctx, entry)
+    if (!id) throw new Error('That activity had no record to attach to.')
+    return {
+      result: { id },
+      audit: {
+        entity: 'activity',
+        entityId: id,
+        action: entry.type,
+        before: null,
+        after: { subject: entry.subject ?? null, links: entry.links },
+      },
+    }
+  })
 
 export type TimelineCursor = { occurredAt: Date; id: string }
 
