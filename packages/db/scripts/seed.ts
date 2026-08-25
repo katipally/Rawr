@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import {
   CORE_OBJECTS,
+  CORE_VIEWS,
   ENTERPRISE_STAGES,
   LIFECYCLE_STAGES,
   SALES_STAGES,
@@ -121,10 +122,14 @@ try {
             key: f.key,
             label: f.label,
             type: f.type,
-            storage: 'column' as const,
-            columnName: f.columnName,
-            isCustom: false,
+            // No column means the field lives in custom jsonb, which is how a
+            // HubSpot custom property arrives.
+            storage: f.columnName ? ('column' as const) : ('jsonb' as const),
+            columnName: f.columnName ?? null,
+            isCustom: !f.columnName,
             isRequired: f.isRequired ?? false,
+            trackChanges: f.trackChanges ?? false,
+            options: f.options ?? null,
             position: f.position,
           })),
         )
@@ -137,6 +142,24 @@ try {
           .set({ labelFieldId: labelField.id })
           .where(eq(s.objectDef.id, objectDef.id))
       }
+
+      // 'all' is the slug every deep link falls back to, so it is seeded, not
+      // created on demand.
+      await db.insert(s.savedView).values(
+        CORE_VIEWS[obj.key].map((view) => ({
+          workspaceId: ws,
+          objectId: objectDef.id,
+          slug: view.slug,
+          name: view.name,
+          kind: view.kind,
+          columns: view.columns,
+          filters: view.filters ?? [],
+          sorts: view.sorts ?? [],
+          isShared: true,
+          position: view.position,
+          groupByFieldId: view.groupBy ? (fields.find((f) => f.key === view.groupBy)?.id ?? null) : null,
+        })),
+      )
     }
 
     const pipelines = await db
@@ -209,12 +232,13 @@ try {
         workspaceId: ws,
         firstName: i === 2 ? null : `Contact${i + 1}`,
         lastName: i === 2 ? null : `Surname${i + 1}`,
-        email: i === 9 ? null : `contact${i + 1}@partner${i + 1}.example`,
+        // Row 3 is on a free provider, so A4's rule has a case in the seed data.
+        email: i === 9 ? null : i === 3 ? `contact4@gmail.com` : `contact${i + 1}@partner${i + 1}.example`,
         phone: i % 3 === 0 ? null : `+62 21 5555 ${1000 + i}`,
         title: i === 8 ? LONG_NAME : 'Head of Data',
         linkedinUrl: i % 4 === 0 ? null : `https://www.linkedin.com/in/contact${i + 1}`,
         // Row 1 has no company: an unlinked contact is normal, not an error.
-        companyId: i === 1 ? null : (companies[i % companies.length]?.id ?? null),
+        companyId: i === 1 || i === 3 ? null : (companies[i % companies.length]?.id ?? null),
         ownerId: ownerFor(i),
         lifecycleStageId: stages[i % stages.length]?.id ?? null,
         leadStatus: i % 2 === 0 ? 'New' : 'Open',
@@ -224,23 +248,102 @@ try {
       })),
     )
 
-    await db.insert(s.deal).values(
-      Array.from({ length: scale }, (_, i) => ({
+    const contacts = await db
+      .select({ id: s.contact.id })
+      .from(s.contact)
+      .where(eq(s.contact.workspaceId, ws))
+
+    const deals = await db
+      .insert(s.deal)
+      .values(
+        Array.from({ length: scale }, (_, i) => ({
+          workspaceId: ws,
+          name: i === 6 ? null : `${INDUSTRIES[i % 5]} rollout ${i + 1}`,
+          pipelineId: enterprise.id,
+          stageId: enterpriseStages[i % enterpriseStages.length]!.id,
+          // Zero and null amounts both exist in the real portal.
+          amount: i === 0 ? '0' : i === 11 ? null : String((i + 1) * 25_000),
+          // One deal off USD, so the board proves it subtotals per currency
+          // instead of adding two currencies together.
+          currency: i === 14 ? 'EUR' : 'USD',
+          closeDate: i === 12 ? null : dayAgo(-(i + 5)).toISOString().slice(0, 10),
+          nextStep: i % 3 === 0 ? null : 'Send revised pricing',
+          // Rows 2 and 5 are already overdue, which is the Monday list.
+          nextStepDate:
+            i % 3 === 0 ? null : dayAgo(i === 2 || i === 5 ? 6 : -(i + 2)).toISOString().slice(0, 10),
+          ownerId: ownerFor(i),
+          companyId: companies[i % companies.length]?.id ?? null,
+          dealType: i % 2 === 0 ? 'New Business' : 'Existing Business',
+          custom: {
+            uttr_pipeline: i % 4 === 0,
+            deal_product_of_interest: i % 3 === 0 ? ['NLP Labeling'] : ['LLM Labs', 'Data Studio'],
+          },
+          createdAt: dayAgo(scale - i),
+        })),
+      )
+      .returning({ id: s.deal.id, name: s.deal.name })
+
+    // Deal to contact association, so the right rail and the merge path both have
+    // rows to work with rather than an empty table.
+    await db.insert(s.association).values(
+      deals.flatMap((deal, i) => {
+        const contact = contacts[i % Math.max(contacts.length, 1)]
+        return contact ? [{ workspaceId: ws, fromType: 'contact' as const, fromId: contact.id, toType: 'deal' as const, toId: deal.id, label: 'Decision maker' }] : []
+      }),
+    )
+
+    // A timeline with something on it. One deal gets 120 entries so the keyset
+    // pagination and the per-type counts are exercised, not just rendered.
+    const busy = deals[0]
+    if (busy) {
+      const entries = Array.from({ length: 120 }, (_, i) => ({
         workspaceId: ws,
-        name: i === 6 ? null : `${INDUSTRIES[i % 5]} rollout ${i + 1}`,
-        pipelineId: enterprise.id,
-        stageId: enterpriseStages[i % enterpriseStages.length]!.id,
-        // Zero and null amounts both exist in the real portal.
-        amount: i === 0 ? '0' : i === 11 ? null : String((i + 1) * 25_000),
-        currency: 'USD',
-        closeDate: i === 12 ? null : dayAgo(-(i + 5)).toISOString().slice(0, 10),
-        nextStep: i % 3 === 0 ? null : 'Send revised pricing',
-        ownerId: ownerFor(i),
-        companyId: companies[i % companies.length]?.id ?? null,
-        dealType: i % 2 === 0 ? 'New Business' : 'Existing Business',
-        createdAt: dayAgo(scale - i),
+        type: (['note', 'call', 'email', 'meeting', 'stage_change'] as const)[i % 5]!,
+        subject: `Touchpoint ${i + 1} on ${busy.name ?? 'the deal'}`,
+        body: i % 5 === 0 ? 'Talked through the trial plan and the security review.' : null,
+        occurredAt: dayAgo(i),
+        actorId: owners[i % owners.length] ?? null,
+        actorKind: 'user' as const,
+        source: 'seed',
+      }))
+      const written = await db.insert(s.activity).values(entries).returning({ id: s.activity.id })
+      await db.insert(s.activityLink).values(
+        written.map((row, i) => ({
+          workspaceId: ws,
+          activityId: row.id,
+          entityType: 'deal' as const,
+          entityId: busy.id,
+          type: entries[i]!.type,
+          occurredAt: entries[i]!.occurredAt,
+        })),
+      )
+    }
+
+    await db.insert(s.task).values(
+      deals.slice(0, Math.min(4, deals.length)).map((deal, i) => ({
+        workspaceId: ws,
+        title: `Chase ${deal.name ?? 'the unnamed deal'}`,
+        dueDate: dayAgo(i === 0 ? 3 : -(i + 1)).toISOString().slice(0, 10),
+        assigneeId: owners[i % owners.length] ?? null,
+        entityType: 'deal' as const,
+        entityId: deal.id,
+        createdBy: owners[0] ?? null,
       })),
     )
+
+    // Most contacts have never said anything, which must render as exactly that.
+    // Two have, so both other states are on screen somewhere. D15.
+    const subTypes = await db
+      .select({ id: s.subscriptionType.id, name: s.subscriptionType.name })
+      .from(s.subscriptionType)
+      .where(eq(s.subscriptionType.workspaceId, ws))
+    const newsletter = subTypes.find((t) => t.name === 'Newsletter')
+    if (newsletter && contacts.length > 1) {
+      await db.insert(s.subscriptionState).values([
+        { workspaceId: ws, contactId: contacts[0]!.id, subscriptionTypeId: newsletter.id, state: 'subscribed' as const, source: 'seed' },
+        { workspaceId: ws, contactId: contacts[1]!.id, subscriptionTypeId: newsletter.id, state: 'unsubscribed' as const, source: 'seed' },
+      ])
+    }
   }
 
   const counts = await client`
@@ -249,6 +352,10 @@ try {
     union all select 'deal', count(*)::int from deal
     union all select 'field_def', count(*)::int from field_def
     union all select 'pipeline_stage', count(*)::int from pipeline_stage
+    union all select 'saved_view', count(*)::int from saved_view
+    union all select 'activity', count(*)::int from activity
+    union all select 'task', count(*)::int from task
+    union all select 'association', count(*)::int from association
     order by t`
   console.log('seeded:')
   for (const row of counts) console.log(`  ${row.t}: ${row.n}`)
