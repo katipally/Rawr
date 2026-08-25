@@ -61,6 +61,17 @@ export const recordPath = (
 export const importsPath = (workspace: string, id?: string): string =>
   id ? `/${CRM_ROOT}/${workspace}/import/${id}` : `/${CRM_ROOT}/${workspace}/import`
 
+/** Forms live under the same workspace-addressed tree as every other surface, so
+ *  a link to one form, or to the review queue filtered to a state, pastes like
+ *  anything else. */
+export const formsPath = (workspace: string, id?: string): string =>
+  id ? `/${CRM_ROOT}/${workspace}/forms/${id}` : `/${CRM_ROOT}/${workspace}/forms`
+
+export const submissionsPath = (
+  workspace: string,
+  params: { state?: string; form?: string } = {},
+): string => `/${CRM_ROOT}/${workspace}/submissions${query(params)}`
+
 export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
 
