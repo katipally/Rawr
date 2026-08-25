@@ -36,10 +36,53 @@ export const queueSlackNotification = (notification: SlackNotification): void =>
   })
 }
 
-const deliver = async (notification: SlackNotification): Promise<void> => {
+const deliver = (notification: SlackNotification): Promise<void> =>
+  send({
+    workspaceId: notification.workspaceId,
+    jobName: 'slack.form-submission',
+    payload: {
+      submissionId: notification.submissionId,
+      formId: notification.formId,
+      contactId: notification.contactId,
+      channel: notification.channel ?? null,
+    },
+    body: message(notification),
+  })
+
+/** One meeting that has no conference link, addressed to the people who can do
+ *  something about it. F2 §4 step 5: the booking stands, the host is told. */
+export const queueHostAlert = (alert: {
+  workspaceId: string
+  jobName: string
+  payload: Record<string, unknown>
+  text: string
+  channel?: string | null
+}): void => {
+  void send({
+    workspaceId: alert.workspaceId,
+    jobName: alert.jobName,
+    payload: alert.payload,
+    body: {
+      ...(env.SLACK_BOT_TOKEN ? { channel: alert.channel ?? env.SLACK_DEFAULT_CHANNEL } : {}),
+      text: alert.text,
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
+    },
+  }).catch(() => {
+    // send() already dead-letters.
+  })
+}
+
+type Outbound = {
+  workspaceId: string
+  jobName: string
+  payload: Record<string, unknown>
+  body: SlackBody
+}
+
+const send = async (outbound: Outbound): Promise<void> => {
   if (!slackConfigured) {
     await deadLetter(
-      notification,
+      outbound,
       'Slack is not configured. Set SLACK_BOT_TOKEN or SLACK_WEBHOOK_URL (open item 4).',
       0,
     )
@@ -49,7 +92,7 @@ const deliver = async (notification: SlackNotification): Promise<void> => {
   let lastError = 'unknown'
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
-      const outcome = await post(notification)
+      const outcome = await post(outbound.body)
       if (outcome === null) return
       lastError = outcome
       // Backoff with jitter, so a Slack blip does not turn into a thundering herd
@@ -60,14 +103,16 @@ const deliver = async (notification: SlackNotification): Promise<void> => {
       lastError = cause instanceof Error ? cause.message : String(cause)
     }
   }
-  await deadLetter(notification, lastError, ATTEMPTS)
+  await deadLetter(outbound, lastError, ATTEMPTS)
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+type SlackBody = { channel?: string | undefined; text: string; blocks: unknown[] }
+
 /** Returns null on success, or the error to retry on. */
-const post = async (notification: SlackNotification): Promise<string | null> => {
-  const body = JSON.stringify(message(notification))
+const post = async (payload: SlackBody): Promise<string | null> => {
+  const body = JSON.stringify(payload)
   const target = env.SLACK_BOT_TOKEN
     ? 'https://slack.com/api/chat.postMessage'
     : env.SLACK_WEBHOOK_URL
@@ -92,7 +137,7 @@ const post = async (notification: SlackNotification): Promise<string | null> => 
   return `Slack refused the message: ${result.error ?? 'unknown error'}.`
 }
 
-const message = (notification: SlackNotification) => {
+const message = (notification: SlackNotification): SlackBody => {
   const { values, attribution } = notification
   const answer = (...keys: string[]): string => {
     for (const key of keys) {
@@ -126,20 +171,11 @@ const message = (notification: SlackNotification) => {
   }
 }
 
-const deadLetter = async (
-  notification: SlackNotification,
-  error: string,
-  attempts: number,
-): Promise<void> => {
+const deadLetter = async (outbound: Outbound, error: string, attempts: number): Promise<void> => {
   try {
-    await recordDeadLetter(publicEdgeContext(notification.workspaceId), {
-      jobName: 'slack.form-submission',
-      payload: {
-        submissionId: notification.submissionId,
-        formId: notification.formId,
-        contactId: notification.contactId,
-        channel: notification.channel ?? null,
-      },
+    await recordDeadLetter(publicEdgeContext(outbound.workspaceId), {
+      jobName: outbound.jobName,
+      payload: outbound.payload,
       error,
       attempts,
     })
