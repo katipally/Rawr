@@ -51,7 +51,23 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
    *  being held is somebody's prospect. */
   form_submission: ['admin', 'sales', 'marketing'],
   consent_record: ['admin', 'marketing'],
+  /** F2. A booking is created by a stranger on the public edge, which acts with
+   *  marketing's ceiling, so the same three roles that can capture a lead can
+   *  create one. */
+  booking: ['admin', 'sales', 'marketing'],
+  /** Anyone but a viewer may own a personal calendar link. Whether a given page is
+   *  theirs to change is finer than an object-level role can say, so a round robin
+   *  page and somebody else's personal link are refused inside the layer. F2 §6. */
+  booking_page: ['admin', 'sales', 'marketing'],
+  booking_host: ['admin'],
+  availability: ['admin', 'sales', 'marketing'],
+  availability_override: ['admin', 'sales', 'marketing'],
+  calendar_grant: ['admin', 'sales', 'marketing'],
   membership: ['admin'],
+  /** F5 §1. Anybody may hold agent access to what they can already reach. A token
+   *  carries no role of its own, so a viewer's token reads and cannot write, and
+   *  revoking somebody else's is refused inside the layer rather than here. */
+  mcp_token: ['admin', 'sales', 'marketing', 'viewer'],
 }
 
 export const canWrite = (role: Role, entity: string): boolean =>
