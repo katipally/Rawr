@@ -10,6 +10,7 @@ import { and, desc, eq, lt, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
+import { crmRouter } from './crm.ts'
 
 const PAGE_MAX = 200
 
@@ -17,6 +18,8 @@ const PAGE_MAX = 200
 const cursor = z.object({ createdAt: z.coerce.date(), id: z.uuid() })
 
 export const appRouter = router({
+  crm: crmRouter,
+
   health: publicProcedure.query(() => ({ ok: true as const })),
 
   me: protectedProcedure.query(({ ctx }) => ({
