@@ -13,6 +13,26 @@ export type DeadLetterRow = {
   payload: unknown
 }
 
+/** A job that fails without landing one of these is a bug, not an incident.
+ *  Written with withWorkspace rather than mutate: a dead letter is the record of
+ *  a failure, not a change a person made, so it carries no audit row and no role
+ *  check. The caller is always a job or the public edge, both of which have
+ *  already been scoped by the time they get here. */
+export const recordDeadLetter = async (
+  ctx: WorkspaceContext,
+  entry: { jobName: string; payload: unknown; error: string; attempts: number },
+): Promise<void> => {
+  await withWorkspace(ctx, async (tx) => {
+    await tx.insert(deadLetter).values({
+      workspaceId: ctx.workspaceId,
+      jobName: entry.jobName,
+      payload: entry.payload ?? {},
+      error: entry.error.slice(0, 2000),
+      attempts: entry.attempts,
+    })
+  })
+}
+
 export const listDeadLetters = async (ctx: WorkspaceContext): Promise<DeadLetterRow[]> =>
   withWorkspace(ctx, (tx) =>
     tx
