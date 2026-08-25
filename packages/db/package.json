@@ -13,16 +13,18 @@
     "seed": "node --experimental-strip-types --env-file=../../.env.local scripts/seed.ts",
     "verify": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-tenancy.ts",
     "typecheck": "tsc --noEmit",
-    "verify:guards": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-guards.ts"
+    "verify:guards": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-guards.ts",
+    "verify:crm": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-crm.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
     "postgres": "catalog:",
+    "psl": "^1.15.0",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "drizzle-kit": "catalog:",
-    "typescript": "catalog:",
-    "@types/node": "catalog:"
+    "typescript": "catalog:"
   }
 }

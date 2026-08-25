@@ -18,6 +18,7 @@
     "@trpc/tanstack-react-query": "catalog:",
     "arctic": "catalog:",
     "drizzle-orm": "catalog:",
+    "exceljs": "^4.4.0",
     "jose": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
