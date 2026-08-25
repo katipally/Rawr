@@ -362,6 +362,120 @@ try {
     )
   }
 
+  // F2. A round robin across the three non-viewer staff plus a personal link for
+  // one of them, on both tenants so the isolation test has a page on each side.
+  // Availability is nine to five in three different zones on purpose: a bug that
+  // only shows up across timezones has to be visible in the seed.
+  const BOOKING_ZONES = ['America/Los_Angeles', 'Asia/Jakarta', 'Europe/Berlin']
+
+  for (const ws of [datasaur, probe]) {
+    const staff =
+      ws === datasaur
+        ? PEOPLE.filter((p) => p.role !== 'viewer').map((p) => userId(p.email))
+        : [userId('admin@probe.example')]
+
+    await db.insert(s.availability).values(
+      staff.map((id, i) => ({
+        workspaceId: ws,
+        userId: id,
+        timezone: BOOKING_ZONES[i % BOOKING_ZONES.length]!,
+        weekly: {
+          '1': [['09:00', '17:00']],
+          '2': [['09:00', '17:00']],
+          '3': [['09:00', '17:00']],
+          '4': [['09:00', '17:00']],
+          '5': [['09:00', '13:00']],
+        },
+      })),
+    )
+
+    // The development provider: Rawr's own confirmed bookings are the only source
+    // of busy time. It is what makes the engine exercisable while open item 3 is
+    // outstanding, and the web layer refuses it outside development.
+    await db.insert(s.calendarGrant).values(
+      staff.map((id) => ({
+        workspaceId: ws,
+        userId: id,
+        provider: 'dev' as const,
+        calendarId: 'primary',
+        state: 'connected' as const,
+        lastOkAt: new Date(),
+      })),
+    )
+
+    const [roundRobin] = await db
+      .insert(s.bookingPage)
+      .values({
+        workspaceId: ws,
+        slug: 'sales-team',
+        name: 'Talk to sales',
+        kind: 'round_robin',
+        durationMinutes: 30,
+        bufferAfterMinutes: 15,
+        minNoticeMinutes: 240,
+        maxHorizonDays: 60,
+        granularityMinutes: 30,
+        location: 'zoom',
+        titleTpl: 'Discovery Session with Datasaur <> {{company.name}}',
+        descriptionTpl:
+          '{{contact.first_name}} {{contact.last_name}} {{contact.email}}\n{{company.name}}',
+        companyFallback: 'a new team',
+        questions: [
+          {
+            key: 'interest',
+            type: 'select',
+            label: 'What are you looking at?',
+            required: false,
+            options: [
+              { value: 'labeling', label: 'Data labeling' },
+              { value: 'llm', label: 'LLM evaluation' },
+              { value: 'other', label: 'Something else' },
+            ],
+          },
+        ],
+        isActive: true,
+      })
+      .returning({ id: s.bookingPage.id })
+
+    if (!roundRobin) throw new Error('booking_page sales-team was not created')
+
+    await db.insert(s.bookingHost).values(
+      staff.map((id, i) => ({
+        workspaceId: ws,
+        bookingPageId: roundRobin.id,
+        userId: id,
+        // Uneven on purpose: an even split hides a weighting bug.
+        weight: i === 0 ? 2 : 1,
+      })),
+    )
+
+    const owner = staff[0]!
+    const [personal] = await db
+      .insert(s.bookingPage)
+      .values({
+        workspaceId: ws,
+        slug: 'one-on-one',
+        name: 'Book time with me',
+        kind: 'one_on_one',
+        ownerId: owner,
+        durationMinutes: 45,
+        granularityMinutes: 15,
+        minNoticeMinutes: 60,
+        location: 'google_meet',
+        titleTpl: '{{host.name}} <> {{company.name}}',
+        descriptionTpl: '{{contact.full_name}} · {{contact.email}}',
+        companyFallback: 'you',
+        questions: [],
+        isActive: true,
+      })
+      .returning({ id: s.bookingPage.id })
+
+    if (!personal) throw new Error('booking_page one-on-one was not created')
+    await db
+      .insert(s.bookingHost)
+      .values({ workspaceId: ws, bookingPageId: personal.id, userId: owner, weight: 1 })
+  }
+
   const counts = await client`
     select 'company' as t, count(*)::int as n from company
     union all select 'contact', count(*)::int from contact
@@ -373,6 +487,9 @@ try {
     union all select 'task', count(*)::int from task
     union all select 'association', count(*)::int from association
     union all select 'form', count(*)::int from form
+    union all select 'booking_page', count(*)::int from booking_page
+    union all select 'booking_host', count(*)::int from booking_host
+    union all select 'availability', count(*)::int from availability
     order by t`
   console.log('seeded:')
   for (const row of counts) console.log(`  ${row.t}: ${row.n}`)
