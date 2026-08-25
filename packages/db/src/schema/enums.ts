@@ -104,3 +104,28 @@ export const spamStateEnum = pgEnum('rawr_spam_state', [
   'confirmed_spam',
   'released',
 ])
+
+/** F2 §1. A round robin page fans across hosts; a one-on-one page is one person's
+ *  own link. The distinction drives assignment and who may edit the page, so it is
+ *  a column rather than "has exactly one host". */
+export const bookingKindEnum = pgEnum('rawr_booking_kind', ['one_on_one', 'round_robin'])
+
+export const bookingLocationEnum = pgEnum('rawr_booking_location', [
+  'zoom',
+  'google_meet',
+  'phone',
+  'custom',
+])
+
+/** 'rescheduled' is the old row, kept so the timeline reads as a move rather than
+ *  a cancellation followed by an unrelated booking. F2 §8. */
+export const bookingStateEnum = pgEnum('rawr_booking_state', [
+  'confirmed',
+  'cancelled',
+  'rescheduled',
+])
+
+/** 'dev' exists because open item 3 has not landed: it reads busy time from Rawr's
+ *  own confirmed bookings so the engine is exercisable end to end before a Google
+ *  project exists. It is refused in production. */
+export const calendarProviderEnum = pgEnum('rawr_calendar_provider', ['google', 'dev'])
