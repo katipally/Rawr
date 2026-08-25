@@ -1,7 +1,7 @@
 import { listMcpTokens } from '@rawr/db'
 import Link from 'next/link'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { failedJobsPath } from '~/lib/links.ts'
+import { failedJobsPath, sitesPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { TokenList } from './token-list.tsx'
 
@@ -29,9 +29,10 @@ const AgentAccessPage = async () => {
           </p>
         </div>
         {session.role === 'admin' ? (
-          <Link href={failedJobsPath()} className="shrink-0">
-            Failed jobs
-          </Link>
+          <div className="flex shrink-0 gap-4">
+            <Link href={sitesPath()}>Tracked sites</Link>
+            <Link href={failedJobsPath()}>Failed jobs</Link>
+          </div>
         ) : null}
       </div>
 

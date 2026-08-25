@@ -72,6 +72,16 @@ export const submissionsPath = (
   params: { state?: string; form?: string } = {},
 ): string => `/${CRM_ROOT}/${workspace}/submissions${query(params)}`
 
+/** F4. One page view, addressed by its own id, so the screen a salesperson is
+ *  looking at pastes into Slack like every other surface. The workspace is in the
+ *  path for the same reason it is everywhere else. */
+export const pageViewPath = (workspace: string, id: string): string =>
+  `/${CRM_ROOT}/${workspace}/activity/${id}`
+
+/** The tracked hosts and their site keys. Under settings rather than the CRM tree:
+ *  it is configuration, not a record. */
+export const sitesPath = (): string => '/settings/sites'
+
 export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
 
