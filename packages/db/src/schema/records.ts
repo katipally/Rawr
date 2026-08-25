@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   date,
@@ -13,7 +14,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { createdAt, pk, searchVector, updatedAt, workspaceId } from './columns.ts'
-import { activityTypeEnum, actorKindEnum, entityTypeEnum } from './enums.ts'
+import { activityTypeEnum, actorKindEnum, entityTypeEnum, taskStatusEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 
 export const lifecycleStage = pgTable(
@@ -48,11 +49,19 @@ export const company = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    /** Soft delete. Activity is retained and its timeline entry reads "deleted
+     *  company", so history is never silently rewritten. */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     search: searchVector('name', 'domain', 'industry', 'city', 'country'),
   },
   (t) => [
+    /** Dedupe enforced by the index, not by check-then-insert, so two concurrent
+     *  imports cannot both win. Partial, so soft-deleted rows free their domain. */
+    uniqueIndex('company_domain_key')
+      .on(t.workspaceId, t.domain)
+      .where(sql`domain is not null and deleted_at is null`),
     index('company_search_idx').using('gin', t.search),
     index('company_custom_idx').using('gin', t.custom),
     index('company_owner_idx').on(t.workspaceId, t.ownerId),
@@ -84,11 +93,15 @@ export const contact = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     search: searchVector('first_name', 'last_name', 'email', 'title'),
   },
   (t) => [
+    uniqueIndex('contact_email_key')
+      .on(t.workspaceId, sql`lower(${t.email})`)
+      .where(sql`email is not null and deleted_at is null`),
     index('contact_search_idx').using('gin', t.search),
     index('contact_custom_idx').using('gin', t.custom),
     index('contact_company_idx').on(t.workspaceId, t.companyId),
@@ -148,6 +161,7 @@ export const deal = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     search: searchVector('name', 'next_step', 'deal_type'),
@@ -208,9 +222,47 @@ export const activityLink = pgTable(
       .references(() => activity.id, { onDelete: 'cascade' }),
     entityType: entityTypeEnum('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
+    /** Copied from the activity, written in the same transaction. A contact with
+     *  4,000 activities is keyset paginated and counted straight off the index
+     *  below; without these two columns every page would sort a join result. */
+    type: activityTypeEnum('type').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.activityId, t.entityType, t.entityId] }),
-    index('activity_link_entity_idx').on(t.workspaceId, t.entityType, t.entityId),
+    index('activity_link_timeline_idx').on(
+      t.workspaceId,
+      t.entityType,
+      t.entityId,
+      t.occurredAt.desc(),
+      t.activityId.desc(),
+    ),
+    index('activity_link_type_idx').on(t.workspaceId, t.entityType, t.entityId, t.type),
+  ],
+)
+
+/** A9. One task hangs on at most one record, which is how HubSpot's task queue
+ *  behaves and is all Trevor's Monday chase needs. */
+export const task = pgTable(
+  'task',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    body: text('body'),
+    dueDate: date('due_date'),
+    status: taskStatusEnum('status').notNull().default('open'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    assigneeId: uuid('assignee_id').references(() => userAccount.id, { onDelete: 'set null' }),
+    entityType: entityTypeEnum('entity_type'),
+    entityId: uuid('entity_id'),
+    createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('task_queue_idx').on(t.workspaceId, t.status, t.dueDate, t.id),
+    index('task_assignee_idx').on(t.workspaceId, t.assigneeId, t.status, t.dueDate),
+    index('task_entity_idx').on(t.workspaceId, t.entityType, t.entityId),
   ],
 )

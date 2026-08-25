@@ -57,6 +57,9 @@ export const fieldDef = pgTable(
     position: integer('position').notNull().default(0),
     /** Has a dedicated expression index, created by a job and recorded in field_index. */
     isHot: boolean('is_hot').notNull().default(false),
+    /** A3: a field_change activity is written only for fields marked here.
+     *  Without the gate an 88,270-row import writes 371 rows per contact. */
+    trackChanges: boolean('track_changes').notNull().default(false),
     /** Two-phase delete. Hidden everywhere the moment this is set, data still present
      *  until an explicit purge strips the key from every row. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),

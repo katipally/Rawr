@@ -42,6 +42,8 @@ export const viewKindEnum = pgEnum('rawr_view_kind', ['table', 'board'])
 
 export const entityTypeEnum = pgEnum('rawr_entity_type', ['company', 'contact', 'deal'])
 
+/** 01-crm.md A3. Twenty types, reduced from HubSpot's 44-type filter set to what
+ *  Rawr will actually produce. Grouped in the order the timeline filter shows them. */
 export const activityTypeEnum = pgEnum('rawr_activity_type', [
   'note',
   'call',
@@ -56,6 +58,14 @@ export const activityTypeEnum = pgEnum('rawr_activity_type', [
   'booking',
   'field_change',
   'association_change',
+  'merge',
+  'import',
+  'page_view',
+  'custom_event',
+  'marketing_email',
+  'email_tracking',
+  'sequence_activity',
+  'enrichment',
 ])
 
 export const integrationStateEnum = pgEnum('rawr_integration_state', [
@@ -63,4 +73,15 @@ export const integrationStateEnum = pgEnum('rawr_integration_state', [
   'connected',
   'degraded',
   'revoked',
+])
+
+export const taskStatusEnum = pgEnum('rawr_task_status', ['open', 'done'])
+
+export const importStateEnum = pgEnum('rawr_import_state', [
+  'mapping',
+  'previewing',
+  'running',
+  'done',
+  'failed',
+  'cancelled',
 ])

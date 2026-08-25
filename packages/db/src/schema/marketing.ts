@@ -1,6 +1,7 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   primaryKey,
@@ -89,7 +90,11 @@ export const savedView = pgTable(
       .notNull()
       .references(() => objectDef.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    /** The URL segment. /contacts/:workspace/objects/:object/views/:slug/list is
+     *  the shareable address of a view, so the slug is the identity, not the uuid. */
+    slug: text('slug').notNull(),
     kind: viewKindEnum('kind').notNull().default('table'),
+    position: integer('position').notNull().default(0),
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     isShared: boolean('is_shared').notNull().default(false),
     filters: jsonb('filters').notNull().default([]),
@@ -100,5 +105,8 @@ export const savedView = pgTable(
     }),
     createdAt: createdAt(),
   },
-  (t) => [index('saved_view_object_idx').on(t.workspaceId, t.objectId)],
+  (t) => [
+    index('saved_view_object_idx').on(t.workspaceId, t.objectId, t.position),
+    uniqueIndex('saved_view_slug_key').on(t.workspaceId, t.objectId, t.slug),
+  ],
 )
