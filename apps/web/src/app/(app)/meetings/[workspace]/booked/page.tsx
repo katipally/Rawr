@@ -46,7 +46,7 @@ const BookedScreen = async ({
   const pageName = pages.find((page) => page.id === query.page)?.name
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+    <div className="w-full max-w-6xl">
       <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-2">
         <h1 className="text-lg font-medium">Booked meetings</h1>
         {pageName ? <span className="text-sm text-secondary">{pageName}</span> : null}

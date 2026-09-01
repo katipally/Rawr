@@ -114,7 +114,10 @@ const announce = async (
   const when = booking.startsAt.toISOString().replace('T', ' ').slice(0, 16)
   queueHostAlert({
     workspaceId: pending.workspaceId,
-    jobName: 'zoom.backfill',
+    jobName: 'slack.booking-no-conference',
+    // Keyed on the booking: one meeting without a link, one alert, however many
+    // times the chase gives up.
+    idempotencyKey: `slack:booking-no-conference:${pending.bookingId}`,
     payload: { bookingId: pending.bookingId, hostEmail: booking.hostEmail, reason },
     text: [
       `*No Zoom link on a confirmed meeting.* ${booking.hostName} with ${booking.attendeeName}, ${when} UTC.`,

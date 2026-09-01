@@ -3,7 +3,7 @@ import type { WorkspaceContext } from './context.ts'
 import { withWorkspace } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import { fieldOrThrow, getRegistryIn, objectOrThrow } from './registry.ts'
+import { fieldOrThrow, getRegistryIn, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 
 export type BoardCard = {
   id: string
@@ -20,6 +20,7 @@ export type BoardCard = {
 export type BoardColumn = {
   key: string
   name: string
+  /** Only a pipeline stage carries one. Any other grouping has no weighting. */
   probability: number | null
   count: number
   /** Per currency, never summed across them. A mixed board shows subtotals rather
@@ -31,6 +32,10 @@ export type BoardColumn = {
 
 export type Board = {
   groupByKey: string
+  groupByLabel: string
+  /** Every field this board could be grouped by, so the picker is the registry's
+   *  answer rather than a hardcoded list. A5. */
+  groupableFields: { key: string; label: string }[]
   columns: BoardColumn[]
   /** Deals whose group value is set to something no longer on the board. */
   unassigned: number
@@ -38,32 +43,62 @@ export type Board = {
 
 const CARDS_PER_COLUMN = 50
 
+/** A board groups by exactly one field. Stage is the default and the only one that
+ *  can weight a total, because probability is a property of a pipeline stage and
+ *  of nothing else. Any select field is groupable: "by deal type" and "by product
+ *  of interest" are boards somebody will want, and the registry already knows both
+ *  their values and their labels. A5. */
+const GROUPABLE = (field: RegistryField): boolean =>
+  field.key === 'stage_id' || field.type === 'select'
+
+export const groupableFields = (object: RegistryObject): { key: string; label: string }[] =>
+  object.fields.filter(GROUPABLE).map((field) => ({ key: field.key, label: field.label }))
+
 /** Two queries for the whole board, whatever the column count: one grouped
  *  aggregate for the footers, one windowed fetch for the visible cards. Counting
  *  and totalling from the loaded cards would be wrong the moment a column has more
  *  than CARDS_PER_COLUMN deals. A5. */
 export const readBoard = async (
   ctx: WorkspaceContext,
-  input: { pipelineId?: string | null; filters?: FilterGroup[]; search?: string },
+  input: {
+    pipelineId?: string | null
+    filters?: FilterGroup[]
+    search?: string
+    /** Defaults to stage_id, which is what the deal board has always shown. */
+    groupBy?: string | null
+  },
 ): Promise<Board> => {
   const scope = scopeFor(ctx.actorId)
 
   return withWorkspace(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, 'deal')
-    const groupBy = fieldOrThrow(object, 'stage_id')
+    const requested = input.groupBy ?? 'stage_id'
+    const candidate = object.byKey.get(requested)
+    if (!candidate || !GROUPABLE(candidate)) {
+      const names = groupableFields(object).map((field) => field.label).join(', ')
+      throw new Error(`A board cannot be grouped by "${requested}". Try one of: ${names}.`)
+    }
+    const groupBy = fieldOrThrow(object, candidate.key)
     const groupExpr = fieldExpression(object, groupBy)
+    const byStage = groupBy.key === 'stage_id'
 
-    const stages = await tx.execute<{
-      id: string
-      name: string
-      probability: string | null
-      pipeline_id: string
-    }>(sql`
-      select s.id, s.name, s.probability, s.pipeline_id
-        from pipeline_stage s
-        ${input.pipelineId ? sql`where s.pipeline_id = ${input.pipelineId}` : sql``}
-       order by s.position asc`)
+    // The columns a board lays out, and their order. Stage takes them from the
+    // pipeline so an empty stage still shows; a select takes them from the
+    // registry's own option list for the same reason.
+    const columnDefs = byStage
+      ? (
+          await tx.execute<{ id: string; name: string; probability: string | null }>(sql`
+            select s.id, s.name, s.probability
+              from pipeline_stage s
+              ${input.pipelineId ? sql`where s.pipeline_id = ${input.pipelineId}` : sql``}
+             order by s.position asc`)
+        ).map((stage) => ({
+          key: stage.id,
+          name: stage.name,
+          probability: stage.probability === null ? null : Number(stage.probability),
+        }))
+      : groupBy.options.map((option) => ({ key: option, name: option, probability: null }))
 
     const where: SQL[] = [sql.raw(`"deal"."deleted_at" is null`)]
     if (input.pipelineId) where.push(sql`"deal"."pipeline_id" = ${input.pipelineId}`)
@@ -74,20 +109,28 @@ export const readBoard = async (
     }
     const predicate = sql.join(where, sql` and `)
 
+    // Weighting only means anything against a stage's probability, so a board
+    // grouped by anything else reports a total and leaves weighted equal to it
+    // rather than inventing a percentage.
+    const weightedExpr = byStage
+      ? sql`coalesce(sum("deal"."amount" * coalesce(s."probability", 0) / 100), 0)::text`
+      : sql`coalesce(sum("deal"."amount"), 0)::text`
+    const weightJoin = byStage ? sql`left join pipeline_stage s on s.id = "deal"."stage_id"` : sql``
+
     const totals = await tx.execute<{
-      stage_id: string
+      group_key: string | null
       currency: string
       n: number
       total: string | null
       weighted: string | null
     }>(sql`
-      select ${groupExpr} as stage_id,
+      select ${groupExpr} as group_key,
              "deal"."currency" as currency,
              count(*)::int as n,
              coalesce(sum("deal"."amount"), 0)::text as total,
-             coalesce(sum("deal"."amount" * coalesce(s."probability", 0) / 100), 0)::text as weighted
+             ${weightedExpr} as weighted
         from "deal"
-        left join pipeline_stage s on s.id = "deal"."stage_id"
+        ${weightJoin}
        where ${predicate}
        group by 1, 2`)
 
@@ -95,7 +138,7 @@ export const readBoard = async (
     // and its count can never disagree about which deals belong to it.
     const cards = await tx.execute<{
       id: string
-      stage_id: string
+      group_key: string | null
       name: string | null
       amount: string | null
       currency: string
@@ -105,11 +148,11 @@ export const readBoard = async (
       owner_name: string | null
       company_name: string | null
     }>(sql`
-      select id, stage_id, name, amount, currency, close_date, next_step, next_step_date,
+      select id, group_key, name, amount, currency, close_date, next_step, next_step_date,
              owner_name, company_name
         from (
           select "deal"."id" as id,
-                 ${groupExpr} as stage_id,
+                 ${groupExpr} as group_key,
                  "deal"."name" as name,
                  "deal"."amount"::text as amount,
                  "deal"."currency" as currency,
@@ -130,30 +173,31 @@ export const readBoard = async (
        where rank <= ${CARDS_PER_COLUMN}`)
 
     type Card = (typeof cards)[number]
-    const byStage = new Map<string, Card[]>()
+    const grouped = new Map<string, Card[]>()
     for (const card of cards) {
-      const bucket = byStage.get(card.stage_id)
+      const key = card.group_key ?? ''
+      const bucket = grouped.get(key)
       if (bucket) bucket.push(card)
-      else byStage.set(card.stage_id, [card])
+      else grouped.set(key, [card])
     }
 
-    const known = new Set(stages.map((stage) => stage.id))
-    const columns: BoardColumn[] = stages.map((stage) => {
-      const rows = totals.filter((row) => row.stage_id === stage.id)
-      const stageCards = byStage.get(stage.id) ?? []
+    const known = new Set(columnDefs.map((column) => column.key))
+    const columns: BoardColumn[] = columnDefs.map((column) => {
+      const rows = totals.filter((row) => row.group_key === column.key)
+      const columnCards = grouped.get(column.key) ?? []
       const count = rows.reduce((sum, row) => sum + Number(row.n), 0)
       return {
-        key: stage.id,
-        name: stage.name,
-        probability: stage.probability === null ? null : Number(stage.probability),
+        key: column.key,
+        name: column.name,
+        probability: column.probability,
         count,
         totals: rows.map((row) => ({
           currency: row.currency,
           total: row.total ?? '0',
           weighted: row.weighted ?? '0',
         })),
-        hasMore: count > stageCards.length,
-        cards: stageCards.map((card) => ({
+        hasMore: count > columnCards.length,
+        cards: columnCards.map((card) => ({
           id: card.id,
           displayName: displayName('deal', { name: card.name }),
           amount: card.amount,
@@ -169,9 +213,13 @@ export const readBoard = async (
 
     return {
       groupByKey: groupBy.key,
+      groupByLabel: groupBy.label,
+      groupableFields: groupableFields(object),
       columns,
+      // Includes deals with no value at all for the grouping field, which is a real
+      // state for a select and is never a state for a stage.
       unassigned: totals
-        .filter((row) => !known.has(row.stage_id))
+        .filter((row) => row.group_key === null || !known.has(row.group_key))
         .reduce((sum, row) => sum + Number(row.n), 0),
     }
   })

@@ -86,7 +86,15 @@ try {
     expect(registry.objects.length === 3, `saw ${registry.objects.length} objects`)
     const deal = objectOrThrow(registry, 'deal')
     const custom = deal.fields.filter((f) => f.storage === 'jsonb')
-    expect(custom.length === 2, `deal has ${custom.length} custom fields, expected 2`)
+    // The two HubSpot properties the seed carries, checked by name. Not by count:
+    // custom fields are creatable from Settings now, so a total is a property of
+    // whatever somebody has added rather than of the system. A1.
+    for (const key of ['uttr_pipeline', 'deal_product_of_interest']) {
+      expect(
+        custom.some((field) => field.key === key),
+        `deal has no custom jsonb field called ${key}`,
+      )
+    }
     return `deal has ${deal.fields.length} fields, ${custom.length} of them custom jsonb`
   })
 
@@ -346,9 +354,9 @@ try {
     const keep = await createRecord(sales, 'contact', { first_name: 'Keep', email: `keep.${stamp}@partner4.example` })
     const absorb = await createRecord(sales, 'contact', { first_name: 'Absorb', last_name: 'Me', email: `absorb.${stamp}@partner5.example` })
 
-    const { createNote } = await import('../src/dal/tasks.ts')
-    await createNote(sales, { body: 'note on the survivor', entity: { entityType: 'contact', entityId: keep.id } })
-    await createNote(sales, { body: 'note on the absorbed', entity: { entityType: 'contact', entityId: absorb.id } })
+    const { logByHand } = await import('../src/dal/tasks.ts')
+    await logByHand(sales, { type: 'note', body: 'note on the survivor', entity: { entityType: 'contact', entityId: keep.id } })
+    await logByHand(sales, { type: 'call', body: 'call on the absorbed', entity: { entityType: 'contact', entityId: absorb.id } })
 
     const before = {
       keep: await timelineCounts(sales, { entityType: 'contact', entityId: keep.id }),

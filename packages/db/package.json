@@ -20,7 +20,9 @@
     "verify:forms": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-forms.ts",
     "verify:booking": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-booking.ts",
     "verify:mcp": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-mcp.ts",
-    "verify:activity": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-activity.ts"
+    "verify:activity": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-activity.ts",
+    "verify:admin": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-admin.ts",
+    "verify:integrations": "node --experimental-strip-types --env-file=../../.env.local scripts/verify-integrations.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

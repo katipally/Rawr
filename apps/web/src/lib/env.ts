@@ -45,6 +45,10 @@ const schema = z.object({
    *  only source of busy time, which is what makes the engine exercisable end to
    *  end today. It refuses to be reachable in production. */
   RAWR_DEV_CALENDAR: z.string().optional(),
+  RAWR_DEV_GMAIL: z.string().optional(),
+  RAWR_DEV_INTEGRATIONS: z.string().optional(),
+  /** Shared with the worker so it can ask the app to run a mailbox pass. */
+  RAWR_INTERNAL_SECRET: z.string().default(''),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -77,6 +81,16 @@ export const zoomConfigured =
 /** Never in production: a booking confirmed against a calendar nobody checked is
  *  worse than no booking. */
 export const devCalendarEnabled = env.RAWR_DEV_CALENDAR === '1' && env.NODE_ENV !== 'production'
+
+/** F1 phase B. A stand-in Gmail so the sync, the matching and the blocklist are
+ *  exercisable before the Google consent screen exists (open item 3). */
+export const devGmailEnabled = env.RAWR_DEV_GMAIL === '1' && env.NODE_ENV !== 'production'
+
+/** F6. Stand-in providers for Brevo, Apollo, Clay, Slack and GA4, so the framework
+ *  — connection test, health, idempotency, retry, dead letter, replay — is
+ *  exercisable before open items 4, 6, 7 and 12 land. Nothing leaves the machine. */
+export const devIntegrationsEnabled =
+  env.RAWR_DEV_INTEGRATIONS === '1' && env.NODE_ENV !== 'production'
 
 /** The embed and the hosted page are loaded from another origin, so they need an
  *  absolute base. Falls back to AUTH_URL, which is correct in development. */

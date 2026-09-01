@@ -3,10 +3,11 @@ import {
   getRecord,
   isActivityType,
   isObjectKey,
-  listRecords,
   listTasks,
   readAssociations,
+  readMemberships,
   readSubscriptions,
+  threadsForContact,
   readTimeline,
   timelineCounts,
   websiteActivity,
@@ -18,6 +19,8 @@ import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
 import { PropertyPanel, type PropertySection } from '~/components/crm/property-panel.tsx'
 import { RecordActions } from '~/components/crm/record-actions.tsx'
+import { MailPanel } from '~/components/crm/mail-panel.tsx'
+import { SegmentsPanel } from '~/components/crm/segments-panel.tsx'
 import { SubscriptionsPanel } from '~/components/crm/subscriptions-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
@@ -40,12 +43,14 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'About this contact', fieldKeys: ['first_name', 'last_name', 'email', 'phone', 'title', 'linkedin_url'] },
     { title: 'Ownership and status', fieldKeys: ['owner_id', 'company_id', 'lifecycle_stage_id', 'lead_status'] },
     { title: 'Where they came from', fieldKeys: ['lead_source', 'marketing_status', 'original_source', 'latest_source'] },
+    { title: 'Record', fieldKeys: ['created_at'] },
   ],
   company: [
     { title: 'About this company', fieldKeys: ['name', 'domain', 'industry', 'phone'] },
     { title: 'Size and location', fieldKeys: ['employee_count', 'annual_revenue', 'city', 'country'] },
     { title: 'Ownership and status', fieldKeys: ['owner_id', 'lifecycle_stage_id'] },
     { title: 'Where they came from', fieldKeys: ['original_source', 'latest_source'] },
+    { title: 'Record', fieldKeys: ['created_at'] },
   ],
   deal: [
     { title: 'About this deal', fieldKeys: ['name', 'amount', 'currency', 'close_date', 'deal_type'] },
@@ -54,6 +59,7 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'Ownership', fieldKeys: ['owner_id', 'company_id'] },
     { title: 'Custom properties', fieldKeys: ['uttr_pipeline', 'deal_product_of_interest'] },
     { title: 'Where it came from', fieldKeys: ['original_source', 'latest_source'] },
+    { title: 'Record', fieldKeys: ['created_at'] },
   ],
 }
 
@@ -79,7 +85,7 @@ const RecordPage = async ({
   const { type } = await searchParams
 
   const ctx = contextFrom(session)
-  const { object, lookups, companies, canWrite } = await loadCrmContext(ctx, objectParam)
+  const { object, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
   const record = await getRecord(ctx, objectParam, id)
 
   if (!record) {
@@ -93,18 +99,19 @@ const RecordPage = async ({
   }
 
   const entity = { entityType: objectParam, entityId: id }
-  const [timeline, counts, rail, tasks, subscriptions, mergeCandidates, activity] = await Promise.all([
+  const [timeline, counts, rail, tasks, subscriptions, activity, memberships, threads] = await Promise.all([
     // A hand-edited type in a link is dropped rather than failing the page.
     readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
     timelineCounts(ctx, entity),
     readAssociations(ctx, entity),
     listTasks(ctx, { entity }),
     objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
-    listRecords(ctx, { object: objectParam, limit: 200, sorts: [{ key: 'created_at', direction: 'desc' }] }),
     objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
+    readMemberships(ctx, id),
+    objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([]),
   ])
 
-  const fields = toEditableFields(object, lookups, companies, { includeReadOnly: true })
+  const fields = toEditableFields(object, lookups, { includeReadOnly: true })
   const headerFields = HEADER_FIELDS[objectParam].flatMap((key) => {
     const field = object.byKey.get(key)
     return field ? [field] : []
@@ -112,12 +119,8 @@ const RecordPage = async ({
 
   // Only the pairs that make sense: a deal links to contacts, a contact links to
   // deals, and a company's contacts and deals are held on the records themselves.
-  const candidates =
-    objectParam === 'deal'
-      ? [{ objectKey: 'contact' as const, options: await contactOptions(ctx) }]
-      : objectParam === 'contact'
-        ? [{ objectKey: 'deal' as const, options: await dealOptions(ctx) }]
-        : []
+  const linkable: ObjectKey[] =
+    objectParam === 'deal' ? ['contact'] : objectParam === 'contact' ? ['deal'] : []
 
   return (
     <div className="flex flex-col gap-4">
@@ -136,7 +139,6 @@ const RecordPage = async ({
             fields={fields.filter((field) => !field.readOnly)}
             values={record.values}
             labels={record.labels}
-            candidates={mergeCandidates.rows.map((row) => ({ id: row.id, label: row.displayName }))}
             canWrite={canWrite}
           />
         </div>
@@ -184,6 +186,12 @@ const RecordPage = async ({
               isAdmin={session.role === 'admin'}
             />
           ) : null}
+          {memberships.length > 0 || objectParam === 'contact' ? (
+            <SegmentsPanel workspace={workspace} recordName={record.displayName} rows={memberships} />
+          ) : null}
+          {objectParam === 'contact' ? (
+            <MailPanel contactName={record.displayName} threads={threads} />
+          ) : null}
           {objectParam === 'contact' ? (
             <SubscriptionsPanel
               contactId={id}
@@ -229,7 +237,7 @@ const RecordPage = async ({
             contacts={rail.contacts}
             companies={rail.companies}
             deals={rail.deals}
-            candidates={candidates}
+            linkable={linkable}
             canWrite={canWrite}
           />
           <TasksPanel
@@ -254,14 +262,5 @@ const RecordPage = async ({
   )
 }
 
-const contactOptions = async (ctx: Parameters<typeof listRecords>[0]) => {
-  const page = await listRecords(ctx, { object: 'contact', limit: 200 })
-  return page.rows.map((row) => ({ id: row.id, label: row.displayName }))
-}
-
-const dealOptions = async (ctx: Parameters<typeof listRecords>[0]) => {
-  const page = await listRecords(ctx, { object: 'deal', limit: 200 })
-  return page.rows.map((row) => ({ id: row.id, label: row.displayName }))
-}
 
 export default RecordPage

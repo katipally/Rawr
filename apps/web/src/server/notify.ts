@@ -1,13 +1,15 @@
-import { publicEdgeContext, recordDeadLetter, type Attribution } from '@rawr/db'
-import { env, publicBaseUrl, slackConfigured } from '~/lib/env.ts'
+import { publicEdgeContext, recordDeadLetter, type Attribution, type WorkspaceContext } from '@rawr/db'
+import { publicBaseUrl } from '~/lib/env.ts'
+import { postToSlack, slackReady, type SlackBody } from './integrations/slack.ts'
 
 /** Replaces what HubSpot posts to #sales-leads-2026 today. Trevor flagged this
  *  loss first: a form fill from a real prospect lands in Slack, and that stops at
  *  cutover.
  *
  *  The lead is already saved by the time this runs. Every failure lands in
- *  dead_letter with the real error and is replayable; none of them can fail the
- *  capture. F3 §6. */
+ *  dead_letter carrying the message it could not send, which is what makes the
+ *  replay button on the failed-jobs screen able to send it later. None of it can
+ *  fail the capture. F3 §6, F6 §5. */
 
 export type SlackNotification = {
   workspaceId: string
@@ -24,8 +26,6 @@ export type SlackNotification = {
   channel?: string | null
 }
 
-const ATTEMPTS = 3
-
 /** Fired and not awaited by the route, so the visitor's response is never waiting
  *  on Slack. Failures are recorded rather than thrown, because there is nobody
  *  left to throw to. */
@@ -36,105 +36,86 @@ export const queueSlackNotification = (notification: SlackNotification): void =>
   })
 }
 
-const deliver = (notification: SlackNotification): Promise<void> =>
-  send({
-    workspaceId: notification.workspaceId,
+const deliver = async (notification: SlackNotification): Promise<void> => {
+  const ctx = publicEdgeContext(notification.workspaceId)
+  const body = message(notification)
+  // Keyed on the submission, so a retry, a replay, or both announce the lead once.
+  const key = `slack:submission:${notification.submissionId}`
+
+  await send(ctx, {
+    key,
     jobName: 'slack.form-submission',
+    body,
     payload: {
       submissionId: notification.submissionId,
       formId: notification.formId,
       contactId: notification.contactId,
-      channel: notification.channel ?? null,
+      body,
     },
-    body: message(notification),
   })
+}
+
+type Outbound = {
+  key: string
+  jobName: string
+  body: SlackBody
+  payload: Record<string, unknown>
+}
+
+/** The one path everything Slack-shaped goes through. Retry, backoff, jitter and
+ *  the dead letter all live in the integration layer; what is here is the decision
+ *  to swallow rather than throw, because every caller is fire-and-forget. */
+const send = async (ctx: WorkspaceContext, outbound: Outbound): Promise<void> => {
+  if (!slackReady()) {
+    await deadLetter(ctx, outbound, 'Slack is not configured. Add a bot token or a webhook URL in Settings, under Integrations (open item 4).')
+    return
+  }
+  try {
+    await postToSlack(ctx, outbound)
+  } catch (cause) {
+    // postToSlack dead-letters through the provider layer on the way out, but a
+    // configuration failure never reaches that path, so this catches the rest.
+    await deadLetter(ctx, outbound, cause instanceof Error ? cause.message : String(cause))
+  }
+}
 
 /** One meeting that has no conference link, addressed to the people who can do
  *  something about it. F2 §4 step 5: the booking stands, the host is told. */
 export const queueHostAlert = (alert: {
   workspaceId: string
   jobName: string
+  idempotencyKey: string
   payload: Record<string, unknown>
   text: string
   channel?: string | null
 }): void => {
-  void send({
-    workspaceId: alert.workspaceId,
+  const body: SlackBody = {
+    ...(alert.channel ? { channel: alert.channel } : {}),
+    text: alert.text,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
+  }
+  void send(publicEdgeContext(alert.workspaceId), {
+    key: alert.idempotencyKey,
     jobName: alert.jobName,
-    payload: alert.payload,
-    body: {
-      ...(env.SLACK_BOT_TOKEN ? { channel: alert.channel ?? env.SLACK_DEFAULT_CHANNEL } : {}),
-      text: alert.text,
-      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
-    },
-  }).catch(() => {
-    // send() already dead-letters.
-  })
-}
-
-type Outbound = {
-  workspaceId: string
-  jobName: string
-  payload: Record<string, unknown>
-  body: SlackBody
-}
-
-const send = async (outbound: Outbound): Promise<void> => {
-  if (!slackConfigured) {
-    await deadLetter(
-      outbound,
-      'Slack is not configured. Set SLACK_BOT_TOKEN or SLACK_WEBHOOK_URL (open item 4).',
-      0,
-    )
-    return
-  }
-
-  let lastError = 'unknown'
-  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-    try {
-      const outcome = await post(outbound.body)
-      if (outcome === null) return
-      lastError = outcome
-      // Backoff with jitter, so a Slack blip does not turn into a thundering herd
-      // when many forms are submitted in the same minute.
-      const base = 2 ** (attempt - 1) * 500
-      await sleep(base + Math.random() * base)
-    } catch (cause) {
-      lastError = cause instanceof Error ? cause.message : String(cause)
-    }
-  }
-  await deadLetter(outbound, lastError, ATTEMPTS)
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-type SlackBody = { channel?: string | undefined; text: string; blocks: unknown[] }
-
-/** Returns null on success, or the error to retry on. */
-const post = async (payload: SlackBody): Promise<string | null> => {
-  const body = JSON.stringify(payload)
-  const target = env.SLACK_BOT_TOKEN
-    ? 'https://slack.com/api/chat.postMessage'
-    : env.SLACK_WEBHOOK_URL
-
-  const response = await fetch(target, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      ...(env.SLACK_BOT_TOKEN ? { authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } : {}),
-    },
     body,
-    signal: AbortSignal.timeout(8000),
+    payload: { ...alert.payload, idempotencyKey: alert.idempotencyKey, body },
+  }).catch(() => {
+    // send() already records its own failures.
   })
+}
 
-  if (!response.ok) return `Slack answered ${response.status} ${response.statusText}.`
-
-  // A webhook answers "ok" as plain text; the Web API answers JSON and reports
-  // failure inside a 200, which is the case a status check alone would miss.
-  if (!env.SLACK_BOT_TOKEN) return null
-  const result = (await response.json()) as { ok?: boolean; error?: string }
-  if (result.ok) return null
-  return `Slack refused the message: ${result.error ?? 'unknown error'}.`
+const deadLetter = async (ctx: WorkspaceContext, outbound: Outbound, error: string): Promise<void> => {
+  try {
+    await recordDeadLetter(ctx, {
+      jobName: outbound.jobName,
+      payload: outbound.payload,
+      error,
+      attempts: 0,
+    })
+  } catch {
+    // The database is the last place to record this. If it is unreachable too,
+    // the lead is still saved and there is nothing further to do here.
+  }
 }
 
 const message = (notification: SlackNotification): SlackBody => {
@@ -163,24 +144,31 @@ const message = (notification: SlackNotification): SlackBody => {
   ].filter(Boolean)
 
   return {
-    ...(env.SLACK_BOT_TOKEN
-      ? { channel: notification.channel ?? env.SLACK_DEFAULT_CHANNEL }
-      : {}),
+    ...(notification.channel ? { channel: notification.channel } : {}),
     text: `New lead: ${name || answer('email')} via ${notification.formName}`,
     blocks: [{ type: 'section', text: { type: 'mrkdwn', text: lines.join('\n') } }],
   }
 }
 
-const deadLetter = async (outbound: Outbound, error: string, attempts: number): Promise<void> => {
-  try {
-    await recordDeadLetter(publicEdgeContext(outbound.workspaceId), {
-      jobName: outbound.jobName,
-      payload: outbound.payload,
-      error,
-      attempts,
-    })
-  } catch {
-    // The database is the last place to record this. If it is unreachable too,
-    // the lead is still saved and there is nothing further to do here.
-  }
+/** F6 §5's second use: a deal moving stage, opt-in per pipeline. */
+export const queueStageAlert = (alert: {
+  workspaceId: string
+  workspaceSlug: string
+  dealId: string
+  dealName: string
+  from: string
+  to: string
+  actor: string
+  activityId: string
+}): void => {
+  const link = `${publicBaseUrl}/contacts/${alert.workspaceSlug}/record/deal/${alert.dealId}`
+  const text = `${alert.actor} moved ${alert.dealName} from ${alert.from} to ${alert.to}`
+  queueHostAlert({
+    workspaceId: alert.workspaceId,
+    jobName: 'slack.stage-change',
+    // Keyed on the activity: one move, one announcement, however many retries.
+    idempotencyKey: `slack:stage:${alert.activityId}`,
+    payload: { dealId: alert.dealId, activityId: alert.activityId },
+    text: `${text}\n<${link}|Open in Rawr>`,
+  })
 }

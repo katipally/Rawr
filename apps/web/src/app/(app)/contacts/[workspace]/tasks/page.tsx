@@ -43,7 +43,7 @@ const TasksPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-base font-medium">Tasks</h1>
+      <h1 className="text-lg font-medium">Tasks</h1>
 
       <nav aria-label="Task filter" className="flex flex-wrap gap-1">
         {filters.map((option) => (

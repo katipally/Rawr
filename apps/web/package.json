@@ -20,6 +20,7 @@
     "drizzle-orm": "catalog:",
     "exceljs": "^4.4.0",
     "jose": "catalog:",
+    "lucide-react": "catalog:",
     "next": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

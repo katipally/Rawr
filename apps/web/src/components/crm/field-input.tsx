@@ -1,7 +1,8 @@
 'use client'
 
 import { Select, TextArea, TextInput } from '@rawr/ui'
-import type { FieldType } from '@rawr/db'
+import type { FieldType, ObjectKey } from '@rawr/db'
+import { RecordPicker } from './record-picker.tsx'
 
 export type Choice = { id: string; label: string }
 
@@ -12,8 +13,10 @@ export type EditableField = {
   isRequired: boolean
   helpText: string | null
   options: string[]
-  /** Relation and user fields are picked from a list, never typed. */
+  /** Relation and user fields with a short, bounded list are picked from it. */
   choices?: Choice[]
+  /** Relations whose target is too large for a list: searched, not enumerated. */
+  pickObject?: ObjectKey
   readOnly?: boolean
 }
 
@@ -25,12 +28,29 @@ export type FieldInputProps = {
   onChange: (value: unknown) => void
   id: string
   autoFocus?: boolean
+  /** What the current value is called, so a searched relation shows a name rather
+   *  than the uuid it stores. */
+  valueLabel?: string | null | undefined
 }
 
 /** One editor per field type, chosen from the registry. Adding a type means adding
  *  a branch here and nowhere else on the write side. */
-export const FieldInput = ({ field, value, onChange, id, autoFocus }: FieldInputProps) => {
+export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }: FieldInputProps) => {
   const common = { id, 'aria-label': field.label, autoFocus }
+
+  if (field.pickObject) {
+    const current = typeof value === 'string' && value !== '' ? value : null
+    return (
+      <RecordPicker
+        id={id}
+        object={field.pickObject}
+        label={field.label}
+        allowClear={!field.isRequired}
+        value={current ? { id: current, label: valueLabel || current } : null}
+        onChange={(next) => onChange(next?.id ?? null)}
+      />
+    )
+  }
 
   if (field.choices) {
     return (

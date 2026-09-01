@@ -132,27 +132,38 @@ export const setTaskStatus = async (
     }
   })
 
-/** A note is a timeline entry, not its own table: it hangs on the same rail as
- *  every other activity and is filtered by the same control. A9. */
-export const createNote = async (
+/** The four kinds a person writes by hand. A call that happened is a fact about
+ *  the relationship exactly as much as a form submission is, so it lands on the
+ *  same rail and answers the same filter rather than living in a notes silo.
+ *  Task is absent on purpose: it has a due date and an assignee, so it is a task
+ *  row that writes its own activity, not something typed into this box. A3. */
+export const LOGGABLE_TYPES = ['note', 'call', 'meeting', 'email'] as const
+export type LoggableType = (typeof LOGGABLE_TYPES)[number]
+
+/** A logged activity is a timeline entry, not its own table: it hangs on the same
+ *  rail as every other activity and is filtered by the same control. A9.
+ *
+ *  `occurredAt` is separate from now because a call is logged after it happened,
+ *  and the timeline sorts on when it happened. */
+export const logByHand = async (
   ctx: WorkspaceContext,
-  input: { body: string; entity: EntityRef; occurredAt?: Date },
+  input: { type: LoggableType; body: string; entity: EntityRef; occurredAt?: Date },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'activity', async (tx) => {
     const body = input.body.trim()
-    if (!body) throw new Error('A note needs something in it.')
+    if (!body) throw new Error('There is nothing to log.')
 
     const id = await recordActivity(tx, ctx, {
-      type: 'note',
+      type: input.type,
       body,
       occurredAt: input.occurredAt ?? new Date(),
       links: [input.entity],
     })
-    if (!id) throw new Error('The note could not be attached to that record.')
+    if (!id) throw new Error('That could not be attached to the record.')
 
     return {
       result: { id },
-      audit: { entity: 'activity', entityId: id, action: 'note', before: null, after: { entity: input.entity } },
+      audit: { entity: 'activity', entityId: id, action: input.type, before: null, after: { entity: input.entity } },
     }
   })
 

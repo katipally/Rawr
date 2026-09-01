@@ -100,3 +100,65 @@ export const searchAll = async (
   }
   return results
 }
+
+export type RecordOption = { id: string; label: string; detail: string | null }
+
+/** What every record picker reads: a short, ranked, server-side answer to "which
+ *  record did you mean".
+ *
+ *  The pickers used to be fixed lists — the 500 alphabetically first companies, the
+ *  200 most recently created contacts — which is fine against seed data and useless
+ *  against 34,648 companies. Nothing in this project may hold a whole object in a
+ *  select element, so the query goes to Postgres and comes back with at most a
+ *  screenful. An empty query returns the most recent, because that is what somebody
+ *  who has just created a record is looking for. */
+export const recordOptions = async (
+  ctx: WorkspaceContext,
+  input: { object: ObjectKey; query?: string; limit?: number; excludeId?: string | null },
+): Promise<RecordOption[]> => {
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50)
+  const trimmed = (input.query ?? '').trim()
+  const exclude = input.excludeId ?? null
+
+  // The label and detail expression per object, so the picker reads the way the
+  // record page does. Identifiers only, never a caller's text.
+  const shape: Record<ObjectKey, { label: string; detail: string; match: string }> = {
+    contact: {
+      label: `coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email, 'Unnamed contact')`,
+      detail: 'email',
+      match: `coalesce(first_name,'') || ' ' || coalesce(last_name,'') || ' ' || coalesce(email,'')`,
+    },
+    company: {
+      label: `coalesce(nullif(name, ''), domain, 'Unnamed company')`,
+      detail: 'domain',
+      match: `coalesce(name,'') || ' ' || coalesce(domain,'')`,
+    },
+    deal: {
+      label: `coalesce(nullif(name, ''), 'Unnamed deal')`,
+      detail: 'next_step',
+      match: `coalesce(name,'')`,
+    },
+  }
+  const { label, detail, match } = shape[input.object]
+  const table = sql.raw(`"${input.object}"`)
+
+  return withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string; label: string; detail: string | null }>(
+      trimmed.length === 0
+        ? sql`select id, ${sql.raw(label)} as label, ${sql.raw(`"${detail}"`)} as detail
+                from ${table}
+               where deleted_at is null ${exclude ? sql`and id <> ${exclude}` : sql``}
+               order by created_at desc
+               limit ${limit}`
+        : sql`select id, ${sql.raw(label)} as label, ${sql.raw(`"${detail}"`)} as detail
+                from ${table}
+               where deleted_at is null
+                 ${exclude ? sql`and id <> ${exclude}` : sql``}
+                 and (search @@ plainto_tsquery('simple', ${trimmed})
+                      or ${sql.raw(match)} ilike ${`%${trimmed}%`})
+               order by extensions.similarity(${sql.raw(match)}, ${trimmed}) desc, created_at desc
+               limit ${limit}`,
+    )
+    return rows.map((row) => ({ id: row.id, label: row.label, detail: row.detail }))
+  })
+}

@@ -35,7 +35,7 @@ const ListPage = async ({
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const { object, lookups, companies, canWrite } = await loadCrmContext(ctx, objectParam)
+  const { object, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
 
   const [views, resolved] = await Promise.all([
     listViews(ctx, objectParam),
@@ -65,12 +65,21 @@ const ListPage = async ({
       search: search.q ?? '',
       limit: PAGE_SIZE,
       cursor: decodeCursor(search.cursor),
+      count: true,
     })
   } catch (cause) {
     // A hand-edited filter in a URL is the usual cause. Say so instead of
     // showing a crash page.
     queryError = cause instanceof Error ? cause.message : String(cause)
   }
+
+  // A bulk edit sets one value on many records, so a field that is unique per
+  // record — an email, a domain, a name — would only ever produce duplicates.
+  const bulkFields = canWrite
+    ? toEditableFields(object, lookups).filter(
+        (field) => !['email', 'domain', 'first_name', 'last_name', 'name'].includes(field.key),
+      )
+    : []
 
   const listParams: ListParams = {
     ...(search.q ? { q: search.q } : {}),
@@ -92,7 +101,7 @@ const ListPage = async ({
       ) : null}
 
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <h1 className="text-base font-medium">{object.namePlural}</h1>
+        <h1 className="text-lg font-medium">{object.namePlural}</h1>
         <p className="text-secondary">{resolved.view.name}</p>
       </div>
 
@@ -117,7 +126,7 @@ const ListPage = async ({
         columns={columns}
         sorts={sorts}
         filterFields={toFilterFields(object)}
-        createFields={toEditableFields(object, lookups, companies)}
+        createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
         exportHref={`/contacts/${workspace}/export?${exportParams.toString()}`}
       />
@@ -142,7 +151,9 @@ const ListPage = async ({
           params={listParams}
           nextCursor={encodeCursor(page!.nextCursor)}
           sort={sorts[0] ?? null}
-          totalHint={null}
+          totalHint={page!.total}
+          objectLabel={object.nameSingular}
+          bulkFields={bulkFields}
         />
       )}
     </div>

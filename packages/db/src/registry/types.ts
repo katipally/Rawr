@@ -1,4 +1,4 @@
-import type { fieldTypeEnum } from '../schema/enums.ts'
+import { fieldTypeEnum } from '../schema/enums.ts'
 
 export type FieldType = (typeof fieldTypeEnum.enumValues)[number]
 
@@ -95,6 +95,10 @@ export type TypeMeta = {
   /** Never editable by hand: the system owns the value. */
   readOnly?: true
 }
+
+/** Every type the registry can hold, in the order a field picker should offer
+ *  them: the common ones first, the structural ones last. */
+export const FIELD_TYPES = fieldTypeEnum.enumValues
 
 export const TYPE_META: Record<FieldType, TypeMeta> = {
   text: { jsonbCast: 'text', operators: TEXTUAL, editor: 'text' },

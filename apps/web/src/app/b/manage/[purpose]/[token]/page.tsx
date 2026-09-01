@@ -8,6 +8,7 @@ import {
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
+import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
 import { cancelBookingAction, rescheduleBookingAction } from './actions.ts'
 
@@ -37,6 +38,7 @@ const ManageBookingPage = async ({
 }) => {
   const { purpose, token } = await params
   const query = await searchParams
+  const locale = await visitorLocale()
   if (!isPurpose(purpose)) notFound()
 
   const single = (key: string): string | null => {
@@ -68,7 +70,7 @@ const ManageBookingPage = async ({
   const done = single('done') === '1'
   const problem = single('e')
 
-  const when = booking.startsAt.toLocaleString('en-GB', {
+  const when = booking.startsAt.toLocaleString(locale.tag, {
     timeZone: timezone,
     weekday: 'long',
     day: 'numeric',
@@ -218,7 +220,7 @@ const ManageBookingPage = async ({
           {[...byDay.entries()].map(([day, slots]) => (
             <fieldset key={day} style={{ border: 0, margin: 0, padding: 0 }}>
               <legend className="rawr-b-hint" style={{ paddingBlockEnd: '0.25rem' }}>
-                {new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', {
+                {new Date(`${day}T12:00:00Z`).toLocaleDateString(locale.tag, {
                   weekday: 'long',
                   day: 'numeric',
                   month: 'long',
@@ -236,7 +238,7 @@ const ManageBookingPage = async ({
                         required
                         style={{ marginInlineEnd: '0.375rem' }}
                       />
-                      {slot.toLocaleTimeString('en-GB', {
+                      {slot.toLocaleTimeString(locale.tag, {
                         timeZone: timezone,
                         hour: '2-digit',
                         minute: '2-digit',

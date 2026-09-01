@@ -49,6 +49,10 @@ export const company = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    /** F6. The provider's own id for this record, keyed by provider, so a sync
+     *  is incremental rather than a full re-push and an opt-out can be sent to
+     *  the right row at the other end. */
+    externalIds: jsonb('external_ids').notNull().default({}),
     /** Soft delete. Activity is retained and its timeline entry reads "deleted
      *  company", so history is never silently rewritten. */
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
@@ -93,6 +97,10 @@ export const contact = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    /** F6. The provider's own id for this record, keyed by provider, so a sync
+     *  is incremental rather than a full re-push and an opt-out can be sent to
+     *  the right row at the other end. */
+    externalIds: jsonb('external_ids').notNull().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

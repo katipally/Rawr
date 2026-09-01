@@ -97,3 +97,153 @@ export const setSubscription = async (
       },
     }
   })
+
+// ------------------------------------------------------- managing the types
+
+export type SubscriptionTypeRow = {
+  id: string
+  name: string
+  description: string | null
+  isInternal: boolean
+  subscribed: number
+  unsubscribed: number
+}
+
+/** The types themselves, with how many contacts have said something about each.
+ *  "Never specified" is deliberately not a count here: it is everybody else, and
+ *  showing it as a number invites treating it as a third opt-in. A2. */
+export const listSubscriptionTypes = async (ctx: WorkspaceContext): Promise<SubscriptionTypeRow[]> =>
+  withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{
+      id: string
+      name: string
+      description: string | null
+      is_internal: boolean
+      subscribed: number
+      unsubscribed: number
+    }>(sql`
+      select t.id, t.name, t.description, t.is_internal,
+             count(*) filter (where s.state = 'subscribed')::int as subscribed,
+             count(*) filter (where s.state = 'unsubscribed')::int as unsubscribed
+        from subscription_type t
+        left join subscription_state s on s.subscription_type_id = t.id
+       group by t.id, t.name, t.description, t.is_internal
+       order by t.name asc`)
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      isInternal: row.is_internal,
+      subscribed: Number(row.subscribed),
+      unsubscribed: Number(row.unsubscribed),
+    }))
+  })
+
+export const createSubscriptionType = async (
+  ctx: WorkspaceContext,
+  input: { name: string; description?: string | null; isInternal?: boolean },
+): Promise<{ id: string }> =>
+  mutate(ctx, 'subscription_type', async (tx) => {
+    const name = input.name.trim()
+    if (!name) throw new Error('A subscription type needs a name.')
+
+    const [clash] = await tx
+      .select({ id: subscriptionType.id })
+      .from(subscriptionType)
+      .where(sql`lower(${subscriptionType.name}) = lower(${name})`)
+      .limit(1)
+    if (clash) throw new Error(`There is already a subscription type called "${name}".`)
+
+    const [created] = await tx
+      .insert(subscriptionType)
+      .values({
+        workspaceId: ctx.workspaceId,
+        name,
+        description: input.description?.trim() || null,
+        isInternal: input.isInternal ?? false,
+      })
+      .returning({ id: subscriptionType.id })
+    if (!created) throw new Error('The subscription type could not be created.')
+
+    return {
+      result: { id: created.id },
+      audit: { entity: 'subscription_type', entityId: created.id, action: 'create', before: null, after: { name } },
+    }
+  })
+
+export const updateSubscriptionType = async (
+  ctx: WorkspaceContext,
+  input: { id: string; name?: string; description?: string | null; isInternal?: boolean },
+): Promise<void> =>
+  mutate(ctx, 'subscription_type', async (tx) => {
+    const [before] = await tx
+      .select({
+        name: subscriptionType.name,
+        description: subscriptionType.description,
+        isInternal: subscriptionType.isInternal,
+      })
+      .from(subscriptionType)
+      .where(eq(subscriptionType.id, input.id))
+      .limit(1)
+    if (!before) throw new Error('That subscription type no longer exists.')
+
+    const name = input.name?.trim()
+    if (input.name !== undefined && !name) throw new Error('A subscription type needs a name.')
+
+    await tx
+      .update(subscriptionType)
+      .set({
+        ...(name ? { name } : {}),
+        ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+        ...(input.isInternal !== undefined ? { isInternal: input.isInternal } : {}),
+      })
+      .where(eq(subscriptionType.id, input.id))
+
+    return {
+      result: undefined,
+      audit: { entity: 'subscription_type', entityId: input.id, action: 'update', before, after: input },
+    }
+  })
+
+/** Deleting a type deletes every opt-out recorded against it, and an opt-out is the
+ *  one piece of consent state that must never be lost by accident. So the count is
+ *  named and the caller has to say it meant it. */
+export const deleteSubscriptionType = async (
+  ctx: WorkspaceContext,
+  id: string,
+  confirmUnsubscribes: number,
+): Promise<{ discarded: number }> =>
+  mutate(ctx, 'subscription_type', async (tx) => {
+    const [found] = await tx
+      .select({ name: subscriptionType.name })
+      .from(subscriptionType)
+      .where(eq(subscriptionType.id, id))
+      .limit(1)
+    if (!found) throw new Error('That subscription type no longer exists.')
+
+    const [{ n = 0 } = { n: 0 }] = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from subscription_state
+           where subscription_type_id = ${id} and state = 'unsubscribed'`,
+    )
+    const optOuts = Number(n)
+    if (optOuts !== confirmUnsubscribes) {
+      throw new Error(
+        `${found.name} carries ${optOuts} opt-out${optOuts === 1 ? '' : 's'}, which would be discarded. Reload and confirm that number to delete it.`,
+      )
+    }
+
+    await tx.delete(subscriptionState).where(eq(subscriptionState.subscriptionTypeId, id))
+    await tx.delete(subscriptionType).where(eq(subscriptionType.id, id))
+
+    return {
+      result: { discarded: optOuts },
+      audit: {
+        entity: 'subscription_type',
+        entityId: id,
+        action: 'delete',
+        before: { name: found.name, unsubscribes: optOuts },
+        after: null,
+      },
+    }
+  })

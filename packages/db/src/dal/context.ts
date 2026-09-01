@@ -46,6 +46,8 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   object_def: ['admin'],
   field_def: ['admin'],
   integration: ['admin'],
+  /** F6. A dead letter is replayed by whoever can see it, which is an admin. */
+  dead_letter: ['admin'],
   form: ['admin', 'marketing'],
   /** Reviewing the spam queue is sales work as much as marketing work: the lead
    *  being held is somebody's prospect. */
@@ -64,6 +66,13 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   availability_override: ['admin', 'sales', 'marketing'],
   calendar_grant: ['admin', 'sales', 'marketing'],
   membership: ['admin'],
+  /** F1 phase B. Anybody but a viewer may connect their own mailbox; whether a
+   *  given mailbox is theirs to disconnect is finer than an object-level role can
+   *  say, so that is checked inside the layer. */
+  mailbox: ['admin', 'sales', 'marketing'],
+  /** A personal exclusion is the person's own; a workspace-wide one is an admin
+   *  act, refused inside the layer rather than here. B3. */
+  message_blocklist: ['admin', 'sales', 'marketing'],
   /** F5 §1. Anybody may hold agent access to what they can already reach. A token
    *  carries no role of its own, so a viewer's token reads and cannot write, and
    *  revoking somebody else's is refused inside the layer rather than here. */

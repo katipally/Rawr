@@ -39,6 +39,17 @@
   --color-warning-subtle: var(--rawr-warning-subtle);
 
   --font-sans: var(--rawr-font-sans);
+
+  /* The type scale. Without these the text-body and text-small utilities match no
+     rule at all, and every 12px label in the app silently renders at 14px. */
+  --text-body: var(--rawr-text-body);
+  --text-body--line-height: 1.5;
+  --text-small: var(--rawr-text-small);
+  --text-small--line-height: 1.45;
+
+  --font-weight-body: var(--rawr-weight-body);
+  --font-weight-label: var(--rawr-weight-label);
+  --font-weight-link: var(--rawr-weight-link);
   --radius-hs: var(--rawr-radius);
   --radius-panel: var(--rawr-radius-panel);
   --shadow-panel: var(--rawr-shadow-panel);

@@ -72,7 +72,9 @@ export const readAssociations = async (
       if (row?.company_id) {
         const found = await fetchByIds(tx, 'company', [row.company_id])
         const company = found.get(row.company_id)
-        if (company) rail.companies.push(toRecord('company', company, true, 'Primary'))
+        // No label: isPrimary already renders the "Primary" badge, and setting both
+        // printed the word twice on the same row.
+        if (company) rail.companies.push(toRecord('company', company, true, null))
       }
     }
     if (entityType === 'company') {

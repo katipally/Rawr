@@ -48,7 +48,7 @@ const SubmissionsPage = async ({
   const canReview = session.role !== 'viewer'
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+    <div className="w-full max-w-6xl">
       <header className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-lg font-medium">Submissions</h1>
         <span className="text-sm text-secondary">

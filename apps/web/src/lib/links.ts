@@ -27,6 +27,8 @@ export type ListParams = {
   sort?: string | undefined
   cursor?: string | undefined
   pipeline?: string | undefined
+  /** Board only: which field's values become the columns. */
+  group?: string | undefined
 }
 
 const query = (params: Record<string, string | number | undefined | null>): string => {
@@ -78,9 +80,30 @@ export const submissionsPath = (
 export const pageViewPath = (workspace: string, id: string): string =>
   `/${CRM_ROOT}/${workspace}/activity/${id}`
 
-/** The tracked hosts and their site keys. Under settings rather than the CRM tree:
- *  it is configuration, not a record. */
+/** Everything under /settings is workspace configuration rather than a record, so
+ *  none of it carries a workspace in the path: a session is already in exactly one.
+ *  Kept in one list so the settings sub-navigation and the pages agree. */
 export const sitesPath = (): string => '/settings/sites'
+
+export const propertiesPath = (object?: string): string =>
+  object ? `/settings/properties?object=${object}` : '/settings/properties'
+
+export const pipelinesPath = (): string => '/settings/pipelines'
+
+/** F1 phase B. Connected mailboxes, their sync state, and the exclusion lists. */
+export const mailboxesPath = (): string => '/settings/mailboxes'
+
+export const lifecyclePath = (): string => '/settings/lifecycle'
+
+export const subscriptionsPath = (): string => '/settings/subscriptions'
+
+export const integrationsPath = (kind?: string): string =>
+  kind ? `/settings/integrations/${kind}` : '/settings/integrations'
+
+/** Segments live in the CRM tree, not settings: a segment is a view of records
+ *  that salespeople open, not configuration an admin sets once. */
+export const segmentsPath = (workspace: string, id?: string): string =>
+  id ? `/${CRM_ROOT}/${workspace}/segments/${id}` : `/${CRM_ROOT}/${workspace}/segments`
 
 export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`

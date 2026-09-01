@@ -100,7 +100,7 @@ export const FormBuilder = ({
   const stepCount = Math.max(1, ...fields.map((field) => (field.step ?? 0) + 1))
 
   return (
-    <div className="mx-auto w-full max-w-7xl p-4 sm:p-6">
+    <div className="w-full max-w-7xl">
       <header className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Link href={formsPath(workspace)} className="text-sm text-link">
           Forms

@@ -43,6 +43,18 @@ export const PropertyPanel = ({
   const [saving, setSaving] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [stamp, setStamp] = useState(updatedAt)
+  const [seen, setSeen] = useState(updatedAt)
+
+  /** The panel edits a copy so a field can show its new value before the server
+   *  answers. That copy has to give way when the record changes underneath it —
+   *  a merge, an accepted enrichment, a bulk edit — or the panel shows values
+   *  that are no longer stored, and `stamp` goes stale enough that the next
+   *  inline edit is refused as a conflict with a change this panel made itself. */
+  if (updatedAt !== seen) {
+    setSeen(updatedAt)
+    setLocal(values)
+    setStamp(updatedAt)
+  }
 
   const byKey = new Map(fields.map((field) => [field.key, field]))
 
@@ -134,6 +146,7 @@ export const PropertyPanel = ({
                               id={`edit-${field.key}`}
                               field={field}
                               value={draft}
+                              valueLabel={labels[field.key]}
                               autoFocus
                               onChange={setDraft}
                             />

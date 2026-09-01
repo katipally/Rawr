@@ -1,13 +1,25 @@
 import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
 import { owner, recordDeadLetter } from './db.ts'
+import { checkIntegrations } from './jobs/check-integrations.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
+import { evaluateSegments } from './jobs/evaluate-segments.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
+import { dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
 import { workspaceIdOf, type Job } from './jobs/registry.ts'
 
-const JOBS: Job[] = [createFieldIndex, dispatchFieldIndexes, dispatchStitches, stitchVisitor, rollUpActivity]
+const JOBS: Job[] = [
+  createFieldIndex,
+  dispatchFieldIndexes,
+  dispatchStitches,
+  stitchVisitor,
+  rollUpActivity,
+  evaluateSegments,
+  ...mailJobs,
+  checkIntegrations,
+]
 
 const boss = await startBoss()
 
@@ -70,6 +82,16 @@ await boss.schedule(dispatchStitches.name, '* * * * *', {})
 // Nightly. Retention is measured in months, so the hour it runs does not matter;
 // that it runs off the request path does.
 await boss.schedule(rollUpActivity.name, '30 3 * * *', {})
+// Hourly, which is the bound on how stale a segment's membership can be. A2 asks
+// for "on write and on a schedule"; a write recomputes the one segment somebody is
+// looking at, and this covers everything else.
+await boss.schedule(evaluateSegments.name, '0 * * * *', {})
+// F1 phase B. Every ten minutes: connected mailboxes catch up, and one still
+// reading its history queues its own next page immediately rather than waiting.
+await boss.schedule(dispatchMailboxes.name, '*/10 * * * *', {})
+// F6 §1. Every half hour, so a credential revoked at the provider turns the health
+// red within one cycle rather than the next time somebody opens Settings.
+await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})
 
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, finishing in-flight work.`)

@@ -1,0 +1,267 @@
+'use client'
+
+import { Button, Field, Select, TextInput, cn, useToast } from '@rawr/ui'
+import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import type { BlocklistRow, MailboxState } from '@rawr/db'
+import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
+
+export type MailboxSummary = {
+  id: string
+  userId: string
+  userName: string
+  email: string
+  state: MailboxState
+  backfillDone: boolean
+  lastSyncAt: string | null
+  lastError: string | null
+  lastErrorAt: string | null
+  threadCount: number
+}
+
+export type MailboxListProps = {
+  rows: MailboxSummary[]
+  blocklist: BlocklistRow[]
+  currentUserId: string
+  role: string
+  internalDomain: string
+  googleReady: boolean
+  devReady: boolean
+}
+
+/** What each state means to a person, rather than what it means to the sync. A
+ *  revoked mailbox is the one that needs a sentence: it looks like a failure and
+ *  is actually somebody withdrawing consent, which is their right and not a bug. */
+const STATE_COPY: Record<MailboxState, { label: string; tone: 'ok' | 'warn' | 'error'; hint: string }> = {
+  connected: { label: 'Connected', tone: 'ok', hint: 'New mail appears on the right records within the hour.' },
+  backfilling: {
+    label: 'Reading history',
+    tone: 'warn',
+    hint: 'Working through the archive oldest first. It can be interrupted and resumes where it stopped.',
+  },
+  revoked: {
+    label: 'Access withdrawn',
+    tone: 'error',
+    hint: 'Rawr was removed from this Google account, so reading has stopped. Nothing is retried until it is connected again.',
+  },
+  error: { label: 'Not syncing', tone: 'error', hint: 'The last pass failed. The reason is below.' },
+  paused: { label: 'Paused', tone: 'warn', hint: 'Reading is stopped on purpose. Existing history stays.' },
+}
+
+export const MailboxList = ({
+  rows,
+  blocklist,
+  currentUserId,
+  role,
+  internalDomain,
+  googleReady,
+  devReady,
+}: MailboxListProps) => {
+  const router = useRouter()
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const [pattern, setPattern] = useState('')
+  const [scope, setScope] = useState<'workspace' | 'mine'>('mine')
+
+  const mine = rows.find((row) => row.userId === currentUserId)
+
+  const run = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true)
+    try {
+      await fn()
+      toast('success', done)
+      router.refresh()
+      return true
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-2">
+        {mine ? null : (
+          <div className="flex flex-wrap gap-2">
+            {googleReady ? (
+              <Button variant="primary" onClick={() => { window.location.href = '/api/auth/google/gmail' }}>
+                Connect my Gmail
+              </Button>
+            ) : null}
+            {devReady ? (
+              <Button
+                busy={busy}
+                onClick={() =>
+                  void run(
+                    () => api.mail.connectDev.mutate(),
+                    'Development mailbox connected. Run a pass to read its history.',
+                  )
+                }
+              >
+                Connect the development mailbox
+              </Button>
+            ) : null}
+            {!googleReady && !devReady ? (
+              <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+                Gmail sync needs a Google client and an internal consent screen on the{' '}
+                {internalDomain} organisation (open item 3). Until that exists, nothing here can
+                connect.
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {rows.length === 0 ? (
+          <p className="text-secondary">
+            No mailbox is connected. Threads only appear on a record once somebody whose mail
+            matters has connected their own.
+          </p>
+        ) : (
+          <ul className="flex flex-col rounded-panel border border-line bg-surface">
+            {rows.map((row) => {
+              const copy = STATE_COPY[row.state]
+              const isMine = row.userId === currentUserId
+              return (
+                <li key={row.id} className="flex flex-col gap-1 border-b border-divider px-3 py-2 last:border-0">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="font-medium">{row.userName}</span>
+                        <span className="text-small text-secondary">{row.email}</span>
+                        <span
+                          className={cn(
+                            'rounded-hs px-1.5 py-0.5 text-small',
+                            copy.tone === 'ok' && 'bg-success-subtle text-success',
+                            copy.tone === 'warn' && 'bg-warning-subtle text-warning',
+                            copy.tone === 'error' && 'bg-error-subtle text-error',
+                          )}
+                        >
+                          {copy.label}
+                        </span>
+                      </p>
+                      <p className="text-small text-secondary">{copy.hint}</p>
+                      <p className="text-small text-secondary">
+                        {row.lastSyncAt ? `Last pass ${formatDateTime(row.lastSyncAt)}` : 'Never run'} ·{' '}
+                        {row.backfillDone ? 'History read in full' : 'History still being read'}
+                      </p>
+                      {row.lastError ? (
+                        <p role="alert" className="break-words text-small text-error">
+                          {row.lastError}
+                          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt)})` : ''}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    {isMine || role === 'admin' ? (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          busy={busy}
+                          disabled={row.state === 'revoked'}
+                          onClick={() =>
+                            void run(async () => {
+                              const outcome = await api.mail.sync.mutate({ id: row.id })
+                              toast(
+                                'info',
+                                `${outcome.read} read: ${outcome.stored} new, ${outcome.alreadyHad} already had, ${outcome.skipped} refused.${outcome.reason ? ` ${outcome.reason}` : ''}`,
+                              )
+                            }, 'Pass finished.')
+                          }
+                        >
+                          Read now
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          busy={busy}
+                          onClick={() =>
+                            void run(
+                              () => api.mail.disconnect.mutate({ id: row.id }),
+                              'Disconnected. The threads already read stay on their records.',
+                            )
+                          }
+                        >
+                          Disconnect
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <div className="max-w-2xl">
+          <h3 className="font-medium">Never read these</h3>
+          <p className="text-secondary">
+            An address or a domain. Applied before anything is stored, so a match is never in the
+            database at all. Threads where everybody is at {internalDomain}, and anything from a
+            personal mail provider, are already excluded without being listed here.
+          </p>
+        </div>
+
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void run(
+              () => api.mail.blocklist.add.mutate({ pattern, scope, note: null }),
+              'Added. It applies from the next pass.',
+            ).then((ok) => ok && setPattern(''))
+          }}
+        >
+          <Field id="block-pattern" label="Address or domain">
+            <TextInput
+              id="block-pattern"
+              value={pattern}
+              onChange={(event) => setPattern(event.target.value)}
+              placeholder="recruiter@agency.example"
+            />
+          </Field>
+          <Field id="block-scope" label="Applies to">
+            <Select id="block-scope" value={scope} onChange={(event) => setScope(event.target.value as 'workspace' | 'mine')}>
+              <option value="mine">Just my mailbox</option>
+              <option value="workspace">Everybody</option>
+            </Select>
+          </Field>
+          <Button variant="primary" busy={busy} disabled={pattern.trim().length < 3}>
+            Add
+          </Button>
+        </form>
+
+        {blocklist.length === 0 ? (
+          <p className="text-secondary">Nothing excluded by hand yet.</p>
+        ) : (
+          <ul className="flex flex-col rounded-panel border border-line bg-surface">
+            {blocklist.map((entry) => (
+              <li
+                key={entry.id}
+                className="flex flex-wrap items-center justify-between gap-2 border-b border-divider px-3 py-1.5 last:border-0"
+              >
+                <span className="min-w-0 break-words">
+                  {entry.pattern}
+                  <span className="ml-2 text-small text-secondary">
+                    {entry.userId === null ? 'everybody' : entry.userId === currentUserId ? 'mine' : 'somebody else'}
+                  </span>
+                </span>
+                <Button
+                  variant="tertiary"
+                  busy={busy}
+                  onClick={() =>
+                    void run(() => api.mail.blocklist.remove.mutate({ id: entry.id }), 'Removed.')
+                  }
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}

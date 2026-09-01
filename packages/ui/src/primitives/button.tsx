@@ -7,7 +7,11 @@ const VARIANTS: Record<Variant, string> = {
   primary: 'bg-cta text-white hover:bg-cta-hover border-transparent',
   secondary: 'bg-surface text-body border-line hover:bg-fill-hover',
   tertiary: 'bg-transparent text-link border-transparent hover:underline',
-  destructive: 'bg-error text-white border-transparent hover:brightness-95',
+  // Outlined, not filled. Twenty of the twenty-three destructive buttons are
+  // per-row triggers, and filling them made a stack of ten Delete buttons the
+  // loudest thing on a settings page. Red on the border and the text is enough
+  // to read as dangerous, in a row and in a confirmation dialog alike.
+  destructive: 'bg-transparent text-error border-error hover:bg-error-subtle',
 }
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {

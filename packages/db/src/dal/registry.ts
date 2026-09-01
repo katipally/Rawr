@@ -11,6 +11,13 @@ export const OBJECT_KEYS = ['contact', 'company', 'deal'] as const
 export const isObjectKey = (value: string): value is ObjectKey =>
   (OBJECT_KEYS as readonly string[]).includes(value)
 
+/** Fields the system owns. They are in the registry because every surface has to
+ *  be able to read, sort, filter and export them, and they are refused on the write
+ *  path because nobody may hand-edit when a record was created. Kept here rather
+ *  than as a column on field_def: the set is fixed by what the database itself
+ *  maintains, not by anything an admin configures. */
+export const SYSTEM_FIELD_KEYS: ReadonlySet<string> = new Set(['created_at'])
+
 export type RegistryField = {
   id: string
   key: string
@@ -20,6 +27,8 @@ export type RegistryField = {
   columnName: string | null
   isRequired: boolean
   isCustom: boolean
+  /** Readable and filterable everywhere, refused on every write path. */
+  isSystem: boolean
   trackChanges: boolean
   options: string[]
   helpText: string | null
@@ -106,6 +115,7 @@ const load = async (tx: Tx): Promise<Registry> => {
       columnName: row.columnName,
       isRequired: row.isRequired ?? false,
       isCustom: row.isCustom ?? true,
+      isSystem: SYSTEM_FIELD_KEYS.has(row.key),
       trackChanges: row.trackChanges ?? false,
       options: Array.isArray(row.options) ? (row.options as string[]) : [],
       helpText: row.helpText,

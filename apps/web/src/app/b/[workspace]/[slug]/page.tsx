@@ -15,6 +15,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
 import { bookingPublicPath } from '~/lib/links.ts'
+import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
 import { confirmHostedBooking } from './actions.ts'
 import { TimezonePicker } from './timezone-picker.tsx'
@@ -47,8 +48,6 @@ const LOCATIONS: Record<string, string> = {
   custom: 'See the invitation',
 }
 
-const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-
 const monthKeyOf = (at: Date, timezone: string): string => dayKey(at, timezone).slice(0, 7)
 
 const monthStart = (monthKey: string, timezone: string): Date =>
@@ -74,6 +73,8 @@ const BookingPublicPage = async ({
     return typeof value === 'string' && value !== '' ? value : null
   }
 
+  const locale = await visitorLocale()
+
   const summary = await publicBookingPage(workspace, slug)
   if (!summary) notFound()
 
@@ -84,7 +85,12 @@ const BookingPublicPage = async ({
   if (!page) notFound()
 
   const now = new Date()
-  const timezone = isKnownTimezone(single('tz') ?? '') ? (single('tz') as string) : 'UTC'
+  // Whether the visitor's zone is a choice or a fallback. The server cannot know a
+  // browser's timezone, so the page renders in UTC and the picker replaces that
+  // with the detected zone on first paint. Once tz is in the URL it is a decision
+  // and is never overridden again, which is what makes a shared link stable. F2 §4.
+  const explicitTimezone = isKnownTimezone(single('tz') ?? '')
+  const timezone = explicitTimezone ? (single('tz') as string) : 'UTC'
   const requested = single('month')
   const monthKey = /^\d{4}-\d{2}$/.test(requested ?? '') ? (requested as string) : monthKeyOf(now, timezone)
 
@@ -93,7 +99,7 @@ const BookingPublicPage = async ({
 
   if (confirmed) {
     return (
-      <Shell page={summary} timezone={timezone} monthKey={monthKey} workspace={workspace} slug={slug}>
+      <Shell page={summary} timezone={timezone} explicitTimezone={explicitTimezone} monthKey={monthKey} workspace={workspace} slug={slug}>
         <div className="rawr-b-note" data-good>
           <p>
             <strong>You are booked.</strong>{' '}
@@ -102,7 +108,7 @@ const BookingPublicPage = async ({
           </p>
           {single('at') ? (
             <p style={{ marginBlockStart: '0.5rem' }}>
-              {new Date(single('at') as string).toLocaleString('en-GB', {
+              {new Date(single('at') as string).toLocaleString(locale.tag, {
                 timeZone: timezone,
                 weekday: 'long',
                 day: 'numeric',
@@ -132,7 +138,7 @@ const BookingPublicPage = async ({
 
   if (!page.isActive) {
     return (
-      <Shell page={summary} timezone={timezone} monthKey={monthKey} workspace={workspace} slug={slug}>
+      <Shell page={summary} timezone={timezone} explicitTimezone={explicitTimezone} monthKey={monthKey} workspace={workspace} slug={slug}>
         <div className="rawr-b-note" data-bad>
           This page is not taking new meetings at the moment. Existing bookings still stand, and the
           reschedule link in your invitation still works.
@@ -165,12 +171,12 @@ const BookingPublicPage = async ({
   const link = (changes: { date?: string | undefined; slot?: string | undefined; month?: string }): string =>
     bookingPublicPath(workspace, slug, { tz: timezone, month: monthKey, ...changes })
 
-  const days = calendarDays(monthKey)
+  const days = calendarDays(monthKey, locale.firstDay)
   const fields = bookingFields(page.questions)
   const errors = parseErrors(single('err'))
 
   return (
-    <Shell page={summary} timezone={timezone} monthKey={monthKey} workspace={workspace} slug={slug}>
+    <Shell page={summary} timezone={timezone} explicitTimezone={explicitTimezone} monthKey={monthKey} workspace={workspace} slug={slug}>
       {problem ? (
         <div className="rawr-b-note" data-bad role="alert">
           {problem}
@@ -183,8 +189,8 @@ const BookingPublicPage = async ({
         </div>
       ) : offer.slots.length === 0 ? (
         <div className="rawr-b-note">
-          Nothing is open in {monthLabel(monthKey)}. Try the next month, or{' '}
-          <a href={`https://www.datasaur.ai/contact-us`}>send a message instead</a>.
+          Nothing is open in {monthLabel(monthKey, locale.tag)}. Try the next month, or a later
+          one.
         </div>
       ) : null}
 
@@ -199,7 +205,7 @@ const BookingPublicPage = async ({
             >
               ← Earlier
             </a>
-            <span className="rawr-b-month">{monthLabel(monthKey)}</span>
+            <span className="rawr-b-month">{monthLabel(monthKey, locale.tag)}</span>
             <a
               className="rawr-b-slot"
               style={{ padding: '0.25rem 0.5rem' }}
@@ -210,8 +216,8 @@ const BookingPublicPage = async ({
             </a>
           </div>
 
-          <div className="rawr-b-grid" role="grid" aria-label={`Open days in ${monthLabel(monthKey)}`}>
-            {DOW.map((label) => (
+          <div className="rawr-b-grid" role="grid" aria-label={`Open days in ${monthLabel(monthKey, locale.tag)}`}>
+            {locale.weekdays.map((label) => (
               <div key={label} className="rawr-b-dow" aria-hidden="true">
                 {label}
               </div>
@@ -235,7 +241,7 @@ const BookingPublicPage = async ({
         {selectedDay ? (
           <div className="rawr-b-panel">
             <h2 style={{ marginBlockEnd: '0.5rem' }}>
-              {new Date(`${selectedDay}T12:00:00Z`).toLocaleDateString('en-GB', {
+              {new Date(`${selectedDay}T12:00:00Z`).toLocaleDateString(locale.tag, {
                 weekday: 'long',
                 day: 'numeric',
                 month: 'long',
@@ -256,7 +262,7 @@ const BookingPublicPage = async ({
                       href={link({ date: selectedDay, slot: iso })}
                       rel="nofollow"
                     >
-                      {slot.toLocaleTimeString('en-GB', {
+                      {slot.toLocaleTimeString(locale.tag, {
                         timeZone: timezone,
                         hour: '2-digit',
                         minute: '2-digit',
@@ -307,6 +313,7 @@ const BookingPublicPage = async ({
 const Shell = ({
   page,
   timezone,
+  explicitTimezone,
   monthKey,
   workspace,
   slug,
@@ -314,27 +321,37 @@ const Shell = ({
 }: {
   page: PublicBookingPage
   timezone: string
+  explicitTimezone: boolean
   monthKey: string
   workspace: string
   slug: string
   children: React.ReactNode
 }) => (
-  <div data-rawr-booking-widget data-rawr-booking-hosted className="mx-auto w-full max-w-3xl p-4">
-    <style dangerouslySetInnerHTML={{ __html: BOOKING_STYLES + HOSTED_BOOKING_STYLES }} />
-    <div className="rawr-b">
-      <header className="rawr-b-head">
-        <span className="rawr-b-title">{page.name}</span>
-        <div className="rawr-b-meta">
-          <span>{page.workspaceName}</span>
-          <span>{page.durationMinutes} minutes</span>
-          <span>{LOCATIONS[page.location] ?? page.location}</span>
-        </div>
-        <TimezonePicker
-          timezone={timezone}
-          basePath={bookingPublicPath(workspace, slug, { month: monthKey })}
-        />
-      </header>
-      {children}
+  // The page width is set on a wrapper rather than on the widget itself. The embed
+  // stylesheet declares max-width:100% on [data-rawr-booking-widget], and that rule
+  // is unlayered while Tailwind's utilities live in @layer utilities, so a max-w-*
+  // class on the same element silently loses. Keeping the two on separate elements
+  // means neither has to know about the other, and the embed CSS stays unlayered
+  // where it belongs: inside somebody else's page it must beat their stylesheet.
+  <div className="mx-auto w-full max-w-3xl p-4">
+    <div data-rawr-booking-widget data-rawr-booking-hosted>
+      <style dangerouslySetInnerHTML={{ __html: BOOKING_STYLES + HOSTED_BOOKING_STYLES }} />
+      <div className="rawr-b">
+        <header className="rawr-b-head">
+          <span className="rawr-b-title">{page.name}</span>
+          <div className="rawr-b-meta">
+            <span>{page.workspaceName}</span>
+            <span>{page.durationMinutes} minutes</span>
+            <span>{LOCATIONS[page.location] ?? page.location}</span>
+          </div>
+          <TimezonePicker
+            timezone={timezone}
+            explicit={explicitTimezone}
+            basePath={bookingPublicPath(workspace, slug, { month: monthKey })}
+          />
+        </header>
+        {children}
+      </div>
     </div>
   </div>
 )
@@ -373,18 +390,19 @@ const DayCell = ({
   )
 }
 
-/** A whole month, padded to start on the Monday of its first week, so the grid
- *  lines up under the weekday headings. */
-const calendarDays = (monthKey: string): (string | null)[] => {
+/** A whole month, padded to start on whichever weekday the visitor's locale
+ *  begins its week on, so the grid lines up under the weekday headings. Monday in
+ *  most of Europe, Sunday in the US, Saturday across much of the Middle East. */
+const calendarDays = (monthKey: string, firstDay: number): (string | null)[] => {
   const first = `${monthKey}-01`
-  const pad = isoWeekday(first) - 1
+  const pad = (isoWeekday(first) - firstDay + 7) % 7
   const cells: (string | null)[] = Array.from({ length: pad }, () => null)
   for (let day = first; day.startsWith(monthKey); day = addDays(day, 1)) cells.push(day)
   return cells
 }
 
-const monthLabel = (monthKey: string): string =>
-  new Date(`${monthKey}-01T12:00:00Z`).toLocaleDateString('en-GB', {
+const monthLabel = (monthKey: string, tag: string): string =>
+  new Date(`${monthKey}-01T12:00:00Z`).toLocaleDateString(tag, {
     month: 'long',
     year: 'numeric',
   })

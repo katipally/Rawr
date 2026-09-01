@@ -3,6 +3,7 @@
 import { Button, DataTable, EmptyState, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type DeadLetter = {
   id: string
@@ -18,22 +19,16 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
   const router = useRouter()
   const [busyId, setBusyId] = useState<string | null>(null)
 
+  /** Safe to press twice: every replay path is keyed on the work rather than on
+   *  the attempt, so a second press is a no-op at the provider. F6 §1. */
   const replay = async (id: string) => {
     setBusyId(id)
     try {
-      const response = await fetch('/api/trpc/jobs.replay?batch=0', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ json: { id } }),
-      })
-      const body = (await response.json()) as { error?: { json?: { message?: string } } }
-      if (!response.ok) {
-        throw new Error(body.error?.json?.message ?? `The server answered ${response.status}.`)
-      }
-      toast('success', 'Queued again. The dispatcher picks it up within a minute.')
+      const result = await api.integrations.replay.mutate({ id })
+      toast('success', result.detail)
       router.refresh()
     } catch (cause) {
-      toast('error', cause instanceof Error ? cause.message : String(cause))
+      toast('error', errorMessage(cause))
     } finally {
       setBusyId(null)
     }

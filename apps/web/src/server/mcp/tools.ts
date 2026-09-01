@@ -5,7 +5,7 @@ import {
   ForbiddenError,
   UnknownFieldError,
   ValueError,
-  createNote,
+  logByHand,
   createRecord,
   createTask,
   describeAmbiguity,
@@ -559,7 +559,8 @@ const createNoteTool: ToolDefinition = {
     const body = String(args.body ?? '').trim()
     if (!body) return { text: 'A note needs something in it.', isError: true }
 
-    const note = await createNote(context.caller.ctx, {
+    const note = await logByHand(context.caller.ctx, {
+      type: 'note',
       body,
       entity: { entityType: key, entityId: found.id },
     })

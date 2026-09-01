@@ -1,7 +1,9 @@
 import {
   ACTIVITY_GROUPS,
   associate,
-  createNote,
+  bulkUpdateRecords,
+  logByHand,
+  LOGGABLE_TYPES,
   createRecord,
   createTask,
   deleteRecord,
@@ -23,6 +25,7 @@ import {
   listImportRuns,
   readSubscriptions,
   readTimeline,
+  recordOptions,
   runImportChunk,
   saveView,
   searchAll,
@@ -37,6 +40,7 @@ import {
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
+import { announceStageChange } from '../stage-alerts.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 const objectKey = z.enum(['contact', 'company', 'deal'])
@@ -137,6 +141,28 @@ export const crmRouter = router({
       .input(z.object({ object: objectKey, id: z.uuid() }))
       .query(({ ctx, input }) => call(() => getRecord(ctx.workspace, input.object, input.id))),
 
+    /** What every record picker reads. A capped, ranked answer to "which record
+     *  did you mean", never the whole object. */
+    options: protectedProcedure
+      .input(
+        z.object({
+          object: objectKey,
+          query: z.string().max(200).optional(),
+          limit: z.number().int().min(1).max(50).optional(),
+          excludeId: z.uuid().nullish(),
+        }),
+      )
+      .query(({ ctx, input }) =>
+        call(() =>
+          recordOptions(ctx.workspace, {
+            object: input.object,
+            query: input.query ?? '',
+            limit: input.limit ?? 20,
+            excludeId: input.excludeId ?? null,
+          }),
+        ),
+      ),
+
     create: protectedProcedure
       .input(z.object({ object: objectKey, values: recordValues }))
       .mutation(({ ctx, input }) => call(() => createRecord(ctx.workspace, input.object, input.values))),
@@ -153,9 +179,31 @@ export const crmRouter = router({
         }),
       )
       .mutation(({ ctx, input }) =>
-        call(() =>
-          updateRecord(ctx.workspace, input.object, input.id, input.values, input.expectedUpdatedAt ?? null),
-        ),
+        call(async () => {
+          const result = await updateRecord(
+            ctx.workspace,
+            input.object,
+            input.id,
+            input.values,
+            input.expectedUpdatedAt ?? null,
+          )
+          announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          return result
+        }),
+      ),
+
+    /** One field set applied to a selection. A row that refuses the change is
+     *  named back rather than failing the whole run. A5. */
+    bulkUpdate: protectedProcedure
+      .input(
+        z.object({
+          object: objectKey,
+          ids: z.array(z.uuid()).min(1).max(500),
+          values: recordValues,
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() => bulkUpdateRecords(ctx.workspace, input.object, input.ids, input.values)),
       ),
 
     remove: protectedProcedure
@@ -228,6 +276,7 @@ export const crmRouter = router({
           pipelineId: z.uuid().nullish(),
           filters: z.array(filterGroup).max(5).optional(),
           search: z.string().max(200).optional(),
+          groupBy: z.string().max(64).nullish(),
         }),
       )
       .query(({ ctx, input }) =>
@@ -236,16 +285,31 @@ export const crmRouter = router({
             pipelineId: input.pipelineId ?? null,
             filters: (input.filters ?? []) as never,
             search: input.search ?? '',
+            groupBy: input.groupBy ?? null,
           }),
         ),
       ),
 
     /** Dragging a card is an ordinary field write, so it goes through the same
-     *  path and writes the same stage_change activity. */
+     *  path and writes the same stage_change activity. The field comes from which
+     *  board is on screen; the registry refuses anything it does not know, so
+     *  nothing here has to guess what is writable. */
     moveCard: protectedProcedure
-      .input(z.object({ dealId: z.uuid(), stageId: z.uuid() }))
+      .input(
+        z.object({
+          dealId: z.uuid(),
+          field: z.string().min(1).max(64),
+          value: z.string().min(1).max(200),
+        }),
+      )
       .mutation(({ ctx, input }) =>
-        call(() => updateRecord(ctx.workspace, 'deal', input.dealId, { stage_id: input.stageId })),
+        call(async () => {
+          const result = await updateRecord(ctx.workspace, 'deal', input.dealId, {
+            [input.field]: input.value,
+          })
+          announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          return result
+        }),
       ),
   }),
 
@@ -274,10 +338,25 @@ export const crmRouter = router({
       .input(z.object({ entity: entityRef }))
       .query(({ ctx, input }) => call(() => timelineCounts(ctx.workspace, input.entity))),
 
-    note: protectedProcedure
-      .input(z.object({ entity: entityRef, body: z.string().trim().min(1).max(20_000) }))
+    log: protectedProcedure
+      .input(
+        z.object({
+          entity: entityRef,
+          type: z.enum(LOGGABLE_TYPES),
+          body: z.string().trim().min(1).max(20_000),
+          // A call is logged after it happened. Absent means now.
+          occurredAt: z.coerce.date().optional(),
+        }),
+      )
       .mutation(({ ctx, input }) =>
-        call(() => createNote(ctx.workspace, { entity: input.entity, body: input.body })),
+        call(() =>
+          logByHand(ctx.workspace, {
+            entity: input.entity,
+            type: input.type,
+            body: input.body,
+            ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+          }),
+        ),
       ),
   }),
 

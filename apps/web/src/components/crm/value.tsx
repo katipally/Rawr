@@ -96,6 +96,25 @@ export type ValueProps = {
   placeholder?: string
 }
 
+/** The keys of a source blob that are worth putting on screen, and nothing else.
+ *  A null or an empty string means "we did not learn this", which is not something
+ *  to take up a line for. */
+/** What a link says on screen. The scheme and the www are noise in a narrow
+ *  column; the full address is on hover and in the href. */
+const shortLink = (text: string): string =>
+  text.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '')
+
+const readableEntries = (value: unknown): [string, string][] => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== null && entry !== undefined && entry !== '')
+    .map(([key, entry]): [string, string] => [
+      key,
+      typeof entry === 'object' ? JSON.stringify(entry) : String(entry),
+    ])
+    .slice(0, 6)
+}
+
 export const Value = ({ type, value, label, currency = 'USD', placeholder = '' }: ValueProps): ReactNode => {
   if (label !== undefined && label !== '') return <span className="break-words">{label}</span>
 
@@ -127,21 +146,45 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '' }
 
   const link = typeof value === 'string' ? href(type, value) : null
   if (link) {
+    const isWeb = type === 'url' || type === 'linkedin'
     return (
       <a
         href={link}
         // A record link is internal; these leave the app, so they open away and
         // never hand the target a window handle.
-        {...(type === 'url' || type === 'linkedin' ? { target: '_blank', rel: 'noreferrer noopener' } : {})}
-        className="break-all"
+        {...(isWeb ? { target: '_blank', rel: 'noreferrer noopener' } : {})}
+        // A web address is long and its tail is rarely the point, so it is
+        // shortened and clipped with the whole thing on hover. An email address
+        // is the opposite: every character is the point, so it wraps — but only
+        // where it has to. break-all breaks eagerly and shatters a long address
+        // into three ragged pieces in a column that had room for two.
+        className={isWeb ? 'block truncate' : 'wrap-anywhere'}
+        title={isWeb ? text : undefined}
       >
-        {text}
+        {isWeb ? shortLink(text) : text}
       </a>
     )
   }
 
   if (type === 'json') {
-    return <code className="break-all text-small text-secondary">{text}</code>
+    // The attribution container: raw JSON in a 20rem column is unreadable, and the
+    // useful part is always the handful of keys that carry a value. D17 stores the
+    // whole payload verbatim; this renders the half a person can act on and keeps
+    // the rest on hover.
+    const entries = readableEntries(value)
+    if (entries.length === 0) {
+      return placeholder ? <span className="text-secondary">{placeholder}</span> : null
+    }
+    return (
+      <span className="flex flex-col gap-0.5" title={text}>
+        {entries.map(([key, entry]) => (
+          <span key={key} className="flex flex-wrap gap-x-1">
+            <span className="text-small text-secondary">{key.replace(/_/g, ' ')}</span>
+            <span className="min-w-0 break-words">{entry}</span>
+          </span>
+        ))}
+      </span>
+    )
   }
 
   return <span className="break-words">{text}</span>

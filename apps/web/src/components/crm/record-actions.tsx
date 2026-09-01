@@ -1,15 +1,14 @@
 'use client'
 
-import { Button, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { objectView } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { Value } from './value.tsx'
+import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
-
-export type MergeCandidate = { id: string; label: string }
 
 export type RecordActionsProps = {
   workspace: string
@@ -20,7 +19,6 @@ export type RecordActionsProps = {
   fields: EditableField[]
   values: Record<string, unknown>
   labels: Record<string, string>
-  candidates: MergeCandidate[]
   canWrite: boolean
 }
 
@@ -33,7 +31,6 @@ export const RecordActions = ({
   fields,
   values,
   labels,
-  candidates,
   canWrite,
 }: RecordActionsProps) => {
   const router = useRouter()
@@ -41,18 +38,19 @@ export const RecordActions = ({
   const [showMerge, setShowMerge] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [confirmText, setConfirmText] = useState('')
-  const [absorbedId, setAbsorbedId] = useState('')
+  const [other, setOther] = useState<PickedRecord | null>(null)
+  const absorbedId = other?.id ?? ''
   const [absorbed, setAbsorbed] = useState<{ values: Record<string, unknown>; labels: Record<string, string> } | null>(null)
   const [picks, setPicks] = useState<Record<string, 'survivor' | 'absorbed'>>({})
   const [busy, setBusy] = useState(false)
 
-  const loadOther = async (id: string) => {
-    setAbsorbedId(id)
+  const loadOther = async (picked: PickedRecord | null) => {
+    setOther(picked)
     setAbsorbed(null)
     setPicks({})
-    if (!id) return
+    if (!picked) return
     try {
-      const record = await api.crm.records.get.query({ object, id })
+      const record = await api.crm.records.get.query({ object, id: picked.id })
       if (record) setAbsorbed({ values: record.values, labels: record.labels })
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -62,7 +60,13 @@ export const RecordActions = ({
   const merge = async () => {
     setBusy(true)
     try {
-      const result = await api.crm.records.merge.mutate({ object, survivorId: recordId, absorbedId, picks })
+      // Every differing field is sent, defaults included. Sending only what was
+      // clicked would let a default that nobody looked at go unrecorded, and the
+      // useful default is the one that fills a blank.
+      const decided = Object.fromEntries(
+        differing.map((field) => [field.key, picks[field.key] ?? defaultSide(field.key)]),
+      )
+      const result = await api.crm.records.merge.mutate({ object, survivorId: recordId, absorbedId, picks: decided })
       toast('success', `Merged. ${result.activitiesMoved} timeline entries moved onto this record.`)
       setShowMerge(false)
       router.refresh()
@@ -91,6 +95,15 @@ export const RecordActions = ({
     ? fields.filter((field) => String(values[field.key] ?? '') !== String(absorbed.values[field.key] ?? ''))
     : []
 
+  /** This record wins by default, except where it holds nothing. Losing the only
+   *  phone number on the file because the survivor's was blank is not a merge,
+   *  it is a deletion nobody asked for. */
+  const isBlank = (value: unknown): boolean =>
+    value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)
+
+  const defaultSide = (key: string): 'survivor' | 'absorbed' =>
+    absorbed && isBlank(values[key]) && !isBlank(absorbed.values[key]) ? 'absorbed' : 'survivor'
+
   if (!canWrite) return null
 
   return (
@@ -107,20 +120,16 @@ export const RecordActions = ({
             links, its subscriptions and its tasks. The other record is then deleted.
           </p>
 
-          <Select
-            aria-label={`Which ${objectLabel.toLowerCase()} to merge in`}
-            value={absorbedId}
-            onChange={(event) => void loadOther(event.target.value)}
-          >
-            <option value="">Pick the record to merge in</option>
-            {candidates
-              .filter((candidate) => candidate.id !== recordId)
-              .map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.label}
-                </option>
-              ))}
-          </Select>
+          {/* Searched rather than listed: a duplicate is almost never among the
+              most recently created records, which is all a capped list could offer. */}
+          <RecordPicker
+            object={object}
+            label={`Which ${objectLabel.toLowerCase()} to merge in`}
+            placeholder={`Search for the ${objectLabel.toLowerCase()} to merge in`}
+            excludeId={recordId}
+            value={other}
+            onChange={(picked) => void loadOther(picked)}
+          />
 
           {absorbed ? (
             differing.length === 0 ? (
@@ -132,7 +141,7 @@ export const RecordActions = ({
               <div className="flex flex-col gap-2">
                 <p className="font-medium">Pick which value wins</p>
                 {differing.map((field) => {
-                  const chosen = picks[field.key] ?? 'survivor'
+                  const chosen = picks[field.key] ?? defaultSide(field.key)
                   return (
                     <fieldset key={field.key} className="rounded-hs border border-divider p-2">
                       <legend className="px-1 text-secondary">{field.label}</legend>

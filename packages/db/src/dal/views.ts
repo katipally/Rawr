@@ -1,4 +1,5 @@
 import { and, asc, eq, or, isNull } from 'drizzle-orm'
+import { fieldDef } from '../schema/metadata.ts'
 import { savedView } from '../schema/marketing.ts'
 import { CORE_VIEWS, type ObjectKey } from '../registry/core.ts'
 import type { WorkspaceContext } from './context.ts'
@@ -17,6 +18,8 @@ export type ViewDefinition = {
   isShared: boolean
   ownerId: string | null
   position: number
+  /** Board views only: the field whose values become columns. Null means stage. */
+  groupByKey: string | null
 }
 
 /** Reserved: /objects/:object/views/all/list must always resolve, even in a
@@ -36,6 +39,7 @@ const fallbackView = (objectKey: ObjectKey, slug: string): ViewDefinition => {
     isShared: true,
     ownerId: null,
     position: seeded?.position ?? 0,
+    groupByKey: seeded?.groupBy ?? null,
   }
 }
 
@@ -50,6 +54,8 @@ const toDefinition = (row: {
   isShared: boolean
   ownerId: string | null
   position: number
+  /** Board views only: the field whose values become columns. Null means stage. */
+  groupByKey: string | null
 }): ViewDefinition => ({
   id: row.id,
   slug: row.slug,
@@ -61,6 +67,7 @@ const toDefinition = (row: {
   isShared: row.isShared,
   ownerId: row.ownerId,
   position: row.position,
+  groupByKey: row.groupByKey,
 })
 
 /** The view tabs a person can see: the shared ones plus their own. */
@@ -84,8 +91,10 @@ export const listViews = async (
         isShared: savedView.isShared,
         ownerId: savedView.ownerId,
         position: savedView.position,
+        groupByKey: fieldDef.key,
       })
       .from(savedView)
+      .leftJoin(fieldDef, eq(fieldDef.id, savedView.groupByFieldId))
       .where(
         and(
           eq(savedView.objectId, object.id),

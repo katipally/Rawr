@@ -25,7 +25,7 @@ const ImportPage = async ({
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
-      <h1 className="text-base font-medium">Import</h1>
+      <h1 className="text-lg font-medium">Import</h1>
 
       {error ? (
         <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">

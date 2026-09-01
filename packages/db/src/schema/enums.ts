@@ -138,3 +138,27 @@ export const aliasViaEnum = pgEnum('rawr_alias_via', [
   'booking',
   'product_signin',
 ])
+
+/** F1 phase B. A mailbox stops rather than retrying forever when a grant is
+ *  revoked, and the reason is on screen. B2. */
+export const mailboxStateEnum = pgEnum('rawr_mailbox_state', [
+  'connected',
+  'backfilling',
+  'revoked',
+  'error',
+  'paused',
+])
+
+export const messageDirectionEnum = pgEnum('rawr_message_direction', ['inbound', 'outbound'])
+
+export const messageRoleEnum = pgEnum('rawr_message_role', ['from', 'to', 'cc'])
+
+/** F6 §4. Where a stored value came from. Enrichment never overwrites 'human'. */
+export const fieldSourceEnum = pgEnum('rawr_field_source', [
+  'human',
+  'import',
+  'enrichment',
+  'form',
+  'booking',
+  'product',
+])

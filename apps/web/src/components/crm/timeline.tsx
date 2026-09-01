@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, EmptyState, TextArea, cn, useToast } from '@rawr/ui'
+import { Button, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -63,6 +63,18 @@ const TYPE_LABELS: Record<string, string> = {
   segment_change: 'Segment',
 }
 
+/** What a person can put on the timeline by hand, and the prompt each one needs.
+ *  A note is about the record; the other three are about something that happened,
+ *  which is why they carry a date and a note does not. A3. */
+const LOGGABLE = [
+  { type: 'note', verb: 'Add note', prompt: 'Add a note to this record', dated: false },
+  { type: 'call', verb: 'Log call', prompt: 'What was said on the call', dated: true },
+  { type: 'meeting', verb: 'Log meeting', prompt: 'What happened in the meeting', dated: true },
+  { type: 'email', verb: 'Log email', prompt: 'What the email said', dated: true },
+] as const
+
+type Loggable = (typeof LOGGABLE)[number]['type']
+
 const STORAGE_PREFIX = 'rawr.timeline.types.'
 
 /** The two types whose actor is the person the record is about, not a user, a job
@@ -99,6 +111,8 @@ export const Timeline = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState('')
+  const [kind, setKind] = useState<Loggable>('note')
+  const [happenedOn, setHappenedOn] = useState('')
   const [posting, setPosting] = useState(false)
   const [hydrated, setHydrated] = useState(false)
 
@@ -170,15 +184,22 @@ export const Timeline = ({
     void load(next, null, false)
   }
 
-  const addNote = async () => {
+  const compose = LOGGABLE.find((entry) => entry.type === kind) ?? LOGGABLE[0]
+
+  const log = async () => {
     setPosting(true)
     try {
-      await api.crm.timeline.note.mutate({
+      await api.crm.timeline.log.mutate({
         entity: { entityType: object, entityId: recordId },
+        type: kind,
         body: note,
+        // A bare date means midday local, so a call logged for yesterday does not
+        // land on the day before in a zone behind the browser.
+        ...(compose.dated && happenedOn ? { occurredAt: new Date(`${happenedOn}T12:00`) } : {}),
       })
       setNote('')
-      toast('success', 'Note added.')
+      setHappenedOn('')
+      toast('success', `${TYPE_LABELS[kind]} added.`)
       await load(selected, null, false)
       router.refresh()
     } catch (cause) {
@@ -192,16 +213,38 @@ export const Timeline = ({
     <div className="flex flex-col gap-3">
       {canWrite ? (
         <div className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
+          <div className="flex flex-wrap gap-1">
+            {LOGGABLE.map((entry) => (
+              <Button
+                key={entry.type}
+                variant={entry.type === kind ? 'secondary' : 'tertiary'}
+                aria-pressed={entry.type === kind}
+                onClick={() => setKind(entry.type)}
+              >
+                {TYPE_LABELS[entry.type]}
+              </Button>
+            ))}
+          </div>
           <TextArea
             value={note}
-            aria-label="Add a note"
-            placeholder="Add a note to this record"
+            aria-label={compose.prompt}
+            placeholder={compose.prompt}
             onChange={(event) => setNote(event.target.value)}
           />
-          <div>
-            <Button variant="primary" busy={posting} disabled={note.trim() === ''} onClick={() => void addNote()}>
-              Add note
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" busy={posting} disabled={note.trim() === ''} onClick={() => void log()}>
+              {compose.verb}
             </Button>
+            {compose.dated ? (
+              <label className="flex items-center gap-2 text-secondary">
+                When
+                <TextInput
+                  type="date"
+                  value={happenedOn}
+                  onChange={(event) => setHappenedOn(event.target.value)}
+                />
+              </label>
+            ) : null}
           </div>
         </div>
       ) : null}

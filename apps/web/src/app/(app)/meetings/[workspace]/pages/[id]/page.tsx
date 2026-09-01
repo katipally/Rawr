@@ -25,7 +25,7 @@ const BookingPageEditorScreen = async ({
 
   if (!page) {
     return (
-      <div className="mx-auto w-full max-w-4xl p-4 sm:p-6">
+      <div className="w-full max-w-4xl">
         <EmptyState
           title="That meeting page does not exist"
           description="It may have been deleted, or the link may belong to another workspace."
@@ -39,7 +39,7 @@ const BookingPageEditorScreen = async ({
   const mine = page.ownerId === session.userId
   if (page.kind === 'one_on_one' && !mine && session.role !== 'admin') {
     return (
-      <div className="mx-auto w-full max-w-4xl p-4 sm:p-6">
+      <div className="w-full max-w-4xl">
         <EmptyState
           title="That is somebody else's personal link"
           description="Personal calendar links are private to the person who owns them. Ask them for the link if you need it."
@@ -73,7 +73,7 @@ const BookingPageEditorScreen = async ({
     session.role === 'admin' || (page.kind === 'one_on_one' && mine && session.role !== 'viewer')
 
   return (
-    <div className="mx-auto w-full max-w-5xl p-4 sm:p-6">
+    <div className="w-full max-w-5xl">
       <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <Link href={bookingPagesPath(workspace)} className="text-sm font-semibold text-link">
           Meeting links

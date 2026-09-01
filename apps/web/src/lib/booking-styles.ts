@@ -69,8 +69,11 @@ export const BOOKING_STYLES = `
 .rawr-b-day {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 1px;
-  aspect-ratio: 1 / 1;
-  min-height: 2.25rem;
+  /* Height comes from the type, not from the column width. aspect-ratio here made
+     every cell as tall as it was wide, so on a 1400px container one month ran
+     1200px down the page. A day cell only ever holds a number and a dot. */
+  min-block-size: 2.75rem;
+  padding-block: 0.25rem;
   border: 1px solid transparent;
   border-radius: var(--_radius);
   background: none;

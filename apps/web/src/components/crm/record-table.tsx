@@ -3,8 +3,11 @@
 import { Button, DataTable, EmptyState, cn, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import type { FieldType, ObjectKey } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
+import { BulkBar } from './bulk-bar.tsx'
+import type { EditableField } from './field-input.tsx'
 import { Value, isPast } from './value.tsx'
 
 export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
@@ -27,6 +30,10 @@ export type RecordTableProps = {
   nextCursor: string | undefined
   sort: { key: string; direction: 'asc' | 'desc' } | null
   totalHint: number | null
+  objectLabel: string
+  /** What a bulk edit may set. Empty for a role that cannot write, which is what
+   *  removes the checkbox column entirely rather than showing a dead one. */
+  bulkFields: EditableField[]
 }
 
 const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
@@ -41,8 +48,17 @@ export const RecordTable = ({
   nextCursor,
   sort,
   totalHint,
+  objectLabel,
+  bulkFields,
 }: RecordTableProps) => {
   const router = useRouter()
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const canBulk = bulkFields.length > 0
+
+  // Ids that are no longer on screen cannot be edited from here, and keeping them
+  // ticked would make the count lie about what Apply is going to touch.
+  const onPage = new Set(rows.map((row) => row.id))
+  const live = [...selected].filter((id) => onPage.has(id))
 
   const sortHref = (key: string): string => {
     // Clicking the sorted column flips it; clicking another starts descending,
@@ -139,12 +155,26 @@ export const RecordTable = ({
         </span>
       </div>
 
+      {canBulk && live.length > 0 ? (
+        <BulkBar
+          object={object}
+          objectLabel={objectLabel}
+          ids={live}
+          fields={bulkFields}
+          onDone={() => setSelected(new Set())}
+          onClear={() => setSelected(new Set())}
+        />
+      ) : null}
+
       <DataTable
         columns={tableColumns}
         rows={rows}
         rowKey={(row) => row.id}
         onRowClick={(row) => router.push(recordPath(workspace, object, row.id))}
         caption={`${object} records in the ${view} view`}
+        {...(canBulk
+          ? { selection: { selected, onChange: setSelected, noun: objectLabel.toLowerCase() } }
+          : {})}
         empty={
           <EmptyState
             title="Nothing matches this view"

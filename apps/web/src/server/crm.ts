@@ -54,26 +54,22 @@ export const readLookups = async (ctx: WorkspaceContext): Promise<Lookups> =>
     }
   })
 
-/** Companies are the one relation with too many rows for a fixed list, so the
- *  picker offers the most recent and the command palette covers the rest. */
-const companyChoices = async (ctx: WorkspaceContext): Promise<Choice[]> =>
-  withWorkspace(ctx, async (tx) => {
-    const rows = await tx
-      .select({ id: schema.company.id, name: schema.company.name, domain: schema.company.domain })
-      .from(schema.company)
-      .orderBy(asc(schema.company.name))
-      .limit(500)
-    return rows.map((row) => ({ id: row.id, label: row.name ?? row.domain ?? 'Unnamed company' }))
-  })
-
-const choicesFor = (field: RegistryField, lookups: Lookups, companies: Choice[]): Choice[] | undefined => {
+/** Relations small enough to enumerate. Users, pipelines, stages and lifecycle
+ *  stages are workspace configuration and are counted in tens, so a select element
+ *  is right. Companies are records, counted in tens of thousands, so they are
+ *  searched instead: see PICK_OBJECT below. */
+const choicesFor = (field: RegistryField, lookups: Lookups): Choice[] | undefined => {
   if (field.key === 'owner_id') return lookups.users
   if (field.key === 'pipeline_id') return lookups.pipelines
   if (field.key === 'stage_id') return lookups.stages.map(({ id, label }) => ({ id, label }))
   if (field.key === 'lifecycle_stage_id') return lookups.lifecycleStages
-  if (field.key === 'company_id') return companies
   return undefined
 }
+
+/** Relation fields whose target is an object rather than a configuration list.
+ *  These render as a search box that asks the server, because no list element may
+ *  ever try to hold 34,648 companies. */
+const PICK_OBJECT: Partial<Record<string, ObjectKey>> = { company_id: 'company' }
 
 /** Starting widths by type. Without them the browser hands a long email column a
  *  few pixels and wraps it one character per line, which is what a table of
@@ -122,19 +118,20 @@ export const toFilterFields = (object: RegistryObject): FilterField[] =>
     operators: field.operators,
   }))
 
-/** Read-only types are shown but never offered as an input, so nobody types into
- *  a source container the capture surfaces own. */
+/** Read-only fields are shown but never offered as an input, so nobody types into
+ *  a source container the capture surfaces own or a create date the database keeps.
+ *  Read-only is either a property of the type (json) or of the field itself
+ *  (isSystem); both land on the same flag so the panel has one thing to check. */
 export const toEditableFields = (
   object: RegistryObject,
   lookups: Lookups,
-  companies: Choice[],
   { includeReadOnly = false } = {},
 ): EditableField[] =>
   object.fields
-    .filter((field) => field.key !== 'created_at')
-    .filter((field) => includeReadOnly || !TYPE_META[field.type].readOnly)
+    .filter((field) => includeReadOnly || !isReadOnly(field))
     .map((field) => {
-      const choices = choicesFor(field, lookups, companies)
+      const choices = choicesFor(field, lookups)
+      const pickObject = PICK_OBJECT[field.key]
       return {
         key: field.key,
         label: field.label,
@@ -142,25 +139,24 @@ export const toEditableFields = (
         isRequired: field.isRequired,
         helpText: field.helpText,
         options: field.options,
-        readOnly: TYPE_META[field.type].readOnly === true,
+        readOnly: isReadOnly(field),
         ...(choices ? { choices } : {}),
+        ...(pickObject ? { pickObject } : {}),
       }
     })
+
+const isReadOnly = (field: RegistryField): boolean =>
+  field.isSystem || TYPE_META[field.type].readOnly === true
 
 export type CrmContext = {
   object: RegistryObject
   lookups: Lookups
-  companies: Choice[]
   canWrite: boolean
 }
 
 export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: ObjectKey): Promise<CrmContext> => {
-  const [registry, lookups, companies] = await Promise.all([
-    getRegistry(ctx),
-    readLookups(ctx),
-    companyChoices(ctx),
-  ])
+  const [registry, lookups] = await Promise.all([getRegistry(ctx), readLookups(ctx)])
   const object = registry.byKey.get(objectKey)
   if (!object) throw new Error(`This workspace has no object called "${objectKey}".`)
-  return { object, lookups, companies, canWrite: canWrite(ctx.role, objectKey) }
+  return { object, lookups, canWrite: canWrite(ctx.role, objectKey) }
 }

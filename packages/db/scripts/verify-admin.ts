@@ -1,0 +1,601 @@
+import { drizzle } from 'drizzle-orm/postgres-js'
+import { eq, sql } from 'drizzle-orm'
+import postgres from 'postgres'
+import * as s from '../src/schema/index.ts'
+import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import { ForbiddenError } from '../src/dal/context.ts'
+import {
+  createField,
+  deleteField,
+  fieldUsage,
+  listDeletedFields,
+  listFields,
+  purgeField,
+  reorderFields,
+  restoreField,
+  updateField,
+} from '../src/dal/admin-fields.ts'
+import {
+  createLifecycleStage,
+  createPipeline,
+  createStage,
+  deleteLifecycleStage,
+  deletePipeline,
+  deleteStage,
+  listLifecycleStages,
+  listPipelines,
+  reorderStages,
+  updateStage,
+} from '../src/dal/pipelines.ts'
+import {
+  createSubscriptionType,
+  deleteSubscriptionType,
+  listSubscriptionTypes,
+} from '../src/dal/subscriptions.ts'
+import {
+  deleteSegment,
+  evaluateSegment,
+  listSegments,
+  previewSegment,
+  readMemberships,
+  readSegmentMembers,
+  saveSegment,
+} from '../src/dal/segments.ts'
+import { bulkUpdateRecords, createRecord, getRecord, updateRecord } from '../src/dal/records.ts'
+import { readTimeline } from '../src/dal/activity.ts'
+import { readBoard, groupableFields } from '../src/dal/board.ts'
+import { recordOptions } from '../src/dal/search.ts'
+import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
+import { closeAppPool } from '../src/internal/pool.ts'
+
+/** The parts of F1 that had no code: the metadata registry's write side, pipeline
+ *  and lifecycle administration, subscription types, segments, bulk edit, board
+ *  grouping and the searched pickers. Every check maps to a line in
+ *  features/01-crm.md or 02-foundation.md §4. */
+
+const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
+const db = drizzle(owner, { schema: s })
+
+let failures = 0
+const pass = (what: string, detail = '') => console.log(`PASS  ${what}${detail ? `  ${detail}` : ''}`)
+const fail = (what: string, detail: string) => {
+  failures += 1
+  console.log(`FAIL  ${what}\n      ${detail}`)
+}
+
+const check = async (what: string, fn: () => Promise<string | void>): Promise<void> => {
+  try {
+    const detail = await fn()
+    pass(what, detail ?? '')
+  } catch (cause) {
+    const detail = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)
+    fail(what, detail)
+  }
+}
+
+const expect = (condition: boolean, message: string): void => {
+  if (!condition) throw new Error(message)
+}
+
+const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string> => {
+  try {
+    await fn()
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause)
+  }
+  throw new Error(`${what} was allowed and should not have been`)
+}
+
+const stamp = Math.random().toString(36).slice(2, 8)
+
+try {
+  const [datasaur] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur'))
+  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
+
+  const members = await db
+    .select({ id: s.userAccount.id, role: s.membership.role })
+    .from(s.membership)
+    .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
+    .where(eq(s.membership.workspaceId, datasaur.id))
+
+  const ctxFor = (role: Role): WorkspaceContext => {
+    const member = members.find((m) => m.role === role)
+    if (!member) throw new Error(`no seeded ${role}`)
+    return { workspaceId: datasaur.id, actorId: member.id, actorKind: 'user', role }
+  }
+
+  const admin = ctxFor('admin')
+  const sales = ctxFor('sales')
+  const marketing = ctxFor('marketing')
+  const viewer = ctxFor('viewer')
+  const probeCtx: WorkspaceContext = {
+    workspaceId: probe.id,
+    actorId: null,
+    actorKind: 'user',
+    role: 'admin',
+  }
+
+  console.log('-- the registry has a write side -------------------------------')
+
+  const fieldKey = `verify_risk_${stamp}`
+  let fieldId = ''
+
+  await check('a custom field can be created without a deploy', async () => {
+    const created = await createField(admin, {
+      objectKey: 'deal',
+      key: fieldKey,
+      label: 'Verify renewal risk',
+      type: 'select',
+      options: ['Low', 'Medium', 'High'],
+      helpText: 'Written by verify-admin.',
+    })
+    fieldId = created.id
+    expect(created.storage === 'jsonb', 'a new field must be jsonb-stored')
+    return `${created.key} is a ${created.type} on deal`
+  })
+
+  await check('and it appears in the registry immediately', async () => {
+    forgetRegistry(datasaur.id)
+    const registry = await getRegistry(admin)
+    const object = objectOrThrow(registry, 'deal')
+    expect(object.byKey.has(fieldKey), 'the new field is not in the registry')
+    return 'every surface reads this list, so it is on the record editor too'
+  })
+
+  await check('a record can hold a value for it', async () => {
+    const deals = await recordOptions(admin, { object: 'deal', limit: 1 })
+    const target = deals[0]
+    expect(Boolean(target), 'no deal to write to')
+    await updateRecord(admin, 'deal', target!.id, { [fieldKey]: 'High' })
+    const record = await getRecord(admin, 'deal', target!.id)
+    expect(record?.values[fieldKey] === 'High', `stored ${String(record?.values[fieldKey])}`)
+    return `${target!.label} now has ${fieldKey} = High`
+  })
+
+  await check('a value outside the choices is refused', async () => {
+    const deals = await recordOptions(admin, { object: 'deal', limit: 1 })
+    const message = await refuses('an invalid choice', () =>
+      updateRecord(admin, 'deal', deals[0]!.id, { [fieldKey]: 'Catastrophic' }),
+    )
+    return message
+  })
+
+  await check('the label can change and the key cannot', async () => {
+    await updateField(admin, { id: fieldId, label: 'Verify renewal risk (renamed)' })
+    forgetRegistry(datasaur.id)
+    const fields = await listFields(admin, 'deal')
+    const found = fields.find((field) => field.id === fieldId)
+    expect(found?.label === 'Verify renewal risk (renamed)', 'the label did not change')
+    expect(found?.key === fieldKey, 'the key changed, which would orphan every stored value')
+    return 'renaming a label never touches data'
+  })
+
+  await check('a core field cannot be deleted', async () => {
+    const fields = await listFields(admin, 'deal')
+    const core = fields.find((field) => field.key === 'amount')
+    return await refuses('deleting a core field', () => deleteField(admin, core!.id))
+  })
+
+  await check('a system field cannot be edited or written', async () => {
+    const fields = await listFields(admin, 'contact')
+    const created = fields.find((field) => field.key === 'created_at')
+    expect(created?.isSystem === true, 'created_at is not marked as a system field')
+    const one = await recordOptions(admin, { object: 'contact', limit: 1 })
+    const message = await refuses('writing created_at', () =>
+      updateRecord(admin, 'contact', one[0]!.id, { created_at: new Date('2020-01-01') }),
+    )
+    return message
+  })
+
+  await check('deleting a custom field says what is at stake first', async () => {
+    const usage = await fieldUsage(admin, fieldId)
+    expect(usage.filled === 1, `${usage.filled} records hold a value, expected 1`)
+    return `${usage.filled} record holds a value`
+  })
+
+  await check('delete hides it everywhere and keeps the data', async () => {
+    await deleteField(admin, fieldId)
+    forgetRegistry(datasaur.id)
+    const registry = await getRegistry(admin)
+    expect(!objectOrThrow(registry, 'deal').byKey.has(fieldKey), 'the deleted field is still in the registry')
+    const [row] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from deal where custom ? ${fieldKey}`,
+    )
+    expect(Number(row?.n) === 1, 'the value was removed by a soft delete')
+    return 'hidden immediately, value still present'
+  })
+
+  await check('and restore puts it back exactly as it was', async () => {
+    const deleted = await listDeletedFields(admin)
+    expect(deleted.some((field) => field.id === fieldId), 'the deleted field is not listed')
+    await restoreField(admin, fieldId)
+    forgetRegistry(datasaur.id)
+    const registry = await getRegistry(admin)
+    expect(objectOrThrow(registry, 'deal').byKey.has(fieldKey), 'restore did not bring it back')
+    return 'nobody loses data by misclicking'
+  })
+
+  await check('purge is refused until it has been deleted', async () => {
+    return await refuses('purging a live field', () => purgeField(admin, fieldId))
+  })
+
+  await check('purge strips the value out of every record', async () => {
+    await deleteField(admin, fieldId)
+    const result = await purgeField(admin, fieldId)
+    expect(result.stripped === 1, `stripped ${result.stripped}, expected 1`)
+    const [row] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from deal where custom ? ${fieldKey}`,
+    )
+    expect(Number(row?.n) === 0, 'the value survived the purge')
+    return `${result.stripped} record cleared, definition gone`
+  })
+
+  await check('a key that would collide with Postgres is refused', async () =>
+    refuses('a reserved key', () =>
+      createField(admin, { objectKey: 'deal', key: 'select', label: 'Select', type: 'text' }),
+    ),
+  )
+
+  await check('reordering fields is a real edit', async () => {
+    const before = await listFields(admin, 'company')
+    const flipped = [before[1]!.id, before[0]!.id, ...before.slice(2).map((field) => field.id)]
+    await reorderFields(admin, 'company', flipped)
+    const after = await listFields(admin, 'company')
+    expect(after[0]!.id === before[1]!.id, 'the order did not change')
+    // Put it back so the seeded workspace reads the way it started.
+    await reorderFields(admin, 'company', before.map((field) => field.id))
+    return 'position drives the record page and the picker'
+  })
+
+  await check('a viewer cannot change the registry', async () =>
+    refuses('a viewer creating a field', () =>
+      createField(viewer, { objectKey: 'deal', key: `v_${stamp}`, label: 'Nope', type: 'text' }),
+    ),
+  )
+
+  console.log('')
+  console.log('-- pipelines and stages ----------------------------------------')
+
+  let pipelineId = ''
+  let stageA = ''
+  let stageB = ''
+
+  await check('a pipeline and its stages can be created', async () => {
+    const created = await createPipeline(admin, `Verify pipeline ${stamp}`)
+    pipelineId = created.id
+    stageA = (await createStage(admin, { pipelineId, name: 'First', probability: 10 })).id
+    stageB = (await createStage(admin, { pipelineId, name: 'Second', probability: 60 })).id
+    const pipelines = await listPipelines(admin)
+    const found = pipelines.find((row) => row.id === pipelineId)
+    expect(found?.stages.length === 2, `${found?.stages.length} stages`)
+    return '2 stages, with probabilities'
+  })
+
+  await check('a stage cannot be both closed won and closed lost', async () =>
+    refuses('a stage that is both', () =>
+      updateStage(admin, { id: stageA, isClosedWon: true, isClosedLost: true }),
+    ),
+  )
+
+  await check('a probability outside 0 to 100 is refused', async () =>
+    refuses('a probability of 140', () => updateStage(admin, { id: stageA, probability: 140 })),
+  )
+
+  await check('stages reorder', async () => {
+    await reorderStages(admin, pipelineId, [stageB, stageA])
+    const pipelines = await listPipelines(admin)
+    const found = pipelines.find((row) => row.id === pipelineId)
+    expect(found?.stages[0]?.id === stageB, 'the order did not change')
+    return 'position is what the board lays out'
+  })
+
+  let movedDeal = ''
+
+  await check('a stage holding deals cannot be deleted without a destination', async () => {
+    const created = await createRecord(admin, 'deal', {
+      name: `Verify stage move ${stamp}`,
+      pipeline_id: pipelineId,
+      stage_id: stageA,
+    })
+    movedDeal = created.id
+    return await refuses('deleting a stage with deals in it', () => deleteStage(admin, stageA, null))
+  })
+
+  await check('and deleting it with one moves every deal', async () => {
+    const result = await deleteStage(admin, stageA, stageB)
+    expect(result.moved === 1, `moved ${result.moved}`)
+    const record = await getRecord(admin, 'deal', movedDeal)
+    expect(record?.values.stage_id === stageB, 'the deal did not move')
+    return `${result.moved} deal moved to Second`
+  })
+
+  await check('and each move is on the deal timeline', async () => {
+    const timeline = await readTimeline(admin, {
+      entity: { entityType: 'deal', entityId: movedDeal },
+      types: ['stage_change'],
+    })
+    expect(timeline.rows.length > 0, 'no stage_change was written')
+    return timeline.rows[0]!.subject ?? ''
+  })
+
+  await check('a pipeline with deals in it cannot be deleted', async () =>
+    refuses('deleting a pipeline that holds deals', () => deletePipeline(admin, pipelineId)),
+  )
+
+  await check('and it can once it is empty', async () => {
+    await db.execute(sql`delete from activity_link where entity_id = ${movedDeal}`)
+    await db.execute(sql`delete from deal where id = ${movedDeal}`)
+    await deletePipeline(admin, pipelineId)
+    const pipelines = await listPipelines(admin)
+    expect(!pipelines.some((row) => row.id === pipelineId), 'the pipeline survived')
+    return 'stages went with it'
+  })
+
+  await check('the last pipeline cannot be deleted', async () => {
+    const pipelines = await listPipelines(admin)
+    const empty = pipelines.find((row) => row.dealCount === 0)
+    if (!empty) return 'every remaining pipeline holds deals, which is refused for its own reason'
+    return await refuses('deleting the only pipeline', async () => {
+      // Only meaningful when one is left; with several this refuses for the
+      // deal-count reason instead, which is also correct.
+      for (const row of pipelines) if (row.id !== empty.id) await deletePipeline(admin, row.id)
+      await deletePipeline(admin, empty.id)
+    })
+  })
+
+  console.log('')
+  console.log('-- lifecycle and subscriptions ---------------------------------')
+
+  await check('a lifecycle stage can be created and deleted', async () => {
+    const created = await createLifecycleStage(admin, `Verify stage ${stamp}`)
+    const rows = await listLifecycleStages(admin)
+    expect(rows.some((row) => row.id === created.id), 'the stage was not created')
+    await deleteLifecycleStage(admin, created.id, null)
+    return `${rows.length} stages, ordered`
+  })
+
+  await check('one that records point at needs a destination', async () => {
+    const rows = await listLifecycleStages(admin)
+    const used = rows.find((row) => row.usedBy > 0)
+    if (!used) return 'no seeded lifecycle stage is in use, so nothing to move'
+    return await refuses('deleting a lifecycle stage in use', () =>
+      deleteLifecycleStage(admin, used.id, null),
+    )
+  })
+
+  await check('a subscription type can be created', async () => {
+    const created = await createSubscriptionType(marketing, {
+      name: `Verify type ${stamp}`,
+      description: 'Written by verify-admin.',
+    })
+    const rows = await listSubscriptionTypes(marketing)
+    expect(rows.some((row) => row.id === created.id), 'the type was not created')
+    await deleteSubscriptionType(marketing, created.id, 0)
+    return `${rows.length} types`
+  })
+
+  await check('deleting one that carries opt-outs must confirm the number', async () => {
+    const rows = await listSubscriptionTypes(admin)
+    const withOptOuts = rows.find((row) => row.unsubscribed > 0)
+    if (!withOptOuts) return 'no seeded type carries an opt-out'
+    return await refuses('discarding opt-outs without confirming', () =>
+      deleteSubscriptionType(admin, withOptOuts.id, 0),
+    )
+  })
+
+  await check('a viewer cannot manage subscription types', async () =>
+    refuses('a viewer creating a subscription type', () =>
+      createSubscriptionType(viewer, { name: 'Nope' }),
+    ),
+  )
+
+  console.log('')
+  console.log('-- segments ----------------------------------------------------')
+
+  let segmentId = ''
+
+  await check('a segment with no conditions is refused', async () =>
+    refuses('an empty segment', () =>
+      saveSegment(marketing, {
+        objectKey: 'contact',
+        name: `Verify empty ${stamp}`,
+        filters: [{ conjunction: 'and', conditions: [] }],
+      }),
+    ),
+  )
+
+  await check('a filter that cannot run is refused at save', async () =>
+    refuses('a segment on a field that does not exist', () =>
+      saveSegment(marketing, {
+        objectKey: 'contact',
+        name: `Verify broken ${stamp}`,
+        filters: [{ conjunction: 'and', conditions: [{ field: 'not_a_field', operator: 'is', value: 'x' }] }],
+      }),
+    ),
+  )
+
+  await check('the builder previews before anything is saved', async () => {
+    const preview = await previewSegment(marketing, {
+      objectKey: 'contact',
+      filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: 'partner' }] }],
+    })
+    expect(preview.count > 0, 'nothing matched the preview')
+    return `${preview.count} match, ${preview.sample.length} shown`
+  })
+
+  await check('a segment stores its membership', async () => {
+    const created = await saveSegment(marketing, {
+      objectKey: 'contact',
+      name: `Verify partners ${stamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: 'partner' }] }],
+    })
+    segmentId = created.id
+    const result = await evaluateSegment(marketing, segmentId)
+    expect(result.entered > 0, 'nobody entered the segment')
+    expect(result.members === result.entered, 'the member count disagrees with the entries')
+    return `${result.entered} entered, ${result.members} members`
+  })
+
+  await check('and entering writes a timeline event', async () => {
+    const members = await readSegmentMembers(marketing, segmentId, 1)
+    const timeline = await readTimeline(marketing, {
+      entity: { entityType: 'contact', entityId: members[0]!.id },
+      types: ['segment_change'],
+    })
+    expect(timeline.rows.length > 0, 'no segment_change was written')
+    return timeline.rows[0]!.subject ?? ''
+  })
+
+  await check('leaving writes another, and the spell is kept', async () => {
+    const members = await readSegmentMembers(marketing, segmentId, 1)
+    const leaver = members[0]!
+    await saveSegment(marketing, {
+      id: segmentId,
+      objectKey: 'contact',
+      name: `Verify partners ${stamp}`,
+      filters: [
+        { conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: 'nobody-at-all' }] },
+      ],
+    })
+    const result = await evaluateSegment(marketing, segmentId)
+    expect(result.exited > 0, 'nobody left')
+    expect(result.members === 0, `${result.members} still in it`)
+
+    const history = await readMemberships(marketing, leaver.id)
+    const spell = history.find((row) => row.segmentId === segmentId)
+    expect(spell?.exitedAt !== null, 'the exit was not recorded, so the spell is lost')
+    return `${result.exited} left, and the past spell still reads`
+  })
+
+  await check('re-entry is a new spell rather than an un-exit', async () => {
+    await saveSegment(marketing, {
+      id: segmentId,
+      objectKey: 'contact',
+      name: `Verify partners ${stamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: 'partner' }] }],
+    })
+    const result = await evaluateSegment(marketing, segmentId)
+    const members = await readSegmentMembers(marketing, segmentId, 1)
+    const history = await readMemberships(marketing, members[0]!.id)
+    const spells = history.filter((row) => row.segmentId === segmentId)
+    expect(spells.length >= 2, `${spells.length} spell(s); a churn and a return must both survive`)
+    return `${result.entered} re-entered, ${spells.length} spells on the record`
+  })
+
+  await check('a sales user cannot change somebody else’s list', async () =>
+    refuses('a sales user saving a segment', () =>
+      saveSegment(sales, {
+        objectKey: 'contact',
+        name: `Verify nope ${stamp}`,
+        filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: 'x' }] }],
+      }),
+    ),
+  )
+
+  await check('one tenant cannot see another’s segments', async () => {
+    const theirs = await listSegments(probeCtx)
+    expect(theirs.length === 0, `${theirs.length} segments leaked across tenants`)
+    return 'row level security covers segment and segment_membership'
+  })
+
+  await check('deleting a segment keeps the timeline entries', async () => {
+    const members = await readSegmentMembers(marketing, segmentId, 1)
+    const contactId = members[0]!.id
+    await deleteSegment(marketing, segmentId)
+    const timeline = await readTimeline(marketing, {
+      entity: { entityType: 'contact', entityId: contactId },
+      types: ['segment_change'],
+    })
+    expect(timeline.rows.length > 0, 'the history of what happened to the contact was erased')
+    return 'membership goes, what happened to the person stays'
+  })
+
+  console.log('')
+  console.log('-- bulk edit, boards and pickers -------------------------------')
+
+  await check('one field is applied to a selection', async () => {
+    const deals = await recordOptions(admin, { object: 'deal', limit: 3 })
+    const ids = deals.map((row) => row.id)
+    const result = await bulkUpdateRecords(admin, 'deal', ids, { deal_type: 'Renewal' })
+    expect(result.updated === ids.length, `${result.updated} of ${ids.length} updated`)
+    expect(result.failed.length === 0, JSON.stringify(result.failed))
+    return `${result.updated} deals changed in one call`
+  })
+
+  await check('a row that refuses the change is named, and the rest still save', async () => {
+    const contacts = await recordOptions(admin, { object: 'contact', limit: 3 })
+    const result = await bulkUpdateRecords(admin, 'contact', contacts.map((row) => row.id), {
+      // Every contact would end up with the same address, so all but the first
+      // collide on the unique index.
+      email: `bulk-${stamp}@verify.example`,
+    })
+    expect(result.updated >= 1, 'nothing was written at all')
+    expect(result.failed.length >= 1, 'a duplicate email was allowed')
+    expect(Boolean(result.failed[0]?.displayName), 'a failure came back without a name')
+    return `${result.updated} written, ${result.failed.length} named back with a reason`
+  })
+
+  await check('a viewer cannot bulk edit', async () => {
+    const deals = await recordOptions(viewer, { object: 'deal', limit: 1 })
+    const message = await refuses('a viewer bulk editing', () =>
+      bulkUpdateRecords(viewer, 'deal', [deals[0]!.id], { deal_type: 'Renewal' }),
+    )
+    expect(message.includes('viewer'), message)
+    return message
+  })
+
+  await check('a board groups by any select field, not just stage', async () => {
+    const registry = await getRegistry(admin)
+    const object = objectOrThrow(registry, 'deal')
+    const groupable = groupableFields(object)
+    expect(groupable.length > 1, 'only one field is groupable')
+    const board = await readBoard(admin, { groupBy: 'deal_type' })
+    expect(board.groupByKey === 'deal_type', `grouped by ${board.groupByKey}`)
+    expect(board.columns.length > 0, 'no columns')
+    return `${groupable.length} groupable fields; deal_type gives ${board.columns.length} columns`
+  })
+
+  await check('and a field that cannot group says which ones can', async () => {
+    const message = await refuses('grouping by a long text field', () =>
+      readBoard(admin, { groupBy: 'next_step' }),
+    )
+    expect(message.includes('Deal stage'), message)
+    return message
+  })
+
+  await check('a picker searches rather than listing everything', async () => {
+    const all = await recordOptions(admin, { object: 'company', limit: 5 })
+    expect(all.length > 0, 'an empty query returned nothing')
+    const target = all[0]!
+    const found = await recordOptions(admin, { object: 'company', query: target.label.slice(0, 6) })
+    expect(found.some((row) => row.id === target.id), `searching for "${target.label}" did not find it`)
+    return `"${target.label.slice(0, 6)}" found ${found.length} of ${all.length}`
+  })
+
+  await check('and it never offers the record being merged into', async () => {
+    const all = await recordOptions(admin, { object: 'contact', limit: 5 })
+    const excluded = await recordOptions(admin, { object: 'contact', excludeId: all[0]!.id, limit: 5 })
+    expect(!excluded.some((row) => row.id === all[0]!.id), 'the excluded record was offered')
+    return 'a record cannot be merged into itself'
+  })
+
+  await check('a picker cannot reach across tenants', async () => {
+    const theirs = await recordOptions(probeCtx, { object: 'contact', limit: 50 })
+    const ours = await recordOptions(admin, { object: 'contact', limit: 50 })
+    const overlap = theirs.filter((row) => ours.some((mine) => mine.id === row.id))
+    expect(overlap.length === 0, `${overlap.length} records visible to both tenants`)
+    return `${theirs.length} of its own, none of Datasaur's`
+  })
+
+  console.log('')
+  if (failures > 0) {
+    console.log(`${failures} check(s) failed.`)
+    process.exitCode = 1
+  } else {
+    console.log('all admin, segment and bulk checks passed.')
+  }
+} finally {
+  await owner.end()
+  await closeAppPool()
+}

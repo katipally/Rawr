@@ -43,7 +43,7 @@ const AvailabilityScreen = async ({
   const grant = grants.find((row) => row.userId === subject)
 
   return (
-    <div className="mx-auto w-full max-w-4xl p-4 sm:p-6">
+    <div className="w-full max-w-4xl">
       <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-lg font-medium">
           {subject === session.userId ? 'My working hours' : `${person?.label ?? 'Working hours'}`}

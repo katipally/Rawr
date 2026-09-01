@@ -10,7 +10,7 @@ import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.t
 import { contextFrom, readSession } from '~/server/session.ts'
 
 type Params = { workspace: string; object: string; view: string }
-type Search = { q?: string; filters?: string; pipeline?: string }
+type Search = { q?: string; filters?: string; pipeline?: string; group?: string }
 
 const BoardPage = async ({
   params,
@@ -24,24 +24,45 @@ const BoardPage = async ({
 
   const { workspace, object: objectParam, view: viewSlug } = await params
   if (!isObjectKey(objectParam)) notFound()
-  // A board groups by pipeline stage, which only deals have.
+  // Deals are the only object with a pipeline, and the only one anybody has asked
+  // to see as a board.
   if (objectParam !== 'deal') redirect(objectView(workspace, objectParam, viewSlug, 'list'))
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const { object, lookups, companies, canWrite } = await loadCrmContext(ctx, 'deal')
+  const { object, lookups, canWrite } = await loadCrmContext(ctx, 'deal')
 
   const [views, resolved] = await Promise.all([listViews(ctx, 'deal'), resolveView(ctx, 'deal', viewSlug)])
   const filters = search.filters ? (decodeFilters(search.filters) as never) : resolved.view.filters
   // No pipeline in the URL means the first one, which is Enterprise in production.
   const pipelineId = search.pipeline ?? lookups.pipelines[0]?.id ?? null
 
-  const board = await readBoard(ctx, { pipelineId, filters, search: search.q ?? '' })
+  // A board grouped by something other than stage spans every pipeline, because a
+  // deal type or a product of interest is not a property of one pipeline.
+  const groupBy = search.group ?? resolved.view.groupByKey ?? 'stage_id'
+  const byStage = groupBy === 'stage_id'
+
+  let board
+  let boardError: string | null = null
+  try {
+    board = await readBoard(ctx, {
+      pipelineId: byStage ? pipelineId : null,
+      filters,
+      search: search.q ?? '',
+      groupBy,
+    })
+  } catch (cause) {
+    // A hand-edited group in a URL is the usual cause, and the message names the
+    // fields that would have worked.
+    boardError = cause instanceof Error ? cause.message : String(cause)
+    board = await readBoard(ctx, { pipelineId, filters, search: search.q ?? '', groupBy: 'stage_id' })
+  }
 
   const listParams: ListParams = {
     ...(search.q ? { q: search.q } : {}),
     ...(search.filters ? { filters: search.filters } : {}),
     ...(search.pipeline ? { pipeline: search.pipeline } : {}),
+    ...(search.group ? { group: search.group } : {}),
   }
 
   const exportParams = new URLSearchParams({
@@ -54,7 +75,7 @@ const BoardPage = async ({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline gap-x-3">
-        <h1 className="text-base font-medium">{object.namePlural}</h1>
+        <h1 className="text-lg font-medium">{object.namePlural}</h1>
         <p className="text-secondary">{resolved.view.name}</p>
       </div>
 
@@ -67,7 +88,37 @@ const BoardPage = async ({
         params={listParams}
       />
 
-      {lookups.pipelines.length > 1 ? (
+      {boardError ? (
+        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+          {boardError} Showing the board by stage instead.
+        </p>
+      ) : null}
+
+      {board.groupableFields.length > 1 ? (
+        <nav aria-label="Group by" className="flex flex-wrap items-baseline gap-1">
+          <span className="text-small text-secondary">Group by</span>
+          {board.groupableFields.map((field) => (
+            <Link
+              key={field.key}
+              href={objectView(workspace, 'deal', resolved.view.slug, 'board', {
+                ...listParams,
+                group: field.key,
+              })}
+              aria-current={field.key === board.groupByKey ? 'true' : undefined}
+              className={cn(
+                'rounded-hs border px-2 py-1 no-underline',
+                field.key === board.groupByKey
+                  ? 'border-line-interactive bg-accent-subtle text-link'
+                  : 'border-line text-secondary',
+              )}
+            >
+              {field.label}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
+
+      {byStage && lookups.pipelines.length > 1 ? (
         <nav aria-label="Pipeline" className="flex flex-wrap gap-1">
           {lookups.pipelines.map((pipeline) => (
             <Link
@@ -102,19 +153,27 @@ const BoardPage = async ({
         columns={resolved.view.columns}
         sorts={resolved.view.sorts}
         filterFields={toFilterFields(object)}
-        createFields={toEditableFields(object, lookups, companies)}
+        createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
         exportHref={`/contacts/${workspace}/export?${exportParams.toString()}`}
       />
 
       {board.unassigned > 0 ? (
         <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
-          {board.unassigned.toLocaleString()} deal{board.unassigned === 1 ? ' sits' : 's sit'} in a stage that
-          is not on this pipeline. Switch pipelines above to find them.
+          {board.unassigned.toLocaleString()} deal{board.unassigned === 1 ? '' : 's'}{' '}
+          {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
+          {byStage
+            ? 'Switch pipelines above to find them.'
+            : `Filter on ${board.groupByLabel} being empty to see them.`}
         </p>
       ) : null}
 
-      <DealBoard workspace={workspace} columns={board.columns} canWrite={canWrite} />
+      <DealBoard
+        workspace={workspace}
+        columns={board.columns}
+        groupByKey={board.groupByKey}
+        canWrite={canWrite}
+      />
     </div>
   )
 }

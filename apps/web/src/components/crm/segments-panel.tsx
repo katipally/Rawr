@@ -1,0 +1,61 @@
+import Link from 'next/link'
+import type { MembershipRow } from '@rawr/db'
+import { segmentsPath } from '~/lib/links.ts'
+import { formatDate } from './value.tsx'
+
+export type SegmentsPanelProps = {
+  workspace: string
+  recordName: string
+  rows: MembershipRow[]
+}
+
+/** Which lists this record is in, and which it used to be in. Past spells are kept
+ *  on purpose: somebody asking "why did they stop getting the newsletter" is asking
+ *  about an exit, and an exit that leaves no trace cannot answer them. A2. */
+export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProps) => {
+  const live = rows.filter((row) => row.exitedAt === null)
+  const past = rows.filter((row) => row.exitedAt !== null)
+
+  return (
+    <section className="rounded-panel border border-line bg-surface">
+      <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
+        <h3 className="font-medium">Segments ({live.length})</h3>
+        <Link href={segmentsPath(workspace)} className="text-small">
+          Manage
+        </Link>
+      </header>
+
+      {rows.length === 0 ? (
+        <p className="px-3 py-3 text-secondary">
+          {recordName} is not in any segment. A segment is a saved query, so membership appears
+          here the next time one is recomputed.
+        </p>
+      ) : (
+        <ul className="flex flex-col">
+          {live.map((row) => (
+            <li
+              key={`${row.segmentId}-${row.enteredAt.toISOString()}`}
+              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-3 py-1.5 last:border-0"
+            >
+              <span className="min-w-0 break-words">{row.name}</span>
+              <span className="shrink-0 text-small text-secondary">
+                since {formatDate(row.enteredAt.toISOString())}
+              </span>
+            </li>
+          ))}
+          {past.map((row) => (
+            <li
+              key={`${row.segmentId}-${row.enteredAt.toISOString()}-past`}
+              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-3 py-1.5 text-secondary last:border-0"
+            >
+              <span className="min-w-0 break-words">{row.name}</span>
+              <span className="shrink-0 text-small">
+                left {formatDate(row.exitedAt!.toISOString())}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}

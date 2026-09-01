@@ -53,10 +53,14 @@ export const segment = pgTable(
     id: pk(),
     workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
+    description: text('description'),
     objectId: uuid('object_id')
       .notNull()
       .references(() => objectDef.id, { onDelete: 'cascade' }),
     query: jsonb('query').notNull(),
+    /** Null until the first evaluation. The UI says "not evaluated yet" rather
+     *  than showing a member count that is really just zero. */
+    lastEvaluatedAt: timestamp('last_evaluated_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('segment_name_key').on(t.workspaceId, t.name)],

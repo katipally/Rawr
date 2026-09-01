@@ -37,21 +37,29 @@ const DRAG_TYPE = 'application/x-rawr-deal'
 export type DealBoardProps = {
   workspace: string
   columns: BoardColumn[]
+  /** Which field a column stands for. A drop writes that field, so a board grouped
+   *  by deal type moves the deal's type rather than its stage. */
+  groupByKey: string
   canWrite: boolean
 }
 
-export const DealBoard = ({ workspace, columns, canWrite }: DealBoardProps) => {
+export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoardProps) => {
   const router = useRouter()
   const toast = useToast()
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [moving, setMoving] = useState<string | null>(null)
 
-  const move = async (dealId: string, stageId: string) => {
+  const move = async (dealId: string, columnKey: string) => {
     setMoving(dealId)
     try {
-      await api.crm.board.moveCard.mutate({ dealId, stageId })
-      toast('success', 'Stage changed. The move is on the deal timeline.')
+      await api.crm.board.moveCard.mutate({ dealId, field: groupByKey, value: columnKey })
+      toast(
+        'success',
+        groupByKey === 'stage_id'
+          ? 'Stage changed. The move is on the deal timeline.'
+          : 'Moved. The change is in the audit log.',
+      )
       router.refresh()
     } catch (cause) {
       // The card snaps back because the server never accepted the move.
@@ -66,8 +74,12 @@ export const DealBoard = ({ workspace, columns, canWrite }: DealBoardProps) => {
   if (columns.length === 0) {
     return (
       <EmptyState
-        title="This pipeline has no stages"
-        description="An admin adds stages in settings. Until then there is nothing to lay a board out on."
+        title="This board has no columns"
+        description={
+          groupByKey === 'stage_id'
+            ? 'This pipeline has no stages. An admin adds them in Settings, under Pipelines.'
+            : 'The field this board groups by has no values to lay out. An admin adds them in Settings, under Properties.'
+        }
       />
     )
   }
@@ -75,7 +87,10 @@ export const DealBoard = ({ workspace, columns, canWrite }: DealBoardProps) => {
   return (
     // The board scrolls inside its own box; the page never scrolls sideways.
     <div className="w-full overflow-x-auto pb-2">
-      <div className="flex min-w-max items-start gap-3">
+      {/* Stretch, not start: a column that sizes to its own cards leaves an empty
+          stage as a header-high drop target, which is the one stage somebody most
+          often drags into. Equal heights also stop the board reading as ragged. */}
+      <div className="flex min-w-max items-stretch gap-3">
         {columns.map((column) => (
           <section
             key={column.key}
@@ -94,7 +109,9 @@ export const DealBoard = ({ workspace, columns, canWrite }: DealBoardProps) => {
               if (dealId) void move(dealId, column.key)
             }}
             className={cn(
-              'flex w-72 shrink-0 flex-col rounded-panel border bg-fill',
+              // One comfortable reading width, whatever the column count. Growing
+              // to fill made a three-column board stretch each card to 470px.
+              'flex w-[min(18rem,85vw)] shrink-0 flex-col rounded-panel border bg-fill',
               over === column.key ? 'border-line-interactive bg-accent-subtle' : 'border-line',
             )}
           >
@@ -122,9 +139,14 @@ export const DealBoard = ({ workspace, columns, canWrite }: DealBoardProps) => {
               )}
             </header>
 
-            <ol className="flex max-h-[65vh] flex-col gap-2 overflow-y-auto p-2">
+            {/* The card list scrolls, the board does not. Height follows the
+                viewport rather than a fixed pixel count so a short laptop screen
+                and a tall monitor both show whole cards. */}
+            <ol className="flex max-h-[min(65svh,50rem)] flex-col gap-2 overflow-y-auto p-2">
               {column.cards.length === 0 ? (
-                <li className="px-1 py-2 text-secondary">Nothing in this stage.</li>
+                <li className="px-1 py-2 text-secondary">
+                  Nothing {groupByKey === 'stage_id' ? 'in this stage' : 'here'} yet.
+                </li>
               ) : (
                 column.cards.map((card) => (
                   <li key={card.id}>

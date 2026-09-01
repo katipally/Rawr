@@ -15,12 +15,14 @@
     "db:seed": "pnpm --filter @rawr/db seed",
     "db:verify": "pnpm --filter @rawr/db verify",
     "db:verify:guards": "pnpm --filter @rawr/db verify:guards",
-    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity",
+    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:integrations",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
     "db:verify:forms": "pnpm --filter @rawr/db verify:forms",
     "db:verify:booking": "pnpm --filter @rawr/db verify:booking",
     "db:verify:mcp": "pnpm --filter @rawr/db verify:mcp",
-    "db:verify:activity": "pnpm --filter @rawr/db verify:activity"
+    "db:verify:activity": "pnpm --filter @rawr/db verify:activity",
+    "db:verify:admin": "pnpm --filter @rawr/db verify:admin",
+    "db:verify:integrations": "pnpm --filter @rawr/db verify:integrations"
   },
   "devDependencies": {
     "typescript": "catalog:"

@@ -27,7 +27,7 @@ const JobsPage = async () => {
         <Link href={sitesPath()}>Tracked sites</Link>
       </div>
       <div>
-        <h1 className="text-base font-medium">Failed jobs</h1>
+        <h1 className="text-lg font-medium">Failed jobs</h1>
         <p className="text-secondary">
           A job that exhausted its retries lands here with the payload and the real error. Replaying
           one puts the work back in the queue; the dispatcher picks it up within a minute.

@@ -114,6 +114,10 @@ export type ListInput = {
   search?: string
   limit?: number
   cursor?: Cursor | null
+  /** Ask for the matching-row count alongside the page. Off by default: the
+   *  board reads one query per stage and an export reads every page, and
+   *  neither has anywhere to show it. */
+  count?: boolean
 }
 
 export type ListRow = {
@@ -124,7 +128,15 @@ export type ListRow = {
   labels: Record<string, string>
 }
 
-export type ListPage = { rows: ListRow[]; nextCursor: Cursor | null; columns: RegistryField[] }
+export type ListPage = {
+  rows: ListRow[]
+  nextCursor: Cursor | null
+  columns: RegistryField[]
+  /** How many rows the filter matches, not how many this page holds. Null when
+   *  the caller did not ask, because an export streaming every page has no use
+   *  for the same count once per page. */
+  total: number | null
+}
 
 /** The one read path behind every table, board column, CSV export and MCP list. */
 export const listRecords = async (
@@ -157,6 +169,19 @@ export const listRecords = async (
     if (input.search?.trim()) {
       where.push(sql`${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${input.search.trim()})`)
     }
+    // Counted before the cursor narrows it, so page two still says how many rows
+    // the filter matches rather than how many are left.
+    const total = input.count
+      ? Number(
+          (
+            await tx.execute<{ n: string }>(sql`
+              select count(*) as n
+                from ${sql.raw(`"${object.key}"`)}
+               where ${sql.join(where, sql` and `)}`)
+          )[0]?.n ?? 0,
+        )
+      : null
+
     if (input.cursor) where.push(plan.keysetWhere(input.cursor))
 
     const rows = await tx.execute<RecordValues & { id: string }>(sql`
@@ -172,6 +197,7 @@ export const listRecords = async (
 
     return {
       columns,
+      total,
       nextCursor:
         more && page.at(-1)
           ? {
@@ -272,6 +298,11 @@ const prepare = (object: RegistryObject, values: RecordValues): Prepared => {
   const prepared: Prepared = { columns: {}, custom: {}, warnings: [] }
   for (const [key, raw] of Object.entries(values)) {
     const field = fieldOrThrow(object, key)
+    // Refused here rather than by hiding the input, so the API and the MCP tools
+    // are held to the same rule as the record page.
+    if (field.isSystem) {
+      throw new ValueError(field, 'is maintained by Rawr and cannot be edited.')
+    }
     const { value, warning } = coerce(field, raw)
     if (warning) prepared.warnings.push(warning)
     if (field.storage === 'column') prepared.columns[field.columnName!] = value
@@ -433,7 +464,23 @@ const linksFor = (
   return links
 }
 
-export type UpdateResult = { updatedAt: Date; warnings: string[] }
+export type StageChange = {
+  activityId: string
+  dealId: string
+  dealName: string
+  from: string
+  to: string
+  pipelineId: string | null
+}
+
+export type UpdateResult = {
+  updatedAt: Date
+  warnings: string[]
+  /** Set when this write moved a deal's stage. Returned rather than announced from
+   *  here: telling Slack is F6's job, and the data access layer must not know that
+   *  Slack exists. */
+  stageChange?: StageChange | undefined
+}
 
 /** Last write wins, but conditional on updated_at. A stale write is refused with
  *  what changed rather than silently overwriting someone else's edit. */
@@ -448,44 +495,114 @@ export const updateRecord = async (
   return withWorkspace(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
-    const prepared = prepare(object, values)
-    if (Object.keys(prepared.columns).length === 0 && Object.keys(prepared.custom).length === 0) {
-      throw new Error('Nothing was changed.')
+    return updateRecordIn(tx, ctx, object, id, values, expectedUpdatedAt ?? null)
+  })
+}
+
+/** The write itself, inside a transaction the caller already owns. Split out so a
+ *  bulk edit can apply the same rules — coercion, conflict, dedupe, audit, change
+ *  activity — to many records without opening a transaction per row. */
+const updateRecordIn = async (
+  tx: Tx,
+  ctx: WorkspaceContext,
+  object: RegistryObject,
+  id: string,
+  values: RecordValues,
+  expectedUpdatedAt: Date | null,
+): Promise<UpdateResult> => {
+  const prepared = prepare(object, values)
+  if (Object.keys(prepared.columns).length === 0 && Object.keys(prepared.custom).length === 0) {
+    throw new Error('Nothing was changed.')
+  }
+
+  const before = await readForWrite(tx, object, id)
+  if (!before) throw new Error('That record no longer exists.')
+  if (expectedUpdatedAt && before.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
+    throw new ConflictError(before.updated_at)
+  }
+
+  const duplicate = await findDuplicate(tx, object, prepared.columns, id)
+  if (duplicate) throw new DuplicateError(duplicate.what, duplicate.id)
+
+  const assignments = quotedAssignments(prepared.columns)
+  if (Object.keys(prepared.custom).length > 0) {
+    assignments.push(sql`"custom" = coalesce("custom", '{}'::jsonb) || ${JSON.stringify(prepared.custom)}::jsonb`)
+  }
+  assignments.push(sql`"updated_at" = now()`)
+
+  const [row] = await tx.execute<{ updated_at: unknown }>(sql`
+    update ${sql.raw(`"${object.key}"`)}
+       set ${sql.join(assignments, sql`, `)}
+     where id = ${id} and deleted_at is null
+     returning updated_at`)
+
+  if (!row) throw new Error('That record no longer exists.')
+
+  await writeAudit(tx, ctx, {
+    entity: object.key,
+    entityId: id,
+    action: 'update',
+    before: pick(before, Object.keys(values), object),
+    after: values,
+  })
+  const stageChange = await writeChangeActivities(tx, ctx, object, id, before, values)
+
+  return { updatedAt: asDate(row.updated_at), warnings: prepared.warnings, stageChange }
+}
+
+export type BulkUpdateResult = {
+  updated: number
+  /** Named per record so a partial run is legible rather than "some failed". */
+  failed: { id: string; displayName: string; reason: string }[]
+}
+
+const BULK_MAX = 500
+
+/** One field set applied to a selection. A5.
+ *
+ *  A row that cannot take the change does not stop the rest: a bulk edit over
+ *  fifty records where two carry a duplicate email should write forty-eight and
+ *  say which two it did not. Each record is written in its own savepoint so a
+ *  failure rolls back only that row, and every one still writes its own audit
+ *  entry and its own change activity. */
+export const bulkUpdateRecords = async (
+  ctx: WorkspaceContext,
+  objectKey: string,
+  ids: string[],
+  values: RecordValues,
+): Promise<BulkUpdateResult> => {
+  assertCanWrite(ctx, objectKey)
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) throw new Error('Nothing was selected.')
+  if (unique.length > BULK_MAX) {
+    throw new Error(`That is ${unique.length} records in one edit; ${BULK_MAX} is the limit. Narrow the selection.`)
+  }
+  if (Object.keys(values).length === 0) throw new Error('Pick a field to change first.')
+
+  return withWorkspace(ctx, async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const object = objectOrThrow(registry, objectKey)
+    const result: BulkUpdateResult = { updated: 0, failed: [] }
+
+    for (const id of unique) {
+      const point = `bulk_${result.updated + result.failed.length}`
+      await tx.execute(sql.raw(`savepoint "${point}"`))
+      try {
+        await updateRecordIn(tx, ctx, object, id, values, null)
+        await tx.execute(sql.raw(`release savepoint "${point}"`))
+        result.updated += 1
+      } catch (cause) {
+        await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
+        const row = await readForWrite(tx, object, id).catch(() => undefined)
+        result.failed.push({
+          id,
+          displayName: row ? displayName(object.key, row) : id,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
     }
 
-    const before = await readForWrite(tx, object, id)
-    if (!before) throw new Error('That record no longer exists.')
-    if (expectedUpdatedAt && before.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
-      throw new ConflictError(before.updated_at)
-    }
-
-    const duplicate = await findDuplicate(tx, object, prepared.columns, id)
-    if (duplicate) throw new DuplicateError(duplicate.what, duplicate.id)
-
-    const assignments = quotedAssignments(prepared.columns)
-    if (Object.keys(prepared.custom).length > 0) {
-      assignments.push(sql`"custom" = coalesce("custom", '{}'::jsonb) || ${JSON.stringify(prepared.custom)}::jsonb`)
-    }
-    assignments.push(sql`"updated_at" = now()`)
-
-    const [row] = await tx.execute<{ updated_at: unknown }>(sql`
-      update ${sql.raw(`"${object.key}"`)}
-         set ${sql.join(assignments, sql`, `)}
-       where id = ${id} and deleted_at is null
-       returning updated_at`)
-
-    if (!row) throw new Error('That record no longer exists.')
-
-    await writeAudit(tx, ctx, {
-      entity: object.key,
-      entityId: id,
-      action: 'update',
-      before: pick(before, Object.keys(values), object),
-      after: values,
-    })
-    await writeChangeActivities(tx, ctx, object, id, before, values)
-
-    return { updatedAt: asDate(row.updated_at), warnings: prepared.warnings }
+    return result
   })
 }
 
@@ -532,7 +649,8 @@ const writeChangeActivities = async (
   id: string,
   before: RecordValues,
   after: RecordValues,
-): Promise<void> => {
+): Promise<StageChange | undefined> => {
+  let stageChange: StageChange | undefined
   const links = linksFor(object.key, id, {
     company_id: after.company_id ?? before.company_id,
   })
@@ -558,13 +676,31 @@ const writeChangeActivities = async (
           ? `moved ${name} to ${toLabel || 'no lifecycle stage'}`
           : `changed ${field.label} on ${name} from ${fromLabel || 'empty'} to ${toLabel || 'empty'}`
 
-    await recordActivity(tx, ctx, {
+    const activityId = await recordActivity(tx, ctx, {
       type,
       subject: sentence,
       payload: { field: key, from: previous ?? null, to: next ?? null, fromLabel, toLabel },
       links,
     })
+
+    if (type === 'stage_change' && activityId) {
+      stageChange = {
+        activityId,
+        dealId: id,
+        dealName: name,
+        from: fromLabel || 'no stage',
+        to: toLabel || 'no stage',
+        pipelineId:
+          typeof after.pipeline_id === 'string'
+            ? after.pipeline_id
+            : typeof before.pipeline_id === 'string'
+              ? before.pipeline_id
+              : null,
+      }
+    }
   }
+
+  return stageChange
 }
 
 const labelOf = async (tx: Tx, fieldKey: string, value: unknown): Promise<string> => {
@@ -662,7 +798,10 @@ export const mergeRecords = async (
 
     const chosen: RecordValues = {}
     for (const [key, side] of Object.entries(input.picks)) {
-      if (!object.byKey.has(key)) continue
+      const field = object.byKey.get(key)
+      // created_at is decided below by which record is older, so a pick on it is
+      // meaningless and prepare() would refuse it anyway.
+      if (!field || field.isSystem) continue
       chosen[key] = side === 'absorbed' ? absorbed[key] : survivor[key]
     }
 

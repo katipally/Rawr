@@ -32,7 +32,7 @@ const SitesPage = async () => {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <h1 className="text-base font-medium">Tracked sites</h1>
+          <h1 className="text-lg font-medium">Tracked sites</h1>
           <p className="text-secondary">
             Each host that sends page views carries a site key. Nothing is collected without one,
             and nothing is collected from anyone who has not accepted analytics cookies.

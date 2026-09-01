@@ -12,6 +12,14 @@ export type Column<Row> = {
   render: (row: Row) => ReactNode
 }
 
+export type Selection = {
+  /** Ids currently ticked. Held by the caller so a page change can keep or drop it. */
+  selected: ReadonlySet<string>
+  onChange: (next: Set<string>) => void
+  /** What one row is called in the select-all label, e.g. "contact". */
+  noun: string
+}
+
 export type DataTableProps<Row> = {
   columns: Column<Row>[]
   rows: Row[]
@@ -19,9 +27,13 @@ export type DataTableProps<Row> = {
   onRowClick?: (row: Row) => void
   caption: string
   empty?: ReactNode
+  /** Omitted means no checkbox column at all, which is what a read-only table wants. */
+  selection?: Selection
 }
 
 const MIN_WIDTH = 64
+const DEFAULT_WIDTH = 180
+const SELECT_WIDTH = 40
 
 export const DataTable = <Row,>({
   columns,
@@ -30,6 +42,7 @@ export const DataTable = <Row,>({
   onRowClick,
   caption,
   empty,
+  selection,
 }: DataTableProps<Row>) => {
   const [widths, setWidths] = useState<Record<string, number>>({})
   const drag = useRef<{ key: string; startX: number; startWidth: number } | null>(null)
@@ -55,25 +68,72 @@ export const DataTable = <Row,>({
 
   if (rows.length === 0 && empty) return <>{empty}</>
 
+  const widthOf = (column: Column<Row>): number =>
+    widths[column.key] ?? column.width ?? DEFAULT_WIDTH
+
+  const allTicked =
+    selection !== undefined && rows.length > 0 && rows.every((row) => selection.selected.has(rowKey(row)))
+
+  const toggleAll = () => {
+    if (!selection) return
+    const next = new Set(selection.selected)
+    for (const row of rows) {
+      if (allTicked) next.delete(rowKey(row))
+      else next.add(rowKey(row))
+    }
+    selection.onChange(next)
+  }
+
+  const toggleOne = (id: string) => {
+    if (!selection) return
+    const next = new Set(selection.selected)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    selection.onChange(next)
+  }
+
   return (
     // The table scrolls inside its own box. The page never scrolls sideways.
     <div className="w-full overflow-x-auto rounded-panel border border-line bg-surface">
-      <table className="w-full border-collapse text-left">
+      {/*  table-layout: fixed is what makes truncation possible at all. In the
+           default auto layout a cell grows to fit its content however narrow the
+           header says it is, so a 500-character name stretches its column past
+           17,000px and pushes every other column off the screen. Fixed layout
+           makes the colgroup authoritative and the per-cell `truncate` real. */}
+      <table className="w-full table-fixed border-collapse text-left">
         <caption className="sr-only">{caption}</caption>
+        <colgroup>
+          {selection ? <col style={{ width: SELECT_WIDTH }} /> : null}
+          {columns.map((column) => (
+            <col key={column.key} style={{ width: widthOf(column) }} />
+          ))}
+        </colgroup>
         <thead>
           <tr className="bg-fill">
+            {selection ? (
+              <th
+                scope="col"
+                className="sticky top-0 z-10 border-b border-line bg-fill px-3 py-2"
+              >
+                <input
+                  type="checkbox"
+                  checked={allTicked}
+                  onChange={toggleAll}
+                  aria-label={`Select every ${selection.noun} on this page`}
+                />
+              </th>
+            ) : null}
             {columns.map((column) => {
-              const width = widths[column.key] ?? column.width
               return (
                 <th
                   key={column.key}
                   scope="col"
-                  style={width ? { width, minWidth: width } : undefined}
                   className={cn(
-                    'relative border-b border-line px-3 py-2 text-small font-medium text-secondary',
-                    'sticky top-0 z-10 bg-fill whitespace-nowrap',
+                    'relative border-b border-line px-3 py-2 font-medium',
+                    'sticky top-0 z-10 truncate bg-fill text-small text-secondary',
                     column.align === 'right' && 'text-right',
                   )}
+                  title={column.header}
                 >
                   {column.header}
                   <span
@@ -82,11 +142,7 @@ export const DataTable = <Row,>({
                     aria-label={`Resize ${column.header}`}
                     onPointerDown={(event) => {
                       event.preventDefault()
-                      startResize(
-                        column.key,
-                        event.clientX,
-                        event.currentTarget.parentElement?.offsetWidth ?? MIN_WIDTH,
-                      )
+                      startResize(column.key, event.clientX, widthOf(column))
                     }}
                     className="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none hover:bg-line-interactive"
                   />
@@ -103,13 +159,24 @@ export const DataTable = <Row,>({
               className={cn(
                 'border-b border-divider last:border-0',
                 onRowClick && 'cursor-pointer hover:bg-fill',
+                selection?.selected.has(rowKey(row)) && 'bg-accent-subtle',
               )}
             >
+              {selection ? (
+                <td className="h-row px-3 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selection.selected.has(rowKey(row))}
+                    onChange={() => toggleOne(rowKey(row))}
+                    aria-label={`Select this ${selection.noun}`}
+                  />
+                </td>
+              ) : null}
               {columns.map((column) => (
                 <td
                   key={column.key}
                   className={cn(
-                    'h-row px-3 py-1.5 align-middle',
+                    'h-row overflow-hidden px-3 py-1.5 align-middle',
                     column.align === 'right' && 'text-right tabular-nums',
                   )}
                 >

@@ -20,7 +20,7 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
   const held = forms.reduce((total, form) => total + form.quarantined, 0)
 
   return (
-    <div className="mx-auto w-full max-w-6xl p-4 sm:p-6">
+    <div className="w-full max-w-6xl">
       <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-lg font-medium">Forms</h1>
         <span className="text-sm text-secondary">
