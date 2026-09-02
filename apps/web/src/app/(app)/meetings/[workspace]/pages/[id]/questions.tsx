@@ -1,6 +1,8 @@
 'use client'
 
-import { FORM_FIELD_TYPES, type FormField } from '@rawr/db'
+// Values come from the browser-safe subpath, not the barrel: importing a runtime
+// value from '@rawr/db' here pulls the Postgres driver into the client bundle.
+import { FORM_FIELD_TYPES, type FormField } from '@rawr/db/forms'
 import { Button, Field, Select, TextInput } from '@rawr/ui'
 
 /** The extra questions a booking page asks.
