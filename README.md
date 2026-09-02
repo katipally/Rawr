@@ -70,7 +70,10 @@ together exhaust the Supabase pooler and the failures read as logic errors:
 ```
 
 All of them run against the real database and exit non-zero on failure, so they
-can gate a build. `/design` renders every primitive in its empty, single-row and
+can gate a build. They run inside the two seeded workspaces and leave records,
+timeline rows and settings behind, so `pnpm verify` ends by reseeding: after a
+full run the development data is fresh again. Running one suite on its own does
+not reseed; run `pnpm db:seed` when the leftovers get in the way. `/design` renders every primitive in its empty, single-row and
 500-character states; `/design?rows=10000` is the large-result check.
 
 ## The public edge
