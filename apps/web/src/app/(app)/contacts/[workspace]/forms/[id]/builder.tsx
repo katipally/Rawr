@@ -7,7 +7,7 @@ import type { FormDetail } from '@rawr/db'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Button, Field, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FormPreview } from './preview.tsx'
@@ -55,6 +55,23 @@ export const FormBuilder = ({
   const [fields, setFields] = useState<FormField[]>(form.fields)
   const [settings, setSettings] = useState(form.settings)
   const [saving, setSaving] = useState(false)
+  const [showDelete, setShowDelete] = useState(false)
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
+
+  const remove = async () => {
+    setDeleting(true)
+    try {
+      await api.forms.remove.mutate({ id: form.id })
+      toast('success', `"${form.name}" is deleted.`)
+      router.push(formsPath(workspace))
+    } catch (cause) {
+      // Refused with the reason when the form has submissions: those are leads.
+      toast('error', errorMessage(cause))
+      setDeleting(false)
+      setShowDelete(false)
+    }
+  }
   /** The last state the server confirmed. Everything on this screen is local
    *  until Save, and the header has a link straight back to the list, so leaving
    *  used to discard a rebuilt form without a word. */
@@ -155,6 +172,11 @@ export const FormBuilder = ({
           ) : (
             <>
               {dirty ? <span className="text-xs text-secondary">Unsaved changes</span> : null}
+              {form.id ? (
+                <Button type="button" variant="destructive" onClick={() => setShowDelete(true)}>
+                  Delete
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="primary"
@@ -168,6 +190,34 @@ export const FormBuilder = ({
           )}
         </div>
       </header>
+
+      <Modal open={showDelete} title={`Delete ${form.name}`} onClose={() => setShowDelete(false)}>
+        <div className="flex flex-col gap-3">
+          <p>
+            The embed and the hosted page stop working the moment it is gone. A form that has taken
+            submissions is refused here, because those are leads; turn it off instead.
+          </p>
+          <p className="text-secondary">Type the name to confirm.</p>
+          <TextInput
+            aria-label={`Type ${form.name} to confirm`}
+            value={confirmText}
+            onChange={(event) => setConfirmText(event.target.value)}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="destructive"
+              busy={deleting}
+              disabled={confirmText.trim() !== form.name}
+              onClick={() => void remove()}
+            >
+              Delete form
+            </Button>
+            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Editor and preview sit side by side only when there is room for both.
           Below that the preview follows the editor rather than being hidden. */}

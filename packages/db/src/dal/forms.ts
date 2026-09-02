@@ -537,6 +537,30 @@ export type SubmissionRow = {
   at: Date
 }
 
+/** Refused while any submission exists: those are leads, and the form's schema
+ *  is what makes them readable. Turn the form off instead, or delete it once its
+ *  history has been dealt with. */
+export const deleteForm = async (ctx: WorkspaceContext, id: string): Promise<void> => {
+  await mutate(ctx, 'form', async (tx) => {
+    const [row] = await tx.select({ id: form.id, name: form.name, slug: form.slug }).from(form).where(eq(form.id, id)).limit(1)
+    if (!row) throw new Error('That form no longer exists.')
+    const [held] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(formSubmission)
+      .where(eq(formSubmission.formId, id))
+    if (held && held.n > 0) {
+      throw new Error(
+        `"${row.name}" has ${held.n} submission${held.n === 1 ? '' : 's'}, which are leads. Turn it off instead; a form with history is not deleted.`,
+      )
+    }
+    await tx.delete(form).where(eq(form.id, id))
+    return {
+      result: undefined,
+      audit: { entity: 'form', entityId: id, action: 'delete', before: { name: row.name, slug: row.slug }, after: null },
+    }
+  })
+}
+
 export const listSubmissions = async (
   ctx: WorkspaceContext,
   input: {

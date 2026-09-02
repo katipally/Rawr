@@ -7,6 +7,7 @@ import {
   releaseSubmission,
   saveForm,
   type FormField,
+  deleteForm,
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -79,6 +80,10 @@ export const formsRouter = router({
         }),
       ),
     ),
+
+  remove: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => deleteForm(ctx.workspace, input.id))),
 
   submissions: protectedProcedure
     .input(
