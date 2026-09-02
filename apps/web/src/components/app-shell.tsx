@@ -277,7 +277,33 @@ const Shell = ({
     </nav>
   )
 
-  /** The phone sheet: same sections, inline lists, no hover. */
+  const switcher = (
+    <label className="flex items-center">
+      <span className="sr-only">Workspace</span>
+      <select
+        value={workspaceSlug}
+        title={`${email} · ${role}`}
+        onChange={(event) => {
+          // The switch handler re-reads the membership before it changes
+          // anything, so the selection is a request, never proof.
+          const target = new URL('/api/auth/workspace', window.location.origin)
+          target.searchParams.set('to', event.target.value)
+          window.location.assign(target.toString())
+        }}
+        className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface px-2 text-small"
+      >
+        {workspaces.map((option) => (
+          <option key={option.slug} value={option.slug}>
+            {option.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+
+  /** The phone sheet: same sections, inline lists, no hover. Ends with who is
+   *  signed in and, for members of more than one workspace, the switcher the
+   *  top bar has no room for at this width. */
   const sheet = (
     <nav aria-label="Sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
       {nav.map((section) => {
@@ -423,6 +449,12 @@ const Shell = ({
           <>
             <div id="primary-nav" className="fixed inset-y-12 left-0 z-30 flex w-64 flex-col bg-nav text-nav-text md:hidden">
               {sheet}
+              <div className="flex flex-col gap-2 border-t border-nav-active/60 px-3 py-3 text-small text-nav-muted">
+                <span className="truncate" title={email}>
+                  {email} · {role}
+                </span>
+                {workspaces.length > 1 ? switcher : <span className="truncate">{workspaceName}</span>}
+              </div>
             </div>
             <button
               type="button"
