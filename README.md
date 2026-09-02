@@ -60,7 +60,22 @@ a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
  pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```
 
-`pnpm verify` runs all nine. One of them needs the app up: `verify:mcp` calls the
+`pnpm verify` runs all nine.
+
+## Connecting an assistant
+
+Rawr is an MCP server at `/api/mcp` and its own OAuth 2.1 authorization server, so a
+client connects by signing in rather than by pasting a token:
+
+```
+ claude.ai / Desktop   Settings, Connectors, Add custom connector, paste the URL
+ Claude Code           claude mcp add --transport http rawr http://localhost:3000/api/mcp
+ no browser            Settings, Agent access: a token, sent as a bearer header
+```
+
+Discovery is at `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`; consent is `/oauth/authorize`. Every screen has
+a tool, under the signed-in person's role. One of them needs the app up: `verify:mcp` calls the
 real `/api/mcp`. Start it with a small pool, or the suites and the dev server
 together exhaust the Supabase pooler and the failures read as logic errors:
 

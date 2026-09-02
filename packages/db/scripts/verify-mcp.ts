@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
+import { randomToken } from '../src/internal/crypto.ts'
 import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import {
   createMcpToken,
@@ -289,9 +291,9 @@ try {
   const tools: any[] = listed.body?.result?.tools ?? []
   const names = tools.map((tool) => tool.name).sort()
   check(
-    'all ten tools are offered',
-    names.length === 10,
-    names.join(', '),
+    'the ten hand-written tools are offered, then one per procedure',
+    names.length >= 120,
+    `${names.length} tools`,
   )
   check(
     'the five reads and the five writes are the ones the doc names',
@@ -309,9 +311,17 @@ try {
     ].every((name) => names.includes(name)),
   )
   check(
-    'no delete, merge or bulk tool exists',
-    !names.some((name: string) => /delete|merge|bulk/.test(name)),
-    'destructive work stays in the UI, where a human is looking at it',
+    'a delete, merge or bulk tool is marked destructive, so a client confirms first',
+    tools
+      .filter((tool) => /remove|merge|bulk/.test(tool.name))
+      .every((tool) => tool.annotations?.destructiveHint === true),
+    tools.filter((tool) => tool.annotations?.destructiveHint === true).map((t) => t.name).join(', '),
+  )
+  check(
+    'every screen has a tool: mail, meetings, forms, segments, integrations, settings',
+    ['mail_thread', 'mail_body', 'booking_pages', 'forms_list', 'segments_list', 'integrations_list', 'admin_fields_list'].every(
+      (name) => names.includes(name),
+    ),
   )
   check(
     'every tool has a schema a client can validate against',
@@ -334,10 +344,140 @@ try {
 
   const unknownTool = await call(salesToken, 'destroy_everything', {})
   check(
-    'an unknown tool names the ones that exist',
-    (unknownTool.rpcError ?? '').includes('search_records'),
+    'an unknown tool points at the catalogue',
+    (unknownTool.rpcError ?? '').includes('tools/list'),
     unknownTool.rpcError ?? '',
   )
+
+  const generated = await call(salesToken, 'integrations_list', {})
+  check(
+    'a generated tool runs the same procedure the screen does',
+    !generated.isError && Array.isArray(generated.data?.rows) && generated.data.rows.length === 7,
+    generated.text,
+  )
+  const generatedRefusal = await call(viewerToken, 'crm_records_remove', { object: 'deal', id: mggId })
+  check(
+    'and a generated write is refused by role in the layer, in a sentence',
+    generatedRefusal.isError && /viewer/i.test(generatedRefusal.text),
+    generatedRefusal.text,
+  )
+
+  // -----------------------------------------------------------------------
+  section('oauth: the way a client actually connects')
+
+  const discovery = await fetch(`${BASE}/.well-known/oauth-protected-resource/api/mcp`).then((r) => r.json() as Promise<any>)
+  check('the protected resource names itself and its authorization server', discovery.resource === ENDPOINT && discovery.authorization_servers?.[0] === BASE)
+  const server = await fetch(`${BASE}/.well-known/oauth-authorization-server`).then((r) => r.json() as Promise<any>)
+  check(
+    'the authorization server advertises PKCE S256, DCR, CIMD and public clients',
+    server.code_challenge_methods_supported?.includes('S256') &&
+      typeof server.registration_endpoint === 'string' &&
+      server.client_id_metadata_document_supported === true &&
+      server.token_endpoint_auth_methods_supported?.includes('none'),
+  )
+  check(
+    'a 401 carries the resource_metadata pointer',
+    /resource_metadata=/.test(
+      (await fetch(ENDPOINT, { method: 'POST', body: '{}' })).headers.get('www-authenticate') ?? '',
+    ),
+  )
+
+  const registered = await fetch(`${BASE}/api/oauth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ client_name: `${MARK} client`, redirect_uris: ['http://localhost/callback'] }),
+  }).then((r) => r.json() as Promise<any>)
+  check('a public client registers dynamically', typeof registered.client_id === 'string', registered.client_id)
+  const badRegistration = await fetch(`${BASE}/api/oauth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ client_name: 'x', redirect_uris: ['http://evil.example/cb'] }),
+  })
+  check('a plain-http redirect off the loopback is refused', badRegistration.status === 400)
+
+  const devLogin = await fetch(`${BASE}/api/auth/dev`, {
+    method: 'POST',
+    body: new URLSearchParams({ email: 'sales@datasaur.ai' }),
+    redirect: 'manual',
+  })
+  const cookie = devLogin.headers.get('set-cookie')?.split(';')[0] ?? ''
+  if (!cookie.startsWith('rawr_session=')) {
+    console.log('skip  consent flow: dev sign-in is not enabled here (RAWR_DEV_LOGIN)')
+  } else {
+    const verifier = randomToken(48)
+    const challenge = createHash('sha256').update(verifier).digest('base64url')
+    const approve = await fetch(`${BASE}/api/oauth/authorize`, {
+      method: 'POST',
+      headers: { cookie },
+      body: new URLSearchParams({
+        client_id: registered.client_id,
+        redirect_uri: 'http://localhost:5555/callback',
+        code_challenge: challenge,
+        state: 'verify',
+        decision: 'approve',
+      }),
+      redirect: 'manual',
+    })
+    const back = new URL(approve.headers.get('location') ?? 'http://x/')
+    check(
+      'approving sends a code back to the loopback with any port, plus state and iss',
+      back.port === '5555' && back.searchParams.get('state') === 'verify' && back.searchParams.get('iss') === BASE && Boolean(back.searchParams.get('code')),
+      back.toString(),
+    )
+
+    const wrongVerifier = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: back.searchParams.get('code') ?? '',
+        code_verifier: 'x'.repeat(50),
+        client_id: registered.client_id,
+      }),
+    }).then((r) => r.json() as Promise<any>)
+    check('a wrong PKCE verifier is refused and burns the code', wrongVerifier.error === 'invalid_grant')
+
+    const second = await fetch(`${BASE}/api/oauth/authorize`, {
+      method: 'POST',
+      headers: { cookie },
+      body: new URLSearchParams({ client_id: registered.client_id, redirect_uri: 'http://localhost:5555/callback', code_challenge: challenge, decision: 'approve' }),
+      redirect: 'manual',
+    })
+    const code = new URL(second.headers.get('location') ?? 'http://x/').searchParams.get('code') ?? ''
+    const tokens = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<any>)
+    check('the right verifier gets an access token and a refresh token', typeof tokens.access_token === 'string' && typeof tokens.refresh_token === 'string' && tokens.expires_in === 3600)
+
+    const viaOauth = await call(tokens.access_token, 'get_record', { object: 'deal', id: mggId })
+    check('the OAuth token reads as the person who approved', !viaOauth.isError && viaOauth.text.includes('MGG'), viaOauth.text.slice(0, 80))
+
+    const reused = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<any>)
+    check('a code cannot be redeemed twice', reused.error === 'invalid_grant')
+
+    const refreshed = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<any>)
+    check('a refresh rotates both tokens', typeof refreshed.access_token === 'string' && refreshed.refresh_token !== tokens.refresh_token)
+    const staleRefresh = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<any>)
+    check('the old refresh token is dead the moment the new one exists', staleRefresh.error === 'invalid_grant')
+    const staleAccess = await rpc(tokens.access_token, 'ping')
+    check('and so is the old access token', staleAccess.status === 401)
+
+    const ownTokens = await listMcpTokens(sales)
+    check(
+      'the connection appears in Settings under the client name, revocable like any token',
+      ownTokens.some((t) => t.name === `${MARK} client` && !t.revokedAt),
+    )
+  }
 
   // -----------------------------------------------------------------------
   section('the registry is the schema')
@@ -754,9 +894,9 @@ try {
   const salesSees = await listMcpTokens(sales)
   check(
     'an admin sees every token in the workspace',
-    // Three: the probe tenant's token belongs to the other workspace and is
-    // correctly invisible here.
-    adminSees.filter((t) => t.name.startsWith(MARK)).length === 3,
+    // Three by hand: the probe tenant's token belongs to the other workspace and
+    // is correctly invisible here. The OAuth section's token is named for its client.
+    adminSees.filter((t) => t.name.startsWith(MARK) && !t.name.endsWith('client')).length === 3,
     `${adminSees.length} visible`,
   )
   check(
@@ -804,9 +944,12 @@ try {
       await tx.execute(sql`delete from mcp_call where token_id in (
         select id from mcp_token where name like ${`${MARK}%`})`)
       await tx.execute(sql`delete from mcp_token where name like ${`${MARK}%`}`)
+      await tx.execute(sql`delete from mcp_oauth_code where client_id in (
+        select id from mcp_client where name like ${`${MARK}%`})`)
       await tx.execute(sql`delete from field_def where key = 'f5_verify_flavour'`)
     })
     forgetRegistry(admin.workspaceId)
+    await appDb.execute(sql`delete from mcp_client where name like ${`${MARK}%`}`)
   }
   await closeAppPool()
 }
