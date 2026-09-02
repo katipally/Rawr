@@ -10,9 +10,12 @@ import { IntegrationPanel } from './integration-panel.tsx'
  *  here hides a state: an unconfigured provider is a row, a rejected credential is
  *  red with the reason, and a webhook that has stopped arriving turns amber on its
  *  own rather than looking fine forever. */
-const IntegrationsPage = async () => {
+type Props = { searchParams: Promise<{ open?: string }> }
+
+const IntegrationsPage = async ({ searchParams }: Props) => {
   const session = await readSession()
   if (!session) return null
+  const { open } = await searchParams
 
   const ctx = contextFrom(session)
   const [rows, unmatched] = await Promise.all([readIntegrations(ctx), listUnmatchedEvents(ctx, 25)])
@@ -46,6 +49,7 @@ const IntegrationsPage = async () => {
         webhookBase={publicBaseUrl}
         canWrite={session.role === 'admin'}
         role={session.role}
+        openKind={rows.find((row) => row.kind === open)?.kind ?? null}
       />
     </div>
   )

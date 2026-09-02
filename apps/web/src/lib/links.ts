@@ -100,7 +100,7 @@ export const lifecyclePath = (): string => '/settings/lifecycle'
 export const subscriptionsPath = (): string => '/settings/subscriptions'
 
 export const integrationsPath = (kind?: string): string =>
-  kind ? `/settings/integrations/${kind}` : '/settings/integrations'
+  kind ? `/settings/integrations?open=${kind}` : '/settings/integrations'
 
 /** Segments live in the CRM tree, not settings: a segment is a view of records
  *  that salespeople open, not configuration an admin sets once. */

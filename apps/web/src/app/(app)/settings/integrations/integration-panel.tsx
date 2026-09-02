@@ -2,7 +2,7 @@
 
 import { Button, Field, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { HealthState, IntegrationKind } from '@rawr/db'
 import type { IntegrationMeta } from '~/server/integrations/index.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -28,6 +28,8 @@ export type IntegrationPanelProps = {
   webhookBase: string
   canWrite: boolean
   role: string
+  /** A provider to land on with its form open, from a "connect" link elsewhere. */
+  openKind: IntegrationKind | null
 }
 
 /** F6 §1's four states, and what each one tells a person to do next. */
@@ -57,14 +59,23 @@ export const IntegrationPanel = ({
   webhookBase,
   canWrite,
   role,
+  openKind,
 }: IntegrationPanelProps) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
-  const [editing, setEditing] = useState<IntegrationKind | null>(null)
+  // A "connect Apollo" link from a record lands with that provider's form open.
+  const opened = openKind ? rows.find((row) => row.kind === openKind) : null
+  const [editing, setEditing] = useState<IntegrationKind | null>(canWrite && opened ? opened.kind : null)
   const [secret, setSecret] = useState('')
-  const [config, setConfig] = useState<Record<string, string>>({})
+  const [config, setConfig] = useState<Record<string, string>>(
+    Object.fromEntries(Object.entries(opened?.config ?? {}).map(([key, value]) => [key, String(value ?? '')])),
+  )
   const [result, setResult] = useState<{ kind: IntegrationKind; ok: boolean; detail: string } | null>(null)
+
+  useEffect(() => {
+    if (openKind) document.getElementById(`integration-${openKind}`)?.scrollIntoView({ block: 'start' })
+  }, [openKind])
 
   const open = (row: IntegrationView) => {
     setEditing(row.kind)
@@ -124,7 +135,7 @@ export const IntegrationPanel = ({
           const isOpen = editing === row.kind
 
           return (
-            <li key={row.kind} className="rounded-panel border border-line bg-surface">
+            <li key={row.kind} id={`integration-${row.kind}`} className="rounded-panel border border-line bg-surface">
               <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-baseline gap-x-2">

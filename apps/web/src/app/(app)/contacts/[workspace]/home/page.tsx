@@ -111,7 +111,7 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
                 <thead>
                   <tr className="text-left text-small text-secondary">
                     <th className="py-1 pr-3 font-medium">Stage</th>
-                    <th className="py-1 pr-3 text-right font-medium">Deals</th>
+                    <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Deals</th>
                     <th className="py-1 pr-3 text-right font-medium">Total</th>
                     <th className="py-1 text-right font-medium">Weighted</th>
                   </tr>
@@ -129,15 +129,15 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
                       .filter((s) => s.pipelineId === pipelineId)
                       .map((stage) => (
                         <tr key={stage.stageId} className="border-t border-divider">
-                          <td className="max-w-0 truncate py-1.5 pr-3">
+                          <td className="w-full max-w-0 truncate py-1.5 pr-3">
                             <Link href={objectView(workspace, 'deal', 'all', 'board', { pipeline: pipelineId })}>{stage.stageName}</Link>
                             {stage.probability !== null ? <span className="ml-1 text-small text-secondary">{stage.probability}%</span> : null}
                           </td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums">
+                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
+                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
                             {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.total, m.currency)).join(' · ') : formatCurrency(0)}
                           </td>
-                          <td className="py-1.5 text-right tabular-nums">
+                          <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
                             {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.weighted, m.currency)).join(' · ') : formatCurrency(0)}
                           </td>
                         </tr>

@@ -270,7 +270,13 @@ const Shell = ({
           style={{ top: flyoutTop }}
           className="absolute left-full z-40 w-56 rounded-r-panel border-l border-nav-active bg-nav py-1 text-nav-text shadow-overlay"
         >
-          <p className="px-3 pt-1 pb-2 text-small font-medium uppercase tracking-wide text-nav-muted">{open.label}</p>
+          {/* The rail already says which section this is when it is pinned open;
+              only an icon-only rail needs the name repeated here. */}
+          {expanded ? null : (
+            <p className="px-3 pt-1 pb-2 text-small font-semibold uppercase tracking-wider text-nav-muted/70">
+              {open.label}
+            </p>
+          )}
           {itemLinks(open, true)}
         </div>
       ) : null}

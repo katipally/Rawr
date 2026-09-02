@@ -47,7 +47,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     kind: 'apollo',
     name: 'Apollo',
     purpose:
-      'Sequences, email tracking and person enrichment. Rawr sends no sequence email and builds no pixel; these are Apollo’s own events read back onto the timeline.',
+      'Sequences, email tracking, and person and company enrichment. A contact is enrolled in a sequence from its record; Rawr sends no sequence email and builds no pixel. Steps, replies, opens and clicks are Apollo’s own events, read back onto the timeline.',
     failureMode:
       'Apollo down means the timeline is missing recent tracking events, and a degraded health state says so on the record rather than implying nobody opened anything.',
     secretLabel: 'API key',
@@ -57,7 +57,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   {
     kind: 'clay',
     name: 'Clay',
-    purpose: 'The second enricher, filling what Apollo left blank on a company.',
+    purpose: 'The second enricher: a company’s domain is pushed into a Clay table, and whatever Apollo left blank comes back by webhook.',
     failureMode:
       'On the Launch tier there is no webhook or HTTP API sync at all, so this degrades to a documented CSV round trip and says so, rather than silently doing nothing.',
     secretLabel: 'Webhook auth token',
