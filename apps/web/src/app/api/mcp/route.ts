@@ -2,6 +2,7 @@ import { callerForToken, touchMcpToken } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { handle, PROTOCOL_VERSIONS, type JsonRpcRequest } from '~/server/mcp/protocol.ts'
 import { clientIp, rateLimit } from '~/server/edge.ts'
+import { challengeHeader } from '~/server/mcp/oauth.ts'
 
 /** F5 §1. The MCP endpoint. One path, POST for messages, and nothing else.
  *
@@ -28,9 +29,9 @@ const unauthorized = (message: string): NextResponse =>
     { jsonrpc: '2.0', id: null, error: { code: -32001, message } },
     {
       status: 401,
-      // Names where a token comes from, so somebody holding a stale one knows what
-      // to do next instead of reading a bare 401.
-      headers: { 'www-authenticate': 'Bearer realm="Rawr MCP"' },
+      // Where the OAuth metadata is, so a client connects by signing in rather
+      // than by reading a bare 401; a person holding a stale token reads the message.
+      headers: { 'www-authenticate': challengeHeader() },
     },
   )
 
@@ -64,7 +65,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   const authorization = request.headers.get('authorization') ?? ''
   const token = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
   if (!token) {
-    return unauthorized('This endpoint needs a Rawr token. Create one in Settings and send it as "Authorization: Bearer rawr_mcp_…".')
+    return unauthorized('This endpoint needs a Rawr token. Connect through OAuth (sign in when your client asks), or create a token in Settings and send it as "Authorization: Bearer rawr_mcp_…".')
   }
 
   const caller = await callerForToken(token)

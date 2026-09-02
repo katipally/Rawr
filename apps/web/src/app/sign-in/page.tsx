@@ -1,9 +1,10 @@
 import { devLoginEnabled, env, googleConfigured } from '~/lib/env.ts'
 
-type Props = { searchParams: Promise<{ error?: string }> }
+type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 
 const SignIn = async ({ searchParams }: Props) => {
-  const { error } = await searchParams
+  const { error, next } = await searchParams
+  const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-sm flex-col justify-center gap-6 p-6">
@@ -20,7 +21,7 @@ const SignIn = async ({ searchParams }: Props) => {
 
       {googleConfigured ? (
         <a
-          href="/api/auth/google"
+          href={after ? `/api/auth/google?next=${encodeURIComponent(after)}` : '/api/auth/google'}
           className="flex h-9 items-center justify-center rounded-hs bg-cta px-3 font-semibold text-white no-underline transition-colors hover:bg-cta-hover"
         >
           Continue with Google
@@ -34,6 +35,7 @@ const SignIn = async ({ searchParams }: Props) => {
 
       {devLoginEnabled ? (
         <form action="/api/auth/dev" method="post" className="flex flex-col gap-2">
+          {after ? <input type="hidden" name="next" value={after} /> : null}
           <label htmlFor="dev-email" className="font-medium">
             Development sign-in
           </label>

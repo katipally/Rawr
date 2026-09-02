@@ -142,16 +142,36 @@ export const TokenList = ({
       <div className="rounded-panel border border-line p-4">
         <h2 className="font-medium">Connecting an assistant</h2>
         <p className="text-secondary">
-          Rawr speaks MCP over HTTP. In Claude Code, with the token from above:
+          Rawr speaks MCP over HTTP and signs you in with OAuth, so most clients need no token at
+          all: add the server, approve the connection in the browser, and it acts as you.
         </p>
-        <code className="mt-2 block overflow-x-auto rounded-hs bg-fill p-3 text-small">
-          claude mcp add --transport http rawr {endpoint} --header &quot;Authorization: Bearer
-          YOUR_TOKEN&quot;
-        </code>
-        <p className="mt-2 text-secondary">
-          For a client that only speaks stdio, run{' '}
-          <code>node apps/web/scripts/mcp-stdio.ts</code> with <code>RAWR_MCP_URL</code> and{' '}
-          <code>RAWR_MCP_TOKEN</code> set.
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-small">
+          <dt className="text-secondary">claude.ai, Claude Desktop</dt>
+          <dd>
+            Settings, Connectors, Add custom connector. Paste{' '}
+            <code className="rounded-hs bg-fill px-1 break-all">{endpoint}</code> and leave the client
+            secret empty.
+          </dd>
+          <dt className="text-secondary">Claude Code</dt>
+          <dd>
+            <code className="block overflow-x-auto rounded-hs bg-fill p-2">
+              claude mcp add --transport http rawr {endpoint}
+            </code>
+            then <code>/mcp</code> to sign in.
+          </dd>
+          <dt className="text-secondary">A fixed token</dt>
+          <dd>
+            For a client that cannot open a browser, create a token above and send it as{' '}
+            <code>Authorization: Bearer YOUR_TOKEN</code>. A stdio-only client can run{' '}
+            <code>node apps/web/scripts/mcp-stdio.ts</code> with <code>RAWR_MCP_URL</code> and{' '}
+            <code>RAWR_MCP_TOKEN</code> set.
+          </dd>
+        </dl>
+        <p className="mt-3 text-secondary">
+          Either way, every tool the screens have is available: records, pipeline, tasks, timeline,
+          mail threads, meetings, forms, segments, integrations and settings, each under your role.
+          A connection made through OAuth appears in the list below under the client&apos;s name
+          and is revoked the same way.
         </p>
       </div>
 

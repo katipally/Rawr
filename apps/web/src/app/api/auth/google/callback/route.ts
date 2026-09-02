@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { membershipsForUser, signInWithGoogle } from '@rawr/db'
 import { env } from '~/lib/env.ts'
 import { googleClient, identityFromIdToken } from '~/server/auth/google.ts'
+import { safeNext } from '~/server/auth/next.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
 const denied = (reason: string): NextResponse =>
@@ -15,8 +16,10 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const jar = await cookies()
   const expectedState = jar.get('rawr_oauth_state')?.value
   const codeVerifier = jar.get('rawr_oauth_verifier')?.value
+  const next = safeNext(jar.get('rawr_next')?.value ?? null)
   jar.delete('rawr_oauth_state')
   jar.delete('rawr_oauth_verifier')
+  jar.delete('rawr_next')
 
   if (request.nextUrl.searchParams.get('error')) {
     return denied('Google sign-in was cancelled.')
@@ -59,5 +62,5 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   await writeSessionCookie(sessionFromMembership(membership))
-  return NextResponse.redirect(new URL('/', env.AUTH_URL))
+  return NextResponse.redirect(new URL(next, env.AUTH_URL))
 }

@@ -2,6 +2,7 @@ import { membershipsForUser, userIdForEmail } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { devLoginEnabled, env } from '~/lib/env.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
+import { safeNext } from '~/server/auth/next.ts'
 
 const back = (error: string): NextResponse =>
   NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(error)}`, env.AUTH_URL))
@@ -28,5 +29,5 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   await writeSessionCookie(sessionFromMembership(membership))
-  return NextResponse.redirect(new URL('/', env.AUTH_URL))
+  return NextResponse.redirect(new URL(safeNext(String(form.get('next') ?? '')), env.AUTH_URL))
 }
