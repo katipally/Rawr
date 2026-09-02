@@ -11,7 +11,7 @@ import {
 import { z } from 'zod'
 import { devGmailEnabled } from '~/lib/env.ts'
 import { call } from '../errors.ts'
-import { syncMailbox } from '../gmail.ts'
+import { readMessageBody, syncMailbox } from '../gmail.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 /** F1 phase B. Reading is open to anybody signed in, because a thread on a record
@@ -85,4 +85,11 @@ export const mailRouter = router({
   thread: protectedProcedure
     .input(z.object({ id: z.uuid() }))
     .query(({ ctx, input }) => call(() => readThread(ctx.workspace, input.id))),
+
+  /** The full text of one message, fetched from Gmail through the mailbox that
+   *  read it. Never stored, so a withdrawn mailbox means a snippet and a
+   *  sentence saying why, not a stale copy. */
+  body: protectedProcedure
+    .input(z.object({ messageId: z.uuid() }))
+    .query(({ ctx, input }) => call(() => readMessageBody(ctx.workspace, input.messageId))),
 })

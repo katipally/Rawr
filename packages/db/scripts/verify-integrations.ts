@@ -524,6 +524,7 @@ try {
     const result = await ingestMessage(sales, {
       incoming: incoming({ from: 'recruiter@agency.example' }),
       ownerEmail: salesUser.email,
+      mailboxId,
       internalDomain,
       blocked,
     })
@@ -551,6 +552,7 @@ try {
     const result = await ingestMessage(sales, {
       incoming: incoming({ from: `verify-mail-${stamp}@partner1.example` }),
       ownerEmail: salesUser.email,
+      mailboxId,
       internalDomain,
       blocked: new Set(),
     })
@@ -575,6 +577,7 @@ try {
     const result = await ingestMessage(sales, {
       incoming: incoming({ from: `verify-mail-${stamp}@partner1.example` }),
       ownerEmail: salesUser.email,
+      mailboxId,
       internalDomain,
       blocked: new Set(),
     })
@@ -591,6 +594,7 @@ try {
     await ingestMessage(admin, {
       incoming: incoming({ providerMessageId: `m2-${stamp}`, from: `verify-mail-${stamp}@partner1.example` }),
       ownerEmail: 'admin@datasaur.ai',
+      mailboxId,
       internalDomain,
       blocked: new Set(),
     })
@@ -617,6 +621,7 @@ try {
         from: `brand-new-${stamp}@partner1.example`,
       }),
       ownerEmail: salesUser.email,
+      mailboxId,
       internalDomain,
       blocked: new Set(),
     })
@@ -639,6 +644,7 @@ try {
         to: [salesUser.email, `verify-mail-${stamp}@partner1.example`],
       }),
       ownerEmail: salesUser.email,
+      mailboxId,
       internalDomain,
       blocked: new Set(),
     })

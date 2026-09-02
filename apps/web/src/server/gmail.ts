@@ -2,6 +2,7 @@ import {
   blockedPatterns,
   ingestMessage,
   internalDomainOf,
+  messageSource,
   readMailbox,
   recordMailboxFailure,
   updateMailboxCursor,
@@ -224,7 +225,7 @@ type Tally = { stored: number; alreadyHad: number; skipped: number }
 
 const store = async (
   ctx: WorkspaceContext,
-  box: { email: string },
+  box: { id: string; email: string },
   incoming: IncomingMessage,
   options: Options,
   tally: Tally,
@@ -232,6 +233,7 @@ const store = async (
   const result = await ingestMessage(ctx, {
     incoming,
     ownerEmail: box.email,
+    mailboxId: box.id,
     internalDomain: options.internalDomain,
     blocked: options.blocked,
   })
@@ -342,6 +344,65 @@ const incremental = async (
   return { read, ...tally, done: true, reason: null }
 }
 
+// ---------------------------------------------------------------- bodies
+
+export type MessageBody = { text: string; truncated: boolean }
+
+/** Bodies are never stored (B1): the reference is the provider's own id, and the
+ *  body is fetched through the mailbox that read it, on the day somebody opens
+ *  the thread. Plain text is preferred; HTML is flattened to text so nothing a
+ *  sender wrote executes or loads here. */
+const BODY_LIMIT = 200_000
+
+const decodeBase64Url = (data: string): string => Buffer.from(data, 'base64url').toString('utf8')
+
+type BodyPart = GmailPayload & { mimeType?: string; body?: { data?: string; attachmentId?: string; size?: number } }
+
+const collect = (part: BodyPart | undefined, into: { text: string[]; html: string[] }): void => {
+  if (!part) return
+  if (part.body?.data && !part.filename) {
+    if (part.mimeType === 'text/plain') into.text.push(decodeBase64Url(part.body.data))
+    else if (part.mimeType === 'text/html') into.html.push(decodeBase64Url(part.body.data))
+  }
+  for (const child of (part.parts ?? []) as BodyPart[]) collect(child, into)
+}
+
+export const htmlToText = (html: string): string =>
+  html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+export const readMessageBody = async (ctx: WorkspaceContext, messageId: string): Promise<MessageBody> => {
+  const source = await messageSource(ctx, messageId)
+  if (!source) {
+    throw new Error('No connected mailbox can fetch this message any more. The snippet is all that remains.')
+  }
+  if (source.mailbox.state === 'revoked') {
+    throw new Error('Access to the mailbox that read this message has been withdrawn. Reconnect it to read bodies again.')
+  }
+
+  const { fetcher } = devGmailEnabled
+    ? { fetcher: devFetcher(source.mailbox.email, await internalDomainOf(ctx)) }
+    : await authorised(ctx, source.mailbox.id, source.mailbox)
+
+  const raw = (await fetcher(`/messages/${source.providerMessageId}`, { format: 'full' })) as { payload?: BodyPart }
+  const found = { text: [] as string[], html: [] as string[] }
+  collect(raw.payload, found)
+  const text = found.text.length > 0 ? found.text.join('\n').trim() : htmlToText(found.html.join('\n'))
+  const body = text || source.snippet || '(this message has no readable text)'
+  return { text: body.slice(0, BODY_LIMIT), truncated: body.length > BODY_LIMIT }
+}
+
 // ------------------------------------------------------- development only
 
 /** A stand-in Gmail so the whole path — back-fill, cursor, participant matching,
@@ -373,7 +434,17 @@ const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
     const id = path.replace('/messages/', '')
     const found = messages.find((entry) => entry.id === id)
     if (!found) throw new Error(`The development mailbox has no message ${id}.`)
-    return found
+    if (params?.format !== 'full') return found
+    const subject = found.payload?.headers?.find((h) => h.name === 'Subject')?.value ?? ''
+    const body = `Hi,\n\nThis is the full body of "${subject}" from the development mailbox. It exists so the thread viewer, the on-demand fetch and the MCP tool are all exercisable before a real mailbox is connected.\n\nThanks,\nDev`
+    return {
+      ...found,
+      payload: {
+        ...found.payload,
+        mimeType: 'text/plain',
+        body: { data: Buffer.from(body, 'utf8').toString('base64url') },
+      },
+    }
   }
 }
 
