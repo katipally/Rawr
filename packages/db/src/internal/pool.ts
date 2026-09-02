@@ -19,8 +19,14 @@ const required = (name: string): string => {
 /** Transaction-mode pooler. Prepared statements do not survive it, hence prepare: false. */
 const appClient = postgres(required('DATABASE_URL'), {
   prepare: false,
-  max: Number(process.env.DATABASE_POOL_MAX ?? 10),
-  idle_timeout: 20,
+  // A record screen fans out to about fifteen reads, each on its own connection.
+  max: Number(process.env.DATABASE_POOL_MAX ?? 20),
+  // A fresh connection to the pooler is a TLS handshake of roughly half a second,
+  // so a connection dropped after twenty idle seconds made every click after a
+  // pause pay it again. Ten minutes keeps a working session warm; the pooler
+  // still reclaims anything left open overnight.
+  idle_timeout: 600,
+  max_lifetime: 60 * 60,
   connect_timeout: 10,
 })
 

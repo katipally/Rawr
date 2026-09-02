@@ -3,7 +3,7 @@ import type { WorkspaceContext } from './context.ts'
 import { withWorkspace } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import { fieldOrThrow, getRegistryIn, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 
 export type BoardCard = {
   id: string
@@ -70,9 +70,9 @@ export const readBoard = async (
 ): Promise<Board> => {
   const scope = scopeFor(ctx.actorId)
 
-  return withWorkspace(ctx, async (tx) => {
-    const registry = await getRegistryIn(tx)
-    const object = objectOrThrow(registry, 'deal')
+  const registry = await getRegistry(ctx)
+  const object = objectOrThrow(registry, 'deal')
+  {
     const requested = input.groupBy ?? 'stage_id'
     const candidate = object.byKey.get(requested)
     if (!candidate || !GROUPABLE(candidate)) {
@@ -86,19 +86,23 @@ export const readBoard = async (
     // The columns a board lays out, and their order. Stage takes them from the
     // pipeline so an empty stage still shows; a select takes them from the
     // registry's own option list for the same reason.
-    const columnDefs = byStage
-      ? (
-          await tx.execute<{ id: string; name: string; probability: string | null }>(sql`
-            select s.id, s.name, s.probability
-              from pipeline_stage s
-              ${input.pipelineId ? sql`where s.pipeline_id = ${input.pipelineId}` : sql``}
-             order by s.position asc`)
-        ).map((stage) => ({
-          key: stage.id,
-          name: stage.name,
-          probability: stage.probability === null ? null : Number(stage.probability),
-        }))
-      : groupBy.options.map((option) => ({ key: option, name: option, probability: null }))
+    // Three independent reads, three connections, so the board costs one read's
+    // round trips rather than three in a row. See withWorkspaceReads.
+    const columnsRead = byStage
+      ? withWorkspace(ctx, async (tx) =>
+          (
+            await tx.execute<{ id: string; name: string; probability: string | null }>(sql`
+              select s.id, s.name, s.probability
+                from pipeline_stage s
+                ${input.pipelineId ? sql`where s.pipeline_id = ${input.pipelineId}` : sql``}
+               order by s.position asc`)
+          ).map((stage) => ({
+            key: stage.id,
+            name: stage.name,
+            probability: stage.probability === null ? null : Number(stage.probability),
+          })),
+        )
+      : Promise.resolve(groupBy.options.map((option) => ({ key: option, name: option, probability: null })))
 
     const where: SQL[] = [sql.raw(`"deal"."deleted_at" is null`)]
     if (input.pipelineId) where.push(sql`"deal"."pipeline_id" = ${input.pipelineId}`)
@@ -117,7 +121,7 @@ export const readBoard = async (
       : sql`coalesce(sum("deal"."amount"), 0)::text`
     const weightJoin = byStage ? sql`left join pipeline_stage s on s.id = "deal"."stage_id"` : sql``
 
-    const totals = await tx.execute<{
+    const totalsRead = withWorkspace(ctx, (tx) => tx.execute<{
       group_key: string | null
       currency: string
       n: number
@@ -132,11 +136,11 @@ export const readBoard = async (
         from "deal"
         ${weightJoin}
        where ${predicate}
-       group by 1, 2`)
+       group by 1, 2`))
 
     // row_number over the same partition the footers group by, so a column's cards
     // and its count can never disagree about which deals belong to it.
-    const cards = await tx.execute<{
+    const cardsRead = withWorkspace(ctx, (tx) => tx.execute<{
       id: string
       group_key: string | null
       name: string | null
@@ -170,7 +174,9 @@ export const readBoard = async (
             left join company c on c.id = "deal"."company_id"
            where ${predicate}
         ) ranked
-       where rank <= ${CARDS_PER_COLUMN}`)
+       where rank <= ${CARDS_PER_COLUMN}`))
+
+    const [columnDefs, totals, cards] = await Promise.all([columnsRead, totalsRead, cardsRead])
 
     type Card = (typeof cards)[number]
     const grouped = new Map<string, Card[]>()
@@ -222,5 +228,5 @@ export const readBoard = async (
         .filter((row) => row.group_key === null || !known.has(row.group_key))
         .reduce((sum, row) => sum + Number(row.n), 0),
     }
-  })
+  }
 }

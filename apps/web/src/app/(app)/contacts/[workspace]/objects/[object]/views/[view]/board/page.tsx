@@ -30,9 +30,11 @@ const BoardPage = async ({
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const { object, lookups, canWrite } = await loadCrmContext(ctx, 'deal')
-
-  const [views, resolved] = await Promise.all([listViews(ctx, 'deal'), resolveView(ctx, 'deal', viewSlug)])
+  const [{ object, lookups, canWrite }, views, resolved] = await Promise.all([
+    loadCrmContext(ctx, 'deal'),
+    listViews(ctx, 'deal'),
+    resolveView(ctx, 'deal', viewSlug),
+  ])
   const filters = search.filters ? (decodeFilters(search.filters) as never) : resolved.view.filters
   // No pipeline in the URL means the first one, which is Enterprise in production.
   const pipelineId = search.pipeline ?? lookups.pipelines[0]?.id ?? null

@@ -17,9 +17,10 @@ const ambient = new AsyncLocalStorage<{ workspaceId: string; tx: Tx }>()
 
 const open = async <T>(ctx: WorkspaceContext, fn: (tx: Tx) => Promise<T>): Promise<T> =>
   appDb.transaction(async (tx) => {
-    // set_config rather than SET LOCAL: the value is a bind parameter, so a
-    // workspace id can never be concatenated into SQL. Third argument is is_local.
-    await tx.execute(sql`select set_config('rawr.workspace_id', ${ctx.workspaceId}, true)`)
+    // The id is inlined as a literal rather than bound: assertUsable has already
+    // proven it is a bare UUID, and a statement with no parameters is one round
+    // trip where a bound one is two (the driver describes before it binds).
+    await tx.execute(sql`select set_config('rawr.workspace_id', ${sql.raw(`'${ctx.workspaceId}'`)}, true)`)
     return ambient.run({ workspaceId: ctx.workspaceId, tx }, () => fn(tx))
   })
 
@@ -49,20 +50,18 @@ export const withWorkspace = async <T>(
   return open(ctx, fn)
 }
 
-/** Opens one transaction for a group of reads that would otherwise open one each.
- *  A page with six reads becomes one BEGIN and one COMMIT.
+/** A group of reads that feed one screen. Each read still opens its own
+ *  transaction, on its own pooled connection, and that is deliberate: the driver
+ *  runs parameterised statements on one connection strictly one at a time, two
+ *  round trips each, so pinning a fan-out of N reads to one transaction costs 2N
+ *  trips in a row. Spread across the pool the same fan-out costs about five.
+ *  Measured on the record page: 3.0 s pinned, under 1 s spread.
  *
- *  Explicit rather than automatic: the transaction holds a pooler connection for
- *  as long as the callback runs, so the caller is the one who decides that its
- *  work is short, bounded, and worth the connection. Wrap reads that feed one
- *  screen; never wrap a render that awaits anything but the database. */
-export const withWorkspaceReads = async <T>(
-  ctx: WorkspaceContext,
-  fn: () => Promise<T>,
-): Promise<T> => {
+ *  Kept as the one place a page names its read set, so the day the driver
+ *  pipelines this is one function to change. */
+export const withWorkspaceReads = async <T>(ctx: WorkspaceContext, fn: () => Promise<T>): Promise<T> => {
   assertUsable(ctx)
-  if (ambient.getStore()?.workspaceId === ctx.workspaceId) return fn()
-  return open(ctx, () => fn())
+  return fn()
 }
 
 export type AuditEntry = {

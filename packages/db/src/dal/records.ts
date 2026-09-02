@@ -16,7 +16,7 @@ import {
   type QueryScope,
   type Sort,
 } from './query.ts'
-import { fieldOrThrow, getRegistryIn, objectOrThrow, type Registry, type RegistryField, type RegistryObject } from './registry.ts'
+import { fieldOrThrow, getRegistry, getRegistryIn, objectOrThrow, type Registry, type RegistryField, type RegistryObject } from './registry.ts'
 import { coerce, ValueError } from './values.ts'
 
 export type RecordValues = Record<string, unknown>
@@ -146,54 +146,62 @@ export const listRecords = async (
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
   const scope = scopeFor(ctx.actorId)
 
-  return withWorkspace(ctx, async (tx) => {
-    const registry = await getRegistryIn(tx)
-    const object = objectOrThrow(registry, input.object)
-    const columns = columnsFor(object, input.columns)
-    const plan = orderPlan(object, input.sorts ?? [])
+  const registry = await getRegistry(ctx)
+  const object = objectOrThrow(registry, input.object)
+  const columns = columnsFor(object, input.columns)
+  const plan = orderPlan(object, input.sorts ?? [])
 
-    const selected = [
-      sql.raw(`"${object.key}"."id" as "id"`),
-      ...columns.map((field) => selectExpression(object, field)),
-      ...displayFields(object)
-        .filter((field) => !columns.some((c) => c.key === field.key))
-        .map((field) => selectExpression(object, field)),
-      ...(plan.cursorValue && !columns.some((c) => c.key === plan.cursorValue)
-        ? [selectExpression(object, fieldOrThrow(object, plan.cursorValue))]
-        : []),
-    ]
+  const selected = [
+    sql.raw(`"${object.key}"."id" as "id"`),
+    ...columns.map((field) => selectExpression(object, field)),
+    ...displayFields(object)
+      .filter((field) => !columns.some((c) => c.key === field.key))
+      .map((field) => selectExpression(object, field)),
+    ...(plan.cursorValue && !columns.some((c) => c.key === plan.cursorValue)
+      ? [selectExpression(object, fieldOrThrow(object, plan.cursorValue))]
+      : []),
+  ]
 
-    const where: SQL[] = [NOT_DELETED(object)]
-    const filters = compileFilters(object, input.filters ?? [], scope)
-    if (filters) where.push(filters)
-    if (input.search?.trim()) {
-      where.push(sql`${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${input.search.trim()})`)
-    }
-    // Counted before the cursor narrows it, so page two still says how many rows
-    // the filter matches rather than how many are left.
-    const total = input.count
-      ? Number(
+  const where: SQL[] = [NOT_DELETED(object)]
+  const filters = compileFilters(object, input.filters ?? [], scope)
+  if (filters) where.push(filters)
+  if (input.search?.trim()) {
+    where.push(sql`${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${input.search.trim()})`)
+  }
+  // Counted before the cursor narrows it, so page two still says how many rows
+  // the filter matches rather than how many are left. Its own transaction, so
+  // it runs alongside the page instead of ahead of it.
+  const counting = input.count
+    ? withWorkspace(ctx, async (tx) =>
+        Number(
           (
             await tx.execute<{ n: string }>(sql`
               select count(*) as n
                 from ${sql.raw(`"${object.key}"`)}
                where ${sql.join(where, sql` and `)}`)
           )[0]?.n ?? 0,
-        )
-      : null
+        ),
+      )
+    : Promise.resolve(null)
 
-    if (input.cursor) where.push(plan.keysetWhere(input.cursor))
+  const pageWhere = input.cursor ? [...where, plan.keysetWhere(input.cursor)] : where
 
-    const rows = await tx.execute<RecordValues & { id: string }>(sql`
-      select ${sql.join(selected, sql`, `)}
-        from ${sql.raw(`"${object.key}"`)}
-       where ${sql.join(where, sql` and `)}
-       order by ${plan.orderBy}
-       limit ${limit + 1}`)
+  const [total, { rows, labels }] = await Promise.all([
+    counting,
+    withWorkspace(ctx, async (tx) => {
+      const rows = await tx.execute<RecordValues & { id: string }>(sql`
+        select ${sql.join(selected, sql`, `)}
+          from ${sql.raw(`"${object.key}"`)}
+         where ${sql.join(pageWhere, sql` and `)}
+         order by ${plan.orderBy}
+         limit ${limit + 1}`)
+      return { rows, labels: await resolveLabels(tx, columns, rows.slice(0, limit)) }
+    }),
+  ])
 
+  {
     const page = rows.slice(0, limit)
     const more = rows.length > limit
-    const labels = await resolveLabels(tx, columns, page)
 
     return {
       columns,
@@ -216,7 +224,7 @@ export const listRecords = async (
         ),
       })),
     }
-  })
+  }
 }
 
 const cursorValueOf = (row: RecordValues, key: string): string | number | null => {

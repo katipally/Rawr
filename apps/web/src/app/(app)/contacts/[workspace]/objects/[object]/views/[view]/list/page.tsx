@@ -39,13 +39,41 @@ const ListPage = async ({
   // One transaction for the whole screen. Each of these reads used to open its
   // own, and BEGIN plus the set_config plus COMMIT is three network round trips
   // before a row is fetched.
-  const { object, lookups, canWrite, views, resolved } = await withWorkspaceReads(ctx, async () => {
-    const crm = await loadCrmContext(ctx, objectParam)
-    const [list, view] = await Promise.all([
+  const { object, lookups, canWrite, views, resolved, page, queryError } = await withWorkspaceReads(ctx, async () => {
+    const [crm, list, view] = await Promise.all([
+      loadCrmContext(ctx, objectParam),
       listViews(ctx, objectParam),
       resolveView(ctx, objectParam, viewSlug),
     ])
-    return { ...crm, views: list, resolved: view }
+    // A stale bookmark is redirected below, after the transaction closes.
+    if (!view.matched && view.view.slug !== viewSlug) {
+      return { ...crm, views: list, resolved: view, page: undefined, queryError: null }
+    }
+
+    // Anything in the URL wins over what the view stored, which is what makes a
+    // filtered screen shareable without saving it first.
+    const urlFilters = search.filters ? (decodeFilters(search.filters) as never) : null
+    const filters = urlFilters ?? view.view.filters
+    const sorts = search.sort ? decodeSort(search.sort) : view.view.sorts
+    const columns = view.view.columns.length > 0 ? view.view.columns : crm.object.fields.slice(0, 8).map((f) => f.key)
+
+    try {
+      const page = await listRecords(ctx, {
+        object: objectParam,
+        columns,
+        filters,
+        sorts,
+        search: search.q ?? '',
+        limit: PAGE_SIZE,
+        cursor: decodeCursor(search.cursor),
+        count: true,
+      })
+      return { ...crm, views: list, resolved: view, page, queryError: null }
+    } catch (cause) {
+      // A hand-edited filter in a URL is the usual cause. Say so instead of
+      // showing a crash page.
+      return { ...crm, views: list, resolved: view, page: undefined, queryError: cause instanceof Error ? cause.message : String(cause) }
+    }
   })
   // A stale bookmark still shows the person their records, at the address the
   // view actually lives at, rather than a 404.
@@ -53,31 +81,10 @@ const ListPage = async ({
     redirect(objectView(workspace, objectParam, resolved.view.slug, 'list', search as ListParams))
   }
 
-  // Anything in the URL wins over what the view stored, which is what makes a
-  // filtered screen shareable without saving it first.
   const urlFilters = search.filters ? (decodeFilters(search.filters) as never) : null
   const filters = urlFilters ?? resolved.view.filters
   const sorts = search.sort ? decodeSort(search.sort) : resolved.view.sorts
   const columns = resolved.view.columns.length > 0 ? resolved.view.columns : object.fields.slice(0, 8).map((f) => f.key)
-
-  let page
-  let queryError: string | null = null
-  try {
-    page = await listRecords(ctx, {
-      object: objectParam,
-      columns,
-      filters,
-      sorts,
-      search: search.q ?? '',
-      limit: PAGE_SIZE,
-      cursor: decodeCursor(search.cursor),
-      count: true,
-    })
-  } catch (cause) {
-    // A hand-edited filter in a URL is the usual cause. Say so instead of
-    // showing a crash page.
-    queryError = cause instanceof Error ? cause.message : String(cause)
-  }
 
   // A bulk edit sets one value on many records, so a field that is unique per
   // record — an email, a domain, a name — would only ever produce duplicates.
