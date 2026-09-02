@@ -114,9 +114,13 @@ export const FormBuilder = ({
   const save = async () => {
     setSaving(true)
     try {
-      await api.forms.save.mutate({ id: form.id, name, slug, isActive, fields, settings })
+      const id = await api.forms.save.mutate({ id: form.id || null, name, slug, isActive, fields, settings })
       setSaved({ name, slug, isActive, fields, settings })
       toast('success', 'Saved. The embed picks this up within a minute.')
+      if (!form.id) {
+        router.push(formsPath(workspace, id))
+        return
+      }
       router.refresh()
     } catch (cause) {
       // The schema rules refuse things a person can fix, and the message says
@@ -136,13 +140,15 @@ export const FormBuilder = ({
           Forms
         </Link>
         <span className="text-secondary">/</span>
-        <h1 className="text-lg font-medium">{form.name}</h1>
-        <Link
-          href={submissionsPath(workspace, { form: form.id, state: 'clean' })}
-          className="text-sm text-link"
-        >
-          Submissions
-        </Link>
+        <h1 className="text-lg font-medium">{form.id ? form.name : 'New form'}</h1>
+        {form.id ? (
+          <Link
+            href={submissionsPath(workspace, { form: form.id, state: 'clean' })}
+            className="text-sm text-link"
+          >
+            Submissions
+          </Link>
+        ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {!canEdit ? (
             <span className="text-xs text-secondary">Your role can view this but not change it.</span>

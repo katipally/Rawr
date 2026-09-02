@@ -18,6 +18,12 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
 
   const forms = await listForms(contextFrom(session))
   const held = forms.reduce((total, form) => total + form.quarantined, 0)
+  const canCreate = session.role === 'admin' || session.role === 'marketing'
+  const newForm = canCreate ? (
+    <Link href={formsPath(workspace, 'new')} className="text-sm font-semibold text-link">
+      New form
+    </Link>
+  ) : null
 
   return (
     <div className="w-full max-w-6xl">
@@ -34,12 +40,14 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
             {held === 1 ? '1 submission held for review' : `${held} submissions held for review`}
           </Link>
         ) : null}
+        <span className="ml-auto">{newForm}</span>
       </header>
 
       {forms.length === 0 ? (
         <EmptyState
           title="No forms yet"
           description="A form captures a lead from the website and files it as a contact."
+          action={newForm}
         />
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">

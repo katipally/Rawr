@@ -47,7 +47,9 @@ const BookingPagesScreen = async ({ params }: { params: Promise<{ workspace: str
           <Link href={bookedPath(workspace)} className="text-sm font-semibold text-link">
             Booked meetings
           </Link>
-          <NewPageButton workspace={workspace} canCreateShared={session.role === 'admin'} />
+          {session.role === 'viewer' ? null : (
+            <NewPageButton workspace={workspace} canCreateShared={session.role === 'admin'} />
+          )}
         </div>
       </header>
 

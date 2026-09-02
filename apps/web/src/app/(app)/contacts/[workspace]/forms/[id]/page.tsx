@@ -1,4 +1,7 @@
-import { getForm, getRegistry } from '@rawr/db'
+import { getForm, getRegistry, readSettings, type FormDetail } from '@rawr/db'
+import { EmptyState } from '@rawr/ui'
+import Link from 'next/link'
+import { formsPath } from '~/lib/links.ts'
 import { notFound, redirect } from 'next/navigation'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -14,7 +17,21 @@ const BuilderPage = async ({ params }: { params: Promise<{ workspace: string; id
   if (!session) redirect('/sign-in')
 
   const ctx = contextFrom(session)
-  const [form, registry] = await Promise.all([getForm(ctx, id), getRegistry(ctx)])
+  const canEdit = session.role === 'admin' || session.role === 'marketing'
+
+  // /forms/new is the builder with nothing in it. Saving creates the form and
+  // moves to its real address.
+  if (id === 'new' && !canEdit) {
+    return (
+      <EmptyState
+        title="Forms are built by marketing"
+        description={`Your role (${session.role}) can read forms and their submissions, and cannot create one.`}
+        action={<Link href={formsPath(workspace)}>Back to forms</Link>}
+      />
+    )
+  }
+  const blank: FormDetail = { id: '', name: '', slug: '', isActive: false, fields: [], settings: readSettings({}) }
+  const [form, registry] = await Promise.all([id === 'new' ? blank : getForm(ctx, id), getRegistry(ctx)])
   if (!form) notFound()
 
   // Only contact and company: a form fills in a person and where they work. A
@@ -36,7 +53,7 @@ const BuilderPage = async ({ params }: { params: Promise<{ workspace: string; id
       form={form}
       targets={targets}
       baseUrl={publicBaseUrl}
-      canEdit={session.role === 'admin' || session.role === 'marketing'}
+      canEdit={canEdit}
     />
   )
 }

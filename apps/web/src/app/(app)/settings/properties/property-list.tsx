@@ -161,9 +161,13 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
   return (
     <div className="flex flex-col gap-4">
       <div>
+        {role !== 'admin' ? (
+          <p className="text-secondary">Your role ({role}) can read the fields and cannot change them.</p>
+        ) : (
         <Button variant="primary" onClick={() => { reset(); setCreating(true) }}>
           Create property
         </Button>
+        )}
       </div>
 
       <ul className="flex flex-col rounded-panel border border-line bg-surface">
