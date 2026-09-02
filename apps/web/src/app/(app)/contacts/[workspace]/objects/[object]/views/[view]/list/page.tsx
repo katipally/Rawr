@@ -98,6 +98,7 @@ const ListPage = async ({
     ...(search.q ? { q: search.q } : {}),
     ...(search.filters ? { filters: search.filters } : {}),
     ...(search.sort ? { sort: search.sort } : {}),
+    ...(search.cursor ? { cursor: search.cursor } : {}),
   }
 
   const exportParams = new URLSearchParams({ object: objectParam, columns: columns.join(',') })

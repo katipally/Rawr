@@ -3,6 +3,7 @@
 import { Button, DataTable, EmptyState, cn, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { FieldType, ObjectKey } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
@@ -52,6 +53,7 @@ export const RecordTable = ({
   bulkFields,
 }: RecordTableProps) => {
   const router = useRouter()
+  const { navigate } = useNavigation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const canBulk = bulkFields.length > 0
 
@@ -64,7 +66,8 @@ export const RecordTable = ({
     // Clicking the sorted column flips it; clicking another starts descending,
     // which is what a person wants from a date or an amount.
     const direction = sort?.key === key && sort.direction === 'desc' ? 'asc' : 'desc'
-    const next: ListParams = { ...params, sort: direction === 'desc' ? `-${key}` : key }
+    // A new order starts from the first page; a cursor from the old order is meaningless.
+    const next: ListParams = { ...params, cursor: undefined, sort: direction === 'desc' ? `-${key}` : key }
     delete next.cursor
     return objectView(workspace, object, view, 'list', next)
   }
@@ -189,17 +192,27 @@ export const RecordTable = ({
         }
       />
 
-      {nextCursor ? (
-        <div className="shrink-0">
-          <Button
-            onClick={() =>
-              router.push(
-                objectView(workspace, object, view, 'list', { ...params, cursor: nextCursor }),
-              )
-            }
-          >
-            Next page
-          </Button>
+      {nextCursor || params.cursor ? (
+        // Keyset pages have no page numbers, so "previous" is the browser's own
+        // history and "first" drops the cursor. Both are honest about what a
+        // cursor can and cannot do.
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {params.cursor ? (
+            <>
+              <Button onClick={() => router.back()}>Previous page</Button>
+              <Button onClick={() => navigate(objectView(workspace, object, view, 'list', { ...params, cursor: undefined }))}>
+                First page
+              </Button>
+            </>
+          ) : null}
+          {nextCursor ? (
+            <Button
+              variant="primary"
+              onClick={() => navigate(objectView(workspace, object, view, 'list', { ...params, cursor: nextCursor }))}
+            >
+              Next page
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>
