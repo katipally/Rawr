@@ -704,7 +704,9 @@ const logActivityTool: ToolDefinition = {
   },
 }
 
-export const TOOLS: ToolDefinition[] = [
+/** The ten that talk the way a person does, first, then one tool per procedure
+ *  so nothing the screens can do is out of an assistant's reach. */
+export const CURATED_TOOLS: ToolDefinition[] = [
   searchRecords,
   getRecordTool,
   listPipeline,
@@ -716,8 +718,6 @@ export const TOOLS: ToolDefinition[] = [
   createTaskTool,
   logActivityTool,
 ]
-
-export const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]))
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -762,6 +762,7 @@ const format = (value: unknown): string => {
   if (value === null || value === undefined || value === '') return '(empty)'
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   if (Array.isArray(value)) return value.join(', ')
+  if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 

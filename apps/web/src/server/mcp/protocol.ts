@@ -1,5 +1,6 @@
 import { recallMcpCall, rememberMcpCall, type McpCaller } from '@rawr/db'
-import { TOOLS, TOOLS_BY_NAME, contextFor, explain, type ToolResult } from './tools.ts'
+import { TOOLS, TOOLS_BY_NAME } from './catalogue.ts'
+import { contextFor, explain, type ToolResult } from './tools.ts'
 
 /** F5 §1. JSON-RPC over one endpoint, written against two versions of the spec.
  *
@@ -138,9 +139,7 @@ export const handle = async (
             inputSchema: tool.inputSchema({ registry }),
             annotations: {
               readOnlyHint: !tool.writes,
-              // Nothing here deletes. The most a repeated write does is set the
-              // same value twice, which is why none of them is marked destructive.
-              destructiveHint: false,
+              destructiveHint: tool.writes && /delete|remove|merge|purge|revoke|disconnect|erase|bulk|dismiss/i.test(tool.name),
               idempotentHint: !tool.writes,
               openWorldHint: false,
             },
@@ -162,7 +161,7 @@ export const handle = async (
       const tool = TOOLS_BY_NAME.get(name)
       if (!tool) {
         return {
-          response: fail(id, INVALID_PARAMS, `Unknown tool: ${name}. This server has ${TOOLS.map((t) => t.name).join(', ')}.`),
+          response: fail(id, INVALID_PARAMS, `Unknown tool: ${name}. Call tools/list for the ${TOOLS.length} this server has.`),
           status: 200,
         }
       }
