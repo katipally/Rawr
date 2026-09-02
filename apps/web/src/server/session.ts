@@ -1,4 +1,4 @@
-import { membershipsForGoogleSub, type Membership, type WorkspaceContext } from '@rawr/db'
+import { membershipsForUser, type Membership, type WorkspaceContext } from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
@@ -10,8 +10,11 @@ const MAX_AGE_SECONDS = 60 * 60 * 12
 
 const key = new TextEncoder().encode(env.AUTH_SECRET)
 
+/** One membership query per request, however many of the layout, the page and
+ *  their helpers ask. */
+export const memberships = cache(membershipsForUser)
+
 export type Session = {
-  googleSub: string
   userId: string
   email: string
   displayName: string
@@ -19,11 +22,11 @@ export type Session = {
   workspaceId: string
   workspaceSlug: string
   workspaceName: string
+  hostedDomain: string
   role: Membership['role']
 }
 
-export const sessionFromMembership = (googleSub: string, m: Membership): Session => ({
-  googleSub,
+export const sessionFromMembership = (m: Membership): Session => ({
   userId: m.userId,
   email: m.email,
   displayName: m.displayName,
@@ -31,6 +34,7 @@ export const sessionFromMembership = (googleSub: string, m: Membership): Session
   workspaceId: m.workspaceId,
   workspaceSlug: m.workspaceSlug,
   workspaceName: m.workspaceName,
+  hostedDomain: m.hostedDomain,
   role: m.role,
 })
 
@@ -78,11 +82,10 @@ export const readSession = cache(async (): Promise<Session | null> => {
     return null
   }
 
-  const memberships = await membershipsForGoogleSub(claims.googleSub)
-  const current = memberships.find((m) => m.workspaceId === claims.workspaceId)
+  const current = (await memberships(claims.userId)).find((m) => m.workspaceId === claims.workspaceId)
   if (!current) return null
 
-  return sessionFromMembership(claims.googleSub, current)
+  return sessionFromMembership(current)
 })
 
 export const contextFrom = (session: Session): WorkspaceContext => ({

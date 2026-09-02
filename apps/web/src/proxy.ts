@@ -1,7 +1,7 @@
 import { decodeJwt } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 
-/** A CRM link carries its workspace in the path, so opening someone else's link
+/** A CRM or meetings link carries its workspace in the path, so opening someone else's link
  *  while signed in to a different workspace has to switch rather than quietly
  *  show the wrong tenant's screen or 404.
  *
@@ -9,10 +9,10 @@ import { NextResponse, type NextRequest } from 'next/server'
  *  redirecting. The switch handler verifies the signature and the membership
  *  before it changes anything. */
 
-const CRM_PATH = /^\/contacts\/([^/]+)(\/|$)/
+const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/]+)(\/|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
-  const match = CRM_PATH.exec(request.nextUrl.pathname)
+  const match = WORKSPACE_PATH.exec(request.nextUrl.pathname)
   if (!match) return NextResponse.next()
 
   const wanted = match[1]
@@ -36,4 +36,4 @@ export const proxy = (request: NextRequest): NextResponse => {
   return NextResponse.redirect(switchTo)
 }
 
-export const config = { matcher: '/contacts/:path*' }
+export const config = { matcher: ['/contacts/:path*', '/meetings/:path*'] }

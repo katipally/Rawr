@@ -1,11 +1,10 @@
-import { membershipsForGoogleSub } from '@rawr/db'
+import { membershipsForUser, userIdForEmail } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { devLoginEnabled, env } from '~/lib/env.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
-/** The seeded stand-in for a Google subject. Real Google subjects are numeric, so
- *  a dev identity can never collide with one. */
-export const devGoogleSub = (email: string): string => `dev:${email.trim().toLowerCase()}`
+const back = (error: string): NextResponse =>
+  NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(error)}`, env.AUTH_URL))
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
   if (!devLoginEnabled) {
@@ -13,27 +12,21 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const form = await request.formData()
-  const email = String(form.get('email') ?? '')
-  const workspaceSlug = String(form.get('workspace') ?? '')
-  if (!email) {
-    return NextResponse.redirect(new URL('/sign-in?error=Enter+an+email+address.', env.AUTH_URL))
-  }
+  const email = String(form.get('email') ?? '').trim()
+  const workspaceSlug = String(form.get('workspace') ?? '').trim()
+  if (!email) return back('Enter an email address.')
 
-  const memberships = await membershipsForGoogleSub(devGoogleSub(email))
+  const userId = await userIdForEmail(email)
+  const memberships = userId ? await membershipsForUser(userId) : []
   const membership = workspaceSlug
     ? memberships.find((m) => m.workspaceSlug === workspaceSlug)
     : memberships[0]
 
   if (!membership) {
     const detail = workspaceSlug ? ` in workspace ${workspaceSlug}` : ''
-    return NextResponse.redirect(
-      new URL(
-        `/sign-in?error=${encodeURIComponent(`No seeded user ${email}${detail}. Run pnpm db:seed.`)}`,
-        env.AUTH_URL,
-      ),
-    )
+    return back(`No seeded user ${email}${detail}. Run pnpm db:seed.`)
   }
 
-  await writeSessionCookie(sessionFromMembership(devGoogleSub(email), membership))
+  await writeSessionCookie(sessionFromMembership(membership))
   return NextResponse.redirect(new URL('/', env.AUTH_URL))
 }

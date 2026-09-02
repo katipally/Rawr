@@ -40,11 +40,15 @@ only by migrations and the worker's own bookkeeping.
  pnpm worker     the job daemon, needs to be running for index builds
 ```
 
-Until Google OAuth credentials exist (open item 3), sign in at `/sign-in` with a
-seeded address: `ivan@datasaur.ai` is admin, `trevor@` is sales, `andrew@` is
-marketing, `viewer@` is viewer, and `admin@probe.example` is the second tenant.
-That form refuses to render unless `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not
-production.
+Sign in with Google: any verified `@datasaur.ai` account joins the Datasaur
+workspace as a viewer on its first sign-in, and an admin raises the role under
+Settings, Members. A seeded address whose email matches is claimed by that
+sign-in, so `admin@datasaur.ai` signing in with Google is the seeded admin.
+
+Without Google credentials, `/sign-in` also offers a development form that takes
+a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
+`admin@probe.example` for the second tenant. That form refuses to render unless
+`RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
 
 ## Checking it still holds
 
@@ -61,7 +65,7 @@ real `/api/mcp`. Start it with a small pool, or the suites and the dev server
 together exhaust the Supabase pooler and the failures read as logic errors:
 
 ```
- DATABASE_POOL_MAX=3 pnpm dev    in one terminal
+ DATABASE_POOL_MAX=5 pnpm dev    in one terminal
  pnpm verify                     in another
 ```
 

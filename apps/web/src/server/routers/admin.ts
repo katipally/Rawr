@@ -1,5 +1,10 @@
 import {
   FIELD_TYPES,
+  ROLES,
+  addMember,
+  listMembers,
+  removeMember,
+  setMemberRole,
   createField,
   createLifecycleStage,
   createPipeline,
@@ -45,6 +50,20 @@ const name = z.string().trim().min(1).max(120)
 const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
 
 export const adminRouter = router({
+  members: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listMembers(ctx.workspace))),
+    roles: protectedProcedure.query(() => ROLES),
+    add: adminProcedure
+      .input(z.object({ email: z.string().trim().email().max(254), name: z.string().trim().max(120).optional(), role: z.enum(ROLES) }))
+      .mutation(({ ctx, input }) => call(() => addMember(ctx.workspace, input))),
+    setRole: adminProcedure
+      .input(z.object({ userId: z.string().uuid(), role: z.enum(ROLES) }))
+      .mutation(({ ctx, input }) => call(() => setMemberRole(ctx.workspace, input))),
+    remove: adminProcedure
+      .input(z.object({ userId: z.string().uuid() }))
+      .mutation(({ ctx, input }) => call(() => removeMember(ctx.workspace, input.userId))),
+  }),
+
   fields: router({
     list: protectedProcedure
       .input(z.object({ object: objectKey.optional() }).optional())

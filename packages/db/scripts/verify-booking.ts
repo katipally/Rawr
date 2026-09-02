@@ -556,8 +556,8 @@ try {
     attendeeEmail: 'priya@acme.com',
     companyName: 'Acme',
     companyFallback: 'a new team',
-    hostName: 'Ivan Lee',
-    hostEmail: 'ivan@datasaur.ai',
+    hostName: 'Admin',
+    hostEmail: 'admin@datasaur.ai',
     pageName: 'Talk to sales',
     durationMinutes: 30,
   })
@@ -572,8 +572,8 @@ try {
     attendeeEmail: 'priya@gmail.com',
     companyName: null,
     companyFallback: 'a new team',
-    hostName: 'Ivan Lee',
-    hostEmail: 'ivan@datasaur.ai',
+    hostName: 'Admin',
+    hostEmail: 'admin@datasaur.ai',
     pageName: 'Talk to sales',
     durationMinutes: 30,
   })
@@ -1045,7 +1045,7 @@ try {
     await refusesAsync(() => saveSchedule(viewer, { userId: viewer.actorId!, timezone: 'UTC', weekly: {} })),
   )
 
-  const sales = await actorCtx('datasaur', 'trevor@datasaur.ai', 'sales')
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
   check(
     'sales cannot create a shared round robin',
     await refusesAsync(() =>
@@ -1088,7 +1088,7 @@ try {
   })
   check('with themselves as the only host', ownHosts.length === 1 && ownHosts[0]?.userId === sales.actorId)
 
-  const marketing = await actorCtx('datasaur', 'andrew@datasaur.ai', 'marketing')
+  const marketing = await actorCtx('datasaur', 'marketing@datasaur.ai', 'marketing')
   check(
     'somebody else cannot change that personal link',
     await refusesAsync(() => setPageActive(marketing, ownLink, true)),

@@ -590,7 +590,7 @@ try {
     )
     await ingestMessage(admin, {
       incoming: incoming({ providerMessageId: `m2-${stamp}`, from: `verify-mail-${stamp}@partner1.example` }),
-      ownerEmail: 'ivan@datasaur.ai',
+      ownerEmail: 'admin@datasaur.ai',
       internalDomain,
       blocked: new Set(),
     })

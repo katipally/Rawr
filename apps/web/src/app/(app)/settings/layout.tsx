@@ -6,6 +6,7 @@ import {
   integrationsPath,
   lifecyclePath,
   mailboxesPath,
+  membersPath,
   pipelinesPath,
   propertiesPath,
   sitesPath,
@@ -16,6 +17,7 @@ import {
  *  three of the others by hand, which meant a new page was reachable only from
  *  whichever page somebody remembered to edit. */
 const SECTIONS = [
+  { href: membersPath(), label: 'Members', hint: 'Who is in this workspace, and their role' },
   { href: propertiesPath(), label: 'Properties', hint: 'The fields on every record' },
   { href: pipelinesPath(), label: 'Pipelines', hint: 'Deal stages and probabilities' },
   { href: lifecyclePath(), label: 'Lifecycle', hint: 'The ordered stage list' },

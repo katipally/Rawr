@@ -139,8 +139,8 @@ try {
     process.exit(1)
   }
 
-  const admin = await actorCtx('datasaur', 'ivan@datasaur.ai', 'admin')
-  const sales = await actorCtx('datasaur', 'trevor@datasaur.ai', 'sales')
+  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin')
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
   const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', 'viewer')
   const probe = await actorCtx('probe', 'admin@probe.example', 'admin')
 
@@ -792,7 +792,7 @@ try {
   })
   check('a batch is refused with a reason', batched.status === 400)
 } finally {
-  const admin = await actorCtx('datasaur', 'ivan@datasaur.ai', 'admin').catch(() => null)
+  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin').catch(() => null)
   if (admin) {
     await withWorkspace(admin, async (tx) => {
       await tx.execute(sql`delete from activity_link where activity_id in (

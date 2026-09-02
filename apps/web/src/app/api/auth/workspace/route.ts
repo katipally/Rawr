@@ -1,4 +1,4 @@
-import { membershipsForGoogleSub } from '@rawr/db'
+import { membershipsForUser } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
@@ -23,7 +23,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(new URL(next, env.AUTH_URL))
   }
 
-  const memberships = await membershipsForGoogleSub(session.googleSub)
+  const memberships = await membershipsForUser(session.userId)
   const target = memberships.find((membership) => membership.workspaceSlug === wanted)
   if (!target) {
     const back = new URL('/', env.AUTH_URL)
@@ -34,6 +34,6 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(back)
   }
 
-  await writeSessionCookie(sessionFromMembership(session.googleSub, target))
+  await writeSessionCookie(sessionFromMembership(target))
   return NextResponse.redirect(new URL(next, env.AUTH_URL))
 }

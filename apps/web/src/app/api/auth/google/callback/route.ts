@@ -1,7 +1,7 @@
 import { decodeIdToken } from 'arctic'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
-import { membershipsForGoogleSub } from '@rawr/db'
+import { membershipsForUser, signInWithGoogle } from '@rawr/db'
 import { env } from '~/lib/env.ts'
 import { googleClient, identityFromIdToken } from '~/server/auth/google.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
@@ -43,14 +43,21 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied(`Rawr is limited to ${env.GOOGLE_HOSTED_DOMAIN} accounts.`)
   }
 
-  const memberships = await membershipsForGoogleSub(identity.sub)
+  // A verified @datasaur.ai identity joins every workspace on that domain as a
+  // viewer. An admin raises the role from Settings, under Members.
+  const userId = await signInWithGoogle({
+    sub: identity.sub,
+    email: identity.email,
+    name: identity.name,
+    picture: identity.picture,
+    hostedDomain: identity.hostedDomain,
+  })
+  const memberships = await membershipsForUser(userId)
   const membership = memberships[0]
   if (!membership) {
-    return denied(
-      `${identity.email} signed in, but has no workspace membership yet. An admin has to add you.`,
-    )
+    return denied(`${identity.email} signed in, but no workspace exists for ${identity.hostedDomain}.`)
   }
 
-  await writeSessionCookie(sessionFromMembership(identity.sub, membership))
+  await writeSessionCookie(sessionFromMembership(membership))
   return NextResponse.redirect(new URL('/', env.AUTH_URL))
 }

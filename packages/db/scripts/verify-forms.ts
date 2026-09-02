@@ -349,7 +349,7 @@ try {
     queue.some((row) => row.id === quarantined.submissionId && row.spamReasons.length > 0),
     queue.find((r) => r.id === quarantined.submissionId)?.spamReasons[0]?.detail)
 
-  const reviewer = await actorCtx('datasaur', 'ivan@datasaur.ai', 'admin')
+  const reviewer = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin')
   const released = await releaseSubmission(reviewer, quarantined.submissionId)
   check('releasing it creates the contact', !!released.contactId, released.contactId?.slice(0, 8))
 
@@ -387,7 +387,7 @@ try {
       fields: [{ key: 'email', type: 'email', label: 'Email', required: true }],
     })), 'refused')
 
-  const sales = await actorCtx('datasaur', 'trevor@datasaur.ai', 'sales')
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
   check('sales can act on the review queue but cannot rebuild a form',
     await refusesAsync(() => saveForm(sales, {
       name: 'Nope', slug: 'nope-2', isActive: true, settings: contactUs.settings,

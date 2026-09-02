@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import {
@@ -29,11 +29,13 @@ const WORKSPACES = [
   { name: 'Probe Tenant', slug: 'probe', domain: 'probe.example' },
 ] as const
 
+/** One account per role, named for the role. A real person signs in with Google,
+ *  lands as a viewer, and is raised from Settings, so nobody's name is seeded. */
 const PEOPLE = [
-  { email: 'trevor@datasaur.ai', name: 'Trevor Kwan', role: 'sales' as const },
-  { email: 'ivan@datasaur.ai', name: 'Ivan Lee', role: 'admin' as const },
-  { email: 'andrew@datasaur.ai', name: 'Andrew Chan', role: 'marketing' as const },
-  { email: 'viewer@datasaur.ai', name: 'Read Only', role: 'viewer' as const },
+  { email: 'admin@datasaur.ai', name: 'Admin', role: 'admin' as const },
+  { email: 'sales@datasaur.ai', name: 'Sales', role: 'sales' as const },
+  { email: 'marketing@datasaur.ai', name: 'Marketing', role: 'marketing' as const },
+  { email: 'viewer@datasaur.ai', name: 'Viewer', role: 'viewer' as const },
 ]
 
 const INDUSTRIES = ['Software', 'Financial Services', 'Healthcare', 'Government', 'Education']
@@ -71,7 +73,7 @@ try {
       ...PEOPLE.map((p) => ({ email: p.email, name: p.name, googleSub: `dev:${p.email}` })),
       { email: 'admin@probe.example', name: 'Probe Admin', googleSub: 'dev:admin@probe.example' },
     ])
-    .onConflictDoUpdate({ target: s.userAccount.email, set: { name: s.userAccount.name } })
+    .onConflictDoUpdate({ target: s.userAccount.email, set: { name: sql`excluded.name` } })
     .returning({ id: s.userAccount.id, email: s.userAccount.email })
 
   const userId = (email: string) => {
