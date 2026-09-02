@@ -16,6 +16,11 @@ export const useOverlay = (
   dialog: RefObject<HTMLElement | null>,
 ): void => {
   const opener = useRef<HTMLElement | null>(null)
+  // Callers pass an inline closure, which is a new function every render. Read
+  // through a ref so the effect runs once per open, not once per keystroke;
+  // otherwise every re-render moved focus back to the first control.
+  const close = useRef(onClose)
+  close.current = onClose
 
   useEffect(() => {
     if (!open) return
@@ -29,7 +34,7 @@ export const useOverlay = (
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose()
+        close.current()
         return
       }
       if (event.key !== 'Tab' || !box) return
@@ -58,5 +63,5 @@ export const useOverlay = (
       document.body.style.overflow = previous
       opener.current?.focus()
     }
-  }, [open, onClose, dialog])
+  }, [open, dialog])
 }
