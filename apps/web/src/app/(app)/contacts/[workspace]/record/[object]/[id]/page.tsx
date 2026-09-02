@@ -3,6 +3,8 @@ import {
   getRecord,
   isActivityType,
   isObjectKey,
+  listIntegrations,
+  listSuggestions,
   listTasks,
   readAssociations,
   readMemberships,
@@ -11,12 +13,14 @@ import {
   readTimeline,
   timelineCounts,
   websiteActivity,
+  withWorkspaceReads,
   type ObjectKey,
 } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
+import { EnrichmentPanel } from '~/components/crm/enrichment-panel.tsx'
 import { PropertyPanel, type PropertySection } from '~/components/crm/property-panel.tsx'
 import { RecordActions } from '~/components/crm/record-actions.tsx'
 import { MailPanel } from '~/components/crm/mail-panel.tsx'
@@ -28,6 +32,7 @@ import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value } from '~/components/crm/value.tsx'
 import { objectView } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
+import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** HubSpot's record anatomy, because familiarity is the point. 00-context.md
@@ -85,10 +90,34 @@ const RecordPage = async ({
   const { type } = await searchParams
 
   const ctx = contextFrom(session)
-  const { object, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
-  const record = await getRecord(ctx, objectParam, id)
+  // Every read on this screen runs at once, each on its own connection; see
+  // withWorkspaceReads for why they are not pinned to one transaction.
+  const screen = await withWorkspaceReads(ctx, async () => {
+    const entity = { entityType: objectParam, entityId: id }
+    const enrichable = objectParam === 'contact' || objectParam === 'company'
+    // The record itself is fetched alongside its panels, not before them: the
+    // panels only need the id, and a missing record just discards their answers.
+    const [{ object, lookups, canWrite }, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations] = await Promise.all([
+      loadCrmContext(ctx, objectParam),
+      getRecord(ctx, objectParam, id),
+      // A hand-edited type in a link is dropped rather than failing the page.
+      readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
+      timelineCounts(ctx, entity),
+      readAssociations(ctx, entity),
+      listTasks(ctx, { entity }),
+      objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
+      objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
+      readMemberships(ctx, id),
+      objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([]),
+      enrichable ? listSuggestions(ctx, objectParam, id) : Promise.resolve([]),
+      enrichable ? listIntegrations(ctx) : Promise.resolve([]),
+    ])
+    if (!record) return null
+    return { object, lookups, canWrite, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations }
+  })
 
-  if (!record) {
+  if (!screen) {
+    const { object } = await loadCrmContext(ctx, objectParam)
     return (
       <EmptyState
         title={`That ${object.nameSingular.toLowerCase()} is not here`}
@@ -98,18 +127,15 @@ const RecordPage = async ({
     )
   }
 
-  const entity = { entityType: objectParam, entityId: id }
-  const [timeline, counts, rail, tasks, subscriptions, activity, memberships, threads] = await Promise.all([
-    // A hand-edited type in a link is dropped rather than failing the page.
-    readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
-    timelineCounts(ctx, entity),
-    readAssociations(ctx, entity),
-    listTasks(ctx, { entity }),
-    objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
-    objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
-    readMemberships(ctx, id),
-    objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([]),
-  ])
+  const { object, lookups, canWrite, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations } = screen
+
+  const health = (kind: 'apollo' | 'clay') => {
+    const row = integrations.find((i) => i.kind === kind)
+    return { state: row?.state ?? ('not_configured' as const), lastError: row?.lastError ?? null }
+  }
+  const email = typeof record.values.email === 'string' && record.values.email ? record.values.email : null
+  // A company is enriched through a person, so the first linked contact stands in.
+  const enrichContactId = objectParam === 'contact' ? id : (rail.contacts[0]?.id ?? null)
 
   const fields = toEditableFields(object, lookups, { includeReadOnly: true })
   const headerFields = HEADER_FIELDS[objectParam].flatMap((key) => {
@@ -188,6 +214,30 @@ const RecordPage = async ({
           ) : null}
           {memberships.length > 0 || objectParam === 'contact' ? (
             <SegmentsPanel workspace={workspace} recordName={record.displayName} rows={memberships} />
+          ) : null}
+          {objectParam !== 'deal' ? (
+            <EnrichmentPanel
+              workspace={workspace}
+              object={objectParam}
+              recordId={id}
+              enrichContactId={enrichContactId}
+              email={email}
+              apolloUrl={email ? apolloContactUrl(email) : null}
+              apollo={health('apollo')}
+              clay={health('clay')}
+              tracked={counts.email_tracking ?? 0}
+              sequenced={counts.sequence_activity ?? 0}
+              suggestions={suggestions.map((s) => ({
+                id: s.id,
+                fieldKey: s.fieldKey,
+                fieldLabel: object.byKey.get(s.fieldKey)?.label ?? s.fieldKey,
+                suggested: s.suggested,
+                current: s.current,
+                provider: s.provider,
+                at: s.at.toISOString(),
+              }))}
+              canWrite={canWrite}
+            />
           ) : null}
           {objectParam === 'contact' ? (
             <MailPanel contactName={record.displayName} threads={threads} />
