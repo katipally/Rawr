@@ -128,3 +128,11 @@
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* The navigation bar grows quickly, then creeps: it never reaches the end on
+   its own, so it never lies about being done. */
+@keyframes rawr-progress {
+  0% { transform: scaleX(0); }
+  40% { transform: scaleX(0.7); }
+  100% { transform: scaleX(0.92); }
+}

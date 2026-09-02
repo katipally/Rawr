@@ -14,7 +14,8 @@ import {
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { cn } from '@rawr/ui'
+import { cn, Spinner } from '@rawr/ui'
+import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
 import { ThemeToggle } from './theme.tsx'
 
 export type NavItem = {
@@ -90,7 +91,13 @@ const write = (key: string, value: string): void => {
  *  flyout of links when an icon is hovered or focused, and pins open to icons
  *  plus labels when asked. Below the sidebar breakpoint the same sections render
  *  as a sheet with inline lists, because hover does not exist on a phone. */
-export const AppShell = ({
+export const AppShell = (props: AppShellProps) => (
+  <NavigationProvider>
+    <Shell {...props} />
+  </NavigationProvider>
+)
+
+const Shell = ({
   workspaceName,
   workspaceSlug,
   workspaces,
@@ -102,6 +109,9 @@ export const AppShell = ({
   children,
 }: AppShellProps) => {
   const pathname = usePathname()
+  const { pendingHref } = useNavigation()
+  // Where the person is going counts as where they are, from the click onward.
+  const here = pendingHref?.split('?')[0] ?? pathname
   const [sheetOpen, setSheetOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   /** Which section's flyout is showing on a wide screen. */
@@ -141,14 +151,14 @@ export const AppShell = ({
 
   const isCurrent = (item: NavItem) => {
     const prefix = item.match ?? item.href
-    return prefix === '/' ? pathname === '/' : pathname.startsWith(prefix)
+    return prefix === '/' ? here === '/' : here.startsWith(prefix)
   }
   const sectionIsCurrent = (section: NavSection) =>
     section.href
-      ? pathname.startsWith(section.href)
+      ? here.startsWith(section.href)
       : (section.groups ?? []).some((group) => group.some(isCurrent))
 
-  const onSettings = pathname.startsWith(settingsHref.split('/').slice(0, 2).join('/'))
+  const onSettings = here.startsWith(settingsHref.split('/').slice(0, 2).join('/'))
   const open = flyout ? nav.find((section) => section.key === flyout) : null
   /** The flyout sits level with its icon; measured on open so it follows the
    *  rail whether collapsed or expanded, and at any zoom. */
@@ -311,7 +321,8 @@ export const AppShell = ({
     // <main> moves. That is what lets a table header stick and keeps the rail and
     // the top bar from scrolling away.
     <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="z-40 flex h-12 shrink-0 items-center gap-3 border-b border-divider bg-surface px-3">
+      <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-divider bg-surface px-3">
+        <NavigationProgress />
         <button
           type="button"
           aria-expanded={sheetOpen}
@@ -424,7 +435,20 @@ export const AppShell = ({
 
         {/* Full bleed: this is a data tool, and a wide screen is there to be used.
             This is the one scrolling box on the page. */}
-        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto p-3 sm:p-6">{children}</main>
+        <main
+          aria-busy={pendingHref ? 'true' : undefined}
+          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto p-3 sm:p-6"
+        >
+          {children}
+          {pendingHref ? (
+            // The old screen stays put but steps back, and the spinner says the
+            // new one is on its way. Replaced by the route's own loading state the
+            // moment the server starts streaming it.
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-start justify-center bg-canvas/60 pt-[20vh]">
+              <Spinner size="lg" label="Opening" />
+            </div>
+          ) : null}
+        </main>
       </div>
     </div>
   )
