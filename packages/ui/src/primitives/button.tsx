@@ -38,9 +38,13 @@ export const Button = ({
       'inline-flex min-h-9 items-center justify-center gap-2 rounded-hs border px-3 py-1.5',
       'font-medium transition-colors duration-150',
       // A faded coral primary reads as broken rather than as not-yet-available.
-      // Every disabled button drops to the neutral fill instead, whatever its
-      // variant, so "nothing to save yet" and "this is dead" never look alike.
-      'disabled:cursor-not-allowed disabled:border-line disabled:bg-disabled disabled:text-secondary',
+      // Every filled button drops to the neutral fill when disabled, so "nothing
+      // to save yet" and "this is dead" never look alike. A tertiary button is a
+      // link, and a disabled link fades; boxing it would invent a control.
+      'disabled:cursor-not-allowed',
+      variant === 'tertiary'
+        ? 'disabled:text-secondary disabled:no-underline disabled:opacity-60'
+        : 'disabled:border-line disabled:bg-disabled disabled:text-secondary',
       VARIANTS[variant],
       className,
     )}
