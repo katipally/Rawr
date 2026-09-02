@@ -6,6 +6,10 @@ import { withWorkspace } from './index.ts'
  *  one transaction: the open pipeline per stage, what closes this month, what is
  *  overdue, and what arrived since the person last looked. D10. */
 
+export type Money = { currency: string; total: number; weighted: number }
+
+/** One row per stage. Amounts are never summed across currencies: a dollar and
+ *  a euro deal in the same stage report as two totals, the way the board does. */
 export type StageSummary = {
   pipelineId: string
   pipelineName: string
@@ -14,8 +18,7 @@ export type StageSummary = {
   position: number
   probability: number | null
   count: number
-  total: number
-  weighted: number
+  totals: Money[]
 }
 
 export type DealDue = {
@@ -59,19 +62,21 @@ export const readDashboard = async (ctx: WorkspaceContext): Promise<Dashboard> =
         position: number
         probability: string | null
         n: number
-        total: string
-        weighted: string
+        totals: { currency: string; total: string; weighted: string }[] | null
       }>(sql`
         select p.id as pipeline_id, p.name as pipeline_name, s.id as stage_id, s.name as stage_name,
                s.position, s.probability,
-               count(d.id)::int as n,
-               coalesce(sum(d.amount), 0) as total,
-               coalesce(sum(d.amount * coalesce(s.probability, 0) / 100), 0) as weighted
+               (select count(*) from deal d where d.stage_id = s.id and d.deleted_at is null)::int as n,
+               (select json_agg(json_build_object('currency', m.currency, 'total', m.total, 'weighted', m.weighted) order by m.currency)
+                  from (select d.currency,
+                               coalesce(sum(d.amount), 0)::text as total,
+                               coalesce(sum(d.amount * coalesce(s.probability, 0) / 100), 0)::text as weighted
+                          from deal d
+                         where d.stage_id = s.id and d.deleted_at is null and d.amount is not null
+                         group by d.currency) m) as totals
           from pipeline_stage s
           join pipeline p on p.id = s.pipeline_id
-          left join deal d on d.stage_id = s.id and d.deleted_at is null
          where not s.is_closed_won and not s.is_closed_lost
-         group by p.id, p.name, p.position, s.id, s.name, s.position, s.probability
          order by p.position, s.position`),
       tx.execute<{
         id: string
@@ -125,8 +130,7 @@ export const readDashboard = async (ctx: WorkspaceContext): Promise<Dashboard> =
         position: row.position,
         probability: row.probability === null ? null : Number(row.probability),
         count: Number(row.n),
-        total: Number(row.total),
-        weighted: Number(row.weighted),
+        totals: (row.totals ?? []).map((m) => ({ currency: m.currency, total: Number(m.total), weighted: Number(m.weighted) })),
       })),
       closingThisMonth: closing.map((row) => ({
         id: row.id,

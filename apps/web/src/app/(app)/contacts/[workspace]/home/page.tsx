@@ -62,15 +62,25 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
     ]),
   )
 
-  const open = board.stages.reduce(
-    (sum, stage) => ({ count: sum.count + stage.count, total: sum.total + stage.total, weighted: sum.weighted + stage.weighted }),
-    { count: 0, total: 0, weighted: 0 },
-  )
+  const openCount = board.stages.reduce((sum, stage) => sum + stage.count, 0)
+  // Per currency, never across: adding dollars to euros would be a number that
+  // means nothing. Most workspaces have one currency and see one figure.
+  const byCurrency = new Map<string, { total: number; weighted: number }>()
+  for (const stage of board.stages) {
+    for (const m of stage.totals) {
+      const acc = byCurrency.get(m.currency) ?? { total: 0, weighted: 0 }
+      byCurrency.set(m.currency, { total: acc.total + m.total, weighted: acc.weighted + m.weighted })
+    }
+  }
+  const money = (pick: (m: { total: number; weighted: number }) => number) =>
+    byCurrency.size === 0
+      ? formatCurrency(0)
+      : [...byCurrency.entries()].map(([currency, m]) => formatCurrency(pick(m), currency)).join(' · ')
   const pipelines = [...new Map(board.stages.map((s) => [s.pipelineId, s.pipelineName])).entries()]
 
   const tiles: Tile[] = [
-    { label: 'Open deals', value: `${open.count.toLocaleString()} · ${formatCurrency(open.total)}`, href: objectView(workspace, 'deal', 'all', 'board') },
-    { label: 'Weighted pipeline', value: formatCurrency(open.weighted), href: objectView(workspace, 'deal', 'all', 'board') },
+    { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(workspace, 'deal', 'all', 'board') },
+    { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(workspace, 'deal', 'all', 'board') },
     { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(workspace, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
     { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(workspace, { filter: 'mine' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
     { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(workspace, 'contact', 'all', 'list', { sort: '-created_at' }) },
@@ -124,8 +134,12 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
                             {stage.probability !== null ? <span className="ml-1 text-small text-secondary">{stage.probability}%</span> : null}
                           </td>
                           <td className="py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums">{formatCurrency(stage.total)}</td>
-                          <td className="py-1.5 text-right tabular-nums">{formatCurrency(stage.weighted)}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">
+                            {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.total, m.currency)).join(' · ') : formatCurrency(0)}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums">
+                            {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.weighted, m.currency)).join(' · ') : formatCurrency(0)}
+                          </td>
                         </tr>
                       ))}
                   </tbody>
