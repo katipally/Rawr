@@ -134,8 +134,13 @@ const RecordPage = async ({
     return { state: row?.state ?? ('not_configured' as const), lastError: row?.lastError ?? null }
   }
   const email = typeof record.values.email === 'string' && record.values.email ? record.values.email : null
-  // A company is enriched through a person, so the first linked contact stands in.
-  const enrichContactId = objectParam === 'contact' ? id : (rail.contacts[0]?.id ?? null)
+  const domain = typeof record.values.domain === 'string' && record.values.domain ? record.values.domain : null
+  // What each enricher can fill on this object, so the panel can name what is
+  // still blank rather than offering a button with nothing behind it.
+  const enrichable = objectParam === 'contact' ? ['title', 'linkedin_url'] : ['industry', 'employee_count', 'annual_revenue', 'city', 'country']
+  const blankFields = enrichable
+    .filter((key) => record.values[key] === null || record.values[key] === undefined || record.values[key] === '')
+    .map((key) => object.byKey.get(key)?.label ?? key)
 
   const fields = toEditableFields(object, lookups, { includeReadOnly: true })
   const headerFields = HEADER_FIELDS[objectParam].flatMap((key) => {
@@ -220,8 +225,8 @@ const RecordPage = async ({
               workspace={workspace}
               object={objectParam}
               recordId={id}
-              enrichContactId={enrichContactId}
-              email={email}
+              matchKey={objectParam === 'contact' ? email : domain}
+              blankFields={blankFields}
               apolloUrl={email ? apolloContactUrl(email) : null}
               apollo={health('apollo')}
               clay={health('clay')}

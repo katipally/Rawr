@@ -6,6 +6,7 @@ import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
+import { syncApollo } from './jobs/sync-apollo.ts'
 import { dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
 import { workspaceIdOf, type Job } from './jobs/registry.ts'
@@ -19,6 +20,7 @@ const JOBS: Job[] = [
   evaluateSegments,
   ...mailJobs,
   checkIntegrations,
+  syncApollo,
 ]
 
 const boss = await startBoss()
@@ -92,6 +94,9 @@ await boss.schedule(dispatchMailboxes.name, '*/10 * * * *', {})
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})
+// F6 §3. Sequence steps, replies and failures read back from Apollo every half
+// hour, offset from the health check so the two do not queue behind each other.
+await boss.schedule(syncApollo.name, '15,45 * * * *', {})
 
 const shutdown = async (signal: string) => {
   console.log(`[worker] ${signal} received, finishing in-flight work.`)

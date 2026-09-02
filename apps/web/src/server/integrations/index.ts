@@ -5,7 +5,7 @@ import {
   type IntegrationRow,
   type WorkspaceContext,
 } from '@rawr/db'
-import { enrichContact, testApollo } from './apollo.ts'
+import { enrichCompany, enrichContact, testApollo } from './apollo.ts'
 import { testBrevo } from './brevo.ts'
 import { enrichWithClay, testClay } from './clay.ts'
 import { testGa4 } from './ga4.ts'
@@ -156,10 +156,50 @@ export const testConnection = async (
 }
 
 export type EnrichmentRun = {
-  contactId: string
   detail: string
   written: string[]
   suggested: string[]
+}
+
+const BLANKABLE = ['industry', 'employee_count', 'annual_revenue', 'city', 'country']
+
+const stillBlank = (values: Record<string, unknown>): string[] =>
+  BLANKABLE.filter((key) => values[key] === null || values[key] === undefined || values[key] === '')
+
+/** A company on its own: Apollo by domain, then Clay for what is still blank. */
+export const enrichCompanyRecord = async (ctx: WorkspaceContext, companyId: string): Promise<EnrichmentRun> => {
+  const company = await getRecord(ctx, 'company', companyId)
+  if (!company) throw new Error('That company no longer exists.')
+  const domain = typeof company.values.domain === 'string' ? company.values.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : ''
+  if (!domain) {
+    return { detail: 'That company has no domain, which is the only thing an enricher can match a company on.', written: [], suggested: [] }
+  }
+
+  const apollo = await enrichCompany(ctx, { companyId, domain })
+  const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
+  const after = await getRecord(ctx, 'company', companyId)
+  await fillWithClay(ctx, run, companyId, domain, stillBlank(after?.values ?? {}))
+  return run
+}
+
+const fillWithClay = async (
+  ctx: WorkspaceContext,
+  run: EnrichmentRun,
+  companyId: string,
+  domain: string,
+  missing: string[],
+): Promise<void> => {
+  if (missing.length === 0) return
+  const clay = await enrichWithClay(ctx, { companyId, domain, missing }).catch((cause: unknown) => ({
+    provider: 'clay' as const,
+    matched: false,
+    written: [] as string[],
+    suggested: [] as string[],
+    detail: cause instanceof Error ? cause.message : String(cause),
+  }))
+  run.detail = `${run.detail} ${clay.detail}`
+  run.written.push(...clay.written)
+  run.suggested.push(...clay.suggested)
 }
 
 /** F6 §4's configured order, in one place: Apollo first for the person and the
@@ -176,8 +216,7 @@ export const enrichRecord = async (
   const email = typeof record.values.email === 'string' ? record.values.email : ''
   if (!email) {
     return {
-      contactId,
-      detail: 'That contact has no email address, which is the only thing an enricher can match on.',
+      detail: 'That contact has no email address, which is the only thing an enricher can match a person on.',
       written: [],
       suggested: [],
     }
@@ -185,33 +224,15 @@ export const enrichRecord = async (
   const companyId = typeof record.values.company_id === 'string' ? record.values.company_id : null
 
   const apollo = await enrichContact(ctx, { contactId, email, companyId })
-  const details = [apollo.detail]
-  const written = [...apollo.written]
-  const suggested = [...apollo.suggested]
+  const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
 
   if (companyId) {
     const company = await getRecord(ctx, 'company', companyId)
     const domain = typeof company?.values.domain === 'string' ? company.values.domain : ''
     // Only what is still blank. Asking Clay to re-answer something Apollo answered
     // is what "first non-empty by configured order wins" rules out.
-    const missing = ['industry', 'employee_count', 'annual_revenue', 'city', 'country'].filter((key) => {
-      const value = company?.values[key]
-      return value === null || value === undefined || value === ''
-    })
-
-    if (domain && missing.length > 0) {
-      const clay = await enrichWithClay(ctx, { companyId, domain, missing }).catch((cause: unknown) => ({
-        provider: 'clay' as const,
-        matched: false,
-        written: [] as string[],
-        suggested: [] as string[],
-        detail: cause instanceof Error ? cause.message : String(cause),
-      }))
-      details.push(clay.detail)
-      written.push(...clay.written)
-      suggested.push(...clay.suggested)
-    }
+    if (domain) await fillWithClay(ctx, run, companyId, domain, stillBlank(company?.values ?? {}))
   }
 
-  return { contactId, detail: details.join(' '), written, suggested }
+  return run
 }

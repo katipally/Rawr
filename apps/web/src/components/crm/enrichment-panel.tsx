@@ -1,9 +1,9 @@
 'use client'
 
-import { Button, useToast } from '@rawr/ui'
+import { Button, Select, Spinner, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -26,10 +26,10 @@ export type EnrichmentPanelProps = {
   workspace: string
   object: 'contact' | 'company'
   recordId: string
-  /** The contact whose email enrichment runs on. For a company this is the
-   *  primary contact, because Apollo matches people, not domains. */
-  enrichContactId: string | null
-  email: string | null
+  /** What the enricher matches on: a contact's email, a company's domain. */
+  matchKey: string | null
+  /** Labels of the enrichable fields that are still blank on this record. */
+  blankFields: string[]
   apolloUrl: string | null
   apollo: ProviderHealth
   clay: ProviderHealth
@@ -47,16 +47,18 @@ const HEALTH: Record<ProviderHealth['state'], { label: string; tone: string }> =
   not_configured: { label: 'Not connected', tone: 'text-secondary' },
 }
 
+const usable = (health: ProviderHealth) => health.state === 'connected' || health.state === 'degraded'
+
 /** F6 §3 and §4 on the record. Enrichment fills blanks and never overwrites a
- *  human; what it was not allowed to write waits here as a suggestion. Apollo's
- *  opens, clicks and sequence steps land on the timeline, and a degraded provider
- *  says so here rather than reading as "nobody opened anything". */
+ *  human; what it was not allowed to write waits here as a suggestion. Sequences
+ *  are enrolled from here and read back onto the timeline. A provider that is
+ *  not connected says so, with the link, rather than hiding the feature. */
 export const EnrichmentPanel = ({
   workspace,
   object,
   recordId,
-  enrichContactId,
-  email,
+  matchKey,
+  blankFields,
   apolloUrl,
   apollo,
   clay,
@@ -83,22 +85,25 @@ export const EnrichmentPanel = ({
 
   const enrich = () =>
     run('enrich', async () => {
-      if (!enrichContactId) throw new Error('Enrichment matches on a contact email, and this company has no contact yet.')
-      const outcome = await api.integrations.enrich.mutate({ contactId: enrichContactId })
+      const outcome =
+        object === 'contact'
+          ? await api.integrations.enrich.mutate({ contactId: recordId })
+          : await api.integrations.enrichCompany.mutate({ companyId: recordId })
       const wrote = outcome.written.length
       const held = outcome.suggested.length
       return `${outcome.detail} ${wrote ? `Filled ${wrote} blank field${wrote === 1 ? '' : 's'}.` : ''} ${held ? `${held} value${held === 1 ? '' : 's'} held for review below.` : ''}`.trim()
     })
 
-  const canEnrich = canWrite && apollo.state !== 'not_configured' && apollo.state !== 'disconnected'
+  const canEnrich = canWrite && usable(apollo) && Boolean(matchKey)
   const timeline = recordPath(workspace, object, recordId, { tab: 'activity', type: 'email_tracking,sequence_activity' })
+  const matchLabel = object === 'contact' ? 'email' : 'domain'
 
   return (
     <section className="rounded-panel border border-line bg-surface">
       <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
         <h3 className="font-medium">Enrichment and outreach</h3>
         {canEnrich ? (
-          <Button onClick={() => void enrich()} busy={busy === 'enrich'} disabled={!email && object === 'contact'}>
+          <Button onClick={() => void enrich()} busy={busy === 'enrich'}>
             Enrich
           </Button>
         ) : null}
@@ -108,18 +113,44 @@ export const EnrichmentPanel = ({
         <dt className="text-secondary">Apollo</dt>
         <dd className={HEALTH[apollo.state].tone} title={apollo.lastError ?? undefined}>
           {HEALTH[apollo.state].label}
-          {apollo.state === 'not_configured' ? (
+          {apollo.state === 'not_configured' || apollo.state === 'disconnected' ? (
             <>
               {' · '}
-              <Link href={integrationsPath()}>connect</Link>
+              <Link href={integrationsPath('apollo')}>connect</Link>
             </>
           ) : null}
         </dd>
         <dt className="text-secondary">Clay</dt>
         <dd className={HEALTH[clay.state].tone} title={clay.lastError ?? undefined}>
           {HEALTH[clay.state].label}
+          {clay.state === 'not_configured' || clay.state === 'disconnected' ? (
+            <>
+              {' · '}
+              <Link href={integrationsPath('clay')}>connect</Link>
+            </>
+          ) : null}
         </dd>
       </dl>
+
+      {!usable(apollo) ? (
+        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+          <Link href={integrationsPath('apollo')}>Connect Apollo</Link> to fill{' '}
+          {blankFields.length > 0 ? `${blankFields.join(', ')}` : 'blank fields'} from its data
+          {object === 'contact' ? ', enrol this person in a sequence, and see opens, clicks and replies here' : ''}.
+          {!usable(clay) ? ' Clay fills whatever Apollo leaves blank on a company.' : ''}
+        </p>
+      ) : blankFields.length > 0 ? (
+        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+          Blank and fillable: {blankFields.join(', ')}.
+          {!matchKey ? ` Add ${object === 'contact' ? 'an email address' : 'a domain'} first: that is what Apollo matches on.` : ''}
+        </p>
+      ) : null}
+
+      {usable(apollo) && !matchKey && blankFields.length === 0 ? (
+        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+          No {matchLabel}, so nothing to look up in Apollo.
+        </p>
+      ) : null}
 
       {apollo.state === 'degraded' || apollo.state === 'disconnected' ? (
         <p className="border-t border-divider px-3 py-2 text-small text-warning">
@@ -129,19 +160,21 @@ export const EnrichmentPanel = ({
 
       {object === 'contact' ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-divider px-3 py-2">
-          {apolloUrl && email ? (
+          {apolloUrl && matchKey ? (
             <a href={apolloUrl} target="_blank" rel="noreferrer">
               Open in Apollo
             </a>
-          ) : (
-            <span className="text-secondary">No email, so nothing to look up in Apollo.</span>
-          )}
+          ) : null}
           <Link href={timeline} className="text-small">
             {tracked + sequenced === 0
               ? 'No opens, clicks or sequence steps yet'
               : `${tracked} tracking event${tracked === 1 ? '' : 's'} · ${sequenced} sequence step${sequenced === 1 ? '' : 's'}`}
           </Link>
         </div>
+      ) : null}
+
+      {object === 'contact' && usable(apollo) && matchKey ? (
+        <Sequences contactId={recordId} canWrite={canWrite} onChanged={() => router.refresh()} />
       ) : null}
 
       {suggestions.length > 0 ? (
@@ -192,5 +225,134 @@ export const EnrichmentPanel = ({
         </ul>
       ) : null}
     </section>
+  )
+}
+
+type Status = { sequenceId: string; sequenceName: string; status: string; currentStep: number | null; failureReason: string | null }
+type Loaded =
+  | { state: 'loading' }
+  | { state: 'error'; message: string }
+  | { state: 'ready'; statuses: Status[]; sequences: { id: string; name: string }[]; accounts: { id: string; email: string }[] }
+
+/** F6 §3 on the record: where each sequence got to, and the one write a person
+ *  asks for, "add them to the follow-up". Loaded after paint, because it is a
+ *  call to Apollo and the rest of the record should not wait on it. */
+const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canWrite: boolean; onChanged: () => void }) => {
+  const toast = useToast()
+  const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
+  const [sequenceId, setSequenceId] = useState('')
+  const [accountId, setAccountId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const load = async () => {
+    setLoaded({ state: 'loading' })
+    try {
+      const [status, sequences, accounts] = await Promise.all([
+        api.integrations.apolloStatus.query({ contactId }),
+        api.integrations.apolloSequences.query(),
+        api.integrations.apolloEmailAccounts.query(),
+      ])
+      setLoaded({ state: 'ready', statuses: status.statuses, sequences, accounts })
+      if (status.recorded > 0) onChanged()
+    } catch (cause) {
+      setLoaded({ state: 'error', message: errorMessage(cause) })
+    }
+  }
+
+  useEffect(() => {
+    void load()
+    // Once per contact: the status is re-read after an enrolment below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactId])
+
+  const enroll = async () => {
+    if (!sequenceId || !accountId) {
+      toast('error', 'Pick a sequence and the inbox it sends from.')
+      return
+    }
+    setBusy(true)
+    try {
+      const outcome = await api.integrations.apolloEnroll.mutate({ contactId, sequenceId, emailAccountId: accountId })
+      toast(outcome.enrolled ? 'success' : 'error', outcome.detail)
+      await load()
+      onChanged()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-divider px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-small font-medium">Sequences</h4>
+        {loaded.state !== 'loading' ? (
+          <Button variant="tertiary" onClick={() => void load()}>
+            Sync now
+          </Button>
+        ) : null}
+      </div>
+
+      {loaded.state === 'loading' ? <Spinner /> : null}
+      {loaded.state === 'error' ? (
+        <p role="alert" className="text-small text-error">
+          {loaded.message}
+        </p>
+      ) : null}
+      {loaded.state === 'ready' ? (
+        <>
+          {loaded.statuses.length === 0 ? (
+            <p className="text-small text-secondary">Not in any sequence.</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-small">
+              {loaded.statuses.map((row) => (
+                <li key={row.sequenceId} className="flex flex-wrap justify-between gap-x-3">
+                  <span className="break-words font-medium">{row.sequenceName}</span>
+                  <span className={row.status === 'failed' ? 'text-error' : 'text-secondary'}>
+                    {row.status}
+                    {row.currentStep ? ` · step ${row.currentStep}` : ''}
+                    {row.failureReason ? ` · ${row.failureReason.replace(/_/g, ' ')}` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {canWrite ? (
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex min-w-40 flex-1 flex-col gap-1 text-small">
+                <span className="text-secondary">Add to sequence</span>
+                <Select value={sequenceId} onChange={(event) => setSequenceId(event.target.value)}>
+                  <option value="">Choose one…</option>
+                  {loaded.sequences.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="flex min-w-40 flex-1 flex-col gap-1 text-small">
+                <span className="text-secondary">Send from</span>
+                <Select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+                  <option value="">Choose an inbox…</option>
+                  {loaded.accounts.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.email}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <Button onClick={() => void enroll()} busy={busy} disabled={loaded.sequences.length === 0}>
+                Enrol
+              </Button>
+              {loaded.sequences.length === 0 ? (
+                <span className="text-small text-secondary">No sequences exist in Apollo yet. Create one there first.</span>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   )
 }
