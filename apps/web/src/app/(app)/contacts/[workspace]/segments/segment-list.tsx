@@ -123,7 +123,8 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
 
   return (
     <div className="flex flex-col gap-4">
-      {canWrite ? (
+      {/* With nothing listed, the empty state below carries the one button. */}
+      {canWrite && rows.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           <Button variant="primary" onClick={openNew}>
             Create segment
