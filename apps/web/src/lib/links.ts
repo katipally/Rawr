@@ -41,8 +41,8 @@ const query = (params: Record<string, string | number | undefined | null>): stri
   return rendered ? `?${rendered}` : ''
 }
 
-export const workspaceHome = (workspace: string): string =>
-  objectView(workspace, 'contact', 'all', 'list')
+/** The front door: the Monday screen, not a list. */
+export const workspaceHome = (workspace: string): string => `/${CRM_ROOT}/${workspace}/home`
 
 export const objectView = (
   workspace: string,
@@ -84,6 +84,8 @@ export const pageViewPath = (workspace: string, id: string): string =>
  *  none of it carries a workspace in the path: a session is already in exactly one.
  *  Kept in one list so the settings sub-navigation and the pages agree. */
 export const sitesPath = (): string => '/settings/sites'
+
+export const membersPath = (): string => '/settings/members'
 
 export const propertiesPath = (object?: string): string =>
   object ? `/settings/properties?object=${object}` : '/settings/properties'

@@ -40,6 +40,13 @@
 
   --color-scrim: var(--rawr-scrim);
 
+  --color-nav: var(--rawr-nav);
+  --color-nav-hover: var(--rawr-nav-hover);
+  --color-nav-active: var(--rawr-nav-active);
+  --color-nav-text: var(--rawr-nav-text);
+  --color-nav-muted: var(--rawr-nav-muted);
+  --color-nav-accent: var(--rawr-nav-accent);
+
   --font-sans: var(--rawr-font-sans);
 
   /* The type scale. Without these the text-body and text-small utilities match no
@@ -93,5 +100,31 @@
   h2,
   h3 {
     overflow-wrap: anywhere;
+  }
+}
+
+@layer base {
+  /* Chrome and Safari smooth text differently; Safari's subpixel pass makes the
+     300-weight body copy read heavier than Chrome's. Grayscale in both so the
+     same weight looks the same. */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Native selects are the one control each engine draws its own way. One
+     appearance everywhere, with the chevron drawn by us. */
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    padding-right: 1.75rem;
+  }
+
+  button {
+    -webkit-tap-highlight-color: transparent;
   }
 }

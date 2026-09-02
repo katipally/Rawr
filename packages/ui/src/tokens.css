@@ -49,6 +49,15 @@
 
   --rawr-scrim: rgb(51 71 91 / 0.4);
 
+  /* The navigation rail is HubSpot navy in both themes: it is the one surface
+     that does not follow the canvas, which is what makes it read as chrome. */
+  --rawr-nav: #2d3e50;
+  --rawr-nav-hover: #3b5068;
+  --rawr-nav-active: #516f90;
+  --rawr-nav-text: #ffffff;
+  --rawr-nav-muted: #cbd6e2;
+  --rawr-nav-accent: #ff7a59;
+
   --rawr-shadow-panel: 0 1px 2px rgb(51 71 91 / 0.12);
   --rawr-shadow-overlay: 0 8px 24px rgb(51 71 91 / 0.2);
 

@@ -11,20 +11,23 @@ import {
   segmentsPath,
   submissionsPath,
   tasksPath,
+  workspaceHome,
 } from '~/lib/links.ts'
-import { readSession } from '~/server/session.ts'
+import { memberships, readSession } from '~/server/session.ts'
 
 const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const workspace = session.workspaceSlug
+  const mine = await memberships(session.userId)
   // Built from the session, because every CRM address carries its workspace.
   // Three sections rather than ten tabs: the record types and the two things
   // built on them, what the outside world sends in, and what somebody loads by
   // hand. Settings is not a section; it lives in the top bar and owns its own
   // sub-navigation once you are inside it.
   const nav: NavSection[] = [
+    { key: 'home', label: 'Home', icon: 'home', href: workspaceHome(workspace) },
     {
       key: 'crm',
       label: 'CRM',
@@ -67,6 +70,8 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
     <ToastProvider>
       <AppShell
         workspaceName={session.workspaceName}
+        workspaceSlug={workspace}
+        workspaces={mine.map((m) => ({ slug: m.workspaceSlug, name: m.workspaceName }))}
         email={session.email}
         role={session.role}
         nav={nav}
