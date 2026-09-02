@@ -243,3 +243,218 @@ export const rememberMcpCall = async (
       delete from mcp_call where created_at < now() - make_interval(hours => ${KEEP_HOURS * 2})`)
   })
 }
+
+// ---------------------------------------------------------------------------
+// OAuth 2.1: clients, codes, and tokens issued through consent
+// ---------------------------------------------------------------------------
+
+/** An access token issued through OAuth lives an hour; the refresh token that
+ *  comes with it lives until the token is revoked, and is replaced on every use
+ *  (OAuth 2.1 rotation for public clients). */
+export const OAUTH_ACCESS_SECONDS = 60 * 60
+const REFRESH_PREFIX = 'rawr_mcp_refresh_'
+
+export type McpClientRow = {
+  id: string
+  name: string
+  redirectUris: string[]
+  source: 'dcr' | 'cimd'
+  fetchedAt: Date | null
+}
+
+type ClientRow = {
+  id: string
+  name: string
+  redirect_uris: string[]
+  source: string
+  fetched_at: Date | string | null
+}
+
+const toClient = (row: ClientRow): McpClientRow => ({
+  id: row.id,
+  name: row.name,
+  redirectUris: row.redirect_uris,
+  source: row.source === 'cimd' ? 'cimd' : 'dcr',
+  fetchedAt: row.fetched_at ? new Date(row.fetched_at) : null,
+})
+
+/** Outside any tenant, deliberately: a client registers before anybody has signed
+ *  in, and its record is a name and a redirect list, not workspace data. */
+export const saveMcpClient = async (input: {
+  id: string
+  name: string
+  redirectUris: string[]
+  source: 'dcr' | 'cimd'
+}): Promise<McpClientRow> => {
+  const [row] = await appDb.execute<ClientRow>(sql`
+    insert into mcp_client (id, name, redirect_uris, source, fetched_at)
+    values (${input.id}, ${input.name},
+            (select coalesce(array_agg(uri), '{}') from jsonb_array_elements_text(${JSON.stringify(input.redirectUris)}::jsonb) uri),
+            ${input.source},
+            ${input.source === 'cimd' ? sql`now()` : sql`null`})
+    on conflict (id) do update
+      set name = excluded.name, redirect_uris = excluded.redirect_uris,
+          fetched_at = excluded.fetched_at
+    returning id, name, redirect_uris, source, fetched_at`)
+  if (!row) throw new Error('The client could not be registered.')
+  return toClient(row)
+}
+
+export const readMcpClient = async (id: string): Promise<McpClientRow | null> => {
+  const [row] = await appDb.execute<ClientRow>(sql`
+    select id, name, redirect_uris, source, fetched_at from mcp_client where id = ${id} limit 1`)
+  return row ? toClient(row) : null
+}
+
+/** Written by the person approving on the consent screen. The plaintext goes back
+ *  to the client in the redirect and is never stored. */
+export const createOauthCode = async (
+  ctx: WorkspaceContext,
+  input: { clientId: string; codeChallenge: string; redirectUri: string; resource: string | null; scope: string | null },
+): Promise<string> => {
+  if (!ctx.actorId) throw new Error('An approval belongs to a person, and this request has no one.')
+  const code = randomToken(32)
+  await mutate(ctx, 'mcp_oauth_code', async (tx) => {
+    const [row] = await tx.execute<{ id: string }>(sql`
+      insert into mcp_oauth_code
+        (workspace_id, user_id, client_id, code_hash, code_challenge, redirect_uri, resource, scope, expires_at)
+      values (${ctx.workspaceId}, ${ctx.actorId}, ${input.clientId}, ${hashToken(code)},
+              ${input.codeChallenge}, ${input.redirectUri}, ${input.resource}, ${input.scope},
+              now() + interval '5 minutes')
+      returning id`)
+    return {
+      result: undefined,
+      audit: {
+        entity: 'mcp_oauth_code',
+        entityId: row?.id ?? null,
+        action: 'approve',
+        before: null,
+        after: { clientId: input.clientId, redirectUri: input.redirectUri },
+      },
+    }
+  })
+  await appDb.execute(sql`update mcp_client set last_used_at = now() where id = ${input.clientId}`)
+  return code
+}
+
+export type RedeemedCode = {
+  workspaceId: string
+  userId: string
+  clientId: string
+  codeChallenge: string
+  redirectUri: string
+  resource: string | null
+  scope: string | null
+  expiresAt: Date
+}
+
+/** Single use: the row is deleted as it is read. An expired code is returned so
+ *  the caller can name the reason, and is gone either way. */
+export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode | null> => {
+  const [row] = await appDb.execute<{
+    workspace_id: string
+    user_id: string
+    client_id: string
+    code_challenge: string
+    redirect_uri: string
+    resource: string | null
+    scope: string | null
+    expires_at: Date | string
+  }>(sql`select * from rawr.mcp_code_redeem(${hashToken(plaintext)})`)
+  if (!row) return null
+  return {
+    workspaceId: row.workspace_id,
+    userId: row.user_id,
+    clientId: row.client_id,
+    codeChallenge: row.code_challenge,
+    redirectUri: row.redirect_uri,
+    resource: row.resource,
+    scope: row.scope,
+    expiresAt: new Date(row.expires_at),
+  }
+}
+
+export type IssuedOauthToken = { accessToken: string; refreshToken: string; expiresIn: number; scope: string | null }
+
+const oauthContext = (workspaceId: string, userId: string): WorkspaceContext => ({
+  workspaceId,
+  actorId: userId,
+  actorKind: 'user',
+  // Every role may hold a token (WRITE_ROLES), and the live role is read from the
+  // membership on each call, so the least one is the right one to issue under.
+  role: 'viewer',
+})
+
+/** A token the consent flow issues. It is an mcp_token like any other, named
+ *  after the client, so it appears in Settings and is revoked the same way. */
+export const issueOauthToken = async (input: {
+  workspaceId: string
+  userId: string
+  clientId: string
+  clientName: string
+  scope: string | null
+}): Promise<IssuedOauthToken> => {
+  const accessToken = `${PREFIX}${randomToken(32)}`
+  const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
+  const ctx = oauthContext(input.workspaceId, input.userId)
+
+  await mutate(ctx, 'mcp_token', async (tx) => {
+    const [row] = await tx.execute<{ id: string; prefix: string }>(sql`
+      insert into mcp_token
+        (workspace_id, user_id, name, token_hash, prefix, client_id, scope, expires_at, refresh_hash)
+      values (${ctx.workspaceId}, ${ctx.actorId}, ${input.clientName}, ${hashToken(accessToken)},
+              ${accessToken.slice(0, PREFIX.length + PREVIEW_CHARS)}, ${input.clientId}, ${input.scope},
+              now() + make_interval(secs => ${OAUTH_ACCESS_SECONDS}), ${hashToken(refreshToken)})
+      returning id, prefix`)
+    return {
+      result: undefined,
+      audit: {
+        entity: 'mcp_token',
+        entityId: row?.id ?? null,
+        action: 'create',
+        before: null,
+        after: { name: input.clientName, prefix: row?.prefix, clientId: input.clientId, via: 'oauth' },
+      },
+    }
+  })
+
+  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: input.scope }
+}
+
+/** Rotation: the presented refresh token is replaced in the same update that
+ *  mints the new access token, so the old one stops working the moment the new
+ *  one exists. Returns null for a refresh token that is unknown, revoked, or
+ *  already rotated, and the caller answers `invalid_grant`. */
+export const refreshOauthToken = async (
+  plaintext: string,
+  clientId: string,
+): Promise<IssuedOauthToken | null> => {
+  if (!plaintext.startsWith(REFRESH_PREFIX)) return null
+  const [owner] = await appDb.execute<{
+    token_id: string
+    workspace_id: string
+    user_id: string
+    client_id: string | null
+    scope: string | null
+  }>(sql`select * from rawr.mcp_refresh_owner(${hashToken(plaintext)})`)
+  if (!owner || owner.client_id !== clientId) return null
+
+  const accessToken = `${PREFIX}${randomToken(32)}`
+  const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
+  const ctx = oauthContext(owner.workspace_id, owner.user_id)
+
+  const rotated = await withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string }>(sql`
+      update mcp_token
+         set token_hash = ${hashToken(accessToken)},
+             prefix = ${accessToken.slice(0, PREFIX.length + PREVIEW_CHARS)},
+             refresh_hash = ${hashToken(refreshToken)},
+             expires_at = now() + make_interval(secs => ${OAUTH_ACCESS_SECONDS})
+       where id = ${owner.token_id} and refresh_hash = ${hashToken(plaintext)} and revoked_at is null
+       returning id`)
+    return rows.length > 0
+  })
+  if (!rotated) return null
+
+  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: owner.scope }
+}

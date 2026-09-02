@@ -52,14 +52,28 @@ const ACTIVITY_TYPE: Record<MarketingEventKind, ActivityType> = {
   sequence_reply: 'sequence_activity',
 }
 
-const SENTENCE: Record<MarketingEventKind, (subject: string) => string> = {
+/** A sequence event names what happened (enrolled, completed, failed, removed,
+ *  paused, resumed); the step number is the fallback when it does not. */
+const sequenceSentence = (subject: string, detail: Record<string, unknown>): string => {
+  const event = typeof detail.event === 'string' ? detail.event : ''
+  const step = typeof detail.step === 'number' && detail.step > 0 ? ` (step ${detail.step})` : ''
+  if (event === 'enrolled') return `was enrolled in ${subject}${step}`
+  if (event === 'completed') return `finished ${subject}`
+  if (event === 'failed') return `failed in ${subject}${detail.reason ? `: ${String(detail.reason)}` : ''}`
+  if (event === 'removed') return `was removed from ${subject}`
+  if (event === 'paused') return `was paused in ${subject}${detail.reason ? `: ${String(detail.reason)}` : ''}`
+  if (event === 'resumed') return `was resumed in ${subject}`
+  return `reached${step || ' a step'} in ${subject}`
+}
+
+const SENTENCE: Record<MarketingEventKind, (subject: string, detail: Record<string, unknown>) => string> = {
   delivered: (subject) => `${subject} was delivered`,
   open: (subject) => `opened ${subject}`,
   click: (subject) => `clicked a link in ${subject}`,
   bounce: (subject) => `${subject} bounced`,
   spam: (subject) => `${subject} was marked as spam`,
   unsubscribe: () => 'unsubscribed',
-  sequence_step: (subject) => `reached a step in ${subject}`,
+  sequence_step: sequenceSentence,
   sequence_reply: (subject) => `replied to ${subject}`,
 }
 
@@ -104,7 +118,7 @@ export const ingestMarketingEvent = async (
     const subject = event.subject ?? 'an email'
     await recordActivity(tx, ctx, {
       type: ACTIVITY_TYPE[event.kind],
-      subject: SENTENCE[event.kind](subject),
+      subject: SENTENCE[event.kind](subject, event.detail),
       occurredAt: event.at,
       payload: { source: event.source, kind: event.kind, ...event.detail },
       links: [{ entityType: 'contact', entityId: matchedContact.id }],
@@ -193,3 +207,33 @@ export const setExternalId = async (
       .where(eq(contact.id, contactId))
   })
 }
+
+export const externalIdOf = async (
+  ctx: WorkspaceContext,
+  contactId: string,
+  provider: string,
+): Promise<string | null> =>
+  withWorkspace(ctx, async (tx) => {
+    const [row] = await tx.execute<{ external_id: string | null }>(sql`
+      select external_ids ->> ${provider} as external_id from contact
+       where id = ${contactId} and deleted_at is null limit 1`)
+    return row?.external_id ?? null
+  })
+
+/** Contacts a provider knows, oldest-synced first, so a scheduled read-back walks
+ *  the whole set over a few passes rather than the same few every time. */
+export const contactsLinkedTo = async (
+  ctx: WorkspaceContext,
+  provider: string,
+  limit: number,
+): Promise<{ id: string; email: string; externalId: string }[]> =>
+  withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string; email: string; external_id: string }>(sql`
+      select c.id, c.email, c.external_ids ->> ${provider} as external_id
+        from contact c
+       where c.deleted_at is null and c.email is not null
+         and c.external_ids ? ${provider}
+       order by coalesce((c.external_ids ->> ${provider + ':synced_at'})::timestamptz, 'epoch'::timestamptz)
+       limit ${limit}`)
+    return rows.map((row) => ({ id: row.id, email: row.email, externalId: row.external_id }))
+  })

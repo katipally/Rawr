@@ -92,6 +92,9 @@ export const message = pgTable(
      *  20MB thread must not bloat the table. B1. */
     bodyRef: text('body_ref'),
     hasAttachments: boolean('has_attachments').notNull().default(false),
+    /** The mailbox that read it. A Gmail message id only means something inside
+     *  the mailbox that issued it, so fetching the body later needs this. */
+    mailboxId: uuid('mailbox_id').references(() => mailbox.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
   (t) => [

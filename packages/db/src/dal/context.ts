@@ -77,6 +77,9 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
    *  carries no role of its own, so a viewer's token reads and cannot write, and
    *  revoking somebody else's is refused inside the layer rather than here. */
   mcp_token: ['admin', 'sales', 'marketing', 'viewer'],
+  /** An approval on the OAuth consent screen, by the same people who may hold a
+   *  token, because it is the same access issued a different way. */
+  mcp_oauth_code: ['admin', 'sales', 'marketing', 'viewer'],
   /** F4. A site key is what lets a host write into this workspace, so creating one
    *  is an admin act however harmless the row looks. */
   site: ['admin'],

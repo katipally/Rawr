@@ -397,7 +397,7 @@ export const blockedPatterns = async (ctx: WorkspaceContext, userId: string): Pr
  *  restarting it produce no duplicates. B2. */
 export const ingestMessage = async (
   ctx: WorkspaceContext,
-  input: { incoming: IncomingMessage; ownerEmail: string; internalDomain: string; blocked: Set<string> },
+  input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string; blocked: Set<string> },
 ): Promise<IngestResult> => {
   assertCanWrite(ctx, 'mailbox')
   const skip = shouldSkip(input.incoming, {
@@ -412,7 +412,7 @@ export const ingestMessage = async (
 const storeMessage = async (
   tx: Tx,
   ctx: WorkspaceContext,
-  input: { incoming: IncomingMessage; ownerEmail: string; internalDomain: string },
+  input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string },
 ): Promise<IngestResult> => {
   const { incoming } = input
 
@@ -454,6 +454,7 @@ const storeMessage = async (
       snippet: incoming.snippet,
       bodyRef: incoming.bodyRef,
       hasAttachments: incoming.hasAttachments,
+      mailboxId: input.mailboxId,
     })
     .onConflictDoNothing({ target: [message.workspaceId, message.providerMessageId] })
     .returning({ id: message.id })
@@ -658,6 +659,8 @@ export type ThreadMessage = {
   sentAt: Date
   snippet: string | null
   hasAttachments: boolean
+  /** False when no connected mailbox can fetch the body any more. */
+  bodyAvailable: boolean
 }
 
 export const readThread = async (
@@ -688,10 +691,80 @@ export const readThread = async (
         sentAt: message.sentAt,
         snippet: message.snippet,
         hasAttachments: message.hasAttachments,
+        bodyRef: message.bodyRef,
+        mailboxState: mailbox.state,
       })
       .from(message)
+      .leftJoin(mailbox, eq(mailbox.id, message.mailboxId))
       .where(eq(message.threadId, threadId))
       .orderBy(asc(message.sentAt))
 
-    return { thread, messages }
+    return {
+      thread,
+      messages: messages.map(({ bodyRef, mailboxState, ...row }) => ({
+        ...row,
+        bodyAvailable: bodyRef !== null && mailboxState !== null && mailboxState !== 'revoked',
+      })),
+    }
+  })
+
+export type MessageSource = {
+  id: string
+  threadId: string
+  providerMessageId: string
+  snippet: string | null
+  mailbox: MailboxTokens
+}
+
+/** The message and the mailbox that can fetch its body. A row from before the
+ *  mailbox was recorded falls back to a connected mailbox owned by one of the
+ *  message's own participants, which is the only mailbox the id is valid in. */
+export const messageSource = async (ctx: WorkspaceContext, messageId: string): Promise<MessageSource | null> =>
+  withWorkspace(ctx, async (tx) => {
+    const [row] = await tx
+      .select({
+        id: message.id,
+        threadId: message.threadId,
+        providerMessageId: message.providerMessageId,
+        snippet: message.snippet,
+        mailboxId: message.mailboxId,
+        fromAddr: message.fromAddr,
+        toAddrs: message.toAddrs,
+        ccAddrs: message.ccAddrs,
+      })
+      .from(message)
+      .where(eq(message.id, messageId))
+      .limit(1)
+    if (!row) return null
+
+    const participants = [row.fromAddr ?? '', ...row.toAddrs, ...row.ccAddrs].filter(Boolean)
+    const [box] = await tx
+      .select()
+      .from(mailbox)
+      .where(
+        row.mailboxId
+          ? eq(mailbox.id, row.mailboxId)
+          : and(sql`lower(${mailbox.email}) in (${sql.join(participants.map((a) => sql`${a}`), sql`, `)})`, sql`${mailbox.state} <> 'revoked'`),
+      )
+      .limit(1)
+    if (!box) return null
+
+    return {
+      id: row.id,
+      threadId: row.threadId,
+      providerMessageId: row.providerMessageId,
+      snippet: row.snippet,
+      mailbox: {
+        id: box.id,
+        userId: box.userId,
+        email: box.email,
+        state: box.state,
+        accessToken: decryptToken(box.accessToken),
+        refreshToken: decryptToken(box.refreshToken),
+        accessTokenExpiresAt: box.accessTokenExpiresAt,
+        historyId: box.historyId,
+        backfillCursor: box.backfillCursor,
+        backfillDone: box.backfillDone,
+      },
+    }
   })

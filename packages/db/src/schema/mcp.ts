@@ -28,12 +28,56 @@ export const mcpToken = pgTable(
     prefix: text('prefix').notNull(),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    /** Set on a token issued through OAuth: the client it was issued to, what it
+     *  may do, when the access token dies, and the hash of the refresh token that
+     *  replaces it. A token created by hand in Settings has none of these. */
+    clientId: text('client_id'),
+    scope: text('scope'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    refreshHash: text('refresh_hash'),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex('mcp_token_hash_key').on(t.tokenHash),
+    uniqueIndex('mcp_token_refresh_key').on(t.refreshHash),
     index('mcp_token_user_idx').on(t.workspaceId, t.userId, t.createdAt.desc()),
   ],
+)
+
+/** An OAuth client: registered dynamically (RFC 7591) or resolved from a Client
+ *  ID Metadata Document and cached under its URL. Not tenant data, so no
+ *  workspace column and no row level security: a client is a public name and a
+ *  list of places it may be sent back to. */
+export const mcpClient = pgTable('mcp_client', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  redirectUris: text('redirect_uris').array().notNull().default([]),
+  source: text('source').notNull().default('dcr'),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+})
+
+/** One authorization code, alive for a few minutes between the consent screen and
+ *  the token endpoint. Redeemed by deleting it, so it cannot be used twice. */
+export const mcpOauthCode = pgTable(
+  'mcp_oauth_code',
+  {
+    id: pk(),
+    workspaceId: workspaceId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull(),
+    codeHash: text('code_hash').notNull(),
+    codeChallenge: text('code_challenge').notNull(),
+    redirectUri: text('redirect_uri').notNull(),
+    resource: text('resource'),
+    scope: text('scope'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('mcp_oauth_code_hash_key').on(t.codeHash)],
 )
 
 /** F5 §Edge cases, "the same write is retried after a timeout".
