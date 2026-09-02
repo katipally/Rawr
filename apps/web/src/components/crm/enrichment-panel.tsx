@@ -134,8 +134,8 @@ export const EnrichmentPanel = ({
 
       {!usable(apollo) ? (
         <p className="border-t border-divider px-3 py-2 text-small text-secondary">
-          <Link href={integrationsPath('apollo')}>Connect Apollo</Link> to fill{' '}
-          {blankFields.length > 0 ? `${blankFields.join(', ')}` : 'blank fields'} from its data
+          <Link href={integrationsPath('apollo')}>Connect Apollo</Link>
+          {blankFields.length > 0 ? ` to fill ${blankFields.join(', ')} from its data` : ` to keep this ${object} current from its data`}
           {object === 'contact' ? ', enrol this person in a sequence, and see opens, clicks and replies here' : ''}.
           {!usable(clay) ? ' Clay fills whatever Apollo leaves blank on a company.' : ''}
         </p>
