@@ -1,8 +1,6 @@
 import { listCollectorNotices, listSites } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
-import Link from 'next/link'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { agentAccessPath, failedJobsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { SiteList } from './site-list.tsx'
@@ -37,10 +35,6 @@ const SitesPage = async () => {
             Each host that sends page views carries a site key. Nothing is collected without one,
             and nothing is collected from anyone who has not accepted analytics cookies.
           </p>
-        </div>
-        <div className="flex shrink-0 gap-4">
-          <Link href={agentAccessPath()}>Agent access</Link>
-          <Link href={failedJobsPath()}>Failed jobs</Link>
         </div>
       </div>
 

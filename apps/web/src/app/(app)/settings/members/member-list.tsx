@@ -69,6 +69,7 @@ export const MemberList = ({ rows, selfId, canWrite, role }: Props) => {
     {
       key: 'role',
       header: 'Role',
+      width: 150,
       render: (row) =>
         canWrite ? (
           <select
@@ -96,6 +97,7 @@ export const MemberList = ({ rows, selfId, canWrite, role }: Props) => {
     {
       key: 'linked',
       header: 'Google',
+      width: 160,
       render: (row) => (
         <span className={row.linked ? 'text-success' : 'text-secondary'}>
           {row.linked ? 'Signed in' : 'Not signed in yet'}
@@ -105,6 +107,7 @@ export const MemberList = ({ rows, selfId, canWrite, role }: Props) => {
     {
       key: 'joinedAt',
       header: 'Joined',
+      width: 120,
       render: (row) => <span className="text-secondary">{new Date(row.joinedAt).toLocaleDateString()}</span>,
     },
     ...(canWrite
@@ -112,6 +115,7 @@ export const MemberList = ({ rows, selfId, canWrite, role }: Props) => {
           {
             key: 'actions',
             header: '',
+            width: 110,
             render: (row: MemberListRow) =>
               row.userId === selfId ? null : (
                 <Button variant="tertiary" disabled={busy} onClick={() => setRemoving(row)}>

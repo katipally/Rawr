@@ -25,7 +25,7 @@ const SECTIONS = [
   { href: mailboxesPath(), label: 'Mailboxes', hint: 'Gmail history on records' },
   { href: integrationsPath(), label: 'Integrations', hint: 'Connected services and their health' },
   { href: sitesPath(), label: 'Tracked sites', hint: 'Hosts that may send events' },
-  { href: agentAccessPath(), label: 'Agent access', hint: 'Tokens for Claude' },
+  { href: agentAccessPath(), label: 'Agent access', hint: 'Connecting Claude and other assistants' },
   { href: failedJobsPath(), label: 'Failed jobs', hint: 'What broke, and replaying it' },
 ]
 

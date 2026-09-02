@@ -1,7 +1,5 @@
 import { listMcpTokens } from '@rawr/db'
-import Link from 'next/link'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { failedJobsPath, sitesPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { TokenList } from './token-list.tsx'
 
@@ -19,21 +17,14 @@ const AgentAccessPage = async () => {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="max-w-2xl">
-          <h1 className="text-lg font-medium">Agent access</h1>
-          <p className="text-secondary">
-            A token lets an assistant read and change records as you, with your role. It can do
-            nothing you cannot do yourself, every change is on the timeline under your name, and
-            revoking one stops it on the next call.
-          </p>
-        </div>
-        {session.role === 'admin' ? (
-          <div className="flex shrink-0 gap-4">
-            <Link href={sitesPath()}>Tracked sites</Link>
-            <Link href={failedJobsPath()}>Failed jobs</Link>
-          </div>
-        ) : null}
+      <div className="max-w-2xl">
+        <h1 className="text-lg font-medium">Agent access</h1>
+        <p className="text-secondary">
+          An assistant connects by signing in to Rawr, or with a token created here. Either way it
+          reads and changes records as you, with your role: it can do nothing you cannot do
+          yourself, every change is on the timeline under your name, and revoking the connection
+          stops it on the next call.
+        </p>
       </div>
 
       <TokenList
