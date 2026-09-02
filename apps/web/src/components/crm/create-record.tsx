@@ -2,7 +2,7 @@
 
 import { Button, Field, Modal, useToast } from '@rawr/ui'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useId, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { recordPath } from '~/lib/links.ts'
@@ -29,7 +29,7 @@ export const CreateRecordDialog = ({
   onClose,
   initial = {},
 }: CreateRecordDialogProps) => {
-  const router = useRouter()
+  const { navigate } = useNavigation()
   const toast = useToast()
   const prefix = useId()
   const [values, setValues] = useState<Record<string, unknown>>(initial)
@@ -52,7 +52,7 @@ export const CreateRecordDialog = ({
       }
       toast('success', `${objectLabel} created.`)
       onClose()
-      router.push(recordPath(workspace, object, created.id))
+      navigate(recordPath(workspace, object, created.id))
     } catch (cause) {
       const message = errorMessage(cause)
       setError(message)

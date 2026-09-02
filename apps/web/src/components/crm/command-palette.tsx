@@ -1,7 +1,7 @@
 'use client'
 
 import { cn } from '@rawr/ui'
-import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
@@ -13,7 +13,7 @@ type Group = { label: string; hits: Hit[] }
 const DEBOUNCE_MS = 180
 
 export const CommandPalette = ({ workspace }: { workspace: string }) => {
-  const router = useRouter()
+  const { navigate } = useNavigation()
   const listId = useId()
   const input = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
@@ -82,7 +82,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
     setOpen(false)
     setText('')
     setGroups([])
-    router.push(recordPath(workspace, hit.objectKey, hit.id))
+    navigate(recordPath(workspace, hit.objectKey, hit.id))
   }
 
   const onKeyDown = (event: React.KeyboardEvent) => {

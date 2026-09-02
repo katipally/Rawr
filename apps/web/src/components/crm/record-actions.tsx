@@ -2,6 +2,7 @@
 
 import { Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { objectView } from '~/lib/links.ts'
@@ -34,6 +35,7 @@ export const RecordActions = ({
   canWrite,
 }: RecordActionsProps) => {
   const router = useRouter()
+  const { navigate } = useNavigation()
   const toast = useToast()
   const [showMerge, setShowMerge] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
@@ -82,7 +84,7 @@ export const RecordActions = ({
     try {
       await api.crm.records.remove.mutate({ object, id: recordId })
       toast('success', `${objectLabel} deleted. Its history is kept on the records it touched.`)
-      router.push(objectView(workspace, object, 'all'))
+      navigate(objectView(workspace, object, 'all'))
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {

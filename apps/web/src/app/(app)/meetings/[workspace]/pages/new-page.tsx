@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
-import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { bookingPagesPath } from '~/lib/links.ts'
@@ -38,7 +38,7 @@ export const NewPageButton = ({
   workspace: string
   canCreateShared: boolean
 }) => {
-  const router = useRouter()
+  const { navigate } = useNavigation()
   const show = useToast()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -67,7 +67,7 @@ export const NewPageButton = ({
         isActive: false,
         ...(kind === 'round_robin' ? { hosts: [] } : {}),
       })
-      router.push(bookingPagesPath(workspace, id))
+      navigate(bookingPagesPath(workspace, id))
     } catch (cause) {
       show('error', errorMessage(cause))
       setSaving(false)

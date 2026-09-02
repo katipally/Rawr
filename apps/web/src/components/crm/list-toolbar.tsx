@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, Modal, TextInput, useToast } from '@rawr/ui'
-import { useRouter } from 'next/navigation'
+import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
@@ -42,7 +42,7 @@ export const ListToolbar = ({
   canWrite,
   exportHref,
 }: ListToolbarProps) => {
-  const router = useRouter()
+  const { navigate } = useNavigation()
   const toast = useToast()
   const [search, setSearch] = useState(params.q ?? '')
   const [showFilters, setShowFilters] = useState(false)
@@ -55,7 +55,7 @@ export const ListToolbar = ({
   const goTo = (next: ListParams) => {
     const merged: ListParams = { ...params, ...next }
     delete merged.cursor
-    router.push(objectView(workspace, object, view, kind, merged))
+    navigate(objectView(workspace, object, view, kind, merged))
   }
 
   const activeConditions = filters.reduce((sum, group) => sum + group.conditions.length, 0)
@@ -75,7 +75,7 @@ export const ListToolbar = ({
       })
       toast('success', `Saved as “${saved.name}”. Its address is /views/${saved.slug}/${kind}.`)
       setShowSave(false)
-      router.push(objectView(workspace, object, saved.slug, kind, { q: params.q }))
+      navigate(objectView(workspace, object, saved.slug, kind, { q: params.q }))
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
