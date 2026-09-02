@@ -1,6 +1,7 @@
 import { membershipsForGoogleSub, type Membership, type WorkspaceContext } from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
+import { cache } from 'react'
 import { env } from '~/lib/env.ts'
 
 const COOKIE = 'rawr_session'
@@ -58,8 +59,13 @@ export const clearSessionCookie = async (): Promise<void> => {
 
 /** The cookie is a claim, not proof. Every read re-checks that the membership still
  *  exists and re-reads the role from the database, so a revoked person loses access
- *  on their next request rather than when their token expires. */
-export const readSession = async (): Promise<Session | null> => {
+ *  on their next request rather than when their token expires.
+ *
+ *  Deduplicated per request, not cached across them: the layout and the page both
+ *  ask, and several pages ask again inside a helper, so one screen was paying for
+ *  the same membership query three or four times over. `cache` is scoped to a
+ *  single render, so a revoked role still takes effect on the very next request. */
+export const readSession = cache(async (): Promise<Session | null> => {
   const jar = await cookies()
   const token = jar.get(COOKIE)?.value
   if (!token) return null
@@ -77,7 +83,7 @@ export const readSession = async (): Promise<Session | null> => {
   if (!current) return null
 
   return sessionFromMembership(claims.googleSub, current)
-}
+})
 
 export const contextFrom = (session: Session): WorkspaceContext => ({
   workspaceId: session.workspaceId,

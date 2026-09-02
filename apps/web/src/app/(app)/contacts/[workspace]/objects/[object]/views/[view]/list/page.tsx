@@ -1,4 +1,4 @@
-import { isObjectKey, listRecords, resolveView, listViews } from '@rawr/db'
+import { isObjectKey, listRecords, resolveView, listViews, withWorkspaceReads } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
@@ -35,12 +35,18 @@ const ListPage = async ({
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const { object, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
 
-  const [views, resolved] = await Promise.all([
-    listViews(ctx, objectParam),
-    resolveView(ctx, objectParam, viewSlug),
-  ])
+  // One transaction for the whole screen. Each of these reads used to open its
+  // own, and BEGIN plus the set_config plus COMMIT is three network round trips
+  // before a row is fetched.
+  const { object, lookups, canWrite, views, resolved } = await withWorkspaceReads(ctx, async () => {
+    const crm = await loadCrmContext(ctx, objectParam)
+    const [list, view] = await Promise.all([
+      listViews(ctx, objectParam),
+      resolveView(ctx, objectParam, viewSlug),
+    ])
+    return { ...crm, views: list, resolved: view }
+  })
   // A stale bookmark still shows the person their records, at the address the
   // view actually lives at, rather than a 404.
   if (!resolved.matched && resolved.view.slug !== viewSlug) {
@@ -93,7 +99,9 @@ const ListPage = async ({
   if (search.q) exportParams.set('q', search.q)
 
   return (
-    <div className="flex flex-col gap-3">
+    // h-full and min-h-0 all the way down are what let the table fill the screen
+    // and scroll under its own header rather than the page scrolling past it.
+    <div className="flex h-full min-h-0 flex-col gap-3">
       {search.error ? (
         <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
           {search.error}

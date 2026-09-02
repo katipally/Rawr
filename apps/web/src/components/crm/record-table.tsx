@@ -127,10 +127,10 @@ export const RecordTable = ({
   }))
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* The header row is its own control strip so the sort links stay reachable
           by keyboard rather than being buried in the table header. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-secondary">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-secondary">
         <span>
           {rows.length === 0
             ? 'No records'
@@ -167,6 +167,8 @@ export const RecordTable = ({
       ) : null}
 
       <DataTable
+        fill
+        storageKey={`${object}.${view}`}
         columns={tableColumns}
         rows={rows}
         rowKey={(row) => row.id}
@@ -188,7 +190,7 @@ export const RecordTable = ({
       />
 
       {nextCursor ? (
-        <div>
+        <div className="shrink-0">
           <Button
             onClick={() =>
               router.push(

@@ -82,34 +82,44 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
   const addCondition = (groupIndex: number) => {
     const first = fields[0]
     if (!first) return
-    patch(groupIndex, {
-      conditions: [
-        ...(groups[groupIndex]?.conditions ?? []),
-        { field: first.key, operator: first.operators[0] ?? 'is', value: '' },
-      ],
-    })
+    // Read from the updater's own argument rather than the render's `groups`, so
+    // two quick clicks add two conditions instead of one overwriting the other.
+    setGroups((current) =>
+      current.map((group, i) =>
+        i === groupIndex
+          ? {
+              ...group,
+              conditions: [
+                ...group.conditions,
+                { field: first.key, operator: first.operators[0] ?? 'is', value: '' },
+              ],
+            }
+          : group,
+      ),
+    )
   }
 
   const apply = () => {
-    const cleaned = groups
-      .map((group) => ({
-        ...group,
-        conditions: group.conditions.filter(
-          (condition) =>
-            NULLARY.has(condition.operator) ||
-            (condition.value !== undefined && condition.value !== null && String(condition.value) !== ''),
-        ),
-      }))
-      .filter((group) => group.conditions.length > 0)
+    // Kept aligned with `groups` while the check runs. Dropping the empty groups
+    // first and then indexing `cleaned[i]` against `groups` compares one group's
+    // conditions with a different group's, so a missing value went unreported.
+    const trimmed = groups.map((group) => ({
+      ...group,
+      conditions: group.conditions.filter(
+        (condition) =>
+          NULLARY.has(condition.operator) ||
+          (condition.value !== undefined && condition.value !== null && String(condition.value) !== ''),
+      ),
+    }))
 
-    const incomplete = groups.some(
-      (group, i) => group.conditions.length > 0 && (cleaned[i]?.conditions.length ?? 0) < group.conditions.length,
+    const incomplete = trimmed.some(
+      (group, i) => group.conditions.length < (groups[i]?.conditions.length ?? 0),
     )
     if (incomplete) {
       setError('Every condition needs a value, or an operator that does not take one.')
       return
     }
-    onApply(cleaned)
+    onApply(trimmed.filter((group) => group.conditions.length > 0))
   }
 
   return (

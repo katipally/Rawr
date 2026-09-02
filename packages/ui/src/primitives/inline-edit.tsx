@@ -28,6 +28,9 @@ export const InlineEdit = ({ label, value, placeholder = 'Empty', onCommit }: In
   }, [value, editing])
 
   const commit = async () => {
+    // Enter disables the input, the browser blurs it, and onBlur would commit a
+    // second time. One guard covers both entry points.
+    if (saving) return
     if (draft === (value ?? '')) {
       setEditing(false)
       return
@@ -51,12 +54,19 @@ export const InlineEdit = ({ label, value, placeholder = 'Empty', onCommit }: In
         onClick={() => setEditing(true)}
         aria-label={`Edit ${label}`}
         className={cn(
-          'w-full min-w-0 rounded-hs border border-transparent px-2 py-1 text-left',
-          'hover:border-line hover:bg-fill',
+          // A dashed underline at rest, because a value that only looks editable
+          // on hover is a value nobody discovers they can edit.
+          'group w-full min-w-0 rounded-hs border border-transparent px-2 py-1 text-left',
+          'decoration-line decoration-dashed underline-offset-4 hover:border-line hover:bg-fill-hover',
           !value && 'text-secondary',
         )}
       >
-        <span className="break-words">{value || placeholder}</span>
+        <span className="break-words underline decoration-inherit decoration-dashed">
+          {value || placeholder}
+        </span>
+        <span aria-hidden="true" className="ml-1 text-secondary opacity-0 group-hover:opacity-100">
+          ✎
+        </span>
       </button>
     )
   }

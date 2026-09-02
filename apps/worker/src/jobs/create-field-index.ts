@@ -25,6 +25,16 @@ export const createFieldIndex = defineJob({
     assertUsableFieldKey(objectKey)
     const indexName = `hot_${objectKey}_${fieldKey}`
 
+    // A failed CREATE INDEX CONCURRENTLY leaves the index behind marked invalid,
+    // and IF NOT EXISTS then matches it on the retry and does nothing at all — so
+    // the row would flip to 'ready' over an index the planner refuses to use.
+    // Dropping any invalid leftover first is what makes the retry mean something.
+    const [invalid] = await owner`
+      select 1 from pg_class c
+        join pg_index i on i.indexrelid = c.oid
+       where c.relname = ${indexName} and not i.indisvalid`
+    if (invalid) await owner.unsafe(`drop index concurrently if exists "${indexName}"`)
+
     try {
       // CONCURRENTLY cannot run inside a transaction, which is exactly why this is
       // a job and not part of the request that asked for it.

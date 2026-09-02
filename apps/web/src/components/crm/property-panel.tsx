@@ -182,8 +182,12 @@ export const PropertyPanel = ({
                               setDraft(local[field.key] ?? '')
                             }}
                             className={cn(
-                              'w-full min-w-0 rounded-hs border border-transparent px-1.5 py-0.5 text-left',
-                              editable && 'hover:border-line hover:bg-fill',
+                              'group w-full min-w-0 rounded-hs border border-transparent px-1.5 py-0.5 text-left',
+                              // The dashed underline is the whole affordance: a
+                              // value that only looks editable on hover is a value
+                              // nobody finds out they can edit.
+                              editable &&
+                                'underline decoration-line decoration-dashed underline-offset-4 hover:border-line hover:bg-fill-hover',
                               !editable && 'cursor-default',
                             )}
                           >
@@ -194,6 +198,14 @@ export const PropertyPanel = ({
                               currency={String(local.currency ?? 'USD')}
                               placeholder={editable ? 'Empty' : '—'}
                             />
+                            {editable ? (
+                              <span
+                                aria-hidden="true"
+                                className="ml-1 text-secondary no-underline opacity-0 group-hover:opacity-100"
+                              >
+                                ✎
+                              </span>
+                            ) : null}
                           </button>
                         )}
 

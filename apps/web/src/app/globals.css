@@ -38,6 +38,8 @@
   --color-warning: var(--rawr-warning);
   --color-warning-subtle: var(--rawr-warning-subtle);
 
+  --color-scrim: var(--rawr-scrim);
+
   --font-sans: var(--rawr-font-sans);
 
   /* The type scale. Without these the text-body and text-small utilities match no

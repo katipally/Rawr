@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { appDb } from '../src/internal/pool.ts'
+import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import {
   assignHost,
   attachConference,
@@ -1226,6 +1226,9 @@ try {
       ? `\nall ${checks} booking checks passed.`
       : `\n${failures} of ${checks} booking checks FAILED.`,
   )
+  // Given back before exiting, so the next suite in `pnpm verify` does not start
+  // against a pooler this one is still holding connections on.
+  await closeAppPool()
   process.exit(failures === 0 ? 0 : 1)
 }
 

@@ -33,10 +33,10 @@ export const dispatchStitches = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 30,
   handle: async () => {
-    // Claim-and-read in one statement, so two dispatch runs cannot queue the same
-    // alias twice. Unlike field_index there is no 'building' state to reclaim: the
-    // back-fill is idempotent, so a worker that dies leaves the row unresolved and
-    // the next run picks it up.
+    // A plain read, and the de-duplication happens on the queue instead. The
+    // alias row cannot carry the claim: it stays unresolved until the back-fill
+    // genuinely finishes, which is what lets a bounded run be picked up again.
+    // Field_index can claim in SQL because it has a 'building' state to claim into.
     const claimed = await owner`
       select id, workspace_id, visitor_id, contact_id
         from visitor_alias
@@ -48,12 +48,20 @@ export const dispatchStitches = defineJob({
     console.log(`[activity.stitch.dispatch] queueing ${claimed.length} back-fill(s).`)
 
     for (const row of claimed) {
-      await boss().send('activity.stitch', {
-        workspaceId: row.workspace_id,
-        aliasId: row.id,
-        visitorId: row.visitor_id,
-        contactId: row.contact_id,
-      })
+      await boss().send(
+        'activity.stitch',
+        {
+          workspaceId: row.workspace_id,
+          aliasId: row.id,
+          visitorId: row.visitor_id,
+          contactId: row.contact_id,
+        },
+        // This dispatcher runs every minute and a back-fill is bounded by passes
+        // rather than by the clock, so a visitor with a long history was queued
+        // again on every tick while the first attempt was still running. One
+        // outstanding job per alias is all that is ever useful.
+        { singletonKey: row.id as string },
+      )
     }
   },
 })
@@ -95,8 +103,10 @@ export const stitchVisitor = defineJob({
         }
       }
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      await markAliasResolved(ctx, aliasId, message)
+      // Deliberately not resolved here. Marking the alias done on the way out of a
+      // failure retired it on the first transient error, and the four retries that
+      // followed had nothing left to finish — the contact kept a half-moved
+      // timeline and nothing said so. The dispatcher re-claims it instead.
       throw cause
     }
 

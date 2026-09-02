@@ -1,6 +1,15 @@
 'use client'
 
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { cn } from '../cn.ts'
 
 type Tone = 'success' | 'error' | 'info'
@@ -9,7 +18,7 @@ type Toast = { id: number; tone: Tone; message: string }
 const TONES: Record<Tone, string> = {
   success: 'border-success bg-success-subtle',
   error: 'border-error bg-error-subtle',
-  info: 'border-line bg-surface',
+  info: 'border-line bg-surface-raised',
 }
 
 const ToastContext = createContext<((tone: Tone, message: string) => void) | null>(null)
@@ -24,6 +33,9 @@ let nextId = 0
 
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  useEffect(() => () => timers.current.forEach(clearTimeout), [])
 
   const show = useCallback((tone: Tone, message: string) => {
     const id = ++nextId
@@ -31,7 +43,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     // Errors stay until dismissed: a failure a person did not read is a failure
     // they will hit again.
     if (tone !== 'error') {
-      setTimeout(() => setToasts((all) => all.filter((t) => t.id !== id)), 5000)
+      timers.current.push(setTimeout(() => setToasts((all) => all.filter((t) => t.id !== id)), 5000))
     }
   }, [])
 
@@ -42,7 +54,7 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       {children}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex flex-col items-center gap-2 p-4 sm:items-end"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-60 flex flex-col items-center gap-2 p-4 sm:items-end"
       >
         {toasts.map((toast) => (
           <div

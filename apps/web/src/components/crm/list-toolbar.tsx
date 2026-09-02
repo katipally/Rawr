@@ -118,9 +118,15 @@ export const ListToolbar = ({
         </Button>
 
         {/* A plain link, so the browser downloads it and the export survives a
-            closed tab. It carries the same filters the table is showing. */}
-        <a href={exportHref} className="inline-flex" download>
-          <Button>Export CSV</Button>
+            closed tab. It carries the same filters the table is showing. Styled
+            as a button rather than wrapping one: a <button> inside an <a> is
+            nested interactive content, which assistive technology cannot resolve. */}
+        <a
+          href={exportHref}
+          download
+          className="inline-flex min-h-9 items-center justify-center rounded-hs border border-line bg-surface px-3 py-1.5 font-medium text-body no-underline transition-colors duration-150 hover:border-line-pressed hover:bg-fill-hover"
+        >
+          Export CSV
         </a>
 
         {canWrite ? (

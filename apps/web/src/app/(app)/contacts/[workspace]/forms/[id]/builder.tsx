@@ -6,7 +6,7 @@ import { FORM_FIELD_TYPES, type FormField, type FormFieldType } from '@rawr/db/f
 import type { FormDetail } from '@rawr/db'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Field, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -55,6 +55,26 @@ export const FormBuilder = ({
   const [fields, setFields] = useState<FormField[]>(form.fields)
   const [settings, setSettings] = useState(form.settings)
   const [saving, setSaving] = useState(false)
+  /** The last state the server confirmed. Everything on this screen is local
+   *  until Save, and the header has a link straight back to the list, so leaving
+   *  used to discard a rebuilt form without a word. */
+  const [saved, setSaved] = useState({
+    name: form.name,
+    slug: form.slug,
+    isActive: form.isActive,
+    fields: form.fields,
+    settings: form.settings,
+  })
+
+  const dirty =
+    JSON.stringify({ name, slug, isActive, fields, settings }) !== JSON.stringify(saved)
+
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
 
   const patch = (index: number, change: Partial<FormField>) =>
     setFields((all) => all.map((field, i) => (i === index ? { ...field, ...change } : field)))
@@ -70,22 +90,32 @@ export const FormBuilder = ({
     })
 
   const addField = () =>
-    setFields((all) => [
-      ...all,
-      {
-        key: `field_${all.length + 1}`,
-        type: 'text',
-        label: `Question ${all.length + 1}`,
-        required: false,
-        mapsTo: null,
-        step: 0,
-      },
-    ])
+    setFields((all) => {
+      // Numbered off the highest key in use, not off the count. Adding three,
+      // deleting the second and adding again produced a second "field_3", which
+      // the schema then refused on save with a message about a key the person
+      // never typed.
+      const used = new Set(all.map((field) => field.key))
+      let n = all.length + 1
+      while (used.has(`field_${n}`)) n += 1
+      return [
+        ...all,
+        {
+          key: `field_${n}`,
+          type: 'text',
+          label: `Question ${n}`,
+          required: false,
+          mapsTo: null,
+          step: 0,
+        },
+      ]
+    })
 
   const save = async () => {
     setSaving(true)
     try {
       await api.forms.save.mutate({ id: form.id, name, slug, isActive, fields, settings })
+      setSaved({ name, slug, isActive, fields, settings })
       toast('success', 'Saved. The embed picks this up within a minute.')
       router.refresh()
     } catch (cause) {
@@ -117,9 +147,18 @@ export const FormBuilder = ({
           {!canEdit ? (
             <span className="text-xs text-secondary">Your role can view this but not change it.</span>
           ) : (
-            <Button type="button" variant="primary" busy={saving} onClick={() => void save()}>
-              {saving ? 'Saving…' : 'Save form'}
-            </Button>
+            <>
+              {dirty ? <span className="text-xs text-secondary">Unsaved changes</span> : null}
+              <Button
+                type="button"
+                variant="primary"
+                busy={saving}
+                disabled={!dirty}
+                onClick={() => void save()}
+              >
+                {saving ? 'Saving…' : 'Save form'}
+              </Button>
+            </>
           )}
         </div>
       </header>

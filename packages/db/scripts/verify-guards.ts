@@ -2,6 +2,7 @@ import postgres from 'postgres'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import { replayDeadLetter } from '../src/dal/jobs.ts'
 import { ForbiddenError, ROLES, type Role, type WorkspaceContext } from '../src/dal/context.ts'
+import { closeAppPool } from '../src/internal/pool.ts'
 
 /** Proves the role matrix and the audit trail by calling the mutation directly,
  *  not by checking that a button is hidden. */
@@ -153,7 +154,10 @@ try {
   await owner`delete from field_def where workspace_id = ${workspaceId} and key like 'guard_probe_%'`
   await owner.unsafe('drop index if exists hot_contact_guard_probe_admin')
 } finally {
-  await owner.end()
+  // The mutations under test query through the app pool, so this script owns two
+  // connections to give back, not one. Leaving the second open is what made
+  // `pnpm verify` hang here on an unsettled top-level await.
+  await Promise.all([owner.end(), closeAppPool()])
 }
 
 if (failures.length) {

@@ -2,9 +2,13 @@
 
 import { Button, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { api, errorMessage } from '~/lib/rpc.ts'
+
+/** The loop runs in this tab, so it is bounded. Reaching it is reported, never
+ *  dressed up as a finished import. */
+const MAX_CHUNKS = 10_000
 
 export type MappableField = { key: string; label: string; isRequired: boolean }
 
@@ -57,6 +61,17 @@ export const ImportWizard = ({
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState(processedRows)
   const [running, setRunning] = useState(false)
+  /** Set to stop the chunk loop between calls: by the Stop button, and by leaving
+   *  the page. Without it the loop kept sending chunks after this component was
+   *  gone, and its toast landed on whatever screen the person had moved to. */
+  const stopped = useRef(false)
+
+  useEffect(
+    () => () => {
+      stopped.current = true
+    },
+    [],
+  )
 
   const finished = state === 'done'
 
@@ -87,20 +102,31 @@ export const ImportWizard = ({
   }
 
   /** One chunk per call, so the run survives a closed tab: the server holds the
-   *  cursor and reopening this page picks it back up. A8. */
+   *  cursor and reopening this page picks it back up with Resume. A8.
+   *
+   *  The tab still has to stay open for the loop itself, so a run that stops for
+   *  any reason says so plainly rather than claiming it finished. */
   const run = async () => {
+    stopped.current = false
     setRunning(true)
     setError(null)
     try {
       let done = false
-      let guard = 0
-      while (!done && guard < 10_000) {
+      let chunks = 0
+      while (!done && !stopped.current && chunks < MAX_CHUNKS) {
         const result = await api.crm.imports.runChunk.mutate({ id: runId })
         setProgress(result.processed)
         done = result.done
-        guard += 1
+        chunks += 1
       }
-      toast('success', 'Import finished.')
+      if (done) toast('success', 'Import finished.')
+      else if (stopped.current) toast('info', 'Import paused. Resume picks up where it stopped.')
+      else {
+        toast(
+          'info',
+          `Stopped after ${MAX_CHUNKS.toLocaleString()} chunks so this tab is not held open indefinitely. Resume continues from here.`,
+        )
+      }
       router.refresh()
     } catch (cause) {
       setError(errorMessage(cause))
@@ -142,10 +168,13 @@ export const ImportWizard = ({
         </dl>
 
         {!finished ? (
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button variant="primary" busy={running} onClick={() => void run()}>
               {running ? 'Importing' : 'Resume the import'}
             </Button>
+            {running ? (
+              <Button onClick={() => (stopped.current = true)}>Stop after this chunk</Button>
+            ) : null}
           </div>
         ) : null}
 
@@ -155,8 +184,14 @@ export const ImportWizard = ({
             <p className="text-secondary">
               Everything else was imported. Fix these rows and upload just them again.
             </p>
-            <a href={`/contacts/${workspace}/import/${runId}/errors`} download>
-              <Button>Download the failed rows as CSV</Button>
+            {/* Styled as a button rather than wrapping one: a <button> inside an
+                <a> is nested interactive content assistive technology cannot resolve. */}
+            <a
+              href={`/contacts/${workspace}/import/${runId}/errors`}
+              download
+              className="inline-flex min-h-9 w-fit items-center justify-center rounded-hs border border-line bg-surface px-3 py-1.5 font-medium text-body no-underline hover:border-line-pressed hover:bg-fill-hover"
+            >
+              Download the failed rows as CSV
             </a>
             <ul className="flex flex-col rounded-panel border border-line bg-surface">
               {errors.slice(0, 25).map((row) => (
@@ -267,6 +302,9 @@ export const ImportWizard = ({
           <Button variant="primary" busy={running} onClick={() => void run()}>
             Import {totalRows.toLocaleString()} rows
           </Button>
+        ) : null}
+        {running ? (
+          <Button onClick={() => (stopped.current = true)}>Stop after this chunk</Button>
         ) : null}
       </div>
 

@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useOverlay } from './overlay.ts'
 
 export type ModalProps = {
   open: boolean
@@ -11,33 +12,33 @@ export type ModalProps = {
 }
 
 export const Modal = ({ open, onClose, title, children, footer }: ModalProps) => {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  const dialog = useRef<HTMLDivElement>(null)
+  useOverlay(open, onClose, dialog)
 
   if (!open) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
-      <button
-        type="button"
-        aria-label="Close dialog"
-        onClick={onClose}
-        className="absolute inset-0 cursor-default bg-black/30"
-      />
+      {/* The scrim is a token: black at 30% over a dark canvas is invisible. */}
+      <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-scrim" />
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex max-h-full w-full flex-col rounded-panel bg-surface shadow-overlay sm:max-w-lg"
+        tabIndex={-1}
+        className="relative flex max-h-full w-full flex-col rounded-panel border border-line bg-surface-raised shadow-overlay outline-none sm:max-w-lg"
       >
-        <header className="border-b border-divider px-4 py-3">
-          <h2 className="font-medium">{title}</h2>
+        <header className="flex items-center justify-between gap-3 border-b border-divider px-4 py-3">
+          <h2 className="min-w-0 font-medium">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="shrink-0 rounded-hs px-2 py-1 text-secondary hover:bg-fill-hover"
+          >
+            ✕
+          </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
         {footer ? (

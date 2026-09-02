@@ -56,7 +56,16 @@ production.
  pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```
 
-All four suites run against the real database and exit non-zero on failure, so they
+`pnpm verify` runs all nine. One of them needs the app up: `verify:mcp` calls the
+real `/api/mcp`. Start it with a small pool, or the suites and the dev server
+together exhaust the Supabase pooler and the failures read as logic errors:
+
+```
+ DATABASE_POOL_MAX=3 pnpm dev    in one terminal
+ pnpm verify                     in another
+```
+
+All of them run against the real database and exit non-zero on failure, so they
 can gate a build. `/design` renders every primitive in its empty, single-row and
 500-character states; `/design?rows=10000` is the large-result check.
 

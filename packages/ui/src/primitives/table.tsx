@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../cn.ts'
 
 export type Column<Row> = {
@@ -29,11 +29,31 @@ export type DataTableProps<Row> = {
   empty?: ReactNode
   /** Omitted means no checkbox column at all, which is what a read-only table wants. */
   selection?: Selection
+  /** Remembers this table's column widths in the browser. Sorting is a navigation,
+   *  so without it every resize is undone by the next click on a column. */
+  storageKey?: string
+  /** Fills the remaining height of a flex column and scrolls inside itself, which
+   *  is what makes the header stick. Needs every ancestor up to the shell's <main>
+   *  to be a flex column with min-h-0; without that the box collapses, so it is
+   *  opt-in rather than the default. */
+  fill?: boolean
 }
 
 const MIN_WIDTH = 64
 const DEFAULT_WIDTH = 180
 const SELECT_WIDTH = 40
+const KEY_STEP = 16
+
+const readWidths = (storageKey: string | undefined): Record<string, number> => {
+  if (!storageKey) return {}
+  try {
+    const raw = window.localStorage.getItem(`rawr.widths.${storageKey}`)
+    return raw ? (JSON.parse(raw) as Record<string, number>) : {}
+  } catch {
+    // Private windows and blocked site data are normal, not an error.
+    return {}
+  }
+}
 
 export const DataTable = <Row,>({
   columns,
@@ -43,9 +63,31 @@ export const DataTable = <Row,>({
   caption,
   empty,
   selection,
+  storageKey,
+  fill = false,
 }: DataTableProps<Row>) => {
   const [widths, setWidths] = useState<Record<string, number>>({})
   const drag = useRef<{ key: string; startX: number; startWidth: number } | null>(null)
+  /** What a pointermove handler outside React's render can read without going
+   *  stale, and what the end of a drag writes to storage. */
+  const latest = useRef(widths)
+  latest.current = widths
+
+  // Read after mount, never during render: the server has no localStorage and a
+  // width read at render time would not match the markup it hydrates against.
+  useEffect(() => setWidths(readWidths(storageKey)), [storageKey])
+
+  const save = useCallback(
+    (next: Record<string, number>) => {
+      if (!storageKey) return
+      try {
+        window.localStorage.setItem(`rawr.widths.${storageKey}`, JSON.stringify(next))
+      } catch {
+        // The resize still holds for this page view.
+      }
+    },
+    [storageKey],
+  )
 
   const onPointerMove = useCallback((event: PointerEvent) => {
     const current = drag.current
@@ -55,21 +97,27 @@ export const DataTable = <Row,>({
   }, [])
 
   const stop = useCallback(() => {
+    if (!drag.current) return
     drag.current = null
     window.removeEventListener('pointermove', onPointerMove)
     window.removeEventListener('pointerup', stop)
-  }, [onPointerMove])
+    save(latest.current)
+  }, [onPointerMove, save])
+
+  // A drag still live when the table unmounts would otherwise leave two window
+  // listeners behind for the rest of the session.
+  useEffect(() => stop, [stop])
+
+  if (rows.length === 0 && empty) return <>{empty}</>
+
+  const widthOf = (column: Column<Row>): number =>
+    widths[column.key] ?? column.width ?? DEFAULT_WIDTH
 
   const startResize = (key: string, startX: number, startWidth: number) => {
     drag.current = { key, startX, startWidth }
     window.addEventListener('pointermove', onPointerMove)
     window.addEventListener('pointerup', stop)
   }
-
-  if (rows.length === 0 && empty) return <>{empty}</>
-
-  const widthOf = (column: Column<Row>): number =>
-    widths[column.key] ?? column.width ?? DEFAULT_WIDTH
 
   const allTicked =
     selection !== undefined && rows.length > 0 && rows.every((row) => selection.selected.has(rowKey(row)))
@@ -93,8 +141,16 @@ export const DataTable = <Row,>({
   }
 
   return (
-    // The table scrolls inside its own box. The page never scrolls sideways.
-    <div className="w-full overflow-x-auto rounded-panel border border-line bg-surface">
+    // A box with overflow-x:auto has its other axis forced to a scroll container
+    // whatever is asked for, so `sticky` on a header always resolves against this
+    // box and never against the page. The header therefore only sticks when this
+    // box is the thing that scrolls, which is what `fill` arranges.
+    <div
+      className={cn(
+        'w-full overflow-auto rounded-panel border border-line bg-surface',
+        fill && 'min-h-0 flex-1',
+      )}
+    >
       {/*  table-layout: fixed is what makes truncation possible at all. In the
            default auto layout a cell grows to fit its content however narrow the
            header says it is, so a 500-character name stretches its column past
@@ -109,7 +165,7 @@ export const DataTable = <Row,>({
           ))}
         </colgroup>
         <thead>
-          <tr className="bg-fill">
+          <tr>
             {selection ? (
               <th
                 scope="col"
@@ -123,32 +179,43 @@ export const DataTable = <Row,>({
                 />
               </th>
             ) : null}
-            {columns.map((column) => {
-              return (
-                <th
-                  key={column.key}
-                  scope="col"
-                  className={cn(
-                    'relative border-b border-line px-3 py-2 font-medium',
-                    'sticky top-0 z-10 truncate bg-fill text-small text-secondary',
-                    column.align === 'right' && 'text-right',
-                  )}
-                  title={column.header}
-                >
-                  {column.header}
-                  <span
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label={`Resize ${column.header}`}
-                    onPointerDown={(event) => {
-                      event.preventDefault()
-                      startResize(column.key, event.clientX, widthOf(column))
-                    }}
-                    className="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none hover:bg-line-interactive"
-                  />
-                </th>
-              )
-            })}
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                scope="col"
+                className={cn(
+                  'relative sticky top-0 z-10 border-b border-line px-3 py-2',
+                  'truncate bg-fill text-small font-medium text-secondary',
+                  column.align === 'right' && 'text-right',
+                )}
+                title={column.header}
+              >
+                {column.header}
+                {/* Focusable and driven by the arrow keys, because a pointer is
+                    not the only way somebody arrives at this table. */}
+                <span
+                  role="separator"
+                  tabIndex={0}
+                  aria-orientation="vertical"
+                  aria-label={`Resize ${column.header}`}
+                  aria-valuenow={widthOf(column)}
+                  onPointerDown={(event) => {
+                    event.preventDefault()
+                    startResize(column.key, event.clientX, widthOf(column))
+                  }}
+                  onKeyDown={(event) => {
+                    const step =
+                      event.key === 'ArrowRight' ? KEY_STEP : event.key === 'ArrowLeft' ? -KEY_STEP : 0
+                    if (step === 0) return
+                    event.preventDefault()
+                    const next = { ...widths, [column.key]: Math.max(MIN_WIDTH, widthOf(column) + step) }
+                    setWidths(next)
+                    save(next)
+                  }}
+                  className="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none hover:bg-line-interactive focus-visible:bg-line-interactive"
+                />
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -158,7 +225,7 @@ export const DataTable = <Row,>({
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={cn(
                 'border-b border-divider last:border-0',
-                onRowClick && 'cursor-pointer hover:bg-fill',
+                onRowClick && 'cursor-pointer hover:bg-fill-hover',
                 selection?.selected.has(rowKey(row)) && 'bg-accent-subtle',
               )}
             >
