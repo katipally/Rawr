@@ -7,7 +7,7 @@ import {
   integration,
   outboundCall,
 } from '../schema/platform.ts'
-import { decryptToken, encryptToken } from '../internal/crypto.ts'
+import { decryptToken, encryptToken, randomToken } from '../internal/crypto.ts'
 import type { WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 
@@ -129,13 +129,19 @@ export const saveIntegration = async (
 ): Promise<{ id: string }> =>
   mutate(ctx, 'integration', async (tx) => {
     const secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
+    // Brevo does not sign its webhooks, so the URL Rawr hands it carries a token
+    // minted here once and kept across saves. Compared on every delivery.
+    const config =
+      input.config !== undefined && input.kind === 'brevo' && typeof input.config.webhookToken !== 'string'
+        ? { ...input.config, webhookToken: randomToken(24) }
+        : input.config
 
     const [saved] = await tx
       .insert(integration)
       .values({
         workspaceId: ctx.workspaceId,
         kind: input.kind,
-        config: input.config ?? {},
+        config: config ?? {},
         secretRef: secretRef ?? null,
         // Saved but never yet tested. The connection test is what moves it on.
         state: 'connected',
@@ -145,7 +151,7 @@ export const saveIntegration = async (
       .onConflictDoUpdate({
         target: [integration.workspaceId, integration.kind],
         set: {
-          ...(input.config !== undefined ? { config: input.config } : {}),
+          ...(config !== undefined ? { config } : {}),
           ...(secretRef !== undefined ? { secretRef } : {}),
           state: 'connected',
           lastError: null,
@@ -163,7 +169,7 @@ export const saveIntegration = async (
         action: 'save',
         before: null,
         // Never the secret itself, only that one was supplied.
-        after: { kind: input.kind, config: input.config ?? {}, secretChanged: secretRef !== undefined },
+        after: { kind: input.kind, config: config ?? {}, secretChanged: secretRef !== undefined },
       },
     }
   })

@@ -39,6 +39,7 @@ import {
   withWorkspace,
   schema,
 } from '@rawr/db'
+import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -436,7 +437,14 @@ export const crmRouter = router({
           state: z.enum(['subscribed', 'unsubscribed', 'unspecified']),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => setSubscription(ctx.workspace, input))),
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          await setSubscription(ctx.workspace, input)
+          // After the write, never before: Brevo being down must not block a
+          // person from recording an opt-out. A failure dead-letters and replays.
+          await propagateSubscriptionToBrevo(ctx.workspace, input).catch(() => undefined)
+        }),
+      ),
   }),
 
   search: protectedProcedure

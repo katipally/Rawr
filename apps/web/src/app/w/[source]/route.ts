@@ -66,7 +66,7 @@ export const POST = async (
     return rejected(`${source} is not connected in this workspace, so its webhooks are refused.`, 503)
   }
 
-  const verified = verify(source, request, raw, stored.secret)
+  const verified = verify(source, request, raw, stored.secret, stored.config)
   if (!verified.ok) {
     // Counted against the integration's health, so a spike of bad signatures is
     // visible rather than silently dropped. F6's edge-case table.
@@ -102,15 +102,23 @@ type Verified = { ok: true } | { ok: false; detail: string }
 /** Each provider signs differently, so this is the one place that knows how. Clay
  *  has no signature at all, so a shared secret in a header is what stands in;
  *  without it the endpoint would be an open enrichment-injection hole. */
-const verify = (source: Source, request: NextRequest, raw: string, secret: string): Verified => {
+const verify = (
+  source: Source,
+  request: NextRequest,
+  raw: string,
+  secret: string,
+  config: Record<string, unknown>,
+): Verified => {
   if (source === 'brevo') {
-    // Brevo signs the raw body with the webhook's own key, hex-encoded.
-    const presented = request.headers.get('x-sib-signature') ?? request.headers.get('x-mailin-signature') ?? ''
-    if (!presented) return { ok: false, detail: 'That request carried no Brevo signature.' }
-    const expected = createHmac('sha256', secret).update(raw).digest('hex')
+    // Brevo signs nothing. The URL it was given carries a token Rawr minted when
+    // the integration was saved, and that token is the whole proof.
+    const expected = typeof config.webhookToken === 'string' ? config.webhookToken : ''
+    const presented = request.nextUrl.searchParams.get('t') ?? ''
+    if (!expected) return { ok: false, detail: 'Brevo has no webhook token yet. Save the integration once to issue one.' }
+    if (!presented) return { ok: false, detail: 'That request carried no Brevo webhook token.' }
     return signatureMatches(expected, presented)
       ? { ok: true }
-      : { ok: false, detail: 'That Brevo signature does not match this workspace’s key.' }
+      : { ok: false, detail: 'That Brevo webhook token does not match this workspace’s.' }
   }
 
   if (source === 'apollo') {

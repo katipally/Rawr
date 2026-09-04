@@ -82,6 +82,9 @@ export const IntegrationPanel = ({
     if (openKind) document.getElementById(`integration-${openKind}`)?.scrollIntoView({ block: 'start' })
   }, [openKind])
 
+  const webhookUrl = (row: IntegrationView, key: string) =>
+    `${webhookBase}/w/${row.kind}?w=${key}${row.kind === 'brevo' ? `&t=${String(row.config.webhookToken)}` : ''}`
+
   const open = (row: IntegrationView) => {
     setEditing(row.kind)
     setSecret('')
@@ -270,7 +273,11 @@ export const IntegrationPanel = ({
                   ))}
 
                   {WEBHOOK_SOURCES.has(row.kind) ? (
-                    siteKey ? (
+                    row.kind === 'brevo' && typeof row.config.webhookToken !== 'string' ? (
+                      <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
+                        Save once and the webhook URL appears here with the token Brevo will present.
+                      </p>
+                    ) : siteKey ? (
                       <Field
                         id={`webhook-${row.kind}`}
                         label="Webhook URL to paste at the provider"
@@ -281,13 +288,13 @@ export const IntegrationPanel = ({
                             id={`webhook-${row.kind}`}
                             readOnly
                             className="min-w-0 flex-1"
-                            value={`${webhookBase}/w/${row.kind}?w=${siteKey}`}
+                            value={webhookUrl(row, siteKey)}
                             onFocus={(event) => event.currentTarget.select()}
                           />
                           <Button
                             onClick={() =>
                               void navigator.clipboard
-                                .writeText(`${webhookBase}/w/${row.kind}?w=${siteKey}`)
+                                .writeText(webhookUrl(row, siteKey))
                                 .then(() => toast('success', 'Copied.'))
                                 .catch(() => toast('error', 'Could not copy. Select the field and copy it by hand.'))
                             }

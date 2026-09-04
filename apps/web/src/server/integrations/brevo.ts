@@ -1,4 +1,5 @@
 import {
+  getRecord,
   ingestMarketingEvent,
   mailableContacts,
   once,
@@ -27,7 +28,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.brevo.com/v3'
 
-type BrevoConfig = { listId?: number; segmentId?: string }
+type BrevoConfig = { listId?: number; segmentId?: string; webhookToken?: string }
 
 const credentials = async (ctx: WorkspaceContext) => {
   const found = await readCredentials(ctx, 'brevo')
@@ -141,23 +142,37 @@ export const pushSegmentToBrevo = async (
 type BrevoWebhook = {
   event?: string
   email?: string
+  /** Transactional deliveries carry a message id; campaign events carry the
+   *  campaign id and its name under a key with a space in it. */
   'message-id'?: string
+  camp_id?: number
+  'campaign name'?: string
   id?: number
   subject?: string
   date?: string
+  date_event?: string
   ts_event?: number
   tag?: string
   link?: string
+  URL?: string
 }
 
+/** Both vocabularies: the campaign webhooks say `unsubscribe` and `click`, the
+ *  transactional ones `unsubscribed` and `unique_opened`. A proxy open is Apple
+ *  Mail fetching the pixel; it counts as an open the way HubSpot counts it. */
 const EVENT_MAP: Record<string, MarketingEvent['kind']> = {
   delivered: 'delivered',
   unique_opened: 'open',
   opened: 'open',
+  proxy_open: 'open',
   click: 'click',
+  clicked: 'click',
   hard_bounce: 'bounce',
   soft_bounce: 'bounce',
+  hardBounce: 'bounce',
+  softBounce: 'bounce',
   spam: 'spam',
+  unsubscribe: 'unsubscribe',
   unsubscribed: 'unsubscribe',
 }
 
@@ -174,14 +189,47 @@ export const handleBrevoWebhook = async (
     source: 'brevo',
     // Brevo's own id for the delivery, plus the event name: one message produces
     // a delivered, an open and a click, and all three must survive deduplication.
-    providerEventId: `${event['message-id'] ?? event.id ?? 'unknown'}:${event.event}`,
+    // A campaign fans out to every recipient under one camp_id, so the address is
+    // part of the key; one message produces a delivered, an open and a click, so
+    // the event name is too.
+    providerEventId: `${event.camp_id ?? event['message-id'] ?? event.id ?? 'unknown'}:${event.email.toLowerCase()}:${event.event}`,
     kind,
     email: event.email,
-    subject: event.subject ?? event.tag ?? 'a newsletter',
-    at: event.ts_event ? new Date(event.ts_event * 1000) : event.date ? new Date(event.date) : new Date(),
-    detail: { link: event.link ?? null, tag: event.tag ?? null },
+    subject: event['campaign name'] ?? event.subject ?? event.tag ?? 'a newsletter',
+    at: event.ts_event
+      ? new Date(event.ts_event * 1000)
+      : event.date_event || event.date
+        ? new Date((event.date_event ?? event.date) as string)
+        : new Date(),
+    detail: { link: event.URL ?? event.link ?? null, tag: event.tag ?? null, campaignId: event.camp_id ?? null },
   })
 
   await recordHealth(ctx, 'brevo', { ok: true })
   return { handled: outcome.stored, detail: outcome.reason ?? 'Recorded on the contact timeline.' }
+}
+
+/** The other direction of "unsubscribe is authoritative in Rawr": a choice made
+ *  here reaches Brevo's blocklist, so nobody opted out in the CRM is mailed by a
+ *  campaign. Fails into the dead letter, never into the person's screen. */
+export const propagateSubscriptionToBrevo = async (
+  ctx: WorkspaceContext,
+  input: { contactId: string; state: 'subscribed' | 'unsubscribed' | 'unspecified' },
+): Promise<void> => {
+  if (input.state === 'unspecified' || devIntegrationsEnabled) return
+  const found = await readCredentials(ctx, 'brevo')
+  if (!found?.secret) return
+  const record = await getRecord(ctx, 'contact', input.contactId)
+  const email = typeof record?.values.email === 'string' ? record.values.email : ''
+  if (!email) return
+
+  await attempt(
+    { ctx, kind: 'brevo', jobName: 'brevo.blocklist', payload: { contactId: input.contactId, state: input.state } },
+    () =>
+      json<null>({
+        url: `${API}/contacts/${encodeURIComponent(email)}?identifierType=email_id`,
+        method: 'PUT',
+        headers: headers(found.secret as string),
+        body: { emailBlacklisted: input.state === 'unsubscribed' },
+      }),
+  )
 }

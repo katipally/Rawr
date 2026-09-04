@@ -371,7 +371,13 @@ export const enrollInSequence = async (
         { ctx, kind: 'apollo', jobName: 'apollo.enroll', payload: input },
         () =>
           json<{ contacts?: unknown[]; skipped_contact_ids?: Record<string, string> }>({
-            url: `${API}/emailer_campaigns/${encodeURIComponent(input.sequenceId)}/add_contact_ids`,
+            // Apollo documents these as query parameters on a POST. They ride in
+            // the query, and in the body for good measure.
+            url: `${API}/emailer_campaigns/${encodeURIComponent(input.sequenceId)}/add_contact_ids?${new URLSearchParams([
+              ['emailer_campaign_id', input.sequenceId],
+              ['contact_ids[]', apollo.id],
+              ['send_email_from_email_account_id', input.emailAccountId],
+            ]).toString()}`,
             method: 'POST',
             headers: headers(secret!),
             body: {
@@ -426,6 +432,11 @@ const ACTIVITY_KIND: Record<string, MarketingEvent['kind']> = {
   resumed: 'sequence_step',
   removed: 'sequence_step',
   replied: 'sequence_reply',
+  // The email tracking row: Apollo's own opens and clicks, read back per message.
+  delivered: 'sequence_step',
+  opened: 'open',
+  clicked: 'click',
+  bounced: 'sequence_step',
 }
 
 /** The read-back F6 §3 promises: where each sequence got to, and every event on
@@ -442,22 +453,45 @@ export const syncSequenceActivity = async (
     ? devActivity()
     : await (async () => {
         const { secret } = await credentials(ctx)
-        const [found, feed] = await Promise.all([
+        // Two documented reads. Where each sequence got to is on the contact
+        // itself; what each email did is the outreach-email search, which has no
+        // contact filter, so the keyword is the address and the recipient is
+        // checked on every row that comes back.
+        const [found, mail] = await Promise.all([
           json<{ contacts?: { id: string; contact_campaign_statuses?: RawStatus[] }[] }>({
             url: `${API}/contacts/search`,
             method: 'POST',
             headers: headers(secret!),
             body: { q_keywords: apollo.email, per_page: 5 },
           }),
-          json<{ events?: RawEvent[] }>({
-            url: `${API}/emailer_campaigns/activity_feed`,
-            method: 'POST',
+          json<{ emailer_messages?: RawMessage[] }>({
+            url: `${API}/emailer_messages/search?${new URLSearchParams({ q_keywords: apollo.email, per_page: '100' }).toString()}`,
             headers: headers(secret!),
-            body: { contact_id: apollo.id, per_page: 50 },
           }),
         ])
         const contact = (found.contacts ?? []).find((row) => row.id === apollo.id)
-        return { statuses: contact?.contact_campaign_statuses ?? [], events: feed.events ?? [] }
+        const statuses = contact?.contact_campaign_statuses ?? []
+        const events: RawEvent[] = []
+        for (const status of statuses) {
+          if (status.added_at) events.push({ type: 'enrolled', occurred_at: status.added_at, sequence_id: status.emailer_campaign_id })
+          if (status.status === 'finished' && status.finished_at) events.push({ type: 'completed', occurred_at: status.finished_at, sequence_id: status.emailer_campaign_id })
+          if (status.status === 'failed' && status.failure_reason) {
+            events.push({ type: 'failed', occurred_at: status.finished_at ?? status.added_at ?? new Date().toISOString(), sequence_id: status.emailer_campaign_id, reason: status.failure_reason })
+          }
+          if (status.status === 'paused' && status.paused_at) events.push({ type: 'paused', occurred_at: status.paused_at, sequence_id: status.emailer_campaign_id })
+        }
+        for (const message of mail.emailer_messages ?? []) {
+          if ((message.to_email ?? '').toLowerCase() !== apollo.email.toLowerCase()) continue
+          const at = message.completed_at ?? message.created_at
+          if (!at) continue
+          const base = { occurred_at: at, sequence_id: message.emailer_campaign_id ?? '', step_position: message.emailer_step?.position, message_id: message.id, subject: message.subject ?? undefined }
+          if (['delivered', 'opened', 'clicked', 'replied'].includes(message.status ?? '')) events.push({ ...base, type: 'delivered' })
+          if (message.status === 'opened' || message.status === 'clicked' || message.status === 'replied') events.push({ ...base, type: 'opened' })
+          if (message.status === 'clicked') events.push({ ...base, type: 'clicked' })
+          if (message.status === 'replied') events.push({ ...base, type: 'replied' })
+          if (message.status === 'bounced') events.push({ ...base, type: 'bounced' })
+        }
+        return { statuses, events }
       })()
 
   let recorded = 0
@@ -467,16 +501,19 @@ export const syncSequenceActivity = async (
     const name = event.sequence_name ?? nameOf.get(event.sequence_id) ?? 'a sequence'
     const outcome = await ingestMarketingEvent(ctx, {
       source: 'apollo',
-      providerEventId: `${apollo.id}:${event.sequence_id}:${event.type}:${event.occurred_at}`,
+      providerEventId: event.message_id
+        ? `msg:${event.message_id}:${event.type}`
+        : `${apollo.id}:${event.sequence_id}:${event.type}:${event.occurred_at}`,
       kind,
       email: apollo.email,
-      subject: name,
+      // An open or a click is about one email; everything else is about the sequence.
+      subject: (kind === 'open' || kind === 'click') && event.subject ? event.subject : name,
       at: new Date(event.occurred_at),
       detail: {
         sequence: name,
         sequenceId: event.sequence_id,
         step: event.step_position ?? null,
-        event: event.type,
+        event: event.type === 'delivered' ? 'sent' : event.type === 'bounced' ? 'failed' : event.type,
         reason: event.reason ?? null,
       },
     })
@@ -504,7 +541,20 @@ type RawStatus = {
   status: string
   current_step_position?: number | null
   added_at?: string | null
+  finished_at?: string | null
+  paused_at?: string | null
   failure_reason?: string | null
+}
+
+type RawMessage = {
+  id: string
+  status?: string | null
+  subject?: string | null
+  to_email?: string | null
+  created_at?: string | null
+  completed_at?: string | null
+  emailer_campaign_id?: string | null
+  emailer_step?: { position?: number } | null
 }
 
 type RawEvent = {
@@ -512,8 +562,10 @@ type RawEvent = {
   occurred_at: string
   sequence_id: string
   sequence_name?: string
-  step_position?: number
+  step_position?: number | undefined
   reason?: string
+  message_id?: string
+  subject?: string | undefined
 }
 
 /** The scheduled pass: every contact Apollo knows, a page at a time. Each contact
