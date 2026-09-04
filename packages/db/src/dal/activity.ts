@@ -252,9 +252,14 @@ export type RecentActivityRow = TimelineRow & {
 }
 
 /** The workspace's timeline, newest first: what the team did today, across every
- *  record, for the Home screen. One indexed scan of activity plus a lateral pick
- *  of one link per entry; O(limit), never a join over the whole link table. */
-export const recentActivity = async (ctx: WorkspaceContext, limit = 12): Promise<RecentActivityRow[]> =>
+ *  record, for the Home screen, and narrowed to a few types for a screen that is
+ *  about one of them. One indexed scan of activity plus a lateral pick of one link
+ *  per entry; O(limit), never a join over the whole link table. */
+export const recentActivity = async (
+  ctx: WorkspaceContext,
+  limit = 12,
+  types?: ActivityType[],
+): Promise<RecentActivityRow[]> =>
   withWorkspace(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
@@ -287,7 +292,7 @@ export const recentActivity = async (ctx: WorkspaceContext, limit = 12): Promise
            order by case entity_type when 'contact' then 0 when 'deal' then 1 else 2 end
            limit 1
         ) l on true
-       where a.type <> 'page_view'
+       where ${types && types.length > 0 ? sql`a.type = any(${types}::rawr_activity_type[])` : sql`a.type <> 'page_view'`}
        order by a.occurred_at desc, a.id desc
        limit ${Math.min(Math.max(limit, 1), 100)}`)
 

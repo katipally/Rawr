@@ -1,4 +1,4 @@
-import { createImportRun, isObjectKey, suggestMapping, getRegistry, objectOrThrow } from '@rawr/db'
+import { createImportRun, isObjectKey } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { importsPath } from '~/lib/links.ts'
 import { readSpreadsheet, SpreadsheetError } from '~/server/spreadsheet.ts'
@@ -23,25 +23,31 @@ export const POST = async (
 
   const form = await request.formData()
   const file = form.get('file')
-  const objectKey = String(form.get('object') ?? '')
+  // "activities" is a kind rather than an object: notes and logged emails land on
+  // the timeline of the contact they name, not in columns on it.
+  const what = String(form.get('object') ?? '')
+  const kind = what === 'activities' ? ('activities' as const) : ('records' as const)
+  const objectKey = kind === 'activities' ? 'contact' : what
+  const source = String(form.get('source') ?? '') || null
 
   if (!(file instanceof File) || file.size === 0) return back('Pick a file to import.')
-  if (!isObjectKey(objectKey)) return back(`"${objectKey}" is not something Rawr can import into.`)
+  if (!isObjectKey(objectKey)) return back(`"${what}" is not something Rawr can import into.`)
 
   const ctx = contextFrom(session)
 
   try {
     const sheet = await readSpreadsheet(file)
-    const registry = await getRegistry(ctx)
-    const object = objectOrThrow(registry, objectKey)
 
     const run = await createImportRun(ctx, {
       objectKey,
+      kind,
+      source,
       filename: file.name,
       headers: sheet.headers,
       rows: sheet.rows,
-      // The mapping the last run of the same file shape used, if there was one.
-      mapping: suggestMapping(object, sheet.headers),
+      // Filled from the suggestion the run itself works out, which knows the
+      // preset for the export this file came from.
+      mapping: {},
     })
 
     return NextResponse.redirect(new URL(importsPath(workspace, run.id), request.nextUrl.origin))

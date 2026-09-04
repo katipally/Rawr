@@ -157,6 +157,9 @@ export const threadPath = (workspace: string, threadId: string): string =>
  *  run, not configuration an admin sets once. */
 export const sequencesPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/sequences`
 
+/** Brevo's seam: the audience and the opt-out are Rawr's, the send is Brevo's. */
+export const newsletterPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/newsletter`
+
 export const sequencePath = (workspace: string, id: string): string =>
   `/${CRM_ROOT}/${workspace}/sequences/${id}`
 

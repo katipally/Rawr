@@ -1,12 +1,14 @@
 'use client'
 
-import { Button, Field, TextInput, cn, useToast } from '@rawr/ui'
+import { Badge, Button, Card, EmptyState, Field, IconButton, TextInput, cn, useToast } from '@rawr/ui'
+import { Check, Copy } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { HealthState, IntegrationKind } from '@rawr/db'
 import type { IntegrationMeta } from '~/server/integrations/index.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { INTEGRATION_ICONS } from '~/components/icons.ts'
 import { sitesPath } from '~/lib/links.ts'
 import Link from 'next/link'
 
@@ -37,7 +39,7 @@ export type IntegrationPanelProps = {
 }
 
 /** F6 §1's four states, and what each one tells a person to do next. */
-const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 'error' | 'muted'; hint: string }> = {
+const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 'error' | 'neutral'; hint: string }> = {
   connected: { label: 'Connected', tone: 'ok', hint: 'Working, and it has answered recently.' },
   degraded: {
     label: 'Degraded',
@@ -49,13 +51,17 @@ const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 'error'
     tone: 'error',
     hint: 'The provider rejected the credential. Retrying has stopped; a new key is what fixes this.',
   },
-  not_configured: { label: 'Not configured', tone: 'muted', hint: 'No credential has been saved yet.' },
+  not_configured: { label: 'Not configured', tone: 'neutral', hint: 'No credential has been saved yet.' },
 }
 
 /** Providers that send Rawr webhooks. The URL is generated rather than documented
  *  because it carries the workspace key, which a person cannot be expected to
  *  assemble by hand. */
-const WEBHOOK_SOURCES = new Set<IntegrationKind>(['brevo', 'apollo', 'clay'])
+const WEBHOOK_SOURCES = new Set<IntegrationKind>(['brevo', 'apollo', 'clay', 'woodpecker'])
+
+/** The two that prove themselves with a token in the URL rather than a signature,
+ *  so their webhook URL cannot be shown until one has been minted. */
+const TOKEN_SOURCES = new Set<IntegrationKind>(['brevo', 'woodpecker'])
 
 export const IntegrationPanel = ({
   rows,
@@ -77,13 +83,22 @@ export const IntegrationPanel = ({
     Object.fromEntries(Object.entries(opened?.config ?? {}).map(([key, value]) => [key, String(value ?? '')])),
   )
   const [result, setResult] = useState<{ kind: IntegrationKind; ok: boolean; detail: string } | null>(null)
+  // Which provider's webhook URL was just copied, so the button can say so for a
+  // moment. A toast for something this small is more interruption than it is worth.
+  const [copied, setCopied] = useState<IntegrationKind | null>(null)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(null), 2000)
+    return () => clearTimeout(timer)
+  }, [copied])
 
   useEffect(() => {
     if (openKind) document.getElementById(`integration-${openKind}`)?.scrollIntoView({ block: 'start' })
   }, [openKind])
 
   const webhookUrl = (row: IntegrationView, key: string) =>
-    `${webhookBase}/w/${row.kind}?w=${key}${row.kind === 'brevo' ? `&t=${String(row.config.webhookToken)}` : ''}`
+    `${webhookBase}/w/${row.kind}?w=${key}${typeof row.config.webhookToken === 'string' ? `&t=${row.config.webhookToken}` : ''}`
 
   const open = (row: IntegrationView) => {
     setEditing(row.kind)
@@ -137,102 +152,116 @@ export const IntegrationPanel = ({
         </p>
       ) : null}
 
-      <ul className="flex flex-col gap-3">
+      <ul className="grid gap-3 @3xl:grid-cols-2">
         {rows.map((row) => {
           const health = HEALTH[row.state]
           const isOpen = editing === row.kind
+          const Icon = INTEGRATION_ICONS[row.kind]
 
           return (
-            <li key={row.kind} id={`integration-${row.kind}`} className="rounded-panel border border-line bg-surface">
-              <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-medium">{row.meta.name}</span>
-                    <span
-                      className={cn(
-                        'rounded-hs px-1.5 py-0.5 text-small',
-                        health.tone === 'ok' && 'bg-success-subtle text-success',
-                        health.tone === 'warn' && 'bg-warning-subtle text-warning',
-                        health.tone === 'error' && 'bg-error-subtle text-error',
-                        health.tone === 'muted' && 'bg-fill text-secondary',
-                      )}
-                    >
-                      {health.label}
-                    </span>
-                    {row.meta.rows.map((notionRow) => (
-                      <span key={notionRow} className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">
-                        {notionRow}
-                      </span>
-                    ))}
-                  </p>
+            <li
+              key={row.kind}
+              id={`integration-${row.kind}`}
+              className={cn('min-w-0', isOpen && '@3xl:col-span-2')}
+            >
+              <Card
+                className="h-full"
+                title={
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Icon aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+                    <span className="min-w-0 truncate">{row.meta.name}</span>
+                  </span>
+                }
+                action={
+                  <Badge tone={health.tone} dot>
+                    {health.label}
+                  </Badge>
+                }
+              >
+                <div className="flex flex-col gap-2">
                   <p className="text-secondary">{row.meta.purpose}</p>
-                  <p className="text-small text-secondary">{health.hint}</p>
-                  <p className="text-small text-secondary">
-                    {row.lastOkAt ? `Last succeeded ${formatDateTime(row.lastOkAt)}.` : 'Never succeeded yet.'}
-                    {row.deadLetters > 0
-                      ? ` ${row.deadLetters} failure${row.deadLetters === 1 ? '' : 's'} waiting to be replayed.`
-                      : ''}
-                  </p>
+
+                  {row.meta.rows.length > 0 ? (
+                    <p className="flex flex-wrap gap-1">
+                      {row.meta.rows.map((notionRow) => (
+                        <Badge key={notionRow}>{notionRow}</Badge>
+                      ))}
+                    </p>
+                  ) : null}
+
+                  <dl className="flex flex-col gap-0.5 text-small text-secondary">
+                    <div className="flex flex-wrap gap-x-2">
+                      <dt className="font-medium">State</dt>
+                      <dd className="min-w-0">{health.hint}</dd>
+                    </div>
+                    <div className="flex flex-wrap gap-x-2">
+                      <dt className="font-medium">Last success</dt>
+                      <dd className="min-w-0">
+                        {row.lastOkAt ? formatDateTime(row.lastOkAt) : 'Never yet'}
+                        {row.deadLetters > 0
+                          ? ` · ${row.deadLetters} failure${row.deadLetters === 1 ? '' : 's'} waiting to be replayed`
+                          : ''}
+                      </dd>
+                    </div>
+                    <div className="flex flex-wrap gap-x-2">
+                      <dt className="font-medium">When it is down</dt>
+                      <dd className="min-w-0">{row.meta.failureMode}</dd>
+                    </div>
+                  </dl>
+
                   {row.lastError ? (
                     <p role="alert" className="break-words text-small text-error">
                       {row.lastError}
                       {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt)})` : ''}
                     </p>
                   ) : null}
-                  <p className="text-small text-secondary">
-                    <span className="font-medium">When it is down:</span> {row.meta.failureMode}
-                  </p>
-                </div>
 
-                {canWrite ? (
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      busy={busy === row.kind}
-                      onClick={() =>
-                        void run(row.kind, async () => {
-                          const test = await api.integrations.test.mutate({ kind: row.kind })
-                          setResult({ kind: row.kind, ...test })
-                        })
-                      }
-                    >
-                      Test
-                    </Button>
-                    <Button variant="tertiary" onClick={() => (isOpen ? setEditing(null) : open(row))}>
-                      {isOpen ? 'Close' : row.hasSecret ? 'Change' : 'Connect'}
-                    </Button>
-                    {row.hasSecret ? (
+                  {canWrite ? (
+                    <div className="flex flex-wrap gap-2">
                       <Button
-                        variant="destructive"
                         busy={busy === row.kind}
                         onClick={() =>
-                          void run(
-                            row.kind,
-                            () => api.integrations.disconnect.mutate({ kind: row.kind }),
-                            'Disconnected. Nothing is sent to it any more.',
-                          )
+                          void run(row.kind, async () => {
+                            const test = await api.integrations.test.mutate({ kind: row.kind })
+                            setResult({ kind: row.kind, ...test })
+                          })
                         }
                       >
-                        Disconnect
+                        Test
                       </Button>
-                    ) : null}
-                  </div>
+                      <Button variant="tertiary" onClick={() => (isOpen ? setEditing(null) : open(row))}>
+                        {isOpen ? 'Close' : row.hasSecret ? 'Change' : 'Connect'}
+                      </Button>
+                      {row.hasSecret ? (
+                        <Button
+                          variant="destructive"
+                          busy={busy === row.kind}
+                          onClick={() =>
+                            void run(
+                              row.kind,
+                              () => api.integrations.disconnect.mutate({ kind: row.kind }),
+                              'Disconnected. Nothing is sent to it any more.',
+                            )
+                          }
+                        >
+                          Disconnect
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                {result?.kind === row.kind ? (
+                  <p
+                    role="status"
+                    className={cn('mt-3 border-t border-divider pt-3', result.ok ? 'text-success' : 'text-error')}
+                  >
+                    {result.detail}
+                  </p>
                 ) : null}
-              </div>
 
-              {result?.kind === row.kind ? (
-                <p
-                  role="status"
-                  className={cn(
-                    'border-t border-divider px-3 py-2',
-                    result.ok ? 'text-success' : 'text-error',
-                  )}
-                >
-                  {result.detail}
-                </p>
-              ) : null}
-
-              {isOpen && canWrite ? (
-                <div className="flex flex-col gap-3 border-t border-divider px-3 py-3">
+                {isOpen && canWrite ? (
+                  <div className="mt-3 flex flex-col gap-3 border-t border-divider pt-3">
                   <ol className="flex list-decimal flex-col gap-1 pl-5 text-secondary">
                     {row.meta.setup.map((step) => (
                       <li key={step}>{step}</li>
@@ -273,9 +302,9 @@ export const IntegrationPanel = ({
                   ))}
 
                   {WEBHOOK_SOURCES.has(row.kind) ? (
-                    row.kind === 'brevo' && typeof row.config.webhookToken !== 'string' ? (
+                    TOKEN_SOURCES.has(row.kind) && typeof row.config.webhookToken !== 'string' ? (
                       <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-                        Save once and the webhook URL appears here with the token Brevo will present.
+                        Save once and the webhook URL appears here with the token {row.meta.name} will present.
                       </p>
                     ) : siteKey ? (
                       <Field
@@ -291,16 +320,17 @@ export const IntegrationPanel = ({
                             value={webhookUrl(row, siteKey)}
                             onFocus={(event) => event.currentTarget.select()}
                           />
-                          <Button
+                          <IconButton
+                            label={copied === row.kind ? 'Copied' : 'Copy the webhook URL'}
+                            icon={copied === row.kind ? <Check aria-hidden="true" className="size-4" /> : <Copy aria-hidden="true" className="size-4" />}
+                            tone={copied === row.kind ? 'accent' : 'default'}
                             onClick={() =>
                               void navigator.clipboard
                                 .writeText(webhookUrl(row, siteKey))
-                                .then(() => toast('success', 'Copied.'))
+                                .then(() => setCopied(row.kind))
                                 .catch(() => toast('error', 'Could not copy. Select the field and copy it by hand.'))
                             }
-                          >
-                            Copy
-                          </Button>
+                          />
                         </div>
                       </Field>
                     ) : (
@@ -315,61 +345,62 @@ export const IntegrationPanel = ({
                     <Button variant="primary" busy={busy === row.kind} onClick={() => void save(row)}>
                       Save and test
                     </Button>
-                    <Button variant="tertiary" onClick={() => setEditing(null)}>
-                      Cancel
-                    </Button>
+                      <Button variant="tertiary" onClick={() => setEditing(null)}>
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </Card>
             </li>
           )
         })}
       </ul>
 
-      <section className="flex flex-col gap-2">
-        <div className="max-w-2xl">
-          <h3 className="font-medium">Events with nobody to attach them to</h3>
-          <p className="text-secondary">
+      <Card title="Events with nobody to attach them to" action={<Badge>{String(unmatched.length)}</Badge>}>
+        <div className="flex flex-col gap-3">
+          <p className="max-w-prose text-secondary">
             A tracked open or click for an address no contact holds. Kept rather than dropped,
             because &ldquo;nobody opened it&rdquo; and &ldquo;we could not tell who opened it&rdquo;
             are different answers. Rematching picks up anyone who has since become a contact.
           </p>
-        </div>
 
-        {unmatched.length === 0 ? (
-          <p className="text-secondary">Every event that arrived matched a contact.</p>
-        ) : (
-          <>
-            <div>
-              <Button
-                busy={busy === 'rematch'}
-                onClick={() =>
-                  void run('rematch', async () => {
-                    const outcome = await api.integrations.rematch.mutate()
-                    toast('info', `${outcome.matched} event${outcome.matched === 1 ? '' : 's'} found an owner.`)
-                  })
-                }
-              >
-                Try matching again
-              </Button>
-            </div>
-            <ul className="flex flex-col rounded-panel border border-line bg-surface">
-              {unmatched.map((row) => (
-                <li key={row.id} className="border-b border-divider px-3 py-1.5 last:border-0">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="font-medium">
+          {unmatched.length === 0 ? (
+            <EmptyState
+              title="Everything found an owner"
+              description="Every event that arrived matched a contact. Anything that cannot be matched will wait here."
+            />
+          ) : (
+            <>
+              <div>
+                <Button
+                  busy={busy === 'rematch'}
+                  onClick={() =>
+                    void run('rematch', async () => {
+                      const outcome = await api.integrations.rematch.mutate()
+                      toast('info', `${outcome.matched} event${outcome.matched === 1 ? '' : 's'} found an owner.`)
+                    })
+                  }
+                >
+                  Try matching again
+                </Button>
+              </div>
+              <ul className="flex flex-col rounded-panel border border-line">
+                {unmatched.map((row) => (
+                  <li key={row.id} className="flex flex-wrap items-baseline gap-x-2 border-b border-divider px-3 py-1.5 last:border-0">
+                    <span className="min-w-0 font-medium">
                       {(row.payload as { email?: string }).email ?? 'an unknown address'}
                     </span>
                     <span className="text-small text-secondary">
                       {row.kind} via {row.source} · {formatDateTime(row.at)}
                     </span>
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      </Card>
     </div>
   )
 }

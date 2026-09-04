@@ -1,10 +1,12 @@
 import type { ClaimedRun, WorkspaceContext } from '@rawr/db'
 
-/** What it takes to put one step on the wire, whoever does it.
+/** What it takes to put one step on the wire.
  *
- *  Two implementations: the member's own Gmail, which is the point of building
- *  this, and Woodpecker for volume Gmail's per-account caps cannot carry. The
- *  engine above them knows only this shape. */
+ *  One implementation: the member's own Gmail, which is the point of building
+ *  this. Woodpecker deliberately does not appear here. It is not a transport Rawr
+ *  drives step by step; its campaign owns the steps, the delays and the sending
+ *  accounts, so a Woodpecker enrollment hands the prospect over once and the
+ *  runner returns before it ever reaches a Sender. */
 
 export type OutgoingStep = {
   subject: string
@@ -24,6 +26,6 @@ export type SentMessage = {
 }
 
 export type Sender = {
-  name: 'gmail' | 'woodpecker'
+  name: 'gmail'
   send: (ctx: WorkspaceContext, run: ClaimedRun, step: OutgoingStep) => Promise<SentMessage>
 }

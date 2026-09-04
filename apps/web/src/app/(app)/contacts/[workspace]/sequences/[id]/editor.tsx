@@ -15,12 +15,13 @@ import {
   Switch,
   TextArea,
   TextInput,
+  cn,
   useToast,
 } from '@rawr/ui'
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { enrollmentsPath, sequencesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -92,7 +93,30 @@ export const SequenceEditor = ({
   const [steps, setSteps] = useState<Draft[]>(initial.map((step) => ({ ...step, key: newKey() })))
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useState(sequence.settings)
+  const [sender, setSender] = useState(sequence.sender)
+  const [campaigns, setCampaigns] = useState<{ id: number; name: string; status: string }[] | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Fetched when the panel opens on a Woodpecker sequence, not on every render of
+  // a Gmail one: the list is a call to Woodpecker and most sequences never need it.
+  useEffect(() => {
+    if (!settingsOpen || sender !== 'woodpecker' || campaigns) return
+    let live = true
+    void api.integrations.woodpeckerCampaigns
+      .query()
+      .then((rows) => {
+        if (live) setCampaigns(rows)
+      })
+      .catch((cause: unknown) => {
+        if (live) {
+          setCampaigns([])
+          toast('error', errorMessage(cause))
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [settingsOpen, sender, campaigns, toast])
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -230,7 +254,18 @@ export const SequenceEditor = ({
         ))}
       </div>
 
-      <div className="flex flex-col gap-3">
+      {sender === 'woodpecker' ? (
+        <Card title="Woodpecker owns the steps">
+          <p className="text-secondary">
+            This sequence hands each contact to Woodpecker campaign{' '}
+            {settings.woodpeckerCampaignId ?? 'nobody has picked yet'}, once. The steps, the delays
+            and the sending accounts are Woodpecker's; what comes back here are its events, on the
+            contact's timeline. Pick the campaign in settings.
+          </p>
+        </Card>
+      ) : null}
+
+      <div className={cn('flex flex-col gap-3', sender === 'woodpecker' && 'hidden')}>
         {steps.map((step, index) => (
           <Card
             key={step.key}
@@ -383,7 +418,7 @@ export const SequenceEditor = ({
               busy={busy}
               onClick={() =>
                 void run(
-                  () => api.sequences.save.mutate({ id: sequence.id, name: sequence.name, settings }),
+                  () => api.sequences.save.mutate({ id: sequence.id, name: sequence.name, sender, settings }),
                   'Saved.',
                 ).then((ok) => ok && setSettingsOpen(false))
               }
@@ -394,7 +429,56 @@ export const SequenceEditor = ({
         }
       >
         <div className="flex flex-col gap-4">
-          <fieldset className="flex flex-col gap-2">
+          <Field
+            id="sequence-sender"
+            label="Who sends it"
+            hint="Gmail sends from the enroller's own mailbox, one step at a time. Woodpecker takes the contact and runs its own campaign."
+          >
+            <Select
+              id="sequence-sender"
+              disabled={!canWrite}
+              value={sender}
+              onChange={(event) => setSender(event.target.value === 'woodpecker' ? 'woodpecker' : 'gmail')}
+            >
+              <option value="gmail">Gmail, from the enroller's mailbox</option>
+              <option value="woodpecker">Woodpecker</option>
+            </Select>
+          </Field>
+
+          {sender === 'woodpecker' ? (
+            <Field
+              id="sequence-campaign"
+              label="Woodpecker campaign"
+              hint="Where a contact is handed to. Nothing is sent until one is picked."
+            >
+              <Select
+                id="sequence-campaign"
+                disabled={!canWrite || campaigns === null}
+                value={settings.woodpeckerCampaignId === null ? '' : String(settings.woodpeckerCampaignId)}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    woodpeckerCampaignId: event.target.value === '' ? null : Number(event.target.value),
+                  })
+                }
+              >
+                <option value="">
+                  {campaigns === null
+                    ? 'Reading the campaign list…'
+                    : campaigns.length === 0
+                      ? 'No campaigns, or Woodpecker is not connected'
+                      : 'Pick a campaign'}
+                </option>
+                {(campaigns ?? []).map((campaign) => (
+                  <option key={campaign.id} value={campaign.id}>
+                    {campaign.name} ({campaign.status.toLowerCase()})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
+
+          <fieldset className={cn('flex flex-col gap-2', sender === 'woodpecker' && 'hidden')}>
             <legend className="font-medium">When it may send</legend>
             <p className="text-small text-secondary">
               Wall-clock time in the timezone below, so it does not drift when the clocks change.

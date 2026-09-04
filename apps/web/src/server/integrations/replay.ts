@@ -4,8 +4,9 @@ import {
   type WorkspaceContext,
 } from '@rawr/db'
 import { syncMailbox } from '../gmail.ts'
-import { enrichRecord } from './index.ts'
+import { enrichRecord, enrichCompanyRecord } from './index.ts'
 import { postToSlack } from './slack.ts'
+import { addProspect } from './woodpecker.ts'
 
 /** F6 §1 and its edge case: "a dead-lettered item is replayed twice → the
  *  idempotency key makes the second a no-op."
@@ -55,13 +56,43 @@ export const replayJob = async (
     }
 
     case 'apollo.enrich':
-    case 'clay.enqueue': {
+    case 'clay.enqueue':
+    case 'lusha.enrich': {
+      // Enriching again is safe however many times it runs: a provider is only
+      // asked about fields that are still empty, and nothing overwrites a human.
       const contactId = typeof payload.contactId === 'string' ? payload.contactId : null
-      if (!contactId) {
-        throw new Error('That enrichment failure names no contact, so there is nothing to enrich.')
+      if (contactId) {
+        const result = await enrichRecord(ctx, contactId)
+        return { replayed: true, detail: result.detail }
       }
-      const result = await enrichRecord(ctx, contactId)
-      return { replayed: true, detail: result.detail }
+      const companyId = typeof payload.companyId === 'string' ? payload.companyId : null
+      if (companyId) {
+        const result = await enrichCompanyRecord(ctx, companyId)
+        return { replayed: true, detail: result.detail }
+      }
+      throw new Error('That enrichment failure names no contact or company, so there is nothing to enrich.')
+    }
+
+    case 'woodpecker.enroll': {
+      const campaignId = typeof payload.campaignId === 'number' ? payload.campaignId : null
+      const email = typeof payload.email === 'string' ? payload.email : null
+      if (!campaignId || !email) throw new Error('That hand-over names no campaign and address to retry.')
+      // Woodpecker keys a prospect on its address within a campaign, so handing
+      // the same person over twice updates the row rather than mailing them twice.
+      const outcome = await addProspect(ctx, {
+        campaignId,
+        email,
+        firstName: typeof payload.firstName === 'string' ? payload.firstName : null,
+        lastName: typeof payload.lastName === 'string' ? payload.lastName : null,
+        companyName: typeof payload.companyName === 'string' ? payload.companyName : null,
+      })
+      return { replayed: true, detail: outcome.detail }
+    }
+
+    case 'woodpecker.campaigns': {
+      throw new Error(
+        'Reading the campaign list is not work to replay: open a Woodpecker sequence and the list is fetched again.',
+      )
     }
 
     case 'brevo.upsert_contact':

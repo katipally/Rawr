@@ -50,6 +50,7 @@ export const DEFAULT_SEQUENCE_SETTINGS: SequenceSettings = {
   trackClicks: true,
   subscriptionTypeId: null,
   replyInThread: true,
+  woodpeckerCampaignId: null,
 }
 
 export type SequenceStep = {
@@ -232,6 +233,7 @@ export const saveSequence = async (
       trackClicks: boolean | undefined
       subscriptionTypeId: string | null | undefined
       replyInThread: boolean | undefined
+      woodpeckerCampaignId: number | null | undefined
     }> | undefined
   },
 ): Promise<{ id: string }> =>
@@ -450,7 +452,7 @@ export const enroll = async (
 ): Promise<EnrollOutcome[]> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
     const [found] = await tx
-      .select({ id: sequence.id, state: sequence.state, settings: sequence.settings })
+      .select({ id: sequence.id, state: sequence.state, settings: sequence.settings, sender: sequence.sender })
       .from(sequence)
       .where(eq(sequence.id, input.sequenceId))
     if (!found) throw new Error('That sequence is not in this workspace.')
@@ -461,9 +463,14 @@ export const enroll = async (
       .from(mailbox)
       .where(eq(mailbox.id, input.mailboxId))
     if (!box) throw new Error('That mailbox is not connected.')
-    if (box.state === 'revoked') throw new Error(`${box.email} is disconnected. Reconnect it before enrolling anybody.`)
-    if (!box.canSend) {
-      throw new Error(`${box.email} was connected for reading only. Reconnect it and allow sending.`)
+    // A Woodpecker sequence never sends from this mailbox: the campaign there has
+    // its own sending accounts, and the mailbox only names who owns the outreach.
+    // So the grant to send is asked for only when Rawr is the one sending.
+    if (found.sender === 'gmail') {
+      if (box.state === 'revoked') throw new Error(`${box.email} is disconnected. Reconnect it before enrolling anybody.`)
+      if (!box.canSend) {
+        throw new Error(`${box.email} was connected for reading only. Reconnect it and allow sending.`)
+      }
     }
 
     const ids = [...new Set(input.contactIds)]

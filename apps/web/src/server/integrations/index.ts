@@ -10,7 +10,9 @@ import { enrichCompany, enrichContact, testApollo } from './apollo.ts'
 import { testBrevo } from './brevo.ts'
 import { enrichWithClay, testClay } from './clay.ts'
 import { testGa4 } from './ga4.ts'
+import { enrichCompanyWithLusha, enrichContactWithLusha, testLusha } from './lusha.ts'
 import { testSlack } from './slack.ts'
+import { testWoodpecker } from './woodpecker.ts'
 import type { ConnectionTest } from './provider.ts'
 
 /** One registry of what an integration is, so the settings page, the health check
@@ -91,6 +93,60 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       'Add an HTTP API column at the end of the table that posts each row to the webhook URL below, with the token as a bearer header.',
       'Make up a long random token, paste it below and into that column\u2019s Authorization header. Rawr refuses anything else.',
       'Set the tier to what the Clay account is on. Launch has no HTTP API, so enrichment degrades to CSV (open item 12).',
+    ],
+  },
+  {
+    kind: 'lusha',
+    name: 'Lusha',
+    purpose:
+      'The second enricher, between Apollo and Clay. Direct dials and work addresses, matched on an email address or a company domain.',
+    failureMode:
+      'A miss leaves the field blank and says so. Credits are spent only on fields that are still empty, so a run over records Apollo already answered costs nothing.',
+    secretLabel: 'API key',
+    configFields: [],
+    rows: ['Company & Contact Enrichment'],
+    setup: [
+      'In Lusha, open the API Hub from the left sidebar.',
+      'Copy the API key from the top right, or create one under Manage API Keys, and paste it below.',
+      'The connection test reads the account\u2019s credit balance, which costs nothing.',
+    ],
+  },
+  {
+    kind: 'woodpecker',
+    name: 'Woodpecker',
+    purpose:
+      'Volume sending, for runs a single Gmail account cannot carry. A Woodpecker sequence names a campaign; Rawr hands the prospect over once and Woodpecker owns the steps, the delays and the sending accounts.',
+    failureMode:
+      'A refused prospect is reported by name rather than forced through: Woodpecker rejects anybody who already replied, bounced or opted out, and that refusal is the protection working.',
+    secretLabel: 'API key',
+    configFields: [
+      {
+        key: 'campaignId',
+        label: 'Default campaign',
+        hint: 'The campaign a sequence enrolls into when it names none, by its Woodpecker id.',
+      },
+    ],
+    rows: ['Email Sequences'],
+    setup: [
+      'In Woodpecker, open Marketplace, then Integrations, then API keys. This needs the API keys & integrations add-on.',
+      'Create a key and paste it below.',
+      'Paste the webhook URL below into Woodpecker under Webhooks, for sent, opened, clicked, replied, bounced and opted out.',
+    ],
+  },
+  {
+    kind: 'hubspot',
+    name: 'HubSpot',
+    purpose:
+      'Reading the old portal one last time. Its exports are imported here, contacts and companies and deals, then the notes and logged emails onto the timelines they belong to.',
+    failureMode:
+      'Nothing to fail: this is a file import, not a live connection. A run that stops resumes from the row it reached, and importing the same export twice changes nothing.',
+    secretLabel: null,
+    configFields: [],
+    rows: [],
+    setup: [
+      'In HubSpot, open the object list, then Export, and choose the columns you want with "Comma separated".',
+      'Import each file here from Data management, Import, and pick the HubSpot importer.',
+      'Nothing is pasted here: HubSpot is read from its own exports, so no key of theirs lives in Rawr.',
     ],
   },
   {
@@ -184,6 +240,15 @@ export const testConnection = async (
   if (kind === 'clay') return testClay(ctx)
   if (kind === 'ga4') return testGa4(ctx)
   if (kind === 'slack') return testSlack(ctx)
+  if (kind === 'lusha') return testLusha(ctx)
+  if (kind === 'woodpecker') return testWoodpecker(ctx)
+  if (kind === 'hubspot') {
+    return {
+      ok: false,
+      detail:
+        'HubSpot is read from its own exports rather than over an API, so there is no connection to test. Start an import from Data management, Import.',
+    }
+  }
   if (kind === 'zoom') {
     return {
       ok: false,
@@ -204,10 +269,16 @@ export type EnrichmentRun = {
   suggested: string[]
 }
 
-const BLANKABLE = ['industry', 'employee_count', 'annual_revenue', 'city', 'country']
+/** The fields an enricher is allowed to answer. Anything outside these two lists
+ *  is either a human's decision or a relation, and neither belongs to a provider. */
+const COMPANY_BLANKABLE = ['industry', 'employee_count', 'annual_revenue', 'city', 'country']
+const CONTACT_BLANKABLE = ['first_name', 'last_name', 'title', 'linkedin_url', 'phone']
 
-const stillBlank = (values: Record<string, unknown>): string[] =>
-  BLANKABLE.filter((key) => values[key] === null || values[key] === undefined || values[key] === '')
+const blankIn = (keys: string[]) => (values: Record<string, unknown>): string[] =>
+  keys.filter((key) => values[key] === null || values[key] === undefined || values[key] === '')
+
+const stillBlank = blankIn(COMPANY_BLANKABLE)
+const stillBlankOnContact = blankIn(CONTACT_BLANKABLE)
 
 /** A company on its own: Apollo by domain, then Clay for what is still blank. */
 export const enrichCompanyRecord = async (ctx: WorkspaceContext, companyId: string): Promise<EnrichmentRun> => {
@@ -221,9 +292,40 @@ export const enrichCompanyRecord = async (ctx: WorkspaceContext, companyId: stri
 
   const apollo = await enrichCompany(ctx, { companyId, domain })
   const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
+  await fillWithLushaCompany(ctx, run, companyId, domain)
   const after = await getRecord(ctx, 'company', companyId)
   await fillWithClay(ctx, run, companyId, domain, stillBlank(after?.values ?? {}))
   return run
+}
+
+/** Every provider after the first is asked only about what is still empty, and
+ *  each one's failure is its own: a Lusha outage must not stop Clay from
+ *  answering, so the call is caught here rather than thrown out of the run. */
+const absorb = async (
+  run: EnrichmentRun,
+  provider: string,
+  call: () => Promise<{ detail: string; written: string[]; suggested: string[] }>,
+): Promise<void> => {
+  const outcome = await call().catch((cause: unknown) => ({
+    detail: `${provider}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    written: [] as string[],
+    suggested: [] as string[],
+  }))
+  run.detail = `${run.detail} ${outcome.detail}`
+  run.written.push(...outcome.written)
+  run.suggested.push(...outcome.suggested)
+}
+
+const fillWithLushaCompany = async (
+  ctx: WorkspaceContext,
+  run: EnrichmentRun,
+  companyId: string,
+  domain: string,
+): Promise<void> => {
+  const company = await getRecord(ctx, 'company', companyId)
+  const missing = stillBlank(company?.values ?? {})
+  if (missing.length === 0) return
+  await absorb(run, 'Lusha', () => enrichCompanyWithLusha(ctx, { companyId, domain, missing }))
 }
 
 const fillWithClay = async (
@@ -234,16 +336,7 @@ const fillWithClay = async (
   missing: string[],
 ): Promise<void> => {
   if (missing.length === 0) return
-  const clay = await enrichWithClay(ctx, { companyId, domain, missing }).catch((cause: unknown) => ({
-    provider: 'clay' as const,
-    matched: false,
-    written: [] as string[],
-    suggested: [] as string[],
-    detail: cause instanceof Error ? cause.message : String(cause),
-  }))
-  run.detail = `${run.detail} ${clay.detail}`
-  run.written.push(...clay.written)
-  run.suggested.push(...clay.suggested)
+  await absorb(run, 'Clay', () => enrichWithClay(ctx, { companyId, domain, missing }))
 }
 
 /** F6 §4's configured order, in one place: Apollo first for the person and the
@@ -271,11 +364,21 @@ export const enrichRecord = async (
   const apollo = await enrichContact(ctx, { contactId, email, companyId })
   const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
 
+  const afterApollo = await getRecord(ctx, 'contact', contactId)
+  const companyBefore = companyId ? await getRecord(ctx, 'company', companyId) : null
+  const missing = [
+    ...stillBlankOnContact(afterApollo?.values ?? {}),
+    ...(companyBefore ? stillBlank(companyBefore.values) : []),
+  ]
+  if (missing.length > 0) {
+    await absorb(run, 'Lusha', () => enrichContactWithLusha(ctx, { contactId, email, companyId, missing }))
+  }
+
   if (companyId) {
     const company = await getRecord(ctx, 'company', companyId)
     const domain = typeof company?.values.domain === 'string' ? company.values.domain : ''
-    // Only what is still blank. Asking Clay to re-answer something Apollo answered
-    // is what "first non-empty by configured order wins" rules out.
+    // Only what is still blank. Asking Clay to re-answer something Apollo or Lusha
+    // answered is what "first non-empty by configured order wins" rules out.
     if (domain) await fillWithClay(ctx, run, companyId, domain, stillBlank(company?.values ?? {}))
   }
 

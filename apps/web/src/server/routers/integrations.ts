@@ -3,6 +3,7 @@ import {
   claimForReplay,
   dismissSuggestion,
   disconnectIntegration,
+  INTEGRATION_KINDS,
   listSuggestions,
   listUnmatchedEvents,
   readFieldSources,
@@ -19,12 +20,15 @@ import {
   syncSequenceActivity,
 } from '../integrations/apollo.ts'
 import { replayJob } from '../integrations/replay.ts'
+import { listWoodpeckerCampaigns } from '../integrations/woodpecker.ts'
 import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 
 /** F6. Everything about a connected service: what it is, whether it is working,
  *  and what it did or refused to do. */
 
-const kind = z.enum(['brevo', 'apollo', 'clay', 'slack', 'ga4', 'zoom', 'google_calendar'])
+// Mirrors INTEGRATION_KINDS. A kind the registry knows and this does not is a
+// settings page that cannot save it.
+const kind = z.enum(INTEGRATION_KINDS)
 
 export const integrationsRouter = router({
   /** Readable by anybody signed in, because a degraded integration explains why a
@@ -33,6 +37,13 @@ export const integrationsRouter = router({
   list: protectedProcedure.query(({ ctx }) => call(() => readIntegrations(ctx.workspace))),
 
   catalogue: protectedProcedure.query(() => INTEGRATIONS),
+
+  /** The campaigns a Woodpecker sequence can point at. Read rather than admin: the
+   *  person writing the sequence needs the list, and a campaign name is not a
+   *  credential. */
+  woodpeckerCampaigns: protectedProcedure.query(({ ctx }) =>
+    call(() => listWoodpeckerCampaigns(ctx.workspace)),
+  ),
 
   save: adminProcedure
     .input(

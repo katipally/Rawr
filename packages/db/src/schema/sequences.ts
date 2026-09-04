@@ -44,6 +44,9 @@ export type SequenceSettings = {
   /** Send each step as a reply on the first message's thread, so the recipient
    *  sees one conversation rather than five unrelated mails. */
   replyInThread: boolean
+  /** Only for a Woodpecker sequence, where the steps and the cadence live in
+   *  Woodpecker's campaign rather than here. Null until one is picked. */
+  woodpeckerCampaignId: number | null
 }
 
 export const sequence = pgTable(

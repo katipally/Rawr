@@ -16,6 +16,8 @@ export type ImportWizardProps = {
   workspace: string
   runId: string
   object: ObjectKey
+  /** Records fill columns; activities land on the timeline of the record they name. */
+  kind: 'records' | 'activities'
   filename: string
   headers: string[]
   sampleRows: Record<string, string>[]
@@ -41,6 +43,7 @@ export const ImportWizard = ({
   workspace,
   runId,
   object,
+  kind,
   filename,
   headers,
   sampleRows,
@@ -90,6 +93,7 @@ export const ImportWizard = ({
       await api.crm.imports.setMapping.mutate({ id: runId, mapping })
       const result = await api.crm.imports.dryRun.query({
         object,
+        kind,
         mapping,
         rows: sampleRows,
       })

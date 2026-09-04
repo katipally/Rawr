@@ -1,6 +1,6 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
-import { entityTypeEnum, importStateEnum } from './enums.ts'
+import { entityTypeEnum, importKindEnum, importStateEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 
 /** A8. The run outlives the browser tab: an import of 90,000 rows is a server-side
@@ -11,6 +11,13 @@ export const importRun = pgTable(
     id: pk(),
     workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
     objectType: entityTypeEnum('object_type').notNull(),
+    /** Records fill columns; activities land on the timeline of the record they
+     *  name. An activity run still carries an object type, because the rows are
+     *  matched to contacts or companies before they are written. */
+    importKind: importKindEnum('import_kind').notNull().default('records'),
+    /** Which export this file came out of, so the mapper can offer the preset that
+     *  reads it. Null for a file somebody built by hand. */
+    source: text('source'),
     filename: text('filename').notNull(),
     /** Header shape plus column count. The mapping of the last run with the same
      *  signature is offered as the default, so the same weekly export is mapped once. */

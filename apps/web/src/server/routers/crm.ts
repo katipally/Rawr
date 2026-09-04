@@ -466,12 +466,20 @@ export const crmRouter = router({
       .input(
         z.object({
           object: objectKey,
+          kind: z.enum(['records', 'activities']).default('records'),
           mapping: z.record(z.string(), z.string().nullable()),
           rows: z.array(z.record(z.string(), z.string())).max(5000),
         }),
       )
       .query(({ ctx, input }) =>
-        call(() => dryRun(ctx.workspace, { objectKey: input.object, mapping: input.mapping, rows: input.rows })),
+        call(() =>
+          dryRun(ctx.workspace, {
+            objectKey: input.object,
+            kind: input.kind,
+            mapping: input.mapping,
+            rows: input.rows,
+          }),
+        ),
       ),
 
     /** One chunk per call. The page polls, so closing the tab does not stop it and

@@ -9,11 +9,13 @@ import {
   recordSend,
   recordSendFailure,
   renderMergeFields,
+  stopEnrollment,
   windowFor,
   type ClaimedRun,
   type WorkspaceContext,
 } from '@rawr/db'
 import { RevokedError } from '../gmail.ts'
+import { addProspect } from '../integrations/woodpecker.ts'
 import { canSendFrom, gmailSender } from './gmail-sender.ts'
 import type { Sender } from './sender.ts'
 
@@ -28,6 +30,7 @@ export type RunOutcome =
   | { ran: false; reason: string }
   | { ran: true; kind: 'email'; sendId: string }
   | { ran: true; kind: 'task'; taskId: string }
+  | { ran: true; kind: 'handover'; detail: string }
 
 const SENDERS: Record<string, Sender> = { gmail: gmailSender }
 
@@ -48,6 +51,37 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
   // Somebody else has it, or it stopped between the dispatch and now. Neither is
   // a failure worth retrying.
   if (!run) return { ran: false, reason: 'Not due, or already being run.' }
+
+  // Woodpecker is not a transport Rawr drives step by step: its campaign owns the
+  // steps, the delays and the sending accounts. So the enrollment's whole job is
+  // to hand the prospect over once, and everything after that arrives by webhook.
+  if (run.sender === 'woodpecker') {
+    const campaignId = run.settings.woodpeckerCampaignId
+    if (!campaignId) {
+      const error = 'This sequence sends through Woodpecker but names no campaign.'
+      await recordSendFailure(ctx, { enrollmentId, stepId: null, mailboxId: run.mailboxId, error })
+      return { ran: false, reason: error }
+    }
+    try {
+      const handed = await addProspect(ctx, {
+        campaignId,
+        email: run.contactEmail,
+        firstName: run.contactFirstName,
+        lastName: run.contactLastName,
+        companyName: run.companyName,
+      })
+      if (!handed.handed) {
+        await recordSendFailure(ctx, { enrollmentId, stepId: null, mailboxId: run.mailboxId, error: handed.detail })
+        return { ran: false, reason: handed.detail }
+      }
+      await stopEnrollment(ctx, enrollmentId, 'finished', handed.detail)
+      return { ran: true, kind: 'handover', detail: handed.detail }
+    } catch (cause) {
+      const error = cause instanceof Error ? cause.message : String(cause)
+      await recordSendFailure(ctx, { enrollmentId, stepId: null, mailboxId: run.mailboxId, error })
+      return { ran: false, reason: error }
+    }
+  }
 
   if (!run.step) {
     // No step at this position: the sequence was shortened under a live

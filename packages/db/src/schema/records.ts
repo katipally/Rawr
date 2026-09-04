@@ -218,10 +218,17 @@ export const activity = pgTable(
     actorId: uuid('actor_id'),
     actorKind: actorKindEnum('actor_kind').notNull(),
     source: text('source'),
+    /** What this row was in the file it was imported from. Unique per workspace, so
+     *  re-importing the same HubSpot export leaves the timeline as it was rather
+     *  than writing every note a second time. Null for anything Rawr wrote itself. */
+    importKey: text('import_key'),
     payload: jsonb('payload'),
     createdAt: createdAt(),
   },
-  (t) => [index('activity_occurred_idx').on(t.workspaceId, t.occurredAt.desc(), t.id.desc())],
+  (t) => [
+    index('activity_occurred_idx').on(t.workspaceId, t.occurredAt.desc(), t.id.desc()),
+    uniqueIndex('activity_import_key_idx').on(t.workspaceId, t.importKey).where(sql`import_key is not null`),
+  ],
 )
 
 /** One activity can hang on several records, which is how an email thread appears

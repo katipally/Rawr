@@ -28,6 +28,9 @@ export type IntegrationKind =
   | 'ga4'
   | 'zoom'
   | 'google_calendar'
+  | 'lusha'
+  | 'woodpecker'
+  | 'hubspot'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
   'brevo',
@@ -37,6 +40,9 @@ export const INTEGRATION_KINDS: IntegrationKind[] = [
   'ga4',
   'zoom',
   'google_calendar',
+  'lusha',
+  'woodpecker',
+  'hubspot',
 ]
 
 /** F6 §1's four states. The stored column predates the doc's wording, so the two
@@ -129,10 +135,12 @@ export const saveIntegration = async (
 ): Promise<{ id: string }> =>
   mutate(ctx, 'integration', async (tx) => {
     const secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
-    // Brevo does not sign its webhooks, so the URL Rawr hands it carries a token
-    // minted here once and kept across saves. Compared on every delivery.
+    // Brevo does not sign its webhooks, and Woodpecker's signing header is not
+    // documented, so the URL Rawr hands each of them carries a token minted here
+    // once and kept across saves. Compared on every delivery.
+    const tokenised = input.kind === 'brevo' || input.kind === 'woodpecker'
     const config =
-      input.config !== undefined && input.kind === 'brevo' && typeof input.config.webhookToken !== 'string'
+      input.config !== undefined && tokenised && typeof input.config.webhookToken !== 'string'
         ? { ...input.config, webhookToken: randomToken(24) }
         : input.config
 

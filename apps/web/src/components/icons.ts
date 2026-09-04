@@ -1,14 +1,23 @@
 import {
+  BarChart3,
   Building2,
+  CalendarDays,
   ChartNoAxesColumn,
   Contact,
   Database,
   Handshake,
+  Hash,
   Home,
+  Mail,
   Megaphone,
+  Phone,
+  Send,
+  Sparkles,
+  Video,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react'
-import type { ObjectKey } from '@rawr/db'
+import type { IntegrationKind, ObjectKey } from '@rawr/db'
 
 /** Icons cross the server/client boundary as names: a component reference is not
  *  serialisable, so the layout names the icon and the client resolves it here.
@@ -33,3 +42,20 @@ export const OBJECT_ICONS: Record<ObjectKey, LucideIcon> = {
 
 export const objectIcon = (object: string): LucideIcon =>
   OBJECT_ICONS[object as ObjectKey] ?? Contact
+
+/** One mark per provider, so a row in the integrations list is recognisable
+ *  before its name is read. Lucide rather than brand logos: shipping somebody
+ *  else's trademark is a licence question, and a glyph for what it does is more
+ *  use than a logo anyway. */
+export const INTEGRATION_ICONS: Record<IntegrationKind, LucideIcon> = {
+  brevo: Mail,
+  apollo: Sparkles,
+  clay: Database,
+  lusha: Phone,
+  woodpecker: Send,
+  hubspot: Workflow,
+  slack: Hash,
+  ga4: BarChart3,
+  zoom: Video,
+  google_calendar: CalendarDays,
+}

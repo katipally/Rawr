@@ -40,6 +40,7 @@ const settings = z
     trackClicks: z.boolean(),
     subscriptionTypeId: z.uuid().nullable(),
     replyInThread: z.boolean(),
+    woodpeckerCampaignId: z.number().int().positive().nullable(),
   })
   .partial()
 

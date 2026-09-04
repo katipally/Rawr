@@ -1,4 +1,5 @@
 import {
+  ACTIVITY_IMPORT,
   getRegistry,
   objectOrThrow,
   readImportRun,
@@ -53,8 +54,11 @@ const ImportRunPage = async ({ params }: { params: Promise<{ workspace: string; 
   // From the run, not from a row's key order: jsonb sorts its keys, and a mapper
   // that reorders a person's columns is a mapper they cannot trust.
   const headers = run.headers.length > 0 ? run.headers : Object.keys(rows[0] ?? {})
-  const registry = await getRegistry(ctx)
-  const object = objectOrThrow(registry, run.objectType)
+  // An activity file is mapped against a fixed shape rather than the workspace's
+  // registry: its columns say which record a note belongs to, not what to write on
+  // one.
+  const object =
+    run.importKind === 'activities' ? ACTIVITY_IMPORT : objectOrThrow(await getRegistry(ctx), run.objectType)
 
   const stored = (detail?.mapping as Mapping | undefined) ?? {}
   const mapping = Object.keys(stored).length > 0 ? stored : suggestMapping(object, headers)
@@ -86,6 +90,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ workspace: string; 
         workspace={workspace}
         runId={id}
         object={run.objectType}
+        kind={run.importKind}
         filename={run.filename}
         headers={headers}
         sampleRows={rows.slice(0, SAMPLE_ROWS)}

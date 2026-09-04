@@ -25,7 +25,13 @@ const ImportPage = async ({
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
-      <h1 className="text-lg font-medium">Import</h1>
+      <div>
+        <h1 className="text-lg font-medium">Import</h1>
+        <p className="text-secondary">
+          Records fill columns on a contact, company or deal. Notes and logged emails land on the
+          timeline of the record they name, matched on the address in the file.
+        </p>
+      </div>
 
       {error ? (
         <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
@@ -45,6 +51,18 @@ const ImportPage = async ({
               <option value="contact">Contacts</option>
               <option value="company">Companies</option>
               <option value="deal">Deals</option>
+              <option value="activities">Notes and logged emails</option>
+            </Select>
+          </Field>
+
+          <Field
+            id="import-source"
+            label="Where it came from"
+            hint="A HubSpot export is mapped for you: its column names are matched to Rawr's fields, and the columns that mean nothing here are dismissed. Importing the same export twice changes nothing."
+          >
+            <Select id="import-source" name="source" defaultValue="">
+              <option value="">A file I put together</option>
+              <option value="hubspot">A HubSpot export</option>
             </Select>
           </Field>
 

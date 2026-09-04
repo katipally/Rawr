@@ -6,6 +6,7 @@ import type { Role, WorkspaceContext } from '../src/dal/context.ts'
 import {
   claimForReplay,
   claimInbound,
+  INTEGRATION_KINDS,
   disconnectIntegration,
   listIntegrations,
   listUnmatchedEvents,
@@ -34,6 +35,7 @@ import {
   internalDomainOf,
 } from '../src/dal/messages.ts'
 import { createRecord, getRecord } from '../src/dal/records.ts'
+import { createImportRun, runImportChunk, setImportMapping } from '../src/dal/imports.ts'
 import { readTimeline } from '../src/dal/activity.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
 import { recordDeadLetter } from '../src/dal/jobs.ts'
@@ -106,7 +108,10 @@ try {
 
   await check('every known integration has a row, configured or not', async () => {
     const rows = await listIntegrations(admin)
-    expect(rows.length >= 7, `${rows.length} kinds listed`)
+    expect(rows.length === INTEGRATION_KINDS.length, `${rows.length} kinds listed, ${INTEGRATION_KINDS.length} known`)
+    for (const kind of INTEGRATION_KINDS) {
+      expect(rows.some((row) => row.kind === kind), `${kind} has no row`)
+    }
     const missing = rows.find((row) => row.state === 'not_configured')
     expect(Boolean(missing), 'nothing reads as not configured, so an absent integration is invisible')
     return `${rows.length} kinds, ${rows.filter((row) => row.state === 'not_configured').length} not configured`
@@ -318,6 +323,146 @@ try {
     expect(row?.id === `brevo-${stamp}`, 'the external id was not stored')
     return 'the sync is incremental rather than a full re-push'
   })
+
+  console.log('')
+  console.log('-- woodpecker, whose events are its own ------------------------')
+
+  await check('saving Woodpecker mints a webhook token, and keeps it', async () => {
+    await saveIntegration(admin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
+    const [first] = await db.execute<{ token: string | null }>(
+      sql`select config ->> 'webhookToken' as token from integration
+           where workspace_id = ${datasaur.id} and kind = 'woodpecker'`,
+    )
+    expect(typeof first?.token === 'string' && first.token.length >= 24, 'no token was minted')
+
+    // A second save must not roll it: the URL is already pasted at Woodpecker.
+    await saveIntegration(admin, { kind: 'woodpecker', config: { campaignId: 102 } })
+    const [second] = await db.execute<{ token: string | null }>(
+      sql`select config ->> 'webhookToken' as token from integration
+           where workspace_id = ${datasaur.id} and kind = 'woodpecker'`,
+    )
+    expect(second?.token === first?.token, 'the token changed on a second save')
+    return 'minted once, kept across saves'
+  })
+
+  await check('the same Woodpecker delivery twice writes one timeline entry', async () => {
+    const before = await readTimeline(admin, { entity: { entityType: 'contact', entityId: trackedId }, limit: 100 })
+    const event = {
+      source: 'woodpecker' as const,
+      providerEventId: `wp-open-${stamp}`,
+      kind: 'open' as const,
+      email: `verify-marketing-${stamp}@partner1.example`,
+      subject: 'Development outbound',
+      at: new Date(),
+      detail: { campaignId: 101 },
+    }
+    const first = await ingestMarketingEvent(admin, event)
+    const again = await ingestMarketingEvent(admin, event)
+    expect(first.stored, 'the first delivery was not stored')
+    expect(!again.stored, 'the retry was stored a second time')
+
+    const after = await readTimeline(admin, { entity: { entityType: 'contact', entityId: trackedId }, limit: 100 })
+    expect(after.rows.length === before.rows.length + 1, `${before.rows.length} then ${after.rows.length}`)
+    return 'batched retries cost nothing, because the key is what the event is about'
+  })
+
+  console.log('')
+  console.log('-- importing a HubSpot portal ----------------------------------')
+
+  await check('notes land on the timeline of the contact they name', async () => {
+    const email = `verify-marketing-${stamp}@partner1.example`
+    const rows = [
+      { 'Associated Contact': email, 'Activity Type': 'note', 'Note Body': 'Talked about pricing', 'Activity Date': '2026-08-01T10:00:00Z', 'Record ID': `hs-${stamp}-1` },
+      { 'Associated Contact': email, 'Activity Type': 'email', Subject: 'Trial', 'Note Body': 'Sent the trial link', 'Activity Date': '2026-08-02T10:00:00Z', 'Record ID': `hs-${stamp}-2` },
+    ]
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind: 'activities',
+      source: 'hubspot',
+      filename: 'engagements.csv',
+      headers: Object.keys(rows[0]!),
+      rows,
+      mapping: {},
+    })
+    // The preset is what maps them: nobody picked these columns by hand.
+    expect(run.suggested['Associated Contact'] === 'contact_email', JSON.stringify(run.suggested))
+    expect(run.suggested['Activity Date'] === 'occurred_at', JSON.stringify(run.suggested))
+
+    await setImportMapping(admin, run.id, run.suggested)
+    const outcome = await runImportChunk(admin, run.id)
+    expect(outcome.done, 'the run did not finish')
+
+    const [counted] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from activity
+           where workspace_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
+    )
+    expect(Number(counted?.n) === 2, `${counted?.n} activities written`)
+    return 'two engagements, matched on the address in the file'
+  })
+
+  await check('importing the same export again changes nothing', async () => {
+    const email = `verify-marketing-${stamp}@partner1.example`
+    const rows = [
+      { 'Associated Contact': email, 'Activity Type': 'note', 'Note Body': 'Talked about pricing', 'Activity Date': '2026-08-01T10:00:00Z', 'Record ID': `hs-${stamp}-1` },
+      { 'Associated Contact': email, 'Activity Type': 'email', Subject: 'Trial', 'Note Body': 'Sent the trial link', 'Activity Date': '2026-08-02T10:00:00Z', 'Record ID': `hs-${stamp}-2` },
+    ]
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind: 'activities',
+      source: 'hubspot',
+      filename: 'engagements.csv',
+      headers: Object.keys(rows[0]!),
+      rows,
+      mapping: {},
+    })
+    await setImportMapping(admin, run.id, run.suggested)
+    await runImportChunk(admin, run.id)
+
+    const [counted] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from activity
+           where workspace_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
+    )
+    expect(Number(counted?.n) === 2, `${counted?.n} activities after the second run`)
+    return 'the import key is the file\u2019s own, so a re-run is a no-op'
+  })
+
+  await check('a note about somebody who is not here is reported, not invented', async () => {
+    const rows = [
+      { 'Associated Contact': `nobody-${stamp}@stranger.example`, 'Activity Type': 'note', 'Note Body': 'Who?', 'Activity Date': '2026-08-03T10:00:00Z', 'Record ID': `hs-${stamp}-3` },
+    ]
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind: 'activities',
+      source: 'hubspot',
+      filename: 'engagements.csv',
+      headers: Object.keys(rows[0]!),
+      rows,
+      mapping: {},
+    })
+    await setImportMapping(admin, run.id, run.suggested)
+    await runImportChunk(admin, run.id)
+
+    const [counted] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from activity
+           where workspace_id = ${datasaur.id} and import_key = ${`hubspot:hs-${stamp}-3`}`,
+    )
+    expect(Number(counted?.n) === 0, 'a contact was invented for an unmatched note')
+    return 'no contact is created to hold an orphaned note'
+  })
+
+  await check('an activity file with no address is refused before it runs', async () =>
+    refuses('an activity import with no contact column', () =>
+      createImportRun(admin, {
+        objectKey: 'contact',
+        kind: 'activities',
+        source: null,
+        filename: 'notes.csv',
+        headers: ['Body'],
+        rows: [{ Body: 'something' }],
+        mapping: {},
+      }).then((run) => setImportMapping(admin, run.id, { Body: 'body' })),
+    ),
+  )
 
   console.log('')
   console.log('-- enrichment never overwrites a human -------------------------')

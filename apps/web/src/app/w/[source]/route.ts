@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { handleApolloWebhook } from '~/server/integrations/apollo.ts'
 import { handleBrevoWebhook } from '~/server/integrations/brevo.ts'
 import { handleClayWebhook } from '~/server/integrations/clay.ts'
+import { handleWoodpeckerWebhook } from '~/server/integrations/woodpecker.ts'
 import { clientIp, rateLimit } from '~/server/edge.ts'
 
 /** POST /w/:source — F0 §6's fourth public endpoint, and F6 §1's inbound half.
@@ -18,7 +19,7 @@ import { clientIp, rateLimit } from '~/server/edge.ts'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
-const SOURCES = ['brevo', 'apollo', 'clay'] as const
+const SOURCES = ['brevo', 'apollo', 'clay', 'woodpecker'] as const
 type Source = (typeof SOURCES)[number]
 
 const isSource = (value: string): value is Source => (SOURCES as readonly string[]).includes(value)
@@ -87,7 +88,9 @@ export const POST = async (
         ? await handleBrevoWebhook(ctx, body)
         : source === 'apollo'
           ? await handleApolloWebhook(ctx, body)
-          : await handleClayWebhook(ctx, body)
+          : source === 'woodpecker'
+            ? await handleWoodpeckerWebhook(ctx, body)
+            : await handleClayWebhook(ctx, body)
     return accepted(outcome.detail)
   } catch (cause) {
     // A real failure: the provider should try again.
@@ -135,6 +138,23 @@ const verify = (
     return signatureMatches(expected, presented)
       ? { ok: true }
       : { ok: false, detail: 'That Apollo signature does not match this workspace’s key.' }
+  }
+
+  if (source === 'woodpecker') {
+    // Woodpecker signs its deliveries, but the header it signs with is not in the
+    // public documentation, and a verification written from a guess is worse than
+    // none: it would either reject every real delivery or accept every forged one.
+    // So the proof is the token in the URL Rawr minted, exactly as for Brevo, and
+    // that token is the only thing that makes the endpoint writable.
+    const expected = typeof config.webhookToken === 'string' ? config.webhookToken : ''
+    const presented = request.nextUrl.searchParams.get('t') ?? ''
+    if (!expected) {
+      return { ok: false, detail: 'Woodpecker has no webhook token yet. Save the integration once to issue one.' }
+    }
+    if (!presented) return { ok: false, detail: 'That request carried no Woodpecker webhook token.' }
+    return signatureMatches(expected, presented)
+      ? { ok: true }
+      : { ok: false, detail: 'That Woodpecker webhook token does not match this workspace’s.' }
   }
 
   const presented = request.headers.get('x-clay-webhook-auth') ?? ''

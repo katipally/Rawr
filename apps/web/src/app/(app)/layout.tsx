@@ -13,6 +13,7 @@ import {
   objectView,
   propertiesPath,
   segmentsPath,
+  newsletterPath,
   sequencesPath,
   sitesPath,
   submissionsPath,
@@ -73,6 +74,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           label: 'Outreach',
           items: [
             { href: sequencesPath(workspace), label: 'Sequences', match: `/contacts/${workspace}/sequences` },
+            { href: newsletterPath(workspace), label: 'Newsletter', match: `/contacts/${workspace}/newsletter` },
           ],
         },
       ],

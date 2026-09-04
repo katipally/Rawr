@@ -30,7 +30,7 @@ export type MarketingEventKind =
   | 'sequence_reply'
 
 export type MarketingEvent = {
-  source: 'brevo' | 'apollo'
+  source: 'brevo' | 'apollo' | 'woodpecker'
   providerEventId: string
   kind: MarketingEventKind
   email: string
