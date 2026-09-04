@@ -334,6 +334,7 @@ const capturePerson = async (
     attribution: input.attribution,
     lifecycleStage: input.settings.lifecycleStageOnSubmit,
     source: 'form',
+    assignOwner: input.settings.assignOwner,
   })
 }
 

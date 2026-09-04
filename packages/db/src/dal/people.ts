@@ -3,7 +3,7 @@ import { recordActivity } from './activity.ts'
 import { sourceFrom, type Attribution } from './attribution.ts'
 import type { WorkspaceContext } from './context.ts'
 import { employerDomainFromEmail } from './domains.ts'
-import type { FormField } from './form-schema.ts'
+import type { AssignOwner, FormField } from './form-schema.ts'
 import type { Tx } from './index.ts'
 
 /** The one path by which a stranger becomes a contact.
@@ -28,6 +28,8 @@ export type PersonCapture = {
   lifecycleStage?: string | null | undefined
   /** What the timeline says did this: 'form', 'booking'. */
   source: string
+  /** Who the lead goes to when nobody owns them yet. */
+  assignOwner?: AssignOwner | null | undefined
 }
 
 export type CapturedPerson = { contactId: string | null; companyId: string | null }
@@ -41,8 +43,8 @@ export const upsertCapturedPerson = async (
 
   const contactValues = { ...input.contact, email: input.email }
 
-  const [existing] = await tx.execute<{ id: string; company_id: string | null }>(
-    sql`select id, company_id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
+  const [existing] = await tx.execute<{ id: string; company_id: string | null; owner_id: string | null }>(
+    sql`select id, company_id, owner_id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
   )
 
   const source = sourceFrom(input.attribution)
@@ -76,6 +78,7 @@ export const upsertCapturedPerson = async (
     await tx.execute(
       sql`update contact set ${sql.join(assignments, sql`, `)} where id = ${existing.id}`,
     )
+    if (!existing.owner_id) await assignOwner(tx, ctx, existing.id, input.assignOwner, input.source)
     if (input.lifecycleStage) {
       await applyLifecycle(tx, ctx, existing.id, input.lifecycleStage, input.source)
     }
@@ -111,10 +114,60 @@ export const upsertCapturedPerson = async (
     return { contactId: raced?.id ?? null, companyId }
   }
 
+  await assignOwner(tx, ctx, created.id, input.assignOwner, input.source)
   if (input.lifecycleStage) {
     await applyLifecycle(tx, ctx, created.id, input.lifecycleStage, input.source)
   }
   return { contactId: created.id, companyId }
+}
+
+/** Picks the owner a capture asked for and writes it, with the same timeline
+ *  entry a person changing the field by hand would leave.
+ *
+ *  Round robin is "the eligible member who owns the fewest contacts", which is
+ *  fair without any state to keep: two forms with two pools stay balanced on their
+ *  own, and a member who leaves simply stops being eligible. One grouped count
+ *  over the pool per lead. */
+const assignOwner = async (
+  tx: Tx,
+  ctx: WorkspaceContext,
+  contactId: string,
+  rule: AssignOwner | null | undefined,
+  source: string,
+): Promise<void> => {
+  if (!rule || rule.mode === 'none') return
+
+  let ownerId: string | null = null
+  if (rule.mode === 'user') {
+    const [member] = await tx.execute<{ user_id: string }>(
+      sql`select user_id from membership where user_id = ${rule.userId ?? ''} limit 1`,
+    )
+    ownerId = member?.user_id ?? null
+  } else {
+    const pool = (rule.pool ?? []).filter(Boolean)
+    const [member] = await tx.execute<{ user_id: string }>(sql`
+      select m.user_id
+        from membership m
+        left join contact c on c.owner_id = m.user_id and c.deleted_at is null
+       where ${pool.length > 0 ? sql`m.user_id in (${sql.join(pool.map((id) => sql`${id}::uuid`), sql`, `)})` : sql`m.role in ('admin', 'sales')`}
+       group by m.user_id
+       order by count(c.id) asc, m.user_id asc
+       limit 1`)
+    ownerId = member?.user_id ?? null
+  }
+  if (!ownerId) return
+
+  const [owner] = await tx.execute<{ name: string; label: string }>(sql`
+    select u.name, coalesce(nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''), c.email, 'Contact') as label
+      from user_account u, contact c where u.id = ${ownerId} and c.id = ${contactId}`)
+  await tx.execute(sql`update contact set owner_id = ${ownerId}, updated_at = now() where id = ${contactId}`)
+  await recordActivity(tx, ctx, {
+    type: 'field_change',
+    subject: `${owner?.label ?? 'Contact'} was assigned to ${owner?.name ?? 'a member'}`,
+    source,
+    payload: { field: 'owner_id', to: ownerId, toLabel: owner?.name ?? null, by: source },
+    links: [{ entityType: 'contact', entityId: contactId }],
+  })
 }
 
 const upsertCompany = async (

@@ -37,12 +37,15 @@ export const FormBuilder = ({
   workspace,
   form,
   targets,
+  members,
   baseUrl,
   canEdit,
 }: {
   workspace: string
   form: FormDetail
   targets: Target[]
+  /** Who a lead can be handed to: every admin and sales member. */
+  members: { id: string; name: string; role: string }[]
   baseUrl: string
   canEdit: boolean
 }) => {
@@ -458,6 +461,76 @@ export const FormBuilder = ({
                 />
               </Field>
             </div>
+            <fieldset className="mt-3 flex flex-col gap-2">
+              <legend className="font-medium">Assign new contacts to</legend>
+              <Select
+                aria-label="Assignment"
+                value={settings.assignOwner?.mode ?? 'none'}
+                disabled={!canEdit}
+                onChange={(event) =>
+                  setSettings({
+                    ...settings,
+                    assignOwner: { ...(settings.assignOwner ?? { userId: null, pool: [] }), mode: event.target.value as 'none' | 'user' | 'round_robin' },
+                  })
+                }
+                className="max-w-xs"
+              >
+                <option value="none">Nobody, leave them unassigned</option>
+                <option value="user">One person</option>
+                <option value="round_robin">Round robin across the team</option>
+              </Select>
+              {settings.assignOwner?.mode === 'user' ? (
+                <Select
+                  aria-label="Owner"
+                  value={settings.assignOwner.userId ?? ''}
+                  disabled={!canEdit}
+                  onChange={(event) =>
+                    setSettings({ ...settings, assignOwner: { ...settings.assignOwner, mode: 'user', userId: event.target.value || null } })
+                  }
+                  className="max-w-xs"
+                >
+                  <option value="">Pick a member</option>
+                  {members.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name} · {member.role}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+              {settings.assignOwner?.mode === 'round_robin' ? (
+                <div className="flex flex-col gap-1">
+                  <p className="text-small text-secondary">
+                    Each lead goes to whoever in the pool owns the fewest contacts. Nobody ticked means every admin and sales member.
+                  </p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {members.map((member) => {
+                      const pool = settings.assignOwner?.pool ?? []
+                      const on = pool.includes(member.id)
+                      return (
+                        <label key={member.id} className="flex items-center gap-1.5 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            disabled={!canEdit}
+                            onChange={(event) =>
+                              setSettings({
+                                ...settings,
+                                assignOwner: {
+                                  ...settings.assignOwner,
+                                  mode: 'round_robin',
+                                  pool: event.target.checked ? [...pool, member.id] : pool.filter((id) => id !== member.id),
+                                },
+                              })
+                            }
+                          />
+                          {member.name}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </fieldset>
             <label className="mt-3 flex items-center gap-2 text-sm">
               <input
                 type="checkbox"

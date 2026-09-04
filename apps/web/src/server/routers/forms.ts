@@ -8,6 +8,7 @@ import {
   saveForm,
   type FormField,
   deleteForm,
+  readSettings,
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -20,10 +21,12 @@ const fieldSchema = z.object({
   key: z.string(),
   type: z.enum(FORM_FIELD_TYPES),
   label: z.string(),
-  placeholder: z.string().optional(),
-  help: z.string().optional(),
+  // A stored field reads back with nulls where nothing was set. Accepted as
+  // "not set" rather than refused, or an existing form could never be re-saved.
+  placeholder: z.string().nullish(),
+  help: z.string().nullish(),
   required: z.boolean(),
-  options: z.array(z.object({ value: z.string(), label: z.string() })).optional(),
+  options: z.array(z.object({ value: z.string(), label: z.string() })).nullish(),
   validation: z
     .object({
       regex: z.string().optional(),
@@ -32,11 +35,11 @@ const fieldSchema = z.object({
       minLength: z.number().optional(),
       maxLength: z.number().optional(),
     })
-    .optional(),
-  visibleIf: z.object({ field: z.string(), equals: z.string() }).optional(),
+    .nullish(),
+  visibleIf: z.object({ field: z.string(), equals: z.string() }).nullish(),
   mapsTo: z.string().nullable().optional(),
   step: z.number().int().min(0).optional(),
-  defaultValue: z.string().optional(),
+  defaultValue: z.string().nullish(),
 })
 
 const settingsSchema = z.object({
@@ -47,7 +50,10 @@ const settingsSchema = z.object({
   slackChannel: z.string().nullable().optional(),
   lifecycleStageOnSubmit: z.string().nullable().optional(),
   subscriptionOptIns: z.array(z.string()).optional(),
-  steps: z.array(z.string()).optional(),
+  steps: z.array(z.string()).nullish(),
+  assignOwner: z
+    .object({ mode: z.enum(['none', 'user', 'round_robin']), userId: z.uuid().nullable().optional(), pool: z.array(z.uuid()).optional() })
+    .optional(),
 })
 
 export const formsRouter = router({
@@ -76,7 +82,8 @@ export const formsRouter = router({
           slug: input.slug,
           isActive: input.isActive,
           fields: input.fields as FormField[],
-          settings: input.settings,
+          // Normalised the way a stored form reads back, nulls and all.
+          settings: readSettings(input.settings),
         }),
       ),
     ),

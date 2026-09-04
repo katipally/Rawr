@@ -67,6 +67,22 @@ export type FormSettings = {
   subscriptionOptIns?: string[] | undefined
   /** Step labels, used for the progress indicator. One entry per step. */
   steps?: string[] | undefined
+  /** Who a new lead belongs to. 'user' names one person; 'round_robin' shares
+   *  them across the pool, or across every admin and sales member when the pool
+   *  is empty. A contact that already has an owner keeps them. */
+  assignOwner?: AssignOwner | undefined
+}
+
+export type AssignOwner = { mode: 'none' | 'user' | 'round_robin'; userId?: string | null | undefined; pool?: string[] | undefined }
+
+export const readAssignOwner = (raw: unknown): AssignOwner => {
+  const a = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const mode = a.mode === 'user' || a.mode === 'round_robin' ? a.mode : 'none'
+  return {
+    mode,
+    userId: typeof a.userId === 'string' && a.userId ? a.userId : null,
+    pool: Array.isArray(a.pool) ? a.pool.filter((v): v is string => typeof v === 'string') : [],
+  }
 }
 
 export const DEFAULT_SETTINGS: FormSettings = {
@@ -77,6 +93,7 @@ export const DEFAULT_SETTINGS: FormSettings = {
   slackChannel: null,
   lifecycleStageOnSubmit: null,
   subscriptionOptIns: [],
+  assignOwner: { mode: 'none', userId: null, pool: [] },
 }
 
 /** The honeypot's name has to look like something a bot wants to fill and nothing
@@ -183,6 +200,7 @@ export const readSettings = (raw: unknown): FormSettings => {
     steps: Array.isArray(s.steps)
       ? s.steps.filter((v): v is string => typeof v === 'string')
       : undefined,
+    assignOwner: readAssignOwner(s.assignOwner),
   }
 }
 

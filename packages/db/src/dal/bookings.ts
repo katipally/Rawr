@@ -705,6 +705,9 @@ export const confirmBooking = async (
       company: mapped.company,
       attribution,
       source: 'booking',
+      // The person who takes the meeting owns the lead, the way HubSpot hands a
+      // booked contact to the organiser. An existing owner is kept.
+      assignOwner: { mode: 'user', userId: host.userId },
     })
 
     const companyName = await resolveCompanyName(tx, linked.companyId, mapped.company)

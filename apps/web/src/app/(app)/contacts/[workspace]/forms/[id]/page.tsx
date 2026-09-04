@@ -1,4 +1,4 @@
-import { getForm, getRegistry, readSettings, type FormDetail } from '@rawr/db'
+import { getForm, getRegistry, listMembers, readSettings, type FormDetail } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { formsPath } from '~/lib/links.ts'
@@ -31,7 +31,7 @@ const BuilderPage = async ({ params }: { params: Promise<{ workspace: string; id
     )
   }
   const blank: FormDetail = { id: '', name: '', slug: '', isActive: false, fields: [], settings: readSettings({}) }
-  const [form, registry] = await Promise.all([id === 'new' ? blank : getForm(ctx, id), getRegistry(ctx)])
+  const [form, registry, members] = await Promise.all([id === 'new' ? blank : getForm(ctx, id), getRegistry(ctx), listMembers(ctx)])
   if (!form) notFound()
 
   // Only contact and company: a form fills in a person and where they work. A
@@ -52,6 +52,7 @@ const BuilderPage = async ({ params }: { params: Promise<{ workspace: string; id
       workspace={workspace}
       form={form}
       targets={targets}
+      members={members.filter((m) => m.role === 'admin' || m.role === 'sales').map((m) => ({ id: m.userId, name: m.name, role: m.role }))}
       baseUrl={publicBaseUrl}
       canEdit={canEdit}
     />

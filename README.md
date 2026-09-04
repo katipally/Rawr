@@ -115,6 +115,12 @@ To try the embed on a page that is not ours, serve any HTML containing:
          data-rawr-consent defer></script>
 ```
 
+A form can hand each new contact to one person or round-robin them across the
+admin and sales members (whoever owns the fewest contacts takes the next one), and a
+booking hands the contact to its host. Every contact carries Last contacted, Last
+reply, Emails sent and Emails received, derived from Gmail, logged activity and
+Apollo sequences; views sort on them and segments filter on them.
+
 Brevo does not sign its webhooks. Saving the Brevo integration mints a token, and
 the webhook URL shown under Settings, Integrations carries it as `t=`; Brevo posts
 without it are refused. The Slack, Apollo, Clay, GA4 and Zoom setup steps are on
