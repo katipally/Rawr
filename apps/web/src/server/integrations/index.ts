@@ -28,6 +28,9 @@ export type IntegrationMeta = {
   configFields: { key: string; label: string; hint: string }[]
   /** Which Notion rows this is the answer to. */
   rows: string[]
+  /** Where the credential comes from, as steps a person follows in the provider's
+   *  own UI. Written once here so the settings form can show them beside the field. */
+  setup: string[]
 }
 
 export const INTEGRATIONS: IntegrationMeta[] = [
@@ -42,6 +45,12 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       { key: 'listId', label: 'List id', hint: 'The Brevo list a segment push writes into.' },
     ],
     rows: ['Newsletter'],
+    setup: [
+      'In Brevo, open your profile menu, then SMTP & API, then the API Keys tab.',
+      'Generate a new v3 key named "Rawr" and paste it below. Brevo shows it once.',
+      'Under Contacts, Lists, open the list newsletters go to and copy the number from its URL.',
+      'Paste the webhook URL below into Brevo under Transactional, Settings, Webhooks, for delivered, opened, clicked, hard bounce and unsubscribed.',
+    ],
   },
   {
     kind: 'apollo',
@@ -53,6 +62,11 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     secretLabel: 'API key',
     configFields: [],
     rows: ['Email Sequences', 'Email Tracking', 'Company & Contact Enrichment'],
+    setup: [
+      'In Apollo, open Settings, then Integrations, then API. This needs API access on the plan, not only a seat (open item 7).',
+      'Create a key with people, organisations and sequences scopes and paste it below.',
+      'Paste the webhook URL below into Apollo under Settings, Integrations, Webhooks so opens, clicks and replies flow back.',
+    ],
   },
   {
     kind: 'clay',
@@ -66,6 +80,12 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       { key: 'tier', label: 'Plan tier', hint: 'launch or growth. Launch has no API write-back.' },
     ],
     rows: ['Company & Contact Enrichment'],
+    setup: [
+      'In Clay, open the enrichment table and add a Webhook source; copy its URL into "Table webhook URL".',
+      'Add an HTTP API column at the end of the table that posts each row to the webhook URL below, with the token as a bearer header.',
+      'Make up a long random token, paste it below and into that column\u2019s Authorization header. Rawr refuses anything else.',
+      'Set the tier to what the Clay account is on. Launch has no HTTP API, so enrichment degrades to CSV (open item 12).',
+    ],
   },
   {
     kind: 'slack',
@@ -78,6 +98,11 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       { key: 'stageAlerts', label: 'Stage alerts', hint: 'Comma-separated pipeline ids to announce moves for.' },
     ],
     rows: ['Custom Lead Forms'],
+    setup: [
+      'Quickest: in Slack open the channel, then its settings, Integrations, Add an app, Incoming WebHooks; copy the webhook URL and paste it as the secret.',
+      'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the workspace and paste the xoxb bot token instead (open item 4).',
+      'Invite the bot to #sales-leads-2026, or whichever channel you name as the default.',
+    ],
   },
   {
     kind: 'ga4',
@@ -90,6 +115,10 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       { key: 'measurementId', label: 'Measurement id', hint: 'G-XXXXXXX, from the same data stream as the secret.' },
     ],
     rows: [],
+    setup: [
+      'In Google Analytics, Admin, Data streams, open the datasaur.ai web stream and copy its Measurement ID.',
+      'On the same screen, Measurement Protocol API secrets, create one named "Rawr" and paste it below.',
+    ],
   },
   {
     kind: 'zoom',
@@ -103,6 +132,10 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       { key: 'clientId', label: 'Client id', hint: 'From the same app.' },
     ],
     rows: ['Book Meeting'],
+    setup: [
+      'At marketplace.zoom.us, Develop, Build App, choose Server-to-Server OAuth (open item 5).',
+      'Add the meeting:write:admin scope, activate the app, and copy the Account ID, Client ID and Client Secret from the App Credentials tab.',
+    ],
   },
   {
     kind: 'google_calendar',
@@ -113,6 +146,10 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     secretLabel: null,
     configFields: [],
     rows: ['Book Meeting', 'Calendar Links'],
+    setup: [
+      'Nothing to paste here. Each host connects their own calendar from Your account, or Meetings, Calendars.',
+      'The Google project behind it is open item 3; until then the development calendar stands in.',
+    ],
   },
 ]
 

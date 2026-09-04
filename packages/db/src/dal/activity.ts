@@ -116,6 +116,7 @@ export type TimelineRow = {
   occurredAt: Date
   source: string | null
   payload: unknown
+  actorId: string | null
   actorName: string | null
   actorKind: string
 }
@@ -146,6 +147,7 @@ export const readTimeline = async (
         occurredAt: activity.occurredAt,
         source: activity.source,
         payload: activity.payload,
+        actorId: activity.actorId,
         actorName: userAccount.name,
         actorKind: activity.actorKind,
       })
@@ -240,3 +242,68 @@ export const moveActivityLinks = async (
 
   return moved.length
 }
+
+export type RecentActivityRow = TimelineRow & {
+  /** The first record the entry hangs on, for the link. An entry on a contact,
+   *  its company and a deal shows once, under the contact. */
+  entityType: EntityRef['entityType']
+  entityId: string
+  entityName: string
+}
+
+/** The workspace's timeline, newest first: what the team did today, across every
+ *  record, for the Home screen. One indexed scan of activity plus a lateral pick
+ *  of one link per entry; O(limit), never a join over the whole link table. */
+export const recentActivity = async (ctx: WorkspaceContext, limit = 12): Promise<RecentActivityRow[]> =>
+  withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{
+      id: string
+      type: ActivityType
+      subject: string | null
+      body: string | null
+      occurred_at: Date | string
+      source: string | null
+      payload: unknown
+      actor_id: string | null
+      actor_name: string | null
+      actor_kind: string
+      entity_type: EntityRef['entityType']
+      entity_id: string
+      entity_name: string | null
+    }>(sql`
+      select a.id, a.type, a.subject, a.body, a.occurred_at, a.source, a.payload,
+             a.actor_id, u.name as actor_name, a.actor_kind,
+             l.entity_type, l.entity_id,
+             case l.entity_type
+               when 'contact' then (select coalesce(nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''), c.email) from contact c where c.id = l.entity_id)
+               when 'company' then (select coalesce(co.name, co.domain) from company co where co.id = l.entity_id)
+               when 'deal' then (select d.name from deal d where d.id = l.entity_id)
+             end as entity_name
+        from activity a
+        left join user_account u on u.id = a.actor_id
+        join lateral (
+          select entity_type, entity_id from activity_link
+           where activity_id = a.id
+           order by case entity_type when 'contact' then 0 when 'deal' then 1 else 2 end
+           limit 1
+        ) l on true
+       where a.type <> 'page_view'
+       order by a.occurred_at desc, a.id desc
+       limit ${Math.min(Math.max(limit, 1), 100)}`)
+
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      subject: row.subject,
+      body: row.body,
+      occurredAt: new Date(row.occurred_at),
+      source: row.source,
+      payload: row.payload,
+      actorId: row.actor_id,
+      actorName: row.actor_name,
+      actorKind: row.actor_kind,
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      entityName: row.entity_name ?? 'a deleted record',
+    }))
+  })

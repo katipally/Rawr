@@ -12,6 +12,9 @@ export type Membership = {
   displayName: string
   avatarUrl: string | null
   role: Role
+  joinedAt: Date
+  /** Sessions issued before this are dead. Null means nobody has signed out everywhere. */
+  sessionsValidAfter: Date | null
 }
 
 type MembershipRow = {
@@ -24,6 +27,8 @@ type MembershipRow = {
   display_name: string
   avatar_url: string | null
   role: Role
+  joined_at: Date | string
+  sessions_valid_after: Date | string | null
 }
 
 const toMembership = (r: MembershipRow): Membership => ({
@@ -36,6 +41,8 @@ const toMembership = (r: MembershipRow): Membership => ({
   displayName: r.display_name,
   avatarUrl: r.avatar_url,
   role: r.role,
+  joinedAt: new Date(r.joined_at),
+  sessionsValidAfter: r.sessions_valid_after ? new Date(r.sessions_valid_after) : null,
 })
 
 /** The one question row level security cannot answer: which workspaces does this
@@ -72,4 +79,10 @@ export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> 
   )
   if (!row) throw new Error('Sign-in did not return an account.')
   return row.id
+}
+
+/** Every session this person holds, on every device, stops working on its next
+ *  request. The current one included: the caller signs back in. */
+export const signOutEverywhere = async (userId: string): Promise<void> => {
+  await appDb.execute(sql`select rawr.sign_out_everywhere(${userId})`)
 }

@@ -1,4 +1,4 @@
-import { listUnmatchedEvents } from '@rawr/db'
+import { listSites, listUnmatchedEvents } from '@rawr/db'
 import { devIntegrationsEnabled, publicBaseUrl } from '~/lib/env.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -18,7 +18,10 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
   const { open } = await searchParams
 
   const ctx = contextFrom(session)
-  const [rows, unmatched] = await Promise.all([readIntegrations(ctx), listUnmatchedEvents(ctx, 25)])
+  const [rows, unmatched, sites] = await Promise.all([readIntegrations(ctx), listUnmatchedEvents(ctx, 25), listSites(ctx)])
+  // The webhook URL names the workspace through a tracked site's key; the first
+  // active one is the workspace's public identity for that purpose.
+  const siteKey = sites.find((site) => site.isActive)?.siteKey ?? sites[0]?.siteKey ?? null
 
   return (
     <div className="flex flex-col gap-4">
@@ -47,6 +50,7 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
         }))}
         unmatched={unmatched.map((row) => ({ ...row, at: row.at.toISOString() }))}
         webhookBase={publicBaseUrl}
+        siteKey={siteKey}
         canWrite={session.role === 'admin'}
         role={session.role}
         openKind={rows.find((row) => row.kind === open)?.kind ?? null}

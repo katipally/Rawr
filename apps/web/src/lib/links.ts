@@ -187,6 +187,9 @@ export const bookingManagePath = (purpose: 'cancel' | 'reschedule', token: strin
  *  that changes is one edit here. */
 export const agentAccessPath = (): string => '/settings/agent'
 
+/** The signed-in person's own screen: identity, roles, timezone, connected Google services, sessions. */
+export const accountPath = (): string => '/settings/account'
+
 export const failedJobsPath = (): string => '/settings/jobs'
 
 /** A sort is one field and a direction, written the way a person would type it:

@@ -74,7 +74,7 @@ export const readSession = cache(async (): Promise<Session | null> => {
   const token = jar.get(COOKIE)?.value
   if (!token) return null
 
-  let claims: Session
+  let claims: Session & { iat?: number }
   try {
     const { payload } = await jwtVerify<Session>(token, key, { issuer: ISSUER })
     claims = payload
@@ -84,6 +84,12 @@ export const readSession = cache(async (): Promise<Session | null> => {
 
   const current = (await memberships(claims.userId)).find((m) => m.workspaceId === claims.workspaceId)
   if (!current) return null
+  // "Sign out everywhere" moves the watermark; a cookie minted before it is dead
+  // even though its signature still checks out.
+  // iat has second precision, so a cookie minted in the same second as the
+  // watermark is given the whole second: a sign-in right after signing out
+  // everywhere must not be refused by its own rounding.
+  if (current.sessionsValidAfter && ((claims.iat ?? 0) + 1) * 1000 <= current.sessionsValidAfter.getTime()) return null
 
   return sessionFromMembership(current)
 })

@@ -7,6 +7,8 @@ import type { HealthState, IntegrationKind } from '@rawr/db'
 import type { IntegrationMeta } from '~/server/integrations/index.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { sitesPath } from '~/lib/links.ts'
+import Link from 'next/link'
 
 export type IntegrationView = {
   kind: IntegrationKind
@@ -26,6 +28,8 @@ export type IntegrationPanelProps = {
   rows: IntegrationView[]
   unmatched: UnmatchedRow[]
   webhookBase: string
+  /** Null until a tracked site exists; the webhook URL cannot be built without one. */
+  siteKey: string | null
   canWrite: boolean
   role: string
   /** A provider to land on with its form open, from a "connect" link elsewhere. */
@@ -57,6 +61,7 @@ export const IntegrationPanel = ({
   rows,
   unmatched,
   webhookBase,
+  siteKey,
   canWrite,
   role,
   openKind,
@@ -225,6 +230,11 @@ export const IntegrationPanel = ({
 
               {isOpen && canWrite ? (
                 <div className="flex flex-col gap-3 border-t border-divider px-3 py-3">
+                  <ol className="flex list-decimal flex-col gap-1 pl-5 text-secondary">
+                    {row.meta.setup.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
                   {row.meta.secretLabel ? (
                     <Field
                       id={`secret-${row.kind}`}
@@ -260,18 +270,38 @@ export const IntegrationPanel = ({
                   ))}
 
                   {WEBHOOK_SOURCES.has(row.kind) ? (
-                    <Field
-                      id={`webhook-${row.kind}`}
-                      label="Webhook URL to paste at the provider"
-                      hint="Carries the workspace key. Requests without a valid signature are refused and counted against this integration's health."
-                    >
-                      <TextInput
+                    siteKey ? (
+                      <Field
                         id={`webhook-${row.kind}`}
-                        readOnly
-                        value={`${webhookBase}/w/${row.kind}?w=${String(config.siteKey ?? 'YOUR-SITE-KEY')}`}
-                        onFocus={(event) => event.currentTarget.select()}
-                      />
-                    </Field>
+                        label="Webhook URL to paste at the provider"
+                        hint="Carries the workspace key. Requests without a valid signature are refused and counted against this integration's health."
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <TextInput
+                            id={`webhook-${row.kind}`}
+                            readOnly
+                            className="min-w-0 flex-1"
+                            value={`${webhookBase}/w/${row.kind}?w=${siteKey}`}
+                            onFocus={(event) => event.currentTarget.select()}
+                          />
+                          <Button
+                            onClick={() =>
+                              void navigator.clipboard
+                                .writeText(`${webhookBase}/w/${row.kind}?w=${siteKey}`)
+                                .then(() => toast('success', 'Copied.'))
+                                .catch(() => toast('error', 'Could not copy. Select the field and copy it by hand.'))
+                            }
+                          >
+                            Copy
+                          </Button>
+                        </div>
+                      </Field>
+                    ) : (
+                      <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+                        The webhook URL needs a tracked site to name this workspace.{' '}
+                        <Link href={sitesPath()}>Add one under Tracked sites</Link>, then come back.
+                      </p>
+                    )
                   ) : null}
 
                   <div className="flex flex-wrap gap-2">

@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { pageViewPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from './value.tsx'
+import { ACTIVITY_LABELS as TYPE_LABELS, formatDateTime } from './value.tsx'
 
 export type TimelineEntry = {
   id: string
@@ -15,6 +15,7 @@ export type TimelineEntry = {
   subject: string | null
   body: string | null
   occurredAt: string
+  actorId: string | null
   actorName: string | null
   actorKind: string
   /** What the entry was written from. Only F4's two types read it, to address the
@@ -37,30 +38,9 @@ export type TimelineProps = {
   counts: Record<string, number>
   groups: TimelineGroup[]
   canWrite: boolean
-}
-
-const TYPE_LABELS: Record<string, string> = {
-  note: 'Note',
-  call: 'Call',
-  email: 'Email',
-  meeting: 'Meeting',
-  task: 'Task',
-  stage_change: 'Stage change',
-  lifecycle_change: 'Lifecycle change',
-  field_change: 'Property change',
-  association_change: 'Association',
-  merge: 'Merge',
-  import: 'Import',
-  form_submission: 'Form submission',
-  booking: 'Booking',
-  page_view: 'Page view',
-  custom_event: 'Custom event',
-  marketing_email: 'Marketing email',
-  email_tracking: 'Email tracking',
-  sequence_activity: 'Sequence',
-  enrichment: 'Enrichment',
-  subscription_change: 'Subscription',
-  segment_change: 'Segment',
+  /** Who is looking. Their own hand-logged entries can be corrected or removed; an
+   *  admin can do that to anyone's. Nothing the system wrote can be touched. */
+  viewer: { userId: string; role: string }
 }
 
 /** What a person can put on the timeline by hand, and the prompt each one needs.
@@ -99,6 +79,7 @@ export const Timeline = ({
   counts,
   groups,
   canWrite,
+  viewer,
 }: TimelineProps) => {
   const router = useRouter()
   const toast = useToast()
@@ -115,6 +96,9 @@ export const Timeline = ({
   const [happenedOn, setHappenedOn] = useState('')
   const [posting, setPosting] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+  const [editing, setEditing] = useState<{ id: string; body: string } | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [working, setWorking] = useState(false)
 
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
   const shownCount = selected.length === 0 ? total : selected.reduce((sum, type) => sum + (counts[type] ?? 0), 0)
@@ -157,6 +141,7 @@ export const Timeline = ({
         subject: row.subject,
         body: row.body,
         occurredAt: row.occurredAt.toISOString(),
+        actorId: row.actorId,
         actorName: row.actorName,
         actorKind: row.actorKind,
         payload: row.payload,
@@ -212,6 +197,41 @@ export const Timeline = ({
       toast('error', errorMessage(cause))
     } finally {
       setPosting(false)
+    }
+  }
+
+  const canTouch = (entry: TimelineEntry) =>
+    canWrite &&
+    LOGGABLE.some((loggable) => loggable.type === entry.type) &&
+    (entry.actorId === viewer.userId || viewer.role === 'admin')
+
+  const saveEdit = async () => {
+    if (!editing) return
+    setWorking(true)
+    try {
+      await api.crm.timeline.edit.mutate({ id: editing.id, body: editing.body })
+      setRows((current) => current.map((row) => (row.id === editing.id ? { ...row, body: editing.body.trim() } : row)))
+      setEditing(null)
+      toast('success', 'Saved.')
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  const remove = async (id: string) => {
+    setWorking(true)
+    try {
+      await api.crm.timeline.remove.mutate({ id })
+      setRows((current) => current.filter((row) => row.id !== id))
+      setRemoving(null)
+      toast('success', 'Removed from the timeline.')
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setWorking(false)
     }
   }
 
@@ -339,7 +359,49 @@ export const Timeline = ({
                   {formatDateTime(entry.occurredAt)}
                 </time>
               </p>
-              {entry.body ? <p className="mt-1 break-words whitespace-pre-wrap">{entry.body}</p> : null}
+              {editing?.id === entry.id ? (
+                <div className="mt-2 flex flex-col gap-2">
+                  <TextArea
+                    value={editing.body}
+                    aria-label="Edit this entry"
+                    onChange={(event) => setEditing({ id: entry.id, body: event.target.value })}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="primary" busy={working} disabled={editing.body.trim() === ''} onClick={() => void saveEdit()}>
+                      Save
+                    </Button>
+                    <Button variant="tertiary" onClick={() => setEditing(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : entry.body ? (
+                <p className="mt-1 break-words whitespace-pre-wrap">{entry.body}</p>
+              ) : null}
+              {canTouch(entry) && editing?.id !== entry.id ? (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-small">
+                  {removing === entry.id ? (
+                    <>
+                      <span className="text-secondary">Remove this {TYPE_LABELS[entry.type]?.toLowerCase() ?? 'entry'}?</span>
+                      <Button variant="destructive" busy={working} onClick={() => void remove(entry.id)}>
+                        Remove
+                      </Button>
+                      <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                        Keep
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button variant="tertiary" onClick={() => setEditing({ id: entry.id, body: entry.body ?? '' })}>
+                        Edit
+                      </Button>
+                      <Button variant="tertiary" onClick={() => setRemoving(entry.id)}>
+                        Delete
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ) : null}
             </li>
           ))}
         </ol>

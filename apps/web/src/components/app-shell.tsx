@@ -60,6 +60,8 @@ export type AppShellProps = {
    *  carries its workspace and a hardcoded list could not. */
   nav: NavSection[]
   settingsHref: string
+  /** The signed-in person's own screen, behind their name in the top bar. */
+  accountHref: string
   /** The command palette, rendered by the layout so the shell needs no data. */
   search?: ReactNode
   children: ReactNode
@@ -105,6 +107,7 @@ const Shell = ({
   role,
   nav,
   settingsHref,
+  accountHref,
   search,
   children,
 }: AppShellProps) => {
@@ -405,9 +408,13 @@ const Shell = ({
               </select>
             </label>
           ) : (
-            <span className="hidden max-w-40 truncate text-secondary lg:inline" title={`${email} · ${role}`}>
+            <Link
+              href={accountHref}
+              className="hidden max-w-40 truncate text-secondary no-underline hover:text-body lg:inline"
+              title={`${email} · ${role}. Your account.`}
+            >
               {workspaceName}
-            </span>
+            </Link>
           )}
           <Link
             href={settingsHref}
@@ -465,9 +472,9 @@ const Shell = ({
             <div id="primary-nav" className="fixed inset-y-12 left-0 z-30 flex w-64 flex-col bg-nav text-nav-text md:hidden">
               {sheet}
               <div className="flex flex-col gap-2 border-t border-nav-active/60 px-3 py-3 text-small text-nav-muted">
-                <span className="truncate" title={email}>
+                <Link href={accountHref} className="truncate text-nav-muted no-underline hover:text-nav-text" title={email}>
                   {email} · {role}
-                </span>
+                </Link>
                 {workspaces.length > 1 ? switcher : <span className="truncate">{workspaceName}</span>}
               </div>
             </div>

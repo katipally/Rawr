@@ -1,9 +1,35 @@
-import { listTasks, overdueNextSteps, readDashboard, withWorkspaceReads } from '@rawr/db'
+import {
+  listForms,
+  listGrants,
+  listImportRuns,
+  listIntegrations,
+  listMembers,
+  listPipelines,
+  listSites,
+  listTasks,
+  overdueNextSteps,
+  readDashboard,
+  recentActivity,
+  withWorkspaceReads,
+} from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { formatCurrency, formatDate, formatDateTime } from '~/components/crm/value.tsx'
-import { bookedPath, objectView, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
+import { ACTIVITY_LABELS, formatCurrency, formatDate, formatDateTime } from '~/components/crm/value.tsx'
+import {
+  bookedPath,
+  calendarsPath,
+  formsPath,
+  importsPath,
+  integrationsPath,
+  membersPath,
+  objectView,
+  pipelinesPath,
+  recordPath,
+  sitesPath,
+  submissionsPath,
+  tasksPath,
+} from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** The Monday screen. D10 replaced the spreadsheet ritual with a shared view; this
@@ -48,19 +74,51 @@ const Panel = ({ title, action, children }: { title: string; action?: React.Reac
   </section>
 )
 
-const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) => {
+const HomePage = async ({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ workspace: string }>
+  searchParams: Promise<{ error?: string }>
+}) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const { workspace } = await params
+  const [{ workspace }, { error }] = await Promise.all([params, searchParams])
   const ctx = contextFrom(session)
+  const isAdmin = session.role === 'admin'
 
-  const [board, overdue, myTasks] = await withWorkspaceReads(ctx, () =>
+  const [board, overdue, myTasks, recent, members, setup] = await withWorkspaceReads(ctx, () =>
     Promise.all([
       readDashboard(ctx),
       overdueNextSteps(ctx),
       listTasks(ctx, { status: 'open', assigneeId: session.userId }),
+      recentActivity(ctx, 12),
+      listMembers(ctx),
+      // What an admin still has to switch on. Read only for them: nobody else can
+      // act on it, and six extra queries for a viewer would buy nothing.
+      isAdmin
+        ? Promise.all([listIntegrations(ctx), listGrants(ctx), listForms(ctx), listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
+        : null,
     ]),
   )
+
+  const admins = members.filter((m) => m.role === 'admin' && m.userId !== session.userId)
+  const checklist = setup
+    ? (() => {
+        const [integrations, grants, forms, imports, sites, pipelines] = setup
+        const connected = (kind: string) => integrations.some((row) => row.kind === kind && row.state !== 'not_configured')
+        return [
+          { done: members.length > 1, label: 'Add the team and set roles', href: membersPath() },
+          { done: pipelines.length > 0, label: 'Check the deal pipelines and stage probabilities', href: pipelinesPath() },
+          { done: imports.some((run) => run.state === 'done'), label: 'Import contacts, companies and deals', href: importsPath(workspace) },
+          { done: connected('slack'), label: 'Connect Slack so form fills reach the team', href: integrationsPath('slack') },
+          { done: grants.length > 0, label: 'Connect a calendar so booking pages have a host', href: calendarsPath(workspace) },
+          { done: forms.length > 0, label: 'Build the first form', href: formsPath(workspace) },
+          { done: sites.length > 0, label: 'Register datasaur.ai as a tracked site', href: sitesPath() },
+        ]
+      })()
+    : []
+  const remaining = checklist.filter((item) => !item.done)
 
   const openCount = board.stages.reduce((sum, stage) => sum + stage.count, 0)
   // Per currency, never across: adding dollars to euros would be a number that
@@ -95,6 +153,62 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
           {session.workspaceName}, {formatDate(new Date())}. Every number opens the list behind it.
         </p>
       </div>
+
+      {error ? (
+        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+          {error}
+        </p>
+      ) : null}
+
+      {session.role === 'viewer' ? (
+        <section className="rounded-panel border border-line-interactive bg-accent-subtle px-3 py-2">
+          <p className="font-medium">You are in as a viewer.</p>
+          <p className="text-secondary">
+            Everything here is readable and nothing is editable yet. That is how every new
+            {` @${session.hostedDomain} `}sign-in starts.{' '}
+            {admins.length > 0 ? (
+              <>
+                To edit, ask{' '}
+                {admins.map((a, i) => (
+                  <span key={a.email}>
+                    {i > 0 ? (i === admins.length - 1 ? ' or ' : ', ') : ''}
+                    <a href={`mailto:${a.email}?subject=${encodeURIComponent('Rawr role for ' + session.email)}`}>{a.name}</a>
+                  </span>
+                ))}{' '}
+                to raise your role under Settings, Members.
+              </>
+            ) : (
+              'An admin raises roles under Settings, Members.'
+            )}
+          </p>
+        </section>
+      ) : null}
+
+      {remaining.length > 0 ? (
+        <Panel title={`Set up Rawr (${checklist.length - remaining.length} of ${checklist.length} done)`}>
+          <ul className="flex flex-col divide-y divide-divider">
+            {checklist.map((item) => (
+              <li key={item.label} className="flex items-center gap-3 py-1.5 first:pt-0 last:pb-0">
+                <span
+                  aria-hidden="true"
+                  className={
+                    item.done
+                      ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-small text-white'
+                      : 'size-5 shrink-0 rounded-full border border-line'
+                  }
+                >
+                  {item.done ? '✓' : ''}
+                </span>
+                {item.done ? (
+                  <span className="text-secondary line-through">{item.label}</span>
+                ) : (
+                  <Link href={item.href}>{item.label}</Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
 
       <Tiles tiles={tiles} />
 
@@ -249,6 +363,33 @@ const HomePage = async ({ params }: { params: Promise<{ workspace: string }> }) 
                       {formatDate(t.dueDate)}
                     </span>
                   ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title="Recent activity" action={<Link href={objectView(workspace, 'contact', 'all', 'list', { sort: '-updated_at' })}>Recently changed</Link>}>
+          {recent.length === 0 ? (
+            <p className="text-secondary">Nothing has happened yet. Notes, calls, stage moves and form fills land here as the team works.</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-divider">
+              {recent.map((entry) => (
+                <li key={entry.id} className="flex flex-col gap-0.5 py-2">
+                  <div className="flex min-w-0 items-baseline justify-between gap-2">
+                    <p className="min-w-0 truncate">
+                      <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">{ACTIVITY_LABELS[entry.type] ?? entry.type}</span>{' '}
+                      <span className="font-medium">{entry.actorName ?? (entry.actorKind === 'user' ? '' : entry.actorKind)}</span>{' '}
+                      {entry.subject ?? ''}
+                    </p>
+                    <time dateTime={entry.occurredAt.toISOString()} className="shrink-0 text-small text-secondary">
+                      {formatDateTime(entry.occurredAt)}
+                    </time>
+                  </div>
+                  <p className="truncate text-small text-secondary">
+                    <Link href={recordPath(workspace, entry.entityType, entry.entityId)}>{entry.entityName}</Link>
+                    {entry.body ? ` · ${entry.body}` : ''}
+                  </p>
                 </li>
               ))}
             </ul>

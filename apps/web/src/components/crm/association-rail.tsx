@@ -7,6 +7,7 @@ import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 
 export type Associated = {
@@ -29,6 +30,12 @@ export type AssociationRailProps = {
    *  records themselves are searched, never listed: a deal's next contact is very
    *  rarely among the newest few hundred. */
   linkable: ObjectKey[]
+  /** The create form for each linkable object, so a deal's new contact is made
+   *  here and linked in one step rather than created elsewhere and searched for. */
+  createFields: Partial<Record<ObjectKey, CreateField[]>>
+  /** Prefilled onto a record created from here: a contact or deal made from a
+   *  company page starts with that company as its primary. */
+  createInitial: Record<string, unknown>
   canWrite: boolean
 }
 
@@ -46,12 +53,15 @@ export const AssociationRail = ({
   companies,
   deals,
   linkable,
+  createFields,
+  createInitial,
   canWrite,
 }: AssociationRailProps) => {
   const router = useRouter()
   const toast = useToast()
   const [adding, setAdding] = useState<ObjectKey | null>(null)
   const [choice, setChoice] = useState<PickedRecord | null>(null)
+  const [creating, setCreating] = useState<ObjectKey | null>(null)
   const [busy, setBusy] = useState(false)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -88,15 +98,22 @@ export const AssociationRail = ({
                 {TITLES[section.key]} ({section.rows.length})
               </h3>
               {canWrite && canLink ? (
-                <Button
-                  variant="tertiary"
-                  onClick={() => {
-                    setChoice(null)
-                    setAdding(adding === section.key ? null : section.key)
-                  }}
-                >
-                  Add
-                </Button>
+                <span className="flex items-center gap-1">
+                  {createFields[section.key] ? (
+                    <Button variant="tertiary" onClick={() => setCreating(section.key)}>
+                      New
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="tertiary"
+                    onClick={() => {
+                      setChoice(null)
+                      setAdding(adding === section.key ? null : section.key)
+                    }}
+                  >
+                    Add
+                  </Button>
+                </span>
               ) : null}
             </header>
 
@@ -195,6 +212,30 @@ export const AssociationRail = ({
           </section>
         )
       })}
+
+      {creating && createFields[creating] ? (
+        <CreateRecordDialog
+          workspace={workspace}
+          object={creating}
+          objectLabel={TITLES[creating].replace(/s$/, '').replace('Companie', 'Company')}
+          fields={createFields[creating] ?? []}
+          // A contact or deal made from a company already points at it through
+          // company_id, so the link exists without an association row.
+          initial={createInitial}
+          onClose={() => setCreating(null)}
+          onCreated={async (id) => {
+            const already = object === 'company' && (creating === 'contact' || creating === 'deal')
+            if (!already) {
+              await api.crm.associations.add.mutate({
+                a: { entityType: object, entityId: recordId },
+                b: { entityType: creating, entityId: id },
+                label: null,
+              })
+            }
+            router.refresh()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { listDeadLetters } from '@rawr/db'
+import { listDeadLetters, signOutEverywhere } from '@rawr/db'
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
 import { adminRouter } from './admin.ts'
 import { analyticsRouter } from './analytics.ts'
@@ -29,6 +29,12 @@ export const appRouter = router({
     role: ctx.session.role,
     workspaceName: ctx.session.workspaceName,
   })),
+
+  account: router({
+    /** Ends every session the caller holds. Scoped to the caller by construction:
+     *  the id comes from the verified session, never from input. */
+    signOutEverywhere: protectedProcedure.mutation(({ ctx }) => signOutEverywhere(ctx.session.userId)),
+  }),
 
   jobs: router({
     /** The failed-jobs screen. Replaying is on the integrations router, because a

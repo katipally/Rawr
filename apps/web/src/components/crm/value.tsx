@@ -189,3 +189,29 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '' }
 
   return <span className="break-words">{text}</span>
 }
+
+/** How each timeline type is named on screen. Shared by the record timeline and
+ *  the Home feed so the same event never has two names. */
+export const ACTIVITY_LABELS: Record<string, string> = {
+  note: 'Note',
+  call: 'Call',
+  email: 'Email',
+  meeting: 'Meeting',
+  task: 'Task',
+  stage_change: 'Stage change',
+  lifecycle_change: 'Lifecycle change',
+  field_change: 'Property change',
+  association_change: 'Association',
+  merge: 'Merge',
+  import: 'Import',
+  form_submission: 'Form submission',
+  booking: 'Booking',
+  page_view: 'Page view',
+  custom_event: 'Custom event',
+  marketing_email: 'Marketing email',
+  email_tracking: 'Email tracking',
+  sequence_activity: 'Sequence',
+  enrichment: 'Enrichment',
+  subscription_change: 'Subscription',
+  segment_change: 'Segment',
+}

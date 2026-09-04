@@ -3,7 +3,7 @@ import { task } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { recordActivity, type EntityRef } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { mutate, withWorkspace, type Tx } from './index.ts'
 
 export type TaskRow = {
   id: string
@@ -164,6 +164,45 @@ export const logByHand = async (
     return {
       result: { id },
       audit: { entity: 'activity', entityId: id, action: input.type, before: null, after: { entity: input.entity } },
+    }
+  })
+
+/** A hand-logged entry belongs to the person who wrote it. They, or an admin, may
+ *  correct or remove it; everything the system wrote stays as it happened. */
+const ownLoggedEntry = async (tx: Tx, ctx: WorkspaceContext, id: string) => {
+  const [row] = await tx.execute<{ id: string; type: string; body: string | null; actor_id: string | null }>(
+    sql`select id, type, body, actor_id from activity where id = ${id} limit 1`,
+  )
+  if (!row) throw new Error('That entry is no longer on the timeline.')
+  if (!(LOGGABLE_TYPES as readonly string[]).includes(row.type)) {
+    throw new Error('Only notes, calls, meetings and emails logged by hand can be changed.')
+  }
+  if (row.actor_id !== ctx.actorId && ctx.role !== 'admin') {
+    throw new Error('Only the person who wrote this, or an admin, can change it.')
+  }
+  return row
+}
+
+export const editLoggedEntry = async (ctx: WorkspaceContext, input: { id: string; body: string }): Promise<void> =>
+  mutate(ctx, 'activity', async (tx) => {
+    const body = input.body.trim()
+    if (!body) throw new Error('An entry cannot be emptied. Delete it instead.')
+    const before = await ownLoggedEntry(tx, ctx, input.id)
+    await tx.execute(sql`update activity set body = ${body} where id = ${input.id}`)
+    return {
+      result: undefined,
+      audit: { entity: 'activity', entityId: input.id, action: 'edit', before: { body: before.body }, after: { body } },
+    }
+  })
+
+export const deleteLoggedEntry = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+  mutate(ctx, 'activity', async (tx) => {
+    const before = await ownLoggedEntry(tx, ctx, id)
+    // Links cascade. The audit row keeps what was said, so nothing is unrecoverable.
+    await tx.execute(sql`delete from activity where id = ${id}`)
+    return {
+      result: undefined,
+      audit: { entity: 'activity', entityId: id, action: 'delete', before: { type: before.type, body: before.body }, after: null },
     }
   })
 

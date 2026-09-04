@@ -19,6 +19,9 @@ export type CreateRecordDialogProps = {
   onClose: () => void
   /** Prefills a relation, used when creating from a record's association rail. */
   initial?: Record<string, unknown>
+  /** Where to go once it exists. Absent means open the new record; the rail passes
+   *  one so the person stays where they were and sees the link appear. */
+  onCreated?: (id: string) => Promise<void> | void
 }
 
 export const CreateRecordDialog = ({
@@ -28,6 +31,7 @@ export const CreateRecordDialog = ({
   fields,
   onClose,
   initial = {},
+  onCreated,
 }: CreateRecordDialogProps) => {
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -52,7 +56,8 @@ export const CreateRecordDialog = ({
       }
       toast('success', `${objectLabel} created.`)
       onClose()
-      navigate(recordPath(workspace, object, created.id))
+      if (onCreated) await onCreated(created.id)
+      else navigate(recordPath(workspace, object, created.id))
     } catch (cause) {
       const message = errorMessage(cause)
       setError(message)

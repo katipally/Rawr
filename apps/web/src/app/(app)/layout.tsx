@@ -3,6 +3,7 @@ import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavSection } from '~/components/app-shell.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
 import {
+  accountPath,
   bookingPagesPath,
   formsPath,
   importsPath,
@@ -76,6 +77,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         role={session.role}
         nav={nav}
         settingsHref={propertiesPath()}
+        accountHref={accountPath()}
         search={<CommandPalette workspace={workspace} />}
       >
         {children}

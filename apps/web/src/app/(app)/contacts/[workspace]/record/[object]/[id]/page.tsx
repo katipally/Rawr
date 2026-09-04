@@ -1,6 +1,7 @@
 import {
   ACTIVITY_GROUPS,
   getRecord,
+  getRegistry,
   isActivityType,
   isObjectKey,
   isUuid,
@@ -100,8 +101,9 @@ const RecordPage = async ({
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
     // panels only need the id, and a missing record just discards their answers.
-    const [{ object, lookups, canWrite }, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations] = await Promise.all([
+    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations] = await Promise.all([
       loadCrmContext(ctx, objectParam),
+      getRegistry(ctx),
       getRecord(ctx, objectParam, id),
       // A hand-edited type in a link is dropped rather than failing the page.
       readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
@@ -116,7 +118,7 @@ const RecordPage = async ({
       enrichable ? listIntegrations(ctx) : Promise.resolve([]),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations }
+    return { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations }
   })
 
   if (!screen) {
@@ -130,7 +132,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations } = screen
+  const { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations } = screen
 
   const health = (kind: 'apollo' | 'clay') => {
     const row = integrations.find((i) => i.kind === kind)
@@ -160,8 +162,17 @@ const RecordPage = async ({
 
   // Only the pairs that make sense: a deal links to contacts, a contact links to
   // deals, and a company's contacts and deals are held on the records themselves.
-  const linkable: ObjectKey[] =
-    objectParam === 'deal' ? ['contact'] : objectParam === 'contact' ? ['deal'] : []
+  // Every other object. The primary company still lives on company_id; anything
+  // linked here beyond that is an association row, the way HubSpot lets one
+  // contact sit on several companies and one company hold many deals.
+  const linkable = (['contact', 'company', 'deal'] as const).filter((key): key is ObjectKey => key !== objectParam)
+  const createFields = Object.fromEntries(
+    linkable.flatMap((key) => {
+      const target = registry.byKey.get(key)
+      return target ? [[key, toEditableFields(target, lookups)]] : []
+    }),
+  ) as Partial<Record<ObjectKey, ReturnType<typeof toEditableFields>>>
+  const createInitial = objectParam === 'company' ? { company_id: id } : {}
 
   return (
     <div className="flex flex-col gap-4">
@@ -279,6 +290,7 @@ const RecordPage = async ({
               subject: row.subject,
               body: row.body,
               occurredAt: row.occurredAt.toISOString(),
+              actorId: row.actorId,
               actorName: row.actorName,
               actorKind: row.actorKind,
               payload: row.payload,
@@ -291,6 +303,7 @@ const RecordPage = async ({
             counts={counts}
             groups={ACTIVITY_GROUPS}
             canWrite={canWrite}
+            viewer={{ userId: session.userId, role: session.role }}
           />
         </div>
 
@@ -303,6 +316,8 @@ const RecordPage = async ({
             companies={rail.companies}
             deals={rail.deals}
             linkable={linkable}
+            createFields={createFields}
+            createInitial={createInitial}
             canWrite={canWrite}
           />
           <TasksPanel

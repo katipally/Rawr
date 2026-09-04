@@ -20,6 +20,8 @@ export const userAccount = pgTable('user_account', {
   googleSub: text('google_sub').unique(),
   name: text('name').notNull(),
   avatarUrl: text('avatar_url'),
+  /** Sessions issued before this instant are refused. Set by "sign out everywhere". */
+  sessionsValidAfter: timestamp('sessions_valid_after', { withTimezone: true }),
   createdAt: createdAt(),
 })
 

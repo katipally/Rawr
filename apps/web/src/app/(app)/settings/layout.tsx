@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { SettingsNav } from './nav.tsx'
 import {
+  accountPath,
   agentAccessPath,
   failedJobsPath,
   integrationsPath,
@@ -17,6 +18,7 @@ import {
  *  three of the others by hand, which meant a new page was reachable only from
  *  whichever page somebody remembered to edit. */
 const SECTIONS = [
+  { href: accountPath(), label: 'Your account', hint: 'Who you are, your timezone, your connections' },
   { href: membersPath(), label: 'Members', hint: 'Who is in this workspace, and their role' },
   { href: propertiesPath(), label: 'Properties', hint: 'The fields on every record' },
   { href: pipelinesPath(), label: 'Pipelines', hint: 'Deal stages and probabilities' },

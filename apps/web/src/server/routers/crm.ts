@@ -6,8 +6,10 @@ import {
   LOGGABLE_TYPES,
   createRecord,
   createTask,
+  deleteLoggedEntry,
   deleteRecord,
   deleteTask,
+  editLoggedEntry,
   deleteView,
   dissociate,
   dryRun,
@@ -358,6 +360,14 @@ export const crmRouter = router({
           }),
         ),
       ),
+
+    edit: protectedProcedure
+      .input(z.object({ id: z.uuid(), body: z.string().trim().min(1).max(20_000) }))
+      .mutation(({ ctx, input }) => call(() => editLoggedEntry(ctx.workspace, input))),
+
+    remove: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => deleteLoggedEntry(ctx.workspace, input.id))),
   }),
 
   associations: router({
