@@ -1,6 +1,7 @@
 import {
   getRecord,
   ingestMarketingEvent,
+  listSubscriptionTypes,
   mailableContacts,
   once,
   readCredentials,
@@ -28,7 +29,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.brevo.com/v3'
 
-type BrevoConfig = { listId?: number; segmentId?: string; webhookToken?: string }
+type BrevoConfig = { listId?: number; segmentId?: string; webhookToken?: string; subscriptionType?: string }
 
 const credentials = async (ctx: WorkspaceContext) => {
   const found = await readCredentials(ctx, 'brevo')
@@ -176,32 +177,45 @@ const EVENT_MAP: Record<string, MarketingEvent['kind']> = {
   unsubscribed: 'unsubscribe',
 }
 
+/** Brevo's payload as a Rawr event, or the reason it is not one. Pure, so the
+ *  vocabulary above can be tested without a database. */
+export const parseBrevoEvent = (body: unknown): { ok: true; event: MarketingEvent } | { ok: false; detail: string } => {
+  const event = body as BrevoWebhook
+  const kind = EVENT_MAP[event.event ?? '']
+  if (!kind) return { ok: false, detail: `Brevo event "${event.event}" is not one Rawr records.` }
+  if (!event.email) return { ok: false, detail: 'That event carried no address.' }
+  return {
+    ok: true,
+    event: {
+      source: 'brevo',
+      // A campaign fans out to every recipient under one camp_id, so the address is
+      // part of the key; one message produces a delivered, an open and a click, so
+      // the event name is too.
+      providerEventId: `${event.camp_id ?? event['message-id'] ?? event.id ?? 'unknown'}:${event.email.toLowerCase()}:${event.event}`,
+      kind,
+      email: event.email,
+      subject: event['campaign name'] ?? event.subject ?? event.tag ?? 'a newsletter',
+      at: event.ts_event
+        ? new Date(event.ts_event * 1000)
+        : event.date_event || event.date
+          ? new Date((event.date_event ?? event.date) as string)
+          : new Date(),
+      detail: { link: event.URL ?? event.link ?? null, tag: event.tag ?? null, campaignId: event.camp_id ?? null },
+    },
+  }
+}
+
 export const handleBrevoWebhook = async (
   ctx: WorkspaceContext,
   body: unknown,
 ): Promise<{ handled: boolean; detail: string }> => {
-  const event = body as BrevoWebhook
-  const kind = EVENT_MAP[event.event ?? '']
-  if (!kind) return { handled: false, detail: `Brevo event "${event.event}" is not one Rawr records.` }
-  if (!event.email) return { handled: false, detail: 'That event carried no address.' }
+  const parsed = parseBrevoEvent(body)
+  if (!parsed.ok) return { handled: false, detail: parsed.detail }
 
+  const { config } = await credentials(ctx)
   const outcome = await ingestMarketingEvent(ctx, {
-    source: 'brevo',
-    // Brevo's own id for the delivery, plus the event name: one message produces
-    // a delivered, an open and a click, and all three must survive deduplication.
-    // A campaign fans out to every recipient under one camp_id, so the address is
-    // part of the key; one message produces a delivered, an open and a click, so
-    // the event name is too.
-    providerEventId: `${event.camp_id ?? event['message-id'] ?? event.id ?? 'unknown'}:${event.email.toLowerCase()}:${event.event}`,
-    kind,
-    email: event.email,
-    subject: event['campaign name'] ?? event.subject ?? event.tag ?? 'a newsletter',
-    at: event.ts_event
-      ? new Date(event.ts_event * 1000)
-      : event.date_event || event.date
-        ? new Date((event.date_event ?? event.date) as string)
-        : new Date(),
-    detail: { link: event.URL ?? event.link ?? null, tag: event.tag ?? null, campaignId: event.camp_id ?? null },
+    ...parsed.event,
+    ...(config.subscriptionType ? { subscriptionTypes: [config.subscriptionType] } : {}),
   })
 
   await recordHealth(ctx, 'brevo', { ok: true })
@@ -213,11 +227,18 @@ export const handleBrevoWebhook = async (
  *  campaign. Fails into the dead letter, never into the person's screen. */
 export const propagateSubscriptionToBrevo = async (
   ctx: WorkspaceContext,
-  input: { contactId: string; state: 'subscribed' | 'unsubscribed' | 'unspecified' },
+  input: { contactId: string; typeId: string; state: 'subscribed' | 'unsubscribed' | 'unspecified' },
 ): Promise<void> => {
   if (input.state === 'unspecified' || devIntegrationsEnabled) return
   const found = await readCredentials(ctx, 'brevo')
   if (!found?.secret) return
+  // Only the type Brevo is mapped to, when one is named: opting out of sales
+  // one-to-ones is not a reason to block the newsletter, or the reverse.
+  const mapped = (found.config as BrevoConfig).subscriptionType?.trim().toLowerCase()
+  if (mapped) {
+    const type = (await listSubscriptionTypes(ctx)).find((row) => row.id === input.typeId)
+    if (!type || type.name.toLowerCase() !== mapped) return
+  }
   const record = await getRecord(ctx, 'contact', input.contactId)
   const email = typeof record?.values.email === 'string' ? record.values.email : ''
   if (!email) return

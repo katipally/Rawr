@@ -65,6 +65,19 @@ if (!parsed.success) {
 
 export const env = parsed.data
 
+/** The values .env.example and the dev setup use are fine on a laptop and a
+ *  breach in production. Refused at boot, by name, rather than discovered later. */
+if (env.NODE_ENV === 'production') {
+  const placeholders: string[] = []
+  if (/^dev-|not-a-real-secret|replace-before-deploy/.test(env.AUTH_SECRET)) placeholders.push('AUTH_SECRET')
+  if (/^dev-|not-for-production/.test(env.RAWR_INTERNAL_SECRET)) placeholders.push('RAWR_INTERNAL_SECRET')
+  if (/not-for-production/.test(env.EDGE_IP_SALT)) placeholders.push('EDGE_IP_SALT')
+  if (!env.TOKEN_ENCRYPTION_KEY) placeholders.push('TOKEN_ENCRYPTION_KEY (empty, so Gmail and Calendar grants cannot be stored)')
+  if (placeholders.length > 0) {
+    throw new Error(`Production is running with development values for: ${placeholders.join(', ')}. Set real ones in the secrets store.`)
+  }
+}
+
 export const googleConfigured = env.GOOGLE_CLIENT_ID !== '' && env.GOOGLE_CLIENT_SECRET !== ''
 
 /** Dev sign-in exists so the role matrix and the isolation tests can be exercised

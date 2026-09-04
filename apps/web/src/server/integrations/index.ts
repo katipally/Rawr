@@ -43,6 +43,11 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     secretLabel: 'API key (v3)',
     configFields: [
       { key: 'listId', label: 'List id', hint: 'The Brevo list a segment push writes into.' },
+      {
+        key: 'subscriptionType',
+        label: 'Subscription type',
+        hint: 'The Rawr subscription type a Brevo unsubscribe applies to, by name, e.g. Newsletter. Blank means every type that is not internal, sales one-to-ones included.',
+      },
     ],
     rows: ['Newsletter'],
     setup: [

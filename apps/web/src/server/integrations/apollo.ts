@@ -506,8 +506,10 @@ export const syncSequenceActivity = async (
         : `${apollo.id}:${event.sequence_id}:${event.type}:${event.occurred_at}`,
       kind,
       email: apollo.email,
-      // An open or a click is about one email; everything else is about the sequence.
-      subject: (kind === 'open' || kind === 'click') && event.subject ? event.subject : name,
+      // An open, a click or a send is about one email; the rest is about the sequence.
+      // A one-off email sent from Apollo has no sequence at all, so its subject is
+      // the only name it has.
+      subject: (kind === 'open' || kind === 'click' || event.type === 'delivered' || !event.sequence_id) && event.subject ? event.subject : name,
       at: new Date(event.occurred_at),
       detail: {
         sequence: name,

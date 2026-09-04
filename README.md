@@ -42,7 +42,8 @@ only by migrations and the worker's own bookkeeping.
 
 Sign in with Google: any verified `@datasaur.ai` account joins the Datasaur
 workspace as a viewer on its first sign-in, and an admin raises the role under
-Settings, Members. A seeded address whose email matches is claimed by that
+Settings, Members. Settings, Your account is the person's own screen: roles,
+timezone, Gmail and Calendar connections, agent tokens, and sign out everywhere. A seeded address whose email matches is claimed by that
 sign-in, so `admin@datasaur.ai` signing in with Google is the seeded admin.
 
 Without Google credentials, `/sign-in` also offers a development form that takes
@@ -113,6 +114,15 @@ To try the embed on a page that is not ours, serve any HTML containing:
  <script src="http://localhost:3000/embed.js" data-rawr-site="datasaur"
          data-rawr-consent defer></script>
 ```
+
+Brevo does not sign its webhooks. Saving the Brevo integration mints a token, and
+the webhook URL shown under Settings, Integrations carries it as `t=`; Brevo posts
+without it are refused. The Slack, Apollo, Clay, GA4 and Zoom setup steps are on
+each provider's connect form.
+
+In production the app refuses to boot on the development placeholders for
+`AUTH_SECRET`, `RAWR_INTERNAL_SECRET`, `EDGE_IP_SALT`, or an empty
+`TOKEN_ENCRYPTION_KEY`, and names which.
 
 Turnstile, Slack and the Webflow secret are all optional in development. Without
 Turnstile a submission that scores into the challenge band fails closed to the

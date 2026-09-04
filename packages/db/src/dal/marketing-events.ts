@@ -36,6 +36,10 @@ export type MarketingEvent = {
   subject: string | null
   at: Date
   detail: Record<string, unknown>
+  /** Which subscription types an unsubscribe applies to, by name, case-insensitive.
+   *  Absent or empty means every type that is not internal: a newsletter opt-out
+   *  from a provider that only ever sent newsletters should not silence sales. */
+  subscriptionTypes?: string[]
 }
 
 /** Which timeline type each event becomes. The three are distinct on purpose: a
@@ -57,6 +61,7 @@ const ACTIVITY_TYPE: Record<MarketingEventKind, ActivityType> = {
 const sequenceSentence = (subject: string, detail: Record<string, unknown>): string => {
   const event = typeof detail.event === 'string' ? detail.event : ''
   const step = typeof detail.step === 'number' && detail.step > 0 ? ` (step ${detail.step})` : ''
+  if (event === 'sent') return subject === 'a sequence' || !subject ? 'was sent an email' : `was sent ${subject}${step}`
   if (event === 'enrolled') return `was enrolled in ${subject}${step}`
   if (event === 'completed') return `finished ${subject}`
   if (event === 'failed') return `failed in ${subject}${detail.reason ? `: ${String(detail.reason)}` : ''}`
@@ -129,9 +134,12 @@ export const ingestMarketingEvent = async (
     // reverse never happens: a Rawr-originated opt-out is not overwritten by a
     // provider claiming the person is subscribed. F6 §2.
     if (event.kind === 'unsubscribe') {
-      const types = await tx.select({ id: subscriptionType.id, name: subscriptionType.name }).from(subscriptionType)
+      const wanted = new Set((event.subscriptionTypes ?? []).map((name) => name.trim().toLowerCase()).filter(Boolean))
+      const types = await tx
+        .select({ id: subscriptionType.id, name: subscriptionType.name, isInternal: subscriptionType.isInternal })
+        .from(subscriptionType)
       for (const type of types) {
-        if (type.name.toLowerCase().includes('internal')) continue
+        if (wanted.size > 0 ? !wanted.has(type.name.toLowerCase()) : type.isInternal) continue
         await tx
           .insert(subscriptionState)
           .values({

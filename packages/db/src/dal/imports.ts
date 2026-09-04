@@ -167,6 +167,7 @@ export const planRow = async (
 ): Promise<{ values: Record<string, unknown>; warnings: string[]; error?: string }> => {
   const values: Record<string, unknown> = {}
   const warnings: string[] = []
+  const dedupeKey = object.key === 'contact' ? 'email' : object.key === 'company' ? 'domain' : 'name'
   for (const [header, key] of Object.entries(mapping)) {
     if (!key) continue
     const raw = row[header]
@@ -186,6 +187,9 @@ export const planRow = async (
         error: cause instanceof ValueError ? cause.message : String(cause),
       }
     }
+  }
+  if (Object.keys(values).length > 0 && !(dedupeKey in values)) {
+    warnings.push(`No ${object.byKey.get(dedupeKey)?.label ?? dedupeKey}, so this row cannot be matched to an existing record and will be created again on every run.`)
   }
   return { values, warnings }
 }
