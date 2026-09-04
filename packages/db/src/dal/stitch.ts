@@ -1,5 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { visitor, visitorAlias } from '../schema/analytics.ts'
+import { sourceFromSession } from './attribution.ts'
 import type { WorkspaceContext } from './context.ts'
 import { publicEdgeContext } from './forms.ts'
 import { withWorkspace, type Tx } from './index.ts'
@@ -70,12 +71,62 @@ export const backfillVisitor = async (
   withWorkspace(ctx, async (tx) => {
     const pageViews = await claimChunk(tx, ctx, input, 'page_view')
     const events = await claimChunk(tx, ctx, input, 'custom_event')
-    return {
-      pageViews,
-      events,
-      done: pageViews < BACKFILL_CHUNK && events < BACKFILL_CHUNK,
-    }
+    const done = pageViews < BACKFILL_CHUNK && events < BACKFILL_CHUNK
+    // Once every chunk has moved, the visitor's whole history belongs to this
+    // contact, and their first session may well predate the form that named them.
+    if (done) await moveFirstTouchEarlier(tx, ctx, input)
+    return { pageViews, events, done }
   })
+
+/** B7's first-touch rule, and the only direction it moves in.
+ *
+ *  Somebody read three blog posts from a paid ad in March and filled in a form in
+ *  July. The form's own attribution is the July visit, so without this the contact
+ *  reads as Direct Traffic and the ad that actually found them is invisible. The
+ *  update is guarded on the stored timestamp, so it only ever moves the first touch
+ *  backwards: a later session can never claim to be the first one, and running the
+ *  back-fill twice changes nothing the second time. */
+const moveFirstTouchEarlier = async (
+  tx: Tx,
+  ctx: WorkspaceContext,
+  input: { visitorId: string; contactId: string },
+): Promise<void> => {
+  const [earliest] = await tx.execute<{
+    referrer: string | null
+    utm: Record<string, unknown> | null
+    entry_path: string | null
+    started_at: Date | string
+  }>(sql`
+    select referrer, utm, entry_path, started_at
+      from visitor_session
+     where workspace_id = ${ctx.workspaceId} and visitor_id = ${input.visitorId}
+     order by started_at
+     limit 1`)
+  if (!earliest) return
+
+  const startedAt = new Date(earliest.started_at)
+  const source = {
+    ...sourceFromSession({
+      referrer: earliest.referrer,
+      utm: earliest.utm,
+      pagePath: earliest.entry_path,
+      at: startedAt,
+    }),
+    via: 'tracking',
+  }
+
+  await tx.execute(sql`
+    update contact
+       set original_source = ${JSON.stringify(source)}::jsonb,
+           updated_at = now()
+     where id = ${input.contactId}
+       and workspace_id = ${ctx.workspaceId}
+       and (
+         original_source is null
+         or (original_source #>> '{detail,firstSeenAt}') is null
+         or (original_source #>> '{detail,firstSeenAt}')::timestamptz > ${startedAt.toISOString()}::timestamptz
+       )`)
+}
 
 const claimChunk = async (
   tx: Tx,

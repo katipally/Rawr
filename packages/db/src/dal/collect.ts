@@ -10,6 +10,7 @@ import {
   visitorSession,
 } from '../schema/analytics.ts'
 import { recordActivity } from './activity.ts'
+import { channelOfSession, sourceFromSession } from './attribution.ts'
 import { publicEdgeContext } from './forms.ts'
 import { withWorkspace, type Tx } from './index.ts'
 
@@ -235,6 +236,10 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
           pageCount: input.event ? 0 : 1,
           referrer,
           utm: input.utm ?? {},
+          // Decided once, on the first page of the visit. A later page carries the
+          // internal referrer of the page before it, which would relabel a paid
+          // click as a referral halfway through the session.
+          channel: channelOfSession({ referrer, utm: input.utm ?? {} }),
         })
         .returning({ id: visitorSession.id })
       if (!created) throw new Error('The visit could not be recorded.')
@@ -257,6 +262,20 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
     const result = input.event
       ? await writeEvent(tx, input, sessionId, contactId)
       : await writeView(tx, input, sessionId, contactId)
+
+    // A visit by somebody already known is a touch, and the latest touch is what
+    // a report answers "what brought them back" with. Only on a new session, and
+    // only when the session names a channel: a second page view must not overwrite
+    // the campaign the visit arrived through.
+    if (contactId && newSession) {
+      await noteLatestTouch(tx, workspaceId, contactId, {
+        referrer,
+        utm: input.utm ?? {},
+        landingPage: trim(input.url, 2048),
+        path,
+        at: input.at,
+      })
+    }
 
     if (contactId) {
       await bumpCounters(tx, workspaceId, contactId, input.at, {
@@ -412,6 +431,43 @@ const notice = async (
 
 /** The Website activity panel's three numbers, maintained here and by the
  *  back-fill job, and read by nothing else. */
+/** The latest touch on a contact, written from a session rather than a form.
+ *
+ *  `original_source` is filled only when it is empty: a contact created by an
+ *  import or typed in by hand has no first touch, and the first visit Rawr sees is
+ *  the best answer available. It is never overwritten, because a later visit is by
+ *  definition not the first one. */
+const noteLatestTouch = async (
+  tx: Tx,
+  workspaceId: string,
+  contactId: string,
+  visit: {
+    referrer: string | null
+    utm: Record<string, unknown>
+    landingPage: string | null
+    path: string
+    at: Date
+  },
+): Promise<void> => {
+  const payload = JSON.stringify({
+    ...sourceFromSession({
+      referrer: visit.referrer,
+      utm: visit.utm,
+      landingPage: visit.landingPage,
+      pagePath: visit.path,
+      at: visit.at,
+    }),
+    via: 'tracking',
+  })
+
+  await tx.execute(sql`
+    update contact
+       set latest_source = ${payload}::jsonb,
+           original_source = coalesce(original_source, ${payload}::jsonb),
+           updated_at = now()
+     where id = ${contactId} and workspace_id = ${workspaceId}`)
+}
+
 export const bumpCounters = async (
   tx: Tx,
   workspaceId: string,

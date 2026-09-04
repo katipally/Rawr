@@ -14,6 +14,7 @@ import {
   propertiesPath,
   segmentsPath,
   newsletterPath,
+  reportsPath,
   sequencesPath,
   sitesPath,
   submissionsPath,
@@ -75,6 +76,25 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           items: [
             { href: sequencesPath(workspace), label: 'Sequences', match: `/contacts/${workspace}/sequences` },
             { href: newsletterPath(workspace), label: 'Newsletter', match: `/contacts/${workspace}/newsletter` },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'reporting',
+      label: 'Reporting',
+      icon: 'reporting',
+      groups: [
+        {
+          label: 'Reports',
+          items: [
+            { href: reportsPath(workspace), label: 'Overview', match: `/contacts/${workspace}/reports` },
+            { href: reportsPath(workspace, { tab: 'pipeline' }), label: 'Pipeline' },
+            { href: reportsPath(workspace, { tab: 'forms' }), label: 'Forms' },
+            { href: reportsPath(workspace, { tab: 'sequences' }), label: 'Sequences' },
+            { href: reportsPath(workspace, { tab: 'email' }), label: 'Email' },
+            { href: reportsPath(workspace, { tab: 'website' }), label: 'Website' },
+            { href: reportsPath(workspace, { tab: 'attribution' }), label: 'Attribution' },
           ],
         },
       ],

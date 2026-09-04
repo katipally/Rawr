@@ -33,6 +33,7 @@ const GROUPS: Record<string, string> = {
   notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
   teams: 'Named groups inside this workspace, used to rotate assignment within a team.',
   jobs: 'Failed jobs and dead letters.',
+  reporting: 'Six reports over a date range: the pipeline, forms, sequences, email, the website, and which channels the contacts who buy first arrived through.',
 }
 
 const DESTRUCTIVE = /delete|remove|merge|purge|revoke|disconnect|erase|bulk|dismiss/i

@@ -114,8 +114,17 @@ export const visitorSession = pgTable(
     pageCount: integer('page_count').notNull().default(0),
     referrer: text('referrer'),
     utm: jsonb('utm').notNull().default({}),
+    /** Which of the seven buckets this visit came through, decided once on the
+     *  first page of the session. Null on a session that predates the column: a
+     *  report says "not attributed" rather than guessing at a paid click from a
+     *  referrer that was never kept. */
+    channel: text('channel'),
   },
-  (t) => [index('visitor_session_visitor_idx').on(t.workspaceId, t.visitorId, t.endedAt.desc())],
+  (t) => [
+    index('visitor_session_visitor_idx').on(t.workspaceId, t.visitorId, t.endedAt.desc()),
+    index('visitor_session_started_idx').on(t.workspaceId, t.startedAt.desc()),
+    index('visitor_session_channel_idx').on(t.workspaceId, t.channel, t.startedAt.desc()),
+  ],
 )
 
 /** contact_id is denormalised deliberately. The alternative is joining through

@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
+import { readAttribution, sourceFrom } from '../src/dal/attribution.ts'
 import { provisionWorkspace } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
@@ -44,6 +45,16 @@ const PEOPLE = [
 const INDUSTRIES = ['Software', 'Financial Services', 'Healthcare', 'Government', 'Education']
 const COUNTRIES = ['United States', 'Indonesia', 'Singapore', 'United Kingdom', 'Germany']
 const LONG_NAME = 'Ludwigshafen Interkontinentale Datenverarbeitungsgesellschaft '.repeat(9).slice(0, 500)
+
+/** One of each channel worth having in a report, in the shape a real arrival has. */
+const SEED_SOURCES = [
+  { rawQuery: '?gclid=seed', referrer: 'https://www.google.com/', landingPage: 'https://datasaur.ai/pricing' },
+  { referrer: 'https://www.google.com/', landingPage: 'https://datasaur.ai/' },
+  { referrer: 'https://www.linkedin.com/feed/', landingPage: 'https://datasaur.ai/blog' },
+  { rawQuery: '?utm_source=newsletter&utm_medium=email&utm_campaign=march', landingPage: 'https://datasaur.ai/' },
+  { referrer: 'https://news.ycombinator.com/', landingPage: 'https://datasaur.ai/' },
+  { landingPage: 'https://datasaur.ai/' },
+]
 
 const dayAgo = (n: number) => new Date(Date.UTC(2026, 7, 23) - n * 86_400_000)
 
@@ -225,7 +236,11 @@ try {
         leadStatus: i % 2 === 0 ? 'New' : 'Open',
         marketingStatus: i % 5 === 0 ? 'Non-marketing contact' : 'Marketing contact',
         createdAt: dayAgo(scale - i),
-        originalSource: { channel: 'paid_search', raw_query: 'gclid=seed', referrer: null },
+        // Built through the same helper a real capture uses, so seeded contacts
+        // carry the shape and the vocabulary the attribution report groups by
+        // rather than a hand-written approximation of it. A spread of channels,
+        // because a report where every contact came from one place shows nothing.
+        originalSource: sourceFrom(readAttribution(SEED_SOURCES[i % SEED_SOURCES.length]!)),
       })),
     )
 

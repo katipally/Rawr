@@ -65,6 +65,7 @@ switch between. That form refuses to render unless
  pnpm db:verify:org       the organisation layer: scope, seats, invitations, teams, history
  pnpm db:verify:mail      stored bodies, who may read a mailbox, and the shared inbox
  pnpm db:verify:sequences the outreach engine: enrolment, the queue, tracking, and every way one stops
+ pnpm db:verify:reporting where a visit is labelled, which way a first touch may move, and that the totals reconcile
  pnpm db:verify:crm       F1: board totals, merge, dedupe, import, search, export
  pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```

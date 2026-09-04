@@ -26,7 +26,8 @@
     "verify:integrations": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-integrations.ts",
     "verify:org": "node --env-file=../../.env.local scripts/verify-org.ts",
     "verify:mail": "node --env-file=../../.env.local scripts/verify-mail.ts",
-    "verify:sequences": "node --env-file=../../.env.local scripts/verify-sequences.ts"
+    "verify:sequences": "node --env-file=../../.env.local scripts/verify-sequences.ts",
+    "verify:reporting": "node --env-file=../../.env.local scripts/verify-reporting.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

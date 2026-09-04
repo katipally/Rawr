@@ -74,14 +74,29 @@ export const readAttribution = (input: AttributionInput): Attribution => {
 /** What `original_source` and `latest_source` hold on contact, company and deal.
  *  A short readable channel plus the evidence it was derived from, so a later
  *  change of heart about channel rules can be re-derived rather than re-collected. */
-export const sourceFrom = (attribution: Attribution): { channel: string; detail: Attribution } => ({
+export const sourceFrom = (attribution: Attribution): { channel: Channel; detail: Attribution } => ({
   channel: channelOf(attribution),
   detail: attribution,
 })
 
-const PAID_KEYS = ['gclid', 'msclkid', 'li_fat_id', 'fbclid', 'ttclid']
+export const PAID_KEYS = ['gclid', 'msclkid', 'li_fat_id', 'fbclid', 'ttclid']
 
-const channelOf = (attribution: Attribution): string => {
+/** The seven buckets every report groups by. Derived rather than stored on the
+ *  way in wherever it can be, so a change of heart about the rules re-derives
+ *  from evidence that was kept rather than needing traffic that was not. */
+export const CHANNELS = [
+  'Paid Search',
+  'Organic Search',
+  'Social Media',
+  'Email Marketing',
+  'Referrals',
+  'Direct Traffic',
+  'Other Campaigns',
+] as const
+
+export type Channel = (typeof CHANNELS)[number]
+
+export const channelOf = (attribution: Attribution): Channel => {
   const params = new URLSearchParams(
     attribution.rawQuery?.startsWith('?')
       ? attribution.rawQuery.slice(1)
@@ -109,4 +124,43 @@ const channelOf = (attribution: Attribution): string => {
   } catch {
     return 'Referrals'
   }
+}
+
+/** A session's own attribution, from what the tracker stored on it.
+ *
+ *  The `utm` column holds the query parameters as they arrived, keys and all:
+ *  `utm_source`, and also `gclid` and whatever else the ad platform appended. So
+ *  the query string is rebuilt from every key rather than five known ones, which
+ *  is what lets a paid click id still read as Paid Search rather than being
+ *  labelled from the referrer as Organic Search. */
+export const sourceFromSession = (session: {
+  referrer: string | null
+  utm: Record<string, unknown> | null
+  landingPage?: string | null
+  pagePath?: string | null
+  at?: Date | string | null
+}): { channel: Channel; detail: Attribution } =>
+  sourceFrom(
+    readAttribution({
+      referrer: session.referrer,
+      rawQuery: queryFrom(session.utm),
+      landingPage: session.landingPage ?? null,
+      pagePath: session.pagePath ?? null,
+      firstSeenAt: session.at ?? null,
+    }),
+  )
+
+export const channelOfSession = (session: {
+  referrer: string | null
+  utm: Record<string, unknown> | null
+}): Channel => sourceFromSession(session).channel
+
+const queryFrom = (utm: Record<string, unknown> | null): string | null => {
+  if (!utm) return null
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(utm)) {
+    if (typeof value === 'string' && value) params.set(key, value)
+  }
+  const rendered = params.toString()
+  return rendered ? `?${rendered}` : null
 }
