@@ -5,7 +5,7 @@ import { moveVisitorHistory } from './stitch.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { companyNameFromDomain, employerDomainFromEmail } from './domains.ts'
-import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import {
   compileFilters,
   fieldExpression,
@@ -265,8 +265,9 @@ export const getRecord = async (
   ctx: WorkspaceContext,
   objectKey: string,
   id: string,
-): Promise<RecordDetail | null> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<RecordDetail | null> => {
+  if (!isUuid(id)) return null
+  return withWorkspace(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const fields = object.fields.map((field) => fieldOrThrow(object, field.key))
@@ -295,6 +296,7 @@ export const getRecord = async (
       ),
     }
   })
+}
 
 type Prepared = { columns: Record<string, unknown>; custom: Record<string, unknown>; warnings: string[] }
 

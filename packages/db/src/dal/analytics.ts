@@ -10,8 +10,8 @@ import {
 } from '../schema/analytics.ts'
 import { consentRecord } from '../schema/forms.ts'
 import { assertCanWrite, type WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
-import { refreshContactActivity } from './stitch.ts'
+import { isUuid, mutate, withWorkspace } from './index.ts'
+import { refreshAllContactActivity, refreshContactActivity } from './stitch.ts'
 
 /** F4 §4. The read side: the three numbers on a contact record, the detail behind
  *  one page view, and the two paths a data-subject request needs. */
@@ -87,8 +87,9 @@ export type PageViewDetail = {
 export const readPageView = async (
   ctx: WorkspaceContext,
   id: string,
-): Promise<PageViewDetail | null> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<PageViewDetail | null> => {
+  if (!isUuid(id)) return null
+  return withWorkspace(ctx, async (tx) => {
     const [row] = await tx.execute<{
       id: string
       contact_id: string | null
@@ -136,6 +137,7 @@ export const readPageView = async (
       session,
     }
   })
+}
 
 /** Capped, because a bot that got past the filter or a single-page app that got
  *  past the debounce would otherwise render a session of ten thousand rows. */

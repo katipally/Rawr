@@ -1,11 +1,11 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { importRun } from '../schema/imports.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { isUuid, mutate, withWorkspace } from './index.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
-import { getRegistry, objectOrThrow, type RegistryObject } from './registry.ts'
+import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { coerce, ValueError } from './values.ts'
 
 export type ImportRow = Record<string, string>
@@ -83,14 +83,88 @@ export const assertMappingIsUsable = (object: RegistryObject, mapping: Mapping):
   }
 }
 
-/** Turns one spreadsheet row into what will happen to it, without writing anything.
- *  The dry run and the real run share this, so the preview cannot promise one thing
- *  and the run do another. */
-export const planRow = (
+/** Where a spreadsheet's words for a relation are looked up. A HubSpot export
+ *  carries the owner's name, the company's name and the stage's label, never an
+ *  id, so each is matched on what a person would type. Only a company is created
+ *  when nothing matches: a stage or an owner that does not exist is a mistake in
+ *  the file, a company that does not exist is the point of the import. */
+const RELATION_LOOKUPS: Record<string, { what: string; find: (needle: string) => SQL }> = {
+  owner_id: {
+    what: 'member',
+    find: (needle) => sql`select u.id from user_account u join membership m on m.user_id = u.id
+                          where lower(u.name) = lower(${needle}) or lower(u.email) = lower(${needle}) limit 1`,
+  },
+  company_id: {
+    what: 'company',
+    find: (needle) => sql`select id from company where deleted_at is null
+                          and (lower(name) = lower(${needle}) or domain = lower(${needle}))
+                          order by created_at limit 1`,
+  },
+  lifecycle_stage_id: {
+    what: 'lifecycle stage',
+    find: (needle) => sql`select id from lifecycle_stage where lower(name) = lower(${needle}) limit 1`,
+  },
+  pipeline_id: {
+    what: 'pipeline',
+    find: (needle) => sql`select id from pipeline where lower(name) = lower(${needle}) limit 1`,
+  },
+  stage_id: {
+    what: 'deal stage',
+    find: (needle) => sql`select id from pipeline_stage where lower(name) = lower(${needle}) limit 1`,
+  },
+}
+
+const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
+
+/** Resolves the relation values in one run, remembering every answer so a file
+ *  with 90,000 rows and 300 distinct companies costs 300 lookups, not 90,000.
+ *  O(distinct values) queries, O(1) per row after the first.
+ *
+ *  Returns null for a company that does not exist yet when creating is off: the
+ *  preview promises nothing has been written, so it reports the row without the
+ *  company and the real run creates it. */
+const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) => {
+  const remembered = new Map<string, string | null>()
+  return async (field: RegistryField, raw: string): Promise<string | null> => {
+    const needle = raw.trim()
+    if (isUuid(needle)) return needle
+    const lookup = RELATION_LOOKUPS[field.key]
+    if (!lookup) throw new ValueError(field, 'has to be picked from the list, not typed.')
+
+    const cacheKey = `${field.key}\u0000${needle.toLowerCase()}`
+    let id = remembered.get(cacheKey)
+    if (id === undefined) {
+      const [found] = await withWorkspace(ctx, (tx) => tx.execute<{ id: string }>(lookup.find(needle)))
+      id = found?.id ?? null
+      if (id === null && field.key === 'company_id') {
+        if (!options.create) return null
+        try {
+          const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle })
+          id = created.id
+        } catch (cause) {
+          if (!(cause instanceof DuplicateError)) throw cause
+          id = cause.existingId
+        }
+      }
+      remembered.set(cacheKey, id)
+    }
+    if (id === null) throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this workspace.`)
+    return id
+  }
+}
+
+type Resolve = ReturnType<typeof relationResolver>
+
+/** Turns one spreadsheet row into what will happen to it. The dry run and the real
+ *  run share this, so the preview cannot promise one thing and the run do another.
+ *  The one write it can cause is a company named for the first time, and only the
+ *  real run passes a resolver that creates. */
+export const planRow = async (
   object: RegistryObject,
   mapping: Mapping,
   row: ImportRow,
-): { values: Record<string, unknown>; warnings: string[]; error?: string } => {
+  resolve: Resolve,
+): Promise<{ values: Record<string, unknown>; warnings: string[]; error?: string }> => {
   const values: Record<string, unknown> = {}
   const warnings: string[] = []
   for (const [header, key] of Object.entries(mapping)) {
@@ -100,7 +174,9 @@ export const planRow = (
     const field = object.byKey.get(key)
     if (!field) continue
     try {
-      const { value, warning } = coerce(field, raw)
+      const named = field.type === 'relation' || field.type === 'user' ? await resolve(field, String(raw)) : raw
+      if (named === null) continue
+      const { value, warning } = coerce(field, named)
       if (warning) warnings.push(warning)
       values[key] = value
     } catch (cause) {
@@ -164,8 +240,9 @@ export const dryRun = async (
   }
 
   const checked = input.rows.slice(0, PREVIEW_ROWS)
+  const resolve = relationResolver(ctx, { create: false })
   for (const [index, row] of checked.entries()) {
-    const planned = planRow(object, input.mapping, row)
+    const planned = await planRow(object, input.mapping, row, resolve)
     if (planned.error) {
       result.willError += 1
       if (result.samples.error.length < SAMPLE_SIZE) {
@@ -306,10 +383,11 @@ export const runImportChunk = async (
   let updated = 0
   let skipped = 0
   const errors: RowError[] = []
+  const resolve = relationResolver(ctx, { create: true })
 
   for (const [offset, row] of slice.entries()) {
     const rowNumber = run.processedRows + offset + 2
-    const planned = planRow(object, mapping, row)
+    const planned = await planRow(object, mapping, row, resolve)
     if (planned.error) {
       errors.push({ row: rowNumber, reason: planned.error, values: row })
       continue
@@ -380,6 +458,7 @@ export const readImportRun = async (
   ctx: WorkspaceContext,
   id: string,
 ): Promise<ImportSummary | null> => {
+  if (!isUuid(id)) return null
   const [row] = await withWorkspace(ctx, (tx) =>
     tx
       .select({

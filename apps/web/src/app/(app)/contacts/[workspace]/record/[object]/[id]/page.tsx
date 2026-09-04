@@ -3,6 +3,7 @@ import {
   getRecord,
   isActivityType,
   isObjectKey,
+  isUuid,
   listIntegrations,
   listSuggestions,
   listTasks,
@@ -91,8 +92,10 @@ const RecordPage = async ({
 
   const ctx = contextFrom(session)
   // Every read on this screen runs at once, each on its own connection; see
-  // withWorkspaceReads for why they are not pinned to one transaction.
-  const screen = await withWorkspaceReads(ctx, async () => {
+  // withWorkspaceReads for why they are not pinned to one transaction. The
+  // panels all take the id as given, so a mangled link is stopped here rather
+  // than by whichever of them Postgres rejects first.
+  const screen = !isUuid(id) ? null : await withWorkspaceReads(ctx, async () => {
     const entity = { entityType: objectParam, entityId: id }
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
@@ -143,6 +146,13 @@ const RecordPage = async ({
     .map((key) => object.byKey.get(key)?.label ?? key)
 
   const fields = toEditableFields(object, lookups, { includeReadOnly: true })
+  // Every field the layout above does not place, in registry order. This is what
+  // makes a property created in Settings show up here without a deploy (D4).
+  const placed = new Set(SECTIONS[objectParam].flatMap((section) => section.fieldKeys))
+  const unplaced = fields.filter((field) => !placed.has(field.key)).map((field) => field.key)
+  const sections = unplaced.length
+    ? [...SECTIONS[objectParam], { title: 'More properties', fieldKeys: unplaced }]
+    : SECTIONS[objectParam]
   const headerFields = HEADER_FIELDS[objectParam].flatMap((key) => {
     const field = object.byKey.get(key)
     return field ? [field] : []
@@ -202,7 +212,7 @@ const RecordPage = async ({
             values={record.values}
             labels={record.labels}
             updatedAt={record.updatedAt.toISOString()}
-            sections={SECTIONS[objectParam]}
+            sections={sections}
             canWrite={canWrite}
           />
           {objectParam === 'contact' && activity ? (

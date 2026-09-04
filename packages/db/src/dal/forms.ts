@@ -13,7 +13,7 @@ import {
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
-import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
 import { aliasVisitor } from './stitch.ts'
 
@@ -444,8 +444,9 @@ export type FormDetail = {
   settings: FormSettings
 }
 
-export const getForm = async (ctx: WorkspaceContext, id: string): Promise<FormDetail | null> =>
-  withWorkspace(ctx, async (tx) => {
+export const getForm = async (ctx: WorkspaceContext, id: string): Promise<FormDetail | null> => {
+  if (!isUuid(id)) return null
+  return withWorkspace(ctx, async (tx) => {
     const [row] = await tx.select().from(form).where(eq(form.id, id)).limit(1)
     if (!row) return null
     return {
@@ -457,6 +458,7 @@ export const getForm = async (ctx: WorkspaceContext, id: string): Promise<FormDe
       settings: readSettings(row.settings),
     }
   })
+}
 
 export type SaveFormInput = {
   id?: string | null

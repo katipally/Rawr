@@ -2,12 +2,12 @@ import { sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { recordActivity } from './activity.ts'
-import { readAttribution, type Attribution, type AttributionInput } from './attribution.ts'
+import { readAttribution, type AttributionInput } from './attribution.ts'
 import { assertCanWrite, type WorkspaceContext } from './context.ts'
 import { readSchema, type FormField } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
-import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 import { mapAnswersToColumns, upsertCapturedPerson } from './people.ts'
 import { aliasVisitor } from './stitch.ts'
 import {
@@ -202,7 +202,8 @@ const readConfig = async (tx: Tx, pageId: string): Promise<BookingPageConfig | n
 export const readBookingPage = async (
   ctx: WorkspaceContext,
   pageId: string,
-): Promise<BookingPageConfig | null> => withWorkspace(ctx, (tx) => readConfig(tx, pageId))
+): Promise<BookingPageConfig | null> =>
+  isUuid(pageId) ? withWorkspace(ctx, (tx) => readConfig(tx, pageId)) : null
 
 // ---------------------------------------------------------------------------
 // Hosts and availability

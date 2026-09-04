@@ -121,14 +121,20 @@ export const Timeline = ({
 
   /** The URL wins, because a link has to open the screen it was taken from. With
    *  nothing in the URL, the last choice this person made is restored. A3. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: load is rebuilt every render; listing it would refetch on every render
   useEffect(() => {
     if (urlTypes !== null) {
       setHydrated(true)
       return
     }
     try {
-      const saved = window.localStorage.getItem(`${STORAGE_PREFIX}${object}`)
-      if (saved) setSelected(saved.split(',').filter(Boolean))
+      const saved = window.localStorage.getItem(`${STORAGE_PREFIX}${object}`)?.split(',').filter(Boolean) ?? []
+      if (saved.length > 0) {
+        setSelected(saved)
+        // The server rendered every type; the restored choice has to fetch its own
+        // rows or the chips say one thing and the cards another.
+        void load(saved, null, false)
+      }
     } catch {
       // Private windows and blocked site data are normal, not an error.
     }
@@ -260,6 +266,9 @@ export const Timeline = ({
         ) : null}
       </div>
 
+      {/* biome-ignore lint/a11y/useSemanticElements: a row of filter buttons is
+          not a form control set, so <fieldset> would be the wrong element. The
+          role and the label are what a screen reader needs here. */}
       <div className="flex flex-wrap gap-1" role="group" aria-label="Filter the timeline by type">
         {groups.flatMap((group) =>
           group.types

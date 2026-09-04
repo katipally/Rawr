@@ -8,6 +8,11 @@ export * from './context.ts'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** A record id from a URL or an assistant is text until proven otherwise. Readers
+ *  check it before querying, because Postgres answers a malformed uuid with a cast
+ *  error, and that is a broken screen where "not here" is the truth. */
+export const isUuid = (value: string): boolean => UUID.test(value)
+
 export type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0]
 
 /** An open transaction with its workspace already pinned, offered to any nested
