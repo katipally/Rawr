@@ -462,7 +462,8 @@ try {
     cc: [],
     sentAt: new Date(),
     snippet: 'A snippet.',
-    bodyRef: `gmail:m-${stamp}`,
+    internetMessageId: `<m-${stamp}@partner1.example>`,
+    body: { text: 'A body stored at ingest.' },
     hasAttachments: false,
     ...over,
   })

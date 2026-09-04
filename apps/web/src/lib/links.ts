@@ -137,6 +137,22 @@ export const segmentsPath = (workspace: string, id?: string): string =>
 export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
 
+/** The shared inbox. Every filter is in the address, so a filtered view pastes
+ *  into Slack and the back button works. */
+export const inboxPath = (
+  workspace: string,
+  params: {
+    scope?: string | undefined
+    mailbox?: string | undefined
+    unreplied?: string | undefined
+    unread?: string | undefined
+    q?: string | undefined
+  } = {},
+): string => `/${CRM_ROOT}/${workspace}/inbox${query(params)}`
+
+export const threadPath = (workspace: string, threadId: string): string =>
+  `/${CRM_ROOT}/${workspace}/inbox/${threadId}`
+
 /** Booking sits under its own root, the way HubSpot puts scheduling pages under
  *  /meetings/:portalId rather than inside the contacts app. Same rule as everything
  *  else: the workspace is in the path, so any screen pastes. */

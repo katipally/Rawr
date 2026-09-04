@@ -84,6 +84,81 @@ const sync = defineJob({
   },
 })
 
-export const mailJobs = [dispatch, sync]
+/** Bodies, after the messages. Split from the sync deliberately: a sync that
+ *  failed because one enormous mail timed out would cost the whole page of
+ *  messages, and a message without its body is still on the record and still
+ *  findable by its snippet.
+ *
+ *  Only mailboxes with a backlog are enqueued, which the partial index on
+ *  body_state makes cheap to ask. */
+const hydrateDispatch = defineJob({
+  name: 'mail.hydrate.dispatch',
+  schema: z.object({}),
+  retryLimit: 3,
+  retryDelaySeconds: 120,
+  handle: async () => {
+    const rows = await owner`
+      select distinct m.mailbox_id as id, m.workspace_id
+        from message m
+        join mailbox b on b.id = m.mailbox_id
+       where m.body_state = 'pending' and b.state in ('connected', 'backfilling')`
+
+    for (const row of rows) {
+      await boss().send('mail.hydrate', { workspaceId: row.workspace_id, mailboxId: row.id })
+    }
+  },
+})
+
+const hydrate = defineJob({
+  name: 'mail.hydrate',
+  schema: z.object({ workspaceId: z.uuid(), mailboxId: z.uuid() }),
+  retryLimit: 3,
+  retryDelaySeconds: 300,
+  handle: async ({ workspaceId, mailboxId }) => {
+    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
+    const secret = process.env.RAWR_INTERNAL_SECRET ?? ''
+    if (!secret) {
+      throw new Error(
+        'RAWR_INTERNAL_SECRET is not set, so the worker cannot ask the app to read a mailbox. Set the same value on both.',
+      )
+    }
+
+    const response = await fetch(`${base}/api/internal/mail-hydrate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-rawr-internal': secret },
+      body: JSON.stringify({ workspaceId, mailboxId }),
+      signal: AbortSignal.timeout(120_000),
+    })
+
+    const body = (await response.json()) as {
+      error?: string
+      stored?: number
+      failed?: number
+      remaining?: boolean
+      revoked?: boolean
+    }
+
+    if (!response.ok) {
+      if (body.revoked) {
+        console.log(`[mail] ${mailboxId}: access withdrawn, bodies left as they are.`)
+        return
+      }
+      throw new Error(body.error ?? `The app answered ${response.status} for mailbox ${mailboxId}.`)
+    }
+
+    if (body.stored || body.failed) {
+      console.log(`[mail] ${mailboxId}: ${body.stored ?? 0} bodies stored, ${body.failed ?? 0} could not be.`)
+    }
+
+    // Straight back on the queue while there is a backlog, for the same reason
+    // the sync does it: a large archive should take minutes, not days.
+    if (body.remaining) {
+      await boss().send('mail.hydrate', { workspaceId, mailboxId })
+    }
+  },
+})
+
+export const mailJobs = [dispatch, sync, hydrateDispatch, hydrate]
 export const dispatchMailboxes = dispatch
 export const syncMailboxJob = sync
+export const dispatchMailboxBodies = hydrateDispatch

@@ -63,11 +63,12 @@ switch between. That form refuses to render unless
  pnpm db:verify           tenancy: RLS forced everywhere, cross-tenant reads and writes refused
  pnpm db:verify:guards    the role matrix and the audit trail, by calling mutations directly
  pnpm db:verify:org       the organisation layer: scope, seats, invitations, teams, history
+ pnpm db:verify:mail      stored bodies, who may read a mailbox, and the shared inbox
  pnpm db:verify:crm       F1: board totals, merge, dedupe, import, search, export
  pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```
 
-`pnpm verify` runs all ten.
+`pnpm verify` runs all eleven.
 
 ## Connecting an assistant
 

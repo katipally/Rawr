@@ -7,7 +7,7 @@ import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
 import { syncApollo } from './jobs/sync-apollo.ts'
-import { dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
+import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
 import { workspaceIdOf, type Job } from './jobs/registry.ts'
 
@@ -91,6 +91,10 @@ await boss.schedule(evaluateSegments.name, '0 * * * *', {})
 // F1 phase B. Every ten minutes: connected mailboxes catch up, and one still
 // reading its history queues its own next page immediately rather than waiting.
 await boss.schedule(dispatchMailboxes.name, '*/10 * * * *', {})
+
+// Bodies follow the messages a few minutes behind, so a thread opened right after
+// a sync shows its snippets now and its full text shortly after.
+await boss.schedule(dispatchMailboxBodies.name, '*/5 * * * *', {})
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})

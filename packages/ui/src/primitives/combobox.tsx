@@ -10,25 +10,25 @@ import { Spinner } from './spinner.tsx'
 export type ComboboxOption = {
   value: string
   label: string
-  hint?: string
-  keywords?: string[]
-  disabled?: boolean
+  hint?: string | undefined
+  keywords?: string[] | undefined
+  disabled?: boolean | undefined
 }
 
 type Shared = {
   label: string
   options: ComboboxOption[]
-  placeholder?: string
+  placeholder?: string | undefined
   /** Hands the typed query to the caller, for lists too large to send whole.
    *  When set, local filtering is skipped: the options prop is the answer. */
-  onSearch?: (query: string) => void
-  loading?: boolean
-  disabled?: boolean
+  onSearch?: ((query: string) => void) | undefined
+  loading?: boolean | undefined
+  disabled?: boolean | undefined
   /** Shown under the control, red when `invalid`. */
-  error?: string
-  hint?: string
-  className?: string
-  id?: string
+  error?: string | undefined
+  hint?: string | undefined
+  className?: string | undefined
+  id?: string | undefined
 }
 
 export type ComboboxProps = Shared &

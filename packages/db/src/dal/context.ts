@@ -80,6 +80,9 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   /** A personal exclusion is the person's own; a workspace-wide one is an admin
    *  act, refused inside the layer rather than here. B3. */
   message_blocklist: ['admin', 'sales', 'marketing'],
+  /** How far somebody has read a thread is their own business, and a viewer reads
+   *  threads, so a viewer marks them read. */
+  message_thread_read: ['admin', 'sales', 'marketing', 'viewer'],
   /** F5 §1. Anybody may hold agent access to what they can already reach. A token
    *  carries no role of its own, so a viewer's token reads and cannot write, and
    *  revoking somebody else's is refused inside the layer rather than here. */

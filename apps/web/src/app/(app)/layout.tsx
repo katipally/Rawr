@@ -8,6 +8,7 @@ import {
   createRecordPath,
   formsPath,
   importsPath,
+  inboxPath,
   integrationsPath,
   objectView,
   propertiesPath,
@@ -47,6 +48,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Work',
           items: [
+            { href: inboxPath(workspace), label: 'Inbox', match: `/contacts/${workspace}/inbox` },
             { href: segmentsPath(workspace), label: 'Segments', match: `/contacts/${workspace}/segments` },
             { href: tasksPath(workspace), label: 'Tasks' },
             { href: bookingPagesPath(workspace), label: 'Meetings', match: `/meetings/${workspace}` },

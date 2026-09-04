@@ -24,6 +24,15 @@ export const actorKindEnum = pgEnum('rawr_actor_kind', [
   'public',
 ])
 
+/** Whether a message's body has been fetched and stored yet. `pending` is the
+ *  hydrate queue; `too_large` and `failed` keep the snippet and say why. */
+export const bodyStateEnum = pgEnum('rawr_body_state', ['pending', 'stored', 'too_large', 'failed'])
+
+/** Who may read a mailbox's threads. `team` is the default because continuity is
+ *  the point: a successor opens a contact and sees the history. `private` is for a
+ *  mailbox that carries personal mail nobody else should read. */
+export const mailboxVisibilityEnum = pgEnum('rawr_mailbox_visibility', ['team', 'private'])
+
 export const fieldStorageEnum = pgEnum('rawr_field_storage', ['column', 'jsonb'])
 
 /** The nineteen field types. Each maps to one Postgres type, one JSON shape, one

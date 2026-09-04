@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Select, TextInput, cn, useToast } from '@rawr/ui'
+import { Badge, Button, Field, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState } from '@rawr/db'
@@ -18,6 +18,10 @@ export type MailboxSummary = {
   lastError: string | null
   lastErrorAt: string | null
   threadCount: number
+  visibility: 'team' | 'private'
+  /** How much of what this mailbox read has had its body stored. */
+  pendingBodies: number
+  storedBodies: number
 }
 
 export type MailboxListProps = {
@@ -147,6 +151,19 @@ export const MailboxList = ({
                         {row.lastSyncAt ? `Last pass ${formatDateTime(row.lastSyncAt)}` : 'Never run'} ·{' '}
                         {row.backfillDone ? 'History read in full' : 'History still being read'}
                       </p>
+                      <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
+                        {row.pendingBodies > 0 ? (
+                          <Badge tone="warn">
+                            {row.storedBodies.toLocaleString()} of{' '}
+                            {(row.storedBodies + row.pendingBodies).toLocaleString()} bodies stored
+                          </Badge>
+                        ) : row.storedBodies > 0 ? (
+                          <Badge tone="ok">{row.storedBodies.toLocaleString()} bodies stored</Badge>
+                        ) : null}
+                        {row.pendingBodies > 0
+                          ? 'The rest arrive over the next few passes; a thread is readable in the meantime from its snippets.'
+                          : null}
+                      </p>
                       {row.lastError ? (
                         <p role="alert" className="break-words text-small text-error">
                           {row.lastError}
@@ -156,7 +173,30 @@ export const MailboxList = ({
                     </div>
 
                     {isMine || role === 'admin' ? (
-                      <div className="flex shrink-0 flex-wrap gap-2">
+                      <div className="flex shrink-0 flex-col items-end gap-2">
+                        <Switch
+                          label="Shared with the team"
+                          hint={
+                            row.visibility === 'team'
+                              ? 'Everybody here can read these threads on a record.'
+                              : 'Only you and an admin can read these threads.'
+                          }
+                          checked={row.visibility === 'team'}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void run(
+                              () =>
+                                api.mail.setVisibility.mutate({
+                                  mailboxId: row.id,
+                                  visibility: event.target.checked ? 'team' : 'private',
+                                }),
+                              event.target.checked
+                                ? 'The team can read these threads.'
+                                : 'These threads are yours and an admin’s to read.',
+                            )
+                          }
+                        />
+                        <div className="flex flex-wrap gap-2">
                         <Button
                           busy={busy}
                           disabled={row.state === 'revoked'}
@@ -184,6 +224,7 @@ export const MailboxList = ({
                         >
                           Disconnect
                         </Button>
+                        </div>
                       </div>
                     ) : null}
                   </div>

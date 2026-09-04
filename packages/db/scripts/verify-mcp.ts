@@ -364,7 +364,9 @@ try {
   )
   check(
     'every screen has a tool: mail, meetings, forms, segments, integrations, settings',
-    ['mail_thread', 'mail_body', 'booking_pages', 'forms_list', 'segments_list', 'integrations_list', 'admin_fields_list'].every(
+    // mail_inbox rather than mail_body: bodies are stored with the thread now, so
+    // there is no separate fetch, and the shared inbox is its own screen.
+    ['mail_thread', 'mail_inbox', 'booking_pages', 'forms_list', 'segments_list', 'integrations_list', 'admin_fields_list'].every(
       (name) => names.includes(name),
     ),
   )

@@ -9,16 +9,24 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { createdAt, pk, workspaceId } from './columns.ts'
-import { mailboxStateEnum, messageDirectionEnum, messageRoleEnum } from './enums.ts'
+import {
+  bodyStateEnum,
+  mailboxStateEnum,
+  mailboxVisibilityEnum,
+  messageDirectionEnum,
+  messageRoleEnum,
+} from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 import { contact } from './records.ts'
 
-/** F1 phase B. Gmail, read only.
+/** Gmail. Read for history, and, once a mailbox is reconnected with the send
+ *  scope, write for sequences and one-off replies.
  *
- *  Trevor's continuity requirement: a successor opens a contact and sees the whole
- *  email history without anybody having forwarded anything. Rawr never sends mail
- *  and builds no tracking pixel; opens and clicks are bought from Apollo and land
- *  as a different activity type. D7, D8. */
+ *  The continuity requirement: a successor opens a contact and sees the whole
+ *  email history without anybody having forwarded anything. That is why bodies are
+ *  stored here rather than fetched from the owner's mailbox on demand: the moment
+ *  somebody leaves and their grant is revoked, an on-demand read returns nothing
+ *  and the history a colleague relies on is gone. */
 
 export const mailbox = pgTable(
   'mailbox',
@@ -30,6 +38,8 @@ export const mailbox = pgTable(
       .references(() => userAccount.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     state: mailboxStateEnum('state').notNull().default('connected'),
+    /** Who may read the threads this mailbox brought in. */
+    visibility: mailboxVisibilityEnum('visibility').notNull().default('team'),
     /** Encrypted with a key held outside this database. F0 §8. */
     accessToken: text('access_token').notNull(),
     refreshToken: text('refresh_token').notNull(),
@@ -88,9 +98,15 @@ export const message = pgTable(
     ccAddrs: text('cc_addrs').array().notNull().default([]),
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull(),
     snippet: text('snippet'),
-    /** Object storage key, prefixed by workspace_id. Never the body itself: a
-     *  20MB thread must not bloat the table. B1. */
-    bodyRef: text('body_ref'),
+    /** RFC 5322 threading. What a reply is matched against, and what a sequence
+     *  sets so its own reply lands in the same conversation. */
+    internetMessageId: text('internet_message_id'),
+    inReplyTo: text('in_reply_to'),
+    references: text('references').array().notNull().default([]),
+    /** Whether the body has been fetched. The row is stored first and hydrated
+     *  after, so a slow or rate-limited fetch never costs the message itself. */
+    bodyState: bodyStateEnum('body_state').notNull().default('pending'),
+    bodyError: text('body_error'),
     hasAttachments: boolean('has_attachments').notNull().default(false),
     /** The mailbox that read it. A Gmail message id only means something inside
      *  the mailbox that issued it, so fetching the body later needs this. */
@@ -101,7 +117,67 @@ export const message = pgTable(
     // What makes the back-fill resumable with no duplicates. B2.
     uniqueIndex('message_provider_key').on(t.workspaceId, t.providerMessageId),
     index('message_thread_idx').on(t.workspaceId, t.threadId, t.sentAt),
+    index('message_internet_id_idx').on(t.workspaceId, t.internetMessageId),
   ],
+)
+
+/** The body, in its own table. `message` is scanned by the inbox and the record
+ *  page, and a wide row full of a 2MB HTML mail makes every one of those scans
+ *  read pages it does not need; Postgres would TOAST the value anyway, so this is
+ *  the same storage with an honest name and a narrow parent. */
+export const messageBody = pgTable('message_body', {
+  id: pk(),
+  workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+  messageId: uuid('message_id')
+    .notNull()
+    .unique()
+    .references(() => message.id, { onDelete: 'cascade' }),
+  textBody: text('text_body').notNull(),
+  /** Sanitised before it is stored, and rendered inside a sandboxed frame with
+   *  images blocked until asked for. Null when it was too large or absent. */
+  htmlBody: text('html_body'),
+  textBytes: integer('text_bytes').notNull().default(0),
+  htmlBytes: integer('html_bytes').notNull().default(0),
+  truncated: boolean('truncated').notNull().default(false),
+  storedAt: timestamp('stored_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** What was attached, not the bytes. A list is what a reader needs; fetching one
+ *  goes back to Gmail while a mailbox that can still do so exists. */
+export const messageAttachment = pgTable(
+  'message_attachment',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => message.id, { onDelete: 'cascade' }),
+    filename: text('filename').notNull(),
+    mimeType: text('mime_type'),
+    sizeBytes: integer('size_bytes').notNull().default(0),
+    providerAttachmentId: text('provider_attachment_id'),
+    /** An inline image referenced by the HTML rather than a real attachment. */
+    inline: boolean('inline').notNull().default(false),
+  },
+  (t) => [index('message_attachment_message_idx').on(t.workspaceId, t.messageId)],
+)
+
+/** How far each person has read each thread. Per person, because "unread" is not
+ *  a property of a shared thread. */
+export const messageThreadRead = pgTable(
+  'message_thread_read',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    threadId: uuid('thread_id')
+      .notNull()
+      .references(() => messageThread.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id, { onDelete: 'cascade' }),
+    lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('message_thread_read_key').on(t.workspaceId, t.threadId, t.userId)],
 )
 
 export const messageParticipant = pgTable(

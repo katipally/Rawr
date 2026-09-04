@@ -2,9 +2,12 @@ import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import {
   mailbox,
   message,
+  messageAttachment,
   messageBlocklist,
+  messageBody,
   messageParticipant,
   messageThread,
+  messageThreadRead,
 } from '../schema/messaging.ts'
 import { contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
@@ -34,6 +37,7 @@ export type MailboxRow = {
   lastError: string | null
   lastErrorAt: Date | null
   threadCount: number
+  visibility: 'team' | 'private'
 }
 
 export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]> =>
@@ -45,6 +49,7 @@ export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]
         userName: userAccount.name,
         email: mailbox.email,
         state: mailbox.state,
+        visibility: mailbox.visibility,
         historyId: mailbox.historyId,
         backfillDone: mailbox.backfillDone,
         backfillCursor: mailbox.backfillCursor,
@@ -316,6 +321,14 @@ export const removeBlocklistEntry = async (ctx: WorkspaceContext, id: string): P
 
 // ------------------------------------------------------------ the ingest
 
+export type IncomingAttachment = {
+  filename: string
+  mimeType: string | null
+  sizeBytes: number
+  providerAttachmentId: string | null
+  inline: boolean
+}
+
 export type IncomingMessage = {
   providerThreadId: string
   providerMessageId: string
@@ -325,8 +338,73 @@ export type IncomingMessage = {
   cc: string[]
   sentAt: Date
   snippet: string | null
-  bodyRef: string | null
+  /** RFC 5322 threading headers. Absent on a row read before B3, which is why
+   *  reply matching falls back to the thread. */
+  internetMessageId?: string | null | undefined
+  inReplyTo?: string | null | undefined
+  references?: string[] | undefined
+  /** The body, when the fetch that read the headers also read it. Absent leaves
+   *  the message `pending` for the hydrate job. */
+  body?: MessageBodyInput | null | undefined
+  attachments?: IncomingAttachment[] | undefined
   hasAttachments: boolean
+}
+
+/** Caps. Text is what a person reads and what search would index, so it survives
+ *  truncation; HTML is presentation and is dropped whole rather than cut, because
+ *  half a document renders as garbage. */
+export const TEXT_LIMIT_BYTES = 1_000_000
+export const HTML_LIMIT_BYTES = 2_000_000
+
+export type MessageBodyInput = { text: string; html?: string | null | undefined }
+
+const bytes = (value: string): number => new TextEncoder().encode(value).length
+
+/** Stores one body under the caps. Text is cut and flagged; HTML is dropped whole
+ *  rather than cut, because half a document renders as garbage. Both are already
+ *  sanitised by the caller: nothing here trusts what a stranger sent. */
+export const writeBody = async (
+  tx: Tx,
+  ctx: WorkspaceContext,
+  messageId: string,
+  body: MessageBodyInput,
+): Promise<void> => {
+  const textBytes = bytes(body.text)
+  const truncated = textBytes > TEXT_LIMIT_BYTES
+  // Cutting by code unit could split a multi-byte character; the encoder is what
+  // knows where the limit really falls, so cut and re-measure.
+  const text = truncated ? body.text.slice(0, TEXT_LIMIT_BYTES / 4) : body.text
+  const html = body.html ?? null
+  const htmlBytes = html ? bytes(html) : 0
+  const keptHtml = html && htmlBytes <= HTML_LIMIT_BYTES ? html : null
+
+  await tx
+    .insert(messageBody)
+    .values({
+      workspaceId: ctx.workspaceId,
+      messageId,
+      textBody: text,
+      htmlBody: keptHtml,
+      textBytes: bytes(text),
+      htmlBytes: keptHtml ? htmlBytes : 0,
+      truncated,
+    })
+    .onConflictDoUpdate({
+      target: messageBody.messageId,
+      set: {
+        textBody: text,
+        htmlBody: keptHtml,
+        textBytes: bytes(text),
+        htmlBytes: keptHtml ? htmlBytes : 0,
+        truncated,
+        storedAt: new Date(),
+      },
+    })
+
+  await tx
+    .update(message)
+    .set({ bodyState: truncated ? 'too_large' : 'stored', bodyError: null })
+    .where(eq(message.id, messageId))
 }
 
 export type IngestResult =
@@ -456,7 +534,10 @@ const storeMessage = async (
       ccAddrs: incoming.cc.map(lower),
       sentAt: incoming.sentAt,
       snippet: incoming.snippet,
-      bodyRef: incoming.bodyRef,
+      internetMessageId: incoming.internetMessageId ?? null,
+      inReplyTo: incoming.inReplyTo ?? null,
+      references: incoming.references ?? [],
+      bodyState: incoming.body ? 'stored' : 'pending',
       hasAttachments: incoming.hasAttachments,
       mailboxId: input.mailboxId,
     })
@@ -478,6 +559,22 @@ const storeMessage = async (
     .update(messageThread)
     .set({ messageCount: sql`${messageThread.messageCount} + 1` })
     .where(eq(messageThread.id, thread.id))
+
+  if (incoming.body) await writeBody(tx, ctx, stored.id, incoming.body)
+
+  if (incoming.attachments && incoming.attachments.length > 0) {
+    await tx.insert(messageAttachment).values(
+      incoming.attachments.map((attachment) => ({
+        workspaceId: ctx.workspaceId,
+        messageId: stored.id,
+        filename: attachment.filename,
+        mimeType: attachment.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        providerAttachmentId: attachment.providerAttachmentId,
+        inline: attachment.inline,
+      })),
+    )
+  }
 
   const participants: { address: string; role: 'from' | 'to' | 'cc' }[] = [
     { address: lower(incoming.from), role: 'from' as const },
@@ -664,9 +761,34 @@ export type ThreadMessage = {
   sentAt: Date
   snippet: string | null
   hasAttachments: boolean
-  /** False when no connected mailbox can fetch the body any more. */
-  bodyAvailable: boolean
+  bodyState: BodyState
+  bodyError: string | null
+  text: string | null
+  html: string | null
+  truncated: boolean
+  attachments: { id: string; filename: string; mimeType: string | null; sizeBytes: number }[]
 }
+
+export type BodyState = 'pending' | 'stored' | 'too_large' | 'failed'
+
+/** Who may read a message. Three ways in, and the caller's own identity decides,
+ *  never the client:
+ *    - the mailbox that read it is gone, so this is workspace history now,
+ *    - the mailbox is shared with the team, which is the default,
+ *    - the caller owns that mailbox, or administers the workspace.
+ *
+ *  Written as one predicate rather than three call sites, because a reader that
+ *  forgets it is a private mailbox leaked. */
+const readable = (ctx: WorkspaceContext) => sql`(
+  ${message.mailboxId} is null
+  or exists (
+    select 1 from mailbox mb
+     where mb.id = ${message.mailboxId}
+       and (mb.visibility = 'team'
+            or mb.user_id = ${ctx.actorId}::uuid
+            or ${ctx.role === 'admin'})
+  )
+)`
 
 export const readThread = async (
   ctx: WorkspaceContext,
@@ -686,7 +808,7 @@ export const readThread = async (
       .limit(1)
     if (!thread) return null
 
-    const messages = await tx
+    const rows = await tx
       .select({
         id: message.id,
         direction: message.direction,
@@ -696,80 +818,269 @@ export const readThread = async (
         sentAt: message.sentAt,
         snippet: message.snippet,
         hasAttachments: message.hasAttachments,
-        bodyRef: message.bodyRef,
-        mailboxState: mailbox.state,
+        bodyState: message.bodyState,
+        bodyError: message.bodyError,
+        text: messageBody.textBody,
+        html: messageBody.htmlBody,
+        truncated: messageBody.truncated,
       })
       .from(message)
-      .leftJoin(mailbox, eq(mailbox.id, message.mailboxId))
-      .where(eq(message.threadId, threadId))
+      .leftJoin(messageBody, eq(messageBody.messageId, message.id))
+      .where(and(eq(message.threadId, threadId), readable(ctx)))
       .orderBy(asc(message.sentAt))
+
+    if (rows.length === 0) return null
+
+    const attachments = await tx
+      .select({
+        id: messageAttachment.id,
+        messageId: messageAttachment.messageId,
+        filename: messageAttachment.filename,
+        mimeType: messageAttachment.mimeType,
+        sizeBytes: messageAttachment.sizeBytes,
+      })
+      .from(messageAttachment)
+      .where(
+        and(
+          inArray(
+            messageAttachment.messageId,
+            rows.map((row) => row.id),
+          ),
+          eq(messageAttachment.inline, false),
+        ),
+      )
 
     return {
       thread,
-      messages: messages.map(({ bodyRef, mailboxState, ...row }) => ({
+      messages: rows.map((row) => ({
         ...row,
-        bodyAvailable: bodyRef !== null && mailboxState !== null && mailboxState !== 'revoked',
+        truncated: row.truncated ?? false,
+        attachments: attachments
+          .filter((file) => file.messageId === row.id)
+          .map(({ messageId: _messageId, ...file }) => file),
       })),
     }
   })
 
-export type MessageSource = {
-  id: string
-  threadId: string
-  providerMessageId: string
-  snippet: string | null
-  mailbox: MailboxTokens
+/** Marks a thread read up to now, for one person. Separate from `readThread` so a
+ *  background refresh does not silently mark somebody's inbox read. */
+export const markThreadRead = async (ctx: WorkspaceContext, threadId: string): Promise<void> => {
+  if (!ctx.actorId) return
+  await mutate(ctx, 'message_thread_read', async (tx) => {
+    await tx
+      .insert(messageThreadRead)
+      .values({ workspaceId: ctx.workspaceId, threadId, userId: ctx.actorId as string, lastReadAt: new Date() })
+      .onConflictDoUpdate({
+        target: [messageThreadRead.workspaceId, messageThreadRead.threadId, messageThreadRead.userId],
+        set: { lastReadAt: new Date() },
+      })
+    return { result: undefined, audit: { entity: 'message_thread_read', entityId: threadId, action: 'read' } }
+  })
 }
 
-/** The message and the mailbox that can fetch its body. A row from before the
- *  mailbox was recorded falls back to a connected mailbox owned by one of the
- *  message's own participants, which is the only mailbox the id is valid in. */
-export const messageSource = async (ctx: WorkspaceContext, messageId: string): Promise<MessageSource | null> =>
+export type InboxThread = {
+  id: string
+  subject: string | null
+  lastAt: Date | null
+  messageCount: number
+  /** The newest message's direction, which is what "waiting on a reply" means. */
+  lastDirection: 'inbound' | 'outbound' | null
+  lastFrom: string | null
+  snippet: string | null
+  unread: boolean
+  /** Contacts on the thread, for the rail beside it. */
+  contacts: { id: string; name: string }[]
+  mailboxEmails: string[]
+}
+
+export type InboxPage = { threads: InboxThread[]; cursor: { lastAt: string; id: string } | null }
+
+/** The shared inbox. Keyset paged on (last_at desc, id desc) over
+ *  `message_thread_last_idx`, so page fifty costs what page one costs.
+ *
+ *  O(page) per call: the filters are all on the thread or on one correlated
+ *  exists, never a scan of every message in the workspace. */
+export const listInboxThreads = async (
+  ctx: WorkspaceContext,
+  input: {
+    scope?: 'mine' | 'all' | undefined
+    mailboxId?: string | null | undefined
+    unreplied?: boolean | undefined
+    unread?: boolean | undefined
+    q?: string | null | undefined
+    limit?: number | undefined
+    cursor?: { lastAt: string; id: string } | null | undefined
+  } = {},
+): Promise<InboxPage> =>
   withWorkspace(ctx, async (tx) => {
-    const [row] = await tx
-      .select({
-        id: message.id,
-        threadId: message.threadId,
-        providerMessageId: message.providerMessageId,
-        snippet: message.snippet,
-        mailboxId: message.mailboxId,
-        fromAddr: message.fromAddr,
-        toAddrs: message.toAddrs,
-        ccAddrs: message.ccAddrs,
-      })
-      .from(message)
-      .where(eq(message.id, messageId))
-      .limit(1)
-    if (!row) return null
+    const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
+    const scope = input.scope ?? 'all'
+    const actor = ctx.actorId
 
-    const participants = [row.fromAddr ?? '', ...row.toAddrs, ...row.ccAddrs].filter(Boolean)
-    const [box] = await tx
-      .select()
-      .from(mailbox)
-      .where(
-        row.mailboxId
-          ? eq(mailbox.id, row.mailboxId)
-          : and(sql`lower(${mailbox.email}) in (${sql.join(participants.map((a) => sql`${a}`), sql`, `)})`, sql`${mailbox.state} <> 'revoked'`),
+    const rows = await tx.execute<{
+      id: string
+      subject: string | null
+      last_at: Date | null
+      message_count: number
+      last_direction: 'inbound' | 'outbound' | null
+      last_from: string | null
+      snippet: string | null
+      unread: boolean
+      contacts: { id: string; name: string }[] | null
+      mailbox_emails: string[] | null
+    }>(sql`
+      with visible as (
+        select m.*, mb.user_id as mailbox_user, mb.email as mailbox_email
+          from message m
+          left join mailbox mb on mb.id = m.mailbox_id
+         where m.mailbox_id is null
+            or mb.visibility = 'team'
+            or mb.user_id = ${actor}::uuid
+            or ${ctx.role === 'admin'}
+      ),
+      newest as (
+        select distinct on (v.thread_id)
+               v.thread_id, v.direction, v.from_addr, v.snippet, v.sent_at
+          from visible v
+         order by v.thread_id, v.sent_at desc
       )
-      .limit(1)
-    if (!box) return null
+      select t.id, t.subject, t.last_at, t.message_count,
+             n.direction as last_direction, n.from_addr as last_from, n.snippet,
+             (r.last_read_at is null or r.last_read_at < t.last_at) as unread,
+             (select json_agg(distinct jsonb_build_object('id', c.id, 'name',
+                        coalesce(nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), ''), c.email)))
+                from visible vm
+                join message_participant mp on mp.message_id = vm.id
+                join contact c on c.id = mp.contact_id
+               where vm.thread_id = t.id) as contacts,
+             (select array_agg(distinct vm.mailbox_email)
+                from visible vm where vm.thread_id = t.id and vm.mailbox_email is not null) as mailbox_emails
+        from message_thread t
+        join newest n on n.thread_id = t.id
+        left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
+       where exists (select 1 from visible v where v.thread_id = t.id)
+         and (${scope === 'all'} or exists (
+              select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))
+         and (${input.mailboxId ?? null}::uuid is null or exists (
+              select 1 from visible v where v.thread_id = t.id and v.mailbox_id = ${input.mailboxId ?? null}::uuid))
+         and (${input.unreplied !== true} or n.direction = 'inbound')
+         and (${input.unread !== true} or r.last_read_at is null or r.last_read_at < t.last_at)
+         and (${input.q ?? null}::text is null
+              or t.subject ilike ${input.q ? `%${input.q}%` : null}
+              or exists (select 1 from visible v
+                          where v.thread_id = t.id
+                            and (v.from_addr ilike ${input.q ? `%${input.q}%` : null}
+                                 or v.snippet ilike ${input.q ? `%${input.q}%` : null})))
+         and (${input.cursor?.lastAt ?? null}::timestamptz is null
+              or (t.last_at, t.id) < (${input.cursor?.lastAt ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
+       order by t.last_at desc, t.id desc
+       limit ${limit + 1}
+    `)
 
+    const page = rows.slice(0, limit)
+    const last = page[page.length - 1]
     return {
-      id: row.id,
-      threadId: row.threadId,
-      providerMessageId: row.providerMessageId,
-      snippet: row.snippet,
-      mailbox: {
-        id: box.id,
-        userId: box.userId,
-        email: box.email,
-        state: box.state,
-        accessToken: decryptToken(box.accessToken),
-        refreshToken: decryptToken(box.refreshToken),
-        accessTokenExpiresAt: box.accessTokenExpiresAt,
-        historyId: box.historyId,
-        backfillCursor: box.backfillCursor,
-        backfillDone: box.backfillDone,
+      threads: page.map((row) => ({
+        id: row.id,
+        subject: row.subject,
+        lastAt: row.last_at ? new Date(row.last_at) : null,
+        messageCount: Number(row.message_count),
+        lastDirection: row.last_direction,
+        lastFrom: row.last_from,
+        snippet: row.snippet,
+        unread: row.unread,
+        contacts: row.contacts ?? [],
+        mailboxEmails: row.mailbox_emails ?? [],
+      })),
+      cursor:
+        rows.length > limit && last?.last_at
+          ? { lastAt: new Date(last.last_at).toISOString(), id: last.id }
+          : null,
+    }
+  })
+
+/** How many bodies are still to fetch, and for which mailbox. Shown on the
+ *  mailboxes screen so a long back-fill is visible rather than mysterious. */
+export const bodyProgress = async (
+  ctx: WorkspaceContext,
+): Promise<{ mailboxId: string; pending: number; stored: number }[]> =>
+  withWorkspace(ctx, async (tx) => {
+    const rows = await tx.execute<{ mailbox_id: string; pending: number; stored: number }>(sql`
+      select mailbox_id,
+             count(*) filter (where body_state = 'pending')::int as pending,
+             count(*) filter (where body_state <> 'pending')::int as stored
+        from message
+       where mailbox_id is not null
+       group by mailbox_id
+    `)
+    return rows.map((row) => ({
+      mailboxId: row.mailbox_id,
+      pending: Number(row.pending),
+      stored: Number(row.stored),
+    }))
+  })
+
+/** The next messages whose bodies have not been fetched, for one mailbox. The
+ *  partial index makes this the size of the backlog, not of the mailbox. */
+export const pendingBodies = async (
+  ctx: WorkspaceContext,
+  mailboxId: string,
+  limit = 50,
+): Promise<{ id: string; providerMessageId: string }[]> =>
+  withWorkspace(ctx, (tx) =>
+    tx
+      .select({ id: message.id, providerMessageId: message.providerMessageId })
+      .from(message)
+      .where(and(eq(message.mailboxId, mailboxId), eq(message.bodyState, 'pending')))
+      .orderBy(desc(message.sentAt))
+      .limit(Math.min(Math.max(limit, 1), 200)),
+  )
+
+export const storeBody = async (
+  ctx: WorkspaceContext,
+  messageId: string,
+  body: MessageBodyInput,
+): Promise<void> => {
+  await mutate(ctx, 'mailbox', async (tx) => {
+    await writeBody(tx, ctx, messageId, body)
+    return { result: undefined, audit: { entity: 'message', entityId: messageId, action: 'store_body' } }
+  })
+}
+
+/** A body that cannot be fetched is marked and left alone, so the queue drains
+ *  rather than spinning on the same message for ever. */
+export const failBody = async (ctx: WorkspaceContext, messageId: string, reason: string): Promise<void> =>
+  withWorkspace(ctx, async (tx) => {
+    await tx
+      .update(message)
+      .set({ bodyState: 'failed', bodyError: reason.slice(0, 500) })
+      .where(eq(message.id, messageId))
+  })
+
+export const setMailboxVisibility = async (
+  ctx: WorkspaceContext,
+  input: { mailboxId: string; visibility: 'team' | 'private' },
+): Promise<void> =>
+  mutate(ctx, 'mailbox', async (tx) => {
+    const [box] = await tx
+      .select({ userId: mailbox.userId, visibility: mailbox.visibility })
+      .from(mailbox)
+      .where(eq(mailbox.id, input.mailboxId))
+    if (!box) throw new Error('That mailbox is not in this workspace.')
+    // Finer than the role matrix can say: it is your mailbox, or you administer
+    // the workspace.
+    if (box.userId !== ctx.actorId && ctx.role !== 'admin') {
+      throw new Error('That is somebody else\'s mailbox. Only they or an admin can change who reads it.')
+    }
+    await tx.update(mailbox).set({ visibility: input.visibility }).where(eq(mailbox.id, input.mailboxId))
+    return {
+      result: undefined,
+      audit: {
+        entity: 'mailbox',
+        entityId: input.mailboxId,
+        action: 'set_visibility',
+        before: { visibility: box.visibility },
+        after: { visibility: input.visibility },
       },
     }
   })

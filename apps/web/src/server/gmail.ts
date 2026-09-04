@@ -1,20 +1,24 @@
 import {
   blockedPatterns,
+  failBody,
   ingestMessage,
   internalDomainOf,
-  messageSource,
+  pendingBodies,
   readMailbox,
   recordMailboxFailure,
+  storeBody,
   updateMailboxCursor,
+  type IncomingAttachment,
   type IncomingMessage,
   type WorkspaceContext,
 } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { googleClient } from './auth/google.ts'
 
-/** F1 phase B. Gmail, read only. D7: `gmail.readonly` and nothing else, because
- *  nobody asked to send from Rawr, Apollo already sends with tracking, and every
- *  extra scope widens the blast radius of a leaked token for no gain. */
+/** Gmail, read only for now: `gmail.readonly` and nothing else. Sending arrives
+ *  with sequences, and adds `gmail.send` to a mailbox that is reconnected for it;
+ *  until then every extra scope widens the blast radius of a leaked token for no
+ *  gain. */
 export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
@@ -123,7 +127,8 @@ type GmailPayload = {
   headers?: { name?: string; value?: string }[]
   parts?: GmailPayload[]
   filename?: string
-  body?: { attachmentId?: string; size?: number }
+  mimeType?: string
+  body?: { data?: string; attachmentId?: string; size?: number }
 }
 
 type GmailMessage = {
@@ -140,10 +145,39 @@ const hasAttachment = (payload: GmailPayload | undefined): boolean => {
   return (payload.parts ?? []).some(hasAttachment)
 }
 
+const attachmentsOf = (payload: GmailPayload | undefined, into: IncomingAttachment[] = []): IncomingAttachment[] => {
+  if (!payload) return into
+  if (payload.filename && payload.body?.attachmentId) {
+    into.push({
+      filename: payload.filename,
+      mimeType: payload.mimeType ?? null,
+      sizeBytes: payload.body.size ?? 0,
+      providerAttachmentId: payload.body.attachmentId,
+      // An inline image referenced by the HTML rather than something a person
+      // meant to attach. Kept, but not listed as an attachment.
+      inline: (payload.headers ?? []).some((header) => /content-id/i.test(header.name ?? '')),
+    })
+  }
+  for (const child of payload.parts ?? []) attachmentsOf(child, into)
+  return into
+}
+
+/** A Message-ID is `<id@host>`. Stored as written, because that is what a reply's
+ *  In-Reply-To will carry and what a match compares against. */
+const messageIds = (raw: string): string[] => raw.match(/<[^>]+>/g) ?? []
+
 export const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
   const headers = raw.payload?.headers ?? []
   const from = parseAddresses(headerValue(headers, 'From'))[0]
   if (!raw.id || !raw.threadId || !from) return null
+
+  const found = { text: [] as string[], html: [] as string[] }
+  collect(raw.payload as BodyPart | undefined, found)
+  const text = found.text.length > 0 ? found.text.join('\n').trim() : htmlToText(found.html.join('\n'))
+  const html = found.html.length > 0 ? sanitiseHtml(found.html.join('\n')) : null
+  // A metadata-only read has no parts to collect from, and leaves the message for
+  // the hydrate job rather than storing an empty body over a real one.
+  const body = text || html ? { text: text || raw.snippet || '', html } : null
 
   return {
     providerThreadId: raw.threadId,
@@ -154,13 +188,70 @@ export const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
     cc: parseAddresses(headerValue(headers, 'Cc')),
     sentAt: new Date(Number(raw.internalDate ?? Date.now())),
     snippet: raw.snippet ?? null,
-    // Bodies are stored by reference, never inline, so a 20MB thread does not
-    // bloat the table. Until an object store is configured, the reference is the
-    // provider's own id, which is enough to fetch it again. B1.
-    bodyRef: `gmail:${raw.id}`,
+    internetMessageId: messageIds(headerValue(headers, 'Message-ID'))[0] ?? null,
+    inReplyTo: messageIds(headerValue(headers, 'In-Reply-To'))[0] ?? null,
+    references: messageIds(headerValue(headers, 'References')),
+    body,
+    attachments: attachmentsOf(raw.payload).filter((file) => !file.inline),
     hasAttachments: hasAttachment(raw.payload),
   }
 }
+
+// ---------------------------------------------------------------- bodies
+
+/** What a thread view renders. Text is what a person reads and what survives
+ *  truncation; the HTML is sanitised here, before it is ever stored, so nothing a
+ *  stranger sent is kept in a form that could execute if a future reader forgot
+ *  the sandbox. */
+const decodeBase64Url = (data: string): string => Buffer.from(data, 'base64url').toString('utf8')
+
+type BodyPart = GmailPayload & { mimeType?: string; body?: { data?: string; attachmentId?: string; size?: number } }
+
+const collect = (part: BodyPart | undefined, into: { text: string[]; html: string[] }): void => {
+  if (!part) return
+  if (part.body?.data && !part.filename) {
+    if (part.mimeType === 'text/plain') into.text.push(decodeBase64Url(part.body.data))
+    else if (part.mimeType === 'text/html') into.html.push(decodeBase64Url(part.body.data))
+  }
+  for (const child of (part.parts ?? []) as BodyPart[]) collect(child, into)
+}
+
+export const htmlToText = (html: string): string =>
+  html
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+/** An allow-nothing-dangerous pass over sender HTML, run before storage.
+ *
+ *  Deliberately not a general-purpose sanitiser: the rendering side puts this in
+ *  an iframe with an empty sandbox and no network for images until asked, so this
+ *  is the second of two defences rather than the only one. What it removes is what
+ *  is dangerous even inside a sandbox or if the sandbox is ever weakened: script
+ *  and style elements, event handlers, javascript: and data: URLs, forms, frames,
+ *  and anything that navigates the parent. */
+export const sanitiseHtml = (html: string): string =>
+  html
+    .replace(/<\s*(script|style|iframe|frame|frameset|object|embed|applet|form|base|meta|link)\b[\s\S]*?<\/\s*\1\s*>/gi, '')
+    .replace(/<\s*(script|style|iframe|frame|frameset|object|embed|applet|form|base|meta|link)\b[^>]*\/?>/gi, '')
+    // on* handlers, quoted or bare.
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '')
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
+    // Anything that would run or smuggle code through an attribute value.
+    .replace(/(href|src|action|formaction|xlink:href)\s*=\s*"(?:\s*)(javascript|vbscript|data):[^"]*"/gi, '$1="#"')
+    .replace(/(href|src|action|formaction|xlink:href)\s*=\s*'(?:\s*)(javascript|vbscript|data):[^']*'/gi, "$1='#'")
+    .replace(/\ssrcdoc\s*=\s*("[^"]*"|'[^']*')/gi, '')
+    .trim()
 
 // ------------------------------------------------------------------ sync
 
@@ -258,7 +349,9 @@ const backfill = async (
 
   const tally: Tally = { stored: 0, alreadyHad: 0, skipped: 0 }
   for (const stub of list.messages ?? []) {
-    const raw = (await fetcher(`/messages/${stub.id}`, { format: 'metadata' })) as GmailMessage
+    // One read, not two: metadata now and the body later cost two requests per
+    // message against the same quota, and left every thread unreadable in between.
+    const raw = (await fetcher(`/messages/${stub.id}`, { format: 'full' })) as GmailMessage
     const incoming = toIncoming(raw)
     if (!incoming) {
       tally.skipped += 1
@@ -329,7 +422,7 @@ const incremental = async (
   for (const entry of history.history ?? []) {
     for (const added of entry.messagesAdded ?? []) {
       read += 1
-      const raw = (await fetcher(`/messages/${added.message.id}`, { format: 'metadata' })) as GmailMessage
+      const raw = (await fetcher(`/messages/${added.message.id}`, { format: 'full' })) as GmailMessage
       const incoming = toIncoming(raw)
       if (!incoming) {
         tally.skipped += 1
@@ -347,63 +440,59 @@ const incremental = async (
   return { read, ...tally, done: true, reason: null }
 }
 
-// ---------------------------------------------------------------- bodies
 
-export type MessageBody = { text: string; truncated: boolean }
+// --------------------------------------------------------------- hydrate
 
-/** Bodies are never stored (B1): the reference is the provider's own id, and the
- *  body is fetched through the mailbox that read it, on the day somebody opens
- *  the thread. Plain text is preferred; HTML is flattened to text so nothing a
- *  sender wrote executes or loads here. */
-const BODY_LIMIT = 200_000
+/** Fetches the bodies of messages stored without one and writes them here, so a
+ *  thread stays readable after the mailbox that read it is disconnected. Run by
+ *  `mail.hydrate`, a page at a time, oldest backlog first.
+ *
+ *  A message whose mailbox can no longer fetch it is marked failed with the reason
+ *  rather than retried for ever: the queue has to drain. */
+export const hydrateMailboxBodies = async (
+  ctx: WorkspaceContext,
+  mailboxId: string,
+  limit = 50,
+): Promise<{ stored: number; failed: number; remaining: boolean }> => {
+  const box = await readMailbox(ctx, mailboxId)
+  if (!box) throw new Error('That mailbox is not connected.')
 
-const decodeBase64Url = (data: string): string => Buffer.from(data, 'base64url').toString('utf8')
+  const pending = await pendingBodies(ctx, mailboxId, limit)
+  if (pending.length === 0) return { stored: 0, failed: 0, remaining: false }
 
-type BodyPart = GmailPayload & { mimeType?: string; body?: { data?: string; attachmentId?: string; size?: number } }
-
-const collect = (part: BodyPart | undefined, into: { text: string[]; html: string[] }): void => {
-  if (!part) return
-  if (part.body?.data && !part.filename) {
-    if (part.mimeType === 'text/plain') into.text.push(decodeBase64Url(part.body.data))
-    else if (part.mimeType === 'text/html') into.html.push(decodeBase64Url(part.body.data))
-  }
-  for (const child of (part.parts ?? []) as BodyPart[]) collect(child, into)
-}
-
-export const htmlToText = (html: string): string =>
-  html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|tr|li|h[1-6]|blockquote)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-
-export const readMessageBody = async (ctx: WorkspaceContext, messageId: string): Promise<MessageBody> => {
-  const source = await messageSource(ctx, messageId)
-  if (!source) {
-    throw new Error('No connected mailbox can fetch this message any more. The snippet is all that remains.')
-  }
-  if (source.mailbox.state === 'revoked') {
-    throw new Error('Access to the mailbox that read this message has been withdrawn. Reconnect it to read bodies again.')
+  if (box.state === 'revoked') {
+    for (const row of pending) {
+      await failBody(ctx, row.id, 'The mailbox that read this message is no longer connected.')
+    }
+    return { stored: 0, failed: pending.length, remaining: true }
   }
 
   const { fetcher } = devGmailEnabled
-    ? { fetcher: devFetcher(source.mailbox.email, await internalDomainOf(ctx)) }
-    : await authorised(ctx, source.mailbox.id, source.mailbox)
+    ? { fetcher: devFetcher(box.email, await internalDomainOf(ctx)) }
+    : await authorised(ctx, box.id, box)
 
-  const raw = (await fetcher(`/messages/${source.providerMessageId}`, { format: 'full' })) as { payload?: BodyPart }
-  const found = { text: [] as string[], html: [] as string[] }
-  collect(raw.payload, found)
-  const text = found.text.length > 0 ? found.text.join('\n').trim() : htmlToText(found.html.join('\n'))
-  const body = text || source.snippet || '(this message has no readable text)'
-  return { text: body.slice(0, BODY_LIMIT), truncated: body.length > BODY_LIMIT }
+  let stored = 0
+  let failed = 0
+  for (const row of pending) {
+    try {
+      const raw = (await fetcher(`/messages/${row.providerMessageId}`, { format: 'full' })) as GmailMessage
+      const found = { text: [] as string[], html: [] as string[] }
+      collect(raw.payload as BodyPart | undefined, found)
+      const text = found.text.length > 0 ? found.text.join('\n').trim() : htmlToText(found.html.join('\n'))
+      const html = found.html.length > 0 ? sanitiseHtml(found.html.join('\n')) : null
+      await storeBody(ctx, row.id, {
+        text: text || raw.snippet || '(this message has no readable text)',
+        html,
+      })
+      stored += 1
+    } catch (cause) {
+      if (cause instanceof RevokedError) throw cause
+      await failBody(ctx, row.id, cause instanceof Error ? cause.message : String(cause))
+      failed += 1
+    }
+  }
+
+  return { stored, failed, remaining: pending.length === limit }
 }
 
 // ------------------------------------------------------- development only
