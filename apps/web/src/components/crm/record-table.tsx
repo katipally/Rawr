@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, DataTable, EmptyState, cn, type Column } from '@rawr/ui'
+import { DataTable, EmptyState, Pagination, cn, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
@@ -38,6 +38,10 @@ export type RecordTableProps = {
 }
 
 const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
+
+/** Matches the list page's own default, so the per-page control opens showing
+ *  what the page actually asked for. */
+const DEFAULT_PAGE_SIZE = 50
 
 export const RecordTable = ({
   workspace,
@@ -133,16 +137,19 @@ export const RecordTable = ({
     },
   }))
 
+  // Keyset pages have no numbers, so how far in we are is carried in the URL and
+  // grows by the size of each page we walk past. A hand-edited value only makes
+  // the label wrong, never the rows.
+  const offset = Math.max(0, Number(params.skip ?? 0) || 0)
+  const perPage = Math.max(1, Number(params.limit ?? 0) || DEFAULT_PAGE_SIZE)
+
+  const pageHref = (next: ListParams): string => objectView(workspace, object, view, 'list', next)
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* The header row is its own control strip so the sort links stay reachable
           by keyboard rather than being buried in the table header. */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-secondary">
-        <span>
-          {rows.length === 0
-            ? 'No records'
-            : `${rows.length.toLocaleString()} shown${totalHint !== null ? ` of ${totalHint.toLocaleString()}` : ''}`}
-        </span>
         <span className="flex flex-wrap items-center gap-1">
           Sort:
           {columns.slice(0, 6).map((column) => (
@@ -196,29 +203,32 @@ export const RecordTable = ({
         }
       />
 
-      {nextCursor || params.cursor ? (
-        // Keyset pages have no page numbers, so "previous" is the browser's own
-        // history and "first" drops the cursor. Both are honest about what a
-        // cursor can and cannot do.
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {params.cursor ? (
-            <>
-              <Button onClick={() => router.back()}>Previous page</Button>
-              <Button onClick={() => navigate(objectView(workspace, object, view, 'list', { ...params, cursor: undefined }))}>
-                First page
-              </Button>
-            </>
-          ) : null}
-          {nextCursor ? (
-            <Button
-              variant="primary"
-              onClick={() => navigate(objectView(workspace, object, view, 'list', { ...params, cursor: nextCursor }))}
-            >
-              Next page
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
+      {/* Previous is the browser's own history, because a keyset cursor points
+          forward only and there is no address to jump back to. */}
+      <Pagination
+        className="shrink-0"
+        count={rows.length}
+        offset={offset}
+        total={totalHint ?? undefined}
+        hasMore={Boolean(nextCursor)}
+        perPage={perPage}
+        noun={`${objectLabel.toLowerCase()} records`}
+        onPrevious={() => {
+          if (offset === 0) return
+          router.back()
+        }}
+        onNext={() => {
+          if (!nextCursor) return
+          navigate(
+            pageHref({ ...params, cursor: nextCursor, skip: String(offset + rows.length) }),
+          )
+        }}
+        onPerPage={(size) =>
+          // A new page size restarts the walk: a cursor from a 25-row page means
+          // nothing to a 100-row one, and neither does the offset it came with.
+          navigate(pageHref({ ...params, limit: String(size), cursor: undefined, skip: undefined }))
+        }
+      />
     </div>
   )
 }

@@ -5,7 +5,7 @@ import { notFound, redirect } from 'next/navigation'
 import { DealBoard } from '~/components/crm/deal-board.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeFilters, objectView, type ListParams } from '~/lib/links.ts'
+import { decodeFilters, exportCsvPath, objectView, type ListParams } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -76,12 +76,12 @@ const BoardPage = async ({
     ...(search.group ? { group: search.group } : {}),
   }
 
-  const exportParams = new URLSearchParams({
+  const exportHref = exportCsvPath(workspace, {
     object: 'deal',
     columns: (resolved.view.columns.length > 0 ? resolved.view.columns : ['name', 'stage_id', 'amount']).join(','),
+    ...(filters.length > 0 ? { filters: JSON.stringify(filters) } : {}),
+    ...(search.q ? { q: search.q } : {}),
   })
-  if (filters.length > 0) exportParams.set('filters', JSON.stringify(filters))
-  if (search.q) exportParams.set('q', search.q)
 
   return (
     <div className="flex flex-col gap-3">
@@ -93,10 +93,18 @@ const BoardPage = async ({
       <ViewTabs
         workspace={workspace}
         object="deal"
-        views={views.map((view) => ({ slug: view.slug, name: view.name, kind: view.kind, isShared: view.isShared }))}
+        views={views.map((view) => ({
+          id: view.id,
+          slug: view.slug,
+          name: view.name,
+          kind: view.kind,
+          isShared: view.isShared,
+          pinned: view.pinned,
+        }))}
         current={resolved.view.slug}
         currentKind="board"
         params={listParams}
+        canWrite={canWrite}
       />
 
       {boardError ? (
@@ -158,7 +166,8 @@ const BoardPage = async ({
         object="deal"
         objectLabel={object.nameSingular}
         view={resolved.view.slug}
-        viewId={null}
+        viewId={resolved.view.id}
+        viewLabel={resolved.view.name}
         kind="board"
         params={listParams}
         filters={filters as never}
@@ -167,7 +176,8 @@ const BoardPage = async ({
         filterFields={toFilterFields(object)}
         createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
-        exportHref={`/contacts/${workspace}/export?${exportParams.toString()}`}
+        exportHref={exportHref}
+        allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
       />
 
       {board && board.unassigned > 0 ? (

@@ -78,6 +78,7 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
         filters: view.filters ?? [],
         sorts: view.sorts ?? [],
         isShared: true,
+        pinned: true,
         position: view.position,
         groupByFieldId: view.groupBy ? (fields.find((field) => field.key === view.groupBy)?.id ?? null) : null,
       })),

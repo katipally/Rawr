@@ -1,4 +1,5 @@
 import { headers } from 'next/headers'
+import { weekInfoFor } from './edge-copy.ts'
 
 /** Public pages are rendered on the server for people who are not signed in and
  *  are not on our continent. Without this they inherit the server's idea of a
@@ -35,18 +36,7 @@ const preferredTag = (header: string): string => {
 export const visitorLocale = async (): Promise<VisitorLocale> => {
   const tag = preferredTag((await headers()).get('accept-language') ?? '')
 
-  // getWeekInfo is ES2024 and present in Node 24, but not yet in TypeScript's
-  // Intl lib, so the shape is declared here rather than widened globally.
-  const locale = new Intl.Locale(tag) as Intl.Locale & {
-    getWeekInfo?: () => { firstDay: number }
-  }
-  const firstDay = locale.getWeekInfo?.().firstDay ?? 1
-
-  const naming = new Intl.DateTimeFormat(tag, { weekday: 'short', timeZone: 'UTC' })
-  // 2024-01-01 was a Monday, so ISO weekday n is that date plus (n - 1) days.
-  const weekdays = Array.from({ length: 7 }, (_, offset) =>
-    naming.format(new Date(Date.UTC(2024, 0, 1 + ((firstDay - 1 + offset) % 7)))),
-  )
-
-  return { tag, firstDay, weekdays }
+  // The same function the embed script inlines, so a visitor sees the same week
+  // whether the calendar is hosted here or embedded in somebody's site.
+  return { tag, ...weekInfoFor(tag) }
 }

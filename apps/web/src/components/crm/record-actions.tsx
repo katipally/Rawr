@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { ComposeDialog } from './compose-dialog.tsx'
 import { EnrollDialog } from './enroll-dialog.tsx'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { objectView } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -23,6 +23,9 @@ export type RecordActionsProps = {
   values: Record<string, unknown>
   labels: Record<string, string>
   canWrite: boolean
+  /** The quick-action row asking for the compose dialog, from the address. The
+   *  dialog is here, next to the address it sends to. */
+  startCompose?: boolean | undefined
 }
 
 export const RecordActions = ({
@@ -35,6 +38,7 @@ export const RecordActions = ({
   values,
   labels,
   canWrite,
+  startCompose,
 }: RecordActionsProps) => {
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -43,6 +47,9 @@ export const RecordActions = ({
   const [showDelete, setShowDelete] = useState(false)
   const [showEnroll, setShowEnroll] = useState(false)
   const [showCompose, setShowCompose] = useState(false)
+  useEffect(() => {
+    if (startCompose) setShowCompose(true)
+  }, [startCompose])
   const [confirmText, setConfirmText] = useState('')
   const [other, setOther] = useState<PickedRecord | null>(null)
   const absorbedId = other?.id ?? ''

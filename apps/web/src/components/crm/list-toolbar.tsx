@@ -1,6 +1,7 @@
 'use client'
 
-import { Button, Modal, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Checkbox, IconButton, Modal, TextInput, useToast } from '@rawr/ui'
+import { ArrowDown, ArrowUp, Columns3, Filter } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -24,7 +25,12 @@ export type ListToolbarProps = {
   filterFields: FilterField[]
   createFields: CreateField[]
   canWrite: boolean
+  /** The view's own name, so "update this view" can save without renaming it. */
+  viewLabel: string
   exportHref: string
+  /** Every field the object has, for the column chooser. Ordered as the registry
+   *  orders them, which is the order a person sees on the record page. */
+  allColumns: { key: string; label: string }[]
 }
 
 export const ListToolbar = ({
@@ -41,7 +47,9 @@ export const ListToolbar = ({
   filterFields,
   createFields,
   canWrite,
+  viewLabel,
   exportHref,
+  allColumns,
 }: ListToolbarProps) => {
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -54,9 +62,17 @@ export const ListToolbar = ({
   // knows the object's real fields.
   const query = useSearchParams()
   const askedToCreate = query.get('new') === '1'
+  // "Add view" on the tab bar links here rather than carrying a second copy of
+  // this dialog, the same way the + in the top bar links here to create a record.
+  const askedForView = query.get('view') === 'new'
   useEffect(() => {
     if (askedToCreate && canWrite) setShowCreate(true)
   }, [askedToCreate, canWrite])
+  useEffect(() => {
+    if (askedForView && canWrite) setShowSave(true)
+  }, [askedForView, canWrite])
+  const [showColumns, setShowColumns] = useState(false)
+  const [draftColumns, setDraftColumns] = useState(columns)
   const [viewName, setViewName] = useState('')
   const [shared, setShared] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -69,27 +85,61 @@ export const ListToolbar = ({
 
   const activeConditions = filters.reduce((sum, group) => sum + group.conditions.length, 0)
 
-  const saveView = async () => {
+  /** One write behind both buttons. `into` null creates a new view under the
+   *  typed name; `into` an id overwrites that view's arrangement and keeps its
+   *  name, because updating a view must never quietly rename it. */
+  const writeView = async (into: string | null, name: string, nextColumns = columns) => {
     setSaving(true)
     try {
       const saved = await api.crm.views.save.mutate({
         object,
-        id: viewId,
-        name: viewName.trim(),
+        id: into,
+        name,
         kind: kind === 'board' ? 'board' : 'table',
-        columns,
+        columns: nextColumns,
         filters: filters as never,
         sorts,
         isShared: shared,
       })
-      toast('success', `Saved as “${saved.name}”. Its address is /views/${saved.slug}/${kind}.`)
       setShowSave(false)
-      navigate(objectView(workspace, object, saved.slug, kind, { q: params.q }))
+      setShowColumns(false)
+      if (into) {
+        toast('success', `Saved to “${saved.name}”.`)
+        // The view now holds these columns, so the ad-hoc set in the URL would
+        // only shadow what was just saved.
+        navigate(objectView(workspace, object, saved.slug, kind, { ...params, cols: undefined }))
+      } else {
+        toast('success', `Saved as “${saved.name}”. Its address is /views/${saved.slug}/${kind}.`)
+        navigate(objectView(workspace, object, saved.slug, kind, { q: params.q }))
+      }
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
       setSaving(false)
     }
+  }
+
+  const closeSave = () => {
+    setShowSave(false)
+    // Drop ?view=new so a refresh, or a step back, does not reopen it.
+    if (askedForView) navigate(objectView(workspace, object, view, kind, params))
+  }
+
+  const labelOf = (key: string): string =>
+    allColumns.find((field) => field.key === key)?.label ?? key
+
+  const openColumns = () => {
+    setDraftColumns(columns)
+    setShowColumns(true)
+  }
+
+  const move = (index: number, by: -1 | 1) => {
+    const next = [...draftColumns]
+    const target = index + by
+    if (target < 0 || target >= next.length) return
+    const [moved] = next.splice(index, 1)
+    next.splice(target, 0, moved!)
+    setDraftColumns(next)
   }
 
   return (
@@ -123,7 +173,15 @@ export const ListToolbar = ({
         </form>
 
         <Button onClick={() => setShowFilters((open) => !open)} aria-expanded={showFilters}>
-          Filters{activeConditions > 0 ? ` (${activeConditions})` : ''}
+          <Filter aria-hidden="true" className="size-4" />
+          Filters
+          {activeConditions > 0 ? <Badge tone="accent">{activeConditions}</Badge> : null}
+        </Button>
+
+        <Button onClick={openColumns} aria-haspopup="dialog">
+          <Columns3 aria-hidden="true" className="size-4" />
+          Columns
+          <Badge tone="neutral">{columns.length}</Badge>
         </Button>
 
         {/* A plain link, so the browser downloads it and the export survives a
@@ -160,27 +218,130 @@ export const ListToolbar = ({
         />
       ) : null}
 
-      <Modal open={showSave} title="Save this view" onClose={() => setShowSave(false)}>
+      <Modal open={showSave} title="Save this view" onClose={() => closeSave()}>
+        <div className="flex flex-col gap-4">
+          {viewId ? (
+            <div className="flex flex-col gap-2 border-b border-divider pb-4">
+              <p className="text-secondary">
+                Overwrite “{viewLabel}” with the columns, filters and sort on screen. Everyone
+                who uses that tab sees the change.
+              </p>
+              <div>
+                <Button busy={saving} onClick={() => void writeView(viewId, viewLabel)}>
+                  Update “{viewLabel}”
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-3">
+            <p className="text-secondary">
+              Or keep “{viewLabel}” as it is and save what is on screen under a new name. The
+              name becomes the address, so the tab can be linked to.
+            </p>
+            <TextInput
+              value={viewName}
+              aria-label="New view name"
+              placeholder="e.g. Enterprise in trial"
+              onChange={(event) => setViewName(event.target.value)}
+            />
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
+              Everyone in this workspace can see it
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                busy={saving}
+                disabled={viewName.trim() === ''}
+                onClick={() => void writeView(null, viewName.trim())}
+              >
+                Save as new view
+              </Button>
+              <Button variant="tertiary" onClick={() => closeSave()}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showColumns} title="Edit columns" onClose={() => setShowColumns(false)}>
         <div className="flex flex-col gap-3">
           <p className="text-secondary">
-            Saves the current columns, filters and sort under a name. The name becomes the
-            address, so the tab can be linked to.
+            {draftColumns.length} of {allColumns.length} fields. The order here is the order
+            across the table; the first column is the link into the record.
           </p>
-          <TextInput
-            value={viewName}
-            aria-label="View name"
-            placeholder="e.g. Enterprise in trial"
-            onChange={(event) => setViewName(event.target.value)}
-          />
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
-            Everyone in this workspace can see it
-          </label>
+
+          <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-hs border border-line p-2">
+            {draftColumns.map((key, index) => (
+              <div key={key} className="flex items-center gap-1">
+                <Checkbox
+                  className="min-w-0 flex-1"
+                  checked
+                  label={labelOf(key)}
+                  onChange={() => setDraftColumns(draftColumns.filter((other) => other !== key))}
+                />
+                <IconButton
+                  label={`Move ${labelOf(key)} earlier`}
+                  icon={<ArrowUp aria-hidden="true" className="size-4" />}
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                />
+                <IconButton
+                  label={`Move ${labelOf(key)} later`}
+                  icon={<ArrowDown aria-hidden="true" className="size-4" />}
+                  disabled={index === draftColumns.length - 1}
+                  onClick={() => move(index, 1)}
+                />
+              </div>
+            ))}
+            {draftColumns.length === 0 ? (
+              <p className="px-1 py-2 text-secondary">
+                No columns yet. Add one below; a table needs at least one.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="grid max-h-56 gap-1.5 overflow-y-auto rounded-hs border border-line p-2 @md:grid-cols-2">
+            {allColumns
+              .filter((field) => !draftColumns.includes(field.key))
+              .map((field) => (
+                <Checkbox
+                  key={field.key}
+                  checked={false}
+                  label={field.label}
+                  onChange={() => setDraftColumns([...draftColumns, field.key])}
+                />
+              ))}
+          </div>
+
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" busy={saving} disabled={viewName.trim() === ''} onClick={() => void saveView()}>
-              Save view
+            <Button
+              variant="primary"
+              disabled={draftColumns.length === 0}
+              onClick={() => {
+                setShowColumns(false)
+                goTo({ cols: draftColumns.join(',') })
+              }}
+            >
+              Apply to this screen
             </Button>
-            <Button variant="tertiary" onClick={() => setShowSave(false)}>
+            {canWrite && viewId ? (
+              <Button
+                busy={saving}
+                disabled={draftColumns.length === 0}
+                onClick={() => void writeView(viewId, viewLabel, draftColumns)}
+              >
+                Save to “{viewLabel}”
+              </Button>
+            ) : null}
+            {params.cols ? (
+              <Button variant="tertiary" onClick={() => { setShowColumns(false); goTo({ cols: undefined }) }}>
+                Back to the view’s columns
+              </Button>
+            ) : null}
+            <Button variant="tertiary" onClick={() => setShowColumns(false)}>
               Cancel
             </Button>
           </div>

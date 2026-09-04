@@ -101,15 +101,20 @@ export const BookedRow = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        {booking.conferenceUrl ? (
+        {/* A cancelled meeting keeps its conference url, because the provider
+            row is what gets torn down and that can fail. Offering it as a link
+            invited somebody to join a meeting nobody is coming to. */}
+        {booking.state !== 'confirmed' ? null : booking.conferenceUrl ? (
           <a href={booking.conferenceUrl} target="_blank" rel="noreferrer">
             Join link
           </a>
-        ) : booking.state === 'confirmed' ? (
+        ) : (
           <span className="text-xs text-secondary">No conference link on this one.</span>
-        ) : null}
+        )}
 
-        {booking.state === 'confirmed' && editable ? (
+        {/* Nothing to cancel once it has happened: the calendar event is in the
+            past and the attendee has either turned up or not. */}
+        {booking.state === 'confirmed' && editable && end.getTime() > Date.now() ? (
           <Button
             type="button"
             variant="destructive"

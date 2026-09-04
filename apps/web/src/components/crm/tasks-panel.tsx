@@ -3,7 +3,7 @@
 import { Button, EmptyState, Select, TextInput, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -29,6 +29,9 @@ export type TasksPanelProps = {
   canWrite: boolean
   /** Rendered as a boxed panel on a record, and bare on the tasks page. */
   heading?: string
+  /** The record page's quick-action row asking for a new task, from the address.
+   *  The form is here, so the row asks rather than carrying a second copy. */
+  startNew?: boolean | undefined
 }
 
 export const TasksPanel = ({
@@ -38,13 +41,19 @@ export const TasksPanel = ({
   entity,
   canWrite,
   heading = 'Tasks',
+  startNew,
 }: TasksPanelProps) => {
   const router = useRouter()
   const toast = useToast()
+  const titleField = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (startNew) titleField.current?.focus()
+  }, [startNew])
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -89,6 +98,7 @@ export const TasksPanel = ({
           }}
         >
           <TextInput
+            ref={titleField}
             value={title}
             aria-label="Task title"
             placeholder="What needs doing"

@@ -225,6 +225,20 @@
       "when": 1787900000000,
       "tag": "0031_attribution_reporting",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787910000000,
+      "tag": "0032_view_pinning",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787920000000,
+      "tag": "0033_booking_page_hosts",
+      "breakpoints": true
     }
   ]
 }

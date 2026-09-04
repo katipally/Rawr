@@ -46,8 +46,10 @@ export const BOOKING_STYLES = `
 .rawr-b-title { font-size: 1.125rem; font-weight: 500; }
 .rawr-b-meta { color: var(--_muted); font-size: 0.8125rem; display: flex; flex-wrap: wrap; gap: 0.75rem; }
 
-/* One column until the container has room for two. */
-.rawr-b-body { display: grid; gap: var(--_gap); grid-template-columns: minmax(0, 1fr); }
+/* One column until the container has room for two. align-items: start, because
+   a grid stretches its items by default and that gave the month panel the height
+   of the times beside it: a calendar with a screen of empty box under it. */
+.rawr-b-body { display: grid; gap: var(--_gap); grid-template-columns: minmax(0, 1fr); align-items: start; }
 @container (min-width: 34rem) {
   .rawr-b-body[data-two] { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
 }
@@ -86,6 +88,19 @@ export const BOOKING_STYLES = `
 .rawr-b-day[data-open]:hover { border-color: var(--_focus); }
 .rawr-b-day[data-closed] { color: var(--_muted); opacity: 0.5; cursor: default; }
 .rawr-b-day[aria-current='date'] { background: var(--_focus); color: #fff; border-color: var(--_focus); }
+/* Today, so a month opens with somewhere to read from. Drawn as an underline
+   rather than a fill, because the fill means "the day you picked" and two filled
+   cells would be two answers to one question. */
+.rawr-b-day[data-today] { box-shadow: inset 0 -2px 0 var(--_muted); }
+.rawr-b-day[data-today][aria-current='date'] { box-shadow: none; }
+
+/* The visitor may be on a keyboard. Without this the only ring is the browser's
+   default, which disappears against a dark theme and against half the sites this
+   widget is embedded in. */
+.rawr-b-day:focus-visible,
+.rawr-b-slot:focus-visible,
+.rawr-b-cta:focus-visible,
+.rawr-b-tz select:focus-visible { outline: 2px solid var(--_focus); outline-offset: 2px; }
 /* Read out, never drawn. A closed day carried its meaning in aria-label alone,
    which a span with no role does not expose, so the words live in the DOM. */
 .rawr-b-off {
@@ -111,6 +126,15 @@ export const BOOKING_STYLES = `
    button under it does not jump the moment a slot is picked. */
 .rawr-b-hold { min-block-size: 1.125rem; }
 .rawr-b-hold[data-bad] { color: var(--_error); }
+
+/* Morning, afternoon, evening. The heading is small and quiet: it is a signpost
+   inside a list, not a title above one. */
+.rawr-b-band + .rawr-b-band { margin-block-start: 0.75rem; }
+/* Attribute-prefixed to outrank the h1-h3 rule above, rather than !important. */
+[data-rawr-booking-widget] .rawr-b-bandname {
+  font-size: 0.6875rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--_muted); margin: 0 0 0.375rem;
+}
 
 /* Times: as many columns as fit, never a fixed count. */
 .rawr-b-times { display: grid; gap: 0.375rem; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); }

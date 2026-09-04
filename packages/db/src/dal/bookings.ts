@@ -83,6 +83,10 @@ export type PublicBookingPage = {
   isActive: boolean
   redirectUrl: string | null
   confirmationCopy: string | null
+  /** Who the meeting is with. Names only: the page is public, so an address here
+   *  would be a scraper's list. A round robin names everybody it might land on,
+   *  because the visitor is choosing the team, not the person. */
+  hostNames: string[]
 }
 
 type PublicPageRow = {
@@ -105,6 +109,7 @@ type PublicPageRow = {
   is_active: boolean
   redirect_url: string | null
   confirmation_copy: string | null
+  host_names: string[] | null
 }
 
 /** The one question the public edge asks before it has a workspace, through the
@@ -139,6 +144,7 @@ export const publicBookingPage = async (
     isActive: row.is_active,
     redirectUrl: row.redirect_url,
     confirmationCopy: row.confirmation_copy,
+    hostNames: Array.isArray(row.host_names) ? row.host_names.filter(Boolean) : [],
   }
 }
 
@@ -156,7 +162,13 @@ const PAGE_COLUMNS = sql`
   p.slug, p.name, p.kind, p.owner_id, p.duration_minutes, p.buffer_before_minutes,
   p.buffer_after_minutes, p.min_notice_minutes, p.max_horizon_days, p.granularity_minutes,
   p.location, p.location_detail, p.title_tpl, p.description_tpl, p.company_fallback,
-  p.questions, p.is_active, p.redirect_url, p.confirmation_copy`
+  p.questions, p.is_active, p.redirect_url, p.confirmation_copy,
+  coalesce(
+    (select array_agg(u.name order by u.name)
+       from booking_host h join user_account u on u.id = h.user_id
+      where h.booking_page_id = p.id and h.is_active),
+    '{}'::text[]
+  ) as host_names`
 
 type ConfigRow = PublicPageRow & {
   owner_id: string | null
@@ -182,6 +194,7 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
   granularityMinutes: row.granularity_minutes,
   location: row.location,
   locationDetail: row.location_detail,
+  hostNames: Array.isArray(row.host_names) ? row.host_names.filter(Boolean) : [],
   titleTpl: row.title_tpl,
   descriptionTpl: row.description_tpl,
   companyFallback: row.company_fallback,

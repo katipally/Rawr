@@ -1182,6 +1182,16 @@ try {
     'and nothing at all for an address that does not exist',
     (await publicBookingPage('datasaur', 'no-such-page')) === null,
   )
+  check(
+    'the public page says who the meeting is with',
+    (publicPage?.hostNames.length ?? 0) === 3,
+    `${publicPage?.hostNames.length ?? 0} names on the round robin`,
+  )
+  check(
+    'and never an address, because the page is public',
+    (publicPage?.hostNames ?? []).every((name) => !name.includes('@')),
+    (publicPage?.hostNames ?? []).join(', '),
+  )
 
   // -----------------------------------------------------------------------
   section('overrides through the layer')

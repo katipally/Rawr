@@ -50,6 +50,15 @@ export type ListParams = {
   pipeline?: string | undefined
   /** Board only: which field's values become the columns. */
   group?: string | undefined
+  /** Comma-separated field keys, when a person has chosen columns that the saved
+   *  view does not hold. In the URL for the same reason filters are: a screen
+   *  somebody arranged should paste. */
+  cols?: string | undefined
+  /** Rows per page. In the URL so a link to page two shows the same page two. */
+  limit?: string | undefined
+  /** How many rows the pages before this one held. Carried so the pager can say
+   *  "Showing 51-100" on a keyset list, which has no page numbers to count from. */
+  skip?: string | undefined
 }
 
 const query = (params: Record<string, string | number | undefined | null>): string => {
@@ -74,11 +83,22 @@ export const objectView = (
 ): string =>
   `/${CRM_ROOT}/${workspace}/objects/${object}/views/${view}/${kind}${query(params)}`
 
+/** `tab` is Overview or Activities, `type` filters the timeline, and the last
+ *  three are the quick-action row asking a panel that is already on the page to
+ *  open: log an activity of this kind, start a task, start an email. They are in
+ *  the address rather than in component state so "log a call on this deal" is a
+ *  link somebody can be sent. */
 export const recordPath = (
   workspace: string,
   object: ObjectKey,
   id: string,
-  params: { tab?: string; type?: string } = {},
+  params: {
+    tab?: string | undefined
+    type?: string | undefined
+    log?: string | undefined
+    task?: string | undefined
+    compose?: string | undefined
+  } = {},
 ): string => `/${CRM_ROOT}/${workspace}/record/${object}/${id}${query(params)}`
 
 /** The + in the top bar. It lands on the object's own list, which is where the
@@ -86,6 +106,16 @@ export const recordPath = (
  *  second copy in the shell that would have to learn the same fields. */
 export const createRecordPath = (workspace: string, object: ObjectKey): string =>
   `${objectView(workspace, object, 'all')}?new=1`
+
+/** The export screen, and the file it hands over. The CSV lives one segment
+ *  deeper than the page so the page has an address of its own: a download route
+ *  cannot also be a screen somebody browses to. */
+export const exportPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/export`
+
+export const exportCsvPath = (
+  workspace: string,
+  params: { object: string; columns?: string; filters?: string; sort?: string; q?: string },
+): string => `/${CRM_ROOT}/${workspace}/export/csv${query(params)}`
 
 export const importsPath = (workspace: string, id?: string): string =>
   id ? `/${CRM_ROOT}/${workspace}/import/${id}` : `/${CRM_ROOT}/${workspace}/import`

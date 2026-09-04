@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
-import { readAttribution, sourceFrom } from '../src/dal/attribution.ts'
+import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
 import { provisionWorkspace } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
@@ -364,6 +364,153 @@ try {
     { workspaceId: probe, name: 'Probe site', host: 'probe.example', siteKey: 'probe-www' },
   ])
 
+  // F4 and B7. Traffic, so the website and attribution reports have something to
+  // report on and the visit history on a contact has something to show. Without
+  // these rows four screens render their empty state on a seeded database, which
+  // makes them impossible to judge and easy to break unnoticed.
+  {
+    const [site] = await db
+      .select({ id: s.site.id })
+      .from(s.site)
+      .where(eq(s.site.workspaceId, datasaur))
+    const seen = await db
+      .select({ id: s.contact.id, email: s.contact.email })
+      .from(s.contact)
+      .where(eq(s.contact.workspaceId, datasaur))
+
+    const PATHS = ['/', '/pricing', '/blog', '/product/data-studio', '/contact']
+    const DEVICES = ['desktop', 'mobile', 'tablet']
+
+    // Every third visit is somebody Rawr can name, which is roughly what a real
+    // site sees and is what makes "identified share" a number rather than 0 or 100.
+    const sessions = Array.from({ length: 48 }, (_, i) => {
+      const source = SEED_SOURCES[i % SEED_SOURCES.length]!
+      const startedAt = dayAgo(45 - Math.floor(i * 0.9))
+      const contact = i % 3 === 0 ? (seen[i % seen.length] ?? null) : null
+      const utm = Object.fromEntries(new URLSearchParams(source.rawQuery ?? ''))
+      return {
+        visitorId: `seed-visitor-${i}`,
+        contact,
+        utm,
+        startedAt,
+        referrer: source.referrer ?? null,
+        landingPage: source.landingPage ?? 'https://datasaur.ai/',
+        pages: 1 + (i % 4),
+      }
+    })
+
+    // The visitor row is what the reports join to answer "how much of this
+    // traffic can Rawr put a name to", so a session without one is anonymous
+    // however many aliases point at it.
+    await db.insert(s.visitor).values(
+      sessions.map((session) => ({
+        workspaceId: datasaur,
+        id: session.visitorId,
+        contactId: session.contact?.id ?? null,
+        firstReferrer: session.referrer,
+        firstLandingPage: session.landingPage,
+        sessionCount: 1,
+        firstSeenAt: session.startedAt,
+        lastSeenAt: session.startedAt,
+      })),
+    )
+
+    const written = await db
+      .insert(s.visitorSession)
+      .values(
+        sessions.map((session) => ({
+          workspaceId: datasaur,
+          visitorId: session.visitorId,
+          siteId: site?.id ?? null,
+          startedAt: session.startedAt,
+          endedAt: new Date(session.startedAt.getTime() + session.pages * 90_000),
+          entryPath: new URL(session.landingPage).pathname,
+          exitPath: PATHS[session.pages % PATHS.length]!,
+          pageCount: session.pages,
+          referrer: session.referrer,
+          utm: session.utm,
+          // Derived by the same helper the collector uses, so the seed cannot
+          // hold a channel no capture path would ever produce.
+          channel: channelOfSession({ referrer: session.referrer, utm: session.utm }),
+        })),
+      )
+      .returning({ id: s.visitorSession.id, visitorId: s.visitorSession.visitorId })
+
+    const idOf = new Map(written.map((row) => [row.visitorId, row.id]))
+    await db.insert(s.pageView).values(
+      sessions.flatMap((session) =>
+        Array.from({ length: session.pages }, (_, page) => ({
+          workspaceId: datasaur,
+          visitorId: session.visitorId,
+          contactId: session.contact?.id ?? null,
+          sessionId: idOf.get(session.visitorId) ?? null,
+          siteId: site?.id ?? null,
+          url: `https://datasaur.ai${PATHS[(page + session.pages) % PATHS.length]}`,
+          path: PATHS[(page + session.pages) % PATHS.length]!,
+          title: 'Datasaur',
+          referrer: page === 0 ? session.referrer : null,
+          utm: session.utm,
+          device: DEVICES[session.pages % DEVICES.length]!,
+          country: COUNTRIES[session.pages % COUNTRIES.length]!,
+          at: new Date(session.startedAt.getTime() + page * 60_000),
+        })),
+      ),
+    )
+
+    const identified = sessions.filter((session) => session.contact !== null)
+    if (identified.length > 0) {
+      await db
+        .insert(s.visitorAlias)
+        .values(
+          identified.map((session) => ({
+            workspaceId: datasaur,
+            visitorId: session.visitorId,
+            contactId: session.contact!.id,
+            via: 'form_submission' as const,
+            createdAt: session.startedAt,
+            resolvedAt: session.startedAt,
+          })),
+        )
+        .onConflictDoNothing()
+    }
+
+    // F3. Submissions, including two the spam rules held, so the review queue is
+    // not an empty screen and the forms report has a clean-versus-held split.
+    const forms = await db
+      .select({ id: s.form.id, slug: s.form.slug })
+      .from(s.form)
+      .where(eq(s.form.workspaceId, datasaur))
+    if (forms.length > 0) {
+      await db.insert(s.formSubmission).values(
+        identified.slice(0, 14).map((session, i) => {
+          const held = i === 3 || i === 9
+          const form = forms[i % forms.length]!
+          return {
+            workspaceId: datasaur,
+            formId: form.id,
+            values: {
+              email: session.contact!.email ?? `seed${i}@partner${i}.example`,
+              first_name: `Contact${i + 1}`,
+              message: held ? 'CHEAP BACKLINKS http://spam.example' : 'We would like a demo.',
+            },
+            attribution: readAttribution({
+              referrer: session.referrer,
+              rawQuery: new URLSearchParams(session.utm).toString(),
+              landingPage: session.landingPage,
+              firstSeenAt: session.startedAt,
+            }),
+            contactId: held ? null : session.contact!.id,
+            visitorId: session.visitorId,
+            spamScore: held ? 78 : 0,
+            spamState: held ? ('quarantined' as const) : ('clean' as const),
+            spamReasons: held ? ['link_in_message', 'shouting'] : [],
+            at: session.startedAt,
+          }
+        }),
+      )
+    }
+  }
+
   // F2. A round robin across the three non-viewer staff plus a personal link for
   // one of them, on both tenants so the isolation test has a page on each side.
   // Availability is nine to five in three different zones on purpose: a bug that
@@ -476,6 +623,44 @@ try {
     await db
       .insert(s.bookingHost)
       .values({ workspaceId: ws, bookingPageId: personal.id, userId: owner, weight: 1 })
+
+    // F2. Meetings on the books, two ahead and two behind, so the booked list is
+    // not an empty screen on a seeded database and the upcoming and past tabs
+    // both have something to show.
+    if (ws === datasaur) {
+      const booked = await db
+        .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
+        .from(s.contact)
+        .where(eq(s.contact.workspaceId, ws))
+        .limit(4)
+      await db.insert(s.booking).values(
+        booked.map((contact, i) => {
+          // Relative to the real clock rather than to the seed's own anchor,
+          // because "upcoming" has to still be upcoming whenever the seed is run.
+          const day = new Date()
+          day.setUTCHours(17, 0, 0, 0)
+          const startsAt = new Date(day.getTime() + (i < 2 ? 3 + i * 4 : -(4 + i * 3)) * 86_400_000)
+          return {
+            workspaceId: ws,
+            bookingPageId: i % 2 === 0 ? roundRobin.id : personal.id,
+            hostUserId: staff[i % staff.length]!,
+            contactId: contact.id,
+            startsAt,
+            endsAt: new Date(startsAt.getTime() + 30 * 60_000),
+            attendeeTimezone: BOOKING_ZONES[i % BOOKING_ZONES.length]!,
+            attendeeName: `${contact.firstName ?? 'Someone'} Surname${i + 1}`,
+            attendeeEmail: contact.email ?? `booked${i}@partner${i}.example`,
+            answers: { notes: 'Looking at Data Studio for the research team.' },
+            state: i === 3 ? ('cancelled' as const) : ('confirmed' as const),
+            cancelledAt: i === 3 ? dayAgo(2) : null,
+            cancelReason: i === 3 ? 'Something came up.' : null,
+            cancelToken: `seed-cancel-${i}`,
+            rescheduleToken: `seed-reschedule-${i}`,
+            conferenceUrl: 'https://meet.google.com/seed-demo',
+          }
+        }),
+      )
+    }
   }
 
   const counts = await client`
@@ -489,7 +674,11 @@ try {
     union all select 'task', count(*)::int from task
     union all select 'association', count(*)::int from association
     union all select 'form', count(*)::int from form
+    union all select 'form_submission', count(*)::int from form_submission
+    union all select 'visitor_session', count(*)::int from visitor_session
+    union all select 'page_view', count(*)::int from page_view
     union all select 'booking_page', count(*)::int from booking_page
+    union all select 'booking', count(*)::int from booking
     union all select 'booking_host', count(*)::int from booking_host
     union all select 'availability', count(*)::int from availability
     order by t`

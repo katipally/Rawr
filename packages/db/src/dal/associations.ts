@@ -13,21 +13,30 @@ export type AssociatedRecord = {
    *  the association table. A contact has one primary company. A4. */
   isPrimary: boolean
   label: string | null
+  /** When the record itself was created, which is what "recent" orders by. */
+  createdAt: string | null
 }
 
 export type AssociationRail = {
   contacts: AssociatedRecord[]
   companies: AssociatedRecord[]
   deals: AssociatedRecord[]
+  /** How many are linked, before a search narrowed them, so the count on a card
+   *  says how many there are rather than how many match what was typed. */
+  totals: { contacts: number; companies: number; deals: number }
 }
+
+/** Newest link first is what a rail is for; alphabetical is what a long one
+ *  needs. Both are applied over the loaded page, which is capped per object. */
+export type AssociationSort = 'recent' | 'name'
 
 const NAME_SELECT: Record<ObjectKey, string> = {
-  contact: `id, coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email) as name, title as detail`,
-  company: `id, coalesce(name, domain) as name, domain as detail`,
-  deal: `id, name, next_step as detail`,
+  contact: `id, coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email) as name, title as detail, created_at`,
+  company: `id, coalesce(name, domain) as name, domain as detail, created_at`,
+  deal: `id, name, next_step as detail, created_at`,
 }
 
-type Row = { id: string; name: string | null; detail: string | null }
+type Row = { id: string; name: string | null; detail: string | null; created_at: string | Date | null }
 
 const UNNAMED: Record<ObjectKey, string> = {
   contact: 'Unnamed contact',
@@ -42,6 +51,7 @@ const toRecord = (objectKey: ObjectKey, row: Row, isPrimary: boolean, label: str
   detail: row.detail,
   isPrimary,
   label,
+  createdAt: row.created_at === null ? null : new Date(row.created_at).toISOString(),
 })
 
 const fetchByIds = async (tx: Tx, objectKey: ObjectKey, ids: string[]): Promise<Map<string, Row>> => {
@@ -55,14 +65,33 @@ const fetchByIds = async (tx: Tx, objectKey: ObjectKey, ids: string[]): Promise<
 
 /** Everything the right rail shows, in one place, so the record page never has to
  *  know that a company link is a column on the contact and a deal link is a row in
- *  the association table. */
+ *  the association table.
+ *
+ *  A search narrows what comes back; the totals do not move, because the count on
+ *  a card says how many are linked, not how many matched what was typed. */
 export const readAssociations = async (
   ctx: WorkspaceContext,
   entity: EntityRef,
+  options: { q?: string | undefined; sort?: AssociationSort | undefined } = {},
 ): Promise<AssociationRail> =>
   withWorkspace(ctx, async (tx) => {
-    const rail: AssociationRail = { contacts: [], companies: [], deals: [] }
     const { entityType, entityId } = entity
+    const needle = options.q?.trim().toLowerCase()
+    const sort = options.sort ?? 'recent'
+    const totals = { contacts: 0, companies: 0, deals: 0 }
+    const own: Record<'contacts' | 'companies' | 'deals', AssociatedRecord[]> = {
+      contacts: [],
+      companies: [],
+      deals: [],
+    }
+
+    // Applied in SQL for the reads that are capped, so searching a company with
+    // four hundred contacts looks at all of them rather than at whichever hundred
+    // the cap happened to load.
+    const matching = (expression: string) =>
+      needle ? sql`and lower(${sql.raw(expression)}) like ${`%${needle}%`}` : sql``
+    const orderedBy = (expression: string) =>
+      sort === 'name' ? sql`order by ${sql.raw(expression)} asc nulls last` : sql`order by created_at desc`
 
     // The relationship a record stores on itself.
     if (entityType === 'contact' || entityType === 'deal') {
@@ -70,28 +99,38 @@ export const readAssociations = async (
         sql`select company_id from ${sql.raw(`"${entityType}"`)} where id = ${entityId} limit 1`,
       )
       if (row?.company_id) {
-        const found = await fetchByIds(tx, 'company', [row.company_id])
-        const company = found.get(row.company_id)
+        totals.companies += 1
+        const company = (await fetchByIds(tx, 'company', [row.company_id])).get(row.company_id)
         // No label: isPrimary already renders the "Primary" badge, and setting both
         // printed the word twice on the same row.
-        if (company) rail.companies.push(toRecord('company', company, true, null))
+        if (company && keeps(company, needle)) own.companies.push(toRecord('company', company, true, null))
       }
     }
+
     if (entityType === 'company') {
+      const contactName = `coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email, '')`
       const contacts = await tx.execute<Row>(sql`
         select ${sql.raw(NAME_SELECT.contact)} from contact
-         where company_id = ${entityId} and deleted_at is null
-         order by created_at desc limit 100`)
-      rail.contacts.push(...contacts.map((row) => toRecord('contact', row, true, null)))
+         where company_id = ${entityId} and deleted_at is null ${matching(contactName)}
+         ${orderedBy(contactName)} limit 100`)
+      own.contacts.push(...contacts.map((row) => toRecord('contact', row, true, null)))
 
       const deals = await tx.execute<Row>(sql`
         select ${sql.raw(NAME_SELECT.deal)} from deal
-         where company_id = ${entityId} and deleted_at is null
-         order by created_at desc limit 100`)
-      rail.deals.push(...deals.map((row) => toRecord('deal', row, true, null)))
+         where company_id = ${entityId} and deleted_at is null ${matching(`coalesce(name, '')`)}
+         ${orderedBy('name')} limit 100`)
+      own.deals.push(...deals.map((row) => toRecord('deal', row, true, null)))
+
+      // Its own query, because both the cap and the search narrow the two above.
+      const [counted] = await tx.execute<{ contacts: number; deals: number }>(sql`
+        select (select count(*)::int from contact where company_id = ${entityId} and deleted_at is null) as contacts,
+               (select count(*)::int from deal where company_id = ${entityId} and deleted_at is null) as deals`)
+      totals.contacts += counted?.contacts ?? 0
+      totals.deals += counted?.deals ?? 0
     }
 
-    // Rows in the association table, in both directions.
+    // Rows in the association table, in both directions. Never capped, so these
+    // are counted and narrowed here rather than in SQL.
     const links = await tx.execute<{ other_type: EntityType; other_id: string; label: string | null }>(sql`
       select to_type as other_type, to_id as other_id, label from association
        where from_type = ${entityType} and from_id = ${entityId}
@@ -104,19 +143,50 @@ export const readAssociations = async (
       grouped.set(link.other_type, [...(grouped.get(link.other_type) ?? []), link.other_id])
     }
 
+    const linked: Record<'contacts' | 'companies' | 'deals', AssociatedRecord[]> = {
+      contacts: [],
+      companies: [],
+      deals: [],
+    }
     for (const [objectKey, ids] of grouped) {
       const found = await fetchByIds(tx, objectKey, ids)
-      const bucket = objectKey === 'contact' ? rail.contacts : objectKey === 'company' ? rail.companies : rail.deals
+      const bucket = bucketOf(objectKey)
+      const seen = new Set(own[bucket].map((record) => record.id))
       for (const id of ids) {
         const row = found.get(id)
-        if (!row || bucket.some((existing) => existing.id === id)) continue
-        const label = links.find((l) => l.other_id === id)?.label ?? null
-        bucket.push(toRecord(objectKey, row, false, label))
+        if (!row || seen.has(id)) continue
+        seen.add(id)
+        totals[bucket] += 1
+        if (!keeps(row, needle)) continue
+        const label = links.find((link) => link.other_id === id)?.label ?? null
+        linked[bucket].push(toRecord(objectKey, row, false, label))
       }
     }
 
-    return rail
+    const order = (records: AssociatedRecord[]): AssociatedRecord[] =>
+      [...records].sort((a, b) =>
+        sort === 'name'
+          ? a.displayName.localeCompare(b.displayName)
+          : (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+      )
+
+    // What the record holds itself comes first: a contact's own company is the
+    // primary one, and a company's own contacts are the ones that belong to it.
+    return {
+      contacts: [...own.contacts, ...order(linked.contacts)],
+      companies: [...own.companies, ...order(linked.companies)],
+      deals: [...own.deals, ...order(linked.deals)],
+      totals,
+    }
   })
+
+const bucketOf = (objectKey: ObjectKey): 'contacts' | 'companies' | 'deals' =>
+  objectKey === 'contact' ? 'contacts' : objectKey === 'company' ? 'companies' : 'deals'
+
+const keeps = (row: Row, needle: string | undefined): boolean =>
+  !needle ||
+  (row.name ?? '').toLowerCase().includes(needle) ||
+  (row.detail ?? '').toLowerCase().includes(needle)
 
 const nameOf = async (tx: Tx, ref: EntityRef): Promise<string> => {
   const [row] = await tx.execute<Row>(sql`

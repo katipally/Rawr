@@ -18,7 +18,17 @@ import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { searchAll } from '../src/dal/search.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
-import { listViews, resolveView } from '../src/dal/views.ts'
+import {
+  deleteView,
+  duplicateView,
+  listViews,
+  renameView,
+  reorderViews,
+  resolveView,
+  saveView,
+  setViewPinned,
+} from '../src/dal/views.ts'
+import { readAssociations, associate } from '../src/dal/associations.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingIsUsable } from '../src/dal/imports.ts'
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'
@@ -651,6 +661,155 @@ try {
     const timeline = await readTimeline(probeCtx, { entity: { entityType: 'deal', entityId: deal!.id } })
     expect(timeline.rows.length === 0, `${timeline.rows.length} activities leaked across tenants`)
     return `probe sees ${page.rows.length} of its own contacts, zero of Datasaur's, and cannot read one by id`
+  })
+
+  await check('B8. a view duplicates, pins, reorders and renames', async () => {
+    const made = await saveView(admin, {
+      objectKey: 'contact',
+      name: 'B8 arrangement',
+      kind: 'table',
+      columns: ['first_name', 'email'],
+      filters: [],
+      sorts: [],
+      isShared: true,
+    })
+    expect(made.pinned, 'a new view did not arrive pinned')
+
+    const copy = await duplicateView(admin, made.id!)
+    expect(copy.id !== made.id, 'the copy reused the original id')
+    expect(copy.slug !== made.slug, `the copy took the slug ${copy.slug}`)
+    expect(copy.isShared === false, 'the copy was shared without being asked')
+    expect(copy.columns.join(',') === 'first_name,email', `the copy took columns ${copy.columns.join(',')}`)
+
+    await setViewPinned(admin, copy.id!, false)
+    const afterUnpin = (await listViews(admin, 'contact')).find((view) => view.id === copy.id)
+    expect(afterUnpin?.pinned === false, 'unpinning did not stick')
+
+    // Pinned first, then position: an unpinned view must not sit between tabs.
+    const listed = await listViews(admin, 'contact')
+    const firstUnpinned = listed.findIndex((view) => !view.pinned)
+    expect(
+      firstUnpinned === -1 || listed.slice(firstUnpinned).every((view) => !view.pinned),
+      'an unpinned view was listed among the pinned ones',
+    )
+
+    const renamed = await renameView(admin, made.id!, 'B8 renamed')
+    expect(renamed.name === 'B8 renamed', `rename produced ${renamed.name}`)
+    expect(renamed.slug === made.slug, 'the rename moved the address')
+
+    const pinnedIds = listed.filter((view) => view.pinned && view.id).map((view) => view.id!)
+    await reorderViews(admin, 'contact', [...pinnedIds].reverse())
+    const reordered = (await listViews(admin, 'contact')).filter((view) => view.pinned && view.id)
+    expect(
+      reordered[0]?.id === pinnedIds.at(-1),
+      'the reorder did not put the last tab first',
+    )
+
+    try {
+      await setViewPinned(admin, listed.find((view) => view.slug === 'all')!.id!, false)
+      throw new Error('the default view was unpinned')
+    } catch (cause) {
+      expect(String(cause).includes('falls back'), `threw ${String(cause)}`)
+    }
+
+    try {
+      await reorderViews(admin, 'contact', [copy.id!, made.id!, crypto.randomUUID()])
+      throw new Error('a reorder naming a view that does not exist was accepted')
+    } catch (cause) {
+      expect(String(cause).includes('no longer exist'), `threw ${String(cause)}`)
+    }
+
+    await deleteView(admin, copy.id!)
+    await deleteView(admin, made.id!)
+    return 'duplicate, pin, reorder, rename and the default-view guard all hold'
+  })
+
+  await check('B8. sales cannot rearrange a view somebody else owns', async () => {
+    const mine = await saveView(admin, {
+      objectKey: 'deal',
+      name: 'B8 admin only',
+      kind: 'table',
+      columns: ['name'],
+      filters: [],
+      sorts: [],
+      isShared: true,
+    })
+    for (const [what, run] of [
+      ['rename', () => renameView(sales, mine.id!, 'nope')],
+      ['pin', () => setViewPinned(sales, mine.id!, false)],
+      ['reorder', () => reorderViews(sales, 'deal', [mine.id!])],
+    ] as const) {
+      try {
+        await run()
+        throw new Error(`sales could ${what} an admin's view`)
+      } catch (cause) {
+        expect(String(cause).includes('belongs to somebody else'), `${what} threw ${String(cause)}`)
+      }
+    }
+    await deleteView(admin, mine.id!)
+    return 'rename, pin and reorder all refuse a view owned by someone else'
+  })
+
+  await check('B8. the association rail searches, sorts and counts', async () => {
+    const [company] = await db
+      .select({ id: s.company.id })
+      .from(s.company)
+      .where(eq(s.company.workspaceId, datasaur.id))
+      .limit(1)
+    const all = await readAssociations(admin, { entityType: 'company', entityId: company!.id })
+    expect(all.totals.contacts === all.contacts.length, 'an unsearched rail disagreed with its own total')
+
+    const target = all.contacts[0]
+    if (!target) return 'the seeded company has no contacts to search'
+
+    const found = await readAssociations(
+      admin,
+      { entityType: 'company', entityId: company!.id },
+      { q: target.displayName.slice(0, 4) },
+    )
+    expect(found.contacts.length <= all.contacts.length, 'searching widened the rail')
+    expect(
+      found.contacts.some((row) => row.id === target.id),
+      'the searched-for contact was not returned',
+    )
+    expect(
+      found.totals.contacts === all.totals.contacts,
+      `the count moved when searching: ${found.totals.contacts} vs ${all.totals.contacts}`,
+    )
+
+    const byName = await readAssociations(
+      admin,
+      { entityType: 'company', entityId: company!.id },
+      { sort: 'name' },
+    )
+    const names = byName.contacts.map((row) => row.displayName)
+    expect(
+      names.every((name, index) => index === 0 || names[index - 1]!.localeCompare(name) <= 0),
+      'sort by name came back unordered',
+    )
+    return `${all.totals.contacts} linked, search and A-to-Z both hold`
+  })
+
+  await check('B8. a list page reports its total alongside a capped page', async () => {
+    const page = await listRecords(admin, { object: 'contact', limit: 2, count: true })
+    expect(page.rows.length <= 2, `a limit of 2 returned ${page.rows.length} rows`)
+    expect(page.total !== null, 'count was asked for and not returned')
+    expect(page.total! >= page.rows.length, 'the total was smaller than the page')
+    if (page.nextCursor) {
+      const second = await listRecords(admin, {
+        object: 'contact',
+        limit: 2,
+        count: true,
+        cursor: page.nextCursor,
+      })
+      expect(
+        second.total === page.total,
+        `the total moved between pages: ${page.total} then ${second.total}`,
+      )
+      const overlap = second.rows.filter((row) => page.rows.some((first) => first.id === row.id))
+      expect(overlap.length === 0, `${overlap.length} rows appeared on both pages`)
+    }
+    return `page of ${page.rows.length} out of ${page.total}`
   })
 
   await check('the probe tenant renders correctly with exactly one row', async () => {

@@ -9,6 +9,7 @@ import {
   decodeFilters,
   decodeSort,
   encodeCursor,
+  exportCsvPath,
   objectView,
   type ListParams,
 } from '~/lib/links.ts'
@@ -16,9 +17,41 @@ import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from
 import { contextFrom, readSession } from '~/server/session.ts'
 
 const PAGE_SIZE = 50
+/** The largest page the table offers. Above this a person is looking for the
+ *  export, not a longer screen. */
+const MAX_PAGE_SIZE = 100
+
+const readLimit = (raw: string | undefined): number => {
+  const asked = Number(raw)
+  if (!Number.isFinite(asked)) return PAGE_SIZE
+  return Math.min(Math.max(Math.trunc(asked), 1), MAX_PAGE_SIZE)
+}
 
 type Params = { workspace: string; object: string; view: string }
-type Search = { q?: string; filters?: string; sort?: string; cursor?: string; error?: string }
+type Search = {
+  q?: string
+  filters?: string
+  sort?: string
+  cursor?: string
+  error?: string
+  cols?: string
+  limit?: string
+  skip?: string
+}
+
+/** What the screen shows: the columns a person chose in the URL, else the view's
+ *  own, else the first few fields so a workspace that has saved nothing still has
+ *  a table. Unknown keys are dropped rather than throwing, because this comes from
+ *  an address somebody can hand-edit. */
+const columnsFrom = (
+  raw: string | undefined,
+  stored: string[],
+  object: { fields: { key: string }[]; byKey: Map<string, unknown> },
+): string[] => {
+  const asked = (raw ?? '').split(',').filter((key) => key && object.byKey.has(key))
+  if (asked.length > 0) return asked
+  return stored.length > 0 ? stored : object.fields.slice(0, 8).map((field) => field.key)
+}
 
 const ListPage = async ({
   params,
@@ -55,7 +88,7 @@ const ListPage = async ({
     const urlFilters = search.filters ? parseFilters(decodeFilters(search.filters)) : null
     const filters = urlFilters ?? view.view.filters
     const sorts = search.sort ? decodeSort(search.sort) : view.view.sorts
-    const columns = view.view.columns.length > 0 ? view.view.columns : crm.object.fields.slice(0, 8).map((f) => f.key)
+    const columns = columnsFrom(search.cols, view.view.columns, crm.object)
 
     try {
       const page = await listRecords(ctx, {
@@ -64,7 +97,7 @@ const ListPage = async ({
         filters,
         sorts,
         search: search.q ?? '',
-        limit: PAGE_SIZE,
+        limit: readLimit(search.limit),
         cursor: decodeCursor(search.cursor),
         count: true,
       })
@@ -86,7 +119,7 @@ const ListPage = async ({
   const urlFilters = search.filters ? parseFilters(decodeFilters(search.filters)) : null
   const filters = urlFilters ?? resolved.view.filters
   const sorts = search.sort ? decodeSort(search.sort) : resolved.view.sorts
-  const columns = resolved.view.columns.length > 0 ? resolved.view.columns : object.fields.slice(0, 8).map((f) => f.key)
+  const columns = columnsFrom(search.cols, resolved.view.columns, object)
 
   // A bulk edit sets one value on many records, so a field that is unique per
   // record — an email, a domain, a name — would only ever produce duplicates.
@@ -101,12 +134,20 @@ const ListPage = async ({
     ...(search.filters ? { filters: search.filters } : {}),
     ...(search.sort ? { sort: search.sort } : {}),
     ...(search.cursor ? { cursor: search.cursor } : {}),
+    ...(search.cols ? { cols: search.cols } : {}),
+    ...(search.limit ? { limit: search.limit } : {}),
+    ...(search.skip ? { skip: search.skip } : {}),
   }
 
-  const exportParams = new URLSearchParams({ object: objectParam, columns: columns.join(',') })
-  if (filters.length > 0) exportParams.set('filters', JSON.stringify(filters))
-  if (sorts.length > 0) exportParams.set('sort', `${sorts[0]!.direction === 'desc' ? '-' : ''}${sorts[0]!.key}`)
-  if (search.q) exportParams.set('q', search.q)
+  const exportHref = exportCsvPath(workspace, {
+    object: objectParam,
+    columns: columns.join(','),
+    ...(filters.length > 0 ? { filters: JSON.stringify(filters) } : {}),
+    ...(sorts.length > 0
+      ? { sort: `${sorts[0]!.direction === 'desc' ? '-' : ''}${sorts[0]!.key}` }
+      : {}),
+    ...(search.q ? { q: search.q } : {}),
+  })
 
   return (
     // h-full and min-h-0 all the way down are what let the table fill the screen
@@ -126,10 +167,18 @@ const ListPage = async ({
       <ViewTabs
         workspace={workspace}
         object={objectParam}
-        views={views.map((view) => ({ slug: view.slug, name: view.name, kind: view.kind, isShared: view.isShared }))}
+        views={views.map((view) => ({
+          id: view.id,
+          slug: view.slug,
+          name: view.name,
+          kind: view.kind,
+          isShared: view.isShared,
+          pinned: view.pinned,
+        }))}
         current={resolved.view.slug}
         currentKind="list"
         params={listParams}
+        canWrite={canWrite}
       />
 
       <ListToolbar
@@ -137,7 +186,8 @@ const ListPage = async ({
         object={objectParam}
         objectLabel={object.nameSingular}
         view={resolved.view.slug}
-        viewId={null}
+        viewId={resolved.view.id}
+        viewLabel={resolved.view.name}
         kind="list"
         params={listParams}
         filters={filters as never}
@@ -146,7 +196,8 @@ const ListPage = async ({
         filterFields={toFilterFields(object)}
         createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
-        exportHref={`/contacts/${workspace}/export?${exportParams.toString()}`}
+        exportHref={exportHref}
+        allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
       />
 
       {queryError ? (

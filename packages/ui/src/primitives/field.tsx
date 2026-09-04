@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { cn } from '../cn.ts'
 
 const control =
@@ -36,14 +36,14 @@ export const Field = ({ id, label, hint, error, required, children }: FieldProps
   </div>
 )
 
-export const TextInput = ({ className, ...rest }: InputHTMLAttributes<HTMLInputElement>) => (
+export const TextInput = ({ className, ...rest }: ComponentProps<'input'>) => (
   <input {...rest} className={cn(control, 'min-h-9', className)} />
 )
 
-export const TextArea = ({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
+export const TextArea = ({ className, ...rest }: ComponentProps<'textarea'>) => (
   <textarea {...rest} className={cn(control, 'min-h-20 resize-y', className)} />
 )
 
-export const Select = ({ className, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) => (
+export const Select = ({ className, ...rest }: ComponentProps<'select'>) => (
   <select {...rest} className={cn(control, 'min-h-9', className)} />
 )

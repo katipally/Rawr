@@ -7,6 +7,7 @@ import {
   bookingPagesPath,
   createRecordPath,
   formsPath,
+  exportPath,
   importsPath,
   inboxPath,
   integrationsPath,
@@ -106,7 +107,10 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       groups: [
         {
           label: 'Move data',
-          items: [{ href: importsPath(workspace), label: 'Import' }],
+          items: [
+            { href: importsPath(workspace), label: 'Import' },
+            { href: exportPath(workspace), label: 'Export' },
+          ],
         },
         {
           label: 'Configure',

@@ -19,13 +19,15 @@ import {
   withWorkspaceReads,
   type ObjectKey,
 } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Breadcrumb, EmptyState, Tabs } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
 import { EnrichmentPanel } from '~/components/crm/enrichment-panel.tsx'
 import { PropertyPanel, type PropertySection } from '~/components/crm/property-panel.tsx'
 import { RecordActions } from '~/components/crm/record-actions.tsx'
+import { RecordOverview, type Touch } from '~/components/crm/record-overview.tsx'
+import { RecordQuickActions } from '~/components/crm/record-quick-actions.tsx'
 import { MailPanel } from '~/components/crm/mail-panel.tsx'
 import { SegmentsPanel } from '~/components/crm/segments-panel.tsx'
 import { SubscriptionsPanel } from '~/components/crm/subscriptions-panel.tsx'
@@ -33,7 +35,7 @@ import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value } from '~/components/crm/value.tsx'
-import { objectView } from '~/lib/links.ts'
+import { objectView, recordPath, workspaceHome } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -72,6 +74,10 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
   ],
 }
 
+/** What the quick-action row may ask the timeline composer to open. Narrowed
+ *  here because it arrives from an address a person can hand-edit. */
+const LOG_KINDS = ['note', 'call', 'meeting', 'email'] as const
+
 /** The two or three values worth reading before anything else. */
 const HEADER_FIELDS: Record<ObjectKey, string[]> = {
   contact: ['title', 'email', 'last_contacted_at', 'owner_id'],
@@ -79,19 +85,40 @@ const HEADER_FIELDS: Record<ObjectKey, string[]> = {
   deal: ['stage_id', 'amount', 'close_date', 'owner_id'],
 }
 
+/** What `original_source` and `latest_source` hold: a channel plus the evidence
+ *  it came from. Only the two readable parts are shown here; the evidence is on
+ *  the property panel, which renders the whole object. */
+const touchFrom = (value: unknown): Touch => {
+  if (typeof value !== 'object' || value === null) return null
+  const source = value as { channel?: unknown; detail?: { firstSeenAt?: unknown } }
+  if (typeof source.channel !== 'string') return null
+  const at = source.detail?.firstSeenAt
+  return { channel: source.channel, at: typeof at === 'string' ? at : null }
+}
+
 const RecordPage = async ({
   params,
   searchParams,
 }: {
   params: Promise<{ workspace: string; object: string; id: string }>
-  searchParams: Promise<{ type?: string }>
+  searchParams: Promise<{
+    type?: string
+    tab?: string
+    log?: string
+    task?: string
+    compose?: string
+  }>
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const { workspace, object: objectParam, id } = await params
   if (!isObjectKey(objectParam)) notFound()
-  const { type } = await searchParams
+  const { type, tab, log, task, compose } = await searchParams
+  // Overview is the landing tab, the way HubSpot opens on a summary rather than
+  // on a wall of history. An unknown value falls back rather than 404ing.
+  const activeTab = tab === 'activities' ? 'activities' : 'overview'
+  const openKind = LOG_KINDS.find((kind) => kind === log)
 
   const ctx = contextFrom(session)
   // Every read on this screen runs at once, each on its own connection; see
@@ -149,6 +176,10 @@ const RecordPage = async ({
     .filter((key) => record.values[key] === null || record.values[key] === undefined || record.values[key] === '')
     .map((key) => object.byKey.get(key)?.label ?? key)
 
+  // Every activity on this record, whatever the timeline filter is narrowed to,
+  // because the tab counts what is there rather than what is showing.
+  const timelineTotal = Object.values(counts).reduce((sum, n) => sum + n, 0)
+
   const fields = toEditableFields(object, lookups, { includeReadOnly: true })
   // Every field the layout above does not place, in registry order. This is what
   // makes a property created in Settings show up here without a deploy (D4).
@@ -178,13 +209,29 @@ const RecordPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb
+        items={[
+          { label: 'Home', href: workspaceHome(workspace) },
+          { label: object.namePlural, href: objectView(workspace, objectParam, 'all') },
+          { label: record.displayName },
+        ]}
+      />
+
       <header className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-small text-secondary uppercase">{object.nameSingular}</p>
             <h1 className="break-words text-lg font-medium">{record.displayName}</h1>
+            <RecordQuickActions
+              workspace={workspace}
+              object={objectParam}
+              recordId={id}
+              email={email}
+              canWrite={canWrite}
+            />
           </div>
           <RecordActions
+            startCompose={compose === '1'}
             workspace={workspace}
             object={objectParam}
             objectLabel={object.nameSingular}
@@ -280,8 +327,55 @@ const RecordPage = async ({
           ) : null}
         </div>
 
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="border-b border-divider">
+            <Tabs
+              label="Record sections"
+              items={[
+                {
+                  key: 'overview',
+                  label: 'Overview',
+                  href: recordPath(workspace, objectParam, id),
+                  current: activeTab === 'overview',
+                },
+                {
+                  key: 'activities',
+                  label: 'Activities',
+                  href: recordPath(workspace, objectParam, id, { tab: 'activities' }),
+                  hint: timelineTotal.toLocaleString(),
+                  current: activeTab === 'activities',
+                },
+              ]}
+            />
+          </div>
+
+          {activeTab === 'overview' ? (
+            <RecordOverview
+              workspace={workspace}
+              object={objectParam}
+              tasks={tasks.map((row) => ({
+                id: row.id,
+                title: row.title,
+                dueDate: row.dueDate,
+                status: row.status,
+              }))}
+              threads={threads.map((thread) => ({
+                threadId: thread.id,
+                subject: thread.subject,
+                lastAt: thread.lastAt?.toISOString() ?? thread.firstAt?.toISOString() ?? null,
+                messageCount: thread.messageCount,
+              }))}
+              deals={rail.deals.map((deal) => ({
+                id: deal.id,
+                displayName: deal.displayName,
+                detail: deal.detail,
+              }))}
+              firstTouch={touchFrom(record.values.original_source)}
+              lastTouch={touchFrom(record.values.latest_source)}
+            />
+          ) : (
           <Timeline
+            openKind={openKind}
             object={objectParam}
             recordId={id}
             workspace={workspace}
@@ -307,6 +401,7 @@ const RecordPage = async ({
             canWrite={canWrite}
             viewer={{ userId: session.userId, role: session.role }}
           />
+          )}
         </div>
 
         <div className="flex min-w-0 flex-col gap-3">
@@ -317,6 +412,7 @@ const RecordPage = async ({
             contacts={rail.contacts}
             companies={rail.companies}
             deals={rail.deals}
+            totals={rail.totals}
             linkable={linkable}
             createFields={createFields}
             createInitial={createInitial}
@@ -337,6 +433,7 @@ const RecordPage = async ({
             assignees={lookups.users}
             entity={entity}
             canWrite={canWrite}
+            startNew={task === 'new'}
           />
         </div>
       </div>

@@ -1,6 +1,7 @@
 'use client'
 
-import { Button, useToast } from '@rawr/ui'
+import { Badge, Button, Card, IconButton, Select, TextInput, useToast } from '@rawr/ui'
+import { ArrowDownUp, Plus, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -18,6 +19,10 @@ export type Associated = {
   isPrimary: boolean
   label: string | null
 }
+
+/** How many rows a card holds before searching it is worth offering. Below this
+ *  the eye is faster than the box. */
+const SEARCHABLE_FROM = 5
 
 export type AssociationRailProps = {
   workspace: string
@@ -37,6 +42,9 @@ export type AssociationRailProps = {
    *  company page starts with that company as its primary. */
   createInitial: Record<string, unknown>
   canWrite: boolean
+  /** How many are linked, before a search narrowed the rows. The badge counts
+   *  these, so a search does not make a card look emptier than the record is. */
+  totals: { contacts: number; companies: number; deals: number }
 }
 
 const TITLES: Record<ObjectKey, string> = {
@@ -56,6 +64,7 @@ export const AssociationRail = ({
   createFields,
   createInitial,
   canWrite,
+  totals,
 }: AssociationRailProps) => {
   const router = useRouter()
   const toast = useToast()
@@ -63,6 +72,10 @@ export const AssociationRail = ({
   const [choice, setChoice] = useState<PickedRecord | null>(null)
   const [creating, setCreating] = useState<ObjectKey | null>(null)
   const [busy, setBusy] = useState(false)
+  // Per card, because a person searching a company's contacts is not searching
+  // its deals at the same time.
+  const [needles, setNeedles] = useState<Partial<Record<ObjectKey, string>>>({})
+  const [sorts, setSorts] = useState<Partial<Record<ObjectKey, 'recent' | 'name'>>>({})
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -79,11 +92,27 @@ export const AssociationRail = ({
     }
   }
 
-  const sections: { key: ObjectKey; rows: Associated[] }[] = [
-    { key: 'contact', rows: contacts },
-    { key: 'company', rows: companies },
-    { key: 'deal', rows: deals },
+  const sections: { key: ObjectKey; rows: Associated[]; total: number }[] = [
+    { key: 'contact', rows: contacts, total: totals.contacts },
+    { key: 'company', rows: companies, total: totals.companies },
+    { key: 'deal', rows: deals, total: totals.deals },
   ]
+
+  /** Over the rows already on the page. The rail is capped per object, and a card
+   *  that says "12 of 340" is honest about what the box is filtering. */
+  const shown = (key: ObjectKey, rows: Associated[]): Associated[] => {
+    const needle = (needles[key] ?? '').trim().toLowerCase()
+    const filtered = needle
+      ? rows.filter(
+          (row) =>
+            row.displayName.toLowerCase().includes(needle) ||
+            (row.detail?.toLowerCase().includes(needle) ?? false),
+        )
+      : rows
+    return (sorts[key] ?? 'recent') === 'name'
+      ? [...filtered].sort((a, b) => a.displayName.localeCompare(b.displayName))
+      : filtered
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -91,21 +120,33 @@ export const AssociationRail = ({
         if (section.key === object && section.rows.length === 0) return null
         const canLink = linkable.includes(section.key)
 
+        const rows = shown(section.key, section.rows)
+        const searchable = section.rows.length >= SEARCHABLE_FROM
+        const needle = needles[section.key] ?? ''
+
         return (
-          <section key={section.key} className="rounded-panel border border-line bg-surface">
-            <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
-              <h3 className="font-medium">
-                {TITLES[section.key]} ({section.rows.length})
-              </h3>
-              {canWrite && canLink ? (
-                <span className="flex items-center gap-1">
+          <Card
+            key={section.key}
+            flush
+            title={
+              <span className="flex items-center gap-1.5">
+                {TITLES[section.key]}
+                <Badge tone="neutral">{section.total}</Badge>
+              </span>
+            }
+            action={
+              canWrite && canLink ? (
+                <>
                   {createFields[section.key] ? (
-                    <Button variant="tertiary" onClick={() => setCreating(section.key)}>
-                      New
-                    </Button>
+                    <IconButton
+                      label={`New ${section.key}`}
+                      icon={<Plus aria-hidden="true" className="size-4" />}
+                      onClick={() => setCreating(section.key)}
+                    />
                   ) : null}
                   <Button
                     variant="tertiary"
+                    aria-expanded={adding === section.key}
                     onClick={() => {
                       setChoice(null)
                       setAdding(adding === section.key ? null : section.key)
@@ -113,9 +154,45 @@ export const AssociationRail = ({
                   >
                     Add
                   </Button>
+                </>
+              ) : null
+            }
+          >
+            {searchable ? (
+              <div className="flex items-center gap-1 border-b border-divider px-3 py-2">
+                <span className="relative flex min-w-0 flex-1 items-center">
+                  <Search aria-hidden="true" className="absolute left-2 size-4 text-secondary" />
+                  <TextInput
+                    type="search"
+                    value={needle}
+                    aria-label={`Search linked ${TITLES[section.key].toLowerCase()}`}
+                    placeholder={`Search ${TITLES[section.key].toLowerCase()}`}
+                    onChange={(event) =>
+                      setNeedles({ ...needles, [section.key]: event.target.value })
+                    }
+                    className="pl-8"
+                  />
                 </span>
-              ) : null}
-            </header>
+                <label className="flex shrink-0 items-center gap-1">
+                  <ArrowDownUp aria-hidden="true" className="size-4 text-secondary" />
+                  <span className="sr-only">Sort {TITLES[section.key].toLowerCase()}</span>
+                  <Select
+                    value={sorts[section.key] ?? 'recent'}
+                    aria-label={`Sort ${TITLES[section.key].toLowerCase()}`}
+                    onChange={(event) =>
+                      setSorts({
+                        ...sorts,
+                        [section.key]: event.target.value === 'name' ? 'name' : 'recent',
+                      })
+                    }
+                    className="w-auto"
+                  >
+                    <option value="recent">Newest</option>
+                    <option value="name">A to Z</option>
+                  </Select>
+                </label>
+              </div>
+            ) : null}
 
             {adding === section.key && canLink ? (
               <div className="flex flex-col gap-2 border-b border-divider px-3 py-2">
@@ -159,16 +236,22 @@ export const AssociationRail = ({
               </div>
             ) : null}
 
-            {section.rows.length === 0 ? (
+            {rows.length === 0 ? (
               <p className="px-3 py-3 text-secondary">
-                Nothing linked yet.{' '}
-                {canWrite && canLink
-                  ? 'Use Add to connect one.'
-                  : 'A link appears here when one is made.'}
+                {section.rows.length === 0 ? (
+                  <>
+                    Nothing linked yet.{' '}
+                    {canWrite && canLink
+                      ? 'Use Add to connect one.'
+                      : 'A link appears here when one is made.'}
+                  </>
+                ) : (
+                  <>Nothing here matches “{needle}”.</>
+                )}
               </p>
             ) : (
               <ul className="flex flex-col">
-                {section.rows.map((row) => (
+                {rows.map((row) => (
                   <li
                     key={`${row.objectKey}-${row.id}`}
                     className="flex items-start justify-between gap-2 border-b border-divider px-3 py-2 last:border-0"
@@ -209,7 +292,13 @@ export const AssociationRail = ({
                 ))}
               </ul>
             )}
-          </section>
+
+            {rows.length > 0 && rows.length < section.total ? (
+              <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+                Showing {rows.length} of {section.total}.
+              </p>
+            ) : null}
+          </Card>
         )
       })}
 

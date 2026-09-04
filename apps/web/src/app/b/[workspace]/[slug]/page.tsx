@@ -15,7 +15,14 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
-import { BOOKING_COPY, bookingNextAvailable } from '~/lib/edge-copy.ts'
+import {
+  BOOKING_COPY,
+  BOOKING_LOCATIONS,
+  bookingHosts,
+  bookingNextAvailable,
+  hourIn,
+  slotBandOf,
+} from '~/lib/edge-copy.ts'
 import { bookingIcsPath, bookingPublicPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
@@ -40,14 +47,13 @@ export const generateMetadata = async ({
 }): Promise<Metadata> => {
   const { workspace, slug } = await params
   const page = await publicBookingPage(workspace, slug)
-  return { title: page ? `Book ${page.name}` : 'Book a meeting', robots: { index: false } }
-}
-
-const LOCATIONS: Record<string, string> = {
-  zoom: 'Zoom',
-  google_meet: 'Google Meet',
-  phone: 'Phone call',
-  custom: 'See the invitation',
+  // The page's own name, not "Book " plus it: pages are usually already named
+  // for the action ("Book time with me"), and prefixing produced "Book Book time
+  // with me" in the browser tab.
+  return {
+    title: page ? `${page.name} · ${page.workspaceName}` : 'Book a meeting',
+    robots: { index: false },
+  }
 }
 
 const monthKeyOf = (at: Date, timezone: string): string => dayKey(at, timezone).slice(0, 7)
@@ -187,6 +193,7 @@ const BookingPublicPage = async ({
     bookingPublicPath(workspace, slug, { tz: timezone, month: monthKey, ...changes })
 
   const days = calendarDays(monthKey, locale.firstDay)
+  const todayKey = dayKey(now, timezone)
   const fields = bookingFields(page.questions)
   const errors = parseErrors(single('err'))
 
@@ -280,6 +287,7 @@ const BookingPublicPage = async ({
                   day={day}
                   count={byDay.get(day)?.length ?? 0}
                   selected={day === selectedDay}
+                  today={day === todayKey}
                   href={link({ date: day, slot: undefined })}
                 />
               ),
@@ -300,26 +308,33 @@ const BookingPublicPage = async ({
             {daySlots.length === 0 ? (
               <p className="rawr-b-hint">{BOOKING_COPY.nothingOnDay}</p>
             ) : (
-              <div className="rawr-b-times">
-                {daySlots.map((slot) => {
-                  const iso = slot.toISOString()
-                  return (
-                    <a
-                      key={iso}
-                      className="rawr-b-slot"
-                      aria-current={iso === selectedSlot ? 'true' : undefined}
-                      href={link({ date: selectedDay, slot: iso })}
-                      rel="nofollow"
-                    >
-                      {slot.toLocaleTimeString(locale.tag, {
-                        timeZone: timezone,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </a>
-                  )
-                })}
-              </div>
+              // Named runs rather than one column of forty buttons. A band with
+              // nothing in it is not drawn, so a nine-to-five day shows two.
+              bandsOf(daySlots, timezone).map(([band, slots]) => (
+                <div key={band} className="rawr-b-band">
+                  <h3 className="rawr-b-bandname">{band}</h3>
+                  <div className="rawr-b-times">
+                    {slots.map((slot) => {
+                      const iso = slot.toISOString()
+                      return (
+                        <a
+                          key={iso}
+                          className="rawr-b-slot"
+                          aria-current={iso === selectedSlot ? 'true' : undefined}
+                          href={link({ date: selectedDay, slot: iso })}
+                          rel="nofollow"
+                        >
+                          {slot.toLocaleTimeString(locale.tag, {
+                            timeZone: timezone,
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </a>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))
             )}
 
             {selectedSlot && !slotIsStillOffered ? (
@@ -390,8 +405,9 @@ const Shell = ({
           <span className="rawr-b-title">{page.name}</span>
           <div className="rawr-b-meta">
             <span>{page.workspaceName}</span>
+            {page.hostNames.length > 0 ? <span>{bookingHosts(page.hostNames)}</span> : null}
             <span>{page.durationMinutes} minutes</span>
-            <span>{LOCATIONS[page.location] ?? page.location}</span>
+            <span>{BOOKING_LOCATIONS[page.location] ?? page.location}</span>
           </div>
           <TimezonePicker
             timezone={timezone}
@@ -409,11 +425,13 @@ const DayCell = ({
   day,
   count,
   selected,
+  today,
   href,
 }: {
   day: string
   count: number
   selected: boolean
+  today: boolean
   href: string
 }) => {
   const label = day.slice(8).replace(/^0/, '')
@@ -422,7 +440,7 @@ const DayCell = ({
     // role, and a label on an element with no role is not announced at all, so
     // the closed days used to read as a bare run of numbers.
     return (
-      <span className="rawr-b-day" data-closed>
+      <span className="rawr-b-day" data-closed {...(today ? { 'data-today': '' } : {})}>
         {label}
         <span className="rawr-b-off">, nothing open</span>
       </span>
@@ -432,6 +450,7 @@ const DayCell = ({
     <a
       className="rawr-b-day"
       data-open
+      {...(today ? { 'data-today': '' } : {})}
       aria-current={selected ? 'date' : undefined}
       aria-label={`${day}, ${count === 1 ? '1 time' : `${count} times`} open`}
       href={href}
@@ -441,6 +460,19 @@ const DayCell = ({
       <span className="rawr-b-dot" aria-hidden="true" />
     </a>
   )
+}
+
+/** The day's times, in the order they happen, split into the runs a person reads
+ *  them in. Insertion order is preserved by Map, and the slots arrive sorted. */
+const bandsOf = (slots: Date[], timezone: string): [string, Date[]][] => {
+  const bands = new Map<string, Date[]>()
+  for (const slot of slots) {
+    const band = slotBandOf(hourIn(slot, timezone))
+    const list = bands.get(band)
+    if (list) list.push(slot)
+    else bands.set(band, [slot])
+  }
+  return [...bands]
 }
 
 /** A whole month, padded to start on whichever weekday the visitor's locale

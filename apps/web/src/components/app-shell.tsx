@@ -626,9 +626,14 @@ const Shell = ({
             This is the one scrolling box on the page. */}
         <main
           aria-busy={pendingHref ? 'true' : undefined}
-          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-2 sm:p-4"
+          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-canvas p-2 sm:p-4"
         >
-          <div className="@container flex-1 min-w-0 rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
+          {/* The card is the frame and the scroller both: bounded to the window
+              so it never grows past its own border, and scrolled inside so tall
+              content stays within it. One scroller, so a page that wants to fill
+              the window (a list with a sticky header and a pager at the foot) can
+              ask for h-full and get a real height back. */}
+          <div className="@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
             {children}
           </div>
           {pendingHref ? (

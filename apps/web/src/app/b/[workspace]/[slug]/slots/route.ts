@@ -94,6 +94,8 @@ export const GET = async (
       timezone,
       name: page.name,
       organisation: page.workspaceName,
+      /** Names only, the same ones the hosted page prints above the calendar. */
+      hosts: page.hostNames,
       location: page.location,
       durationMinutes: page.durationMinutes,
       /** The questions to ask, so the embed renders the same form the hosted page

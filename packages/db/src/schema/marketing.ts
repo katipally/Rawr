@@ -99,6 +99,10 @@ export const savedView = pgTable(
     slug: text('slug').notNull(),
     kind: viewKindEnum('kind').notNull().default('table'),
     position: integer('position').notNull().default(0),
+    /** A pinned view is a tab above the list; the rest live behind "All views".
+     *  Shared rather than per-person, like position, so the tab bar somebody
+     *  describes is the tab bar the next person opens. */
+    pinned: boolean('pinned').notNull().default(false),
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     isShared: boolean('is_shared').notNull().default(false),
     filters: jsonb('filters').notNull().default([]),
@@ -110,7 +114,7 @@ export const savedView = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    index('saved_view_object_idx').on(t.workspaceId, t.objectId, t.position),
+    index('saved_view_object_idx').on(t.workspaceId, t.objectId, t.pinned.desc(), t.position),
     uniqueIndex('saved_view_slug_key').on(t.workspaceId, t.objectId, t.slug),
   ],
 )

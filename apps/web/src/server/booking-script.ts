@@ -18,7 +18,7 @@
  *  class names are shared with the server that defines them; a rename becomes a
  *  compile error instead of a silently broken embed. */
 
-import { BOOKING_COPY, formatterSource } from '~/lib/edge-copy.ts'
+import { BOOKING_COPY, BOOKING_LOCATIONS, formatterSource } from '~/lib/edge-copy.ts'
 
 export type BookingScriptConfig = {
   baseUrl: string
@@ -34,8 +34,12 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
 
   var BASE = ${JSON.stringify(config.baseUrl)};
   var STYLES = ${JSON.stringify(config.styles)};
-  var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  // The visitor's own week, not ours: Sunday first in the US, Saturday first in
+  // much of the Middle East, and the day names in their language.
+  var WEEK = weekInfoFor((navigator.languages && navigator.languages[0]) || navigator.language || 'en-US');
+  var DOW = WEEK.weekdays;
   var COPY = ${JSON.stringify(BOOKING_COPY)};
+  var LOCATIONS = ${JSON.stringify(BOOKING_LOCATIONS)};
 
   // The same formatters the hosted page and the tests use, inlined from source so
   // there is one implementation rather than a copy that drifts.
@@ -363,7 +367,10 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       if (data) {
         var meta = el('div', { class: 'rawr-b-meta' });
         if (data.organisation) meta.appendChild(el('span', null, data.organisation));
+        var withWhom = bookingHosts(data.hosts || []);
+        if (withWhom) meta.appendChild(el('span', null, withWhom));
         meta.appendChild(el('span', null, data.durationMinutes + ' minutes'));
+        if (data.location) meta.appendChild(el('span', null, LOCATIONS[data.location] || data.location));
         meta.appendChild(el('span', null, 'Times shown in ' + state.tz));
         head.appendChild(meta);
       }
@@ -395,10 +402,13 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       var left = el('div', { class: 'rawr-b-panel' });
       left.appendChild(monthBar());
 
-      var grid = el('div', { class: 'rawr-b-grid', role: 'grid' });
+      // Not role="grid": that promises rows of gridcells, and this is seven CSS
+      // columns of buttons. A grid with no rows announces as an empty grid.
+      var grid = el('div', { class: 'rawr-b-grid', role: 'group', 'aria-label': monthLabel(state.month) });
       for (var d = 0; d < 7; d++) grid.appendChild(el('div', { class: 'rawr-b-dow', 'aria-hidden': 'true' }, DOW[d]));
       var first = state.month + '-01';
-      for (var pad = 1; pad < isoWeekday(first); pad++) grid.appendChild(el('span'));
+      var pads = (isoWeekday(first) - WEEK.firstDay + 7) % 7;
+      for (var pad = 0; pad < pads; pad++) grid.appendChild(el('span'));
 
       // Day zero of the next month is the last day of this one, which is the whole
       // leap-year rule. Counted rather than walked with a Date, because a cursor
@@ -424,9 +434,22 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         if (!times.length) {
           right.appendChild(el('p', { class: 'rawr-b-hint' }, COPY.nothingOnDay));
         } else {
-          var list = el('div', { class: 'rawr-b-times' });
-          for (var t = 0; t < times.length; t++) list.appendChild(slotButton(times[t]));
-          right.appendChild(list);
+          // Named runs rather than one column of forty buttons. The slots arrive
+          // in order, so a band ends where the next one starts.
+          var band = null;
+          var list = null;
+          for (var t = 0; t < times.length; t++) {
+            var name = slotBandOf(hourIn(times[t], state.tz));
+            if (name !== band) {
+              band = name;
+              var wrap = el('div', { class: 'rawr-b-band' });
+              wrap.appendChild(el('h3', { class: 'rawr-b-bandname' }, name));
+              list = el('div', { class: 'rawr-b-times' });
+              wrap.appendChild(list);
+              right.appendChild(wrap);
+            }
+            list.appendChild(slotButton(times[t]));
+          }
         }
 
         if (state.slot) right.appendChild(questionForm(data));
@@ -508,11 +531,19 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
     }
 
     function dayCell(key, count) {
+      var isToday = key === dayKey(new Date(), state.tz);
       if (!count) {
-        return el('span', { class: 'rawr-b-day', 'data-closed': '', 'aria-label': key + ', nothing open' }, String(Number(key.slice(8))));
+        // The words are in the DOM rather than in aria-label: a span carries no
+        // role, and a label on an element with no role is not announced at all.
+        var closed = el('span', {
+          class: 'rawr-b-day', 'data-closed': '', 'data-today': isToday ? '' : null
+        }, String(Number(key.slice(8))));
+        closed.appendChild(el('span', { class: 'rawr-b-off' }, ', nothing open'));
+        return closed;
       }
       var node = el('button', {
         type: 'button', class: 'rawr-b-day', 'data-open': '',
+        'data-today': isToday ? '' : null,
         'aria-current': key === state.day ? 'date' : null,
         'aria-label': key + ', ' + count + (count === 1 ? ' time open' : ' times open')
       }, String(Number(key.slice(8))));

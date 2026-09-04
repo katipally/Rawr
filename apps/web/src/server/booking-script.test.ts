@@ -84,3 +84,32 @@ test('the configuration is escaped rather than pasted in', () => {
 test('it stays small enough to be a good guest on somebody else\'s page', () => {
   assert.equal(script.length < 40_000, true, `the widget is ${script.length} bytes`)
 })
+
+test('the week is the visitor’s, not ours: day names and the first column both follow their locale', () => {
+  // The hardcoded Monday-first English week was wrong for every visitor outside
+  // Europe, and the hosted page had already stopped doing it.
+  assert.equal(script.includes("['Mon', 'Tue'"), false)
+  assert.equal(script.includes('weekInfoFor('), true)
+  assert.equal(script.includes('navigator.language'), true)
+  assert.equal(script.includes('WEEK.firstDay'), true)
+})
+
+test('the month is a group with a name, not a grid with no rows', () => {
+  assert.equal(script.includes("role: 'grid'"), false)
+  assert.equal(script.includes("role: 'group'"), true)
+})
+
+test('a closed day says so in the DOM, because a label on a span is announced by nobody', () => {
+  assert.equal(script.includes('rawr-b-off'), true)
+  assert.equal(script.includes(", 'aria-label': key + ', nothing open'"), false)
+})
+
+test('the header says who the meeting is with and where it happens', () => {
+  assert.equal(script.includes('bookingHosts('), true)
+  assert.equal(script.includes('data.hosts'), true)
+  assert.equal(script.includes('LOCATIONS[data.location]'), true)
+})
+
+test('today is marked, so a month opens with somewhere to read from', () => {
+  assert.equal(script.includes("'data-today'"), true)
+})

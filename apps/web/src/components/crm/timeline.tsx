@@ -3,7 +3,7 @@
 import { Button, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { pageViewPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -41,6 +41,9 @@ export type TimelineProps = {
   /** Who is looking. Their own hand-logged entries can be corrected or removed; an
    *  admin can do that to anyone's. Nothing the system wrote can be touched. */
   viewer: { userId: string; role: string }
+  /** Which composer the quick-action row above asked for, from the address. The
+   *  composer lives here, so the row asks rather than carrying a second copy. */
+  openKind?: 'note' | 'call' | 'meeting' | 'email' | undefined
 }
 
 /** What a person can put on the timeline by hand, and the prompt each one needs.
@@ -80,6 +83,7 @@ export const Timeline = ({
   groups,
   canWrite,
   viewer,
+  openKind,
 }: TimelineProps) => {
   const router = useRouter()
   const toast = useToast()
@@ -92,7 +96,8 @@ export const Timeline = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState('')
-  const [kind, setKind] = useState<Loggable>('note')
+  const [kind, setKind] = useState<Loggable>(openKind ?? 'note')
+  const composer = useRef<HTMLTextAreaElement>(null)
   const [happenedOn, setHappenedOn] = useState('')
   const [posting, setPosting] = useState(false)
   const [hydrated, setHydrated] = useState(false)
@@ -106,6 +111,15 @@ export const Timeline = ({
   /** The URL wins, because a link has to open the screen it was taken from. With
    *  nothing in the URL, the last choice this person made is restored. A3. */
   // biome-ignore lint/correctness/useExhaustiveDependencies: load is rebuilt every render; listing it would refetch on every render
+  // The quick-action row is a link, so asking for a kind arrives as a new prop on
+  // the same instance. Focus follows, because a person who clicked "Log call"
+  // wants the cursor in the box, not a scrolled page they have to click into.
+  useEffect(() => {
+    if (!openKind) return
+    setKind(openKind)
+    composer.current?.focus()
+  }, [openKind])
+
   useEffect(() => {
     if (urlTypes !== null) {
       setHydrated(true)
@@ -256,6 +270,7 @@ export const Timeline = ({
             ))}
           </div>
           <TextArea
+            ref={composer}
             value={note}
             aria-label={compose.prompt}
             placeholder={compose.prompt}

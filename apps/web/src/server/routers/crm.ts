@@ -11,6 +11,7 @@ import {
   deleteTask,
   editLoggedEntry,
   deleteView,
+  duplicateView,
   dissociate,
   dryRun,
   getRecord,
@@ -22,6 +23,9 @@ import {
   mergeRecords,
   overdueNextSteps,
   readAssociations,
+  renameView,
+  reorderViews,
+  setViewPinned,
   readBoard,
   readImportRun,
   listImportRuns,
@@ -267,6 +271,22 @@ export const crmRouter = router({
         ),
       ),
 
+    rename: protectedProcedure
+      .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(80) }))
+      .mutation(({ ctx, input }) => call(() => renameView(ctx.workspace, input.id, input.name))),
+
+    duplicate: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => duplicateView(ctx.workspace, input.id))),
+
+    pin: protectedProcedure
+      .input(z.object({ id: z.uuid(), pinned: z.boolean() }))
+      .mutation(({ ctx, input }) => call(() => setViewPinned(ctx.workspace, input.id, input.pinned))),
+
+    reorder: protectedProcedure
+      .input(z.object({ object: objectKey, ids: z.array(z.uuid()).min(1).max(100) }))
+      .mutation(({ ctx, input }) => call(() => reorderViews(ctx.workspace, input.object, input.ids))),
+
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteView(ctx.workspace, input.id))),
@@ -373,8 +393,16 @@ export const crmRouter = router({
 
   associations: router({
     read: protectedProcedure
-      .input(z.object({ entity: entityRef }))
-      .query(({ ctx, input }) => call(() => readAssociations(ctx.workspace, input.entity))),
+      .input(
+        z.object({
+          entity: entityRef,
+          q: z.string().max(200).optional(),
+          sort: z.enum(['recent', 'name']).optional(),
+        }),
+      )
+      .query(({ ctx, input }) =>
+        call(() => readAssociations(ctx.workspace, input.entity, { q: input.q, sort: input.sort })),
+      ),
 
     add: protectedProcedure
       .input(z.object({ a: entityRef, b: entityRef, label: z.string().max(80).nullish() }))
