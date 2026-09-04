@@ -117,10 +117,7 @@ export const TokenList = ({
 
       <div className="rounded-panel border border-line p-4">
         <h2 className="font-medium">New token</h2>
-        <p className="text-secondary">
-          Name it after where it will live, so the right one can be revoked when that laptop or
-          that machine goes away.
-        </p>
+        <p className="text-secondary">Name it after where it will live, so it can be revoked when that machine goes.</p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <TextInput
             aria-label="Token name"
@@ -168,10 +165,8 @@ export const TokenList = ({
           </dd>
         </dl>
         <p className="mt-3 text-secondary">
-          Either way, every tool the screens have is available: records, pipeline, tasks, timeline,
-          mail threads, meetings, forms, segments, integrations and settings, each under your role.
-          A connection made through OAuth appears in the list below under the client&apos;s name
-          and is revoked the same way.
+          Every screen has a tool, under your role. An OAuth connection appears below under the
+          client&apos;s name and is revoked the same way.
         </p>
       </div>
 

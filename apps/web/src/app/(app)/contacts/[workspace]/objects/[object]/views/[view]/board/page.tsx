@@ -1,5 +1,5 @@
 import { isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
-import { cn } from '@rawr/ui'
+import { Alert, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard } from '~/components/crm/deal-board.tsx'
@@ -108,10 +108,10 @@ const BoardPage = async ({
       />
 
       {boardError ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {boardError}
           {board ? ' Showing the board by stage instead.' : ''}
-        </p>
+        </Alert>
       ) : null}
 
       {board && board.groupableFields.length > 1 ? (
@@ -181,13 +181,13 @@ const BoardPage = async ({
       />
 
       {board && board.unassigned > 0 ? (
-        <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+        <Alert tone="warning">
           {board.unassigned.toLocaleString()} deal{board.unassigned === 1 ? '' : 's'}{' '}
           {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
           {byStage
             ? 'Switch pipelines above to find them.'
             : `Filter on ${board.groupByLabel} being empty to see them.`}
-        </p>
+        </Alert>
       ) : null}
 
       {board ? (

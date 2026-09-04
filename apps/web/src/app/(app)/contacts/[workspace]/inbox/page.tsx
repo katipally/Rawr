@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listInboxThreads, listMailboxes } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -42,13 +43,11 @@ const InboxPage = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div>
-        <h1 className="text-lg font-medium">Inbox</h1>
-        <p className="text-secondary">
-          Every thread the team has stored, from every connected mailbox that is shared. Bodies are
-          kept here, so a thread outlives the mailbox that brought it in.
-        </p>
-      </div>
+      <PageHeader
+        title="Inbox"
+        lead="Every thread the team has stored, from every shared mailbox."
+        why={<p>Bodies are kept here, so a thread outlives the mailbox that brought it in.</p>}
+      />
 
       <InboxList
         workspace={workspace}

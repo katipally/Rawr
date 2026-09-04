@@ -160,7 +160,7 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
       {rows.length === 0 ? (
         <EmptyState
           title="No segments yet"
-          description="A segment is a saved query that remembers its members, so a contact entering or leaving one shows up on their timeline. Create the first one to start."
+          description="A saved query that remembers who is in it."
           action={canWrite ? <Button variant="primary" onClick={openNew}>Create segment</Button> : undefined}
         />
       ) : (

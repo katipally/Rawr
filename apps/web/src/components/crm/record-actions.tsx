@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Modal, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { ComposeDialog } from './compose-dialog.tsx'
@@ -155,10 +155,10 @@ export const RecordActions = ({
 
       <Modal open={showMerge} title={`Merge into ${displayName}`} onClose={() => setShowMerge(false)}>
         <div className="flex flex-col gap-3">
-          <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+          <Alert tone="warning">
             Merging cannot be undone. Everything on the other record moves here: its timeline, its
             links, its subscriptions and its tasks. The other record is then deleted.
-          </p>
+          </Alert>
 
           {/* Searched rather than listed: a duplicate is almost never among the
               most recently created records, which is all a capped list could offer. */}

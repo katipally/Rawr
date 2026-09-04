@@ -12,7 +12,7 @@ import {
   recentActivity,
   withWorkspaceReads,
 } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Alert, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ACTIVITY_LABELS, formatCurrency, formatDate, formatDateTime } from '~/components/crm/value.tsx'
@@ -155,9 +155,9 @@ const HomePage = async ({
       </div>
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       {session.role === 'viewer' ? (

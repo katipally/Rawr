@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Select, useToast } from '@rawr/ui'
+import { Alert, Button, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import type { ImportKind, ObjectKey } from '@rawr/db'
@@ -186,11 +186,11 @@ export const ImportWizard = ({
             nobody will trust, and four counters that happen not to add up is the
             first thing worth knowing. */}
         {finished && accounted !== totalRows ? (
-          <p role="alert" className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+          <Alert tone="warning">
             {totalRows.toLocaleString()} rows went in and {accounted.toLocaleString()} are accounted
             for. The {Math.abs(totalRows - accounted).toLocaleString()} in between are rows where
             every mapped column was empty.
-          </p>
+          </Alert>
         ) : null}
 
         {unmatchedOwners.length > 0 ? (
@@ -332,9 +332,9 @@ export const ImportWizard = ({
       ) : null}
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       <div className="flex flex-wrap gap-2">

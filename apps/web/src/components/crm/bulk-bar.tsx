@@ -37,6 +37,35 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
   const field = fields.find((candidate) => candidate.key === fieldKey)
   const noun = ids.length === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
 
+  /** Puts a bulk edit back. Not a transaction and not pretending to be one: a
+   *  record somebody else changed in between is reported by name rather than
+   *  quietly overwritten, which is the same promise the edit itself makes. */
+  const undo = async (key: string, previous: { id: string; values: Record<string, unknown> }[]) => {
+    const byValue = new Map<string, { value: unknown; ids: string[] }>()
+    for (const row of previous) {
+      const value = row.values[key] ?? null
+      const bucket = JSON.stringify(value)
+      const found = byValue.get(bucket)
+      if (found) found.ids.push(row.id)
+      else byValue.set(bucket, { value, ids: [row.id] })
+    }
+    try {
+      let restored = 0
+      for (const { value, ids: group } of byValue.values()) {
+        const result = await api.crm.records.bulkUpdate.mutate({
+          object,
+          ids: group,
+          values: { [key]: value },
+        })
+        restored += result.updated
+      }
+      toast('success', `Put back on ${restored} ${restored === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`}.`)
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
   const apply = async () => {
     if (!field) return
     setBusy(true)
@@ -49,7 +78,15 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
       })
       setFailed(result.failed)
       if (result.updated > 0) {
-        toast('success', `${field.label} changed on ${result.updated} ${result.updated === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`}.`)
+        const noun = result.updated === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
+        toast('success', `${field.label} changed on ${result.updated} ${noun}.`, {
+          label: 'Undo',
+          // Grouped by the value each record held, so putting two hundred records
+          // back costs one call per distinct old value rather than two hundred.
+          // The toast stays until it is used or dismissed, because five seconds is
+          // not long enough to notice what you just did to two hundred records.
+          run: () => undo(field.key, result.previous),
+        })
       }
       if (result.failed.length === 0) {
         setFieldKey('')

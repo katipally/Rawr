@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, Field, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { AdminField, FieldType, ObjectKey } from '@rawr/db'
@@ -492,10 +492,10 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
       {/* ----------------------------------------------------------- purge */}
       <Modal open={purging !== null} title={`Purge ${purging?.label ?? ''}`} onClose={() => setPurging(null)}>
         <div className="flex flex-col gap-3">
-          <p className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+          <Alert>
             This strips <code>{purging?.key}</code> out of every record in the workspace and removes
             the definition. It cannot be undone and there is no copy anywhere else.
-          </p>
+          </Alert>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="destructive"

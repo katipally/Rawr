@@ -2,6 +2,7 @@ import { canWrite, type Role } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavSection } from '~/components/app-shell.tsx'
+import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
 import {
   accountPath,
@@ -157,6 +158,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       >
         {children}
       </AppShell>
+      <ShortcutSheet />
     </ToastProvider>
   )
 }

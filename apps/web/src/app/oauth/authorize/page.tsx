@@ -1,3 +1,4 @@
+import { Alert } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { checkAuthorizeRequest, SCOPE_DESCRIPTION } from '~/server/mcp/oauth.ts'
 import { memberships, readSession } from '~/server/session.ts'
@@ -23,9 +24,9 @@ const AuthorizePage = async ({ searchParams }: Props) => {
   if (!checked.ok) {
     return (
       <Frame title="This connection cannot continue">
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2">
+        <Alert>
           {checked.problem}
-        </p>
+        </Alert>
         <p className="text-secondary">Go back to the assistant and start the connection again.</p>
       </Frame>
     )

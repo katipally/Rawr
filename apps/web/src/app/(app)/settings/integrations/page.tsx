@@ -1,3 +1,4 @@
+import { Alert, PageHeader } from '@rawr/ui'
 import { listSites, listUnmatchedEvents } from '@rawr/db'
 import { devIntegrationsEnabled, publicBaseUrl } from '~/lib/env.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
@@ -25,21 +26,25 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Integrations</h2>
-        <p className="text-secondary">
-          Everything Rawr talks to that is not Rawr. Credentials are encrypted with a key held outside
-          this database and are never shown again after saving. Every provider has a connection
-          test that calls it for real and reports what it said.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Integrations"
+        lead="Everything Rawr talks to that is not Rawr."
+        why={
+          <p>
+            Credentials are encrypted with a key held outside this database and are never shown
+            again after saving. Every provider has a connection test that calls it for real and
+            reports what it said.
+          </p>
+        }
+      />
 
       {devIntegrationsEnabled ? (
-        <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+        <Alert tone="warning">
           Development providers are on. Connection tests pass without a key, enrichment returns a
           fixed match, and nothing is sent to Brevo, Apollo, Clay, Slack or Google. Turn
           RAWR_DEV_INTEGRATIONS off to talk to the real services.
-        </p>
+        </Alert>
       ) : null}
 
       <IntegrationPanel

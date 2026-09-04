@@ -1,5 +1,5 @@
 import { listCollectorNotices, listSites } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -18,7 +18,7 @@ const SitesPage = async () => {
     return (
       <EmptyState
         title="Tracked sites are admin only"
-        description={`Your role (${session.role}) cannot open this page. A site key is what lets a host write into this workspace, so adding one is an admin act. Ask an admin in ${session.workspaceName}.`}
+        description={`Ask an admin in ${session.workspaceName}. A site key lets a host write into this workspace, so adding one is an admin act.`}
       />
     )
   }
@@ -29,13 +29,16 @@ const SitesPage = async () => {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="max-w-2xl">
-          <h1 className="text-lg font-medium">Tracked sites</h1>
-          <p className="text-secondary">
-            Each host that sends page views carries a site key. Nothing is collected without one,
-            and nothing is collected from anyone who has not accepted analytics cookies.
-          </p>
-        </div>
+        <PageHeader
+          title="Tracked sites"
+          lead="Each host that sends page views carries a site key."
+          why={
+            <p>
+              Nothing is collected without one, and nothing is collected from anyone who has not
+              accepted analytics cookies.
+            </p>
+          }
+        />
       </div>
 
       <SiteList

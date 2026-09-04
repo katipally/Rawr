@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { getRegistry, listViews, withWorkspaceReads } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ExportPicker, type ExportObject } from '~/components/crm/export-picker.tsx'
@@ -28,14 +29,16 @@ const ExportPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-lg font-medium">Export</h1>
-        <p className="text-secondary">
-          A CSV of exactly what a view holds: its filters, its columns, its order. The file
-          downloads in the browser, so it is capped at 50,000 rows; past that, narrow the view
-          and export twice.
-        </p>
-      </div>
+      <PageHeader
+        title="Export"
+        lead="A CSV of exactly what a view holds: its filters, its columns, its order."
+        why={
+          <p>
+            The file downloads in the browser, so it is capped at 50,000 rows. Past that, narrow the
+            view and export twice.
+          </p>
+        }
+      />
       <ExportPicker workspace={session.workspaceSlug} objects={objects} />
     </div>
   )

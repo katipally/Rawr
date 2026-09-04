@@ -1,3 +1,4 @@
+import { Alert, PageHeader } from '@rawr/ui'
 import { bodyProgress, internalDomainOf, listBlocklist, listMailboxes } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -25,21 +26,29 @@ const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?:
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Mailboxes</h2>
-        <p className="text-secondary">
-          Gmail. Rawr reads threads so they appear on the right contacts, companies and deals,
-          and keeps them here, so a thread stays readable after the mailbox that brought it in is
-          disconnected. A mailbox that granted sending is also what sequences and one-off replies
-          go out through, so the conversation stays in one place. Everything internal, personal,
-          or on an exclusion list is refused before it is stored rather than stored and hidden.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Mailboxes"
+        lead="Gmail threads on the contacts, companies and deals they are about."
+        why={
+          <>
+            <p>
+              Threads are kept here, so one stays readable after the mailbox that brought it in is
+              disconnected. A mailbox that granted sending is also what sequences and one-off
+              replies go out through, so the conversation stays in one place.
+            </p>
+            <p>
+              Everything internal, personal, or on an exclusion list is refused before it is stored
+              rather than stored and hidden.
+            </p>
+          </>
+        }
+      />
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       <MailboxList

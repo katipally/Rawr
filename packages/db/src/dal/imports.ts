@@ -318,20 +318,26 @@ const dedupeLookup = async (
 /** Every kind but `records` is mapped against a fixed shape rather than the
  *  workspace's registry: nothing on those rows becomes a column on a record, they
  *  say which record something belongs to and what it was. */
-const FIXED_SHAPE: Partial<Record<ImportKind, RegistryObject>> = {
-  activities: ACTIVITY_IMPORT,
-  properties: PROPERTY_IMPORT,
-  associations: ASSOCIATION_IMPORT,
-  lists: LIST_IMPORT,
-  submissions: SUBMISSION_IMPORT,
-}
+/** Exported because the mapper screen needs the same answer this file does. It
+ *  used to ask the registry for whatever `object_type` said, which for a shape
+ *  file is "contact", so every column offered contact fields, none of them
+ *  matched what was actually mapped, and the whole file read as "Do not import"
+ *  over a mapping that was correct in the database. */
+export const importShapeFor = (kind: ImportKind): RegistryObject | null =>
+  ({
+    activities: ACTIVITY_IMPORT,
+    properties: PROPERTY_IMPORT,
+    associations: ASSOCIATION_IMPORT,
+    lists: LIST_IMPORT,
+    submissions: SUBMISSION_IMPORT,
+  })[kind as string] ?? null
 
 const objectFor = async (
   ctx: WorkspaceContext,
   kind: ImportKind,
   objectKey: string,
 ): Promise<RegistryObject> =>
-  FIXED_SHAPE[kind] ?? objectOrThrow(await getRegistry(ctx), objectKey)
+  importShapeFor(kind) ?? objectOrThrow(await getRegistry(ctx), objectKey)
 
 const SHAPE_OF: Partial<Record<ImportKind, string>> = {
   properties: 'property',

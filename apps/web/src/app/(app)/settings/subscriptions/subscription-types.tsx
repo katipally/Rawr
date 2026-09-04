@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, Field, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { SubscriptionTypeRow } from '@rawr/db'
@@ -137,10 +137,10 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
         {removing ? (
           <div className="flex flex-col gap-3">
             {removing.unsubscribed > 0 ? (
-              <p className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+              <Alert>
                 {removing.unsubscribed.toLocaleString()} people have opted out of this. Deleting it
                 discards every one of those opt-outs, and nothing anywhere else remembers them.
-              </p>
+              </Alert>
             ) : (
               <p>Nobody has opted out of this, so no consent is discarded.</p>
             )}

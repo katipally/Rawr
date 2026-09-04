@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listLifecycleStages } from '@rawr/db'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { OrderedList } from '../ordered-list.tsx'
@@ -12,14 +13,18 @@ const LifecyclePage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Lifecycle stages</h2>
-        <p className="text-secondary">
-          The ordered list a contact or a company moves along. Order carries meaning: a lifecycle
-          runs in one direction, and moving backwards is a thing worth seeing on a timeline. Every
-          change on a record writes its own entry, forwards or backwards.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Lifecycle stages"
+        lead="The ordered list a contact or a company moves along."
+        why={
+          <p>
+            Order carries meaning: a lifecycle runs in one direction, and moving backwards is a
+            thing worth seeing on a timeline. Every change on a record writes its own entry,
+            forwards or backwards.
+          </p>
+        }
+      />
 
       <OrderedList
         rows={stages.map((stage) => ({

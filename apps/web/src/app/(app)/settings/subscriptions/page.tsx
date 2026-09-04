@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listSubscriptionTypes } from '@rawr/db'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { SubscriptionTypes } from './subscription-types.tsx'
@@ -13,14 +14,18 @@ const SubscriptionsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Subscription types</h2>
-        <p className="text-secondary">
-          What somebody can opt in or out of. Every contact holds one of three states per type,
-          and the third — never specified — is the default and a real answer, not a blank. Nobody
-          who has opted out is ever included in a list pushed to a sending tool.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Subscription types"
+        lead="What somebody can opt in or out of."
+        why={
+          <p>
+            Every contact holds one of three states per type, and the third, never specified, is
+            the default and a real answer rather than a blank. Nobody who has opted out is ever
+            included in a list pushed to a sending tool.
+          </p>
+        }
+      />
 
       <SubscriptionTypes
         rows={types}

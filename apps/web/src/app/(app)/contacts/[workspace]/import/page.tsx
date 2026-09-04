@@ -1,5 +1,5 @@
 import { canWrite, listImportRuns } from '@rawr/db'
-import { Button, EmptyState, Field, Select } from '@rawr/ui'
+import { Alert, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -25,19 +25,28 @@ const ImportPage = async ({
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
-      <div>
-        <h1 className="text-lg font-medium">Import</h1>
-        <p className="text-secondary">
-          Records fill columns on a contact, company or deal. Everything else carries the shape
-          around them: the properties records go into, the people on a deal, who is in which list,
-          and what a form was told.
-        </p>
-      </div>
+      <PageHeader
+        title="Import"
+        lead="Records, and the shape around them."
+        why={
+          <>
+            <p>
+              Records fill columns on a contact, company or deal. The other four files carry what a
+              record export leaves behind: the properties records go into, the people on a deal, who
+              is in which list, and what a form was told.
+            </p>
+            <p>
+              Order matters for a migration. Properties first, because columns cannot arrive before
+              the fields they go in; then records; then everything that points at a record.
+            </p>
+          </>
+        }
+      />
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       {allowed ? (

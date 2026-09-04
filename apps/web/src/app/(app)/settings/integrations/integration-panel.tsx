@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, Card, EmptyState, Field, IconButton, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Card, EmptyState, Field, IconButton, TextInput, cn, useToast } from '@rawr/ui'
 import { Check, Copy } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -334,10 +334,10 @@ export const IntegrationPanel = ({
                         </div>
                       </Field>
                     ) : (
-                      <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+                      <Alert tone="warning">
                         The webhook URL needs a tracked site to name this workspace.{' '}
                         <Link href={sitesPath()}>Add one under Tracked sites</Link>, then come back.
-                      </p>
+                      </Alert>
                     )
                   ) : null}
 

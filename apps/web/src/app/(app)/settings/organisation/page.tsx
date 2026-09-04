@@ -1,5 +1,5 @@
 import { listOrgWorkspaces, readOrganisation } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { orgContextFrom, readSession } from '~/server/session.ts'
 import { OrganisationPanel } from './organisation-panel.tsx'
 
@@ -24,13 +24,17 @@ const OrganisationPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Organisation</h2>
-        <p className="text-secondary">
-          {organisation.name} owns every workspace below. People, seats and access are held here, so
-          somebody who leaves loses all of them at once.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Organisation"
+        lead={`${organisation.name} owns every workspace below.`}
+        why={
+          <p>
+            People, seats and access are held here, so somebody who leaves loses all of them at
+            once.
+          </p>
+        }
+      />
 
       <OrganisationPanel
         organisation={organisation}

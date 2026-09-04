@@ -1,5 +1,5 @@
 import { listDeadLetters } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { DeadLetterTable } from './table.tsx'
 
@@ -20,13 +20,16 @@ const JobsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-lg font-medium">Failed jobs</h1>
-        <p className="text-secondary">
-          A job that exhausted its retries lands here with the payload and the real error. Replaying
-          one puts the work back in the queue; the dispatcher picks it up within a minute.
-        </p>
-      </div>
+      <PageHeader
+        title="Failed jobs"
+        lead="A job that ran out of retries, with its payload and the real error."
+        why={
+          <p>
+            Replaying one puts the work back in the queue; the dispatcher picks it up within a
+            minute.
+          </p>
+        }
+      />
       <DeadLetterTable
         rows={rows.map((row) => ({ ...row, at: row.at.toISOString() }))}
       />

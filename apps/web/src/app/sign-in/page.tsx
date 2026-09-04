@@ -1,3 +1,4 @@
+import { Alert } from '@rawr/ui'
 import { devLoginEnabled, env, googleConfigured } from '~/lib/env.ts'
 
 type Props = { searchParams: Promise<{ error?: string; next?: string }> }
@@ -23,9 +24,9 @@ const SignIn = async ({ searchParams }: Props) => {
       </div>
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-4">

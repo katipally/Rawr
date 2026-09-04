@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listMcpTokens } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -17,15 +18,17 @@ const AgentAccessPage = async () => {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="max-w-2xl">
-        <h1 className="text-lg font-medium">Agent access</h1>
-        <p className="text-secondary">
-          An assistant connects by signing in to Rawr, or with a token created here. Either way it
-          reads and changes records as you, with your role: it can do nothing you cannot do
-          yourself, every change is on the timeline under your name, and revoking the connection
-          stops it on the next call.
-        </p>
-      </div>
+      <PageHeader
+        title="Agent access"
+        lead="An assistant connects by signing in, or with a token created here."
+        why={
+          <p>
+            Either way it reads and changes records as you, with your role: it can do nothing you
+            cannot do yourself, every change is on the timeline under your name, and revoking the
+            connection stops it on the next call.
+          </p>
+        }
+      />
 
       <TokenList
         endpoint={endpoint}

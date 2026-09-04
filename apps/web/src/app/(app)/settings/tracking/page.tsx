@@ -1,5 +1,5 @@
 import { readTrackingDomain } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { TrackingPanel } from './tracking-panel.tsx'
 
@@ -21,13 +21,17 @@ const TrackingPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Tracking domain</h2>
-        <p className="text-secondary">
-          Sequence mail carries three links: a one-pixel image that counts opens, a redirect that
-          counts clicks, and an unsubscribe link. They are served from here.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Tracking domain"
+        lead="Where the links in sequence mail are served from."
+        why={
+          <p>
+            Sequence mail carries three: a one-pixel image that counts opens, a redirect that counts
+            clicks, and an unsubscribe link.
+          </p>
+        }
+      />
 
       <TrackingPanel domain={domain} />
     </div>

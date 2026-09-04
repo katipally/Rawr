@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, Field, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Field, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState } from '@rawr/db'
@@ -111,11 +111,11 @@ export const MailboxList = ({
               </Button>
             ) : null}
             {!googleReady && !devReady ? (
-              <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+              <Alert tone="warning">
                 Gmail sync needs a Google client and an internal consent screen on the{' '}
                 {internalDomain} organisation (open item 3). Until that exists, nothing here can
                 connect.
-              </p>
+              </Alert>
             ) : null}
           </div>
         )}

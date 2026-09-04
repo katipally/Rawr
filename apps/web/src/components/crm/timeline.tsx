@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
@@ -344,9 +344,9 @@ export const Timeline = ({
       </div>
 
       {error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {error}
-        </p>
+        </Alert>
       ) : null}
 
       {rows.length === 0 && hydrated ? (

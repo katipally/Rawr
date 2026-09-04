@@ -1,5 +1,5 @@
 import { isObjectKey, listRecords, parseFilters, resolveView, listViews, withWorkspaceReads } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
@@ -154,9 +154,9 @@ const ListPage = async ({
     // and scroll under its own header rather than the page scrolling past it.
     <div className="flex h-full min-h-0 flex-col gap-3">
       {search.error ? (
-        <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
+        <Alert>
           {search.error}
-        </p>
+        </Alert>
       ) : null}
 
       <div className="flex flex-wrap items-baseline gap-x-3">

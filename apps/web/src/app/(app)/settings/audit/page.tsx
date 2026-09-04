@@ -1,5 +1,5 @@
 import { auditEntities, listAudit, listMembers, listOrgAudit } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { contextFrom, orgContextFrom, readSession } from '~/server/session.ts'
 import { AuditTable } from './audit-table.tsx'
 
@@ -28,13 +28,17 @@ const AuditPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">History</h2>
-        <p className="text-secondary">
-          Every change made in {session.workspaceName}, newest first. It is append-only: the app cannot
-          rewrite or delete a line here, even with a valid session.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="History"
+        lead={`Every change made in ${session.workspaceName}, newest first.`}
+        why={
+          <p>
+            It is append-only: the app cannot rewrite or delete a line here, even with a valid
+            session.
+          </p>
+        }
+      />
 
       <AuditTable
         initial={page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))}

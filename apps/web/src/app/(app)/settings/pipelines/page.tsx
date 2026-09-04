@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listPipelines } from '@rawr/db'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { PipelineEditor } from './pipeline-editor.tsx'
@@ -14,14 +15,17 @@ const PipelinesPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Pipelines</h2>
-        <p className="text-secondary">
-          The stages a deal moves through, and the probability each one carries. Weighted totals
-          on the board are computed from these on every read, so changing a probability is
-          immediate and nothing stored goes stale.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Pipelines"
+        lead="The stages a deal moves through, and the probability each one carries."
+        why={
+          <p>
+            Weighted totals on the board are computed from these on every read, so changing a
+            probability is immediate and nothing stored goes stale.
+          </p>
+        }
+      />
 
       <PipelineEditor
         pipelines={pipelines}

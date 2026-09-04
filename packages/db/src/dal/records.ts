@@ -563,6 +563,10 @@ export type BulkUpdateResult = {
   updated: number
   /** Named per record so a partial run is legible rather than "some failed". */
   failed: { id: string; displayName: string; reason: string }[]
+  /** What each record held before, for the fields this edit touched. The one
+   *  thing an undo needs, and the one thing the caller cannot work out
+   *  afterwards. */
+  previous: { id: string; values: RecordValues }[]
 }
 
 const BULK_MAX = 500
@@ -591,15 +595,26 @@ export const bulkUpdateRecords = async (
   return withWorkspace(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
-    const result: BulkUpdateResult = { updated: 0, failed: [] }
+    const result: BulkUpdateResult = { updated: 0, failed: [], previous: [] }
 
+    const changed = Object.keys(values)
     for (const id of unique) {
       const point = `bulk_${result.updated + result.failed.length}`
       await tx.execute(sql.raw(`savepoint "${point}"`))
       try {
+        // Read before the write, so the caller can offer to put it back. One
+        // record's worth of columns, not the whole row: an undo restores what
+        // this edit touched and nothing somebody else changed in between.
+        const before = await readForWrite(tx, object, id).catch(() => undefined)
         await updateRecordIn(tx, ctx, object, id, values, null)
         await tx.execute(sql.raw(`release savepoint "${point}"`))
         result.updated += 1
+        if (before) {
+          result.previous.push({
+            id,
+            values: Object.fromEntries(changed.map((key) => [key, before[key] ?? null])),
+          })
+        }
       } catch (cause) {
         await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
         const row = await readForWrite(tx, object, id).catch(() => undefined)

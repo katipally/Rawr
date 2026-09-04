@@ -1,5 +1,5 @@
 import { canWrite, listSegments, recentActivity } from '@rawr/db'
-import { Badge, Card, EmptyState } from '@rawr/ui'
+import { Badge, Card, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -35,13 +35,16 @@ const NewsletterPage = async ({ params }: { params: Promise<{ workspace: string 
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <div>
-        <h1 className="text-lg font-medium">Newsletter</h1>
-        <p className="max-w-prose text-secondary">
-          Written and sent in Brevo. Rawr holds the audience and the opt-out: a segment is pushed
-          across as a list, and anybody who unsubscribes there is refused here from then on.
-        </p>
-      </div>
+      <PageHeader
+        title="Newsletter"
+        lead="Designed in Brevo, aimed and measured here."
+        why={
+          <p>
+            Rawr holds the audience and the opt-out: a segment is pushed across as a list, and
+            anybody who unsubscribes there is refused here from then on.
+          </p>
+        }
+      />
 
       <Card
         title="Brevo"

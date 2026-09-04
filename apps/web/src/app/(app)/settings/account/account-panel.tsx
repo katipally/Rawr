@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Select, cn, useToast } from '@rawr/ui'
+import { Button, Field, PageHeader, Select, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
@@ -136,13 +136,12 @@ export const AccountPanel = ({ me, workspaces, admins, timezone: initialTimezone
 
   return (
     <div className="flex max-w-3xl flex-col gap-4">
-      <div>
-        <h2 className="text-base font-medium">Your account</h2>
-        <p className="text-secondary">
-          What Rawr knows about you, and the things only you control. Your name and picture come
-          from Google each time you sign in.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Your account"
+        lead="What Rawr knows about you, and the things only you control."
+        why={<p>Your name and picture come from Google each time you sign in.</p>}
+      />
 
       <Panel title="Who you are">
         <div className="flex items-center gap-3">

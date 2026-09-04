@@ -1,3 +1,4 @@
+import { PageHeader } from '@rawr/ui'
 import { listInvitations, listMembers, listOrgMembers, listOrgWorkspaces } from '@rawr/db'
 import { contextFrom, orgContextFrom, readSession } from '~/server/session.ts'
 import { MemberList } from './member-list.tsx'
@@ -25,14 +26,18 @@ const MembersPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="max-w-2xl">
-        <h2 className="text-base font-medium">Members</h2>
-        <p className="text-secondary">
-          Everyone in {session.organisationName}. Anyone with a verified {session.hostedDomain} Google
-          account joins as a viewer the first time they sign in. Invite somebody to seat them with a
-          role before that; deactivating ends their access to every workspace at once.
-        </p>
-      </div>
+      <PageHeader
+        as="h2"
+        title="Members"
+        lead={`Everyone in ${session.organisationName}.`}
+        why={
+          <p>
+            Anyone with a verified {session.hostedDomain} Google account joins as a viewer the first
+            time they sign in. Invite somebody to seat them with a role before that; deactivating
+            ends their access to every workspace at once.
+          </p>
+        }
+      />
 
       <MemberList
         rows={people.map((person) => ({
