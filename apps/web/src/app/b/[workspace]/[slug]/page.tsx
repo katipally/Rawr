@@ -13,10 +13,12 @@ import {
 } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
-import { bookingPublicPath } from '~/lib/links.ts'
+import { BOOKING_COPY, bookingNextAvailable } from '~/lib/edge-copy.ts'
+import { bookingIcsPath, bookingPublicPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
-import { loadOffer } from '~/server/booking.ts'
+import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
 import { confirmHostedBooking } from './actions.ts'
 import { TimezonePicker } from './timezone-picker.tsx'
 
@@ -102,7 +104,7 @@ const BookingPublicPage = async ({
       <Shell page={summary} timezone={timezone} explicitTimezone={explicitTimezone} monthKey={monthKey} workspace={workspace} slug={slug}>
         <div className="rawr-b-note" data-good>
           <p>
-            <strong>You are booked.</strong>{' '}
+            <strong>{BOOKING_COPY.booked}</strong>{' '}
             {page.confirmationCopy ??
               'A calendar invitation is on its way to your inbox, with the joining details and links to move or cancel the meeting.'}
           </p>
@@ -120,13 +122,20 @@ const BookingPublicPage = async ({
             </p>
           ) : null}
           {single('w') ? <p style={{ marginBlockStart: '0.5rem' }}>{single('w')}</p> : null}
+          {/* Google invites the mailbox they gave us, which is not always the
+              calendar they keep. This is the meeting as a file for the one they do. */}
           {single('r') ? (
             <p style={{ marginBlockStart: '0.5rem' }}>
-              <a href={`/b/manage/reschedule/${single('r')}`}>Move this meeting</a>
+              <a href={bookingIcsPath(single('r') as string)}>{BOOKING_COPY.addToCalendar}</a>
+            </p>
+          ) : null}
+          {single('r') ? (
+            <p style={{ marginBlockStart: '0.5rem' }}>
+              <a href={`/b/manage/reschedule/${single('r')}`}>{BOOKING_COPY.reschedule}</a>
               {single('c') ? (
                 <>
                   {' · '}
-                  <a href={`/b/manage/cancel/${single('c')}`}>Cancel it</a>
+                  <a href={`/b/manage/cancel/${single('c')}`}>{BOOKING_COPY.cancel}</a>
                 </>
               ) : null}
             </p>
@@ -150,6 +159,12 @@ const BookingPublicPage = async ({
   const from = monthStart(monthKey, timezone)
   const to = monthStart(nextMonthKey(monthKey, 1), timezone)
   const offer = await loadOffer(page, { from, to, now })
+
+  // Only when the month is genuinely empty and availability was actually
+  // established: "nothing until December" is a lie when the truth is that no
+  // calendar could be read.
+  const nextOpen =
+    offer.slots.length === 0 && !offer.unavailable ? await nextAvailableAfter(page, to) : null
 
   // Grouped by the visitor's own calendar date, because that is the date they are
   // clicking on. A 23:30 slot in Los Angeles is the next day in Jakarta, and the
@@ -189,8 +204,36 @@ const BookingPublicPage = async ({
         </div>
       ) : offer.slots.length === 0 ? (
         <div className="rawr-b-note">
-          Nothing is open in {monthLabel(monthKey, locale.tag)}. Try the next month, or a later
-          one.
+          {nextOpen ? (
+            <>
+              <p>
+                {bookingNextAvailable(
+                  nextOpen.toLocaleDateString(locale.tag, {
+                    timeZone: timezone,
+                    weekday: 'long',
+                    day: 'numeric',
+                    month: 'long',
+                  }),
+                )}
+              </p>
+              {/* One click rather than several: the month and the day the times
+                  are actually on, not just the direction to walk in. */}
+              <a
+                className="rawr-b-cta"
+                style={{ display: 'inline-block', marginBlockStart: '0.5rem', textDecoration: 'none' }}
+                href={bookingPublicPath(workspace, slug, {
+                  tz: timezone,
+                  month: dayKey(nextOpen, timezone).slice(0, 7),
+                  date: dayKey(nextOpen, timezone),
+                })}
+                rel="nofollow"
+              >
+                {BOOKING_COPY.jumpToNext}
+              </a>
+            </>
+          ) : (
+            BOOKING_COPY.nothingAtAll
+          )}
         </div>
       ) : null}
 
@@ -255,7 +298,7 @@ const BookingPublicPage = async ({
             </h2>
 
             {daySlots.length === 0 ? (
-              <p className="rawr-b-hint">Nothing open on this day. Pick another.</p>
+              <p className="rawr-b-hint">{BOOKING_COPY.nothingOnDay}</p>
             ) : (
               <div className="rawr-b-times">
                 {daySlots.map((slot) => {
@@ -298,9 +341,9 @@ const BookingPublicPage = async ({
                   <QuestionInput key={field.key} field={field} error={errors[field.key]} />
                 ))}
 
-                <button type="submit" className="rawr-b-cta">
+                <PendingButton className="rawr-b-cta" pendingLabel={BOOKING_COPY.booking}>
                   Confirm {page.durationMinutes} minutes
-                </button>
+                </PendingButton>
                 <p className="rawr-b-hint">
                   Times shown in {timezone}. You will get a calendar invitation with the joining
                   details and a link to move or cancel.
@@ -309,7 +352,7 @@ const BookingPublicPage = async ({
             ) : null}
           </div>
         ) : offer.slots.length > 0 ? (
-          <p className="rawr-b-hint">Pick a day to see the times that are open.</p>
+          <p className="rawr-b-hint">{BOOKING_COPY.pickDay}</p>
         ) : null}
       </div>
     </Shell>

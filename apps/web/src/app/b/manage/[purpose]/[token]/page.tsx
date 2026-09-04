@@ -7,7 +7,10 @@ import {
 } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
+import { BOOKING_COPY } from '~/lib/edge-copy.ts'
+import { bookingIcsPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
 import { cancelBookingAction, rescheduleBookingAction } from './actions.ts'
@@ -93,6 +96,11 @@ const ManageBookingPage = async ({
           <a href={booking.conferenceUrl}>Joining link</a>
         </p>
       ) : null}
+      {booking.state === 'confirmed' ? (
+        <p style={{ marginBlockStart: '0.5rem' }}>
+          <a href={bookingIcsPath(booking.rescheduleToken)}>{BOOKING_COPY.addToCalendar}</a>
+        </p>
+      ) : null}
     </div>
   )
 
@@ -137,9 +145,9 @@ const ManageBookingPage = async ({
               <label htmlFor="reason">Anything you want to pass on? (optional)</label>
               <input id="reason" name="reason" type="text" maxLength={500} />
             </div>
-            <button type="submit" className="rawr-b-cta">
+            <PendingButton className="rawr-b-cta" pendingLabel={BOOKING_COPY.cancelling}>
               Cancel this meeting
-            </button>
+            </PendingButton>
             <p className="rawr-b-hint">
               Prefer a different time?{' '}
               <a href={`/b/manage/reschedule/${booking.rescheduleToken}`}>Move it instead</a>.
@@ -250,9 +258,9 @@ const ManageBookingPage = async ({
             </fieldset>
           ))}
 
-          <button type="submit" className="rawr-b-cta">
+          <PendingButton className="rawr-b-cta" pendingLabel={BOOKING_COPY.moving}>
             Move my meeting
-          </button>
+          </PendingButton>
           <p className="rawr-b-hint">
             Would rather not meet at all? <a href={`/b/manage/cancel/${booking.cancelToken}`}>Cancel</a>.
           </p>

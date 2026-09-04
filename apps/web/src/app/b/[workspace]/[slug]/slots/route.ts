@@ -8,7 +8,7 @@ import {
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { CORS_HEADERS, clientIp, rateLimit } from '~/server/edge.ts'
-import { loadOffer } from '~/server/booking.ts'
+import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
 
 /** GET /b/:workspace/:slug/slots?month=YYYY-MM&tz=Area/City
  *
@@ -81,9 +81,16 @@ export const GET = async (
 
   const offer = await loadOffer(page, { from, to, now })
 
+  // An empty month is the one moment somebody needs to be told where to click.
+  // Only when availability was actually established: "nothing until December" is a
+  // lie when the truth is that no calendar could be read.
+  const nextAvailable =
+    offer.slots.length === 0 && !offer.unavailable ? await nextAvailableAfter(page, to) : null
+
   return NextResponse.json(
     {
       month: monthKey,
+      nextAvailable: nextAvailable ? nextAvailable.toISOString() : null,
       timezone,
       name: page.name,
       organisation: page.workspaceName,

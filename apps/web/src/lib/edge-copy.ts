@@ -44,6 +44,10 @@ export const BOOKING_COPY = {
   addToCalendar: 'Add to your calendar',
   reschedule: 'Move this meeting',
   cancel: 'Cancel it',
+  /** The manage page, where both actions call a calendar provider and the wait is
+   *  long enough that a second click is the natural thing to do. */
+  moving: 'Moving…',
+  cancelling: 'Cancelling…',
 } as const
 
 // ---------------------------------------------------------------- formatters

@@ -112,6 +112,33 @@ export const loadOffer = async (
   }
 }
 
+/** The first open time after a month that had none.
+ *
+ *  A month view with an empty grid tells somebody nothing about whether to click
+ *  Later once or six times, and most give up rather than find out. This answers
+ *  the question they were about to ask by hand.
+ *
+ *  Scanned in one window rather than a month at a time: free-busy is one call per
+ *  host either way, and three sequential calls would be three times the wait for
+ *  the same answer. Bounded, because a page whose hosts are booked solid must not
+ *  turn one empty month into an unbounded search.
+ *
+ *  Called only when a month came back empty, so the usual path never pays for it. */
+export const nextAvailableAfter = async (
+  page: BookingPageConfig,
+  after: Date,
+  horizonDays = 90,
+): Promise<Date | null> => {
+  const now = new Date()
+  const from = after.getTime() > now.getTime() ? after : now
+  const offer = await loadOffer(page, {
+    from,
+    to: new Date(from.getTime() + horizonDays * ONE_DAY),
+    now,
+  })
+  return offer.slots[0]?.startsAt ?? null
+}
+
 // ---------------------------------------------------------------------------
 // Confirming
 // ---------------------------------------------------------------------------

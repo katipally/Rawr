@@ -1,8 +1,19 @@
 'use client'
 
 import { isVisible, type FormField, type FormSettings } from '@rawr/db/forms'
+import { Button } from '@rawr/ui'
 import { useState } from 'react'
+import { FORM_COPY, formStep } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
+
+type PreviewState = 'form' | 'sending' | 'sent' | 'failed'
+
+const STATES: [PreviewState, string][] = [
+  ['form', 'Form'],
+  ['sending', 'Sending'],
+  ['sent', 'Sent'],
+  ['failed', 'Could not send'],
+]
 
 /** The preview renders the real embed markup and the real embed stylesheet, not
  *  an approximation built out of the app's own primitives. What a marketer signs
@@ -22,6 +33,7 @@ export const FormPreview = ({
   const [answers, setAnswers] = useState<Record<string, unknown>>({})
   const [step, setStep] = useState(0)
   const [narrow, setNarrow] = useState(false)
+  const [shown, setShown] = useState<PreviewState>('form')
 
   const steps = Math.max(1, ...fields.map((field) => (field.step ?? 0) + 1))
   const current = Math.min(step, steps - 1)
@@ -40,7 +52,7 @@ export const FormPreview = ({
         </button>
         {steps > 1 ? (
           <span className="ml-auto text-xs text-secondary">
-            Step {current + 1} of {steps}
+            {formStep(current + 1, steps)}
             <button
               type="button"
               className="ml-2 text-link"
@@ -50,6 +62,22 @@ export const FormPreview = ({
             </button>
           </span>
         ) : null}
+      </div>
+
+      {/* The three moments a visitor sees that a marketer otherwise never does,
+          because the preview deliberately cannot submit. Signing off the form
+          without ever seeing what its failure says is how bad failure copy ships. */}
+      <div className="flex flex-wrap gap-1">
+        {STATES.map(([value, label]) => (
+          <Button
+            key={value}
+            variant={shown === value ? 'secondary' : 'tertiary'}
+            aria-pressed={shown === value}
+            onClick={() => setShown(value)}
+          >
+            {label}
+          </Button>
+        ))}
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: EMBED_STYLES }} />
@@ -67,24 +95,46 @@ export const FormPreview = ({
         style={{ background: '#ffffff', ...(narrow ? { maxWidth: '320px' } : {}) }}
       >
         <div data-rawr-form>
-          <div className="rawr-form">
-            {steps > 1 ? <div className="rawr-progress">Step {current + 1} of {steps}</div> : null}
-            <div className="rawr-step">
-              {onThisStep.map((field) => (
-                <PreviewField
-                  key={field.key}
-                  field={field}
-                  hidden={!isVisible(field, answers)}
-                  onChange={(value) => setAnswers((all) => ({ ...all, [field.key]: value }))}
-                />
-              ))}
+          {shown === 'sent' ? (
+            <div className="rawr-done" role="status">
+              <p className="rawr-done-title">{settings.successValue}</p>
             </div>
-            <div className="rawr-actions">
-              <button type="button" className="rawr-submit" disabled>
-                {settings.submitLabel}
-              </button>
+          ) : (
+            <div className="rawr-form">
+              {steps > 1 ? (
+                <div className="rawr-progress">
+                  <span className="rawr-progress-label">{formStep(current + 1, steps)}</span>
+                  <div className="rawr-progress-track">
+                    <div
+                      className="rawr-progress-fill"
+                      style={{ width: `${((current + 1) / steps) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ) : null}
+              <div className="rawr-step">
+                {onThisStep.map((field) => (
+                  <PreviewField
+                    key={field.key}
+                    field={field}
+                    hidden={!isVisible(field, answers)}
+                    onChange={(value) => setAnswers((all) => ({ ...all, [field.key]: value }))}
+                  />
+                ))}
+              </div>
+              {shown === 'failed' ? <div className="rawr-status">{FORM_COPY.failed}</div> : null}
+              <div className="rawr-actions">
+                <button type="button" className="rawr-submit" disabled aria-busy={shown === 'sending'}>
+                  {shown === 'sending' ? FORM_COPY.sending : settings.submitLabel}
+                </button>
+                {shown === 'failed' ? (
+                  <button type="button" className="rawr-retry" disabled>
+                    {FORM_COPY.retry}
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

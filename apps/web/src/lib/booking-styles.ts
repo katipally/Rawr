@@ -95,6 +95,23 @@ export const BOOKING_STYLES = `
 .rawr-b-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--_focus); }
 .rawr-b-day[aria-current='date'] .rawr-b-dot { background: #fff; }
 
+/* A cell the size of a day cell, while the month is being read. Same height, so
+   nothing below it moves when the real grid lands. */
+.rawr-b-skel {
+  min-block-size: 2.75rem;
+  border-radius: var(--_radius);
+  background: var(--_border);
+  opacity: 0.35;
+  animation: rawr-b-pulse 1.4s ease-in-out infinite;
+}
+@keyframes rawr-b-pulse { 50% { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .rawr-b-skel { animation: none; } }
+
+/* The hold countdown. Reserved whether or not it has anything to say, so the
+   button under it does not jump the moment a slot is picked. */
+.rawr-b-hold { min-block-size: 1.125rem; }
+.rawr-b-hold[data-bad] { color: var(--_error); }
+
 /* Times: as many columns as fit, never a fixed count. */
 .rawr-b-times { display: grid; gap: 0.375rem; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); }
 .rawr-b-slot {
