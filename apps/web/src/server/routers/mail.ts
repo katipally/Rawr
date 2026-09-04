@@ -16,6 +16,7 @@ import { z } from 'zod'
 import { devGmailEnabled } from '~/lib/env.ts'
 import { call } from '../errors.ts'
 import { hydrateMailboxBodies, syncMailbox } from '../gmail.ts'
+import { compose } from '../sequences/compose.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 /** Reading is open to anybody signed in, because a thread on a record is the
@@ -127,6 +128,21 @@ export const mailRouter = router({
         .optional(),
     )
     .query(({ ctx, input }) => call(() => listInboxThreads(ctx.workspace, input ?? {}))),
+
+  /** One email, by hand, from the caller's own mailbox. No pixel and no rewritten
+   *  links: a person writing to one person is correspondence, not a campaign. */
+  compose: protectedProcedure
+    .input(
+      z.object({
+        mailboxId: z.uuid(),
+        to: z.string().trim().email(),
+        subject: z.string().trim().min(1).max(300),
+        text: z.string().max(100_000),
+        threadId: z.uuid().nullable().optional(),
+        contactId: z.uuid().nullable().optional(),
+      }),
+    )
+    .mutation(({ ctx, input }) => call(() => compose(ctx.workspace, input))),
 
   /** Marks a thread read up to now, for the caller alone. A separate call, so a
    *  background refresh cannot silently clear somebody's unread count. */

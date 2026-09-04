@@ -3,6 +3,7 @@
 import { Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
+import { ComposeDialog } from './compose-dialog.tsx'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
@@ -41,6 +42,7 @@ export const RecordActions = ({
   const [showMerge, setShowMerge] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [showEnroll, setShowEnroll] = useState(false)
+  const [showCompose, setShowCompose] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [other, setOther] = useState<PickedRecord | null>(null)
   const absorbedId = other?.id ?? ''
@@ -112,16 +114,28 @@ export const RecordActions = ({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {/* Only a contact can be enrolled: a sequence sends to a person. */}
-      {object === 'contact' ? (
-        <Button variant="primary" onClick={() => setShowEnroll(true)}>
-          Add to a sequence
+      {/* Only a contact can be written to or enrolled: both send to a person. */}
+      {object === 'contact' && typeof values.email === 'string' && values.email ? (
+        <Button variant="primary" onClick={() => setShowCompose(true)}>
+          Email
         </Button>
+      ) : null}
+      {object === 'contact' ? (
+        <Button onClick={() => setShowEnroll(true)}>Add to a sequence</Button>
       ) : null}
       <Button onClick={() => setShowMerge(true)}>Merge</Button>
       <Button variant="destructive" onClick={() => setShowDelete(true)}>
         Delete
       </Button>
+
+      {showCompose && typeof values.email === 'string' ? (
+        <ComposeDialog
+          to={values.email}
+          contactId={recordId}
+          onClose={() => setShowCompose(false)}
+          onSent={() => router.refresh()}
+        />
+      ) : null}
 
       {showEnroll ? (
         <EnrollDialog

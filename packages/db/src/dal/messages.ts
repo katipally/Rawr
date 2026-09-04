@@ -150,6 +150,9 @@ export type MailboxTokens = {
   historyId: string | null
   backfillCursor: string | null
   backfillDone: boolean
+  /** Whether this grant may send, so a caller about to send can say why not
+   *  before it builds a message nobody can put on the wire. */
+  canSend: boolean
 }
 
 /** Decrypted only here, only for a sync run. */
@@ -171,6 +174,7 @@ export const readMailbox = async (
       historyId: row.historyId,
       backfillCursor: row.backfillCursor,
       backfillDone: row.backfillDone,
+      canSend: row.canSend,
     }
   })
 

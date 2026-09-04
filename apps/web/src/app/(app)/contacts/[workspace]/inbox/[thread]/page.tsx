@@ -3,6 +3,7 @@ import { Badge, Breadcrumb, Card } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { MessageView } from '~/components/crm/message-view.tsx'
+import { ReplyButton } from './reply.tsx'
 import { ThreadRead } from './thread-read.tsx'
 import { inboxPath, recordPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -28,17 +29,28 @@ const ThreadPage = async ({ params }: { params: Promise<{ workspace: string; thr
     }
   }
 
+  // Who a reply goes to: whoever sent the newest inbound message, falling back to
+  // whoever the newest outbound one was addressed to.
+  const newest = found.messages[found.messages.length - 1]
+  const replyTo =
+    newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : (newest?.toAddrs[0] ?? null)
+
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <ThreadRead threadId={threadId} />
 
       <Breadcrumb items={[{ label: 'Inbox', href: inboxPath(workspace) }, { label: found.thread.subject ?? '(no subject)' }]} />
 
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h1 className="min-w-0 text-lg font-medium">{found.thread.subject ?? '(no subject)'}</h1>
-        <Badge>
-          {found.thread.messageCount} message{found.thread.messageCount === 1 ? '' : 's'}
-        </Badge>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h1 className="min-w-0 text-lg font-medium">{found.thread.subject ?? '(no subject)'}</h1>
+          <Badge>
+            {found.thread.messageCount} message{found.thread.messageCount === 1 ? '' : 's'}
+          </Badge>
+        </div>
+        {replyTo ? (
+          <ReplyButton threadId={threadId} to={replyTo} subject={found.thread.subject} />
+        ) : null}
       </div>
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
