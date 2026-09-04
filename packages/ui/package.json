@@ -7,14 +7,20 @@
     ".": "./src/index.ts",
     "./tokens.css": "./src/tokens.css"
   },
-  "scripts": { "typecheck": "tsc --noEmit" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"src/**/*.test.ts\""
+  },
   "dependencies": {
     "clsx": "catalog:",
     "lucide-react": "catalog:",
     "tailwind-merge": "catalog:"
   },
-  "peerDependencies": { "react": "catalog:" },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
   "devDependencies": {
+    "@types/node": "catalog:",
     "@types/react": "catalog:",
     "typescript": "catalog:"
   }

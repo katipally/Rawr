@@ -2,7 +2,8 @@
 
 import { Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -48,6 +49,14 @@ export const ListToolbar = ({
   const [showFilters, setShowFilters] = useState(false)
   const [showSave, setShowSave] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  // The + in the top bar links here with ?new=1 rather than carrying its own copy
+  // of the create form, so there is one create dialog per object and it always
+  // knows the object's real fields.
+  const query = useSearchParams()
+  const askedToCreate = query.get('new') === '1'
+  useEffect(() => {
+    if (askedToCreate && canWrite) setShowCreate(true)
+  }, [askedToCreate, canWrite])
   const [viewName, setViewName] = useState('')
   const [shared, setShared] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -184,7 +193,11 @@ export const ListToolbar = ({
           object={object}
           objectLabel={objectLabel}
           fields={createFields}
-          onClose={() => setShowCreate(false)}
+          onClose={() => {
+            setShowCreate(false)
+            // Drop ?new=1 so a refresh, or a step back, does not reopen it.
+            if (askedToCreate) navigate(objectView(workspace, object, view, kind, params))
+          }}
         />
       ) : null}
     </div>

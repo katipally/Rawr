@@ -46,6 +46,8 @@
   --rawr-error-subtle: #fdeaeb;
   --rawr-warning: #8a6e3c;
   --rawr-warning-subtle: #fef8f0;
+  --rawr-info: #3b5a9a;
+  --rawr-info-subtle: #eef3fc;
 
   --rawr-scrim: rgb(51 71 91 / 0.4);
 
@@ -76,70 +78,37 @@
   --rawr-radius: 3px;
   --rawr-radius-panel: 6px;
 
+  /* The frame. HubSpot's rail runs the full height with the bar beside it, so
+     both measurements are shared: the rail sets the bar's left edge and the bar
+     sets where a flyout may start. */
+  --rawr-topbar-height: 3rem;
+  --rawr-rail-width: 3.25rem;
+  --rawr-rail-width-expanded: 13rem;
+
+  /* Stacking order, in one place. These used to be literals spread across the
+     shell, the overlays and the toast host, where a new layer had to guess. */
+  --rawr-z-rail: 30;
+  --rawr-z-topbar: 40;
+  --rawr-z-flyout: 45;
+  --rawr-z-overlay: 50;
+  --rawr-z-toast: 60;
+
   --rawr-duration-fast: 150ms;
   --rawr-duration-base: 200ms;
   --rawr-duration-slow: 300ms;
   --rawr-easing: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* System preference. Guarded so an explicit light choice always wins. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    /* A slate ladder, not one navy. Each background step is ~6-9 points of CIE
-       lightness apart, which is what makes a card read as a card without leaning
-       on its border. The old set spanned five tokens inside a 5% luminance band
-       and looked like a single colour. */
-    --rawr-canvas: #131c28;
-    --rawr-surface: #222d3a;
-    --rawr-surface-raised: #344151;
-    --rawr-fill: #2f3a49;
-    --rawr-fill-hover: #3b4858;
-    --rawr-disabled: #2a3441;
-
-    --rawr-text: #eaeef4;
-    --rawr-text-secondary: #acb7c5;
-    --rawr-text-inverse: #131c28;
-
-    --rawr-border: #4e5d71;
-    --rawr-divider: #3c4857;
-    --rawr-border-interactive: #7fd1de;
-    --rawr-border-pressed: #6c7e95;
-
-    /* Lightened off the light-mode hues until each clears 4.5:1 on every one of
-       the five backgrounds above, because these are text colours here. */
-    --rawr-link: #7fd1de;
-    --rawr-accent: #57c3d3;
-    --rawr-accent-subtle: #1b4757;
-    --rawr-cta: #bc5a42;
-    --rawr-cta-hover: #a44f39;
-    --rawr-cta-subtle: #533e41;
-    --rawr-success: #2fc9b6;
-    --rawr-success-subtle: #1b4d52;
-    --rawr-error: #f79b9f;
-    --rawr-error-subtle: #503641;
-    --rawr-warning: #f5c26b;
-    --rawr-warning-subtle: #504e45;
-
-    /* Black at 30% over a dark canvas is nearly invisible, so the scrim is its own
-       token rather than a hardcoded bg-black/30 in each overlay. */
-    --rawr-scrim: rgb(0 0 0 / 0.65);
-
-    --rawr-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.5);
-    --rawr-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.65);
-  }
-}
-
-/* Explicit choice. Repeated rather than nested so the toggle wins in both
-   directions, including on a system set to the opposite. */
+/* One dark block. `ThemeScript` resolves `system` to an explicit `data-theme`
+   before the first paint and follows the OS while the stored preference is
+   `system`, so the media query that used to duplicate every value below is not
+   needed and cannot drift from it. */
 :root[data-theme='dark'] {
   color-scheme: dark;
 
   /* A slate ladder, not one navy. Each background step is ~6-9 points of CIE
      lightness apart, which is what makes a card read as a card without leaning
-     on its border. The old set spanned five tokens inside a 5% luminance band
-     and looked like a single colour. */
+     on its border. */
   --rawr-canvas: #131c28;
   --rawr-surface: #222d3a;
   --rawr-surface-raised: #344151;
@@ -170,6 +139,8 @@
   --rawr-error-subtle: #503641;
   --rawr-warning: #f5c26b;
   --rawr-warning-subtle: #504e45;
+  --rawr-info: #8fb8f0;
+  --rawr-info-subtle: #24374f;
 
   /* Black at 30% over a dark canvas is nearly invisible, so the scrim is its own
      token rather than a hardcoded bg-black/30 in each overlay. */

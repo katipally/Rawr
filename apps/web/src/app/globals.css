@@ -37,6 +37,8 @@
   --color-error-subtle: var(--rawr-error-subtle);
   --color-warning: var(--rawr-warning);
   --color-warning-subtle: var(--rawr-warning-subtle);
+  --color-info: var(--rawr-info);
+  --color-info-subtle: var(--rawr-info-subtle);
 
   --color-scrim: var(--rawr-scrim);
 
@@ -64,6 +66,15 @@
   --shadow-panel: var(--rawr-shadow-panel);
   --shadow-overlay: var(--rawr-shadow-overlay);
   --spacing-row: var(--rawr-row-height);
+  --spacing-topbar: var(--rawr-topbar-height);
+  --spacing-rail: var(--rawr-rail-width);
+  --spacing-rail-open: var(--rawr-rail-width-expanded);
+
+  --z-index-rail: var(--rawr-z-rail);
+  --z-index-topbar: var(--rawr-z-topbar);
+  --z-index-flyout: var(--rawr-z-flyout);
+  --z-index-overlay: var(--rawr-z-overlay);
+  --z-index-toast: var(--rawr-z-toast);
 }
 
 @layer base {

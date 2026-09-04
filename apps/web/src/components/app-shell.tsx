@@ -1,22 +1,30 @@
 'use client'
 
 import {
+  Bell,
+  Building2,
+  ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
+  CircleHelp,
   Contact,
-  Database,
-  Home,
-  Inbox,
+  Handshake,
+  ListChecks,
+  LogOut,
   PanelLeft,
+  Plus,
   Settings,
-  type LucideIcon,
+  UserRound,
+  X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { cn, Spinner } from '@rawr/ui'
+import { Avatar, cn, DropdownMenu, IconButton, Spinner, type MenuGroup } from '@rawr/ui'
+import { SECTION_ICONS, type IconKey } from './icons.ts'
 import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
-import { ThemeToggle } from './theme.tsx'
+import { NotificationBell } from './notifications.tsx'
+import { THEMES, useTheme } from './theme.tsx'
 
 export type NavItem = {
   href: string
@@ -26,6 +34,10 @@ export type NavItem = {
   match?: string
 }
 
+/** A named run of items inside a section's flyout. HubSpot heads each run, which
+ *  is what keeps a ten-item menu readable. */
+export type NavGroup = { label?: string; items: NavItem[] }
+
 /** A section is one icon on the rail. With groups it opens a flyout listing them;
  *  with only a href it is a plain link, which is what Home is. */
 export type NavSection = {
@@ -33,21 +45,12 @@ export type NavSection = {
   label: string
   icon: IconKey
   href?: string
-  groups?: NavItem[][]
+  groups?: NavGroup[]
 }
 
-/** Icons cross the server/client boundary as names. A component reference is
- *  not serialisable, so the layout names the icon and the rail resolves it. */
-export type IconKey = 'home' | 'crm' | 'capture' | 'data'
+export type WorkspaceOption = { slug: string; name: string; organisation?: string }
 
-const ICONS: Record<IconKey, LucideIcon> = {
-  home: Home,
-  crm: Contact,
-  capture: Inbox,
-  data: Database,
-}
-
-export type WorkspaceOption = { slug: string; name: string }
+export type CreateOption = { key: string; label: string; href: string }
 
 export type AppShellProps = {
   workspaceName: string
@@ -59,9 +62,13 @@ export type AppShellProps = {
   /** Built by the layout from the session's workspace, because every CRM address
    *  carries its workspace and a hardcoded list could not. */
   nav: NavSection[]
+  /** What the + button offers. Addresses, so the menu needs no client data. */
+  create: CreateOption[]
   settingsHref: string
   /** The signed-in person's own screen, behind their name in the top bar. */
   accountHref: string
+  /** Where "Back" leaves settings when nothing else has been visited. */
+  homeHref: string
   /** The command palette, rendered by the layout so the shell needs no data. */
   search?: ReactNode
   children: ReactNode
@@ -71,6 +78,13 @@ const RAIL_KEY = 'rawr.rail.expanded'
 /** How long the pointer may be between the rail and its flyout before the flyout
  *  closes. Long enough to cross the gap diagonally, short enough not to linger. */
 const CLOSE_DELAY_MS = 160
+
+const CREATE_ICONS: Record<string, typeof Contact> = {
+  contact: Contact,
+  company: Building2,
+  deal: Handshake,
+  task: ListChecks,
+}
 
 const read = (key: string): string | null => {
   try {
@@ -89,10 +103,11 @@ const write = (key: string, value: string): void => {
   }
 }
 
-/** HubSpot's rail: a navy strip of icons, collapsed by default, that opens a
- *  flyout of links when an icon is hovered or focused, and pins open to icons
- *  plus labels when asked. Below the sidebar breakpoint the same sections render
- *  as a sheet with inline lists, because hover does not exist on a phone. */
+/** HubSpot's frame: a navy rail down the full height with the wordmark on top, the
+ *  top bar starting to its right, and the page itself a white card on the canvas.
+ *  The rail opens a flyout of grouped links on hover or focus and pins open to
+ *  icons plus labels when asked. Below the sidebar breakpoint the same sections
+ *  render as a sheet, because hover does not exist on a phone. */
 export const AppShell = (props: AppShellProps) => (
   <NavigationProvider>
     <Shell {...props} />
@@ -106,8 +121,10 @@ const Shell = ({
   email,
   role,
   nav,
+  create,
   settingsHref,
   accountHref,
+  homeHref,
   search,
   children,
 }: AppShellProps) => {
@@ -123,6 +140,15 @@ const Shell = ({
   const [unfolded, setUnfolded] = useState<string[]>([])
   const closeTimer = useRef<number | null>(null)
   const railRef = useRef<HTMLElement>(null)
+  const [theme, setTheme] = useTheme()
+
+  const inSettings = here.startsWith('/settings')
+  /** The last page outside settings, so Back returns where the person came from
+   *  rather than always to Home. */
+  const cameFrom = useRef(homeHref)
+  useEffect(() => {
+    if (!pathname.startsWith('/settings')) cameFrom.current = pathname
+  }, [pathname])
 
   useEffect(() => setExpanded(read(RAIL_KEY) === '1'), [])
 
@@ -164,9 +190,8 @@ const Shell = ({
   const sectionIsCurrent = (section: NavSection) =>
     section.href
       ? here.startsWith(section.href)
-      : (section.groups ?? []).some((group) => group.some(isCurrent))
+      : (section.groups ?? []).some((group) => group.items.some(isCurrent))
 
-  const onSettings = here.startsWith(settingsHref.split('/').slice(0, 2).join('/'))
   const open = flyout ? nav.find((section) => section.key === flyout) : null
   /** The flyout sits level with its icon; measured on open so it follows the
    *  rail whether collapsed or expanded, and at any zoom. */
@@ -182,28 +207,32 @@ const Shell = ({
 
   const itemLinks = (section: NavSection, dense: boolean) =>
     (section.groups ?? []).map((group, index) => (
-      <ul
-        key={index}
-        className={cn('flex flex-col', index > 0 && 'mt-1 border-t border-nav-active/60 pt-1')}
-      >
-        {group.map((item) => (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              aria-current={isCurrent(item) ? 'page' : undefined}
-              className={cn(
-                'block border-l-2 no-underline',
-                dense ? 'py-1.5 pr-3 pl-3' : 'py-2 pr-4 pl-4',
-                isCurrent(item)
-                  ? 'border-nav-accent bg-nav-active text-nav-text'
-                  : 'border-transparent text-nav-muted hover:bg-nav-hover hover:text-nav-text',
-              )}
-            >
-              {item.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <div key={group.label ?? index} className={cn(index > 0 && 'mt-1 border-t border-nav-active/60 pt-1')}>
+        {group.label ? (
+          <p className="px-3 pt-1 pb-0.5 text-small font-medium uppercase tracking-wide text-nav-muted/70">
+            {group.label}
+          </p>
+        ) : null}
+        <ul className="flex flex-col">
+          {group.items.map((item) => (
+            <li key={item.href}>
+              <Link
+                href={item.href}
+                aria-current={isCurrent(item) ? 'page' : undefined}
+                className={cn(
+                  'block border-l-2 no-underline',
+                  dense ? 'py-1.5 pr-3 pl-3' : 'py-2 pr-4 pl-4',
+                  isCurrent(item)
+                    ? 'border-nav-accent bg-nav-active text-nav-text'
+                    : 'border-transparent text-nav-muted hover:bg-nav-hover hover:text-nav-text',
+                )}
+              >
+                {item.label}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
     ))
 
   /** The wide-screen rail. */
@@ -216,13 +245,13 @@ const Shell = ({
       className="relative flex min-h-0 flex-1 flex-col py-2"
     >
       {nav.map((section) => {
-        const Icon = ICONS[section.icon]
-        const here = sectionIsCurrent(section)
+        const Icon = SECTION_ICONS[section.icon]
+        const current = sectionIsCurrent(section)
         const showing = flyout === section.key
         const face = cn(
           'flex w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left no-underline',
-          here ? 'border-nav-accent bg-nav-active text-nav-text' : 'border-transparent text-nav-muted',
-          showing && !here && 'bg-nav-hover text-nav-text',
+          current ? 'border-nav-accent bg-nav-active text-nav-text' : 'border-transparent text-nav-muted',
+          showing && !current && 'bg-nav-hover text-nav-text',
           'hover:bg-nav-hover hover:text-nav-text focus-visible:bg-nav-hover focus-visible:text-nav-text focus-visible:outline-none',
         )
         const body = (
@@ -240,7 +269,7 @@ const Shell = ({
               key={section.key}
               href={section.href}
               title={expanded ? undefined : section.label}
-              aria-current={here ? 'page' : undefined}
+              aria-current={current ? 'page' : undefined}
               onMouseEnter={() => setFlyout(null)}
               onFocus={() => setFlyout(null)}
               className={face}
@@ -280,44 +309,60 @@ const Shell = ({
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           style={{ top: flyoutTop }}
-          className="absolute left-full z-40 w-56 rounded-r-panel border-l border-nav-active bg-nav py-1 text-nav-text shadow-overlay"
+          className="absolute left-full z-flyout w-56 rounded-r-panel border-l border-nav-active bg-nav py-1 text-nav-text shadow-overlay"
         >
-          {/* The rail already says which section this is when it is pinned open;
-              only an icon-only rail needs the name repeated here. */}
-          {expanded ? null : (
-            <p className="px-3 pt-1 pb-2 text-small font-semibold uppercase tracking-wider text-nav-muted/70">
-              {open.label}
-            </p>
-          )}
+          <p className="px-3 pt-1 pb-2 text-small font-semibold uppercase tracking-wider text-nav-muted/70">
+            {open.label}
+          </p>
           {itemLinks(open, true)}
         </div>
       ) : null}
     </nav>
   )
 
-  const switcher = (
-    <label className="flex items-center">
-      <span className="sr-only">Workspace</span>
-      <select
-        value={workspaceSlug}
-        title={`${email} · ${role}`}
-        onChange={(event) => {
-          // The switch handler re-reads the membership before it changes
-          // anything, so the selection is a request, never proof.
-          const target = new URL('/api/auth/workspace', window.location.origin)
-          target.searchParams.set('to', event.target.value)
-          window.location.assign(target.toString())
-        }}
-        className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface pl-2 pr-7 text-small"
-      >
-        {workspaces.map((option) => (
-          <option key={option.slug} value={option.slug}>
-            {option.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  )
+  const switchTo = (slug: string) => {
+    // The switch handler re-reads the membership before it changes anything, so
+    // the selection is a request, never proof.
+    const target = new URL('/api/auth/workspace', window.location.origin)
+    target.searchParams.set('to', slug)
+    window.location.assign(target.toString())
+  }
+
+  /** Workspaces grouped by the organisation that owns them, so a person on two
+   *  organisations sees which is which rather than one flat list of names. */
+  const workspaceGroups: MenuGroup[] = (() => {
+    const byOrg = new Map<string, WorkspaceOption[]>()
+    for (const option of workspaces) {
+      const key = option.organisation ?? ''
+      byOrg.set(key, [...(byOrg.get(key) ?? []), option])
+    }
+    return [...byOrg.entries()].map(([organisation, options]) => ({
+      key: organisation || 'workspaces',
+      label: organisation || 'Workspaces',
+      items: options.map((option) => ({
+        key: option.slug,
+        label: option.name,
+        checked: option.slug === workspaceSlug,
+        onSelect: () => switchTo(option.slug),
+      })),
+    }))
+  })()
+
+  const accountMenu: MenuGroup[] = [
+    { key: 'you', items: [{ key: 'account', label: 'Your account', href: accountHref, icon: <UserRound className="size-4" /> }] },
+    ...(workspaces.length > 1 ? workspaceGroups : []),
+    {
+      key: 'theme',
+      label: 'Appearance',
+      items: THEMES.map(({ value, label, icon: Icon }) => ({
+        key: value,
+        label,
+        icon: <Icon className="size-4" />,
+        checked: theme === value,
+        onSelect: () => setTheme(value),
+      })),
+    },
+  ]
 
   /** The phone sheet: same sections, inline lists, no hover. Ends with who is
    *  signed in and, for members of more than one workspace, the switcher the
@@ -325,16 +370,16 @@ const Shell = ({
   const sheet = (
     <nav aria-label="Sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
       {nav.map((section) => {
-        const Icon = ICONS[section.icon]
-        const here = sectionIsCurrent(section)
-        const isOpen = unfolded.includes(section.key) || here
+        const Icon = SECTION_ICONS[section.icon]
+        const current = sectionIsCurrent(section)
+        const isOpen = unfolded.includes(section.key) || current
         const face = cn(
           'flex w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left no-underline',
-          here ? 'border-nav-accent text-nav-text' : 'border-transparent text-nav-muted',
+          current ? 'border-nav-accent text-nav-text' : 'border-transparent text-nav-muted',
         )
         if (section.href) {
           return (
-            <Link key={section.key} href={section.href} aria-current={here ? 'page' : undefined} className={face}>
+            <Link key={section.key} href={section.href} aria-current={current ? 'page' : undefined} className={face}>
               <Icon aria-hidden="true" className="size-5 shrink-0" />
               <span className="font-medium">{section.label}</span>
             </Link>
@@ -363,88 +408,30 @@ const Shell = ({
   return (
     // The shell owns the scroll: the viewport is exactly one screen tall and only
     // <main> moves. That is what lets a table header stick and keeps the rail and
-    // the top bar from scrolling away.
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="relative z-40 flex h-12 shrink-0 items-center gap-3 border-b border-divider bg-surface px-3">
-        <NavigationProgress />
-        <button
-          type="button"
-          aria-expanded={sheetOpen}
-          aria-controls="primary-nav"
-          aria-label="Menu"
-          onClick={() => setSheetOpen((value) => !value)}
-          className="rounded-hs p-1.5 text-body hover:bg-fill-hover md:hidden"
-        >
-          <PanelLeft aria-hidden="true" className="size-5" />
-        </button>
-
-        <Link href="/" className="shrink-0 font-semibold tracking-tight text-cta no-underline">
-          Rawr
-        </Link>
-
-        {search ? <div className="ml-auto w-full min-w-0 max-w-md">{search}</div> : null}
-
-        <div className={cn('flex shrink-0 items-center gap-2', search ? '' : 'ml-auto')}>
-          {workspaces.length > 1 ? (
-            <label className="hidden items-center lg:flex">
-              <span className="sr-only">Workspace</span>
-              <select
-                value={workspaceSlug}
-                title={`${email} · ${role}`}
-                onChange={(event) => {
-                  // The switch handler re-reads the membership before it changes
-                  // anything, so the selection is a request, never proof.
-                  const target = new URL('/api/auth/workspace', window.location.origin)
-                  target.searchParams.set('to', event.target.value)
-                  window.location.assign(target.toString())
-                }}
-                className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface pl-2 pr-7 text-small"
-              >
-                {workspaces.map((option) => (
-                  <option key={option.slug} value={option.slug}>
-                    {option.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <Link
-              href={accountHref}
-              className="hidden max-w-40 truncate text-secondary no-underline hover:text-body lg:inline"
-              title={`${email} · ${role}. Your account.`}
-            >
-              {workspaceName}
-            </Link>
-          )}
-          <Link
-            href={settingsHref}
-            aria-label="Settings"
-            aria-current={onSettings ? 'page' : undefined}
-            className={cn(
-              'rounded-hs p-1.5 no-underline',
-              onSettings ? 'bg-accent-subtle text-link' : 'text-body hover:bg-fill-hover',
-            )}
-          >
-            <Settings aria-hidden="true" className="size-5" />
-          </Link>
-          <ThemeToggle />
-          <form action="/api/auth/sign-out" method="post">
-            <button type="submit" className="rounded-hs border border-line px-2 py-1 font-medium hover:bg-fill-hover">
-              Sign out
-            </button>
-          </form>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1">
-        {/* Wide screens: the rail. The flyout is positioned against it, so it
-            must not clip on the x axis. */}
+    // the top bar from scrolling away. The rail runs the full height with the bar
+    // beside it, which is HubSpot's frame and what makes the wordmark sit over
+    // the navigation rather than over the page.
+    <div className="flex h-dvh overflow-hidden">
+      {/* Wide screens: the rail. Hidden inside settings, which is its own place
+          with its own navigation, exactly as HubSpot does it. */}
+      {inSettings ? null : (
         <aside
           className={cn(
-            'z-30 hidden flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
-            expanded ? 'w-52' : 'w-14',
+            'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
+            expanded ? 'w-rail-open' : 'w-rail',
           )}
         >
+          <Link
+            href={homeHref}
+            aria-label="Rawr home"
+            className="flex h-topbar shrink-0 items-center gap-2 border-b border-nav-active/60 px-3 font-semibold tracking-tight text-nav-text no-underline"
+          >
+            <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-hs bg-nav-accent text-inverse">
+              R
+            </span>
+            <span className={expanded ? 'truncate' : 'sr-only'}>Rawr</span>
+          </Link>
+          {rail}
           <button
             type="button"
             onClick={() => {
@@ -454,7 +441,7 @@ const Shell = ({
             }}
             aria-pressed={expanded}
             title={expanded ? 'Collapse' : 'Expand'}
-            className="flex shrink-0 items-center gap-3 border-b border-nav-active/60 px-3 py-2.5 text-nav-muted hover:bg-nav-hover hover:text-nav-text"
+            className="flex shrink-0 items-center gap-3 border-t border-nav-active/60 px-3 py-2.5 text-nav-muted hover:bg-nav-hover hover:text-nav-text"
           >
             {expanded ? (
               <ChevronsLeft aria-hidden="true" className="size-5 shrink-0" />
@@ -463,42 +450,192 @@ const Shell = ({
             )}
             <span className={expanded ? 'truncate' : 'sr-only'}>{expanded ? 'Collapse' : 'Expand'}</span>
           </button>
-          {rail}
         </aside>
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="relative z-topbar flex h-topbar shrink-0 items-center gap-2 border-b border-divider bg-surface px-3">
+          <NavigationProgress />
+          {inSettings ? (
+            <Link
+              href={cameFrom.current}
+              className="flex shrink-0 items-center gap-1 font-medium text-secondary no-underline hover:text-body"
+            >
+              <ChevronLeft aria-hidden="true" className="size-4" />
+              Back
+            </Link>
+          ) : (
+            <>
+              <button
+                type="button"
+                aria-expanded={sheetOpen}
+                aria-controls="primary-nav"
+                aria-label="Menu"
+                onClick={() => setSheetOpen((value) => !value)}
+                className="rounded-hs p-1.5 text-body hover:bg-fill-hover md:hidden"
+              >
+                <PanelLeft aria-hidden="true" className="size-5" />
+              </button>
+              <Link href={homeHref} className="shrink-0 font-semibold tracking-tight text-cta no-underline md:hidden">
+                Rawr
+              </Link>
+            </>
+          )}
+
+          {inSettings ? <h1 className="min-w-0 truncate font-medium">Settings</h1> : null}
+
+          {search ? <div className="mx-auto w-full min-w-0 max-w-md">{search}</div> : null}
+
+          <div className={cn('flex shrink-0 items-center gap-1', search ? '' : 'ml-auto')}>
+            {create.length > 0 && !inSettings ? (
+              <DropdownMenu
+                label="Create"
+                groups={[
+                  {
+                    key: 'create',
+                    items: create.map((option) => {
+                      const Icon = CREATE_ICONS[option.key] ?? Plus
+                      return {
+                        key: option.key,
+                        label: option.label,
+                        href: option.href,
+                        icon: <Icon className="size-4" />,
+                      }
+                    }),
+                  },
+                ]}
+                trigger={(props) => (
+                  <IconButton {...props} label="Create" icon={<Plus className="size-5" />} tone="accent" />
+                )}
+              />
+            ) : null}
+
+            <DropdownMenu
+              label="Help"
+              groups={[
+                {
+                  key: 'help',
+                  items: [
+                    { key: 'agent', label: 'Connect an assistant', href: '/settings/agent' },
+                    { key: 'account', label: 'Your account', href: accountHref },
+                  ],
+                },
+              ]}
+              trigger={(props) => (
+                <IconButton {...props} label="Help" icon={<CircleHelp className="size-5" />} />
+              )}
+            />
+
+            <NotificationBell workspaceSlug={workspaceSlug} />
+
+            <IconButton
+              label="Settings"
+              tone={inSettings ? 'accent' : 'default'}
+              icon={<Settings className="size-5" />}
+              onClick={() => window.location.assign(settingsHref)}
+            />
+
+            <DropdownMenu
+              label={`${email}, ${role}`}
+              groups={[
+                ...accountMenu,
+                {
+                  key: 'session',
+                  items: [
+                    {
+                      key: 'sign-out',
+                      label: 'Sign out',
+                      icon: <LogOut className="size-4" />,
+                      onSelect: () => {
+                        const form = document.createElement('form')
+                        form.method = 'post'
+                        form.action = '/api/auth/sign-out'
+                        document.body.append(form)
+                        form.submit()
+                      },
+                    },
+                  ],
+                },
+              ]}
+              trigger={(props) => (
+                <button
+                  {...props}
+                  type="button"
+                  className="flex min-h-8 items-center gap-2 rounded-hs px-1 hover:bg-fill-hover"
+                >
+                  <Avatar name={email} size="sm" />
+                  <span className="hidden min-w-0 max-w-40 truncate text-secondary lg:inline">
+                    {workspaceName}
+                  </span>
+                </button>
+              )}
+            />
+          </div>
+        </header>
 
         {/* Phones: the same sections as a sheet over the content. */}
         {sheetOpen ? (
           <>
-            <div id="primary-nav" className="fixed inset-y-12 left-0 z-30 flex w-64 flex-col bg-nav text-nav-text md:hidden">
+            <div id="primary-nav" className="fixed inset-y-0 left-0 z-overlay flex w-64 flex-col bg-nav text-nav-text md:hidden">
+              <div className="flex h-topbar shrink-0 items-center justify-between gap-2 border-b border-nav-active/60 px-3">
+                <span className="font-semibold tracking-tight">Rawr</span>
+                <button
+                  type="button"
+                  aria-label="Close menu"
+                  onClick={() => setSheetOpen(false)}
+                  className="rounded-hs p-1.5 text-nav-muted hover:bg-nav-hover hover:text-nav-text"
+                >
+                  <X aria-hidden="true" className="size-5" />
+                </button>
+              </div>
               {sheet}
               <div className="flex flex-col gap-2 border-t border-nav-active/60 px-3 py-3 text-small text-nav-muted">
                 <Link href={accountHref} className="truncate text-nav-muted no-underline hover:text-nav-text" title={email}>
                   {email} · {role}
                 </Link>
-                {workspaces.length > 1 ? switcher : <span className="truncate">{workspaceName}</span>}
+                {workspaces.length > 1 ? (
+                  <label className="flex items-center">
+                    <span className="sr-only">Workspace</span>
+                    <select
+                      value={workspaceSlug}
+                      onChange={(event) => switchTo(event.target.value)}
+                      className="max-w-full min-h-8 truncate rounded-hs border border-nav-active bg-nav pl-2 pr-7 text-small text-nav-text"
+                    >
+                      {workspaces.map((option) => (
+                        <option key={option.slug} value={option.slug}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <span className="truncate">{workspaceName}</span>
+                )}
               </div>
             </div>
             <button
               type="button"
               aria-label="Close menu"
               onClick={() => setSheetOpen(false)}
-              className="fixed inset-x-0 top-12 bottom-0 z-20 cursor-default bg-scrim md:hidden"
+              className="fixed inset-0 z-rail cursor-default bg-scrim md:hidden"
             />
           </>
         ) : null}
 
-        {/* Full bleed: this is a data tool, and a wide screen is there to be used.
+        {/* The page is a card on the canvas, the way HubSpot frames every screen.
             This is the one scrolling box on the page. */}
         <main
           aria-busy={pendingHref ? 'true' : undefined}
-          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto p-3 sm:p-6"
+          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-2 sm:p-4"
         >
-          {children}
+          <div className="min-h-full min-w-0 rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
+            {children}
+          </div>
           {pendingHref ? (
             // The old screen stays put but steps back, and the spinner says the
             // new one is on its way. Replaced by the route's own loading state the
             // moment the server starts streaming it.
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-start justify-center bg-canvas/60 pt-[20vh]">
+            <div className="pointer-events-none absolute inset-0 z-flyout flex items-start justify-center bg-canvas/60 pt-[20vh]">
               <Spinner size="lg" label="Opening" />
             </div>
           ) : null}

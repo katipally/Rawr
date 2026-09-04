@@ -5,11 +5,14 @@ import { CommandPalette } from '~/components/crm/command-palette.tsx'
 import {
   accountPath,
   bookingPagesPath,
+  createRecordPath,
   formsPath,
   importsPath,
+  integrationsPath,
   objectView,
   propertiesPath,
   segmentsPath,
+  sitesPath,
   submissionsPath,
   tasksPath,
   workspaceHome,
@@ -23,10 +26,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const workspace = session.workspaceSlug
   const mine = await memberships(session.userId)
   // Built from the session, because every CRM address carries its workspace.
-  // Three sections rather than ten tabs: the record types and the two things
-  // built on them, what the outside world sends in, and what somebody loads by
-  // hand. Settings is not a section; it lives in the top bar and owns its own
-  // sub-navigation once you are inside it.
+  // The four sections are HubSpot's: the records and the work on them, what goes
+  // out to the market, what the numbers say, and the plumbing. Settings is not a
+  // section; it is its own place, reached from the top bar.
   const nav: NavSection[] = [
     { key: 'home', label: 'Home', icon: 'home', href: workspaceHome(workspace) },
     {
@@ -34,36 +36,56 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       label: 'CRM',
       icon: 'crm',
       groups: [
-        [
-          { href: objectView(workspace, 'contact', 'all'), label: 'Contacts', match: `/contacts/${workspace}/objects/contact` },
-          { href: objectView(workspace, 'company', 'all'), label: 'Companies', match: `/contacts/${workspace}/objects/company` },
-          { href: objectView(workspace, 'deal', 'all'), label: 'Deals', match: `/contacts/${workspace}/objects/deal` },
-        ],
-        [
-          { href: segmentsPath(workspace), label: 'Segments', match: `/contacts/${workspace}/segments` },
-          { href: tasksPath(workspace), label: 'Tasks' },
-        ],
+        {
+          label: 'Records',
+          items: [
+            { href: objectView(workspace, 'contact', 'all'), label: 'Contacts', match: `/contacts/${workspace}/objects/contact` },
+            { href: objectView(workspace, 'company', 'all'), label: 'Companies', match: `/contacts/${workspace}/objects/company` },
+            { href: objectView(workspace, 'deal', 'all'), label: 'Deals', match: `/contacts/${workspace}/objects/deal` },
+          ],
+        },
+        {
+          label: 'Work',
+          items: [
+            { href: segmentsPath(workspace), label: 'Segments', match: `/contacts/${workspace}/segments` },
+            { href: tasksPath(workspace), label: 'Tasks' },
+            { href: bookingPagesPath(workspace), label: 'Meetings', match: `/meetings/${workspace}` },
+          ],
+        },
       ],
     },
     {
-      key: 'capture',
-      label: 'Capture',
-      icon: 'capture',
+      key: 'marketing',
+      label: 'Marketing',
+      icon: 'marketing',
       groups: [
-        [
-          { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
-          { href: bookingPagesPath(workspace), label: 'Meetings', match: `/meetings/${workspace}` },
-        ],
-        [
-          { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Review', match: `/contacts/${workspace}/submissions` },
-        ],
+        {
+          label: 'Capture',
+          items: [
+            { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
+            { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Review', match: `/contacts/${workspace}/submissions` },
+          ],
+        },
       ],
     },
     {
       key: 'data',
-      label: 'Data',
+      label: 'Data management',
       icon: 'data',
-      groups: [[{ href: importsPath(workspace), label: 'Import' }]],
+      groups: [
+        {
+          label: 'Move data',
+          items: [{ href: importsPath(workspace), label: 'Import' }],
+        },
+        {
+          label: 'Configure',
+          items: [
+            { href: propertiesPath(), label: 'Properties' },
+            { href: integrationsPath(), label: 'Integrations' },
+            { href: sitesPath(), label: 'Tracked sites' },
+          ],
+        },
+      ],
     },
   ]
 
@@ -76,8 +98,15 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         email={session.email}
         role={session.role}
         nav={nav}
-        settingsHref={propertiesPath()}
+        create={[
+          { key: 'contact', label: 'Contact', href: createRecordPath(workspace, 'contact') },
+          { key: 'company', label: 'Company', href: createRecordPath(workspace, 'company') },
+          { key: 'deal', label: 'Deal', href: createRecordPath(workspace, 'deal') },
+          { key: 'task', label: 'Task', href: tasksPath(workspace) },
+        ]}
+        settingsHref={accountPath()}
         accountHref={accountPath()}
+        homeHref={workspaceHome(workspace)}
         search={<CommandPalette workspace={workspace} />}
       >
         {children}

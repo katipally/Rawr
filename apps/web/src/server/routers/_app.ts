@@ -1,5 +1,6 @@
-import { listDeadLetters, signOutEverywhere } from '@rawr/db'
+import { listDeadLetters, readNotifications, signOutEverywhere } from '@rawr/db'
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
+import { call } from '../errors.ts'
 import { adminRouter } from './admin.ts'
 import { analyticsRouter } from './analytics.ts'
 import { bookingRouter } from './booking.ts'
@@ -34,6 +35,12 @@ export const appRouter = router({
     /** Ends every session the caller holds. Scoped to the caller by construction:
      *  the id comes from the verified session, never from input. */
     signOutEverywhere: protectedProcedure.mutation(({ ctx }) => signOutEverywhere(ctx.session.userId)),
+  }),
+
+  /** The bell in the top bar. Read on every page, so it is one query and it
+   *  answers for the caller's own role: a viewer never learns that a job failed. */
+  notifications: router({
+    summary: protectedProcedure.query(({ ctx }) => call(() => readNotifications(ctx.workspace))),
   }),
 
   jobs: router({

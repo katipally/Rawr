@@ -81,6 +81,12 @@ export const recordPath = (
   params: { tab?: string; type?: string } = {},
 ): string => `/${CRM_ROOT}/${workspace}/record/${object}/${id}${query(params)}`
 
+/** The + in the top bar. It lands on the object's own list, which is where the
+ *  create dialog lives, so there is one create form per object rather than a
+ *  second copy in the shell that would have to learn the same fields. */
+export const createRecordPath = (workspace: string, object: ObjectKey): string =>
+  `${objectView(workspace, object, 'all')}?new=1`
+
 export const importsPath = (workspace: string, id?: string): string =>
   id ? `/${CRM_ROOT}/${workspace}/import/${id}` : `/${CRM_ROOT}/${workspace}/import`
 
