@@ -18,6 +18,8 @@
  *  class names are shared with the server that defines them; a rename becomes a
  *  compile error instead of a silently broken embed. */
 
+import { BOOKING_COPY, formatterSource } from '~/lib/edge-copy.ts'
+
 export type BookingScriptConfig = {
   baseUrl: string
   /** Injected rather than linked, so the widget cannot render unstyled while a
@@ -33,6 +35,11 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
   var BASE = ${JSON.stringify(config.baseUrl)};
   var STYLES = ${JSON.stringify(config.styles)};
   var DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  var COPY = ${JSON.stringify(BOOKING_COPY)};
+
+  // The same formatters the hosted page and the tests use, inlined from source so
+  // there is one implementation rather than a copy that drifts.
+  ${formatterSource()}
 
   // ---------------------------------------------------------------- utilities
 
@@ -119,12 +126,20 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       month: monthKey(new Date()),
       day: null,
       slot: null,
+      /** { token, expiresAt } while a slot is held, null otherwise. The expiry is
+       *  the server's, not a local guess: a tab that slept through its five
+       *  minutes must read as expired the moment it wakes. */
       hold: null,
+      holdExpired: false,
       /** What the visitor has typed, kept outside the DOM. Every render rebuilds
        *  the form, and a validation error that empties the answers is a worse
        *  outcome than the error it is reporting. */
       answers: {},
       data: null,
+      /** Two different waits, and conflating them showed last month's grid under
+       *  this month's name. One is the month being read, the other is the booking
+       *  being sent. */
+      loadingMonth: false,
       busy: false,
       message: null,
       bad: false
@@ -141,7 +156,7 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
     }
 
     function load() {
-      state.busy = true;
+      state.loadingMonth = true;
       render();
       fetch(endpoint('/slots', 'month=' + encodeURIComponent(state.month) + '&tz=' + encodeURIComponent(state.tz)), {
         headers: { accept: 'application/json' }
@@ -152,7 +167,7 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         })
         .then(function (data) {
           state.data = data;
-          state.busy = false;
+          state.loadingMonth = false;
           render();
         })
         .catch(function () {
@@ -181,15 +196,46 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         body: JSON.stringify({ slot: slot.toISOString() })
       })
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (held) { if (held) state.hold = held.token; })
+        .then(function (held) {
+          if (!held || !state.slot || state.slot.getTime() !== slot.getTime()) return;
+          state.hold = { token: held.token, expiresAt: new Date(held.expiresAt).getTime() };
+          state.holdExpired = false;
+          tickHold();
+        })
         .catch(function () {});
     }
 
     function releaseHold() {
       if (!state.hold) return;
-      var token = state.hold;
+      var token = state.hold.token;
       state.hold = null;
+      state.holdExpired = false;
       fetch(endpoint('/hold', 'token=' + encodeURIComponent(token)), { method: 'DELETE' }).catch(function () {});
+    }
+
+    /** The countdown, updated in place rather than by re-rendering: the person is
+     *  typing into the form underneath it, and rebuilding the DOM every second
+     *  would take their cursor with it. */
+    function tickHold() {
+      var node = root.querySelector('.rawr-b-hold');
+      if (!state.hold) {
+        if (node) node.textContent = state.holdExpired ? COPY.holdExpired : '';
+        return;
+      }
+      var left = state.hold.expiresAt - Date.now();
+      if (left <= 0) {
+        // Expired rather than released: the slot may well still be free, and
+        // telling somebody to pick it again is better than silently letting the
+        // confirm fail.
+        state.hold = null;
+        state.holdExpired = true;
+        if (node) {
+          node.textContent = COPY.holdExpired;
+          node.setAttribute('data-bad', '');
+        }
+        return;
+      }
+      if (node) node.textContent = bookingHeld(countdown(left));
     }
 
     function readInput(input) {
@@ -208,8 +254,17 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       var fields = form.querySelectorAll('[name]');
       for (var i = 0; i < fields.length; i++) state.answers[fields[i].name] = readInput(fields[i]);
 
+      // Asked before the request rather than inferred from its failure, so a train
+      // tunnel reads as a train tunnel instead of as something we broke.
+      if (navigator.onLine === false) {
+        state.message = COPY.offline;
+        state.bad = true;
+        render();
+        return;
+      }
+
       var body = { slot: state.slot.toISOString(), timezone: state.tz, pagePath: location.pathname };
-      if (state.hold) body.hold = state.hold;
+      if (state.hold) body.hold = state.hold.token;
       // F4 §3. The widget renders inline, so it is in the same first-party context
       // as the embed and can read the visitor cookie. Sent in the body, never in a
       // URL, and absent entirely when consent was declined and no cookie exists.
@@ -232,16 +287,19 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         .then(function (result) {
           state.busy = false;
           state.hold = null;
+          state.holdExpired = false;
           if (result.status === 409) {
-            // The slot went while they were typing. Reload rather than argue.
+            // The slot went while they were typing. Reload rather than argue, and
+            // say so in words that do not read as their mistake. The answers stay
+            // in state.answers, so the next slot they pick keeps them.
             state.slot = null;
-            state.message = result.payload.error;
+            state.message = COPY.slotGone;
             state.bad = true;
             load();
             return;
           }
           if (result.status >= 400) {
-            state.message = result.payload.error || 'That could not be booked. Please check the answers.';
+            state.message = result.payload.error || COPY.failed;
             state.bad = true;
             render();
             return;
@@ -254,7 +312,7 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         })
         .catch(function () {
           state.busy = false;
-          state.message = 'The booking could not be sent. Check your connection, or use our scheduling page.';
+          state.message = navigator.onLine === false ? COPY.offline : COPY.failed;
           state.bad = true;
           render();
         });
@@ -262,8 +320,8 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
 
     function renderConfirmed(payload) {
       clear(root);
-      var note = el('div', { class: 'rawr-b-note', 'data-good': '' });
-      note.appendChild(el('p', null, 'You are booked.'));
+      var note = el('div', { class: 'rawr-b-note', 'data-good': '', role: 'status' });
+      note.appendChild(el('p', null, COPY.booked));
       note.appendChild(el('p', null,
         new Date(payload.startsAt).toLocaleString(undefined, {
           timeZone: state.tz, weekday: 'long', day: 'numeric', month: 'long',
@@ -280,10 +338,18 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       for (var w = 0; w < warnings.length; w++) {
         note.appendChild(el('p', { class: 'rawr-b-hint' }, warnings[w]));
       }
+      // Google sends its own invitation to the mailbox they gave us, which is not
+      // always the calendar they actually keep. This is the one they can add to
+      // whatever they use.
+      if (payload.calendarUrl) {
+        var add = el('p');
+        add.appendChild(el('a', { class: 'rawr-b-add', href: payload.calendarUrl }, COPY.addToCalendar));
+        note.appendChild(add);
+      }
       var manage = el('p');
-      manage.appendChild(el('a', { href: payload.rescheduleUrl }, 'Move this meeting'));
+      manage.appendChild(el('a', { href: payload.rescheduleUrl }, COPY.reschedule));
       manage.appendChild(document.createTextNode(' · '));
-      manage.appendChild(el('a', { href: payload.cancelUrl }, 'Cancel it'));
+      manage.appendChild(el('a', { href: payload.cancelUrl }, COPY.cancel));
       note.appendChild(manage);
       root.appendChild(note);
     }
@@ -307,8 +373,12 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         root.appendChild(el('div', { class: 'rawr-b-note', 'data-bad': state.bad ? '' : null, role: 'alert' }, state.message));
       }
 
-      if (!data) {
-        root.appendChild(el('p', { class: 'rawr-b-hint' }, 'Loading times…'));
+      // A month costs a free-busy read per host, so this is a real wait rather than
+      // a flicker. A grid the shape of the answer keeps the widget from jumping
+      // when it lands, and the message says what is being waited on. Shown while a
+      // later month loads too: the old grid under the new month's name is a lie.
+      if (!data || state.loadingMonth) {
+        root.appendChild(skeleton());
         return;
       }
 
@@ -323,15 +393,7 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
 
       // ---- month
       var left = el('div', { class: 'rawr-b-panel' });
-      var bar = el('div', { class: 'rawr-b-monthbar' });
-      bar.appendChild(button('← Earlier', function () {
-        state.month = shiftMonth(state.month, -1); state.day = null; state.slot = null; releaseHold(); load();
-      }));
-      bar.appendChild(el('span', { class: 'rawr-b-month' }, monthLabel(state.month)));
-      bar.appendChild(button('Later →', function () {
-        state.month = shiftMonth(state.month, 1); state.day = null; state.slot = null; releaseHold(); load();
-      }));
-      left.appendChild(bar);
+      left.appendChild(monthBar());
 
       var grid = el('div', { class: 'rawr-b-grid', role: 'grid' });
       for (var d = 0; d < 7; d++) grid.appendChild(el('div', { class: 'rawr-b-dow', 'aria-hidden': 'true' }, DOW[d]));
@@ -360,7 +422,7 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
 
         var times = grouped[state.day] || [];
         if (!times.length) {
-          right.appendChild(el('p', { class: 'rawr-b-hint' }, 'Nothing open on this day. Pick another.'));
+          right.appendChild(el('p', { class: 'rawr-b-hint' }, COPY.nothingOnDay));
         } else {
           var list = el('div', { class: 'rawr-b-times' });
           for (var t = 0; t < times.length; t++) list.appendChild(slotButton(times[t]));
@@ -370,12 +432,73 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
         if (state.slot) right.appendChild(questionForm(data));
         body.appendChild(right);
       } else if ((data.slots || []).length) {
-        body.appendChild(el('p', { class: 'rawr-b-hint' }, 'Pick a day to see the times that are open.'));
+        body.appendChild(el('p', { class: 'rawr-b-hint' }, COPY.pickDay));
       } else {
-        body.appendChild(el('div', { class: 'rawr-b-note' }, 'Nothing is open in ' + monthLabel(state.month) + '. Try the next month.'));
+        body.appendChild(emptyMonth(data));
       }
 
       root.appendChild(body);
+      // Every render rebuilds the countdown node empty, so it is filled here
+      // rather than a second later on the next tick.
+      tickHold();
+    }
+
+    /** An empty grid says nothing about whether to click Later once or six times,
+     *  so the server answers that question with the month it was already reading.
+     *  When there is genuinely nothing ahead, it says so rather than sending
+     *  somebody clicking into an empty year. */
+    function emptyMonth(data) {
+      var note = el('div', { class: 'rawr-b-note' });
+      if (!data.nextAvailable) {
+        note.appendChild(el('p', null, COPY.nothingAtAll));
+        return note;
+      }
+      var when = new Date(data.nextAvailable);
+      note.appendChild(el('p', null, bookingNextAvailable(when.toLocaleDateString(undefined, {
+        timeZone: state.tz, weekday: 'long', day: 'numeric', month: 'long'
+      }))));
+      var jump = button(COPY.jumpToNext, function () {
+        var day = dayKey(when, state.tz);
+        goToMonth(day.slice(0, 7));
+        // The day the times are on, not just the month: one click, not two.
+        state.day = day;
+      });
+      jump.className = 'rawr-b-cta';
+      note.appendChild(jump);
+      return note;
+    }
+
+    function goToMonth(key) {
+      state.month = key;
+      state.day = null;
+      state.slot = null;
+      releaseHold();
+      load();
+    }
+
+    /** Rendered by the skeleton as well as the grid, so the month can be changed
+     *  again while one is still loading rather than waiting for a read to finish
+     *  before the next click is possible. */
+    function monthBar() {
+      var bar = el('div', { class: 'rawr-b-monthbar' });
+      bar.appendChild(button('← Earlier', function () { goToMonth(shiftMonth(state.month, -1)); }));
+      bar.appendChild(el('span', { class: 'rawr-b-month' }, monthLabel(state.month)));
+      bar.appendChild(button('Later →', function () { goToMonth(shiftMonth(state.month, 1)); }));
+      return bar;
+    }
+
+    /** The shape of the answer, drawn while it is being read. Six weeks of cells,
+     *  which is the most any month spans, so nothing below it moves when the real
+     *  grid arrives. */
+    function skeleton() {
+      var panel = el('div', { class: 'rawr-b-panel' });
+      panel.appendChild(monthBar());
+      var grid = el('div', { class: 'rawr-b-grid', 'aria-hidden': 'true' });
+      for (var d = 0; d < 7; d++) grid.appendChild(el('div', { class: 'rawr-b-dow' }, DOW[d]));
+      for (var i = 0; i < 42; i++) grid.appendChild(el('span', { class: 'rawr-b-skel' }));
+      panel.appendChild(grid);
+      panel.appendChild(el('p', { class: 'rawr-b-hint', role: 'status' }, COPY.loading));
+      return panel;
     }
 
     function button(label, onClick) {
@@ -426,9 +549,21 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
       for (var i = 0; i < fields.length; i++) form.appendChild(fieldFor(fields[i]));
 
       var submit = el('button', { type: 'submit', class: 'rawr-b-cta' },
-        state.busy ? 'Booking…' : 'Confirm ' + data.durationMinutes + ' minutes');
-      if (state.busy) submit.setAttribute('disabled', 'disabled');
+        state.busy ? COPY.booking : 'Confirm ' + data.durationMinutes + ' minutes');
+      if (state.busy) {
+        submit.setAttribute('disabled', 'disabled');
+        submit.setAttribute('aria-busy', 'true');
+      }
       form.appendChild(submit);
+
+      // The countdown lives here and is written by tickHold, which finds it by
+      // class. Empty until there is something to say, and it is one line either
+      // way so nothing moves when the words arrive.
+      var held = el('p', { class: 'rawr-b-hold rawr-b-hint', role: 'status' },
+        state.holdExpired ? COPY.holdExpired : '');
+      if (state.holdExpired) held.setAttribute('data-bad', '');
+      form.appendChild(held);
+
       form.appendChild(el('p', { class: 'rawr-b-hint' },
         'You will get a calendar invitation with the joining details and a link to move or cancel.'));
 
@@ -485,6 +620,12 @@ export const buildBookingScript = (config: BookingScriptConfig): string => `/* R
     // A hold nobody confirms should go back as soon as the tab does, rather than
     // sitting on capacity for its full five minutes.
     window.addEventListener('pagehide', releaseHold);
+
+    // A phone that slept through the hold wakes with the countdown stale, so it is
+    // re-read on the way back rather than waiting for the next tick.
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) tickHold(); });
+
+    setInterval(tickHold, 1000);
 
     load();
   }

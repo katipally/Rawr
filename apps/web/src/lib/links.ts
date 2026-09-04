@@ -220,6 +220,11 @@ export const bookingPublicPath = (
 export const bookingManagePath = (purpose: 'cancel' | 'reschedule', token: string): string =>
   `/b/manage/${purpose}/${token}`
 
+/** The meeting as a calendar file. Addressed by the reschedule token because it is
+ *  the credential the attendee already holds, and it grants nothing the manage page
+ *  behind the same token does not already show. */
+export const bookingIcsPath = (token: string): string => `/b/ics/${token}.ics`
+
 /** Settings has no workspace segment: a person belongs to one at a time and the
  *  switcher in the shell is what moves them. Kept as functions anyway so the day
  *  that changes is one edit here. */

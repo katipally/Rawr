@@ -9,6 +9,8 @@ import {
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
+import { PendingButton } from '~/components/pending-button.tsx'
+import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
 import { submitHostedForm } from './actions.ts'
 
@@ -115,9 +117,9 @@ const HostedFormPage = async ({
               </div>
 
               <div className="rawr-actions">
-                <button type="submit" className="rawr-submit">
+                <PendingButton className="rawr-submit" pendingLabel={FORM_COPY.sending}>
                   {form.settings.submitLabel}
-                </button>
+                </PendingButton>
               </div>
             </form>
         )}

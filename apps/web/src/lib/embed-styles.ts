@@ -74,7 +74,14 @@ export const EMBED_STYLES = `
 .rawr-error { color: var(--_error); font-size: 0.75rem; min-height: 0; }
 .rawr-error:empty { display: none; }
 
-.rawr-progress { color: var(--_muted); font-size: 0.75rem; font-weight: 500; }
+.rawr-progress { display: flex; flex-direction: column; gap: 0.375rem; }
+.rawr-progress-label { color: var(--_muted); font-size: 0.75rem; font-weight: 500; }
+.rawr-progress-track { height: 3px; border-radius: 999px; background: var(--_border); overflow: hidden; }
+.rawr-progress-fill {
+  height: 100%; width: 0; border-radius: 999px; background: var(--_cta);
+  transition: width 200ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) { .rawr-progress-fill { transition: none; } }
 .rawr-status { font-size: 0.8125rem; color: var(--_error); }
 .rawr-status:empty { display: none; }
 
@@ -111,7 +118,15 @@ export const EMBED_STYLES = `
   overflow: hidden;
 }
 
-.rawr-done { font-size: 0.9375rem; line-height: 1.5; }
+.rawr-done { font-size: 0.9375rem; line-height: 1.5; display: flex; flex-direction: column; gap: 0.375rem; }
+.rawr-done-title { font-weight: 500; margin: 0; }
+.rawr-done-note { color: var(--_muted); font-size: 0.8125rem; margin: 0; }
+.rawr-done-link { font-size: 0.8125rem; }
+/* The retry sits in the actions row beside the submit it is replacing. */
+.rawr-actions .rawr-retry { border-color: var(--_cta); color: var(--_cta); }
+/* A field the server or the browser refused. The message says what is wrong; the
+   border is what makes it findable in a long form. */
+.rawr-field :is(input, textarea, select)[aria-invalid="true"] { border-color: var(--_error); }
 .rawr-fallback { color: var(--_focus); font-weight: 600; }
 .rawr-challenge { min-height: 4.25rem; }
 

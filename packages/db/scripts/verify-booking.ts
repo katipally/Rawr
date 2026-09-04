@@ -10,6 +10,7 @@ import {
   computeSlots,
   confirmBooking,
   DEFAULT_WEEKLY,
+  HOLD_MINUTES,
   dayKey,
   isKnownTimezone,
   listBookingPages,
@@ -21,6 +22,7 @@ import {
   readBookingPage,
   readHolds,
   readPageHosts,
+  releaseHold,
   readSchedule,
   renderTemplate,
   saveBookingPage,
@@ -959,6 +961,38 @@ try {
   })
   check('a hold is counted against its slot', holds.get(holdSlot.getTime()) === 1, `token ${held.token.slice(0, 8)}…`)
   check('and it expires rather than living forever', held.expiresAt.getTime() > Date.now())
+  check(
+    'the expiry is the five minutes the widget counts down',
+    Math.round((held.expiresAt.getTime() - Date.now()) / 60_000) === HOLD_MINUTES,
+    `${HOLD_MINUTES} minutes`,
+  )
+
+  // Aged deliberately rather than waited out: the widget shows the countdown
+  // reaching zero, and what has to be true then is that the slot is offered again.
+  await withWorkspace(datasaur, (tx) =>
+    tx.execute(sql`
+      update booking_hold set expires_at = now() - interval '1 minute'
+       where token = ${held.token}`),
+  )
+  const afterExpiry = await readHolds(datasaur, page.bookingPageId, {
+    from: new Date('2026-09-17T00:00:00Z'),
+    to: new Date('2026-09-18T00:00:00Z'),
+  })
+  check(
+    'an expired hold stops holding, so the slot comes back',
+    afterExpiry.get(holdSlot.getTime()) === undefined,
+  )
+
+  const released = await placeHold(datasaur.workspaceId, page.bookingPageId, holdSlot)
+  await releaseHold(datasaur.workspaceId, released.token)
+  const afterRelease = await readHolds(datasaur, page.bookingPageId, {
+    from: new Date('2026-09-17T00:00:00Z'),
+    to: new Date('2026-09-18T00:00:00Z'),
+  })
+  check(
+    'and somebody who changes their mind gives it back immediately',
+    afterRelease.get(holdSlot.getTime()) === undefined,
+  )
 
   // -----------------------------------------------------------------------
   section('publishing rules')

@@ -1,7 +1,7 @@
 import { publicBookingPage, publicEdgeContext, readBookingPage } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
+import { bookingIcsPath, bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
 import { book } from '~/server/booking.ts'
 import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
@@ -98,6 +98,8 @@ export const POST = async (
       hostName: booking.hostName,
       conferenceUrl: booking.conferenceUrl,
       rescheduleUrl: `${publicBaseUrl}${bookingManagePath('reschedule', booking.rescheduleToken)}`,
+      /** For a calendar that is not the mailbox Google invited. */
+      calendarUrl: `${publicBaseUrl}${bookingIcsPath(booking.rescheduleToken)}`,
       cancelUrl: `${publicBaseUrl}${bookingManagePath('cancel', booking.cancelToken)}`,
       /** Where to send somebody whose script then fails. Same booking, shown by
        *  the hosted page. */
