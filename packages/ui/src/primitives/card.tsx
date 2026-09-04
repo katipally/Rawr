@@ -34,7 +34,7 @@ export const Card = ({
   const showing = collapsible ? open : true
 
   return (
-    <section className={cn('rounded-panel border border-line bg-surface shadow-panel', className)}>
+    <section className={cn('@container rounded-panel border border-line bg-surface shadow-panel', className)}>
       {title || action ? (
         <header className="flex items-center justify-between gap-2 border-b border-divider px-4 py-2.5">
           {collapsible ? (

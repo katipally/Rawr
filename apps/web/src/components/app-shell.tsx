@@ -628,7 +628,7 @@ const Shell = ({
           aria-busy={pendingHref ? 'true' : undefined}
           className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-2 sm:p-4"
         >
-          <div className="min-h-full min-w-0 rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
+          <div className="@container flex-1 min-w-0 rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
             {children}
           </div>
           {pendingHref ? (
