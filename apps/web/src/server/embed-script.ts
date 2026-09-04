@@ -1,4 +1,6 @@
 import { ATTRIBUTION_FIELDS, HONEYPOT_FIELD, TIMING_FIELD } from '@rawr/db'
+import { FORM_COPY, formatterSource } from '~/lib/edge-copy.ts'
+import { clientFieldErrorSource } from '~/lib/form-rules.ts'
 
 /** The browser half of F3, served as one file from /embed.js.
  *
@@ -31,6 +33,18 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
   var HONEYPOT = ${JSON.stringify(HONEYPOT_FIELD)};
   var TIMING = ${JSON.stringify(TIMING_FIELD)};
   var ATTR = ${JSON.stringify(ATTRIBUTION_FIELDS)};
+  var COPY = ${JSON.stringify(FORM_COPY)};
+
+  // The very functions the tests ran, not copies of them. Inlined from
+  // ~/lib/form-rules.ts and ~/lib/edge-copy.ts so the browser cannot drift from
+  // the server's rules or from the other three surfaces' wording.
+  ${clientFieldErrorSource()}
+
+  ${formatterSource()}
+
+  /** How long a success message stays up before a redirect takes over, so
+   *  somebody sees that it worked rather than a flash and a new page. */
+  var REDIRECT_SECONDS = 3;
 
   // ---------------------------------------------------------------- utilities
 
@@ -414,7 +428,15 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     actions.appendChild(next);
     actions.appendChild(submit);
 
+    // A bar as well as the words: "step 2 of 5" tells somebody where they are,
+    // the bar tells them how much is left without reading anything.
     var progress = el('div', { class: 'rawr-progress' });
+    var progressLabel = el('span', { class: 'rawr-progress-label' });
+    var progressTrack = el('div', { class: 'rawr-progress-track', 'aria-hidden': 'true' });
+    var progressFill = el('div', { class: 'rawr-progress-fill' });
+    progressTrack.appendChild(progressFill);
+    progress.appendChild(progressLabel);
+    progress.appendChild(progressTrack);
     if (steps.length > 1) node.insertBefore(progress, node.firstChild);
     node.appendChild(status);
     node.appendChild(actions);
@@ -425,9 +447,10 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       back.hidden = current === 0;
       next.hidden = current >= steps.length - 1;
       submit.hidden = current < steps.length - 1;
-      progress.textContent = steps.length > 1
-        ? 'Step ' + (current + 1) + ' of ' + steps.length
-        : '';
+      if (steps.length > 1) {
+        progressLabel.textContent = formStep(current + 1, steps.length);
+        progressFill.style.width = Math.round(((current + 1) / steps.length) * 100) + '%';
+      }
       applyConditions();
     }
 
@@ -449,18 +472,53 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     node.addEventListener('change', applyConditions);
     back.addEventListener('click', function () { showStep(current - 1); });
     next.addEventListener('click', function () {
-      // Client-side validation gates the step only. The server revalidates
-      // everything, so a person who defeats this gains nothing.
-      if (validateStep(node, steps[current])) showStep(current + 1);
+      if (validateStep(node, form, steps[current])) showStep(current + 1);
+    });
+
+    // Checked when a field is left rather than on every keystroke: telling
+    // somebody their email is wrong while they are still typing it is nagging,
+    // and telling them after they have moved on is help. Once a field has a
+    // message it re-checks as they type, so the message clears as soon as it is
+    // fixed rather than waiting for another blur.
+    node.addEventListener(
+      'blur',
+      function (event) {
+        var wrapper = event.target.closest && event.target.closest('[data-field]');
+        if (!wrapper) return;
+        var field = fieldByKey(form, wrapper.getAttribute('data-field'));
+        if (field) checkOne(node, field);
+      },
+      true
+    );
+    node.addEventListener('input', function (event) {
+      var wrapper = event.target.closest && event.target.closest('[data-field]');
+      if (!wrapper) return;
+      var slot = wrapper.querySelector('.rawr-error');
+      if (!slot || !slot.textContent) return;
+      var field = fieldByKey(form, wrapper.getAttribute('data-field'));
+      if (field) checkOne(node, field);
     });
 
     node.addEventListener('submit', function (event) {
       event.preventDefault();
+      if (!validateStep(node, form, steps[current])) {
+        status.textContent = COPY.invalid;
+        return;
+      }
       send(node, formId, form, status, submit, mount);
     });
 
+    // Reachable from the send path: a server error on an earlier step is invisible
+    // that step is showing, so the step moves before focus does.
+    form.onStep = showStep;
+
     mount.appendChild(node);
     showStep(0);
+  }
+
+  function fieldByKey(form, key) {
+    for (var i = 0; i < form.fields.length; i++) if (form.fields[i].key === key) return form.fields[i];
+    return null;
   }
 
   function fieldNode(field) {
@@ -507,10 +565,57 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     }
 
     if (field.required && input.tagName !== 'DIV') input.setAttribute('aria-required', 'true');
+
+    var errorId = 'rawr-e-' + field.key;
+    if (input.tagName !== 'DIV') input.setAttribute('aria-describedby', errorId);
     wrap.appendChild(input);
     if (field.help) wrap.appendChild(el('small', { class: 'rawr-help' }, field.help));
-    wrap.appendChild(el('div', { class: 'rawr-error', 'data-error': field.key }));
+    // role=alert so the message is announced when it appears, not only when the
+    // field is next focused.
+    wrap.appendChild(el('div', { class: 'rawr-error', id: errorId, 'data-error': field.key, role: 'alert' }));
     return wrap;
+  }
+
+  /** Shows or clears one field's message, and keeps aria-invalid in step with it.
+   *  Every path that writes an error goes through here, so a message can never
+   *  appear without the field being announced as invalid. */
+  function setFieldError(node, key, message) {
+    var slot = node.querySelector('[data-error="' + key + '"]');
+    if (slot) slot.textContent = message || '';
+    var wrapper = node.querySelector('[data-field="' + key + '"]');
+    if (!wrapper) return;
+    var inputs = wrapper.querySelectorAll('input, textarea, select');
+    for (var i = 0; i < inputs.length; i++) {
+      if (message) inputs[i].setAttribute('aria-invalid', 'true');
+      else inputs[i].removeAttribute('aria-invalid');
+    }
+  }
+
+  function clearErrors(node) {
+    var slots = node.querySelectorAll('.rawr-error');
+    for (var i = 0; i < slots.length; i++) setFieldError(node, slots[i].getAttribute('data-error'), '');
+  }
+
+  /** The answer to one field, in the shape the checker expects: a list for a
+   *  multi-select, a string for everything else. */
+  function answerFor(node, field) {
+    var answers = collect(node);
+    var value = answers[field.key];
+    if (field.type === 'multi_select') return Array.isArray(value) ? value : value ? [value] : [];
+    return value == null ? '' : value;
+  }
+
+  /** Checks one field and paints the result. Returns true when it passes. */
+  function checkOne(node, field) {
+    var wrapper = node.querySelector('[data-field="' + field.key + '"]');
+    // A hidden field is not being asked, so it is not being answered wrongly.
+    if (!wrapper || wrapper.hidden) {
+      setFieldError(node, field.key, '');
+      return true;
+    }
+    var message = clientFieldError(field, answerFor(node, field));
+    setFieldError(node, field.key, message);
+    return !message;
   }
 
   function collect(node) {
@@ -536,27 +641,83 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     return data;
   }
 
-  function validateStep(node, step) {
+  /** Every field on one step, checked against the same rules the server applies.
+   *  Client-side validation gates the step and nothing more: the server checks
+   *  everything again, so somebody who defeats this gains nothing. */
+  function validateStep(node, form, step) {
     var ok = true;
-    var inputs = step.querySelectorAll('input, textarea, select');
-    for (var i = 0; i < inputs.length; i++) {
-      var input = inputs[i];
-      var wrapper = input.closest('[data-field]');
-      if (!wrapper || wrapper.hidden) continue;
-      var slot = wrapper.querySelector('.rawr-error');
-      var required = input.getAttribute('aria-required') === 'true';
-      if (required && !String(input.value || '').trim()) {
-        if (slot) slot.textContent = 'This is required.';
+    var first = null;
+    for (var i = 0; i < form.fields.length; i++) {
+      var field = form.fields[i];
+      var wrapper = step.querySelector('[data-field="' + field.key + '"]');
+      if (!wrapper) continue;
+      if (!checkOne(node, field)) {
         ok = false;
-      } else if (slot) slot.textContent = '';
+        if (!first) first = wrapper;
+      }
     }
+    // The first thing wrong, not the last: somebody looking at the bottom of a
+    // long form has no idea the problem is three fields above them.
+    if (first) focusField(first);
     return ok;
   }
 
+  function focusField(wrapper) {
+    var input = wrapper.querySelector('input, textarea, select');
+    if (!input) return;
+    if (input.scrollIntoView) input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    try { input.focus({ preventScroll: true }); } catch (e) { input.focus(); }
+  }
+
+  /** Puts the button into its waiting state and hands back the undo, so every
+   *  path out of the send restores it exactly once. */
+  function busy(submit, on) {
+    if (on) {
+      if (!submit.getAttribute('data-label')) submit.setAttribute('data-label', submit.textContent);
+      submit.disabled = true;
+      submit.setAttribute('aria-busy', 'true');
+      submit.textContent = COPY.sending;
+    } else {
+      submit.disabled = false;
+      submit.removeAttribute('aria-busy');
+      var label = submit.getAttribute('data-label');
+      if (label) submit.textContent = label;
+    }
+  }
+
+  /** The failure card: what went wrong, and a way to try again that keeps every
+   *  answer. Nothing is cleared, because a person who has just filled in eight
+   *  fields will not fill them in twice. */
+  function showFailure(node, status, submit, message, retry) {
+    status.textContent = message;
+    var actions = node.querySelector('.rawr-actions');
+    var existingRetry = node.querySelector('.rawr-retry');
+    if (existingRetry) existingRetry.parentNode.removeChild(existingRetry);
+    var again = el('button', { type: 'button', class: 'rawr-retry' }, COPY.retry);
+    again.addEventListener('click', function () {
+      again.parentNode.removeChild(again);
+      status.textContent = '';
+      retry();
+    });
+    if (actions) actions.appendChild(again);
+  }
+
   function send(node, formId, form, status, submit, mount) {
-    submit.disabled = true;
+    // Asked before the request rather than inferred from its failure: "you are
+    // offline" is a different instruction from "try again", and the browser
+    // already knows which one applies.
+    if (navigator.onLine === false) {
+      showFailure(node, status, submit, COPY.offline, function () {
+        send(node, formId, form, status, submit, mount);
+      });
+      return;
+    }
+
+    busy(submit, true);
     status.textContent = '';
-    node.querySelectorAll('.rawr-error').forEach(function (s) { s.textContent = ''; });
+    clearErrors(node);
+    var stale = node.querySelector('.rawr-retry');
+    if (stale) stale.parentNode.removeChild(stale);
 
     var payload = collect(node);
     var attr = attribution();
@@ -572,39 +733,82 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     })
       .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
       .then(function (result) {
-        submit.disabled = false;
+        busy(submit, false);
         var body = result.body;
 
         if (body.errors) {
+          var firstWrapper = null;
           body.errors.forEach(function (e) {
-            var slot = node.querySelector('[data-error="' + e.key + '"]');
-            if (slot) slot.textContent = e.message;
+            setFieldError(node, e.key, e.message);
+            if (!firstWrapper) firstWrapper = node.querySelector('[data-field="' + e.key + '"]');
           });
-          status.textContent = 'Check the highlighted fields.';
+          status.textContent = COPY.invalid;
+          // A message on a field two steps back is invisible until the step it
+          // lives on is showing, so the step moves before focus does.
+          if (firstWrapper) {
+            var step = firstWrapper.closest('.rawr-step');
+            if (step && step.hidden && form.onStep) form.onStep(Number(step.getAttribute('data-step')));
+            focusField(firstWrapper);
+          }
           return;
         }
         if (body.challenge) {
           mountChallenge(node, body.challenge, function () { send(node, formId, form, status, submit, mount); });
-          status.textContent = 'One quick check before we can send this.';
+          status.textContent = COPY.challenge;
           return;
         }
         if (!body.ok) {
-          status.textContent = body.error || 'That could not be sent. Try again in a moment.';
+          showFailure(node, status, submit, body.error || COPY.failed, function () {
+            send(node, formId, form, status, submit, mount);
+          });
           return;
         }
 
-        if (body.success && body.success.mode === 'redirect') {
-          location.href = body.success.value;
-          return;
-        }
-        mount.innerHTML = '';
-        mount.appendChild(el('div', { class: 'rawr-done', role: 'status' },
-          (body.success && body.success.value) || 'Thanks.'));
+        succeed(mount, body);
       })
       .catch(function () {
-        submit.disabled = false;
-        status.textContent = 'That could not be sent. Check your connection and try again.';
+        busy(submit, false);
+        showFailure(
+          node,
+          status,
+          submit,
+          navigator.onLine === false ? COPY.offline : COPY.failed,
+          function () { send(node, formId, form, status, submit, mount); }
+        );
       });
+  }
+
+  /** The success card. A redirect counts down in view rather than replacing the
+   *  page instantly: somebody who never sees a confirmation does not know whether
+   *  it worked, and browsers give a same-tab navigation no time to be read. */
+  function succeed(mount, body) {
+    var success = body.success || {};
+    var done = el('div', { class: 'rawr-done', role: 'status' });
+    done.appendChild(el('p', { class: 'rawr-done-title' },
+      success.mode === 'redirect' ? COPY.sent : (success.value || COPY.sent)));
+
+    if (success.mode !== 'redirect') {
+      mount.innerHTML = '';
+      mount.appendChild(done);
+      return;
+    }
+
+    var note = el('p', { class: 'rawr-done-note' }, formRedirecting(REDIRECT_SECONDS));
+    done.appendChild(note);
+    var link = el('a', { href: success.value, class: 'rawr-done-link' }, 'Go there now');
+    done.appendChild(link);
+    mount.innerHTML = '';
+    mount.appendChild(done);
+
+    var left = REDIRECT_SECONDS;
+    var tick = setInterval(function () {
+      left -= 1;
+      note.textContent = formRedirecting(left);
+      if (left <= 0) {
+        clearInterval(tick);
+        location.href = success.value;
+      }
+    }, 1000);
   }
 
   function mountChallenge(node, challenge, onReady) {
