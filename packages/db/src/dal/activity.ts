@@ -292,7 +292,14 @@ export const recentActivity = async (
            order by case entity_type when 'contact' then 0 when 'deal' then 1 else 2 end
            limit 1
         ) l on true
-       where ${types && types.length > 0 ? sql`a.type = any(${types}::rawr_activity_type[])` : sql`a.type <> 'page_view'`}
+       where ${
+         types && types.length > 0
+           ? sql`a.type in (${sql.join(
+               types.map((type) => sql`${type}::rawr_activity_type`),
+               sql`, `,
+             )})`
+           : sql`a.type <> 'page_view'`
+       }
        order by a.occurred_at desc, a.id desc
        limit ${Math.min(Math.max(limit, 1), 100)}`)
 

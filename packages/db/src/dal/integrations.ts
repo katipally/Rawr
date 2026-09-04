@@ -136,13 +136,26 @@ export const saveIntegration = async (
   mutate(ctx, 'integration', async (tx) => {
     const secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
     // Brevo does not sign its webhooks, and Woodpecker's signing header is not
-    // documented, so the URL Rawr hands each of them carries a token minted here
-    // once and kept across saves. Compared on every delivery.
-    const tokenised = input.kind === 'brevo' || input.kind === 'woodpecker'
-    const config =
-      input.config !== undefined && tokenised && typeof input.config.webhookToken !== 'string'
-        ? { ...input.config, webhookToken: randomToken(24) }
-        : input.config
+    // documented, so the URL Rawr hands each of them carries a token compared on
+    // every delivery.
+    //
+    // The token is the server's, never the caller's: minted once, read back from
+    // the stored row on every later save, and ignored if it arrives in the input.
+    // Taking it from the input would let whoever saves the integration choose the
+    // value, and would rotate it to a new one every time somebody edited a config
+    // field, silently breaking the URL already pasted at the provider.
+    let config = input.config
+    if (config !== undefined && (input.kind === 'brevo' || input.kind === 'woodpecker')) {
+      const [existing] = await tx
+        .select({ config: integration.config })
+        .from(integration)
+        .where(eq(integration.kind, input.kind))
+      const held = (existing?.config as { webhookToken?: unknown } | null)?.webhookToken
+      config = {
+        ...config,
+        webhookToken: typeof held === 'string' ? held : randomToken(24),
+      }
+    }
 
     const [saved] = await tx
       .insert(integration)

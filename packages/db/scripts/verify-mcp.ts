@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
+import { INTEGRATION_KINDS } from '../src/dal/integrations.ts'
 import { randomToken } from '../src/internal/crypto.ts'
 import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import {
@@ -399,7 +400,11 @@ try {
   const generated = await call(salesToken, 'integrations_list', {})
   check(
     'a generated tool runs the same procedure the screen does',
-    !generated.isError && Array.isArray(generated.data?.rows) && generated.data.rows.length === 7,
+    // Every kind the registry knows, configured or not: an integration that is
+    // simply absent is a state somebody needs to see.
+    !generated.isError &&
+      Array.isArray(generated.data?.rows) &&
+      generated.data.rows.length === INTEGRATION_KINDS.length,
     generated.text,
   )
   const generatedRefusal = await call(viewerToken, 'crm_records_remove', { object: 'deal', id: mggId })

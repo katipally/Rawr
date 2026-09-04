@@ -527,21 +527,20 @@ const writeImportedActivity = async (
   const key = importKeyOf(source, values)
 
   return withWorkspace(ctx, async (tx) => {
-    const [row] = await tx
-      .insert(activity)
-      .values({
-        workspaceId: ctx.workspaceId,
-        type,
-        subject: typeof values.subject === 'string' ? values.subject : null,
-        body: typeof values.body === 'string' ? values.body : null,
-        occurredAt,
-        actorId: ctx.actorId,
-        actorKind: ctx.actorKind,
-        source: source ?? 'import',
-        importKey: key,
-      })
-      .onConflictDoNothing({ target: [activity.workspaceId, activity.importKey] })
-      .returning({ id: activity.id })
+    // Written as SQL rather than through the query builder because the unique
+    // index is partial, and Postgres only infers a partial index for ON CONFLICT
+    // when the same predicate is repeated here. The index stays partial so it
+    // covers imported rows rather than every activity ever written.
+    const [row] = await tx.execute<{ id: string }>(sql`
+      insert into activity (workspace_id, type, subject, body, occurred_at, actor_id, actor_kind, source, import_key)
+      values (${ctx.workspaceId}::uuid, ${type}::rawr_activity_type,
+              ${typeof values.subject === 'string' ? values.subject : null},
+              ${typeof values.body === 'string' ? values.body : null},
+              ${occurredAt.toISOString()}::timestamptz,
+              ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind,
+              ${source ?? 'import'}, ${key})
+      on conflict (workspace_id, import_key) where import_key is not null do nothing
+      returning id`)
     if (!row) return 'already'
 
     await tx

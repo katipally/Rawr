@@ -351,7 +351,7 @@ try {
       source: 'woodpecker' as const,
       providerEventId: `wp-open-${stamp}`,
       kind: 'open' as const,
-      email: `verify-marketing-${stamp}@partner1.example`,
+      email: trackedEmail,
       subject: 'Development outbound',
       at: new Date(),
       detail: { campaignId: 101 },
@@ -370,7 +370,7 @@ try {
   console.log('-- importing a HubSpot portal ----------------------------------')
 
   await check('notes land on the timeline of the contact they name', async () => {
-    const email = `verify-marketing-${stamp}@partner1.example`
+    const email = trackedEmail
     const rows = [
       { 'Associated Contact': email, 'Activity Type': 'note', 'Note Body': 'Talked about pricing', 'Activity Date': '2026-08-01T10:00:00Z', 'Record ID': `hs-${stamp}-1` },
       { 'Associated Contact': email, 'Activity Type': 'email', Subject: 'Trial', 'Note Body': 'Sent the trial link', 'Activity Date': '2026-08-02T10:00:00Z', 'Record ID': `hs-${stamp}-2` },
@@ -401,7 +401,7 @@ try {
   })
 
   await check('importing the same export again changes nothing', async () => {
-    const email = `verify-marketing-${stamp}@partner1.example`
+    const email = trackedEmail
     const rows = [
       { 'Associated Contact': email, 'Activity Type': 'note', 'Note Body': 'Talked about pricing', 'Activity Date': '2026-08-01T10:00:00Z', 'Record ID': `hs-${stamp}-1` },
       { 'Associated Contact': email, 'Activity Type': 'email', Subject: 'Trial', 'Note Body': 'Sent the trial link', 'Activity Date': '2026-08-02T10:00:00Z', 'Record ID': `hs-${stamp}-2` },
