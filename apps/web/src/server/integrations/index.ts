@@ -1,4 +1,5 @@
 import {
+  assertCanWrite,
   getRecord,
   listIntegrations,
   type IntegrationKind,
@@ -100,7 +101,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     secretLabel: 'Bot token, or an incoming webhook URL',
     configFields: [
       { key: 'channel', label: 'Default channel', hint: 'Where a form fill lands when a form names none.' },
-      { key: 'stageAlerts', label: 'Stage alerts', hint: 'Comma-separated pipeline ids to announce moves for.' },
+      { key: 'stageAlerts', label: 'Stage alerts', hint: 'Pipelines whose stage moves are announced, by name, comma-separated, e.g. Enterprise. Blank means none.' },
     ],
     rows: ['Custom Lead Forms'],
     setup: [
@@ -210,6 +211,7 @@ const stillBlank = (values: Record<string, unknown>): string[] =>
 
 /** A company on its own: Apollo by domain, then Clay for what is still blank. */
 export const enrichCompanyRecord = async (ctx: WorkspaceContext, companyId: string): Promise<EnrichmentRun> => {
+  assertCanWrite(ctx, 'company')
   const company = await getRecord(ctx, 'company', companyId)
   if (!company) throw new Error('That company no longer exists.')
   const domain = typeof company.values.domain === 'string' ? company.values.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : ''
@@ -252,6 +254,7 @@ export const enrichRecord = async (
   ctx: WorkspaceContext,
   contactId: string,
 ): Promise<EnrichmentRun> => {
+  assertCanWrite(ctx, 'contact')
   const record = await getRecord(ctx, 'contact', contactId)
   if (!record) throw new Error('That contact no longer exists.')
 

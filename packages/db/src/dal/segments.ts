@@ -2,7 +2,7 @@ import { asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import { recordActivity, type EntityType } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
+import { assertCanWrite, type WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
@@ -175,8 +175,10 @@ const ENTITY_TYPE: Record<ObjectKey, EntityType> = { contact: 'contact', company
 export const evaluateSegment = async (
   ctx: WorkspaceContext,
   segmentId: string,
-): Promise<EvaluationResult> =>
-  withWorkspace(ctx, (tx) => evaluateSegmentIn(tx, ctx, segmentId))
+): Promise<EvaluationResult> => {
+  assertCanWrite(ctx, 'segment')
+  return withWorkspace(ctx, (tx) => evaluateSegmentIn(tx, ctx, segmentId))
+}
 
 export const evaluateSegmentIn = async (
   tx: Tx,
@@ -253,8 +255,9 @@ const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: Worksp
  *  run that goes wrong on one does not read as a run that did nothing. */
 export const evaluateAllSegments = async (
   ctx: WorkspaceContext,
-): Promise<{ segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[]> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<{ segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[]> => {
+  assertCanWrite(ctx, 'segment')
+  return withWorkspace(ctx, async (tx) => {
     const rows = await tx.select({ id: segment.id, name: segment.name }).from(segment)
     const out: { segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[] = []
 
@@ -279,6 +282,7 @@ export const evaluateAllSegments = async (
     }
     return out
   })
+}
 
 export type SegmentMember = { id: string; displayName: string; enteredAt: Date }
 

@@ -13,6 +13,7 @@ import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { employerDomainFromEmail, isFreeMailDomain, registrableDomain } from './domains.ts'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
+import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
 
 /** F1 phase B, the storage half. The Gmail calls live in the app; everything that
@@ -503,6 +504,7 @@ const storeMessage = async (
 
   const contactIds = [...new Set([...matched.values()])]
   if (contactIds.length > 0) {
+    await refreshEmailEngagement(tx, ctx, contactIds)
     await linkThreadActivity(tx, ctx, {
       threadId: thread.id,
       subject: incoming.subject,

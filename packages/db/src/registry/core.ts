@@ -83,6 +83,11 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'original_source', label: 'Original source', type: 'json', columnName: 'original_source', position: 12 },
       { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 13 },
       { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 14 },
+      // Derived, read only: dal/engagement.ts keeps them, registry.ts marks them system.
+      { key: 'last_contacted_at', label: 'Last contacted', type: 'datetime', columnName: 'last_contacted_at', position: 15 },
+      { key: 'last_replied_at', label: 'Last reply', type: 'datetime', columnName: 'last_replied_at', position: 16 },
+      { key: 'emails_sent', label: 'Emails sent', type: 'number', columnName: 'emails_sent', position: 17 },
+      { key: 'emails_received', label: 'Emails received', type: 'number', columnName: 'emails_received', position: 18 },
     ],
   },
   {
@@ -136,7 +141,7 @@ export const CORE_VIEWS: Record<ObjectKey, CoreView[]> = {
       slug: 'all',
       name: 'All contacts',
       kind: 'table',
-      columns: ['first_name', 'last_name', 'email', 'company_id', 'title', 'lead_status', 'owner_id', 'created_at'],
+      columns: ['first_name', 'last_name', 'email', 'company_id', 'title', 'lead_status', 'owner_id', 'last_contacted_at', 'created_at'],
       sorts: [{ key: 'created_at', direction: 'desc' }],
       position: 0,
     },

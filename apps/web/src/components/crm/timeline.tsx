@@ -112,7 +112,11 @@ export const Timeline = ({
       return
     }
     try {
-      const saved = window.localStorage.getItem(`${STORAGE_PREFIX}${object}`)?.split(',').filter(Boolean) ?? []
+      // A remembered filter only makes sense for types this record has. Restoring
+      // "Task" onto a record with no tasks would open on an empty timeline.
+      const saved = (window.localStorage.getItem(`${STORAGE_PREFIX}${object}`)?.split(',').filter(Boolean) ?? []).filter(
+        (type) => (counts[type] ?? 0) > 0,
+      )
       if (saved.length > 0) {
         setSelected(saved)
         // The server rendered every type; the restored choice has to fetch its own
@@ -280,7 +284,19 @@ export const Timeline = ({
           Activity ({shownCount.toLocaleString()}/{total.toLocaleString()})
         </p>
         {selected.length > 0 ? (
-          <Button variant="tertiary" onClick={() => { setSelected([]); void load([], null, false) }}>
+          <Button
+            variant="tertiary"
+            onClick={() => {
+              setSelected([])
+              try {
+                // Forgotten, not only cleared: otherwise the next record opens filtered again.
+                window.localStorage.removeItem(`${STORAGE_PREFIX}${object}`)
+              } catch {
+                // Nothing depends on this surviving.
+              }
+              void load([], null, false)
+            }}
+          >
             Show all
           </Button>
         ) : null}

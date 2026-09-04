@@ -16,7 +16,13 @@ export const isObjectKey = (value: string): value is ObjectKey =>
  *  path because nobody may hand-edit when a record was created. Kept here rather
  *  than as a column on field_def: the set is fixed by what the database itself
  *  maintains, not by anything an admin configures. */
-export const SYSTEM_FIELD_KEYS: ReadonlySet<string> = new Set(['created_at'])
+export const SYSTEM_FIELD_KEYS: ReadonlySet<string> = new Set([
+  'created_at',
+  'last_contacted_at',
+  'last_replied_at',
+  'emails_sent',
+  'emails_received',
+])
 
 export type RegistryField = {
   id: string

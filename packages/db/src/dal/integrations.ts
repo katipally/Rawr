@@ -8,7 +8,7 @@ import {
   outboundCall,
 } from '../schema/platform.ts'
 import { decryptToken, encryptToken, randomToken } from '../internal/crypto.ts'
-import type { WorkspaceContext } from './context.ts'
+import { assertCanWrite, type WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 
 /** F6 §1, built once and used by every integration without exception.
@@ -344,8 +344,9 @@ export const listUnmatchedEvents = async (
 /** Re-runs the match for events that arrived before the contact existed. Somebody
  *  who fills in a form after an email was tracked should still get that open on
  *  their timeline. */
-export const rematchInbound = async (ctx: WorkspaceContext): Promise<{ matched: number }> =>
-  withWorkspace(ctx, async (tx) => {
+export const rematchInbound = async (ctx: WorkspaceContext): Promise<{ matched: number }> => {
+  assertCanWrite(ctx, 'integration')
+  return withWorkspace(ctx, async (tx) => {
     const rows = await tx.execute<{ id: string }>(sql`
       update inbound_event e
          set contact_id = c.id, matched = true
@@ -356,6 +357,7 @@ export const rematchInbound = async (ctx: WorkspaceContext): Promise<{ matched: 
       returning e.id`)
     return { matched: rows.length }
   })
+}
 
 // ------------------------------------------------------------ provenance
 
@@ -425,6 +427,8 @@ export const listSuggestions = async (
   )
 
 export const dismissSuggestion = async (ctx: WorkspaceContext, id: string): Promise<void> => {
+  // Dismissing is a decision about the record, so it takes the record's write role.
+  assertCanWrite(ctx, 'contact')
   await withWorkspace(ctx, async (tx) => {
     await tx.delete(enrichmentSuggestion).where(eq(enrichmentSuggestion.id, id))
   })

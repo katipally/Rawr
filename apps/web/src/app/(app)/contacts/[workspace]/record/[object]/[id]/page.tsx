@@ -9,6 +9,7 @@ import {
   listSuggestions,
   listTasks,
   readAssociations,
+  readEmailEngagement,
   readMemberships,
   readSubscriptions,
   threadsForContact,
@@ -50,6 +51,7 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'About this contact', fieldKeys: ['first_name', 'last_name', 'email', 'phone', 'title', 'linkedin_url'] },
     { title: 'Ownership and status', fieldKeys: ['owner_id', 'company_id', 'lifecycle_stage_id', 'lead_status'] },
     { title: 'Where they came from', fieldKeys: ['lead_source', 'marketing_status', 'original_source', 'latest_source'] },
+    { title: 'Email engagement', fieldKeys: ['last_contacted_at', 'last_replied_at', 'emails_sent', 'emails_received'] },
     { title: 'Record', fieldKeys: ['created_at'] },
   ],
   company: [
@@ -72,7 +74,7 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
 
 /** The two or three values worth reading before anything else. */
 const HEADER_FIELDS: Record<ObjectKey, string[]> = {
-  contact: ['title', 'email', 'lifecycle_stage_id', 'owner_id'],
+  contact: ['title', 'email', 'last_contacted_at', 'owner_id'],
   company: ['domain', 'industry', 'country', 'owner_id'],
   deal: ['stage_id', 'amount', 'close_date', 'owner_id'],
 }
@@ -266,7 +268,7 @@ const RecordPage = async ({
             />
           ) : null}
           {objectParam === 'contact' ? (
-            <MailPanel contactName={record.displayName} threads={threads} />
+            <MailPanel contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
           ) : null}
           {objectParam === 'contact' ? (
             <SubscriptionsPanel

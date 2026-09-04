@@ -1,4 +1,5 @@
 import {
+  assertCanWrite,
   getRecord,
   ingestMarketingEvent,
   listSubscriptionTypes,
@@ -82,6 +83,7 @@ export const pushSegmentToBrevo = async (
   ctx: WorkspaceContext,
   input: { segmentId: string; listId: number },
 ): Promise<PushResult> => {
+  assertCanWrite(ctx, 'segment')
   const { secret, config, id } = await credentials(ctx).catch((cause) => {
     if (devIntegrationsEnabled) return { secret: null, config: {} as BrevoConfig, id: null }
     throw cause

@@ -3,6 +3,7 @@ import { contact } from '../schema/records.ts'
 import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity, type ActivityType } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
+import { refreshEmailEngagement } from './engagement.ts'
 import { withWorkspace, writeAudit } from './index.ts'
 import { claimInbound } from './integrations.ts'
 
@@ -128,6 +129,9 @@ export const ingestMarketingEvent = async (
       payload: { source: event.source, kind: event.kind, ...event.detail },
       links: [{ entityType: 'contact', entityId: matchedContact.id }],
     })
+    if (event.kind === 'sequence_step' || event.kind === 'sequence_reply') {
+      await refreshEmailEngagement(tx, ctx, [matchedContact.id])
+    }
 
     // An unsubscribe reported by a provider is authoritative for that provider's
     // list, and Rawr then refuses to include the contact in any future push. The

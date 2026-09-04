@@ -2,6 +2,7 @@ import {
   applyEnrichment,
   contactsLinkedTo,
   externalIdOf,
+  assertCanWrite,
   getRecord,
   ingestMarketingEvent,
   once,
@@ -356,6 +357,9 @@ export const enrollInSequence = async (
   ctx: WorkspaceContext,
   input: { contactId: string; sequenceId: string; emailAccountId: string },
 ): Promise<EnrollOutcome> => {
+  // Enrolling sends mail in the person's name from Apollo. The role that may
+  // change the contact is the role that may do that.
+  assertCanWrite(ctx, 'contact')
   const apollo = await apolloContactId(ctx, input.contactId)
   const sequences = await listSequences(ctx)
   const sequence = sequences.find((row) => row.id === input.sequenceId)

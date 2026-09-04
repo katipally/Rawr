@@ -1,4 +1,4 @@
-import { once, readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
+import { isUuid, listPipelines, once, readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
 import { devIntegrationsEnabled, env, slackConfigured } from '~/lib/env.ts'
 import { attempt, json, providerError, type ConnectionTest } from './provider.ts'
 
@@ -34,15 +34,27 @@ export const slackCredentials = async (ctx: WorkspaceContext): Promise<SlackCred
 
   if (!botToken && !webhookUrl) return null
 
+  // A pipeline is named the way a person types it, "Enterprise", and an id is
+  // accepted too for anything already stored that way. Resolved here, once per
+  // call, so the check on every stage move is a set lookup.
+  const wanted = (config.stageAlerts ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+  const named = wanted.filter((entry) => !isUuid(entry))
+  const byName = named.length > 0 ? await listPipelines(ctx) : []
+  const stagePipelines = wanted.flatMap((entry) =>
+    isUuid(entry)
+      ? [entry]
+      : byName.filter((pipeline) => pipeline.name.toLowerCase() === entry.toLowerCase()).map((pipeline) => pipeline.id),
+  )
+
   return {
     botToken,
     webhookUrl,
     channel: config.channel ?? env.SLACK_DEFAULT_CHANNEL ?? null,
     integrationId: stored?.id ?? null,
-    stagePipelines: (config.stageAlerts ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter(Boolean),
+    stagePipelines,
   }
 }
 

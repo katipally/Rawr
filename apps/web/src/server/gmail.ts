@@ -187,6 +187,9 @@ export const syncMailbox = async (
 ): Promise<SyncOutcome> => {
   const box = await readMailbox(ctx, mailboxId)
   if (!box) throw new Error('That mailbox is not connected.')
+  if (ctx.actorKind === 'user' && ctx.role !== 'admin' && box.userId !== ctx.actorId) {
+    throw new Error('That is somebody else’s mailbox. Only they, or an admin, can run its sync.')
+  }
   if (box.state === 'revoked') {
     return { read: 0, stored: 0, alreadyHad: 0, skipped: 0, done: true, reason: 'Access to this mailbox was withdrawn.' }
   }

@@ -2,6 +2,9 @@ import postgres from 'postgres'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import { replayDeadLetter } from '../src/dal/jobs.ts'
 import { ForbiddenError, ROLES, type Role, type WorkspaceContext } from '../src/dal/context.ts'
+import { deleteView } from '../src/dal/views.ts'
+import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
+import { rematchInbound } from '../src/dal/integrations.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 
 /** Proves the role matrix and the audit trail by calling the mutation directly,
@@ -149,7 +152,58 @@ try {
     auditWritable?.can_update === false && auditWritable?.can_delete === false,
     'the app role has no UPDATE or DELETE grant on audit_log',
   )
+  // Ownership on top of the role matrix: the things a role may do in general but
+  // not to somebody else's.
+  const [other] = await owner`
+    select u.id from user_account u join membership m on m.user_id = u.id
+     where m.workspace_id = ${workspaceId} and u.id <> ${actorId} limit 1`
+  const otherId = other!.id as string
+  const [view] = await owner`
+    insert into saved_view (workspace_id, object_id, name, slug, kind, owner_id, is_shared, filters, sorts, columns, position)
+    values (${workspaceId}, ${contactObject!.id}, 'Guard probe view', 'guard-probe-view', 'table', ${otherId}, true, '[]', '[]', '["first_name"]', 99)
+    returning id`
+  const outcomeOf = async (fn: () => Promise<unknown>): Promise<'allowed' | 'refused'> => {
+    try {
+      await fn()
+      return 'allowed'
+    } catch {
+      return 'refused'
+    }
+  }
+  check(
+    (await outcomeOf(() => deleteView(contextFor(workspaceId, actorId, 'sales'), view!.id as string))) === 'refused',
+    "a sales user cannot delete somebody else's view",
+  )
+  check(
+    (await outcomeOf(() => deleteView(contextFor(workspaceId, actorId, 'admin'), view!.id as string))) === 'allowed',
+    'an admin can delete anybody’s view',
+  )
+
+  const probeSegment = await saveSegment(contextFor(workspaceId, actorId, 'admin'), {
+    objectKey: 'contact',
+    name: 'Guard probe segment',
+    filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'is_not_empty' }] }],
+  })
+  check(
+    (await outcomeOf(() => evaluateSegment(contextFor(workspaceId, actorId, 'viewer'), probeSegment.id))) === 'refused',
+    'viewer cannot evaluate a segment',
+  )
+  check(
+    (await outcomeOf(() => evaluateSegment(contextFor(workspaceId, actorId, 'marketing'), probeSegment.id))) === 'allowed',
+    'marketing can evaluate a segment',
+  )
+  await deleteSegment(contextFor(workspaceId, actorId, 'admin'), probeSegment.id)
+  check(
+    (await outcomeOf(() => rematchInbound(contextFor(workspaceId, actorId, 'sales')))) === 'refused',
+    'sales cannot rematch inbound provider events',
+  )
+  check(
+    (await outcomeOf(() => rematchInbound(contextFor(workspaceId, actorId, 'admin')))) === 'allowed',
+    'admin can rematch inbound provider events',
+  )
+
   // The probes are artefacts of this script, so it takes them with it.
+  await owner`delete from saved_view where workspace_id = ${workspaceId} and slug = 'guard-probe-view'`
   await owner`delete from dead_letter where workspace_id = ${workspaceId} and error like 'Simulated failure%'`
   await owner`delete from field_def where workspace_id = ${workspaceId} and key like 'guard_probe_%'`
   await owner.unsafe('drop index if exists hot_contact_guard_probe_admin')

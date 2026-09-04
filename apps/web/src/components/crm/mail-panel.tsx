@@ -1,6 +1,6 @@
 'use client'
 
-import type { ThreadMessage, ThreadSummary } from '@rawr/db'
+import type { EmailEngagement, ThreadMessage, ThreadSummary } from '@rawr/db'
 import { Button, Spinner } from '@rawr/ui'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -9,6 +9,9 @@ import { formatDate } from './value.tsx'
 export type MailPanelProps = {
   contactName: string
   threads: ThreadSummary[]
+  /** The four derived numbers, so the panel says where the conversation stands
+   *  before anyone opens a thread. */
+  engagement: EmailEngagement
 }
 
 /** F1 phase B, the thing the feature exists for: a successor opens a contact and
@@ -17,11 +20,31 @@ export type MailPanelProps = {
  *  Threads are listed from what the sync stored. Opening one loads its messages;
  *  opening a message fetches its body from Gmail on the spot, because bodies are
  *  kept by reference and never copied into this database. */
-export const MailPanel = ({ contactName, threads }: MailPanelProps) => (
+export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) => (
   <section className="rounded-panel border border-line bg-surface">
     <header className="border-b border-divider px-3 py-2">
       <h3 className="font-medium">Email ({threads.length})</h3>
     </header>
+
+    {engagement.lastContactedAt || engagement.lastRepliedAt ? (
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-divider px-3 py-2 text-small">
+        <dt className="text-secondary">Last contacted</dt>
+        <dd className="tabular-nums">{engagement.lastContactedAt ? formatDate(engagement.lastContactedAt) : '—'}</dd>
+        <dt className="text-secondary">Last reply</dt>
+        <dd className="tabular-nums">{engagement.lastRepliedAt ? formatDate(engagement.lastRepliedAt) : 'Never'}</dd>
+        <dt className="text-secondary">Sent · received</dt>
+        <dd className="tabular-nums">
+          {engagement.emailsSent} · {engagement.emailsReceived}
+        </dd>
+        {engagement.awaitingReplyDays !== null ? (
+          <dd className={`col-span-2 ${engagement.awaitingReplyDays >= 7 ? 'text-warning' : 'text-secondary'}`}>
+            {engagement.awaitingReplyDays === 0
+              ? 'Contacted today, no reply yet.'
+              : `Waiting on a reply for ${engagement.awaitingReplyDays} day${engagement.awaitingReplyDays === 1 ? '' : 's'}.`}
+          </dd>
+        ) : null}
+      </dl>
+    ) : null}
 
     {threads.length === 0 ? (
       <p className="px-3 py-3 text-secondary">

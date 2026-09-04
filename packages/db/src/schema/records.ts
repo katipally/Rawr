@@ -101,6 +101,11 @@ export const contact = pgTable(
      *  is incremental rather than a full re-push and an opt-out can be sent to
      *  the right row at the other end. */
     externalIds: jsonb('external_ids').notNull().default({}),
+    /** Email engagement, derived. See dal/engagement.ts. */
+    lastContactedAt: timestamp('last_contacted_at', { withTimezone: true }),
+    lastRepliedAt: timestamp('last_replied_at', { withTimezone: true }),
+    emailsSent: integer('emails_sent').notNull().default(0),
+    emailsReceived: integer('emails_received').notNull().default(0),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

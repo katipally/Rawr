@@ -3,6 +3,7 @@ import { task } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { recordActivity, type EntityRef } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
+import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 
 export type TaskRow = {
@@ -160,6 +161,7 @@ export const logByHand = async (
       links: [input.entity],
     })
     if (!id) throw new Error('That could not be attached to the record.')
+    if (input.entity.entityType === 'contact') await refreshEmailEngagement(tx, ctx, [input.entity.entityId])
 
     return {
       result: { id },
@@ -198,8 +200,12 @@ export const editLoggedEntry = async (ctx: WorkspaceContext, input: { id: string
 export const deleteLoggedEntry = async (ctx: WorkspaceContext, id: string): Promise<void> =>
   mutate(ctx, 'activity', async (tx) => {
     const before = await ownLoggedEntry(tx, ctx, id)
+    const contacts = await tx.execute<{ entity_id: string }>(
+      sql`select entity_id from activity_link where activity_id = ${id} and entity_type = 'contact'`,
+    )
     // Links cascade. The audit row keeps what was said, so nothing is unrecoverable.
     await tx.execute(sql`delete from activity where id = ${id}`)
+    await refreshEmailEngagement(tx, ctx, contacts.map((row) => row.entity_id))
     return {
       result: undefined,
       audit: { entity: 'activity', entityId: id, action: 'delete', before: { type: before.type, body: before.body }, after: null },

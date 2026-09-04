@@ -208,8 +208,14 @@ export const saveView = async (
 
 export const deleteView = async (ctx: WorkspaceContext, id: string): Promise<void> =>
   mutate(ctx, 'saved_view', async (tx) => {
-    const [row] = await tx.select({ slug: savedView.slug, name: savedView.name }).from(savedView).where(eq(savedView.id, id))
+    const [row] = await tx
+      .select({ slug: savedView.slug, name: savedView.name, ownerId: savedView.ownerId })
+      .from(savedView)
+      .where(eq(savedView.id, id))
     if (!row) throw new Error('That view has already been deleted.')
+    if (row.ownerId !== null && row.ownerId !== ctx.actorId && ctx.role !== 'admin') {
+      throw new Error('That view belongs to somebody else. Only they, or an admin, can delete it.')
+    }
     if (row.slug === DEFAULT_VIEW_SLUG) {
       throw new Error('The default view is the address every link falls back to, so it cannot be deleted.')
     }
