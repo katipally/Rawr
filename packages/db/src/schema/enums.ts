@@ -234,3 +234,17 @@ export const fieldSourceEnum = pgEnum('rawr_field_source', [
   'booking',
   'product',
 ])
+
+/** B11. What starts an automation. Every one of these is an event Rawr already
+ *  emits on a write, which is why none of them needs a scheduler. */
+export const automationTriggerEnum = pgEnum('rawr_automation_trigger', [
+  'record_created',
+  'stage_changed',
+  'lifecycle_changed',
+  'form_submitted',
+])
+
+/** `skipped` is the interesting one: the automation was armed, the event
+ *  happened, and a condition was false. Without it a log of successes cannot say
+ *  whether a rule is broken or simply not matching. */
+export const automationStateEnum = pgEnum('rawr_automation_state', ['done', 'skipped', 'failed'])

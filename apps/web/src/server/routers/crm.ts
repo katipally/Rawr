@@ -14,6 +14,7 @@ import {
   duplicateView,
   dissociate,
   dryRun,
+  findDuplicates,
   getRecord,
   IMPORT_KINDS,
   getRegistry,
@@ -43,7 +44,11 @@ import {
   updateRecord,
   withWorkspace,
   schema,
+  type ObjectKey,
+  type UpdateResult,
+  type WorkspaceContext,
 } from '@rawr/db'
+import { runAutomations } from '../automations.ts'
 import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -79,6 +84,26 @@ const listInput = z.object({
   limit: z.number().int().min(1).max(200).optional(),
   cursor: cursorSchema.nullish(),
 })
+
+/** A stage move and a lifecycle move are two triggers on one write, so both are
+ *  read off the same result rather than from two separate calls. `updateRecord`
+ *  reports exactly one of them per write, because they are different columns. */
+const fireChangeAutomations = (
+  ctx: { workspace: WorkspaceContext; session: { workspaceSlug: string } },
+  object: ObjectKey,
+  id: string,
+  result: UpdateResult,
+): void => {
+  const trigger = result.stageChange ? 'stage_changed' : result.lifecycleChanged ? 'lifecycle_changed' : null
+  if (!trigger) return
+  runAutomations(ctx.workspace, {
+    trigger,
+    objectKey: object,
+    entityId: id,
+    displayName: result.displayName,
+    workspaceSlug: ctx.session.workspaceSlug,
+  })
+}
 
 export const crmRouter = router({
   registry: protectedProcedure.query(({ ctx }) =>
@@ -173,7 +198,19 @@ export const crmRouter = router({
 
     create: protectedProcedure
       .input(z.object({ object: objectKey, values: recordValues }))
-      .mutation(({ ctx, input }) => call(() => createRecord(ctx.workspace, input.object, input.values))),
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          const result = await createRecord(ctx.workspace, input.object, input.values)
+          runAutomations(ctx.workspace, {
+            trigger: 'record_created',
+            objectKey: input.object,
+            entityId: result.id,
+            displayName: result.displayName,
+            workspaceSlug: ctx.session.workspaceSlug,
+          })
+          return result
+        }),
+      ),
 
     update: protectedProcedure
       .input(
@@ -196,6 +233,7 @@ export const crmRouter = router({
             input.expectedUpdatedAt ?? null,
           )
           announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          fireChangeAutomations(ctx, input.object, input.id, result)
           return result
         }),
       ),
@@ -217,6 +255,15 @@ export const crmRouter = router({
     remove: protectedProcedure
       .input(z.object({ object: objectKey, id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteRecord(ctx.workspace, input.object, input.id))),
+
+    /** The review queue behind the merge dialog. Read-only, gated on write: it
+     *  lists two records side by side asserting they might be one person, which
+     *  is not a thing to put in front of somebody who cannot act on it. */
+    duplicates: protectedProcedure
+      .input(z.object({ object: z.enum(['contact', 'company']), limit: z.number().int().min(1).max(200).optional() }))
+      .query(({ ctx, input }) =>
+        call(() => findDuplicates(ctx.workspace, input.object, input.limit ? { limit: input.limit } : {})),
+      ),
 
     merge: protectedProcedure
       .input(
@@ -332,6 +379,7 @@ export const crmRouter = router({
             [input.field]: input.value,
           })
           announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          fireChangeAutomations(ctx, 'deal', input.dealId, result)
           return result
         }),
       ),

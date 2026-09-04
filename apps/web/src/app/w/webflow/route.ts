@@ -1,10 +1,14 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { publicFormBySlug } from '@rawr/db'
+import {
+  publicEdgeContext,
+  publicFormBySlug,
+} from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { clientIp } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
+import { runAutomations } from '~/server/automations.ts'
 
 /** POST /w/webflow — the fallback path of F3 §7.
  *
@@ -113,6 +117,18 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
       formId: form.formId,
       submissionId: result.submissionId,
       ...result.notify,
+    })
+  }
+
+  // B11. After the outcome is decided, like the Slack post above, and on the
+  // same background handle: a rule that sets a lifecycle stage must never make
+  // a visitor wait, and must never fail their submission.
+  if (result.contactId) {
+    runAutomations(publicEdgeContext(form.workspaceId), {
+      trigger: 'form_submitted',
+      objectKey: 'contact',
+      entityId: result.contactId,
+      workspaceSlug: form.workspaceSlug,
     })
   }
 

@@ -1,0 +1,71 @@
+import { boolean, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { automationStateEnum, automationTriggerEnum, entityTypeEnum } from './enums.ts'
+import { userAccount, workspace } from './identity.ts'
+
+/** B11. When this happens, do that.
+ *
+ *  Everything automatic in Rawr before this was hard-wired: segments recompute on
+ *  the hour, sequences advance, and one deal stage change posts to one Slack
+ *  channel. Every other rule a team wanted — a form fill sets a lifecycle stage,
+ *  a deal reaching Proposal creates a task for its owner, a new contact from paid
+ *  search goes to whoever is on rotation — needed a deploy.
+ *
+ *  Triggers are the events Rawr already emits rather than a scheduler, so an
+ *  automation fires on the write that caused it and nothing polls. That is also
+ *  why "no activity for thirty days" is not here: it is the one useful trigger
+ *  that is not an event, and it needs a scan the others do not. */
+export const automation = pgTable(
+  'automation',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    isActive: boolean('is_active').notNull().default(false),
+    trigger: automationTriggerEnum('trigger').notNull(),
+    /** Which object the trigger watches, and anything else it needs: a form id, a
+     *  pipeline id. Shape depends on the trigger. */
+    triggerConfig: jsonb('trigger_config').notNull().default({}),
+    /** FilterGroup[], compiled against the record that triggered it, exactly as a
+     *  segment's are. One filter language in the product, not two. */
+    conditions: jsonb('conditions').notNull().default([]),
+    /** Ordered {type, config}. Run in order, and a failure stops the rest: an
+     *  automation half-applied is worse than one that did not run, because the
+     *  record ends up in a state no rule describes. */
+    actions: jsonb('actions').notNull().default([]),
+    createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    /** The only query the runner makes: what is armed for this event. */
+    index('automation_trigger_idx').on(t.workspaceId, t.trigger, t.isActive),
+  ],
+)
+
+/** Every firing, including the ones that did nothing.
+ *
+ *  "It did not run" and "it ran and the conditions were false" are different
+ *  answers to the only question anybody asks about an automation, and a log that
+ *  records just the successes cannot tell them apart. */
+export const automationRun = pgTable(
+  'automation_run',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    automationId: uuid('automation_id')
+      .notNull()
+      .references(() => automation.id, { onDelete: 'cascade' }),
+    entityType: entityTypeEnum('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    state: automationStateEnum('state').notNull(),
+    /** What happened, in the words the screen shows: which actions ran, or the
+     *  condition that was false, or the error verbatim. */
+    detail: text('detail'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('automation_run_recent_idx').on(t.workspaceId, t.automationId, t.at.desc()),
+    index('automation_run_entity_idx').on(t.workspaceId, t.entityId),
+  ],
+)

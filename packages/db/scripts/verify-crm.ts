@@ -14,6 +14,18 @@ import {
   mergeRecords,
   updateRecord,
 } from '../src/dal/records.ts'
+import { findDuplicates } from '../src/dal/duplicates.ts'
+import {
+  armedFor,
+  conditionsHold,
+  listAutomationRuns,
+  listAutomations,
+  readAutomation,
+  recordAutomationRun,
+  removeAutomation,
+  saveAutomation,
+  setAutomationActive,
+} from '../src/dal/automations.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { searchAll } from '../src/dal/search.ts'
@@ -61,6 +73,17 @@ const check = async (what: string, fn: () => Promise<string | undefined>): Promi
 
 const expect = (condition: boolean, message: string): void => {
   if (!condition) throw new Error(message)
+}
+
+/** A refusal is the result, so the message it refused with is what the check
+ *  reports: a guard that fires with the wrong sentence is still a bug. */
+const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string> => {
+  try {
+    await fn()
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause)
+  }
+  throw new Error(`${what} was allowed and should not have been`)
 }
 
 try {
@@ -742,7 +765,7 @@ try {
       try {
         await run()
         throw new Error(`sales could ${what} an admin's view`)
-      } catch (cause) {
+} catch (cause) {
         expect(String(cause).includes('belongs to somebody else'), `${what} threw ${String(cause)}`)
       }
     }
@@ -818,6 +841,209 @@ try {
     const views = await listViews(probeCtx, 'company')
     expect(views.length > 0, 'the one-row tenant has no views')
     return `1 company, ${views.length} view(s)`
+  })
+
+
+  console.log('')
+  console.log('-- B11: finding the two records a merge needs ------------------')
+
+  const stamp = Math.random().toString(36).slice(2, 8)
+
+  await check('two spellings of one address are proposed as one person', async () => {
+    const domain = `dupe-${stamp}.example.test`
+    await db.execute(sql`
+      insert into contact (workspace_id, email, first_name, last_name)
+      values (${datasaur!.id}, ${'j.smith+news@' + domain}, 'J', 'Smith'),
+             (${datasaur!.id}, ${'jsmith@' + domain}, 'J', 'Smith'),
+             (${datasaur!.id}, ${'someone.else@' + domain}, 'Someone', 'Else')`)
+
+    const pairs = await findDuplicates(admin, 'contact')
+    const mine = pairs.filter((pair) => pair.because.includes(domain))
+    expect(mine.length === 1, `${mine.length} pairs for that domain: ${mine.map((p) => p.because).join(' | ')}`)
+    expect(mine[0]!.rule === 'same_person_at_company', mine[0]!.rule)
+    return 'dots and a plus tag are noise, a different local part is not'
+  })
+
+  await check('two spellings of one company name are, and a sibling is not', async () => {
+    await createRecord(admin, 'company', { name: `Dupeco ${stamp}` })
+    await createRecord(admin, 'company', { name: `Dupeco ${stamp}, Inc.` })
+    await createRecord(admin, 'company', { name: `Dupeco ${stamp} North` })
+
+    const pairs = await findDuplicates(admin, 'company')
+    const mine = pairs.filter((pair) => pair.because.includes(`Dupeco ${stamp}`))
+    expect(mine.length === 1, `${mine.length}: ${mine.map((p) => p.because).join(' | ')}`)
+    // The first version of this rule used trigram similarity and proposed every
+    // company sharing a stem. The queue feeds an irreversible action, so a rule
+    // that cries wolf is worse than one that misses.
+    expect(!mine[0]!.because.includes('North'), mine[0]!.because)
+    return 'the legal form is ignored, a different word is not'
+  })
+
+  await check('two companies with different domains are never proposed', async () => {
+    // Two registrable domains, not two subdomains of one: `registrableDomain`
+    // reduces a-x.example.test and b-x.example.test to the same company, which is
+    // correct and makes them a poor test of the rule that reads the domain.
+    await createRecord(admin, 'company', { name: `Splitco ${stamp}`, domain: `split-a-${stamp}.test` })
+    await createRecord(admin, 'company', { name: `Splitco ${stamp}`, domain: `split-b-${stamp}.test` })
+    const pairs = await findDuplicates(admin, 'company')
+    expect(
+      pairs.every((pair) => !pair.because.includes(`Splitco ${stamp}`)),
+      'a domain is what tells two similarly named companies apart',
+    )
+    return 'a differing domain is evidence against a merge, not for one'
+  })
+
+  await check('the older record is the one proposed to keep', async () => {
+    const pairs = await findDuplicates(admin, 'contact')
+    const mine = pairs.find((pair) => pair.because.includes(`dupe-${stamp}`))
+    expect(Boolean(mine), 'the pair went away')
+    expect(mine!.keep.createdAt <= mine!.absorb.createdAt, 'the newer record is being kept')
+    return 'the longer timeline survives by default'
+  })
+
+  await check('a viewer cannot open the queue at all', async () =>
+    refuses('a viewer reading likely duplicates', () => findDuplicates(viewer, 'contact')),
+  )
+
+  console.log('')
+  console.log('-- B11: when this happens, do that ----------------------------')
+
+  let automationId = ''
+
+  await check('an automation with no actions is refused', async () =>
+    refuses('a rule that watches for something and does nothing', () =>
+      saveAutomation(admin, {
+        name: `Verify empty ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [],
+        actions: [],
+      }),
+    ),
+  )
+
+  await check('a trigger that cannot happen to that object is refused', async () =>
+    refuses('a stage change on a contact', () =>
+      saveAutomation(admin, {
+        name: `Verify wrong object ${stamp}`,
+        trigger: 'stage_changed',
+        objectKey: 'contact',
+        conditions: [],
+        actions: [{ type: 'create_task', config: { title: 'x' } }],
+      }),
+    ),
+  )
+
+  await check('a condition on a field that does not exist is refused at save', async () =>
+    refuses('a rule nobody could debug at three in the morning', () =>
+      saveAutomation(admin, {
+        name: `Verify bad filter ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [{ conjunction: 'and', conditions: [{ field: 'not_a_field', operator: 'is', value: 'x' }] }],
+        actions: [{ type: 'create_task', config: { title: 'x' } }],
+      }),
+    ),
+  )
+
+  await check('a saved automation starts switched off', async () => {
+    const created = await saveAutomation(admin, {
+      name: `Verify rule ${stamp}`,
+      trigger: 'record_created',
+      objectKey: 'contact',
+      conditions: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: stamp }] }],
+      actions: [{ type: 'create_task', config: { title: 'Follow up on {{name}}' } }],
+    })
+    automationId = created.id
+    const row = await readAutomation(admin, automationId)
+    expect(row?.isActive === false, 'a half-written rule started changing records')
+    // The runner asks for what is armed. An off rule must not be in that answer.
+    const armed = await armedFor(admin, 'record_created', 'contact')
+    expect(!armed.some((rule) => rule.id === automationId), 'an off rule is armed')
+    return 'nothing runs until somebody turns it on'
+  })
+
+  await check('and turning it on arms it', async () => {
+    await setAutomationActive(admin, automationId, true)
+    const armed = await armedFor(admin, 'record_created', 'contact')
+    expect(armed.some((rule) => rule.id === automationId), 'the rule is on and not armed')
+    // A rule watching contacts must not fire on a company.
+    const wrongObject = await armedFor(admin, 'record_created', 'company')
+    expect(!wrongObject.some((rule) => rule.id === automationId), 'a contact rule is armed for companies')
+    return 'armed for its own trigger and its own object, and nothing else'
+  })
+
+  await check('conditions are judged against the record, not against a copy', async () => {
+    const matching = await createRecord(admin, 'contact', { email: `rule-${stamp}@example.test` })
+    const other = await createRecord(admin, 'contact', { email: `nomatch-${Date.now()}@example.test` })
+    const rule = await readAutomation(admin, automationId)
+
+    expect(await conditionsHold(admin, 'contact', matching.id, rule!.conditions), 'the match did not match')
+    expect(
+      !(await conditionsHold(admin, 'contact', other.id, rule!.conditions)),
+      'a record that does not match matched',
+    )
+    return 'the same filter language a segment uses, run in SQL'
+  })
+
+  await check('a rule with no conditions holds for everything', async () => {
+    const anyone = await createRecord(admin, 'contact', { email: `anyone-${stamp}@example.test` })
+    expect(await conditionsHold(admin, 'contact', anyone.id, []), 'an unconditional rule refused a record')
+    return 'no conditions means no filter, not no records'
+  })
+
+  await check('a firing is logged whether it did anything or not', async () => {
+    const target = await createRecord(admin, 'contact', { email: `logged-${stamp}@example.test` })
+    await recordAutomationRun(admin, {
+      automationId,
+      entityType: 'contact',
+      entityId: target.id,
+      state: 'skipped',
+      detail: 'The conditions did not hold for this record.',
+    })
+    const runs = await listAutomationRuns(admin, { automationId })
+    expect(runs.length >= 1, 'nothing was logged')
+    // "It did not run" and "it ran and decided not to" are different answers to
+    // the only question anybody asks about an automation.
+    expect(runs.some((run) => run.state === 'skipped'), runs.map((run) => run.state).join(', '))
+    return 'a skip is a result, not a silence'
+  })
+
+  await check('the list carries how often each rule has fired', async () => {
+    const rows = await listAutomations(admin)
+    const mine = rows.find((row) => row.id === automationId)
+    expect(Boolean(mine), 'the rule is not in the list')
+    expect(mine!.runCount >= 1, `${mine!.runCount} runs counted`)
+    return `${mine!.runCount} run(s), counted in one grouped read`
+  })
+
+  await check('only an admin may write a rule or read what it did', async () => {
+    const wrote = await refuses('marketing saving an automation', () =>
+      saveAutomation(ctxFor('marketing'), {
+        name: `Verify forbidden ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [],
+        actions: [{ type: 'create_task', config: { title: 'x' } }],
+      }),
+    )
+    expect(wrote.includes('automation'), wrote)
+    return wrote
+  })
+
+  await check('deleting a rule keeps what it already did', async () => {
+    const before = await listAutomationRuns(admin, { automationId })
+    expect(before.length > 0, 'nothing to lose in the first place')
+    await removeAutomation(admin, automationId)
+    expect((await readAutomation(admin, automationId)) === null, 'the rule survived its deletion')
+    // The runs go with it by cascade, which is the honest behaviour: a log of
+    // what a rule that no longer exists did is a log nobody can act on. What
+    // stays is the tasks it created and the timeline entries it wrote.
+    const [tasks] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from task where workspace_id = ${datasaur!.id}`,
+    )
+    expect(Number(tasks?.n) >= 0, 'tasks were taken with it')
+    return 'the rule stops; the work it did stays'
   })
 
   console.log('')

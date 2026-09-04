@@ -4,6 +4,7 @@ import {
   accountPath,
   agentAccessPath,
   auditPath,
+  automationsPath,
   failedJobsPath,
   integrationsPath,
   lifecyclePath,
@@ -55,6 +56,7 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Tools',
     sections: [
+      { href: automationsPath(), label: 'Automations', hint: 'When this happens, do that' },
       { href: integrationsPath(), label: 'Integrations', hint: 'Connected services and their health' },
       { href: trackingPath(), label: 'Tracking domain', hint: 'Where sequence links and pixels point' },
       { href: failedJobsPath(), label: 'Failed jobs', hint: 'What broke, and replaying it' },

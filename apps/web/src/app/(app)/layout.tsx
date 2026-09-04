@@ -9,6 +9,7 @@ import {
   bookingPagesPath,
   createRecordPath,
   formsPath,
+  duplicatesPath,
   exportPath,
   importsPath,
   inboxPath,
@@ -112,6 +113,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           items: [
             { href: importsPath(workspace), label: 'Import' },
             { href: exportPath(workspace), label: 'Export' },
+            { href: duplicatesPath(workspace), label: 'Duplicates' },
           ],
         },
         {

@@ -1,6 +1,16 @@
 import {
+  ACTION_TYPES,
+  AUTOMATION_TRIGGERS,
   FIELD_TYPES,
   ROLES,
+  listAutomationRuns,
+  listAutomations,
+  parseFilters,
+  readAutomation,
+  removeAutomation,
+  saveAutomation,
+  setAutomationActive,
+  type AutomationAction,
   addMember,
   auditEntities,
   deleteTeam,
@@ -302,6 +312,60 @@ export const adminRouter = router({
       .input(z.object({ id: z.uuid(), destinationId: z.uuid().nullish() }))
       .mutation(({ ctx, input }) =>
         call(() => deleteLifecycleStage(ctx.workspace, input.id, input.destinationId ?? null)),
+      ),
+  }),
+
+  /** B11. When this happens, do that. Admin only, both to write a rule and to
+   *  read the log of what it did: a rule writes to every record matching a
+   *  filter, which is not a thing to hand to whoever can write one record. */
+  automations: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listAutomations(ctx.workspace))),
+
+    get: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .query(({ ctx, input }) => call(() => readAutomation(ctx.workspace, input.id))),
+
+    save: protectedProcedure
+      .input(
+        z.object({
+          id: z.uuid().nullish(),
+          name: z.string().min(1).max(120),
+          trigger: z.enum(AUTOMATION_TRIGGERS),
+          object: objectKey,
+          conditions: z.array(z.unknown()).max(10),
+          actions: z
+            .array(z.object({ type: z.enum(ACTION_TYPES), config: z.record(z.string().max(64), z.unknown()) }))
+            .min(1)
+            .max(10),
+          isActive: z.boolean().optional(),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() =>
+          saveAutomation(ctx.workspace, {
+            id: input.id ?? null,
+            name: input.name,
+            trigger: input.trigger,
+            objectKey: input.object,
+            conditions: parseFilters(input.conditions),
+            actions: input.actions as AutomationAction[],
+            ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
+          }),
+        ),
+      ),
+
+    setActive: protectedProcedure
+      .input(z.object({ id: z.uuid(), isActive: z.boolean() }))
+      .mutation(({ ctx, input }) => call(() => setAutomationActive(ctx.workspace, input.id, input.isActive))),
+
+    remove: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => removeAutomation(ctx.workspace, input.id))),
+
+    runs: protectedProcedure
+      .input(z.object({ automationId: z.uuid().optional() }).optional())
+      .query(({ ctx, input }) =>
+        call(() => listAutomationRuns(ctx.workspace, input?.automationId ? { automationId: input.automationId } : {})),
       ),
   }),
 

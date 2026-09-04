@@ -395,7 +395,15 @@ const autoAssociateCompany = async (
   return raced ? { companyId: raced.id, created: false } : null
 }
 
-export type CreateResult = { id: string; warnings: string[]; autoCompanyId?: string | undefined }
+export type CreateResult = {
+  id: string
+  warnings: string[]
+  autoCompanyId?: string | undefined
+  /** What the record goes by. Returned rather than looked up again by the caller,
+   *  because an automation that names the record in a Slack message wants the
+   *  name it had when it fired. */
+  displayName: string
+}
 
 export const createRecord = async (
   ctx: WorkspaceContext,
@@ -454,7 +462,7 @@ export const createRecord = async (
       links: linksFor(object.key, row.id, prepared.columns),
     })
 
-    return { id: row.id, warnings: prepared.warnings, autoCompanyId }
+    return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object.key, values) }
   })
 }
 
@@ -489,6 +497,11 @@ export type UpdateResult = {
    *  here: telling Slack is F6's job, and the data access layer must not know that
    *  Slack exists. */
   stageChange?: StageChange | undefined
+  /** True when this write moved a lifecycle stage. B11's second trigger, and
+   *  reported the same way and for the same reason as the first. */
+  lifecycleChanged: boolean
+  /** What the record goes by after the write. */
+  displayName: string
 }
 
 /** Last write wins, but conditional on updated_at. A stale write is refused with
@@ -554,9 +567,15 @@ const updateRecordIn = async (
     before: pick(before, Object.keys(values), object),
     after: values,
   })
-  const stageChange = await writeChangeActivities(tx, ctx, object, id, before, values)
+  const changes = await writeChangeActivities(tx, ctx, object, id, before, values)
 
-  return { updatedAt: asDate(row.updated_at), warnings: prepared.warnings, stageChange }
+  return {
+    updatedAt: asDate(row.updated_at),
+    warnings: prepared.warnings,
+    stageChange: changes.stageChange,
+    lifecycleChanged: changes.lifecycleChanged,
+    displayName: displayName(object.key, { ...before, ...values }),
+  }
 }
 
 export type BulkUpdateResult = {
@@ -673,8 +692,9 @@ const writeChangeActivities = async (
   id: string,
   before: RecordValues,
   after: RecordValues,
-): Promise<StageChange | undefined> => {
+): Promise<{ stageChange: StageChange | undefined; lifecycleChanged: boolean }> => {
   let stageChange: StageChange | undefined
+  let lifecycleChanged = false
   const links = linksFor(object.key, id, {
     company_id: after.company_id ?? before.company_id,
   })
@@ -707,6 +727,7 @@ const writeChangeActivities = async (
       links,
     })
 
+    if (type === 'lifecycle_change') lifecycleChanged = true
     if (type === 'stage_change' && activityId) {
       stageChange = {
         activityId,
@@ -724,7 +745,7 @@ const writeChangeActivities = async (
     }
   }
 
-  return stageChange
+  return { stageChange, lifecycleChanged }
 }
 
 const labelOf = async (tx: Tx, fieldKey: string, value: unknown): Promise<string> => {

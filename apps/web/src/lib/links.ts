@@ -112,6 +112,9 @@ export const createRecordPath = (workspace: string, object: ObjectKey): string =
  *  cannot also be a screen somebody browses to. */
 export const exportPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/export`
 
+export const duplicatesPath = (workspace: string, object?: 'contact' | 'company'): string =>
+  `/${CRM_ROOT}/${workspace}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`
+
 export const exportCsvPath = (
   workspace: string,
   params: { object: string; columns?: string; filters?: string; sort?: string; q?: string },
@@ -153,6 +156,8 @@ export const pipelinesPath = (): string => '/settings/pipelines'
 export const mailboxesPath = (): string => '/settings/mailboxes'
 
 export const lifecyclePath = (): string => '/settings/lifecycle'
+
+export const automationsPath = (): string => '/settings/automations'
 
 export const subscriptionsPath = (): string => '/settings/subscriptions'
 

@@ -1,4 +1,7 @@
-import { publicFormById } from '@rawr/db'
+import {
+  publicEdgeContext,
+  publicFormById,
+} from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import {
@@ -10,6 +13,7 @@ import {
 } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
+import { runAutomations } from '~/server/automations.ts'
 
 /** POST /f/:formId — the capture path, F3 §4.
  *
@@ -75,6 +79,18 @@ export const POST = async (
       formId: form.formId,
       submissionId: result.submissionId,
       ...result.notify,
+    })
+  }
+
+  // B11. After the outcome is decided, like the Slack post above, and on the
+  // same background handle: a rule that sets a lifecycle stage must never make
+  // a visitor wait, and must never fail their submission.
+  if (result.contactId) {
+    runAutomations(publicEdgeContext(form.workspaceId), {
+      trigger: 'form_submitted',
+      objectKey: 'contact',
+      entityId: result.contactId,
+      workspaceSlug: form.workspaceSlug,
     })
   }
 

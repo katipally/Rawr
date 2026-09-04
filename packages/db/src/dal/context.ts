@@ -46,6 +46,10 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   object_def: ['admin'],
   field_def: ['admin'],
   integration: ['admin'],
+  /** B11. A rule that writes to every record matching a filter is not a thing to
+   *  hand to whoever can write one record. Admins only, both to write the rule
+   *  and to read the log of what it did. */
+  automation: ['admin'],
   /** F6. A dead letter is replayed by whoever can see it, which is an admin. */
   dead_letter: ['admin'],
   form: ['admin', 'marketing'],
