@@ -178,7 +178,7 @@ export const EnrichmentPanel = ({
       ) : null}
 
       {object === 'contact' && usable(apollo) && matchKey ? (
-        <Sequences contactId={recordId} canWrite={canWrite} onChanged={refresh} />
+        <Sequences contactId={recordId} onChanged={refresh} />
       ) : null}
 
       {suggestions.length > 0 ? (
@@ -233,32 +233,24 @@ export const EnrichmentPanel = ({
 }
 
 type Status = { sequenceId: string; sequenceName: string; status: string; currentStep: number | null; failureReason: string | null }
-type Loaded =
-  | { state: 'loading' }
-  | { state: 'error'; message: string }
-  | { state: 'ready'; statuses: Status[]; sequences: { id: string; name: string }[]; accounts: { id: string; email: string }[] }
+type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; statuses: Status[] }
 
-/** F6 §3 on the record: where each sequence got to, and the one write a person
- *  asks for, "add them to the follow-up". Loaded after paint, because it is a
- *  call to Apollo and the rest of the record should not wait on it. */
-const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canWrite: boolean; onChanged: () => void }) => {
-  const toast = useToast()
+/** What Apollo's own sequences did for this contact.
+ *
+ *  Read-only: enrolling happens in Rawr's own sequences now, from the member's
+ *  Gmail, which is what makes the mail thread with the rest of the conversation
+ *  and stop when somebody replies. Anything already running in Apollo still shows
+ *  here and still reaches the timeline. */
+const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () => void }) => {
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
-  const [sequenceId, setSequenceId] = useState('')
-  const [accountId, setAccountId] = useState('')
-  const [busy, setBusy] = useState(false)
 
-  // Three requests, so it must run once per contact and not once per render of
-  // the record page. That holds because onChanged is stable at the call site.
+  // One request, so it must run once per contact and not once per render of the
+  // record page. That holds because onChanged is stable at the call site.
   const load = useCallback(async () => {
     setLoaded({ state: 'loading' })
     try {
-      const [status, sequences, accounts] = await Promise.all([
-        api.integrations.apolloStatus.query({ contactId }),
-        api.integrations.apolloSequences.query(),
-        api.integrations.apolloEmailAccounts.query(),
-      ])
-      setLoaded({ state: 'ready', statuses: status.statuses, sequences, accounts })
+      const status = await api.integrations.apolloStatus.query({ contactId })
+      setLoaded({ state: 'ready', statuses: status.statuses })
       if (status.recorded > 0) onChanged()
     } catch (cause) {
       setLoaded({ state: 'error', message: errorMessage(cause) })
@@ -269,28 +261,10 @@ const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canW
     void load()
   }, [load])
 
-  const enroll = async () => {
-    if (!sequenceId || !accountId) {
-      toast('error', 'Pick a sequence and the inbox it sends from.')
-      return
-    }
-    setBusy(true)
-    try {
-      const outcome = await api.integrations.apolloEnroll.mutate({ contactId, sequenceId, emailAccountId: accountId })
-      toast(outcome.enrolled ? 'success' : 'error', outcome.detail)
-      await load()
-      onChanged()
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   return (
     <div className="flex flex-col gap-2 border-t border-divider px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-small font-medium">Sequences</h4>
+        <h4 className="text-small font-medium">Apollo sequences</h4>
         {loaded.state !== 'loading' ? (
           <Button variant="tertiary" onClick={() => void load()}>
             Sync now
@@ -305,57 +279,24 @@ const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canW
         </p>
       ) : null}
       {loaded.state === 'ready' ? (
-        <>
-          {loaded.statuses.length === 0 ? (
-            <p className="text-small text-secondary">Not in any sequence.</p>
-          ) : (
-            <ul className="flex flex-col gap-1 text-small">
-              {loaded.statuses.map((row) => (
-                <li key={row.sequenceId} className="flex flex-wrap justify-between gap-x-3">
-                  <span className="break-words font-medium">{row.sequenceName}</span>
-                  <span className={row.status === 'failed' ? 'text-error' : 'text-secondary'}>
-                    {row.status}
-                    {row.currentStep ? ` · step ${row.currentStep}` : ''}
-                    {row.failureReason ? ` · ${row.failureReason.replace(/_/g, ' ')}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {canWrite ? (
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="flex min-w-40 flex-1 flex-col gap-1 text-small">
-                <span className="text-secondary">Add to sequence</span>
-                <Select value={sequenceId} onChange={(event) => setSequenceId(event.target.value)}>
-                  <option value="">Choose one…</option>
-                  {loaded.sequences.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <label className="flex min-w-40 flex-1 flex-col gap-1 text-small">
-                <span className="text-secondary">Send from</span>
-                <Select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                  <option value="">Choose an inbox…</option>
-                  {loaded.accounts.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.email}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <Button onClick={() => void enroll()} busy={busy} disabled={loaded.sequences.length === 0}>
-                Enrol
-              </Button>
-              {loaded.sequences.length === 0 ? (
-                <span className="text-small text-secondary">No sequences exist in Apollo yet. Create one there first.</span>
-              ) : null}
-            </div>
-          ) : null}
-        </>
+        loaded.statuses.length === 0 ? (
+          <p className="text-small text-secondary">
+            Not in any Apollo sequence. Rawr’s own sequences are on the Marketing menu.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-1 text-small">
+            {loaded.statuses.map((row) => (
+              <li key={row.sequenceId} className="flex flex-wrap justify-between gap-x-3">
+                <span className="break-words font-medium">{row.sequenceName}</span>
+                <span className={row.status === 'failed' ? 'text-error' : 'text-secondary'}>
+                  {row.status}
+                  {row.currentStep ? ` · step ${row.currentStep}` : ''}
+                  {row.failureReason ? ` · ${row.failureReason.replace(/_/g, ' ')}` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
       ) : null}
     </div>
   )

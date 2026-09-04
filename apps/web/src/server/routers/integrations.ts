@@ -16,9 +16,6 @@ import { enrichCompanyRecord, enrichRecord, INTEGRATIONS, readIntegrations, test
 import { pushSegmentToBrevo } from '../integrations/brevo.ts'
 import {
   apolloContactUrl,
-  enrollInSequence,
-  listEmailAccounts,
-  listSequences,
   syncSequenceActivity,
 } from '../integrations/apollo.ts'
 import { replayJob } from '../integrations/replay.ts'
@@ -83,19 +80,10 @@ export const integrationsRouter = router({
     .input(z.object({ companyId: z.uuid() }))
     .mutation(({ ctx, input }) => call(() => enrichCompanyRecord(ctx.workspace, input.companyId))),
 
-  /** F6 §3. Apollo's sequences and sending inboxes, for the enrol form. */
-  apolloSequences: protectedProcedure.query(({ ctx }) => call(() => listSequences(ctx.workspace))),
-
-  apolloEmailAccounts: protectedProcedure.query(({ ctx }) => call(() => listEmailAccounts(ctx.workspace))),
-
-  /** Puts a contact into an Apollo sequence. Apollo sends; Rawr records the
-   *  enrolment and reads every later step, open and reply back. */
-  apolloEnroll: protectedProcedure
-    .input(z.object({ contactId: z.uuid(), sequenceId: z.string().min(1).max(64), emailAccountId: z.string().min(1).max(64) }))
-    .mutation(({ ctx, input }) => call(() => enrollInSequence(ctx.workspace, input))),
-
-  /** Where each sequence got to for one contact, fetched now, and every new
-   *  event written to the timeline on the way. */
+  /** What Apollo's own sequences did for this contact, read back onto the
+   *  timeline. Enrolling happens in Rawr now: mail sent from Apollo does not
+   *  thread with the rest of the conversation and does not stop when somebody
+   *  replies here, which is the whole reason sequences moved in-house. */
   apolloStatus: protectedProcedure
     .input(z.object({ contactId: z.uuid() }))
     .query(({ ctx, input }) => call(() => syncSequenceActivity(ctx.workspace, input.contactId))),

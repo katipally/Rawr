@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'
 
 export type BulkBarProps = {
@@ -31,6 +32,7 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
   const [value, setValue] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<{ id: string; displayName: string; reason: string }[]>([])
+  const [showEnroll, setShowEnroll] = useState(false)
 
   const field = fields.find((candidate) => candidate.key === fieldKey)
   const noun = ids.length === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
@@ -68,6 +70,13 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         <p className="font-medium">
           {ids.length} {noun} selected
         </p>
+
+        {/* A sequence sends to a person, so this is a contact-only action. */}
+        {object === 'contact' ? (
+          <Button variant="primary" onClick={() => setShowEnroll(true)}>
+            Add to a sequence
+          </Button>
+        ) : null}
 
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-small text-secondary">Change</span>
@@ -116,6 +125,18 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {showEnroll ? (
+        <EnrollDialog
+          contactIds={ids}
+          contactLabel={`${ids.length} ${noun}`}
+          onClose={() => setShowEnroll(false)}
+          onEnrolled={() => {
+            onDone()
+            router.refresh()
+          }}
+        />
       ) : null}
     </div>
   )

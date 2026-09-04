@@ -5,6 +5,10 @@ import { recordActivity, type EntityRef } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
+// A sequence step can make a task, and completing that task resumes the sequence.
+// The two modules import each other for exactly that pair of calls; Node resolves
+// the cycle because neither reads the other at module scope.
+import { onTaskDone } from './sequences.ts'
 
 export type TaskRow = {
   id: string
@@ -126,6 +130,11 @@ export const setTaskStatus = async (
       .update(task)
       .set({ status, completedAt: status === 'done' ? new Date() : null, updatedAt: new Date() })
       .where(eq(task.id, id))
+
+    // A sequence step that made this task is waiting on it. Completing it here is
+    // what moves the outreach on, so nobody has to remember there is a sequence
+    // behind the call they just logged.
+    if (status === 'done') await onTaskDone(tx, ctx, id)
 
     return {
       result: undefined,

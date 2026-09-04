@@ -12,6 +12,7 @@ import {
 import { contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { recordActivity } from './activity.ts'
+import { detectReply } from './sequences.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { employerDomainFromEmail, isFreeMailDomain, registrableDomain } from './domains.ts'
@@ -38,6 +39,11 @@ export type MailboxRow = {
   lastErrorAt: Date | null
   threadCount: number
   visibility: 'team' | 'private'
+  /** True once it has been reconnected with the send scope. Until then it reads
+   *  and cannot send, whatever a sequence asks of it. */
+  canSend: boolean
+  dailyCap: number
+  minGapSeconds: number
 }
 
 export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]> =>
@@ -50,6 +56,9 @@ export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]
         email: mailbox.email,
         state: mailbox.state,
         visibility: mailbox.visibility,
+        canSend: mailbox.canSend,
+        dailyCap: mailbox.dailyCap,
+        minGapSeconds: mailbox.minGapSeconds,
         historyId: mailbox.historyId,
         backfillDone: mailbox.backfillDone,
         backfillCursor: mailbox.backfillCursor,
@@ -76,6 +85,9 @@ export type SaveMailboxInput = {
   accessToken: string
   refreshToken: string
   accessTokenExpiresAt: Date | null
+  /** What Google actually granted, not what was asked for. Absent means read
+   *  only, which is what a mailbox connected before sending existed had. */
+  canSend?: boolean | undefined
 }
 
 /** Connecting twice re-authorises rather than starting a second cursor over the
@@ -93,6 +105,7 @@ export const saveMailbox = async (ctx: WorkspaceContext, input: SaveMailboxInput
         accessToken: encryptToken(input.accessToken),
         refreshToken: encryptToken(input.refreshToken),
         accessTokenExpiresAt: input.accessTokenExpiresAt,
+        canSend: input.canSend ?? false,
         lastError: null,
         lastErrorAt: null,
       })
@@ -104,6 +117,9 @@ export const saveMailbox = async (ctx: WorkspaceContext, input: SaveMailboxInput
           refreshToken: encryptToken(input.refreshToken),
           accessTokenExpiresAt: input.accessTokenExpiresAt,
           state: 'backfilling',
+          // Reconnecting without the send scope takes sending away again, which
+          // is what somebody unticking it on the consent screen meant.
+          canSend: input.canSend ?? false,
           lastError: null,
           lastErrorAt: null,
         },
@@ -118,7 +134,7 @@ export const saveMailbox = async (ctx: WorkspaceContext, input: SaveMailboxInput
         entityId: saved.id,
         action: 'connect',
         before: null,
-        after: { email: input.email, scope: 'gmail.readonly' },
+        after: { email: input.email, scope: input.canSend ? 'gmail.readonly + gmail.send' : 'gmail.readonly' },
       },
     }
   })
@@ -346,6 +362,9 @@ export type IncomingMessage = {
   /** The body, when the fetch that read the headers also read it. Absent leaves
    *  the message `pending` for the hydrate job. */
   body?: MessageBodyInput | null | undefined
+  /** Lower-cased header names, for the checks that need more than the five fields
+   *  above: an auto-reply is not a reply, and must not stop a sequence. */
+  headers?: Record<string, string | undefined> | undefined
   attachments?: IncomingAttachment[] | undefined
   hasAttachments: boolean
 }
@@ -477,11 +496,35 @@ export const blockedPatterns = async (ctx: WorkspaceContext, userId: string): Pr
  *
  *  Idempotent on provider_message_id, which is what makes killing a back-fill and
  *  restarting it produce no duplicates. B2. */
+/** A delivery report is not correspondence: it is a machine telling us an address
+ *  is dead. It must never become a contact or a thread, and it must never be
+ *  filtered out either, which is what nearly happened here: bounces arrive from
+ *  mailer-daemon at the provider's own domain, and the rule that keeps personal
+ *  mail out of the CRM was throwing them away before anything could read them. */
+const isDeliveryReport = (incoming: IncomingMessage): boolean =>
+  /^(mailer-daemon|postmaster)@/i.test(incoming.from.trim().toLowerCase())
+
 export const ingestMessage = async (
   ctx: WorkspaceContext,
   input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string; blocked: Set<string> },
 ): Promise<IngestResult> => {
   assertCanWrite(ctx, 'mailbox')
+
+  if (isDeliveryReport(input.incoming)) {
+    await withWorkspace(ctx, (tx) =>
+      detectReply(tx, ctx, {
+        messageId: '',
+        contactIds: [],
+        fromAddr: input.incoming.from.trim().toLowerCase(),
+        inReplyTo: input.incoming.inReplyTo ?? null,
+        references: input.incoming.references ?? [],
+        threadId: NO_THREAD,
+        subject: input.incoming.subject,
+      }),
+    )
+    return { stored: false, reason: 'A delivery report, read for the bounce and not stored.' }
+  }
+
   const skip = shouldSkip(input.incoming, {
     internalDomain: input.internalDomain,
     blocked: input.blocked,
@@ -490,6 +533,11 @@ export const ingestMessage = async (
 
   return withWorkspace(ctx, async (tx) => storeMessage(tx, ctx, input))
 }
+
+/** A uuid that can never be a thread id, so the thread arm of the reply match is
+ *  inert for a bounce: a delivery report belongs to no conversation of ours, and
+ *  it must be matched on the Message-ID it is reporting on and nothing else. */
+const NO_THREAD = '00000000-0000-0000-0000-000000000000'
 
 const storeMessage = async (
   tx: Tx,
@@ -600,6 +648,22 @@ const storeMessage = async (
         role: entry.role,
       })
       .onConflictDoNothing()
+  }
+
+  // A reply is what stops a sequence, and it arrives here rather than through a
+  // provider webhook, which is the whole reason sequences send from a mailbox we
+  // already read.
+  if (direction === 'inbound') {
+    await detectReply(tx, ctx, {
+      messageId: stored.id,
+      contactIds: [...new Set([...matched.values()])],
+      fromAddr: lower(incoming.from),
+      inReplyTo: incoming.inReplyTo ?? null,
+      references: incoming.references ?? [],
+      threadId: thread.id,
+      subject: incoming.subject,
+      ...(incoming.headers ? { headers: incoming.headers } : {}),
+    })
   }
 
   const contactIds = [...new Set([...matched.values()])]

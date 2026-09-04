@@ -39,6 +39,9 @@ export const mailRouter = router({
         accessToken: 'dev-access',
         refreshToken: 'dev-refresh',
         accessTokenExpiresAt: null,
+        // The development mailbox can send, because the send goes nowhere: the
+        // whole engine below it is otherwise unexercisable without Google.
+        canSend: true,
       })
     }),
   ),

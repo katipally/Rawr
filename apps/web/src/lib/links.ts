@@ -153,6 +153,19 @@ export const inboxPath = (
 export const threadPath = (workspace: string, threadId: string): string =>
   `/${CRM_ROOT}/${workspace}/inbox/${threadId}`
 
+/** Sequences live in the CRM tree, not settings: they are outreach salespeople
+ *  run, not configuration an admin sets once. */
+export const sequencesPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/sequences`
+
+export const sequencePath = (workspace: string, id: string): string =>
+  `/${CRM_ROOT}/${workspace}/sequences/${id}`
+
+export const enrollmentsPath = (workspace: string, id: string, params: { state?: string | undefined } = {}): string =>
+  `/${CRM_ROOT}/${workspace}/sequences/${id}/enrollments${query(params)}`
+
+/** Where sequence pixels and click redirects are served from. */
+export const trackingPath = (): string => '/settings/tracking'
+
 /** Booking sits under its own root, the way HubSpot puts scheduling pages under
  *  /meetings/:portalId rather than inside the contacts app. Same rule as everything
  *  else: the workspace is in the path, so any screen pastes. */

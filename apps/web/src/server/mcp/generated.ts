@@ -28,6 +28,7 @@ const GROUPS: Record<string, string> = {
   integrations: 'Brevo, Apollo, Clay, Slack, GA4 and Zoom: connection, health, enrichment, sequences and replay.',
   admin: 'Workspace settings: fields, pipelines, stages, lifecycle, subscription types, members.',
   mcp: 'Agent access tokens.',
+  sequences: 'Multi-step outreach sent from a member\'s own Gmail: the sequences, their steps, and who is in them.',
   org: 'The organisation above this workspace: its workspaces, its people, their seats and the history of those decisions.',
   notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
   teams: 'Named groups inside this workspace, used to rotate assignment within a team.',

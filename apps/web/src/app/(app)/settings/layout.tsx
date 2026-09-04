@@ -15,6 +15,7 @@ import {
   sitesPath,
   subscriptionsPath,
   teamsPath,
+  trackingPath,
 } from '~/lib/links.ts'
 
 /** One place that knows what settings there are. Each page used to link to two or
@@ -55,6 +56,7 @@ const GROUPS: SettingsGroup[] = [
     label: 'Tools',
     sections: [
       { href: integrationsPath(), label: 'Integrations', hint: 'Connected services and their health' },
+      { href: trackingPath(), label: 'Tracking domain', hint: 'Where sequence links and pixels point' },
       { href: failedJobsPath(), label: 'Failed jobs', hint: 'What broke, and replaying it' },
     ],
   },

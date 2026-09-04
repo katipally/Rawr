@@ -3,6 +3,7 @@ import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace } from './index.ts'
+import { onUnsubscribe } from './sequences.ts'
 
 export type SubscriptionState = 'subscribed' | 'unsubscribed' | 'unspecified'
 
@@ -78,6 +79,12 @@ export const setSubscription = async (
         target: [subscriptionState.workspaceId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
         set: { state: input.state, changedAt: new Date(), source: input.source ?? 'app' },
       })
+
+    // Opting out has to stop the outreach as well as the newsletter, or somebody
+    // who unsubscribes keeps getting sequence mail for another fortnight.
+    if (input.state === 'unsubscribed') {
+      await onUnsubscribe(tx, ctx, { contactId: input.contactId, subscriptionTypeId: input.typeId })
+    }
 
     await recordActivity(tx, ctx, {
       type: 'subscription_change',

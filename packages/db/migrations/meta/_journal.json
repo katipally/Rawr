@@ -197,6 +197,20 @@
       "when": 1787860000000,
       "tag": "0027_message_bodies",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1787870000000,
+      "tag": "0028_sequences",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1787880000000,
+      "tag": "0029_sequence_token_lookup",
+      "breakpoints": true
     }
   ]
 }

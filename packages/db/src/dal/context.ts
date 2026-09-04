@@ -83,6 +83,11 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   /** How far somebody has read a thread is their own business, and a viewer reads
    *  threads, so a viewer marks them read. */
   message_thread_read: ['admin', 'sales', 'marketing', 'viewer'],
+  /** Outreach is sales and marketing work. Pausing or removing somebody else's
+   *  enrollment is finer than a role can say and is checked inside the layer. */
+  sequence: ['admin', 'sales', 'marketing'],
+  sequence_step: ['admin', 'sales', 'marketing'],
+  sequence_enrollment: ['admin', 'sales', 'marketing'],
   /** F5 §1. Anybody may hold agent access to what they can already reach. A token
    *  carries no role of its own, so a viewer's token reads and cannot write, and
    *  revoking somebody else's is refused inside the layer rather than here. */

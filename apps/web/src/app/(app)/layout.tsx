@@ -13,6 +13,7 @@ import {
   objectView,
   propertiesPath,
   segmentsPath,
+  sequencesPath,
   sitesPath,
   submissionsPath,
   tasksPath,
@@ -66,6 +67,12 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           items: [
             { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
             { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Review', match: `/contacts/${workspace}/submissions` },
+          ],
+        },
+        {
+          label: 'Outreach',
+          items: [
+            { href: sequencesPath(workspace), label: 'Sequences', match: `/contacts/${workspace}/sequences` },
           ],
         },
       ],

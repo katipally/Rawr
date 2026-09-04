@@ -19,6 +19,8 @@ export type MailboxSummary = {
   lastErrorAt: string | null
   threadCount: number
   visibility: 'team' | 'private'
+  canSend: boolean
+  dailyCap: number
   /** How much of what this mailbox read has had its body stored. */
   pendingBodies: number
   storedBodies: number
@@ -152,6 +154,11 @@ export const MailboxList = ({
                         {row.backfillDone ? 'History read in full' : 'History still being read'}
                       </p>
                       <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
+                        {row.canSend ? (
+                          <Badge tone="ok">Can send, up to {row.dailyCap} a day</Badge>
+                        ) : (
+                          <Badge>Reading only</Badge>
+                        )}
                         {row.pendingBodies > 0 ? (
                           <Badge tone="warn">
                             {row.storedBodies.toLocaleString()} of{' '}

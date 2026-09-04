@@ -35,7 +35,7 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # The eleven suites run against a real Postgres with row level security on, which
+  # The twelve suites run against a real Postgres with row level security on, which
   # is the only way they prove anything. Skipped rather than failed where no
   # database is configured, so this workflow is useful before open item 9 lands.
   verify:
@@ -99,4 +99,4 @@ jobs:
 
       - name: No database configured
         if: steps.db.outputs.present != 'true'
-        run: echo "DATABASE_URL is not set as a repository secret, so the eleven suites did not run."
+        run: echo "DATABASE_URL is not set as a repository secret, so the twelve suites did not run."

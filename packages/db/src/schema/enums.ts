@@ -33,6 +33,47 @@ export const bodyStateEnum = pgEnum('rawr_body_state', ['pending', 'stored', 'to
  *  mailbox that carries personal mail nobody else should read. */
 export const mailboxVisibilityEnum = pgEnum('rawr_mailbox_visibility', ['team', 'private'])
 
+/** A sequence's own life. `draft` has never sent; `archived` keeps the history
+ *  without offering the sequence for new enrollments. */
+export const sequenceStateEnum = pgEnum('rawr_sequence_state', ['draft', 'active', 'paused', 'archived'])
+
+/** Who puts the mail on the wire. Gmail is the member's own mailbox; Woodpecker is
+ *  for volume Gmail's daily caps cannot carry. */
+export const sequenceSenderEnum = pgEnum('rawr_sequence_sender', ['gmail', 'woodpecker'])
+
+/** What a step does. Only `email` sends; the other three make a task for the owner,
+ *  which is how a sequence carries the work a person still has to do. */
+export const stepKindEnum = pgEnum('rawr_step_kind', ['email', 'call', 'linkedin', 'task'])
+
+/** Where one contact is in one sequence. Every terminal state names why it ended,
+ *  because "finished" and "they replied" are different outcomes to a salesperson. */
+export const enrollmentStateEnum = pgEnum('rawr_enrollment_state', [
+  'active',
+  'waiting_task',
+  'paused',
+  'finished',
+  'replied',
+  'bounced',
+  'unsubscribed',
+  'failed',
+  'removed',
+])
+
+export const sendStateEnum = pgEnum('rawr_send_state', ['sent', 'failed', 'bounced'])
+
+/** Everything that happens to an enrollment, in one ledger. */
+export const sequenceEventEnum = pgEnum('rawr_sequence_event', [
+  'sent',
+  'open',
+  'click',
+  'reply',
+  'bounce',
+  'unsubscribe',
+  'task_created',
+  'task_done',
+  'stopped',
+])
+
 export const fieldStorageEnum = pgEnum('rawr_field_storage', ['column', 'jsonb'])
 
 /** The nineteen field types. Each maps to one Postgres type, one JSON shape, one

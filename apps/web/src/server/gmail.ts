@@ -15,11 +15,26 @@ import {
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { googleClient } from './auth/google.ts'
 
-/** Gmail, read only for now: `gmail.readonly` and nothing else. Sending arrives
- *  with sequences, and adds `gmail.send` to a mailbox that is reconnected for it;
- *  until then every extra scope widens the blast radius of a leaked token for no
- *  gain. */
-export const GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+/** Reading is what every mailbox is connected for. Nothing about the CRM needs
+ *  more than this, and every extra scope widens the blast radius of a leaked
+ *  token. */
+export const GMAIL_READ_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+
+/** Sending is asked for separately and only by somebody who wants sequences sent
+ *  as themselves. `gmail.send` can only send: it cannot read, modify or delete,
+ *  which is why it is the one to ask for rather than `gmail.modify`.
+ *
+ *  A mailbox connected before this existed keeps reading and cannot send until
+ *  its owner reconnects and grants it, which is the honest way round. */
+export const GMAIL_SEND_SCOPES = [...GMAIL_READ_SCOPES, 'https://www.googleapis.com/auth/gmail.send']
+
+export const GMAIL_SCOPES = GMAIL_READ_SCOPES
+
+/** Whether what Google actually granted includes sending. Read from the token's
+ *  own scope list rather than from what was asked for, because a person can
+ *  untick one on the consent screen. */
+export const grantedSending = (scopes: string[]): boolean =>
+  scopes.includes('https://www.googleapis.com/auth/gmail.send')
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
@@ -43,7 +58,13 @@ const isRevocation = (status: number, body: string): boolean =>
   (status === 403 && /insufficient|forbidden|scope/i.test(body)) ||
   /invalid_grant/i.test(body)
 
-type Fetcher = (path: string, params?: Record<string, string>) => Promise<unknown>
+type Fetcher = (
+  path: string,
+  params?: Record<string, string>,
+  /** Set to POST a body. Reads pass neither and get a GET, which is every call
+   *  this module made before sending existed. */
+  send?: { method: 'POST'; body: string },
+) => Promise<unknown>
 
 /** Refreshes the access token when it is within a minute of expiry, and hands the
  *  new one back so the caller can store it. An access token lasts an hour, and a
@@ -71,13 +92,20 @@ const authorised = async (
     }
   }
 
-  const fetcher: Fetcher = async (path, params) => {
+  const fetcher: Fetcher = async (path, params, send) => {
     const url = new URL(`${API}${path}`)
     for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value)
 
     const response = await fetch(url, {
-      headers: { authorization: `Bearer ${accessToken}` },
-      signal: AbortSignal.timeout(20_000),
+      method: send?.method ?? 'GET',
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        ...(send ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(send ? { body: send.body } : {}),
+      // Sending is slower than reading, and a timeout here means a mail that may
+      // or may not have gone out, so it is given longer.
+      signal: AbortSignal.timeout(send ? 45_000 : 20_000),
     })
     if (response.ok) return response.json()
 
@@ -513,7 +541,14 @@ const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
     devMessage('dev-5', 'dev-t4', 'Hello', 'someone@gmail.com', ownerEmail, now - 2 * day),
   ]
 
-  return async (path, params) => {
+  return async (path, params, send) => {
+    if (path === '/messages/send' && send) {
+      // Accepted and dropped. Everything downstream of the send is real: the row,
+      // the tokens, the advance, the pixel and the click all work against this.
+      const id = `dev-sent-${Math.random().toString(36).slice(2, 10)}`
+      console.log(`[gmail:dev] pretending to send ${id}`)
+      return { id, threadId: 'dev-sent-thread' }
+    }
     if (path === '/profile') return { historyId: '1000' }
     if (path === '/messages') {
       const from = params?.pageToken ? Number(params.pageToken) : 0
@@ -557,9 +592,29 @@ const devMessage = (
       { name: 'Subject', value: subject },
       { name: 'From', value: from },
       { name: 'To', value: to },
+      { name: 'Message-ID', value: `<${id}@development.invalid>` },
+      // The second message in a thread answers the first, which is what makes
+      // reply detection exercisable here.
+      ...(subject.startsWith('Re: ') ? [{ name: 'In-Reply-To', value: '<dev-1@development.invalid>' }] : []),
     ],
   },
 })
+
+/** A fetcher bound to one mailbox, for anything outside this module that needs to
+ *  talk to Gmail as that person: the sequence sender, and one-off replies. */
+export const gmailFetcherFor = async (
+  ctx: WorkspaceContext,
+  mailboxId: string,
+): Promise<(path: string, params?: Record<string, string>, send?: { method: 'POST'; body: string }) => Promise<unknown>> => {
+  const box = await readMailbox(ctx, mailboxId)
+  if (!box) throw new Error('That mailbox is not connected.')
+  if (box.state === 'revoked') {
+    throw new RevokedError('Access to this mailbox has been withdrawn in the Google account.')
+  }
+  if (devGmailEnabled) return devFetcher(box.email, await internalDomainOf(ctx))
+  const { fetcher } = await authorised(ctx, box.id, box)
+  return fetcher
+}
 
 export const gmailConfigured = googleConfigured || devGmailEnabled
 

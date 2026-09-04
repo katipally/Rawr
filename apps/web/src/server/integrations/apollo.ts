@@ -348,76 +348,11 @@ const apolloContactId = async (ctx: WorkspaceContext, contactId: string): Promis
   return { id, email }
 }
 
-export type EnrollOutcome = { enrolled: boolean; detail: string }
-
-/** F6 §3, the write half a person actually asks for: "put them in the follow-up
- *  sequence". Apollo sends the mail; Rawr records the enrolment on the timeline
- *  and reads the rest back. Idempotent per contact and sequence. */
-export const enrollInSequence = async (
-  ctx: WorkspaceContext,
-  input: { contactId: string; sequenceId: string; emailAccountId: string },
-): Promise<EnrollOutcome> => {
-  // Enrolling sends mail in the person's name from Apollo. The role that may
-  // change the contact is the role that may do that.
-  assertCanWrite(ctx, 'contact')
-  const apollo = await apolloContactId(ctx, input.contactId)
-  const sequences = await listSequences(ctx)
-  const sequence = sequences.find((row) => row.id === input.sequenceId)
-  if (!sequence) throw new Error('That sequence no longer exists in Apollo. Pick another.')
-
-  const outcome = await once(
-    ctx,
-    { key: `apollo:enroll:${apollo.id}:${input.sequenceId}`, operation: 'apollo.enroll' },
-    async () => {
-      if (devIntegrationsEnabled) return { added: 1, skipped: {} as Record<string, string> }
-      const { secret } = await credentials(ctx)
-      const answer = await attempt(
-        { ctx, kind: 'apollo', jobName: 'apollo.enroll', payload: input },
-        () =>
-          json<{ contacts?: unknown[]; skipped_contact_ids?: Record<string, string> }>({
-            // Apollo documents these as query parameters on a POST. They ride in
-            // the query, and in the body for good measure.
-            url: `${API}/emailer_campaigns/${encodeURIComponent(input.sequenceId)}/add_contact_ids?${new URLSearchParams([
-              ['emailer_campaign_id', input.sequenceId],
-              ['contact_ids[]', apollo.id],
-              ['send_email_from_email_account_id', input.emailAccountId],
-            ]).toString()}`,
-            method: 'POST',
-            headers: headers(secret!),
-            body: {
-              emailer_campaign_id: input.sequenceId,
-              contact_ids: [apollo.id],
-              send_email_from_email_account_id: input.emailAccountId,
-            },
-          }),
-      )
-      return { added: answer.contacts?.length ?? 0, skipped: answer.skipped_contact_ids ?? {} }
-    },
-  )
-
-  const skippedReason = outcome.response.skipped[apollo.id]
-  if (skippedReason) {
-    await recordHealth(ctx, 'apollo', { ok: true })
-    return { enrolled: false, detail: `Apollo did not enrol them: ${skippedReason}.` }
-  }
-
-  await ingestMarketingEvent(ctx, {
-    source: 'apollo',
-    providerEventId: `enroll:${apollo.id}:${input.sequenceId}`,
-    kind: 'sequence_step',
-    email: apollo.email,
-    subject: sequence.name,
-    at: new Date(),
-    detail: { sequence: sequence.name, sequenceId: input.sequenceId, step: 0, event: 'enrolled' },
-  })
-  await recordHealth(ctx, 'apollo', { ok: true })
-  return {
-    enrolled: true,
-    detail: outcome.fresh
-      ? `Enrolled in "${sequence.name}". Apollo sends the mail; steps, opens and replies land on the timeline as they happen.`
-      : `Already enrolled in "${sequence.name}". Nothing was sent twice.`,
-  }
-}
+/** Reading back what Apollo's own sequences did, for anybody still running one
+ *  there. Rawr sends its own sequences now, from the member's Gmail, so there is
+ *  no enrol here any more: the mail Apollo sends does not thread with the rest of
+ *  the conversation and does not stop when somebody replies to us. What Apollo
+ *  already has in flight still reaches the timeline through the sync below. */
 
 export type SequenceStatus = {
   sequenceId: string

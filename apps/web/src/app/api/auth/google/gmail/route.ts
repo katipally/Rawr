@@ -3,14 +3,15 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { devGmailEnabled, env, googleConfigured } from '~/lib/env.ts'
 import { mailboxesPath } from '~/lib/links.ts'
 import { generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
-import { GMAIL_SCOPES } from '~/server/gmail.ts'
+import { GMAIL_READ_SCOPES, GMAIL_SEND_SCOPES } from '~/server/gmail.ts'
 import { readSession } from '~/server/session.ts'
 
 /** Gmail consent, asked separately from sign-in and only of the people whose mail
  *  belongs on a record. F0 §8: somebody who never emails prospects is never asked
  *  for access to their inbox.
  *
- *  gmail.readonly and nothing else. D7 rejects send, modify and compose by name. */
+ *  Reading by default. Sending is asked for only when the person says they want
+ *  it, with `?send=1`, and is `gmail.send`, which can send and nothing else. */
 
 export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const session = await readSession()
@@ -32,7 +33,12 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
 
   const state = generateState()
   const codeVerifier = generateCodeVerifier()
-  const url = googleClient().createAuthorizationURL(state, codeVerifier, GMAIL_SCOPES)
+  const wantsSending = request.nextUrl.searchParams.get('send') === '1'
+  const url = googleClient().createAuthorizationURL(
+    state,
+    codeVerifier,
+    wantsSending ? GMAIL_SEND_SCOPES : GMAIL_READ_SCOPES,
+  )
   url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
   // Offline with an explicit prompt: Google returns a refresh token on the first
   // consent only, and a back-fill runs far longer than an access token lives.

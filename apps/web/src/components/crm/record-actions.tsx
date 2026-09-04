@@ -3,6 +3,7 @@
 import { Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
+import { EnrollDialog } from './enroll-dialog.tsx'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { objectView } from '~/lib/links.ts'
@@ -39,6 +40,7 @@ export const RecordActions = ({
   const toast = useToast()
   const [showMerge, setShowMerge] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
+  const [showEnroll, setShowEnroll] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [other, setOther] = useState<PickedRecord | null>(null)
   const absorbedId = other?.id ?? ''
@@ -110,10 +112,25 @@ export const RecordActions = ({
 
   return (
     <div className="flex flex-wrap gap-2">
+      {/* Only a contact can be enrolled: a sequence sends to a person. */}
+      {object === 'contact' ? (
+        <Button variant="primary" onClick={() => setShowEnroll(true)}>
+          Add to a sequence
+        </Button>
+      ) : null}
       <Button onClick={() => setShowMerge(true)}>Merge</Button>
       <Button variant="destructive" onClick={() => setShowDelete(true)}>
         Delete
       </Button>
+
+      {showEnroll ? (
+        <EnrollDialog
+          contactIds={[recordId]}
+          contactLabel={displayName}
+          onClose={() => setShowEnroll(false)}
+          onEnrolled={() => router.refresh()}
+        />
+      ) : null}
 
       <Modal open={showMerge} title={`Merge into ${displayName}`} onClose={() => setShowMerge(false)}>
         <div className="flex flex-col gap-3">

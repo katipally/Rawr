@@ -32,6 +32,10 @@ export const workspace = pgTable('workspace', {
     .references(() => organisation.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   slug: text('slug').notNull().unique(),
+  /** Where sequence pixels and click redirects are served from. A dedicated host
+   *  keeps sequence mail from carrying links on the app's own domain, which is
+   *  what gets an app domain classified as bulk mail. */
+  trackingDomain: text('tracking_domain'),
   createdAt: createdAt(),
 })
 

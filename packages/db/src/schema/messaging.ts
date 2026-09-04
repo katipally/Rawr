@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -52,6 +53,16 @@ export const mailbox = pgTable(
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
     lastError: text('last_error'),
     lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+    /** True once the mailbox has been reconnected with the send scope. False by
+     *  default, so an existing read-only grant cannot start sending because a
+     *  sequence asked it to. */
+    canSend: boolean('can_send').notNull().default(false),
+    /** Google's own limits are per account, so the pacing is too. */
+    dailyCap: integer('daily_cap').notNull().default(100),
+    /** Overrides the sequence's window for this mailbox, when somebody wants
+     *  their own mail sent on their own hours. */
+    sendWindow: jsonb('send_window').$type<{ days: number[]; start: string; end: string; timezone: string }>(),
+    minGapSeconds: integer('min_gap_seconds').notNull().default(45),
     createdAt: createdAt(),
   },
   (t) => [

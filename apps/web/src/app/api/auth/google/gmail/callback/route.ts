@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { mailboxesPath } from '~/lib/links.ts'
 import { googleClient } from '~/server/auth/google.ts'
+import { grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Stores the mailbox. The tokens are encrypted with a key held outside this
@@ -52,6 +53,10 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
       accessToken: tokens.accessToken(),
       refreshToken: tokens.refreshToken(),
       accessTokenExpiresAt: tokens.accessTokenExpiresAt(),
+      // What Google granted, not what was asked for: somebody can untick sending
+      // on the consent screen, and a mailbox that claims it can send when it
+      // cannot fails at the worst moment.
+      canSend: grantedSending(tokens.hasScopes() ? tokens.scopes() : []),
     })
   } catch (cause) {
     return back(

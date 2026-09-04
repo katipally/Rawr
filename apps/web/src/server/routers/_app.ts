@@ -11,6 +11,7 @@ import { mailRouter } from './mail.ts'
 import { mcpRouter } from './mcp.ts'
 import { orgRouter } from './org.ts'
 import { segmentsRouter } from './segments.ts'
+import { sequencesRouter } from './sequences.ts'
 
 export const appRouter = router({
   admin: adminRouter,
@@ -23,6 +24,7 @@ export const appRouter = router({
   mcp: mcpRouter,
   org: orgRouter,
   segments: segmentsRouter,
+  sequences: sequencesRouter,
 
   health: publicProcedure.query(() => ({ ok: true as const })),
 
