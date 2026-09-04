@@ -148,6 +148,48 @@
       "when": 1787700000000,
       "tag": "0020_email_engagement",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787800000000,
+      "tag": "0021_organisation",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1787810000000,
+      "tag": "0022_mcp_token_organisation",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1787820000000,
+      "tag": "0023_invitation_single_use",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787830000000,
+      "tag": "0024_organisation_visible_to_workspace",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1787840000000,
+      "tag": "0025_membership_visible_to_organisation",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787850000000,
+      "tag": "0026_invitation_offer",
+      "breakpoints": true
     }
   ]
 }

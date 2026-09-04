@@ -40,15 +40,20 @@ only by migrations and the worker's own bookkeeping.
  pnpm worker     the job daemon, needs to be running for index builds
 ```
 
-Sign in with Google: any verified `@datasaur.ai` account joins the Datasaur
-workspace as a viewer on its first sign-in, and an admin raises the role under
-Settings, Members. Settings, Your account is the person's own screen: roles,
+Sign in with Google: an organisation owns its workspaces and holds the Google
+hosted domain, so any verified `@datasaur.ai` account joins the Datasaur
+organisation and, while it allows domain joins, every workspace in it as a
+viewer. An admin raises the role under Settings, Members; an organisation admin
+invites people who are not on the domain, ends somebody's access everywhere at
+once, and creates workspaces under Settings, Organisation. Settings, Your account is the person's own screen: roles,
 timezone, Gmail and Calendar connections, agent tokens, and sign out everywhere. A seeded address whose email matches is claimed by that
 sign-in, so `admin@datasaur.ai` signing in with Google is the seeded admin.
 
 Without Google credentials, `/sign-in` also offers a development form that takes
 a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
-`admin@probe.example` for the second tenant. That form refuses to render unless
+`admin@probe.example` for the second organisation. The seed builds two
+organisations, and Datasaur owns two workspaces so the switcher has something to
+switch between. That form refuses to render unless
 `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
 
 ## Checking it still holds
@@ -57,11 +62,12 @@ a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
  pnpm verify              typecheck, then every suite below
  pnpm db:verify           tenancy: RLS forced everywhere, cross-tenant reads and writes refused
  pnpm db:verify:guards    the role matrix and the audit trail, by calling mutations directly
+ pnpm db:verify:org       the organisation layer: scope, seats, invitations, teams, history
  pnpm db:verify:crm       F1: board totals, merge, dedupe, import, search, export
  pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
 ```
 
-`pnpm verify` runs all nine.
+`pnpm verify` runs all ten.
 
 ## Connecting an assistant
 

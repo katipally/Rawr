@@ -151,6 +151,10 @@ export type McpCaller = {
   ctx: WorkspaceContext
   workspaceSlug: string
   workspaceName: string
+  organisationId: string
+  organisationSlug: string
+  organisationName: string
+  orgRole: 'org_admin' | 'member'
   userId: string
   userEmail: string
   userName: string
@@ -169,6 +173,10 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
     workspace_id: string
     workspace_slug: string
     workspace_name: string
+    organisation_id: string
+    organisation_slug: string
+    organisation_name: string
+    org_role: 'org_admin' | 'member'
     user_id: string
     user_email: string
     user_name: string
@@ -190,6 +198,10 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
     },
     workspaceSlug: found.workspace_slug,
     workspaceName: found.workspace_name,
+    organisationId: found.organisation_id,
+    organisationSlug: found.organisation_slug,
+    organisationName: found.organisation_name,
+    orgRole: found.org_role,
     userId: found.user_id,
     userEmail: found.user_email,
     userName: found.user_name,

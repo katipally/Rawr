@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
-import { membershipsForUser, signInWithGoogle } from '@rawr/db'
+import { acceptInvitation, membershipsForUser, signInWithGoogle } from '@rawr/db'
 import { env } from '~/lib/env.ts'
 import { workspaceInPath } from '~/lib/links.ts'
 import {
@@ -10,6 +10,7 @@ import {
   type GoogleIdentity,
 } from '~/server/auth/google.ts'
 import { safeNext } from '~/server/auth/next.ts'
+import { INVITE_COOKIE } from '~/server/invite.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
 const denied = (reason: string): NextResponse =>
@@ -22,9 +23,11 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const expectedState = jar.get('rawr_oauth_state')?.value
   const codeVerifier = jar.get('rawr_oauth_verifier')?.value
   const next = safeNext(jar.get('rawr_next')?.value ?? null)
+  const inviteToken = jar.get(INVITE_COOKIE)?.value ?? null
   jar.delete('rawr_oauth_state')
   jar.delete('rawr_oauth_verifier')
   jar.delete('rawr_next')
+  jar.delete(INVITE_COOKIE)
 
   if (request.nextUrl.searchParams.get('error')) {
     return denied('Google sign-in was cancelled.')
@@ -60,6 +63,11 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     picture: identity.picture,
     hostedDomain: identity.hostedDomain,
   })
+  // A link somebody followed before signing in. It seats them, and it is checked
+  // against the address they actually signed in with, so a forwarded link cannot
+  // seat the wrong person. Read after sign-in because it needs their user id.
+  if (inviteToken) await acceptInvitation(inviteToken, userId)
+
   const memberships = await membershipsForUser(userId)
   // Somebody following a link into a particular workspace should arrive in that
   // workspace. Without this they land in whichever membership came back first and

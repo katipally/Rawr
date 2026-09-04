@@ -450,7 +450,7 @@ try {
   console.log('')
   console.log('-- Gmail, read only --------------------------------------------')
 
-  const internalDomain = datasaur.googleHostedDomain
+  const internalDomain = await internalDomainOf(sales)
   let mailboxId = ''
 
   const incoming = (over: Partial<IncomingMessage> = {}): IncomingMessage => ({
@@ -470,12 +470,12 @@ try {
   await check('which domain counts as internal is per workspace', async () => {
     const mine = await internalDomainOf(sales)
     const theirs = await internalDomainOf(probeCtx)
-    expect(mine === datasaur.googleHostedDomain, `this workspace was told its domain is ${mine}`)
-    expect(theirs === probe.googleHostedDomain, `the other workspace was told its domain is ${theirs}`)
+    expect(mine === 'datasaur.ai', `this workspace was told its domain is ${mine}`)
+    expect(theirs === 'probe.example', `the other workspace was told its domain is ${theirs}`)
     expect(mine !== theirs, 'both workspaces were handed the same domain')
-    // Read from the workspace row, never from a process-wide setting: one process
-    // serves every tenant, and the wrong domain inverts every internal/external
-    // decision the ingest makes.
+    // Read through the workspace's organisation, never from a process-wide
+    // setting: one process serves every tenant, and the wrong domain inverts
+    // every internal/external decision the ingest makes.
     return `${mine} for one, ${theirs} for the other`
   })
 

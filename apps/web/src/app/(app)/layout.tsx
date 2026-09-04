@@ -94,7 +94,11 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       <AppShell
         workspaceName={session.workspaceName}
         workspaceSlug={workspace}
-        workspaces={mine.map((m) => ({ slug: m.workspaceSlug, name: m.workspaceName }))}
+        workspaces={mine.map((m) => ({
+          slug: m.workspaceSlug,
+          name: m.workspaceName,
+          organisation: m.organisationName,
+        }))}
         email={session.email}
         role={session.role}
         nav={nav}

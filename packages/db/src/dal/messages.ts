@@ -7,7 +7,7 @@ import {
   messageThread,
 } from '../schema/messaging.ts'
 import { contact } from '../schema/records.ts'
-import { userAccount, workspace } from '../schema/identity.ts'
+import { userAccount } from '../schema/identity.ts'
 import { recordActivity } from './activity.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
@@ -345,15 +345,18 @@ const addressesOf = (incoming: IncomingMessage): string[] =>
  *    - every participant is internal, so it is a colleague-to-colleague thread,
  *    - a participant is at a free or disposable mail provider, which is personal,
  *    - an address or domain is on the workspace list or the owner's own list. */
-/** Which mail domain counts as "us". Per workspace, never per deployment: the
- *  same process serves several tenants, and reading one tenant's domain onto
- *  another's mailbox inverts every internal/external decision below. */
+/** Which mail domain counts as "us". Read through the workspace's organisation,
+ *  which is where the domain lives: a domain identifies the company, and every
+ *  workspace it owns shares it. Never per deployment, because the same process
+ *  serves several tenants and reading one tenant's domain onto another's mailbox
+ *  inverts every internal/external decision below. */
 export const internalDomainOf = async (ctx: WorkspaceContext): Promise<string> =>
   withWorkspace(ctx, async (tx) => {
-    const [row] = await tx
-      .select({ domain: workspace.googleHostedDomain })
-      .from(workspace)
-      .limit(1)
+    const [row] = await tx.execute<{ domain: string }>(
+      sql`select o.google_hosted_domain as domain
+            from workspace w join organisation o on o.id = w.organisation_id
+           limit 1`,
+    )
     if (!row) throw new Error('That workspace no longer exists.')
     return row.domain
   })

@@ -1,13 +1,7 @@
-import { eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
-import {
-  CORE_OBJECTS,
-  CORE_VIEWS,
-  ENTERPRISE_STAGES,
-  LIFECYCLE_STAGES,
-  SALES_STAGES,
-} from '../src/registry/core.ts'
+import { provisionWorkspace } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
 
@@ -24,9 +18,18 @@ if (!url) throw new Error('DATABASE_URL_OWNER is not set.')
 const client = postgres(url, { max: 1, onnotice: () => {} })
 const db = drizzle(client, { schema: s })
 
+/** Two organisations, and Datasaur owns two workspaces: one company with more
+ *  than one place to keep records is the case the org layer exists for, so the
+ *  seed has to contain it or nothing exercises it. */
+const ORGANISATIONS = [
+  { name: 'Datasaur', slug: 'datasaur', domain: 'datasaur.ai', seatLimit: 25 },
+  { name: 'Probe', slug: 'probe', domain: 'probe.example', seatLimit: null },
+] as const
+
 const WORKSPACES = [
-  { name: 'Datasaur', slug: 'datasaur', domain: 'datasaur.ai' },
-  { name: 'Probe Tenant', slug: 'probe', domain: 'probe.example' },
+  { name: 'Datasaur', slug: 'datasaur', org: 'datasaur' },
+  { name: 'Datasaur EMEA', slug: 'datasaur-emea', org: 'datasaur' },
+  { name: 'Probe Tenant', slug: 'probe', org: 'probe' },
 ] as const
 
 /** One account per role, named for the role. A real person signs in with Google,
@@ -45,18 +48,37 @@ const LONG_NAME = 'Ludwigshafen Interkontinentale Datenverarbeitungsgesellschaft
 const dayAgo = (n: number) => new Date(Date.UTC(2026, 7, 23) - n * 86_400_000)
 
 try {
-  // Idempotent: the whole tenant goes, cascades take its records with it.
-  const existing = await db
-    .select({ id: s.workspace.id })
-    .from(s.workspace)
-    .where(inArray(s.workspace.slug, WORKSPACES.map((w) => w.slug)))
-  if (existing.length) {
-    await db.delete(s.workspace).where(inArray(s.workspace.id, existing.map((w) => w.id)))
+  // Idempotent: the whole organisation goes, cascades take its workspaces and
+  // every record in them.
+  const existingOrgs = await db
+    .select({ id: s.organisation.id })
+    .from(s.organisation)
+    .where(inArray(s.organisation.slug, ORGANISATIONS.map((o) => o.slug)))
+  if (existingOrgs.length) {
+    await db.delete(s.organisation).where(inArray(s.organisation.id, existingOrgs.map((o) => o.id)))
+  }
+
+  const organisations = await db
+    .insert(s.organisation)
+    .values(
+      ORGANISATIONS.map((o) => ({
+        name: o.name,
+        slug: o.slug,
+        googleHostedDomain: o.domain,
+        seatLimit: o.seatLimit,
+      })),
+    )
+    .returning({ id: s.organisation.id, slug: s.organisation.slug })
+
+  const orgId = (slug: string) => {
+    const found = organisations.find((o) => o.slug === slug)
+    if (!found) throw new Error(`organisation ${slug} was not created`)
+    return found.id
   }
 
   const workspaces = await db
     .insert(s.workspace)
-    .values(WORKSPACES.map((w) => ({ name: w.name, slug: w.slug, googleHostedDomain: w.domain })))
+    .values(WORKSPACES.map((w) => ({ name: w.name, slug: w.slug, organisationId: orgId(w.org) })))
     .returning({ id: s.workspace.id, slug: s.workspace.slug })
 
   const wsId = (slug: string) => {
@@ -65,6 +87,7 @@ try {
     return found.id
   }
   const datasaur = wsId('datasaur')
+  const emea = wsId('datasaur-emea')
   const probe = wsId('probe')
 
   const users = await db
@@ -72,6 +95,9 @@ try {
     .values([
       ...PEOPLE.map((p) => ({ email: p.email, name: p.name, googleSub: `dev:${p.email}` })),
       { email: 'admin@probe.example', name: 'Probe Admin', googleSub: 'dev:admin@probe.example' },
+      // Somebody whose access was ended. The row stays so the audit trail still
+      // names them, and every membership they hold stops answering.
+      { email: 'former@datasaur.ai', name: 'Former', googleSub: 'dev:former@datasaur.ai' },
     ])
     .onConflictDoUpdate({ target: s.userAccount.email, set: { name: sql`excluded.name` } })
     .returning({ id: s.userAccount.id, email: s.userAccount.email })
@@ -84,124 +110,76 @@ try {
 
   await db.insert(s.membership).values([
     ...PEOPLE.map((p) => ({ workspaceId: datasaur, userId: userId(p.email), role: p.role })),
+    // The second Datasaur workspace has its own smaller seating, which is what
+    // makes "which workspace am I in" a real question in the switcher.
+    { workspaceId: emea, userId: userId('admin@datasaur.ai'), role: 'admin' as const },
+    { workspaceId: emea, userId: userId('sales@datasaur.ai'), role: 'sales' as const },
     { workspaceId: probe, userId: userId('admin@probe.example'), role: 'admin' as const },
+    { workspaceId: datasaur, userId: userId('former@datasaur.ai'), role: 'sales' as const },
+  ])
+
+  await db.insert(s.organisationMembership).values([
+    { organisationId: orgId('datasaur'), userId: userId('admin@datasaur.ai'), role: 'org_admin' as const },
+    ...PEOPLE.filter((p) => p.role !== 'admin').map((p) => ({
+      organisationId: orgId('datasaur'),
+      userId: userId(p.email),
+      role: 'member' as const,
+    })),
+    {
+      organisationId: orgId('datasaur'),
+      userId: userId('former@datasaur.ai'),
+      role: 'member' as const,
+      state: 'deactivated' as const,
+      deactivatedAt: dayAgo(3),
+      deactivatedBy: userId('admin@datasaur.ai'),
+    },
+    { organisationId: orgId('probe'), userId: userId('admin@probe.example'), role: 'org_admin' as const },
+  ])
+
+  // One seat offered and not yet claimed, so the pending tab is never empty in
+  // development. The hash is of a token nobody holds; the link cannot be used.
+  await db.insert(s.invitation).values({
+    organisationId: orgId('datasaur'),
+    workspaceId: datasaur,
+    email: 'newstarter@datasaur.ai',
+    workspaceRole: 'sales' as const,
+    orgRole: 'member' as const,
+    tokenHash: 'seed-invitation-hash-not-a-usable-token',
+    invitedBy: userId('admin@datasaur.ai'),
+    expiresAt: new Date(Date.UTC(2026, 8, 30)),
+  })
+
+  const [salesTeam] = await db
+    .insert(s.team)
+    .values({ workspaceId: datasaur, name: 'Sales EMEA', description: 'Works European inbound.' })
+    .returning({ id: s.team.id })
+  if (!salesTeam) throw new Error('the team was not created')
+  await db.insert(s.teamMember).values([
+    { workspaceId: datasaur, teamId: salesTeam.id, userId: userId('sales@datasaur.ai'), isLead: true },
+    { workspaceId: datasaur, teamId: salesTeam.id, userId: userId('marketing@datasaur.ai') },
   ])
 
   const owners = PEOPLE.filter((p) => p.role !== 'viewer').map((p) => userId(p.email))
 
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [datasaur, emea, probe]) {
+    // The same provisioning a workspace created from the organisation screen gets,
+    // so a seeded workspace and a real one cannot differ.
+    await provisionWorkspace(db as unknown as Parameters<typeof provisionWorkspace>[0], ws)
+
     const stages = await db
-      .insert(s.lifecycleStage)
-      .values(LIFECYCLE_STAGES.map((name, i) => ({ workspaceId: ws, name, position: i })))
-      .returning({ id: s.lifecycleStage.id, name: s.lifecycleStage.name })
-
-    await db.insert(s.subscriptionType).values([
-      { workspaceId: ws, name: 'Product updates', description: 'Release notes and changelog.' },
-      { workspaceId: ws, name: 'Newsletter', description: 'The monthly newsletter.' },
-      { workspaceId: ws, name: 'One-to-one sales email', description: 'Direct email from a rep.' },
-      { workspaceId: ws, name: 'Internal notifications', isInternal: true },
-    ])
-
-    for (const obj of CORE_OBJECTS) {
-      const [objectDef] = await db
-        .insert(s.objectDef)
-        .values({
-          workspaceId: ws,
-          key: obj.key,
-          nameSingular: obj.nameSingular,
-          namePlural: obj.namePlural,
-          icon: obj.icon,
-          isCustom: false,
-        })
-        .returning({ id: s.objectDef.id })
-      if (!objectDef) throw new Error(`object_def ${obj.key} was not created`)
-
-      const fields = await db
-        .insert(s.fieldDef)
-        .values(
-          obj.fields.map((f) => ({
-            workspaceId: ws,
-            objectId: objectDef.id,
-            key: f.key,
-            label: f.label,
-            type: f.type,
-            // No column means the field lives in custom jsonb, which is how a
-            // HubSpot custom property arrives.
-            storage: f.columnName ? ('column' as const) : ('jsonb' as const),
-            columnName: f.columnName ?? null,
-            isCustom: !f.columnName,
-            isRequired: f.isRequired ?? false,
-            trackChanges: f.trackChanges ?? false,
-            options: f.options ?? null,
-            position: f.position,
-          })),
-        )
-        .returning({ id: s.fieldDef.id, key: s.fieldDef.key })
-
-      const labelField = fields.find((f) => f.key === obj.labelFieldKey)
-      if (labelField) {
-        await db
-          .update(s.objectDef)
-          .set({ labelFieldId: labelField.id })
-          .where(eq(s.objectDef.id, objectDef.id))
-      }
-
-      // 'all' is the slug every deep link falls back to, so it is seeded, not
-      // created on demand.
-      await db.insert(s.savedView).values(
-        CORE_VIEWS[obj.key].map((view) => ({
-          workspaceId: ws,
-          objectId: objectDef.id,
-          slug: view.slug,
-          name: view.name,
-          kind: view.kind,
-          columns: view.columns,
-          filters: view.filters ?? [],
-          sorts: view.sorts ?? [],
-          isShared: true,
-          position: view.position,
-          groupByFieldId: view.groupBy ? (fields.find((f) => f.key === view.groupBy)?.id ?? null) : null,
-        })),
-      )
-    }
-
-    const pipelines = await db
-      .insert(s.pipeline)
-      .values([
-        { workspaceId: ws, name: 'Enterprise', position: 0 },
-        { workspaceId: ws, name: 'Sales Pipeline', position: 1 },
-      ])
-      .returning({ id: s.pipeline.id, name: s.pipeline.name })
-
-    const enterprise = pipelines.find((p) => p.name === 'Enterprise')!
-    const sales = pipelines.find((p) => p.name === 'Sales Pipeline')!
+      .select({ id: s.lifecycleStage.id, name: s.lifecycleStage.name })
+      .from(s.lifecycleStage)
+      .where(eq(s.lifecycleStage.workspaceId, ws))
+      .orderBy(s.lifecycleStage.position)
 
     const enterpriseStages = await db
-      .insert(s.pipelineStage)
-      .values(
-        ENTERPRISE_STAGES.map((st, i) => ({
-          workspaceId: ws,
-          pipelineId: enterprise.id,
-          name: st.name,
-          probability: st.probability,
-          position: i,
-          isClosedWon: 'isClosedWon' in st,
-          isClosedLost: 'isClosedLost' in st,
-        })),
-      )
-      .returning({ id: s.pipelineStage.id, name: s.pipelineStage.name })
-
-    await db.insert(s.pipelineStage).values(
-      SALES_STAGES.map((st, i) => ({
-        workspaceId: ws,
-        pipelineId: sales.id,
-        name: st.name,
-        probability: st.probability,
-        position: i,
-        isClosedWon: 'isClosedWon' in st,
-        isClosedLost: 'isClosedLost' in st,
-      })),
-    )
+      .select({ id: s.pipelineStage.id, name: s.pipelineStage.name, pipelineId: s.pipelineStage.pipelineId })
+      .from(s.pipelineStage)
+      .innerJoin(s.pipeline, eq(s.pipeline.id, s.pipelineStage.pipelineId))
+      .where(and(eq(s.pipelineStage.workspaceId, ws), eq(s.pipeline.name, 'Enterprise')))
+      .orderBy(s.pipelineStage.position)
+    const enterpriseId = enterpriseStages[0]?.pipelineId
+    if (!enterpriseId) throw new Error('the Enterprise pipeline was not provisioned')
 
     // The probe tenant gets one record of each, which is also the "exactly one row"
     // case every list has to render correctly.
@@ -262,7 +240,7 @@ try {
         Array.from({ length: scale }, (_, i) => ({
           workspaceId: ws,
           name: i === 6 ? null : `${INDUSTRIES[i % 5]} rollout ${i + 1}`,
-          pipelineId: enterprise.id,
+          pipelineId: enterpriseId,
           stageId: enterpriseStages[i % enterpriseStages.length]!.id,
           // Zero and null amounts both exist in the real portal.
           amount: i === 0 ? '0' : i === 11 ? null : String((i + 1) * 25_000),
@@ -351,7 +329,7 @@ try {
 
   // F3. Every workspace gets the same starting forms, including the probe tenant,
   // so the cross-tenant test has a form on both sides to prove isolation with.
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [datasaur, emea, probe]) {
     await db.insert(s.form).values(
       SEED_FORMS.map((form) => ({
         workspaceId: ws,
@@ -377,7 +355,7 @@ try {
   // only shows up across timezones has to be visible in the seed.
   const BOOKING_ZONES = ['America/Los_Angeles', 'Asia/Jakarta', 'Europe/Berlin']
 
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [datasaur, emea, probe]) {
     const staff =
       ws === datasaur
         ? PEOPLE.filter((p) => p.role !== 'viewer').map((p) => userId(p.email))

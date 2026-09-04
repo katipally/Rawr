@@ -2,6 +2,16 @@ import { pgEnum } from 'drizzle-orm/pg-core'
 
 export const roleEnum = pgEnum('rawr_role', ['admin', 'sales', 'marketing', 'viewer'])
 
+/** An organisation owns workspaces. Two roles only: somebody who can create a
+ *  workspace, seat people and end their access, and somebody who is simply in the
+ *  organisation. What they may do inside a given workspace is still `rawr_role`. */
+export const orgRoleEnum = pgEnum('rawr_org_role', ['org_admin', 'member'])
+
+/** `invited` is a seat held for an address that has not signed in yet;
+ *  `deactivated` keeps the row so the audit trail still names a person, while
+ *  every membership it carries stops answering. */
+export const memberStateEnum = pgEnum('rawr_member_state', ['active', 'invited', 'deactivated'])
+
 /** 'public' is the anonymous visitor acting through the public edge: a form fill, a
  *  consent choice, a booking. It is deliberately not folded into 'integration',
  *  which means a named third party like Brevo or Apollo. The audit log is a

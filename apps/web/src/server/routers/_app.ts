@@ -9,6 +9,7 @@ import { formsRouter } from './forms.ts'
 import { integrationsRouter } from './integrations.ts'
 import { mailRouter } from './mail.ts'
 import { mcpRouter } from './mcp.ts'
+import { orgRouter } from './org.ts'
 import { segmentsRouter } from './segments.ts'
 
 export const appRouter = router({
@@ -20,6 +21,7 @@ export const appRouter = router({
   integrations: integrationsRouter,
   mail: mailRouter,
   mcp: mcpRouter,
+  org: orgRouter,
   segments: segmentsRouter,
 
   health: publicProcedure.query(() => ({ ok: true as const })),

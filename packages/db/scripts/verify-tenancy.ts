@@ -42,13 +42,24 @@ try {
   const [appDbRole] = await app`select current_user as who`
   check(appDbRole?.who === 'rawr_app', 'the application connection is the app role, not the owner')
 
+  // Two probe workspaces, each under its own organisation: the domain lives on
+  // the organisation now, and a workspace cannot exist without one.
+  const stamp = Date.now()
+  const orgA = (await owner`
+    insert into organisation (name, slug, google_hosted_domain)
+    values ('Probe Org A', ${'probe-org-a-' + stamp}, ${'a-' + stamp + '.example'})
+    returning id`)[0]!.id
+  const orgB = (await owner`
+    insert into organisation (name, slug, google_hosted_domain)
+    values ('Probe Org B', ${'probe-org-b-' + stamp}, ${'b-' + stamp + '.example'})
+    returning id`)[0]!.id
   const wsA = (await owner`
-    insert into workspace (name, slug, google_hosted_domain)
-    values ('Probe A', ${'probe-a-' + Date.now()}, 'a.example')
+    insert into workspace (organisation_id, name, slug)
+    values (${orgA}, 'Probe A', ${'probe-a-' + stamp})
     returning id`)[0]!.id
   const wsB = (await owner`
-    insert into workspace (name, slug, google_hosted_domain)
-    values ('Probe B', ${'probe-b-' + Date.now()}, 'b.example')
+    insert into workspace (organisation_id, name, slug)
+    values (${orgB}, 'Probe B', ${'probe-b-' + stamp})
     returning id`)[0]!.id
   await owner`insert into company (workspace_id, name) values (${wsA}, 'Company in A')`
   await owner`insert into company (workspace_id, name) values (${wsB}, 'Company in B')`
@@ -88,7 +99,8 @@ try {
   }
   check(auditImmutable, 'the app role cannot update audit_log')
 
-  await owner`delete from workspace where id in (${wsA}, ${wsB})`
+  // The organisations cascade to their workspaces, which cascade to the rows.
+  await owner`delete from organisation where id in (${orgA}, ${orgB})`
 } finally {
   await owner.end()
   await app.end()

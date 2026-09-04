@@ -77,7 +77,7 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
       const there = url.pathname + url.search
       if (url.hash && there === here) return
       // The public and API routes are not part of the app router tree.
-      if (/^\/(api|b|f|form|c|e|w|embed\.js|booking\.js)(\/|$)/.test(url.pathname)) return
+      if (/^\/(api|b|f|form|c|e|w|invite|embed\.js|booking\.js)(\/|$)/.test(url.pathname)) return
       event.preventDefault()
       // Stop Next's own Link handler from pushing a second time.
       event.stopPropagation()

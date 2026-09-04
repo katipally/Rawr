@@ -198,6 +198,17 @@ export const accountPath = (): string => '/settings/account'
 
 export const failedJobsPath = (): string => '/settings/jobs'
 
+/** The company above this workspace: its workspaces, its seats, its history. */
+export const organisationPath = (): string => '/settings/organisation'
+
+export const teamsPath = (): string => '/settings/teams'
+
+export const auditPath = (): string => '/settings/audit'
+
+/** The public invitation link. Absolute when it is put in front of a person to
+ *  send; relative here because the app links to it too. */
+export const invitePath = (token: string): string => `/invite/${token}`
+
 /** A sort is one field and a direction, written the way a person would type it:
  *  `-close_date` for newest first. Kept short because it lives in a URL people
  *  paste into Slack. */

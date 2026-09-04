@@ -2,7 +2,14 @@ import {
   FIELD_TYPES,
   ROLES,
   addMember,
+  auditEntities,
+  deleteTeam,
+  listAssignable,
+  listAudit,
   listMembers,
+  listTeams,
+  saveTeam,
+  setTeamMembers,
   removeMember,
   setMemberRole,
   createField,
@@ -62,6 +69,53 @@ export const adminRouter = router({
     remove: adminProcedure
       .input(z.object({ userId: z.string().uuid() }))
       .mutation(({ ctx, input }) => call(() => removeMember(ctx.workspace, input.userId))),
+  }),
+
+  /** Named groups inside this workspace. A team decides where a round-robin lead
+   *  lands, so reading one is open and changing one is an admin's. */
+  teams: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listTeams(ctx.workspace))),
+    assignable: protectedProcedure.query(({ ctx }) => call(() => listAssignable(ctx.workspace))),
+    save: adminProcedure
+      .input(
+        z.object({
+          id: z.string().uuid().nullable().optional(),
+          name,
+          description: z.string().trim().max(500).nullable().optional(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => saveTeam(ctx.workspace, input))),
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx, input }) => call(() => deleteTeam(ctx.workspace, input.id))),
+    setMembers: adminProcedure
+      .input(
+        z.object({
+          teamId: z.string().uuid(),
+          members: z.array(z.object({ userId: z.string().uuid(), isLead: z.boolean().optional() })).max(200),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => setTeamMembers(ctx.workspace, input))),
+  }),
+
+  /** Who changed what in this workspace. Admin only, and refused again in the
+   *  data access layer, because a history is a security record. */
+  audit: router({
+    entities: adminProcedure.query(({ ctx }) => call(() => auditEntities(ctx.workspace))),
+    list: adminProcedure
+      .input(
+        z
+          .object({
+            entity: z.string().max(64).nullable().optional(),
+            actorId: z.string().uuid().nullable().optional(),
+            from: z.string().datetime().nullable().optional(),
+            to: z.string().datetime().nullable().optional(),
+            limit: z.number().int().min(1).max(200).optional(),
+            cursor: z.object({ at: z.string(), id: z.string().uuid() }).nullable().optional(),
+          })
+          .optional(),
+      )
+      .query(({ ctx, input }) => call(() => listAudit(ctx.workspace, input ?? {}))),
   }),
 
   fields: router({

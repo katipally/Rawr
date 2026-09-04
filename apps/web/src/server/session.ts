@@ -1,4 +1,9 @@
-import { membershipsForUser, type Membership, type WorkspaceContext } from '@rawr/db'
+import {
+  membershipsForUser,
+  type Membership,
+  type OrganisationContext,
+  type WorkspaceContext,
+} from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
@@ -22,6 +27,10 @@ export type Session = {
   workspaceId: string
   workspaceSlug: string
   workspaceName: string
+  organisationId: string
+  organisationSlug: string
+  organisationName: string
+  orgRole: Membership['orgRole']
   hostedDomain: string
   role: Membership['role']
 }
@@ -34,6 +43,10 @@ export const sessionFromMembership = (m: Membership): Session => ({
   workspaceId: m.workspaceId,
   workspaceSlug: m.workspaceSlug,
   workspaceName: m.workspaceName,
+  organisationId: m.organisationId,
+  organisationSlug: m.organisationSlug,
+  organisationName: m.organisationName,
+  orgRole: m.orgRole,
   hostedDomain: m.hostedDomain,
   role: m.role,
 })
@@ -99,4 +112,14 @@ export const contextFrom = (session: Session): WorkspaceContext => ({
   actorId: session.userId,
   actorKind: 'user',
   role: session.role,
+})
+
+/** The second scope, for the handful of screens that sit above a workspace. Kept
+ *  separate from `contextFrom` on purpose: a call that means to act on the company
+ *  must say so, and cannot get there by holding a workspace context. */
+export const orgContextFrom = (session: Session): OrganisationContext => ({
+  organisationId: session.organisationId,
+  actorId: session.userId,
+  actorKind: 'user',
+  orgRole: session.orgRole,
 })

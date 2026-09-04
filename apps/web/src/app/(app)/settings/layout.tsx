@@ -3,15 +3,18 @@ import { SettingsNav, type SettingsGroup } from './nav.tsx'
 import {
   accountPath,
   agentAccessPath,
+  auditPath,
   failedJobsPath,
   integrationsPath,
   lifecyclePath,
   mailboxesPath,
   membersPath,
+  organisationPath,
   pipelinesPath,
   propertiesPath,
   sitesPath,
   subscriptionsPath,
+  teamsPath,
 } from '~/lib/links.ts'
 
 /** One place that knows what settings there are. Each page used to link to two or
@@ -30,7 +33,12 @@ const GROUPS: SettingsGroup[] = [
   },
   {
     label: 'Account management',
-    sections: [{ href: membersPath(), label: 'Members', hint: 'Who is in this workspace, and their role' }],
+    sections: [
+      { href: organisationPath(), label: 'Organisation', hint: 'Workspaces, seats and how people get in' },
+      { href: membersPath(), label: 'Members', hint: 'Who is here, and what each of them may do' },
+      { href: teamsPath(), label: 'Teams', hint: 'Groups that assignment rotates within' },
+      { href: auditPath(), label: 'History', hint: 'Who changed what, and when' },
+    ],
   },
   {
     label: 'Data management',

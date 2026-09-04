@@ -66,6 +66,13 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   availability_override: ['admin', 'sales', 'marketing'],
   calendar_grant: ['admin', 'sales', 'marketing'],
   membership: ['admin'],
+  /** A team is workspace configuration: who is on it decides where a round-robin
+   *  lead lands, so changing it is an admin act. */
+  team: ['admin'],
+  team_member: ['admin'],
+  /** Issued from the organisation screen, which checks the organisation role of
+   *  its own; this entry only stops a workspace-scoped caller writing one. */
+  invitation: ['admin'],
   /** F1 phase B. Anybody but a viewer may connect their own mailbox; whether a
    *  given mailbox is theirs to disconnect is finer than an object-level role can
    *  say, so that is checked inside the layer. */

@@ -28,6 +28,9 @@ const GROUPS: Record<string, string> = {
   integrations: 'Brevo, Apollo, Clay, Slack, GA4 and Zoom: connection, health, enrichment, sequences and replay.',
   admin: 'Workspace settings: fields, pipelines, stages, lifecycle, subscription types, members.',
   mcp: 'Agent access tokens.',
+  org: 'The organisation above this workspace: its workspaces, its people, their seats and the history of those decisions.',
+  notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
+  teams: 'Named groups inside this workspace, used to rotate assignment within a team.',
   jobs: 'Failed jobs and dead letters.',
 }
 
@@ -89,6 +92,10 @@ export const sessionFor = (caller: {
   userName: string
   workspaceSlug: string
   workspaceName: string
+  organisationId: string
+  organisationSlug: string
+  organisationName: string
+  orgRole: Session['orgRole']
   ctx: { workspaceId: string; role: Session['role'] }
 }): Session => ({
   userId: caller.userId,
@@ -98,6 +105,10 @@ export const sessionFor = (caller: {
   workspaceId: caller.ctx.workspaceId,
   workspaceSlug: caller.workspaceSlug,
   workspaceName: caller.workspaceName,
+  organisationId: caller.organisationId,
+  organisationSlug: caller.organisationSlug,
+  organisationName: caller.organisationName,
+  orgRole: caller.orgRole,
   hostedDomain: caller.userEmail.split('@')[1] ?? '',
   role: caller.ctx.role,
 })
@@ -130,6 +141,12 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
         // Through the token's own context, so the audit row says "mcp" and names
         // the person, exactly as the hand-written tools do.
         workspace: context.caller.ctx,
+        organisation: {
+          organisationId: context.caller.organisationId,
+          actorId: context.caller.userId,
+          actorKind: 'mcp',
+          orgRole: context.caller.orgRole,
+        },
       })
       const target = path.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], caller) as (
         input: unknown,

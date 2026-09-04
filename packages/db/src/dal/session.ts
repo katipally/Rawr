@@ -6,6 +6,10 @@ export type Membership = {
   workspaceId: string
   workspaceSlug: string
   workspaceName: string
+  organisationId: string
+  organisationSlug: string
+  organisationName: string
+  orgRole: 'org_admin' | 'member'
   hostedDomain: string
   userId: string
   email: string
@@ -21,6 +25,10 @@ type MembershipRow = {
   workspace_id: string
   workspace_slug: string
   workspace_name: string
+  organisation_id: string
+  organisation_slug: string
+  organisation_name: string
+  org_role: 'org_admin' | 'member'
   hosted_domain: string
   user_id: string
   email: string
@@ -35,6 +43,10 @@ const toMembership = (r: MembershipRow): Membership => ({
   workspaceId: r.workspace_id,
   workspaceSlug: r.workspace_slug,
   workspaceName: r.workspace_name,
+  organisationId: r.organisation_id,
+  organisationSlug: r.organisation_slug,
+  organisationName: r.organisation_name,
+  orgRole: r.org_role,
   hostedDomain: r.hosted_domain,
   userId: r.user_id,
   email: r.email,
@@ -70,9 +82,10 @@ export type GoogleSignIn = {
   hostedDomain: string
 }
 
-/** Links or creates the account and seats it, as a viewer, in every workspace on
- *  that hosted domain. Returns the user id; the memberships are read separately so
- *  sign-in and every later request go through the same function. */
+/** Links or creates the account, puts it in the organisation that owns its hosted
+ *  domain, and seats it as a viewer in that organisation's workspaces when the
+ *  organisation allows domain joins. Returns the user id; the memberships are read
+ *  separately so sign-in and every later request go through the same function. */
 export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> => {
   const [row] = await appDb.execute<{ id: string }>(
     sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}) as id`,
