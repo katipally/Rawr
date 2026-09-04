@@ -123,13 +123,17 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
 
   return (
     <div className="flex flex-col gap-4">
-      {/* With nothing listed, the empty state below carries the one button. */}
-      {canWrite && rows.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          <Button variant="primary" onClick={openNew}>
-            Create segment
-          </Button>
-          {rows.length > 0 ? (
+      {/* Two separate questions. Whether the toolbar is worth drawing depends on
+          there being something to recompute; whether the read-only notice belongs
+          depends only on the role. Asking them as one told an admin looking at an
+          empty page that they could not change segments, directly above a button
+          that creates one. */}
+      {canWrite ? (
+        rows.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" onClick={openNew}>
+              Create segment
+            </Button>
             <Button
               busy={busy}
               onClick={() =>
@@ -144,8 +148,8 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
             >
               Recompute all
             </Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null
       ) : (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
           Your role ({role}) can read segments and cannot change them. Marketing and admins own

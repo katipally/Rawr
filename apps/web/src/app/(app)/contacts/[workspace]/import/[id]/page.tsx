@@ -91,6 +91,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ workspace: string; 
         runId={id}
         object={run.objectType}
         kind={run.importKind}
+        source={run.source}
         filename={run.filename}
         headers={headers}
         sampleRows={rows.slice(0, SAMPLE_ROWS)}
@@ -109,6 +110,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ workspace: string; 
           errored: run.errored,
         }}
         errors={run.errors}
+        unmatchedOwners={run.unmatchedOwners}
       />
     </div>
   )

@@ -9,7 +9,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
-import { BOOKING_COPY } from '~/lib/edge-copy.ts'
+import { BOOKING_COPY, hourIn, slotBandOf } from '~/lib/edge-copy.ts'
 import { bookingIcsPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
@@ -234,27 +234,36 @@ const ManageBookingPage = async ({
                   month: 'long',
                 })}
               </legend>
-              <div className="rawr-b-times">
-                {slots.map((slot) => {
-                  const iso = slot.toISOString()
-                  return (
-                    <label key={iso} className="rawr-b-slot">
-                      <input
-                        type="radio"
-                        name="slot"
-                        value={iso}
-                        required
-                        style={{ marginInlineEnd: '0.375rem' }}
-                      />
-                      {slot.toLocaleTimeString(locale.tag, {
-                        timeZone: timezone,
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </label>
-                  )
-                })}
-              </div>
+              {/* Banded the way the booking page bands them. Three weeks of
+                  half-hour slots is several hundred radio buttons on one page,
+                  which is what a form that has to work without JavaScript costs;
+                  naming the runs is what makes it scannable anyway. */}
+              {bandsOf(slots, timezone).map(([band, run]) => (
+                <div key={band} className="rawr-b-band">
+                  <p className="rawr-b-bandname">{band}</p>
+                  <div className="rawr-b-times">
+                    {run.map((slot) => {
+                      const iso = slot.toISOString()
+                      return (
+                        <label key={iso} className="rawr-b-slot">
+                          <input
+                            type="radio"
+                            name="slot"
+                            value={iso}
+                            required
+                            style={{ marginInlineEnd: '0.375rem' }}
+                          />
+                          {slot.toLocaleTimeString(locale.tag, {
+                            timeZone: timezone,
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
             </fieldset>
           ))}
 
@@ -270,10 +279,30 @@ const ManageBookingPage = async ({
   )
 }
 
+/** The day's times split into the runs a person reads them in. Insertion order is
+ *  preserved by Map, and the slots arrive sorted. */
+const bandsOf = (slots: Date[], timezone: string): [string, Date[]][] => {
+  const bands = new Map<string, Date[]>()
+  for (const slot of slots) {
+    const band = slotBandOf(hourIn(slot, timezone))
+    const list = bands.get(band)
+    if (list) list.push(slot)
+    else bands.set(band, [slot])
+  }
+  return [...bands]
+}
+
+/** The width goes on a wrapper, never on the widget element itself. The embed
+ *  stylesheet declares max-width:100% on [data-rawr-booking-widget] and is
+ *  unlayered, while Tailwind's utilities live in @layer utilities, so a max-w-*
+ *  class on the same element silently loses and this page ran the full width of
+ *  the window. The hosted booking page splits them for the same reason. */
 const Shell = ({ children }: { children: React.ReactNode }) => (
-  <div data-rawr-booking-widget data-rawr-booking-hosted className="mx-auto w-full max-w-2xl p-4">
-    <style dangerouslySetInnerHTML={{ __html: BOOKING_STYLES + HOSTED_BOOKING_STYLES }} />
-    <div className="rawr-b">{children}</div>
+  <div className="mx-auto w-full max-w-2xl p-4">
+    <div data-rawr-booking-widget data-rawr-booking-hosted>
+      <style dangerouslySetInnerHTML={{ __html: BOOKING_STYLES + HOSTED_BOOKING_STYLES }} />
+      <div className="rawr-b">{children}</div>
+    </div>
   </div>
 )
 

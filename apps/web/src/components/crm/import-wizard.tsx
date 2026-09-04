@@ -3,7 +3,7 @@
 import { Button, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
+import type { ImportKind, ObjectKey } from '@rawr/db'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** The loop runs in this tab, so it is bounded. Reaching it is reported, never
@@ -16,8 +16,12 @@ export type ImportWizardProps = {
   workspace: string
   runId: string
   object: ObjectKey
-  /** Records fill columns; activities land on the timeline of the record they name. */
-  kind: 'records' | 'activities'
+  /** Records fill columns; activities land on the timeline of the record they
+   *  name; the other four carry the shape around the records. */
+  kind: ImportKind
+  /** Which export the file came out of, so the dry run reads it the way the run
+   *  will. Without it a preview built its own preset and the run used another. */
+  source: string | null
   filename: string
   headers: string[]
   sampleRows: Record<string, string>[]
@@ -29,6 +33,9 @@ export type ImportWizardProps = {
   processedRows: number
   counts: { created: number; updated: number; skipped: number; errored: number }
   errors: { row: number; reason: string; values: Record<string, string> }[]
+  /** Owner names in the file that match nobody here. Those rows landed
+   *  unassigned rather than failing, so this is what a migration reconciles. */
+  unmatchedOwners: string[]
 }
 
 type Preview = {
@@ -44,6 +51,7 @@ export const ImportWizard = ({
   runId,
   object,
   kind,
+  source,
   filename,
   headers,
   sampleRows,
@@ -55,6 +63,7 @@ export const ImportWizard = ({
   processedRows,
   counts,
   errors,
+  unmatchedOwners,
 }: ImportWizardProps) => {
   const router = useRouter()
   const toast = useToast()
@@ -94,6 +103,7 @@ export const ImportWizard = ({
       const result = await api.crm.imports.dryRun.query({
         object,
         kind,
+        source,
         mapping,
         rows: sampleRows,
       })
@@ -141,6 +151,7 @@ export const ImportWizard = ({
 
   if (finished || state === 'running') {
     const pct = totalRows === 0 ? 100 : Math.round((progress / totalRows) * 100)
+    const accounted = counts.created + counts.updated + counts.skipped + counts.errored
     return (
       <div className="flex flex-col gap-3">
         <h2 className="font-medium">{filename}</h2>
@@ -170,6 +181,34 @@ export const ImportWizard = ({
             </div>
           ))}
         </dl>
+
+        {/* Rows in against rows out. A migration nobody can check is a migration
+            nobody will trust, and four counters that happen not to add up is the
+            first thing worth knowing. */}
+        {finished && accounted !== totalRows ? (
+          <p role="alert" className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
+            {totalRows.toLocaleString()} rows went in and {accounted.toLocaleString()} are accounted
+            for. The {Math.abs(totalRows - accounted).toLocaleString()} in between are rows where
+            every mapped column was empty.
+          </p>
+        ) : null}
+
+        {unmatchedOwners.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="font-medium">Owners nobody here matches ({unmatchedOwners.length})</h3>
+            <p className="text-secondary">
+              Those records came in unassigned. Invite these people under Settings, Members and run
+              the same file again to fill the owner in.
+            </p>
+            <ul className="flex flex-wrap gap-1.5">
+              {unmatchedOwners.map((owner) => (
+                <li key={owner} className="rounded-hs border border-line bg-fill px-2 py-0.5">
+                  {owner}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         {!finished ? (
           <div className="flex flex-wrap gap-2">

@@ -58,6 +58,10 @@ export const segment = pgTable(
       .notNull()
       .references(() => objectDef.id, { onDelete: 'cascade' }),
     query: jsonb('query').notNull(),
+    /** A list imported from somewhere else, whose members are the file's and not
+     *  a query's. The evaluator skips these: rebuilding one from an empty query
+     *  would empty it. */
+    isStatic: boolean('is_static').notNull().default(false),
     /** Null until the first evaluation. The UI says "not evaluated yet" rather
      *  than showing a member count that is really just zero. */
     lastEvaluatedAt: timestamp('last_evaluated_at', { withTimezone: true }),

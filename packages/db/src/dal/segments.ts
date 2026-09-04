@@ -31,6 +31,9 @@ export type SegmentRow = {
   description: string | null
   filters: FilterGroup[]
   memberCount: number
+  /** An imported list, holding the members a file named rather than the members a
+   *  query selects. The evaluator leaves it alone; the screen says so. */
+  isStatic: boolean
   lastEvaluatedAt: Date | null
 }
 
@@ -51,6 +54,7 @@ export const listSegments = async (ctx: WorkspaceContext, objectKey?: string): P
         objectId: segment.objectId,
         description: segment.description,
         query: segment.query,
+        isStatic: segment.isStatic,
         lastEvaluatedAt: segment.lastEvaluatedAt,
       })
       .from(segment)
@@ -72,6 +76,7 @@ export const listSegments = async (ctx: WorkspaceContext, objectKey?: string): P
         description: row.description,
         filters: parseFilters(row.query),
         memberCount: byId.get(row.id) ?? 0,
+        isStatic: row.isStatic,
         lastEvaluatedAt: row.lastEvaluatedAt,
       }))
   })
@@ -187,11 +192,30 @@ export const evaluateSegmentIn = async (
 ): Promise<EvaluationResult> => {
   const registry = await getRegistryIn(tx)
   const [row] = await tx
-    .select({ id: segment.id, name: segment.name, objectId: segment.objectId, query: segment.query })
+    .select({
+      id: segment.id,
+      name: segment.name,
+      objectId: segment.objectId,
+      query: segment.query,
+      isStatic: segment.isStatic,
+    })
     .from(segment)
     .where(eq(segment.id, segmentId))
     .limit(1)
   if (!row) throw new Error('That segment no longer exists.')
+
+  // An imported list holds the members a file named, not the members a query
+  // selects. Rebuilding it from the empty query it carries would empty it, and
+  // the hourly run would do that to all of them on the first pass after a
+  // migration. Reported as a real result rather than an error: nothing is wrong,
+  // there is simply nothing to recompute.
+  if (row.isStatic) {
+    const [{ n = 0 } = { n: 0 }] = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from segment_membership
+           where segment_id = ${segmentId} and exited_at is null`,
+    )
+    return { entered: 0, exited: 0, members: Number(n) }
+  }
 
   const object = registry.objects.find((candidate) => candidate.id === row.objectId)
   if (!object) throw new Error(`The object "${row.name}" is built on no longer exists.`)

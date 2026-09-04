@@ -1,3 +1,4 @@
+import { canWrite, type Role } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavSection } from '~/components/app-shell.tsx'
@@ -137,12 +138,18 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         email={session.email}
         role={session.role}
         nav={nav}
+        // Only what this role can actually make. A viewer was offered four
+        // things to create and every one of them landed on a page that quietly
+        // ignored the request, because the create dialog checks the role and the
+        // menu did not.
         create={[
-          { key: 'contact', label: 'Contact', href: createRecordPath(workspace, 'contact') },
-          { key: 'company', label: 'Company', href: createRecordPath(workspace, 'company') },
-          { key: 'deal', label: 'Deal', href: createRecordPath(workspace, 'deal') },
-          { key: 'task', label: 'Task', href: tasksPath(workspace) },
-        ]}
+          { key: 'contact', label: 'Contact', href: createRecordPath(workspace, 'contact'), entity: 'contact' },
+          { key: 'company', label: 'Company', href: createRecordPath(workspace, 'company'), entity: 'company' },
+          { key: 'deal', label: 'Deal', href: createRecordPath(workspace, 'deal'), entity: 'deal' },
+          { key: 'task', label: 'Task', href: tasksPath(workspace), entity: 'task' },
+        ].flatMap(({ entity, ...option }) =>
+          canWrite(session.role as Role, entity) ? [option] : [],
+        )}
         settingsHref={accountPath()}
         accountHref={accountPath()}
         homeHref={workspaceHome(workspace)}

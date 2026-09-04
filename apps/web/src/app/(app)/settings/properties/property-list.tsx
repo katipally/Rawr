@@ -56,6 +56,12 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
   const [isRequired, setIsRequired] = useState(false)
   const [trackChanges, setTrackChanges] = useState(false)
 
+  /** A portal arrives with three hundred and seventy-two properties on contacts
+   *  alone. A flat list of that many, reordered a click at a time, is a list
+   *  nobody opens twice. */
+  const [query, setQuery] = useState('')
+  const [group, setGroup] = useState('')
+
   const reset = () => {
     setLabel('')
     setKey('')
@@ -158,9 +164,23 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
     )
   }
 
+  const groups = [...new Set(rows.map((field) => field.groupName).filter((name): name is string => Boolean(name)))].sort()
+  const needle = query.trim().toLowerCase()
+  const visible = rows.filter(
+    (field) =>
+      (group === '' || (group === 'ungrouped' ? !field.groupName : field.groupName === group)) &&
+      (needle === '' ||
+        field.label.toLowerCase().includes(needle) ||
+        field.key.includes(needle) ||
+        (field.helpText ?? '').toLowerCase().includes(needle)),
+  )
+  /** Reordering writes the whole ordered id list, so it can only be offered when
+   *  the whole list is on screen. Hidden rather than broken, and said out loud. */
+  const filtered = visible.length !== rows.length
+
   return (
     <div className="flex flex-col gap-4">
-      <div>
+      <div className="flex flex-wrap items-end justify-between gap-3">
         {role !== 'admin' ? (
           <p className="text-secondary">Your role ({role}) can read the fields and cannot change them.</p>
         ) : (
@@ -168,10 +188,41 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
           Create property
         </Button>
         )}
+
+        <div className="flex flex-wrap items-end gap-2">
+          <Field id="property-search" label="Find">
+            <TextInput
+              id="property-search"
+              value={query}
+              placeholder="Name, key or description"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </Field>
+          {groups.length > 0 ? (
+            <Field id="property-group" label="Group">
+              <Select id="property-group" value={group} onChange={(event) => setGroup(event.target.value)}>
+                <option value="">All groups</option>
+                {groups.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                <option value="ungrouped">Ungrouped</option>
+              </Select>
+            </Field>
+          ) : null}
+        </div>
       </div>
 
+      <p className="text-secondary tabular-nums">
+        {filtered
+          ? `${visible.length.toLocaleString()} of ${rows.length.toLocaleString()} properties`
+          : `${rows.length.toLocaleString()} propert${rows.length === 1 ? 'y' : 'ies'}`}
+        {filtered ? '. Clear the filter to reorder.' : ''}
+      </p>
+
       <ul className="flex flex-col rounded-panel border border-line bg-surface">
-        {rows.map((field, index) => (
+        {visible.map((field, index) => (
           <li
             key={field.id}
             className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
@@ -186,6 +237,8 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                 {!field.isCustom && !field.isSystem ? <Badge tone="muted">Core</Badge> : null}
                 {field.isHot ? <Badge tone="ok">Indexed{field.indexState ? ` · ${field.indexState}` : ''}</Badge> : null}
                 {field.trackChanges ? <Badge tone="muted">On the timeline</Badge> : null}
+                {field.groupName ? <Badge tone="muted">{field.groupName}</Badge> : null}
+                {field.source ? <Badge tone="muted">from {field.source}</Badge> : null}
               </p>
               {field.helpText ? <p className="text-small text-secondary">{field.helpText}</p> : null}
               {field.options.length > 0 ? (
@@ -198,17 +251,21 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
             </div>
 
             <div className="flex shrink-0 flex-wrap gap-2">
-              <Button variant="tertiary" busy={busy} onClick={() => move(index, -1)} disabled={index === 0}>
-                Up
-              </Button>
-              <Button
-                variant="tertiary"
-                busy={busy}
-                onClick={() => move(index, 1)}
-                disabled={index === rows.length - 1}
-              >
-                Down
-              </Button>
+              {filtered ? null : (
+                <>
+                  <Button variant="tertiary" busy={busy} onClick={() => move(index, -1)} disabled={index === 0}>
+                    Up
+                  </Button>
+                  <Button
+                    variant="tertiary"
+                    busy={busy}
+                    onClick={() => move(index, 1)}
+                    disabled={index === rows.length - 1}
+                  >
+                    Down
+                  </Button>
+                </>
+              )}
               {field.isSystem ? null : (
                 <Button variant="tertiary" onClick={() => openEdit(field)}>
                   Edit

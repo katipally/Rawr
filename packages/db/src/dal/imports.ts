@@ -4,14 +4,22 @@ import { importRun } from '../schema/imports.ts'
 import { activity, activityLink } from '../schema/records.ts'
 import {
   ACTIVITY_IMPORT,
+  ASSOCIATION_IMPORT,
   hubspotActivityPreset,
+  hubspotFieldType,
   hubspotPreset,
+  hubspotShapePreset,
+  LIST_IMPORT,
   looksLikeHubspot,
+  PROPERTY_IMPORT,
+  SUBMISSION_IMPORT,
 } from '../registry/hubspot.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { isUuid, mutate, withWorkspace } from './index.ts'
+import { createField, updateField } from './admin-fields.ts'
+import { orderedPair } from './associations.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
 import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { coerce, ValueError } from './values.ts'
@@ -22,14 +30,43 @@ export type Mapping = Record<string, string | null>
 
 export type RowError = { row: number; reason: string; values: ImportRow }
 
-/** Records fill columns on a record; activities land on its timeline. */
-export type ImportKind = 'records' | 'activities'
+/** Records fill columns on a record; activities land on its timeline; the other
+ *  four carry the shape around the records rather than the records themselves.
+ *  B9: a portal exports every one of them as its own file. */
+export const IMPORT_KINDS = [
+  'records',
+  'activities',
+  'properties',
+  'associations',
+  'lists',
+  'submissions',
+] as const
+export type ImportKind = (typeof IMPORT_KINDS)[number]
 
 /** The column a run is matched on. Without it a second run of the same file
  *  creates everything again instead of updating it, which is why the mapper
  *  refuses to start until it is mapped. */
+const DEDUPE_KEY: Partial<Record<ImportKind, string>> = {
+  activities: 'contact_email',
+  properties: 'label',
+  associations: 'deal_name',
+  lists: 'list_name',
+  submissions: 'contact_email',
+}
+
 const dedupeKeyOf = (kind: ImportKind, objectKey: string): string =>
-  kind === 'activities' ? 'contact_email' : objectKey === 'contact' ? 'email' : objectKey === 'company' ? 'domain' : 'name'
+  DEDUPE_KEY[kind] ?? (objectKey === 'contact' ? 'email' : objectKey === 'company' ? 'domain' : 'name')
+
+/** What the mapper must carry beyond the dedupe key, and the sentence to say when
+ *  it does not. One entry rather than a branch, because the reason differs per
+ *  kind and a generic "map more columns" helps nobody. */
+const ALSO_REQUIRED: Partial<Record<ImportKind, { key: string; because: string }>> = {
+  activities: { key: 'occurred_at', because: 'Map a column to Activity date. A timeline entry with no date has nowhere to sit.' },
+  properties: { key: 'object_key', because: 'Map a column to Applies to. Without it there is no way to tell a contact property from a deal one.' },
+  associations: { key: 'contact_email', because: 'Map a column to Contact email. A deal with nobody on it is what this file exists to fix.' },
+  lists: { key: 'contact_email', because: 'Map a column to Contact email. A list of nobody is not a list.' },
+  submissions: { key: 'form_name', because: 'Map a column to Form. A submission has to belong to one.' },
+}
 
 export type ImportSummary = {
   id: string
@@ -46,6 +83,9 @@ export type ImportSummary = {
   skipped: number
   errored: number
   errors: RowError[]
+  /** Owner names in the file that match nobody here. Those rows landed
+   *  unassigned rather than failing, so this is the list to act on. */
+  unmatchedOwners: string[]
   lastError: string | null
   createdAt: Date
   finishedAt: Date | null
@@ -120,9 +160,8 @@ export const assertMappingIsUsable = (
         : `Map a column to ${object.byKey.get(dedupeKey)?.label ?? dedupeKey}. Without it every run creates duplicates instead of updating.`,
     )
   }
-  if (kind === 'activities' && !seen.has('occurred_at')) {
-    throw new Error('Map a column to Activity date. A timeline entry with no date has nowhere to sit.')
-  }
+  const also = ALSO_REQUIRED[kind]
+  if (also && !seen.has(also.key)) throw new Error(also.because)
 }
 
 /** Where a spreadsheet's words for a relation are looked up. A HubSpot export
@@ -167,7 +206,11 @@ const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
  *  company and the real run creates it. */
 const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) => {
   const remembered = new Map<string, string | null>()
-  return async (field: RegistryField, raw: string): Promise<string | null> => {
+  /** Every owner name in the file that matches nobody here, once each. A portal
+   *  carries the names of people who never got a Rawr account, and at eighty-eight
+   *  thousand rows that used to be eighty-eight thousand identical errors. */
+  const unmatchedOwners = new Set<string>()
+  const resolve = async (field: RegistryField, raw: string): Promise<string | null> => {
     const needle = raw.trim()
     if (isUuid(needle)) return needle
     const lookup = RELATION_LOOKUPS[field.key]
@@ -190,9 +233,21 @@ const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) =
       }
       remembered.set(cacheKey, id)
     }
-    if (id === null) throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this workspace.`)
+    if (id === null) {
+      // An owner who is not here is a person, not a mistake in the file. The row
+      // lands unassigned and the name is reported once, so somebody can invite
+      // them and re-run; every other relation is still a refusal, because a stage
+      // or a pipeline that does not exist means the column is mapped wrong.
+      if (field.key === 'owner_id') {
+        unmatchedOwners.add(needle)
+        return null
+      }
+      throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this workspace.`)
+    }
     return id
   }
+  resolve.unmatchedOwners = unmatchedOwners
+  return resolve
 }
 
 type Resolve = ReturnType<typeof relationResolver>
@@ -260,15 +315,30 @@ const dedupeLookup = async (
   })
 }
 
-/** Activities are mapped against a fixed shape rather than the workspace's
- *  registry: nothing is created from those columns, they only say which record
- *  the note belongs to and what it said. */
+/** Every kind but `records` is mapped against a fixed shape rather than the
+ *  workspace's registry: nothing on those rows becomes a column on a record, they
+ *  say which record something belongs to and what it was. */
+const FIXED_SHAPE: Partial<Record<ImportKind, RegistryObject>> = {
+  activities: ACTIVITY_IMPORT,
+  properties: PROPERTY_IMPORT,
+  associations: ASSOCIATION_IMPORT,
+  lists: LIST_IMPORT,
+  submissions: SUBMISSION_IMPORT,
+}
+
 const objectFor = async (
   ctx: WorkspaceContext,
   kind: ImportKind,
   objectKey: string,
 ): Promise<RegistryObject> =>
-  kind === 'activities' ? ACTIVITY_IMPORT : objectOrThrow(await getRegistry(ctx), objectKey)
+  FIXED_SHAPE[kind] ?? objectOrThrow(await getRegistry(ctx), objectKey)
+
+const SHAPE_OF: Partial<Record<ImportKind, string>> = {
+  properties: 'property',
+  associations: 'association',
+  lists: 'list',
+  submissions: 'submission',
+}
 
 /** The header preset a file gets opened with. Named sources win; a file nobody
  *  labelled is still recognised when it carries HubSpot's own columns. */
@@ -278,6 +348,11 @@ const presetFor = (
   source: string | null,
   headers: string[],
 ): Record<string, string | null> => {
+  // The four B9 shapes are recognised by the kind the person picked, not by the
+  // file: a two-column list export carries none of HubSpot's tells, and refusing
+  // to preset it because of that would be a guess in the wrong direction.
+  const shape = SHAPE_OF[kind]
+  if (shape) return hubspotShapePreset(shape, headers)
   if (source !== 'hubspot' && !looksLikeHubspot(headers)) return {}
   if (kind === 'activities') return hubspotActivityPreset(headers)
   return hubspotPreset(objectKey as ObjectKey, headers)
@@ -351,7 +426,7 @@ const PREVIEW_ROWS = 500
  *  the import for a number the person is about to confirm anyway. */
 export const dryRun = async (
   ctx: WorkspaceContext,
-  input: { objectKey: string; mapping: Mapping; rows: ImportRow[]; kind?: ImportKind },
+  input: { objectKey: string; mapping: Mapping; rows: ImportRow[]; kind?: ImportKind; source?: string | null },
 ): Promise<DryRun> => {
   const kind = input.kind ?? 'records'
   const object = await objectFor(ctx, kind, input.objectKey)
@@ -368,6 +443,8 @@ export const dryRun = async (
   const checked = input.rows.slice(0, PREVIEW_ROWS)
   const resolve = relationResolver(ctx, { create: false })
   const findRecord = recordResolver(ctx)
+  const writer = SHAPE_WRITER[kind]
+  const deps: ShapeDeps = { ctx, source: input.source ?? null, dry: true, cache: new Map() }
   for (const [index, row] of checked.entries()) {
     const planned = await planRow(object, input.mapping, row, resolve, kind)
     if (planned.error) {
@@ -381,6 +458,26 @@ export const dryRun = async (
       result.willSkip += 1
       continue
     }
+    // The four B9 shapes resolve exactly as the run will and write nothing, so the
+    // preview cannot promise one thing and the run do another.
+    if (writer) {
+      const outcome = await writer(deps, planned.values)
+      if (typeof outcome === 'object') {
+        result.willError += 1
+        if (result.samples.error.length < SAMPLE_SIZE) {
+          result.samples.error.push({ row: index + 2, reason: outcome.error, values: row })
+        }
+      } else if (outcome === 'skipped') {
+        result.willSkip += 1
+      } else {
+        if (outcome === 'updated') result.willUpdate += 1
+        else result.willCreate += 1
+        const bucket = outcome === 'updated' ? result.samples.update : result.samples.create
+        if (bucket.length < SAMPLE_SIZE) bucket.push(row)
+      }
+      continue
+    }
+
     // An activity is only ever created, and only when the record it names exists.
     // A row about somebody who is not in the CRM is reported, not invented.
     if (kind === 'activities') {
@@ -558,6 +655,338 @@ const writeImportedActivity = async (
   })
 }
 
+/* -- B9: what the four shape files do with one planned row ----------------- */
+
+/** What happened to one row. The same four answers the records path already
+ *  reports, so the counters on `import_run` need no new column. */
+type RowOutcome = 'created' | 'updated' | 'skipped' | { error: string }
+
+/** Everything a shape writer needs, threaded once per chunk rather than rebuilt
+ *  per row: the lookups are memoised, which is the difference between a file of
+ *  forty thousand rows about three hundred things costing three hundred queries
+ *  and costing forty thousand. */
+type ShapeDeps = {
+  ctx: WorkspaceContext
+  source: string | null
+  /** The preview resolves exactly as the run does and writes nothing, so it
+   *  cannot promise one thing and the run do another. */
+  dry: boolean
+  cache: Map<string, string | null>
+}
+
+const textOf = (values: Record<string, unknown>, key: string): string => {
+  const value = values[key]
+  return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim()
+}
+
+/** One memoised lookup. `make` runs only when nothing matched and the run is real,
+ *  so a preview never creates the thing it is previewing. */
+const lookupOnce = async (
+  deps: ShapeDeps,
+  bucket: string,
+  needle: string,
+  find: SQL,
+  make?: () => Promise<string>,
+): Promise<string | null> => {
+  const cacheKey = `${bucket} ${needle.toLowerCase()}`
+  const remembered = deps.cache.get(cacheKey)
+  if (remembered !== undefined) return remembered
+
+  const [row] = await withWorkspace(deps.ctx, (tx) => tx.execute<{ id: string }>(find))
+  let id = row?.id ?? null
+  if (id === null && make && !deps.dry) id = await make()
+  // A dry run remembers nothing it did not find, because the real run will create
+  // it and a cached miss would then be handed back after it exists.
+  if (id !== null || !make) deps.cache.set(cacheKey, id)
+  return id
+}
+
+const STARTS_WITH_LETTER = /^[a-z]/
+
+/** A HubSpot property name as a field key, for when the internal-name column was
+ *  not mapped. Lowercase and underscores, prefixed when it would otherwise start
+ *  with a digit, because the key rule requires a letter first. */
+const keyFromLabel = (label: string): string => {
+  const base = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 59)
+  if (!base) return ''
+  return STARTS_WITH_LETTER.test(base) ? base : `p_${base}`.slice(0, 59)
+}
+
+const splitOptions = (raw: string): string[] =>
+  raw
+    .split(/[;\n|]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 500)
+
+const IMPORT_OBJECTS = ['contact', 'company', 'deal']
+
+/** One property definition. This is the file that has to land before any record
+ *  file does: three hundred and seventy-two columns cannot be imported into fields
+ *  that do not exist. */
+const writeProperty = async (deps: ShapeDeps, values: Record<string, unknown>): Promise<RowOutcome> => {
+  const objectKey = textOf(values, 'object_key').toLowerCase() || 'contact'
+  if (!IMPORT_OBJECTS.includes(objectKey)) {
+    return { error: `"${objectKey}" is not an object here. Applies to has to be contact, company or deal.` }
+  }
+  const label = textOf(values, 'label')
+  if (!label) return { error: 'A property with no name cannot be created.' }
+  const key = (textOf(values, 'key') || keyFromLabel(label)).toLowerCase()
+  if (!key) return { error: `"${label}" has no usable internal name, and none could be derived from it.` }
+
+  const type = hubspotFieldType(textOf(values, 'type'), textOf(values, 'field_type'))
+  const options = splitOptions(textOf(values, 'options'))
+  const helpText = textOf(values, 'help_text') || null
+  const groupName = textOf(values, 'group_name') || null
+
+  const [existing] = await withWorkspace(deps.ctx, (tx) =>
+    tx.execute<{ id: string; deleted_at: Date | null; is_custom: boolean }>(sql`
+      select f.id, f.deleted_at, f.is_custom
+        from field_def f join object_def o on o.id = f.object_id
+       where o.key = ${objectKey} and f.key = ${key}
+       limit 1`),
+  )
+
+  if (existing?.deleted_at) {
+    return {
+      error: `${objectKey} had a field called "${key}" that was deleted but not purged. Purge it first, or map this row to another name.`,
+    }
+  }
+  if (existing) {
+    // A field Rawr ships is not the import's to relabel. "Email" meaning the
+    // contact's address is load-bearing in a dozen places, and a portal calling
+    // it something else does not change what it is.
+    if (!existing.is_custom) return 'skipped'
+    if (deps.dry) return 'updated'
+    await updateField(deps.ctx, {
+      id: existing.id,
+      label,
+      ...(options.length > 0 ? { options } : {}),
+      helpText,
+      groupName,
+    })
+    return 'updated'
+  }
+
+  if (deps.dry) return 'created'
+  try {
+    await createField(deps.ctx, {
+      objectKey,
+      key,
+      label,
+      type,
+      options,
+      helpText,
+      groupName,
+      source: deps.source ?? 'import',
+    })
+  } catch (cause) {
+    return { error: cause instanceof Error ? cause.message : String(cause) }
+  }
+  return 'created'
+}
+
+/** A deal's people and companies. A record export carries a contact's primary
+ *  company and nothing else, so without this file every imported deal arrives
+ *  with nobody on it. */
+const writeAssociation = async (deps: ShapeDeps, values: Record<string, unknown>): Promise<RowOutcome> => {
+  const dealName = textOf(values, 'deal_name')
+  if (!dealName) return { error: 'No deal named, so there is nothing to associate.' }
+  const dealId = await lookupOnce(
+    deps,
+    'deal',
+    dealName,
+    sql`select id from deal where deleted_at is null and lower(name) = lower(${dealName})
+         order by created_at limit 1`,
+  )
+  if (!dealId) return { error: `No deal called "${dealName}" is here yet. Import the deals first.` }
+
+  const email = textOf(values, 'contact_email').toLowerCase()
+  const domain = textOf(values, 'company_domain').toLowerCase()
+  const label = textOf(values, 'label') || null
+
+  const targets: { entityType: 'contact' | 'company'; entityId: string }[] = []
+  if (email) {
+    const contactId = await lookupOnce(
+      deps,
+      'contact',
+      email,
+      sql`select id from contact where deleted_at is null and lower(email) = ${email} limit 1`,
+    )
+    if (!contactId) {
+      return { error: `Nobody here has the address ${email}, so there is nothing to put on ${dealName}.` }
+    }
+    targets.push({ entityType: 'contact', entityId: contactId })
+  }
+  if (domain) {
+    const companyId = await lookupOnce(
+      deps,
+      'company',
+      domain,
+      sql`select id from company where deleted_at is null and domain = ${domain} limit 1`,
+    )
+    if (companyId) targets.push({ entityType: 'company', entityId: companyId })
+  }
+  if (targets.length === 0) return 'skipped'
+  if (deps.dry) return 'created'
+
+  // Written straight rather than through `associate`, which records a timeline
+  // entry per link. Eighty-eight thousand of those is a timeline nobody can read
+  // and an import nobody can finish.
+  let written = 0
+  for (const target of targets) {
+    const [from, to] = orderedPair({ entityType: 'deal', entityId: dealId }, target)
+    const inserted = await withWorkspace(deps.ctx, (tx) =>
+      tx.execute<{ to_id: string }>(sql`
+        insert into association (workspace_id, from_type, from_id, to_type, to_id, label)
+        values (${deps.ctx.workspaceId}, ${from.entityType}, ${from.entityId},
+                ${to.entityType}, ${to.entityId}, ${label})
+        on conflict (workspace_id, from_type, from_id, to_type, to_id) do nothing
+        returning to_id`),
+    )
+    written += inserted.length
+  }
+  return written > 0 ? 'created' : 'skipped'
+}
+
+/** One person in one list. The segment is created on first sight and marked
+ *  static, because HubSpot's filter language does not translate into Rawr's and a
+ *  segment that silently stops matching is worse than one that says it is a
+ *  snapshot of the day it arrived. */
+const writeListMember = async (deps: ShapeDeps, values: Record<string, unknown>): Promise<RowOutcome> => {
+  const listName = textOf(values, 'list_name')
+  if (!listName) return { error: 'No list named, so there is nowhere to put this person.' }
+  const email = textOf(values, 'contact_email').toLowerCase()
+  if (!email) return { error: 'No address, so there is nobody to add.' }
+
+  const contactId = await lookupOnce(
+    deps,
+    'contact',
+    email,
+    sql`select id from contact where deleted_at is null and lower(email) = ${email} limit 1`,
+  )
+  if (!contactId) return { error: `Nobody here has the address ${email}. Import the contacts first.` }
+
+  const segmentId = await lookupOnce(
+    deps,
+    'segment',
+    listName,
+    sql`select id from segment where lower(name) = lower(${listName}) limit 1`,
+    async () => {
+      const [row] = await withWorkspace(deps.ctx, (tx) =>
+        tx.execute<{ id: string }>(sql`
+          insert into segment (workspace_id, name, description, object_id, query, is_static)
+          select ${deps.ctx.workspaceId}, ${listName},
+                 ${'Imported list. Its members are the ones the file named, not a query.'},
+                 o.id, '[]'::jsonb, true
+            from object_def o where o.key = 'contact'
+          returning id`),
+      )
+      if (!row) throw new Error(`The list "${listName}" could not be created.`)
+      return row.id
+    },
+  )
+  if (deps.dry) return 'created'
+  if (!segmentId) return { error: `The list "${listName}" could not be created.` }
+
+  const written = await withWorkspace(deps.ctx, (tx) =>
+    tx.execute<{ id: string }>(sql`
+      insert into segment_membership (workspace_id, segment_id, entity_id)
+      select ${deps.ctx.workspaceId}, ${segmentId}, ${contactId}
+       where not exists (
+         select 1 from segment_membership m
+          where m.segment_id = ${segmentId} and m.entity_id = ${contactId} and m.exited_at is null)
+      returning id`),
+  )
+  return written.length > 0 ? 'created' : 'skipped'
+}
+
+/** Form submission history. The form is created as an inactive shell when it is
+ *  not here, because a HubSpot form does not export as a definition: what crosses
+ *  is the record of who filled it and when, and a shell that says so is more use
+ *  than dropping every row for a form nobody has rebuilt yet. */
+const writeSubmission = async (deps: ShapeDeps, values: Record<string, unknown>): Promise<RowOutcome> => {
+  const formName = textOf(values, 'form_name')
+  if (!formName) return { error: 'No form named, so this submission has nowhere to belong.' }
+
+  const formId = await lookupOnce(
+    deps,
+    'form',
+    formName,
+    sql`select id from form where lower(name) = lower(${formName}) limit 1`,
+    async () => {
+      const stem = keyFromLabel(formName).replace(/_/g, '-') || 'imported'
+      const [row] = await withWorkspace(deps.ctx, (tx) =>
+        tx.execute<{ id: string }>(sql`
+          insert into form (workspace_id, name, slug, schema, settings, is_active)
+          values (${deps.ctx.workspaceId}, ${formName},
+                  ${stem} || '-' || substr(md5(random()::text), 1, 4),
+                  '[]'::jsonb,
+                  ${JSON.stringify({ importedFrom: deps.source ?? 'import' })}::jsonb, false)
+          returning id`),
+      )
+      if (!row) throw new Error(`The form "${formName}" could not be created.`)
+      return row.id
+    },
+  )
+  if (deps.dry) return 'created'
+  if (!formId) return { error: `The form "${formName}" could not be created.` }
+
+  const email = textOf(values, 'contact_email').toLowerCase()
+  const contactId = email
+    ? await lookupOnce(
+        deps,
+        'contact',
+        email,
+        sql`select id from contact where deleted_at is null and lower(email) = ${email} limit 1`,
+      )
+    : null
+
+  const at = values.submitted_at instanceof Date ? values.submitted_at : new Date()
+  const body = textOf(values, 'body')
+  const pageUrl = textOf(values, 'page_url')
+  // The same partial unique index the Webflow webhook writes through, so a
+  // redelivery and a second run of the same export are the same no-op.
+  const key = importKeyOf(deps.source, {
+    external_id: values.external_id,
+    contact_email: email,
+    occurred_at: at,
+    subject: formName,
+    body,
+  })
+
+  const written = await withWorkspace(deps.ctx, (tx) =>
+    tx.execute<{ id: string }>(sql`
+      insert into form_submission
+             (workspace_id, form_id, values, attribution, contact_id, at, idempotency_key, spam_state)
+      values (${deps.ctx.workspaceId}, ${formId},
+              ${JSON.stringify(body ? { imported: body } : {})}::jsonb,
+              ${JSON.stringify(pageUrl ? { landing_page: pageUrl } : {})}::jsonb,
+              ${contactId}, ${at.toISOString()}::timestamptz, ${key}, 'clean')
+      on conflict (workspace_id, idempotency_key) where idempotency_key is not null do nothing
+      returning id`),
+  )
+  return written.length > 0 ? 'created' : 'skipped'
+}
+
+/** One writer per shape. Six kinds branching inside three functions is a chain
+ *  nobody can read; a table with an entry each is the same behaviour, scannable.
+ *  `records` and `activities` are absent on purpose: the first is the only kind
+ *  that goes through the registry, and the second predates this and already has
+ *  its own writer. */
+const SHAPE_WRITER: Partial<
+  Record<ImportKind, (deps: ShapeDeps, values: Record<string, unknown>) => Promise<RowOutcome>>
+> = {
+  properties: writeProperty,
+  associations: writeAssociation,
+  lists: writeListMember,
+  submissions: writeSubmission,
+}
+
 const CHUNK = 200
 
 /** One chunk of an import. Called repeatedly by the worker, so an interrupted run
@@ -581,6 +1010,7 @@ export const runImportChunk = async (
         totalRows: importRun.totalRows,
         state: importRun.state,
         errors: importRun.errors,
+        unmatchedOwners: importRun.unmatchedOwners,
       })
       .from(importRun)
       .where(eq(importRun.id, id))
@@ -603,6 +1033,8 @@ export const runImportChunk = async (
   const errors: RowError[] = []
   const resolve = relationResolver(ctx, { create: true })
   const findRecord = recordResolver(ctx)
+  const writer = SHAPE_WRITER[kind]
+  const deps: ShapeDeps = { ctx, source: run.source, dry: false, cache: new Map() }
 
   for (const [offset, row] of slice.entries()) {
     const rowNumber = run.processedRows + offset + 2
@@ -617,6 +1049,15 @@ export const runImportChunk = async (
     }
     for (const warning of planned.warnings) {
       errors.push({ row: rowNumber, reason: warning, values: row })
+    }
+
+    if (writer) {
+      const outcome = await writer(deps, planned.values)
+      if (typeof outcome === 'object') errors.push({ row: rowNumber, reason: outcome.error, values: row })
+      else if (outcome === 'created') created += 1
+      else if (outcome === 'updated') updated += 1
+      else skipped += 1
+      continue
     }
 
     if (kind === 'activities') {
@@ -659,6 +1100,11 @@ export const runImportChunk = async (
     }
   }
 
+  // Once per run, not once per row: a portal with four departed owners produced
+  // four lines, whatever the file's length.
+  const previousUnmatched = (run.unmatchedOwners as string[] | null) ?? []
+  const unmatchedOwners = [...new Set([...previousUnmatched, ...resolve.unmatchedOwners])].slice(0, 200)
+
   const processed = run.processedRows + slice.length
   const done = processed >= rows.length
   const previousErrors = (run.errors as RowError[] | null) ?? []
@@ -675,6 +1121,7 @@ export const runImportChunk = async (
         // Capped: a file where every row fails must not put a 90,000-entry array
         // in one column. The count stays exact.
         errors: [...previousErrors, ...errors].slice(0, 1000),
+        unmatchedOwners,
         state: done ? 'done' : 'running',
         finishedAt: done ? new Date() : null,
         // Rows are only useful while the run can still resume.
@@ -709,6 +1156,7 @@ export const readImportRun = async (
         skipped: importRun.skippedCount,
         errored: importRun.erroredCount,
         errors: importRun.errors,
+        unmatchedOwners: importRun.unmatchedOwners,
         lastError: importRun.lastError,
         createdAt: importRun.createdAt,
         finishedAt: importRun.finishedAt,
@@ -722,6 +1170,7 @@ export const readImportRun = async (
     ...row,
     headers: (row.headers as string[] | null) ?? [],
     errors: (row.errors as RowError[] | null) ?? [],
+    unmatchedOwners: (row.unmatchedOwners as string[] | null) ?? [],
   } as ImportSummary
 }
 
@@ -749,5 +1198,5 @@ export const listImportRuns = async (ctx: WorkspaceContext): Promise<ImportSumma
       .orderBy(desc(importRun.createdAt))
       .limit(50),
   )
-  return rows.map((row) => ({ ...row, headers: [], errors: [] })) as ImportSummary[]
+  return rows.map((row) => ({ ...row, headers: [], errors: [], unmatchedOwners: [] })) as ImportSummary[]
 }

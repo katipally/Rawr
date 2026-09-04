@@ -3,12 +3,10 @@ import {
   getRecord,
   ingestMarketingEvent,
   listSubscriptionTypes,
-  mailableContacts,
   once,
   readCredentials,
-  readSegmentMembers,
+  readSegmentContactPage,
   recordHealth,
-  setExternalId,
   type MarketingEvent,
   type WorkspaceContext,
 } from '@rawr/db'
@@ -73,12 +71,23 @@ export const testBrevo = async (ctx: WorkspaceContext): Promise<ConnectionTest> 
 
 export type PushResult = { pushed: number; skipped: number; listId: number | null }
 
+/** How many people go into one import call. Brevo caps the body at 10 MB and
+ *  five hundred contacts is around eighty kilobytes of it, so the limit that
+ *  binds is the page read, not the request. */
+const PUSH_PAGE = 500
+
 /** Pushes a Rawr segment into a Brevo list.
  *
- *  Two properties this must have and does: it never includes somebody who has opted
- *  out, and running it twice pushes each contact once. The idempotency key is
- *  derived from the segment and the contact set, so a retry of the same push is a
- *  no-op rather than a second upsert. F6 §1 and §2. */
+ *  Three properties this must have and does: nobody who has opted out is ever
+ *  included, running it twice pushes each contact once, and it pushes the whole
+ *  segment. The third is new. This used to read the first two hundred members and
+ *  report that number as though it were the segment, so a newsletter written for
+ *  eighteen hundred people reached two hundred of them and said it had worked.
+ *
+ *  One import call per page rather than one create call per contact. Eighteen
+ *  hundred people is four requests instead of eighteen hundred, which is the
+ *  difference between a push that finishes inside the request and one that times
+ *  out halfway through a list. F6 §1 and §2. */
 export const pushSegmentToBrevo = async (
   ctx: WorkspaceContext,
   input: { segmentId: string; listId: number },
@@ -89,54 +98,73 @@ export const pushSegmentToBrevo = async (
     throw cause
   })
 
-  const members = await readSegmentMembers(ctx, input.segmentId, 200)
-  const mailable = await mailableContacts(
-    ctx,
-    members.map((member) => member.id),
-  )
-  const skipped = members.length - mailable.length
+  let cursor: string | null = null
+  let pushed = 0
+  let skipped = 0
 
-  if (mailable.length === 0) {
-    return { pushed: 0, skipped, listId: input.listId }
-  }
+  do {
+    const page = await readSegmentContactPage(ctx, input.segmentId, { after: cursor, limit: PUSH_PAGE })
+    cursor = page.nextCursor
 
-  // Derived from what is being sent, never random: a retry produces the same key
-  // and the second attempt returns the first one's answer.
-  const key = `brevo:list:${input.listId}:${createHash('sha256')
-    .update(mailable.map((row) => row.id).sort().join(','))
-    .digest('hex')
-    .slice(0, 32)}`
+    // Narrowed rather than filtered, so the address below is a string and not a
+    // string that is probably there.
+    const mailable = page.rows.flatMap((row) =>
+      row.mailable && row.email ? [{ ...row, email: row.email }] : [],
+    )
+    skipped += page.rows.length - mailable.length
+    if (mailable.length === 0) continue
 
-  await once(ctx, { key, operation: 'brevo.push_list', integrationId: id }, async () => {
-    for (const contact of mailable) {
-      if (devIntegrationsEnabled) {
-        await setExternalId(ctx, contact.id, 'brevo', `dev-${contact.id.slice(0, 8)}`)
-        continue
-      }
-      const created = await attempt(
-        { ctx, kind: 'brevo', jobName: 'brevo.upsert_contact', payload: { contactId: contact.id } },
+    // Derived from what is being sent, never random: a retry produces the same key
+    // and the second attempt returns the first one's answer. Per page now, because
+    // the whole set is no longer in hand at once. The rows arrive ordered by id,
+    // so the same page always hashes the same way.
+    const key = `brevo:list:${input.listId}:${createHash('sha256')
+      .update(mailable.map((row) => row.id).join(','))
+      .digest('hex')
+      .slice(0, 32)}`
+
+    await once(ctx, { key, operation: 'brevo.push_list', integrationId: id }, async () => {
+      if (devIntegrationsEnabled) return { pushed: mailable.length, processId: null }
+      const accepted = await attempt(
+        {
+          ctx,
+          kind: 'brevo',
+          jobName: 'brevo.import_contacts',
+          payload: { segmentId: input.segmentId, listId: input.listId, count: mailable.length },
+        },
         () =>
-          json<{ id?: number }>({
-            url: `${API}/contacts`,
+          json<{ processId?: number }>({
+            url: `${API}/contacts/import`,
             method: 'POST',
             headers: headers(secret!),
             body: {
-              email: contact.email,
-              attributes: { FIRSTNAME: contact.firstName ?? '', LASTNAME: contact.lastName ?? '' },
               listIds: [input.listId],
-              // The upsert. Without it a second push is a 400 per existing
+              // The upsert. Without it a second push is an error per existing
               // contact rather than a no-op.
-              updateEnabled: true,
+              updateExistingContacts: true,
+              // A blank first name here means "we do not know it", never "delete
+              // the one Brevo has". This is Brevo's default and is passed anyway,
+              // because the failure it prevents is silent and permanent.
+              emptyContactsAttributes: false,
+              jsonBody: mailable.map((row) => ({
+                email: row.email,
+                attributes: { FIRSTNAME: row.firstName ?? '', LASTNAME: row.lastName ?? '' },
+              })),
             },
+            // The import is accepted, not performed, inside this call; Brevo
+            // answers 202 with a process id. Still worth more than the default
+            // fifteen seconds, because the body carries five hundred people.
+            timeoutMs: 60_000,
           }),
       )
-      if (created?.id) await setExternalId(ctx, contact.id, 'brevo', String(created.id))
-    }
-    return { pushed: mailable.length }
-  })
+      return { pushed: mailable.length, processId: accepted?.processId ?? null }
+    })
+
+    pushed += mailable.length
+  } while (cursor)
 
   await recordHealth(ctx, 'brevo', { ok: true })
-  return { pushed: mailable.length, skipped, listId: input.listId ?? config.listId ?? null }
+  return { pushed, skipped, listId: input.listId ?? config.listId ?? null }
 }
 
 /** Brevo's webhook shape, narrowed to the events F6 §2 names. Anything else is

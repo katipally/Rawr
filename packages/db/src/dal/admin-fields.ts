@@ -30,6 +30,10 @@ export type AdminField = {
   helpText: string | null
   position: number
   trackChanges: boolean
+  /** What this sits under on the settings screen. Null is ungrouped. */
+  groupName: string | null
+  /** Which import wrote the definition, or null for one added by hand. */
+  source: string | null
   /** Set once a hot index has been asked for, so the UI can show its state. */
   indexState: string | null
   /** How many records currently hold a value, so a delete can say what is at stake. */
@@ -55,6 +59,8 @@ export const listFields = async (ctx: WorkspaceContext, objectKey?: string): Pro
         helpText: fieldDef.helpText,
         position: fieldDef.position,
         trackChanges: fieldDef.trackChanges,
+        groupName: fieldDef.groupName,
+        source: fieldDef.source,
         indexState: fieldIndex.state,
       })
       .from(fieldDef)
@@ -77,6 +83,8 @@ export const listFields = async (ctx: WorkspaceContext, objectKey?: string): Pro
       storage: row.storage as 'column' | 'jsonb',
       isRequired: row.isRequired,
       isCustom: row.isCustom,
+      groupName: row.groupName,
+      source: row.source,
       isSystem: SYSTEM_FIELD_KEYS.has(row.key),
       isHot: row.isHot,
       options: Array.isArray(row.options) ? (row.options as string[]) : [],
@@ -119,6 +127,10 @@ export type CreateFieldInput = {
   helpText?: string | null
   isRequired?: boolean
   trackChanges?: boolean
+  /** What this sits under on the settings screen. Null is ungrouped. */
+  groupName?: string | null
+  /** Which import wrote it, or null for a field somebody added here. */
+  source?: string | null
 }
 
 /** A new field is always jsonb-stored and always custom. The key is generated once
@@ -171,6 +183,8 @@ export const createField = async (ctx: WorkspaceContext, input: CreateFieldInput
         trackChanges: input.trackChanges ?? false,
         options: validateOptions(input.type, input.options ?? []),
         helpText: input.helpText?.trim() || null,
+        groupName: input.groupName?.trim() || null,
+        source: input.source ?? null,
         position: Number(next),
       })
       .returning({ id: fieldDef.id })
@@ -194,6 +208,8 @@ export const createField = async (ctx: WorkspaceContext, input: CreateFieldInput
         helpText: input.helpText?.trim() || null,
         position: Number(next),
         trackChanges: input.trackChanges ?? false,
+        groupName: input.groupName?.trim() || null,
+        source: input.source ?? null,
         indexState: null,
         filledCount: null,
       },
@@ -214,6 +230,7 @@ export type UpdateFieldInput = {
   helpText?: string | null
   isRequired?: boolean
   trackChanges?: boolean
+  groupName?: string | null
 }
 
 /** Label, help text, choices and the two flags. The key and the type are not here
@@ -230,6 +247,7 @@ export const updateField = async (ctx: WorkspaceContext, input: UpdateFieldInput
         helpText: fieldDef.helpText,
         isRequired: fieldDef.isRequired,
         trackChanges: fieldDef.trackChanges,
+        groupName: fieldDef.groupName,
       })
       .from(fieldDef)
       .where(and(eq(fieldDef.id, input.id), isNull(fieldDef.deletedAt)))
@@ -250,6 +268,7 @@ export const updateField = async (ctx: WorkspaceContext, input: UpdateFieldInput
         ...(input.helpText !== undefined ? { helpText: input.helpText?.trim() || null } : {}),
         ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
         ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
+        ...(input.groupName !== undefined ? { groupName: input.groupName?.trim() || null } : {}),
       })
       .where(eq(fieldDef.id, input.id))
 
@@ -436,6 +455,8 @@ export const listDeletedFields = async (ctx: WorkspaceContext): Promise<AdminFie
       helpText: null,
       position: row.position,
       trackChanges: false,
+      groupName: null,
+      source: null,
       indexState: null,
       filledCount: null,
     }))

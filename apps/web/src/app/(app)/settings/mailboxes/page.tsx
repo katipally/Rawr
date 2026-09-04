@@ -28,10 +28,11 @@ const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?:
       <div className="max-w-2xl">
         <h2 className="text-base font-medium">Mailboxes</h2>
         <p className="text-secondary">
-          Gmail, read only. Rawr reads threads so they appear on the right contacts, companies
-          and deals, and keeps them here, so a thread stays readable after the mailbox that brought
-          it in is disconnected. Everything internal, personal, or on an exclusion list is refused
-          before it is stored rather than stored and hidden.
+          Gmail. Rawr reads threads so they appear on the right contacts, companies and deals,
+          and keeps them here, so a thread stays readable after the mailbox that brought it in is
+          disconnected. A mailbox that granted sending is also what sequences and one-off replies
+          go out through, so the conversation stays in one place. Everything internal, personal,
+          or on an exclusion list is refused before it is stored rather than stored and hidden.
         </p>
       </div>
 

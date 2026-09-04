@@ -15,6 +15,7 @@ import {
   dissociate,
   dryRun,
   getRecord,
+  IMPORT_KINDS,
   getRegistry,
   isActivityType,
   listRecords,
@@ -494,7 +495,8 @@ export const crmRouter = router({
       .input(
         z.object({
           object: objectKey,
-          kind: z.enum(['records', 'activities']).default('records'),
+          kind: z.enum(IMPORT_KINDS).default('records'),
+          source: z.string().max(60).nullable().default(null),
           mapping: z.record(z.string(), z.string().nullable()),
           rows: z.array(z.record(z.string(), z.string())).max(5000),
         }),
@@ -504,6 +506,7 @@ export const crmRouter = router({
           dryRun(ctx.workspace, {
             objectKey: input.object,
             kind: input.kind,
+            source: input.source,
             mapping: input.mapping,
             rows: input.rows,
           }),

@@ -64,15 +64,15 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     kind: 'apollo',
     name: 'Apollo',
     purpose:
-      'Sequences, email tracking, and person and company enrichment. A contact is enrolled in a sequence from its record; Rawr sends no sequence email and builds no pixel. Steps, replies, opens and clicks are Apollo’s own events, read back onto the timeline.',
+      'Person and company enrichment, and the events from sequences that are run in Apollo itself. Rawr runs its own sequences from a connected Gmail now, so nothing is enrolled through Apollo from here; what still comes back is enrichment, and the opens, clicks and replies of anything Apollo is sending, read onto the timeline.',
     failureMode:
       'Apollo down means the timeline is missing recent tracking events, and a degraded health state says so on the record rather than implying nobody opened anything.',
     secretLabel: 'API key',
     configFields: [],
-    rows: ['Email Sequences', 'Email Tracking', 'Company & Contact Enrichment'],
+    rows: ['Email Tracking', 'Company & Contact Enrichment'],
     setup: [
       'In Apollo, open Settings, then Integrations, then API. This needs API access on the plan, not only a seat (open item 7).',
-      'Create a key with people, organisations and sequences scopes and paste it below.',
+      'Create a key with people and organisations scopes, and sequences too if Apollo is still sending anything of its own. Paste it below.',
       'Paste the webhook URL below into Apollo under Settings, Integrations, Webhooks so opens, clicks and replies flow back.',
     ],
   },

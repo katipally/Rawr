@@ -195,8 +195,10 @@ const nameOf = async (tx: Tx, ref: EntityRef): Promise<string> => {
 }
 
 /** Stored once, in a stable direction, so the same pair cannot exist twice under
- *  two orderings. */
-const ordered = (a: EntityRef, b: EntityRef): [EntityRef, EntityRef] =>
+ *  two orderings. Exported because the importer writes association rows straight
+ *  rather than through `associate`, and a second definition of this is a second
+ *  ordering. */
+export const orderedPair = (a: EntityRef, b: EntityRef): [EntityRef, EntityRef] =>
   a.entityType < b.entityType || (a.entityType === b.entityType && a.entityId < b.entityId) ? [a, b] : [b, a]
 
 export const associate = async (
@@ -209,7 +211,7 @@ export const associate = async (
     if (a.entityType === b.entityType && a.entityId === b.entityId) {
       throw new Error('A record cannot be associated with itself.')
     }
-    const [from, to] = ordered(a, b)
+    const [from, to] = orderedPair(a, b)
     await tx.execute(sql`
       insert into association (workspace_id, from_type, from_id, to_type, to_id, label)
       values (${ctx.workspaceId}, ${from.entityType}, ${from.entityId}, ${to.entityType}, ${to.entityId}, ${label ?? null})
@@ -231,7 +233,7 @@ export const associate = async (
 
 export const dissociate = async (ctx: WorkspaceContext, a: EntityRef, b: EntityRef): Promise<void> =>
   mutate(ctx, 'association', async (tx) => {
-    const [from, to] = ordered(a, b)
+    const [from, to] = orderedPair(a, b)
     const removed = await tx.execute(sql`
       delete from association
        where from_type = ${from.entityType} and from_id = ${from.entityId}

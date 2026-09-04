@@ -1,8 +1,11 @@
-import { createImportRun, isObjectKey } from '@rawr/db'
+import { createImportRun, isObjectKey, type ImportKind } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { importsPath } from '~/lib/links.ts'
 import { readSpreadsheet, SpreadsheetError } from '~/server/spreadsheet.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+
+/** Everything the picker offers that is not one of the three objects. */
+const SHAPE_KINDS = new Set(['activities', 'properties', 'associations', 'lists', 'submissions'])
 
 /** The upload is a form post rather than an RPC call: a 40MB body does not belong
  *  in a JSON envelope, and the browser's own progress is better than one we draw. */
@@ -23,11 +26,14 @@ export const POST = async (
 
   const form = await request.formData()
   const file = form.get('file')
-  // "activities" is a kind rather than an object: notes and logged emails land on
-  // the timeline of the contact they name, not in columns on it.
+  // Five of the six choices are kinds rather than objects. Notes land on the
+  // timeline of the contact they name; properties, associations, lists and
+  // submissions carry the shape around the records rather than columns on one.
+  // Each still records "contact" as its object, because that is what its rows are
+  // matched against.
   const what = String(form.get('object') ?? '')
-  const kind = what === 'activities' ? ('activities' as const) : ('records' as const)
-  const objectKey = kind === 'activities' ? 'contact' : what
+  const kind = SHAPE_KINDS.has(what) ? (what as ImportKind) : ('records' as const)
+  const objectKey = kind === 'records' ? what : 'contact'
   const source = String(form.get('source') ?? '') || null
 
   if (!(file instanceof File) || file.size === 0) return back('Pick a file to import.')

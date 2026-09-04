@@ -54,6 +54,14 @@ export const fieldDef = pgTable(
     options: jsonb('options'),
     defaultValue: jsonb('default_value'),
     helpText: text('help_text'),
+    /** What the property sits under on the settings screen. HubSpot groups its
+     *  three hundred and seventy-two, and the group is the only thing that makes
+     *  that many navigable. Null means ungrouped, which is where hand-made fields
+     *  land until somebody says otherwise. */
+    groupName: text('group_name'),
+    /** Which import wrote this definition, so a property that arrived from a
+     *  portal reads differently from one somebody added here. Null for both. */
+    source: text('source'),
     position: integer('position').notNull().default(0),
     /** Has a dedicated expression index, created by a job and recorded in field_index. */
     isHot: boolean('is_hot').notNull().default(false),

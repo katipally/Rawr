@@ -28,8 +28,9 @@ const ImportPage = async ({
       <div>
         <h1 className="text-lg font-medium">Import</h1>
         <p className="text-secondary">
-          Records fill columns on a contact, company or deal. Notes and logged emails land on the
-          timeline of the record they name, matched on the address in the file.
+          Records fill columns on a contact, company or deal. Everything else carries the shape
+          around them: the properties records go into, the people on a deal, who is in which list,
+          and what a form was told.
         </p>
       </div>
 
@@ -52,6 +53,10 @@ const ImportPage = async ({
               <option value="company">Companies</option>
               <option value="deal">Deals</option>
               <option value="activities">Notes and logged emails</option>
+              <option value="properties">Property definitions</option>
+              <option value="associations">Deal contacts and companies</option>
+              <option value="lists">List memberships</option>
+              <option value="submissions">Form submissions</option>
             </Select>
           </Field>
 

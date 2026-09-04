@@ -665,8 +665,11 @@ try {
             state: i === 3 ? ('cancelled' as const) : ('confirmed' as const),
             cancelledAt: i === 3 ? dayAgo(2) : null,
             cancelReason: i === 3 ? 'Something came up.' : null,
-            cancelToken: `seed-cancel-${i}`,
-            rescheduleToken: `seed-reschedule-${i}`,
+            // Padded: bookingForToken refuses anything under twenty characters
+            // before it looks, because a real token is long and random, and a
+            // short seeded one made every manage link read as expired.
+            cancelToken: `seed-cancel-${i}`.padEnd(28, '0'),
+            rescheduleToken: `seed-reschedule-${i}`.padEnd(28, '0'),
             conferenceUrl: 'https://meet.google.com/seed-demo',
           }
         }),

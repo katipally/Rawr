@@ -38,6 +38,10 @@ export const importRun = pgTable(
     /** Rows are held here for the duration of the run so a resume needs no re-upload. */
     rows: jsonb('rows'),
     errors: jsonb('errors').notNull().default([]),
+    /** B9. Owner names in the file that match nobody here. Those rows land
+     *  unassigned rather than failing, so the migration is reconciled from this
+     *  list rather than from eighty-eight thousand identical errors. */
+    unmatchedOwners: jsonb('unmatched_owners').notNull().default([]),
     lastError: text('last_error'),
     createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),

@@ -45,7 +45,7 @@ export const NewsletterPanel = ({
     try {
       const outcome = await api.integrations.pushSegment.mutate({ segmentId, listId: Number(listId) })
       setResult(
-        `${outcome.pushed} pushed to list ${outcome.listId ?? listId}, ${outcome.skipped} left out because they had opted out.`,
+        `${outcome.pushed} pushed to list ${outcome.listId ?? listId}, ${outcome.skipped} left out: opted out, or no address on the record.`,
       )
       toast('success', 'Pushed to Brevo.')
     } catch (cause) {

@@ -202,6 +202,76 @@ export const mailableContacts = async (
   })
 }
 
+/** One page of a contact segment, for a list push that must not stop early.
+ *
+ *  `mailableContacts` above answers the same question for a set of ids the caller
+ *  already holds, which is fine for a record page and wrong for a segment: an
+ *  `in (...)` list of every member is one enormous statement, and reading the
+ *  members first caps the push at whatever that read caps at. This walks instead.
+ *
+ *  A member with no address or an opt-out is still returned, carrying
+ *  `mailable: false`, so the caller can say how many it left out without a second
+ *  count over the same rows. The cursor is the contact id rather than the join's
+ *  `entered_at`, because two people can enter a segment in the same millisecond
+ *  and a push that skips one of them is the bug this function exists to fix. */
+export type SegmentContact = {
+  id: string
+  email: string | null
+  firstName: string | null
+  lastName: string | null
+  mailable: boolean
+}
+
+export const readSegmentContactPage = async (
+  ctx: WorkspaceContext,
+  segmentId: string,
+  input: { after?: string | null; limit?: number } = {},
+): Promise<{ rows: SegmentContact[]; nextCursor: string | null }> => {
+  const limit = Math.min(Math.max(input.limit ?? 500, 1), 1000)
+  return withWorkspace(ctx, async (tx) => {
+    const [found] = await tx.execute<{ object_key: string }>(sql`
+      select o.key as object_key
+        from segment s join object_def o on o.id = s.object_id
+       where s.id = ${segmentId}`)
+    if (!found) throw new Error('That segment no longer exists.')
+    if (found.object_key !== 'contact') {
+      throw new Error('That segment is not a contact segment, so there is nobody in it to mail.')
+    }
+
+    const rows = await tx.execute<{
+      id: string
+      email: string | null
+      first_name: string | null
+      last_name: string | null
+      mailable: boolean
+    }>(sql`
+      select c.id, c.email, c.first_name, c.last_name,
+             (c.email is not null and not exists (
+                select 1 from subscription_state s
+                 where s.contact_id = c.id and s.state = 'unsubscribed')) as mailable
+        from segment_membership m
+        join contact c on c.id = m.entity_id
+       where m.segment_id = ${segmentId}
+         and m.exited_at is null
+         and c.deleted_at is null
+         ${input.after ? sql`and c.id > ${input.after}` : sql``}
+       order by c.id
+       limit ${limit + 1}`)
+
+    const page = rows.slice(0, limit)
+    return {
+      rows: page.map((row) => ({
+        id: String(row.id),
+        email: row.email,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        mailable: row.mailable === true,
+      })),
+      nextCursor: rows.length > limit && page.at(-1) ? String(page.at(-1)!.id) : null,
+    }
+  })
+}
+
 /** The provider's own id for this contact, so a sync is incremental rather than a
  *  full re-push and an opt-out reaches the right row at the other end. */
 export const setExternalId = async (

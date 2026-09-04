@@ -147,9 +147,17 @@ export const integrationStateEnum = pgEnum('rawr_integration_state', [
 
 export const taskStatusEnum = pgEnum('rawr_task_status', ['open', 'done'])
 
-/** Records go into columns on a record; activities go onto its timeline. A
- *  HubSpot portal exports both, and they are read completely differently. */
-export const importKindEnum = pgEnum('rawr_import_kind', ['records', 'activities'])
+/** What one file is. Records go into columns on a record and activities onto its
+ *  timeline; the other four carry the shape around the records rather than the
+ *  records themselves, and a portal exports every one of them separately. */
+export const importKindEnum = pgEnum('rawr_import_kind', [
+  'records',
+  'activities',
+  'properties',
+  'associations',
+  'lists',
+  'submissions',
+])
 
 export const importStateEnum = pgEnum('rawr_import_state', [
   'mapping',

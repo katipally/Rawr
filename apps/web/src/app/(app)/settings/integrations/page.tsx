@@ -28,7 +28,7 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
       <div className="max-w-2xl">
         <h2 className="text-base font-medium">Integrations</h2>
         <p className="text-secondary">
-          The four bought rows and the glue. Credentials are encrypted with a key held outside
+          Everything Rawr talks to that is not Rawr. Credentials are encrypted with a key held outside
           this database and are never shown again after saving. Every provider has a connection
           test that calls it for real and reports what it said.
         </p>

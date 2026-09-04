@@ -18,7 +18,13 @@ import {
 } from '../src/dal/integrations.ts'
 import { acceptSuggestion, applyEnrichment, markSource } from '../src/dal/enrichment.ts'
 import { listSuggestions, readFieldSources } from '../src/dal/integrations.ts'
-import { ingestMarketingEvent, mailableContacts, setExternalId } from '../src/dal/marketing-events.ts'
+import {
+  ingestMarketingEvent,
+  mailableContacts,
+  readSegmentContactPage,
+  setExternalId,
+} from '../src/dal/marketing-events.ts'
+import { evaluateSegment, listSegments, saveSegment } from '../src/dal/segments.ts'
 import {
   addBlocklistEntry,
   blockedPatterns,
@@ -35,8 +41,9 @@ import {
   internalDomainOf,
 } from '../src/dal/messages.ts'
 import { createRecord, getRecord } from '../src/dal/records.ts'
-import { createImportRun, runImportChunk, setImportMapping } from '../src/dal/imports.ts'
+import { createImportRun, readImportRun, runImportChunk, setImportMapping } from '../src/dal/imports.ts'
 import { readTimeline } from '../src/dal/activity.ts'
+import { listFields } from '../src/dal/admin-fields.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
 import { recordDeadLetter } from '../src/dal/jobs.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
@@ -315,6 +322,66 @@ try {
     return 'nobody is mailed after opting out, in either direction'
   })
 
+  let bulkSegmentId = ''
+
+  await check('a push walks past the old two-hundred-row ceiling', async () => {
+    // Two hundred and ten, because two hundred was the cap that silently truncated
+    // a push and the seed has nowhere near enough contacts to cross it on its own.
+    const marker = `bulkpush-${stamp}`
+    await db.execute(sql`
+      insert into contact (workspace_id, email, first_name, last_name)
+      select ${datasaur.id}, ${marker} || n::text || '@example.test', 'Bulk', n::text
+        from generate_series(1, 210) as n`)
+
+    const created = await saveSegment(admin, {
+      objectKey: 'contact',
+      name: `Verify bulk ${stamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: marker }] }],
+    })
+    bulkSegmentId = created.id
+    await evaluateSegment(admin, created.id)
+
+    let cursor: string | null = null
+    let seen = 0
+    let pages = 0
+    do {
+      const page = await readSegmentContactPage(admin, bulkSegmentId, { after: cursor, limit: 100 })
+      seen += page.rows.length
+      cursor = page.nextCursor
+      pages += 1
+      expect(pages < 10, 'the cursor is not advancing')
+    } while (cursor)
+
+    expect(seen === 210, `${seen} of 210 reached, so a push would leave the rest out`)
+    return `${seen} across ${pages} pages`
+  })
+
+  await check('and leaves out an opt-out without dropping it from the count', async () => {
+    const [row] = await db.execute<{ id: string }>(
+      sql`select id from contact
+           where workspace_id = ${datasaur.id} and email like ${'bulkpush-' + stamp + '%'}
+           order by id limit 1`,
+    )
+    expect(Boolean(row), 'the bulk contacts are gone')
+    const [type] = await db.execute<{ id: string }>(
+      sql`select id from subscription_type
+           where workspace_id = ${datasaur.id} and is_internal = false
+           order by name limit 1`,
+    )
+    expect(Boolean(type), 'the workspace has no external subscription type')
+    await db.execute(sql`
+      insert into subscription_state (workspace_id, contact_id, subscription_type_id, state)
+      values (${datasaur.id}, ${row!.id}, ${type!.id}, 'unsubscribed')
+      on conflict (workspace_id, contact_id, subscription_type_id)
+        do update set state = 'unsubscribed'`)
+
+    const page = await readSegmentContactPage(admin, bulkSegmentId, { limit: 5 })
+    const target = page.rows.find((candidate) => candidate.id === row!.id)
+    expect(Boolean(target), 'the opted-out contact fell out of the page entirely')
+    expect(target!.mailable === false, 'somebody who opted out is still mailable')
+    return 'the row is returned and flagged, so skipped counts without a second scan'
+  })
+
   await check('the provider’s own id is kept for the next sync', async () => {
     await setExternalId(admin, trackedId, 'brevo', `brevo-${stamp}`)
     const [row] = await db.execute<{ id: string }>(
@@ -591,6 +658,258 @@ try {
     expect(result.written.length === 0, 'enrichment overwrote what somebody typed into a form')
     return 'form, import and booking all count as a person'
   })
+
+  console.log('')
+  console.log('-- B9: the four files a portal exports that are not records ----')
+
+  /** One run, start to finish, so a check reads as the thing it is checking
+   *  rather than as four lines of the same plumbing. */
+  const importFile = async (
+    kind: 'properties' | 'associations' | 'lists' | 'submissions',
+    rows: Record<string, string>[],
+  ) => {
+    const headers = Object.keys(rows[0] ?? {})
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind,
+      source: 'hubspot',
+      filename: `verify-${kind}-${stamp}.csv`,
+      headers,
+      rows,
+      mapping: {},
+    })
+    await setImportMapping(admin, run.id, run.suggested)
+    for (let guard = 0; guard < 50; guard += 1) {
+      const progress = await runImportChunk(admin, run.id)
+      if (progress.done) break
+    }
+    const summary = await readImportRun(admin, run.id)
+    if (!summary) throw new Error('the run vanished')
+    return summary
+  }
+
+  await check('a property export creates the fields records need', async () => {
+    const summary = await importFile('properties', [
+      { 'Object': 'contact', 'Name': `Verify tier ${stamp}`, 'Internal name': `verify_tier_${stamp}`, 'Type': 'enumeration', 'Field type': 'select', 'Options': 'Gold;Silver;Bronze', 'Group name': 'Verify group' },
+      { 'Object': 'company', 'Name': `Verify seats ${stamp}`, 'Internal name': `verify_seats_${stamp}`, 'Type': 'number', 'Field type': 'number', 'Options': '', 'Group name': 'Verify group' },
+    ])
+    expect(summary.errored === 0, summary.errors.map((row) => row.reason).join(' | '))
+    expect(summary.created === 2, `${summary.created} created`)
+
+    const fields = await listFields(admin, 'contact')
+    const made = fields.find((field) => field.key === `verify_tier_${stamp}`)
+    expect(Boolean(made), 'the contact property is not there')
+    expect(made!.type === 'select', `type is ${made!.type}`)
+    expect(made!.options.join(',') === 'Gold,Silver,Bronze', made!.options.join(','))
+    expect(made!.groupName === 'Verify group', `group is ${made!.groupName}`)
+    expect(made!.source === 'hubspot', `source is ${made!.source}`)
+    return 'label, type, choices, group and where it came from all crossed'
+  })
+
+  await check('and re-running the same property file updates rather than duplicating', async () => {
+    const summary = await importFile('properties', [
+      { 'Object': 'contact', 'Name': `Verify tier ${stamp} renamed`, 'Internal name': `verify_tier_${stamp}`, 'Type': 'enumeration', 'Field type': 'select', 'Options': 'Gold;Silver', 'Group name': 'Verify group' },
+    ])
+    expect(summary.updated === 1, `${summary.updated} updated, ${summary.created} created`)
+    const fields = await listFields(admin, 'contact')
+    const matching = fields.filter((field) => field.key === `verify_tier_${stamp}`)
+    expect(matching.length === 1, `${matching.length} fields carry that key`)
+    expect(matching[0]!.label.endsWith('renamed'), 'the label did not follow')
+    return 'the internal name is the identity, so a rename is a rename'
+  })
+
+  await check('a property Rawr ships is never relabelled by an import', async () => {
+    const before = (await listFields(admin, 'contact')).find((field) => field.key === 'email')
+    const summary = await importFile('properties', [
+      { 'Object': 'contact', 'Name': 'Electronic mail', 'Internal name': 'email', 'Type': 'string', 'Field type': 'text', 'Options': '', 'Group name': '' },
+    ])
+    expect(summary.skipped === 1, `${summary.skipped} skipped, ${summary.updated} updated`)
+    const after = (await listFields(admin, 'contact')).find((field) => field.key === 'email')
+    expect(after?.label === before?.label, `Email is now called ${after?.label}`)
+    return 'a system field keeps the meaning a dozen screens depend on'
+  })
+
+  await check('a deal arrives with its people on it', async () => {
+    const [seededPipeline] = await db.execute<{ pipeline_id: string; stage_id: string }>(sql`
+      select p.id as pipeline_id, s.id as stage_id
+        from pipeline p join pipeline_stage s on s.pipeline_id = p.id
+       where p.workspace_id = ${datasaur.id}
+       order by p.name, s.position limit 1`)
+    expect(Boolean(seededPipeline), 'the workspace has no pipeline to put a deal in')
+    const deal = await createRecord(admin, 'deal', {
+      name: `Verify assoc deal ${stamp}`,
+      pipeline_id: seededPipeline!.pipeline_id,
+      stage_id: seededPipeline!.stage_id,
+    })
+    const contact = await createRecord(admin, 'contact', { email: `assoc-${stamp}@example.test`, first_name: 'Assoc' })
+    const summary = await importFile('associations', [
+      { 'Deal name': `Verify assoc deal ${stamp}`, 'Contact email': `assoc-${stamp}@example.test`, 'Association label': 'Decision maker' },
+    ])
+    expect(summary.errored === 0, summary.errors.map((row) => row.reason).join(' | '))
+    expect(summary.created === 1, `${summary.created} created`)
+
+    const [link] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from association
+       where workspace_id = ${datasaur.id}
+         and ((from_id = ${deal.id} and to_id = ${contact.id})
+           or (from_id = ${contact.id} and to_id = ${deal.id}))`)
+    expect(Number(link?.n) === 1, `${link?.n} association rows`)
+    return 'the link a record export cannot carry'
+  })
+
+  await check('and importing the same associations twice writes one row', async () => {
+    const summary = await importFile('associations', [
+      { 'Deal name': `Verify assoc deal ${stamp}`, 'Contact email': `assoc-${stamp}@example.test`, 'Association label': 'Decision maker' },
+    ])
+    expect(summary.created === 0 && summary.skipped === 1, `${summary.created} created, ${summary.skipped} skipped`)
+    return 'the pair is the key, in one stable direction'
+  })
+
+  await check('a deal that is not here yet is reported, not invented', async () => {
+    const summary = await importFile('associations', [
+      { 'Deal name': `Nothing called this ${stamp}`, 'Contact email': `assoc-${stamp}@example.test`, 'Association label': '' },
+    ])
+    expect(summary.errored === 1, `${summary.errored} errored`)
+    expect(
+      summary.errors[0]!.reason.includes('Import the deals first'),
+      summary.errors[0]!.reason,
+    )
+    return 'no empty deal is created to hold an orphaned link'
+  })
+
+  let importedSegmentId = ''
+
+  await check('a list export becomes a segment holding the people it named', async () => {
+    await createRecord(admin, 'contact', { email: `list-a-${stamp}@example.test`, first_name: 'List' })
+    await createRecord(admin, 'contact', { email: `list-b-${stamp}@example.test`, first_name: 'List' })
+    const summary = await importFile('lists', [
+      { 'List name': `Verify list ${stamp}`, 'Email': `list-a-${stamp}@example.test` },
+      { 'List name': `Verify list ${stamp}`, 'Email': `list-b-${stamp}@example.test` },
+    ])
+    expect(summary.errored === 0, summary.errors.map((row) => row.reason).join(' | '))
+    expect(summary.created === 2, `${summary.created} created`)
+
+    const rows = await listSegments(admin, 'contact')
+    const made = rows.find((row) => row.name === `Verify list ${stamp}`)
+    expect(Boolean(made), 'the segment is not there')
+    importedSegmentId = made!.id
+    expect(made!.isStatic, 'the imported list is not marked static')
+    expect(made!.memberCount === 2, `${made!.memberCount} members`)
+    return `${made!.memberCount} members, and the list says it is a snapshot`
+  })
+
+  await check('and the hourly evaluation leaves an imported list alone', async () => {
+    // The bug this exists to stop: the evaluator rebuilds a segment from its
+    // query, an imported list carries none, so the first run after a migration
+    // would empty all hundred and twenty-nine of them.
+    const result = await evaluateSegment(admin, importedSegmentId)
+    expect(result.exited === 0, `${result.exited} people were dropped`)
+    expect(result.members === 2, `${result.members} members left`)
+    return 'a snapshot is not recomputed into nothing'
+  })
+
+  await check('form submissions arrive with the form they were sent to', async () => {
+    const summary = await importFile('submissions', [
+      {
+        'Form name': `Verify form ${stamp}`,
+        'Email': `list-a-${stamp}@example.test`,
+        'Submitted at': '2026-03-04T10:00:00Z',
+        'Page URL': 'https://datasaur.ai/pricing',
+        'Record ID': `sub-${stamp}-1`,
+      },
+    ])
+    expect(summary.errored === 0, summary.errors.map((row) => row.reason).join(' | '))
+    expect(summary.created === 1, `${summary.created} created`)
+
+    const [row] = await db.execute<{ is_active: boolean; n: number }>(sql`
+      select f.is_active, count(s.id)::int as n
+        from form f left join form_submission s on s.form_id = f.id
+       where f.workspace_id = ${datasaur.id} and f.name = ${`Verify form ${stamp}`}
+       group by f.is_active`)
+    expect(Boolean(row), 'no form was created to hold the history')
+    expect(row!.is_active === false, 'the shell form is live, and it has no fields')
+    expect(Number(row!.n) === 1, `${row!.n} submissions`)
+    return 'an inactive shell, because a HubSpot form does not export as a definition'
+  })
+
+  await check('and a second run of the same submission file adds nothing', async () => {
+    const summary = await importFile('submissions', [
+      {
+        'Form name': `Verify form ${stamp}`,
+        'Email': `list-a-${stamp}@example.test`,
+        'Submitted at': '2026-03-04T10:00:00Z',
+        'Page URL': 'https://datasaur.ai/pricing',
+        'Record ID': `sub-${stamp}-1`,
+      },
+    ])
+    expect(summary.created === 0 && summary.skipped === 1, `${summary.created} created`)
+    return 'the export id is the key, so a redelivery is a no-op'
+  })
+
+  await check('an owner nobody here matches leaves the row unassigned and names them once', async () => {
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind: 'records',
+      source: 'hubspot',
+      filename: `verify-owner-${stamp}.csv`,
+      headers: ['Email', 'First Name', 'Contact owner'],
+      rows: [
+        { Email: `owner-a-${stamp}@example.test`, 'First Name': 'Owner', 'Contact owner': `Departed Person ${stamp}` },
+        { Email: `owner-b-${stamp}@example.test`, 'First Name': 'Owner', 'Contact owner': `Departed Person ${stamp}` },
+      ],
+      mapping: {},
+    })
+    await setImportMapping(admin, run.id, run.suggested)
+    for (;;) {
+      const progress = await runImportChunk(admin, run.id)
+      if (progress.done) break
+    }
+    const summary = await readImportRun(admin, run.id)
+    // Before this, an owner who had left produced one failed row per line, which
+    // at eighty-eight thousand rows is a failed import rather than a report.
+    expect(summary!.created === 2, `${summary!.created} created, ${summary!.errored} errored`)
+    expect(summary!.unmatchedOwners.length === 1, summary!.unmatchedOwners.join(', '))
+    expect(summary!.unmatchedOwners[0] === `Departed Person ${stamp}`, summary!.unmatchedOwners.join(', '))
+    return 'two records in, one name to act on'
+  })
+
+  await check('a stage that does not exist is still a refusal', async () => {
+    const run = await createImportRun(admin, {
+      objectKey: 'deal',
+      kind: 'records',
+      source: 'hubspot',
+      filename: `verify-stage-${stamp}.csv`,
+      headers: ['Deal Name', 'Deal Stage'],
+      rows: [{ 'Deal Name': `Verify bad stage ${stamp}`, 'Deal Stage': `Nothing called this ${stamp}` }],
+      mapping: {},
+    })
+    await setImportMapping(admin, run.id, run.suggested)
+    for (;;) {
+      const progress = await runImportChunk(admin, run.id)
+      if (progress.done) break
+    }
+    const summary = await readImportRun(admin, run.id)
+    expect(summary!.errored === 1, `${summary!.errored} errored`)
+    // An owner is a person who may not have an account; a stage is a column that
+    // is mapped wrong. Only one of those is worth importing around.
+    expect(summary!.errors[0]!.reason.includes('deal stage'), summary!.errors[0]!.reason)
+    return 'leniency is for owners only, because only owners are people'
+  })
+
+  await check('a properties file with no Applies to column is refused at mapping', async () =>
+    refuses('a property file that does not say which object', async () => {
+      const run = await createImportRun(admin, {
+        objectKey: 'contact',
+        kind: 'properties',
+        source: 'hubspot',
+        filename: `verify-bad-props-${stamp}.csv`,
+        headers: ['Name'],
+        rows: [{ Name: 'Orphan' }],
+        mapping: {},
+      })
+      await setImportMapping(admin, run.id, { Name: 'label' })
+    }),
+  )
 
   console.log('')
   console.log('-- Gmail, read only --------------------------------------------')
