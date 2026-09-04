@@ -8,6 +8,7 @@ import {
 } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { cache } from 'react'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
 import { submitHostedForm } from './actions.ts'
 
@@ -25,9 +26,16 @@ import { submitHostedForm } from './actions.ts'
 
 export const dynamic = 'force-dynamic'
 
+/** Keyed on the path parts rather than the array, so the metadata pass and the
+ *  render below it share one lookup instead of querying the same form twice. */
+const lookup = cache(
+  async (first: string, second?: string): Promise<PublicForm | null> =>
+    second === undefined ? publicFormById(first) : publicFormBySlug(first, second),
+)
+
 const resolve = async (path: string[]): Promise<PublicForm | null> => {
-  if (path.length === 1 && path[0]) return publicFormById(path[0])
-  if (path.length === 2 && path[0] && path[1]) return publicFormBySlug(path[0], path[1])
+  if (path.length === 1 && path[0]) return lookup(path[0])
+  if (path.length === 2 && path[0] && path[1]) return lookup(path[0], path[1])
   return null
 }
 
@@ -37,7 +45,10 @@ export const generateMetadata = async ({
   params: Promise<{ path: string[] }>
 }): Promise<Metadata> => {
   const { path } = await params
-  const form = await resolve(path)
+  // Metadata runs outside every error boundary, so a database that is down here
+  // takes the whole response down with it. The page below re-awaits the same
+  // cached lookup and throws into the boundary, where the failure is visible.
+  const form = await resolve(path).catch(() => null)
   return { title: form?.name ?? 'Form', robots: { index: false } }
 }
 
@@ -80,7 +91,7 @@ const HostedFormPage = async ({
                 : form.settings.successValue}
             </div>
           ) : (
-            <form className="rawr-form" method="post" action={submitHostedForm}>
+            <form className="rawr-form" action={submitHostedForm}>
               <input type="hidden" name="rawr_form_id" value={form.formId} />
               <input type="hidden" name="rawr_path" value={path.join('/')} />
               {/* Present so the two paths score identically when script does run;
@@ -158,6 +169,10 @@ const Field = ({
           ))}
         </select>
       ) : field.type === 'multi_select' ? (
+        // The hosted page ships its own stylesheet, where a <fieldset> would need
+        // its own reset to look the same. role="group" plus aria-labelledby names
+        // the set and is announced.
+        // biome-ignore lint/a11y/useSemanticElements: see above
         <div className="rawr-choices" role="group" aria-labelledby={id}>
           {(field.options ?? []).map((option) => (
             <label key={option.value}>

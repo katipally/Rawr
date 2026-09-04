@@ -164,46 +164,49 @@ export const RecordPicker = ({
         ) : null}
       </div>
 
+      {/* A listbox holds options, not list items. This was a <ul> of <li> each
+          wrapping a role="option" button, so the options were not children of the
+          listbox at all and the list semantics fought the widget semantics. The
+          options are the buttons, and they sit directly inside now. */}
       {open ? (
-        <ul
+        <div
           id={listId}
           role="listbox"
           aria-label={label}
           className="absolute top-full right-0 left-0 z-30 mt-1 max-h-64 overflow-y-auto rounded-panel border border-line bg-surface-raised shadow-overlay"
         >
           {problem ? (
-            <li role="alert" className="px-2 py-2 text-error">
+            <p role="alert" className="px-2 py-2 text-error">
               {problem}
-            </li>
+            </p>
           ) : loading && options.length === 0 ? (
-            <li className="px-2 py-2 text-secondary">Searching…</li>
+            <p className="px-2 py-2 text-secondary">Searching…</p>
           ) : options.length === 0 ? (
-            <li className="px-2 py-2 text-secondary">
+            <p className="px-2 py-2 text-secondary">
               {query.trim() ? `Nothing matches “${query.trim()}”.` : 'No records yet.'}
-            </li>
+            </p>
           ) : (
             options.map((option, index) => (
-              <li key={option.id}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === active}
-                  onMouseEnter={() => setActive(index)}
-                  onClick={() => choose(option)}
-                  className={cn(
-                    'flex w-full min-w-0 flex-col items-start px-2 py-1.5 text-left',
-                    index === active && 'bg-fill',
-                  )}
-                >
-                  <span className="w-full truncate">{option.label}</span>
-                  {option.detail ? (
-                    <span className="w-full truncate text-small text-secondary">{option.detail}</span>
-                  ) : null}
-                </button>
-              </li>
+              <button
+                key={option.id}
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => choose(option)}
+                className={cn(
+                  'flex w-full min-w-0 flex-col items-start px-2 py-1.5 text-left',
+                  index === active && 'bg-fill',
+                )}
+              >
+                <span className="w-full truncate">{option.label}</span>
+                {option.detail ? (
+                  <span className="w-full truncate text-small text-secondary">{option.detail}</span>
+                ) : null}
+              </button>
             ))
           )}
-        </ul>
+        </div>
       ) : null}
     </div>
   )

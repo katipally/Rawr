@@ -86,6 +86,12 @@ export const BOOKING_STYLES = `
 .rawr-b-day[data-open]:hover { border-color: var(--_focus); }
 .rawr-b-day[data-closed] { color: var(--_muted); opacity: 0.5; cursor: default; }
 .rawr-b-day[aria-current='date'] { background: var(--_focus); color: #fff; border-color: var(--_focus); }
+/* Read out, never drawn. A closed day carried its meaning in aria-label alone,
+   which a span with no role does not expose, so the words live in the DOM. */
+.rawr-b-off {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 .rawr-b-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--_focus); }
 .rawr-b-day[aria-current='date'] .rawr-b-dot { background: #fff; }
 

@@ -162,6 +162,64 @@ export const refreshContactActivity = async (
              last_seen_at = excluded.last_seen_at`)
   })
 
+/** Every contact in the workspace at once, for the nightly roll-up.
+ *
+ *  The same arithmetic as above, expressed as two grouped scans and one upsert
+ *  instead of one statement per contact. The per-contact form is right when a
+ *  back-fill has just touched one person; after a roll-up it was being called once
+ *  for every row in contact_activity, which is a network round trip per contact
+ *  and does not survive 88,270 of them.
+ *
+ *  A contact whose rows have all gone is zeroed rather than left holding the count
+ *  it had before, which is what the per-contact version did by recomputing over an
+ *  empty set. */
+export const refreshAllContactActivity = async (ctx: WorkspaceContext): Promise<number> =>
+  withWorkspace(ctx, async (tx) => {
+    const written = await tx.execute<{ contact_id: string }>(sql`
+      with viewed as (
+        select contact_id, count(distinct session_id) as visits, count(*) as views,
+               min(at) as first_at, max(at) as last_at
+          from page_view
+         where workspace_id = ${ctx.workspaceId} and contact_id is not null
+         group by contact_id
+      ), rolled as (
+        select contact_id, sum(views) as views,
+               min(day)::timestamptz as first_day, max(day)::timestamptz as last_day
+          from page_view_daily
+         where workspace_id = ${ctx.workspaceId}
+         group by contact_id
+      )
+      insert into contact_activity
+        (workspace_id, contact_id, site_visits, pages_viewed, first_seen_at, last_seen_at)
+      select ${ctx.workspaceId}, coalesce(viewed.contact_id, rolled.contact_id),
+             coalesce(viewed.visits, 0),
+             coalesce(viewed.views, 0) + coalesce(rolled.views, 0),
+             least(viewed.first_at, rolled.first_day),
+             greatest(viewed.last_at, rolled.last_day)
+        from viewed full outer join rolled on rolled.contact_id = viewed.contact_id
+      on conflict (workspace_id, contact_id) do update
+         set site_visits = excluded.site_visits,
+             pages_viewed = excluded.pages_viewed,
+             first_seen_at = excluded.first_seen_at,
+             last_seen_at = excluded.last_seen_at
+      returning contact_id`)
+
+    // Anybody left in the table with nothing behind them any more. Erasure and a
+    // retention window both get here.
+    await tx.execute(sql`
+      update contact_activity
+         set site_visits = 0, pages_viewed = 0, first_seen_at = null, last_seen_at = null
+       where workspace_id = ${ctx.workspaceId}
+         and pages_viewed <> 0
+         and contact_id not in (
+           select contact_id from page_view
+            where workspace_id = ${ctx.workspaceId} and contact_id is not null
+           union
+           select contact_id from page_view_daily where workspace_id = ${ctx.workspaceId})`)
+
+    return written.length
+  })
+
 /** Called by the worker once a claimed alias is fully back-filled. */
 export const markAliasResolved = async (
   ctx: WorkspaceContext,

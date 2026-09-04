@@ -1,9 +1,8 @@
-import { generateCodeVerifier, generateState } from 'arctic'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env, googleCalendarConfigured } from '~/lib/env.ts'
 import { calendarsPath } from '~/lib/links.ts'
-import { googleClient } from '~/server/auth/google.ts'
+import { generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { CALENDAR_SCOPES } from '~/server/calendar.ts'
 import { readSession } from '~/server/session.ts'
 

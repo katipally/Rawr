@@ -1,4 +1,4 @@
-import { isObjectKey, listViews, readBoard, resolveView } from '@rawr/db'
+import { isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
 import { cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
@@ -35,7 +35,9 @@ const BoardPage = async ({
     listViews(ctx, 'deal'),
     resolveView(ctx, 'deal', viewSlug),
   ])
-  const filters = search.filters ? (decodeFilters(search.filters) as never) : resolved.view.filters
+  // Normalised, not cast: a hand-edited URL can hold a bare condition list, and
+  // the toolbar below reads group.conditions off every entry.
+  const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
   // No pipeline in the URL means the first one, which is Enterprise in production.
   const pipelineId = search.pipeline ?? lookups.pipelines[0]?.id ?? null
 
@@ -44,7 +46,7 @@ const BoardPage = async ({
   const groupBy = search.group ?? resolved.view.groupByKey ?? 'stage_id'
   const byStage = groupBy === 'stage_id'
 
-  let board
+  let board: Awaited<ReturnType<typeof readBoard>> | null = null
   let boardError: string | null = null
   try {
     board = await readBoard(ctx, {
@@ -55,9 +57,16 @@ const BoardPage = async ({
     })
   } catch (cause) {
     // A hand-edited group in a URL is the usual cause, and the message names the
-    // fields that would have worked.
+    // fields that would have worked, so the default grouping is worth one retry.
     boardError = cause instanceof Error ? cause.message : String(cause)
-    board = await readBoard(ctx, { pipelineId, filters, search: search.q ?? '', groupBy: 'stage_id' })
+    // A hand-edited filter is the other cause, and it survives that retry. Saying
+    // so beats the crash screen the second throw used to reach.
+    board = await readBoard(ctx, {
+      pipelineId,
+      filters,
+      search: search.q ?? '',
+      groupBy: 'stage_id',
+    }).catch(() => null)
   }
 
   const listParams: ListParams = {
@@ -92,11 +101,12 @@ const BoardPage = async ({
 
       {boardError ? (
         <p role="alert" className="rounded-hs border border-error bg-error-subtle px-3 py-2 text-error">
-          {boardError} Showing the board by stage instead.
+          {boardError}
+          {board ? ' Showing the board by stage instead.' : ''}
         </p>
       ) : null}
 
-      {board.groupableFields.length > 1 ? (
+      {board && board.groupableFields.length > 1 ? (
         <nav aria-label="Group by" className="flex flex-wrap items-baseline gap-1">
           <span className="text-small text-secondary">Group by</span>
           {board.groupableFields.map((field) => (
@@ -160,7 +170,7 @@ const BoardPage = async ({
         exportHref={`/contacts/${workspace}/export?${exportParams.toString()}`}
       />
 
-      {board.unassigned > 0 ? (
+      {board && board.unassigned > 0 ? (
         <p className="rounded-hs border border-warning bg-warning-subtle px-3 py-2">
           {board.unassigned.toLocaleString()} deal{board.unassigned === 1 ? '' : 's'}{' '}
           {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
@@ -170,12 +180,14 @@ const BoardPage = async ({
         </p>
       ) : null}
 
-      <DealBoard
-        workspace={workspace}
-        columns={board.columns}
-        groupByKey={board.groupByKey}
-        canWrite={canWrite}
-      />
+      {board ? (
+        <DealBoard
+          workspace={workspace}
+          columns={board.columns}
+          groupByKey={board.groupByKey}
+          canWrite={canWrite}
+        />
+      ) : null}
     </div>
   )
 }

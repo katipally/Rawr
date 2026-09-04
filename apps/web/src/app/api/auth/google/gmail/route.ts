@@ -1,9 +1,8 @@
-import { generateCodeVerifier, generateState } from 'arctic'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { devGmailEnabled, env, googleConfigured } from '~/lib/env.ts'
 import { mailboxesPath } from '~/lib/links.ts'
-import { googleClient } from '~/server/auth/google.ts'
+import { generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { GMAIL_SCOPES } from '~/server/gmail.ts'
 import { readSession } from '~/server/session.ts'
 

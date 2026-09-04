@@ -16,6 +16,27 @@ import type { ObjectKey } from '@rawr/db'
 
 export const CRM_ROOT = 'contacts'
 
+/** The reverse of every builder below: which workspace an address names, or null
+ *  when it names none. Both scoped families put the slug in the same position,
+ *  which is what lets one pattern read either.
+ *
+ *  Read by src/proxy.ts, to notice a link into a workspace the session is not on,
+ *  and by the Google callback, to land somebody on the workspace their link asked
+ *  for rather than on whichever membership came back first. */
+const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)(?:[/?#]|$)/
+
+export const workspaceInPath = (path: string | null | undefined): string | null => {
+  const found = path ? WORKSPACE_PATH.exec(path)?.[1] : null
+  if (!found) return null
+  try {
+    return decodeURIComponent(found)
+  } catch {
+    // A half-escaped slug from a hand-edited link. It cannot match a real
+    // workspace, and guessing at it is worse than saying there was none.
+    return null
+  }
+}
+
 export type ViewKind = 'list' | 'board'
 
 /** Every member is optionally undefined so a caller can clear one by passing
@@ -183,6 +204,9 @@ export const decodeSort = (value: string | null | undefined): { key: string; dir
 /** Filters travel as JSON so a saved view and an ad-hoc URL are the same shape.
  *  Unparseable input is dropped rather than throwing: a mangled link should still
  *  show the person their records. */
+/** Whatever JSON was in the URL, and nothing more. A person can hand-edit this,
+ *  so the result is not a FilterGroup[] until parseFilters has read it: pass it
+ *  through that before anything renders from it. */
 export const decodeFilters = (value: string | null | undefined): unknown => {
   if (!value) return []
   try {

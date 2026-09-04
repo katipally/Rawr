@@ -124,21 +124,26 @@ const Shell = ({
   useEffect(() => setExpanded(read(RAIL_KEY) === '1'), [])
 
   // Neither the sheet nor a flyout survives a navigation, or the new page loads
-  // with the menu still covering it.
+  // with the menu still covering it. pathname is the trigger rather than
+  // something the body reads, which is the whole point of the effect: drop it and
+  // this runs once on mount and the menu stays up for the rest of the session.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     setSheetOpen(false)
     setFlyout(null)
   }, [pathname])
 
-  const cancelClose = () => {
+  // Stable: this is the unmount cleanup below, and a new identity every render
+  // would tear the timer down on each one, so the flyout would never linger.
+  const cancelClose = useCallback(() => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
     closeTimer.current = null
-  }
+  }, [])
   const scheduleClose = () => {
     cancelClose()
     closeTimer.current = window.setTimeout(() => setFlyout(null), CLOSE_DELAY_MS)
   }
-  useEffect(() => cancelClose, [])
+  useEffect(() => cancelClose, [cancelClose])
 
   const onKey = useCallback((event: KeyboardEvent) => {
     if (event.key === 'Escape') setFlyout(null)
@@ -261,6 +266,10 @@ const Shell = ({
       })}
 
       {open?.groups ? (
+        // A navigation flyout, not a set of form controls, so <fieldset> would be
+        // the wrong element. The role and the section's own name are what tie
+        // these links back to the rail item that opened them.
+        // biome-ignore lint/a11y/useSemanticElements: see above
         <div
           id={`flyout-${open.key}`}
           role="group"
@@ -296,7 +305,7 @@ const Shell = ({
           target.searchParams.set('to', event.target.value)
           window.location.assign(target.toString())
         }}
-        className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface px-2 text-small"
+        className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface pl-2 pr-7 text-small"
       >
         {workspaces.map((option) => (
           <option key={option.slug} value={option.slug}>
@@ -386,7 +395,7 @@ const Shell = ({
                   target.searchParams.set('to', event.target.value)
                   window.location.assign(target.toString())
                 }}
-                className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface px-2 text-small"
+                className="max-w-48 min-h-8 truncate rounded-hs border border-line bg-surface pl-2 pr-7 text-small"
               >
                 {workspaces.map((option) => (
                   <option key={option.slug} value={option.slug}>

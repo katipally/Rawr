@@ -1,0 +1,94 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": [
+      "apps/**/src/**",
+      "apps/web/scripts/**",
+      "packages/**/src/**",
+      "packages/db/scripts/**",
+      // Tailwind 4 at-rules are not something Biome's CSS parser reads, and a
+      // stylesheet has no lint rules here worth the parse error.
+      "!**/*.css"
+    ]
+  },
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+
+  // Off on purpose. The comment blocks in this repo are hand-set, and a reflow
+  // would rewrite every file for no behavioural gain. Biome is here to catch
+  // mistakes, not to restyle work that is already consistent.
+  "formatter": { "enabled": false },
+
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+
+      // Two ladders below. An "error" is a rule the codebase already satisfies,
+      // so CI fails the moment new code breaks it. A "warn" is a rule with real
+      // findings still open: visible on every run, not yet a gate. Each one is
+      // promoted to "error" in the same change that clears its last finding,
+      // which is what stops the warning list becoming permanent furniture.
+
+      "a11y": {
+        // Gating. The findings these opened were worked through one site at a
+        // time: three were real and are fixed, the rest were the rule not being
+        // able to see through a component boundary or not having a semantic
+        // element to suggest, and each of those carries a biome-ignore naming
+        // the reason at the line it applies to.
+        //
+        // A <label> wrapping its control is a valid association, but the control
+        // here is usually one of our own components rather than a bare <input>.
+        // Naming them is what lets the rule see the pattern it is looking for.
+        "noLabelWithoutControl": {
+          "level": "error",
+          "options": {
+            "inputComponents": ["TextInput", "TextArea", "Select", "FieldInput", "DatePicker", "TagInput"]
+          }
+        },
+        "noNoninteractiveElementToInteractiveRole": "error",
+        "useAriaPropsSupportedByRole": "error",
+        "noStaticElementInteractions": "error",
+        "useKeyWithClickEvents": "error",
+        "useSemanticElements": "error"
+      },
+      "complexity": {
+        // 19 hits, all `a && a.b` written out. A preference, not a defect, and
+        // turning it on would rewrite files nobody is otherwise touching.
+        "useOptionalChain": "off",
+        "noUselessCatch": "warn"
+      },
+      "style": {
+        // 10 hits. Same reasoning as useOptionalChain.
+        "useTemplate": "off",
+        // Used deliberately where a preceding check has already proven the value.
+        "noNonNullAssertion": "off",
+        "useConst": "error",
+        "noParameterAssign": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "warn",
+        "noUnusedVariables": "warn",
+        "noInnerDeclarations": "warn",
+        "useExhaustiveDependencies": "warn"
+      },
+      "suspicious": {
+        "noExplicitAny": "warn",
+        "noImplicitAnyLet": "warn",
+        "noConfusingVoidType": "warn",
+        "noSelfCompare": "warn",
+        "noShadowRestrictedNames": "warn",
+        // alert, confirm and prompt. Clear, so it gates: the three rename dialogs
+        // that used prompt() now ask through the RenamePrompt primitive.
+        "noAlert": "error",
+        "noConsole": { "level": "warn", "options": { "allow": ["error", "log", "warn"] } }
+      },
+      "nursery": {
+        // Needs type information, so it stays a warning. It is the rule that
+        // catches an unawaited promise, which is the class of bug this repo has
+        // already hit on the Slack notification path.
+        "noFloatingPromises": "warn"
+      }
+    }
+  },
+  "assist": { "enabled": false }
+}

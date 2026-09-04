@@ -104,6 +104,10 @@ export const RecordTable = ({
       // rewrite the row height of every other row on the page.
       const full = row.labels[column.key] || (typeof value === 'string' ? value : '')
       return (
+        // Not a control. The handler only stops a click on a link inside the cell
+        // from also opening the row, so there is no behaviour for a keyboard to
+        // reach.
+        // biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: see above
         <span
           title={full || undefined}
           // A mailto or tel link inside a row that is itself clickable must open

@@ -98,6 +98,10 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
     case 'multi_select': {
       const selected = new Set(Array.isArray(value) ? value.map(String) : [])
       return (
+        // role="group" with an accessible name is exposed correctly and is what
+        // this is. <fieldset>, the rule's suggestion, wants a <legend> and its own
+        // reset inside this flex row for no gain a screen reader can hear.
+        // biome-ignore lint/a11y/useSemanticElements: see above
         <div role="group" aria-label={field.label} className="flex flex-wrap gap-x-3 gap-y-1">
           {field.options.map((option) => (
             <label key={option} className="flex items-center gap-1.5">

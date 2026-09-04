@@ -1,4 +1,4 @@
-import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { consentRecord, form, formSubmission } from '../schema/forms.ts'
 import { recordActivity } from './activity.ts'

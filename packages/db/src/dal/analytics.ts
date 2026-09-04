@@ -503,7 +503,7 @@ export const rollUpExpired = async (
     return { rolled: rolled.length }
   })
 
-export { refreshContactActivity }
+export { refreshAllContactActivity, refreshContactActivity }
 
 /** Contacts whose counters need recomputing after a roll-up moved rows out from
  *  under them. One query rather than a counter the roll-up tries to keep in step. */

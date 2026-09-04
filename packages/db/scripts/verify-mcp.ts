@@ -53,7 +53,44 @@ const section = (title: string) =>
 // Talking to the endpoint
 // ---------------------------------------------------------------------------
 
-type Rpc = { status: number; body: Record<string, any> | null }
+/** What the endpoint answers, typed by the fields this script asserts on. Every
+ *  one is optional because a server that omits them is exactly what these checks
+ *  are here to catch. */
+type ToolDescriptor = {
+  name: string
+  title?: string
+  description?: string
+  inputSchema?: Record<string, unknown>
+  annotations?: Record<string, unknown>
+}
+
+type RpcResult = {
+  resultType?: string
+  protocolVersion?: string
+  protocolVersions?: string[]
+  serverInfo?: { name?: string; title?: string; version?: string }
+  instructions?: string
+  tools?: ToolDescriptor[]
+  ttlMs?: number
+  cacheScope?: string
+  content?: { type?: string; text?: string }[]
+  structuredContent?: ToolData
+  isError?: boolean
+}
+
+type RpcBody = {
+  jsonrpc?: string
+  id?: string | number | null
+  result?: RpcResult
+  error?: { code?: number; message?: string; data?: unknown }
+}
+
+type Rpc = { status: number; body: RpcBody | null }
+
+/** The token endpoint answers one of two shapes. Each call below knows which it
+ *  is asserting on, so naming both is what keeps the assertions honest. */
+type IssuedTokens = { access_token: string; refresh_token: string; expires_in?: number }
+type OAuthFailure = { error?: string; error_description?: string }
 
 let nextId = 1
 
@@ -71,7 +108,15 @@ const rpc = async (token: string | null, method: string, params?: unknown): Prom
   return { status: response.status, body: text ? JSON.parse(text) : null }
 }
 
-type ToolAnswer = { text: string; data: any; isError: boolean; status: number; rpcError: string | null }
+/** A tool's structuredContent. Its shape is the tool's own and differs for every
+ *  one of the hundred-odd tools this script calls, so it is read the way a client
+ *  reads it: by reaching for the field being asserted on. The assertion is the
+ *  check, and narrowing each of those reads would add noise to a test script
+ *  without catching anything the assertion does not.
+ *  biome-ignore lint/suspicious/noExplicitAny: see above */
+type ToolData = any
+
+type ToolAnswer = { text: string; data: ToolData; isError: boolean; status: number; rpcError: string | null }
 
 const call = async (
   token: string,
@@ -288,7 +333,7 @@ try {
   // -----------------------------------------------------------------------
   section('the tool catalogue')
 
-  const tools: any[] = listed.body?.result?.tools ?? []
+  const tools: ToolDescriptor[] = listed.body?.result?.tools ?? []
   const names = tools.map((tool) => tool.name).sort()
   check(
     'the ten hand-written tools are offered, then one per procedure',
@@ -365,15 +410,28 @@ try {
   // -----------------------------------------------------------------------
   section('oauth: the way a client actually connects')
 
-  const discovery = await fetch(`${BASE}/.well-known/oauth-protected-resource/api/mcp`).then((r) => r.json() as Promise<any>)
+  const discovery = await fetch(`${BASE}/.well-known/oauth-protected-resource/api/mcp`).then(
+    (r) => r.json() as Promise<{ resource?: string; authorization_servers?: string[] }>,
+  )
   check('the protected resource names itself and its authorization server', discovery.resource === ENDPOINT && discovery.authorization_servers?.[0] === BASE)
-  const server = await fetch(`${BASE}/.well-known/oauth-authorization-server`).then((r) => r.json() as Promise<any>)
+  const server = await fetch(`${BASE}/.well-known/oauth-authorization-server`).then(
+    (r) =>
+      r.json() as Promise<{
+        code_challenge_methods_supported?: string[]
+        registration_endpoint?: string
+        client_id_metadata_document_supported?: boolean
+        token_endpoint_auth_methods_supported?: string[]
+      }>,
+  )
   check(
     'the authorization server advertises PKCE S256, DCR, CIMD and public clients',
-    server.code_challenge_methods_supported?.includes('S256') &&
+    // Coalesced rather than optional-chained: `?.includes()` on a missing field
+    // is undefined, not false, and an undefined here used to reach check() as a
+    // falsy value that read as a failure without ever saying which half failed.
+    (server.code_challenge_methods_supported ?? []).includes('S256') &&
       typeof server.registration_endpoint === 'string' &&
       server.client_id_metadata_document_supported === true &&
-      server.token_endpoint_auth_methods_supported?.includes('none'),
+      (server.token_endpoint_auth_methods_supported ?? []).includes('none'),
   )
   check(
     'a 401 carries the resource_metadata pointer',
@@ -386,7 +444,7 @@ try {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ client_name: `${MARK} client`, redirect_uris: ['http://localhost/callback'] }),
-  }).then((r) => r.json() as Promise<any>)
+  }).then((r) => r.json() as Promise<{ client_id: string }>)
   check('a public client registers dynamically', typeof registered.client_id === 'string', registered.client_id)
   const badRegistration = await fetch(`${BASE}/api/oauth/register`, {
     method: 'POST',
@@ -433,7 +491,7 @@ try {
         code_verifier: 'x'.repeat(50),
         client_id: registered.client_id,
       }),
-    }).then((r) => r.json() as Promise<any>)
+    }).then((r) => r.json() as Promise<OAuthFailure>)
     check('a wrong PKCE verifier is refused and burns the code', wrongVerifier.error === 'invalid_grant')
 
     const second = await fetch(`${BASE}/api/oauth/authorize`, {
@@ -447,7 +505,7 @@ try {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<any>)
+    }).then((r) => r.json() as Promise<IssuedTokens>)
     check('the right verifier gets an access token and a refresh token', typeof tokens.access_token === 'string' && typeof tokens.refresh_token === 'string' && tokens.expires_in === 3600)
 
     const viaOauth = await call(tokens.access_token, 'get_record', { object: 'deal', id: mggId })
@@ -456,18 +514,18 @@ try {
     const reused = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<any>)
+    }).then((r) => r.json() as Promise<OAuthFailure>)
     check('a code cannot be redeemed twice', reused.error === 'invalid_grant')
 
     const refreshed = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<any>)
+    }).then((r) => r.json() as Promise<IssuedTokens>)
     check('a refresh rotates both tokens', typeof refreshed.access_token === 'string' && refreshed.refresh_token !== tokens.refresh_token)
     const staleRefresh = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<any>)
+    }).then((r) => r.json() as Promise<OAuthFailure>)
     check('the old refresh token is dead the moment the new one exists', staleRefresh.error === 'invalid_grant')
     const staleAccess = await rpc(tokens.access_token, 'ping')
     check('and so is the old access token', staleAccess.status === 401)
@@ -497,7 +555,7 @@ try {
   // than asserting an instant that was never promised. "No deploy" is the claim.
   const describedField = async (): Promise<string> => {
     const answer = await rpc(salesToken, 'tools/list')
-    const tool = (answer.body?.result?.tools ?? []).find((t: any) => t.name === 'update_record')
+    const tool = (answer.body?.result?.tools ?? []).find((t) => t.name === 'update_record')
     return String(tool?.description ?? '')
   }
 
@@ -695,7 +753,7 @@ try {
   )
   check(
     'and totals are per currency, never summed across them',
-    pipeline.data.stages.every((s: any) => Array.isArray(s.totals)),
+    pipeline.data.stages.every((s: Record<string, unknown>) => Array.isArray(s.totals)),
   )
 
   const noteAdded = await call(salesToken, 'create_note', {

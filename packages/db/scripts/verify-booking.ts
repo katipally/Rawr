@@ -529,10 +529,12 @@ try {
     `${tally.a} to ${tally.b}, ratio ${ratio.toFixed(3)}`,
   )
 
+  const firstPick = assignHost(candidates, 'fixed')
+  const secondPick = assignHost(candidates, 'fixed')
   check(
     'the same inputs pick the same host every time',
-    assignHost(candidates, 'fixed') === assignHost(candidates, 'fixed'),
-    'deterministic, so a test can assert it',
+    firstPick === secondPick,
+    `deterministic, so a test can assert it: ${firstPick} twice`,
   )
 
   check(

@@ -5,14 +5,31 @@ import { env, turnstileConfigured } from '~/lib/env.ts'
 /** Everything the public edge needs from a request, read in one place so no route
  *  reaches into headers on its own and gets the precedence wrong. */
 
-/** The client address. Trusts x-forwarded-for's first entry, which is correct
- *  behind a single reverse proxy and is what every hosting target in open item 9
- *  provides. It is used only for rate limiting and a rotating hash, never stored,
- *  so a spoofed value costs an attacker their own rate-limit bucket and nothing else. */
+/** The client address, read from the right end of x-forwarded-for.
+ *
+ *  The header is a list appended to by each hop, so the entries a proxy we run
+ *  added are the LAST ones, and everything before them is whatever the caller
+ *  chose to send. Reading the first entry therefore reads the attacker's own
+ *  string: sending a fresh `x-forwarded-for` on every request lands each one in
+ *  its own rate-limit bucket, and the per-IP limits on the submit endpoint stop
+ *  meaning anything.
+ *
+ *  So this counts back past the hops we actually run. TRUSTED_PROXY_HOPS is that
+ *  count, and it defaults to one, which is what a single reverse proxy in front of
+ *  the app produces. Set it to match the deployment: too low reads a spoofable
+ *  entry, too high reads the proxy's own address and puts every visitor in one
+ *  bucket, so it is deliberately explicit rather than guessed.
+ *
+ *  Still used only for rate limiting and a rotating hash. It is never stored. */
 export const clientIp = (request: NextRequest): string | null => {
   const forwarded = request.headers.get('x-forwarded-for')
-  const first = forwarded?.split(',')[0]?.trim()
-  if (first) return first
+  if (forwarded) {
+    const hops = forwarded.split(',').map((entry) => entry.trim()).filter(Boolean)
+    // The last entry our own proxy appended: the address it saw, which is the
+    // furthest right one no caller could have written.
+    const trusted = hops[hops.length - env.TRUSTED_PROXY_HOPS]
+    if (trusted) return trusted
+  }
   return request.headers.get('x-real-ip')?.trim() || null
 }
 
@@ -22,6 +39,11 @@ export const ipHashOf = (request: NextRequest): string | null =>
 /** Largest body the edge will read. A form is text; anything larger is either a
  *  mistake or an attempt to make the process do work. */
 export const MAX_BODY_BYTES = 64 * 1024
+
+/** String length counts UTF-16 units, so 64k characters of anything outside Latin
+ *  can be three times the cap in bytes. The limit is a byte budget, so it is
+ *  measured in bytes. */
+export const byteLength = (text: string): number => new TextEncoder().encode(text).length
 
 export class PayloadTooLarge extends Error {
   constructor() {
@@ -39,7 +61,7 @@ export const readBody = async (request: NextRequest): Promise<Record<string, unk
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new PayloadTooLarge()
 
   const text = await request.text()
-  if (text.length > MAX_BODY_BYTES) throw new PayloadTooLarge()
+  if (byteLength(text) > MAX_BODY_BYTES) throw new PayloadTooLarge()
 
   const type = request.headers.get('content-type') ?? ''
   if (type.includes('application/json')) {

@@ -216,7 +216,13 @@ const BookingPublicPage = async ({
             </a>
           </div>
 
-          <div className="rawr-b-grid" role="grid" aria-label={`Open days in ${monthLabel(monthKey, locale.tag)}`}>
+          {/* Not role="grid": that promises rows of gridcells, and this is seven
+              CSS columns of links. A grid with no rows in it announces as an
+              empty grid, which is worse than the group this actually is. */}
+          {/* biome-ignore lint/a11y/useSemanticElements: not a form control set
+              and not a data table either. It is seven columns of day links with
+              a name, which is exactly what role="group" describes. */}
+          <div className="rawr-b-grid" role="group" aria-label={`Open days in ${monthLabel(monthKey, locale.tag)}`}>
             {locale.weekdays.map((label) => (
               <div key={label} className="rawr-b-dow" aria-hidden="true">
                 {label}
@@ -369,9 +375,13 @@ const DayCell = ({
 }) => {
   const label = day.slice(8).replace(/^0/, '')
   if (count === 0) {
+    // The words are in the DOM rather than in an aria-label: a span carries no
+    // role, and a label on an element with no role is not announced at all, so
+    // the closed days used to read as a bare run of numbers.
     return (
-      <span className="rawr-b-day" data-closed aria-label={`${day}, nothing open`}>
+      <span className="rawr-b-day" data-closed>
         {label}
+        <span className="rawr-b-off">, nothing open</span>
       </span>
     )
   }

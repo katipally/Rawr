@@ -1,4 +1,4 @@
-import { refreshContactActivity, rollUpExpired, type WorkspaceContext } from '@rawr/db'
+import { refreshAllContactActivity, rollUpExpired, type WorkspaceContext } from '@rawr/db'
 import { z } from 'zod'
 import { owner } from '../db.ts'
 import { defineJob } from './registry.ts'
@@ -42,11 +42,10 @@ export const rollUpActivity = defineJob({
 
       // The counters were computed from rows that have just moved into the daily
       // table. Recomputing reads both, so the numbers on the panel do not change.
-      const contacts = await owner`
-        select contact_id from contact_activity where workspace_id = ${row.id}`
-      for (const contact of contacts) {
-        await refreshContactActivity(ctx, contact.contact_id)
-      }
+      // One statement for the whole workspace: this used to be a round trip per
+      // contact, which is fine at 20 seeded rows and not at 88,270.
+      const refreshed = await refreshAllContactActivity(ctx)
+      console.log(`[activity.rollup] recomputed ${refreshed} contact counter(s).`)
     }
   },
 })

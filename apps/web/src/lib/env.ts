@@ -18,6 +18,12 @@ const schema = z.object({
   /** Rotated by changing this value. IPs are hashed with it and a day stamp and
    *  are never stored raw. 02-foundation.md §6. */
   EDGE_IP_SALT: z.string().min(16).default('rawr-development-ip-salt-not-for-production'),
+  /** How many proxies we run sit in front of the app, so the client address can be
+   *  read from the right end of x-forwarded-for rather than from whatever the
+   *  caller put at the left. One is a single reverse proxy, which is the default
+   *  shape. This has to match the deployment or the per-IP rate limits are either
+   *  spoofable or shared by everybody. */
+  TRUSTED_PROXY_HOPS: z.coerce.number().int().min(1).max(8).default(1),
   TURNSTILE_SITE_KEY: z.string().default(''),
   TURNSTILE_SECRET: z.string().default(''),
   /** Open item 4. A bot token is the full app; a webhook URL is the fallback that

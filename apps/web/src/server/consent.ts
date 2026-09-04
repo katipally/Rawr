@@ -24,6 +24,10 @@ export const readHubSpotConsent = (
   for (const part of parts) {
     const [category, value] = part.split(':')
     if (category !== '1' && category !== '2') continue
+    // A category with nothing after the colon is a truncated cookie, not a
+    // refusal. Counting it as one recorded a choice nobody made and suppressed
+    // the banner instead of asking again.
+    if (value === undefined) continue
     seen = true
     if (category === '1') analytics = value === 'true'
     else advertisement = value === 'true'

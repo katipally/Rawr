@@ -82,7 +82,7 @@ export const MemberList = ({ rows, selfId, canWrite, role }: Props) => {
                 `${row.name} is now ${event.target.value}.`,
               )
             }
-            className="min-h-8 rounded-hs border border-line bg-surface px-2 text-body"
+            className="min-h-8 rounded-hs border border-line bg-surface pl-2 pr-7 text-body"
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>

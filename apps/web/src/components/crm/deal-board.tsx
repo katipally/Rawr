@@ -92,6 +92,11 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
           often drags into. Equal heights also stop the board reading as ragged. */}
       <div className="flex min-w-max items-stretch gap-3">
         {columns.map((column) => (
+          // A drop target. Dragging is the pointer shortcut, not the only way: the
+          // same stage change is on the record page and in bulk edit, both
+          // ordinary keyboard-reachable controls. No ARIA role describes a drop
+          // zone, so there is nothing truer to put here.
+          // biome-ignore lint/a11y/noStaticElementInteractions: see above
           <section
             key={column.key}
             onDragOver={(event) => {
@@ -150,6 +155,9 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
               ) : (
                 column.cards.map((card) => (
                   <li key={card.id}>
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions: the drag
+                        source for the drop target above, and the same reasoning
+                        applies. The card's own link is what a keyboard uses. */}
                     <div
                       draggable={canWrite}
                       onDragStart={(event) => {

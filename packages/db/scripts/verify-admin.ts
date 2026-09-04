@@ -3,7 +3,6 @@ import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import type { Role, WorkspaceContext } from '../src/dal/context.ts'
-import { ForbiddenError } from '../src/dal/context.ts'
 import {
   createField,
   deleteField,
@@ -63,7 +62,7 @@ const fail = (what: string, detail: string) => {
   console.log(`FAIL  ${what}\n      ${detail}`)
 }
 
-const check = async (what: string, fn: () => Promise<string | void>): Promise<void> => {
+const check = async (what: string, fn: () => Promise<string | undefined>): Promise<void> => {
   try {
     const detail = await fn()
     pass(what, detail ?? '')

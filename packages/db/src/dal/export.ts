@@ -9,7 +9,7 @@ const PAGE = 200
  *  result file or a database export, not a link that times out halfway. */
 const MAX_ROWS = 50_000
 
-const escape = (value: string): string =>
+const quoted = (value: string): string =>
   /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 
 /** Yields the CSV of exactly the current view: its filters, its columns, its sort
@@ -27,7 +27,7 @@ export async function* exportCsv(
   })
   if (fields.length === 0) throw new Error('Pick at least one column to export.')
 
-  yield `${fields.map((field) => escape(field.label)).join(',')}\n`
+  yield `${fields.map((field) => quoted(field.label)).join(',')}\n`
 
   let cursor: Cursor | null = null
   let emitted = 0
@@ -46,7 +46,7 @@ export async function* exportCsv(
       const cells = fields.map((field) => {
         // A relation exports as the name a person recognises, not as a uuid.
         const label = row.labels[field.key]
-        return escape(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
+        return quoted(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
       })
       yield `${cells.join(',')}\n`
       emitted += 1
@@ -64,11 +64,11 @@ export async function* exportCsv(
  *  original column is kept so the corrected file imports the same way. A8. */
 export const errorCsv = (errors: { row: number; reason: string; values: Record<string, string> }[]): string => {
   const headers = [...new Set(errors.flatMap((error) => Object.keys(error.values)))]
-  const lines = [['Row', 'Reason', ...headers].map(escape).join(',')]
+  const lines = [['Row', 'Reason', ...headers].map(quoted).join(',')]
   for (const error of errors) {
     lines.push(
       [String(error.row), error.reason, ...headers.map((header) => error.values[header] ?? '')]
-        .map(escape)
+        .map(quoted)
         .join(','),
     )
   }

@@ -3,7 +3,7 @@
 import { Button, Select, Spinner, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -70,6 +70,10 @@ export const EnrichmentPanel = ({
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
+
+  // Stable, so the sequence panel below reloads when the contact changes and not
+  // every time this panel re-renders. Three requests hang off it.
+  const refresh = useCallback(() => router.refresh(), [router])
 
   const run = async (key: string, fn: () => Promise<string>) => {
     setBusy(key)
@@ -174,7 +178,7 @@ export const EnrichmentPanel = ({
       ) : null}
 
       {object === 'contact' && usable(apollo) && matchKey ? (
-        <Sequences contactId={recordId} canWrite={canWrite} onChanged={() => router.refresh()} />
+        <Sequences contactId={recordId} canWrite={canWrite} onChanged={refresh} />
       ) : null}
 
       {suggestions.length > 0 ? (
@@ -244,7 +248,9 @@ const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canW
   const [accountId, setAccountId] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const load = async () => {
+  // Three requests, so it must run once per contact and not once per render of
+  // the record page. That holds because onChanged is stable at the call site.
+  const load = useCallback(async () => {
     setLoaded({ state: 'loading' })
     try {
       const [status, sequences, accounts] = await Promise.all([
@@ -257,13 +263,11 @@ const Sequences = ({ contactId, canWrite, onChanged }: { contactId: string; canW
     } catch (cause) {
       setLoaded({ state: 'error', message: errorMessage(cause) })
     }
-  }
+  }, [contactId, onChanged])
 
   useEffect(() => {
     void load()
-    // Once per contact: the status is re-read after an enrolment below.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactId])
+  }, [load])
 
   const enroll = async () => {
     if (!sequenceId || !accountId) {

@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import type { NextRequest } from 'next/server'
 import { checkSubmitLimits } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
-import { runSubmission } from '~/server/submit.ts'
+import { answersFromFormData, runSubmission } from '~/server/submit.ts'
 
 /** The no-JS submit path.
  *
@@ -39,12 +39,7 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
     )
   }
 
-  const body: Record<string, unknown> = {}
-  for (const key of new Set(data.keys())) {
-    if (key.startsWith('rawr_form_id') || key.startsWith('rawr_path')) continue
-    const all = data.getAll(key).map((value) => String(value))
-    body[key] = all.length > 1 ? all : (all[0] ?? '')
-  }
+  const body = answersFromFormData(data)
 
   // A Server Action has no NextRequest. The two fields the capture path reads
   // from one are the user agent and the referer, so a minimal stand-in is built

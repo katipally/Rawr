@@ -9,7 +9,10 @@ import { NextResponse, type NextRequest } from 'next/server'
  *  redirecting. The switch handler verifies the signature and the membership
  *  before it changes anything. */
 
-const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/]+)(\/|$)/
+// The slug ends at a slash, a query string or a fragment. Without the last two,
+// /contacts/probe?tab=x captured "probe?tab=x" and the switch handler then
+// refused a workspace by that name.
+const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
   const match = WORKSPACE_PATH.exec(request.nextUrl.pathname)

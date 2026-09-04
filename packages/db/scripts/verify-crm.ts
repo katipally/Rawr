@@ -38,7 +38,7 @@ const fail = (what: string, detail: string) => {
   console.log(`FAIL  ${what}\n      ${detail}`)
 }
 
-const check = async (what: string, fn: () => Promise<string | void>): Promise<void> => {
+const check = async (what: string, fn: () => Promise<string | undefined>): Promise<void> => {
   try {
     const detail = await fn()
     pass(what, detail ?? '')
@@ -554,7 +554,6 @@ try {
 
   await check('a bad date lands in the error list and does not stop the run', async () => {
     const stamp = Date.now()
-    const headers = ['Deal Name', 'Close Date']
     const rows = [
       { 'Deal Name': `Import deal ${stamp} a`, 'Close Date': '2026-09-01' },
       { 'Deal Name': `Import deal ${stamp} b`, 'Close Date': 'next tuesday-ish' },

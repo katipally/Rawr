@@ -24,7 +24,6 @@ import {
   timelineCounts,
   websiteActivity,
   withWorkspace,
-  type PublicSite,
   type Role,
   type WorkspaceContext,
 } from '../src/index.ts'

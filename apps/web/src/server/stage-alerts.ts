@@ -1,4 +1,5 @@
 import type { StageChange, WorkspaceContext } from '@rawr/db'
+import { inBackground } from './background.ts'
 import { queueStageAlert } from './notify.ts'
 import { shouldAnnounceStage, slackCredentials } from './integrations/slack.ts'
 
@@ -8,8 +9,10 @@ import { shouldAnnounceStage, slackCredentials } from './integrations/slack.ts'
  *  people mute, and a muted channel is how the form-fill notification stops being
  *  read. Which pipelines announce is configured on the Slack integration.
  *
- *  Fired and not awaited: the person who dragged the card is looking at the board,
- *  not at Slack, and a Slack outage must never fail a stage change. */
+ *  Not awaited: the person who dragged the card is looking at the board, not at
+ *  Slack, and a Slack outage must never fail a stage change. It still has to
+ *  happen, though, so it runs after the response rather than in a promise nobody
+ *  is holding. */
 export const announceStageChange = (
   ctx: WorkspaceContext,
   workspaceSlug: string,
@@ -18,22 +21,21 @@ export const announceStageChange = (
 ): void => {
   if (!change) return
 
-  void slackCredentials(ctx)
-    .then((creds) => {
-      if (!shouldAnnounceStage(creds, change.pipelineId)) return
-      queueStageAlert({
-        workspaceId: ctx.workspaceId,
-        workspaceSlug,
-        dealId: change.dealId,
-        dealName: change.dealName,
-        from: change.from,
-        to: change.to,
-        actor: actorName,
-        activityId: change.activityId,
-      })
+  inBackground(`stage alert for deal ${change.dealId}`, async () => {
+    // Reading the credentials can fail, which is already visible as a degraded
+    // integration. A stage change is not the place to surface it, so this returns
+    // rather than announcing against credentials it could not read.
+    const credentials = await slackCredentials(ctx).catch(() => null)
+    if (!shouldAnnounceStage(credentials, change.pipelineId)) return
+    queueStageAlert({
+      workspaceId: ctx.workspaceId,
+      workspaceSlug,
+      dealId: change.dealId,
+      dealName: change.dealName,
+      from: change.from,
+      to: change.to,
+      actor: actorName,
+      activityId: change.activityId,
     })
-    .catch(() => {
-      // Reading the credentials failed, which is already visible as a degraded
-      // integration. A stage change is not the place to surface it.
-    })
+  })
 }

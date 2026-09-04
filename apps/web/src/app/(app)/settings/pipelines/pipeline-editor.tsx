@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { PipelineRow, StageRow } from '@rawr/db'
@@ -23,6 +23,7 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
   const [stageProbability, setStageProbability] = useState('')
   const [editing, setEditing] = useState<StageRow | null>(null)
   const [removing, setRemoving] = useState<{ stage: StageRow; pipeline: PipelineRow } | null>(null)
+  const [renaming, setRenaming] = useState<PipelineRow | null>(null)
   const [destination, setDestination] = useState('')
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -108,15 +109,7 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
               <Button
                 variant="tertiary"
                 busy={busy}
-                onClick={() => {
-                  const next = window.prompt('Rename this pipeline to', pipeline.name)
-                  if (next && next !== pipeline.name) {
-                    void run(
-                      () => api.admin.pipelines.rename.mutate({ id: pipeline.id, name: next }),
-                      'Renamed.',
-                    )
-                  }
-                }}
+                onClick={() => setRenaming(pipeline)}
               >
                 Rename
               </Button>
@@ -306,6 +299,21 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
           </div>
         ) : null}
       </Modal>
+
+      <RenamePrompt
+        value={renaming?.name ?? null}
+        title={`Rename ${renaming?.name ?? ''}`}
+        label="Pipeline name"
+        busy={busy}
+        onCancel={() => setRenaming(null)}
+        onRename={(name) => {
+          if (!renaming) return
+          void run(
+            () => api.admin.pipelines.rename.mutate({ id: renaming.id, name }),
+            'Renamed.',
+          ).then((ok) => ok && setRenaming(null))
+        }}
+      />
     </div>
   )
 }

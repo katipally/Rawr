@@ -1,5 +1,6 @@
 'use client'
 
+import { useServerInsertedHTML } from 'next/navigation'
 import { useEffect, useState } from 'react'
 
 type Theme = 'light' | 'dark' | 'system'
@@ -7,7 +8,15 @@ const KEY = 'rawr-theme'
 
 /** Runs before paint so a dark-mode user never sees a white flash. Reading
  *  localStorage throws in some embedded contexts, hence the try. */
-export const themeScript = `try{var t=localStorage.getItem('${KEY}');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}`
+const themeScript = `try{var t=localStorage.getItem('${KEY}');if(t==='dark'||t==='light')document.documentElement.dataset.theme=t}catch(e){}`
+
+/** Injected into the streamed HTML rather than rendered as a `<script>` element.
+ *  A script React renders is inert on the client and React 19 warns about it,
+ *  and this one only has to run once, before the first paint. */
+export const ThemeScript = () => {
+  useServerInsertedHTML(() => <script dangerouslySetInnerHTML={{ __html: themeScript }} />)
+  return null
+}
 
 const apply = (theme: Theme) => {
   const root = document.documentElement
@@ -43,7 +52,7 @@ export const ThemeToggle = () => {
           setTheme(next)
           apply(next)
         }}
-        className="min-h-8 rounded-hs border border-line bg-surface px-2 text-small"
+        className="min-h-8 rounded-hs border border-line bg-surface pl-2 pr-7 text-small"
       >
         <option value="system">System</option>
         <option value="light">Light</option>

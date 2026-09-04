@@ -15,7 +15,10 @@
     "db:seed": "pnpm --filter @rawr/db seed",
     "db:verify": "pnpm --filter @rawr/db verify",
     "db:verify:guards": "pnpm --filter @rawr/db verify:guards",
-    "verify": "pnpm -r typecheck && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:integrations && pnpm db:seed",
+    "lint": "biome lint .",
+    "lint:ci": "biome ci . --diagnostic-level=error",
+    "test": "pnpm -r --if-present test",
+    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:integrations && pnpm db:seed",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
     "db:verify:forms": "pnpm --filter @rawr/db verify:forms",
     "db:verify:booking": "pnpm --filter @rawr/db verify:booking",
@@ -25,6 +28,7 @@
     "db:verify:integrations": "pnpm --filter @rawr/db verify:integrations"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.12",
     "typescript": "catalog:"
   }
 }

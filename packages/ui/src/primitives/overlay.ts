@@ -27,10 +27,14 @@ export const useOverlay = (
     opener.current = document.activeElement as HTMLElement | null
 
     const box = dialog.current
+    // First focusable is the close button in every dialog that has a header, which
+    // is the wrong place to land in one built around a single field. A dialog says
+    // where it wants focus with data-autofocus; without it the old order holds.
     // The dialog itself takes focus when it holds nothing focusable, so Tab has
     // somewhere to start and the screen reader announces the label.
+    const asked = box?.querySelector<HTMLElement>('[data-autofocus]')
     const first = box?.querySelector<HTMLElement>(FOCUSABLE)
-    ;(first ?? box)?.focus()
+    ;(asked ?? first ?? box)?.focus()
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

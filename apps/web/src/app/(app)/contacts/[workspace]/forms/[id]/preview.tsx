@@ -55,10 +55,16 @@ export const FormPreview = ({
       <style dangerouslySetInnerHTML={{ __html: EMBED_STYLES }} />
 
       <div
-        className="rounded-panel border border-line bg-surface p-3"
+        className="rounded-panel border border-line p-3"
         // The embed is sized by its container, so the preview proves that by
         // being a container of a chosen width rather than a whole viewport.
-        style={narrow ? { maxWidth: '320px' } : undefined}
+        //
+        // White in both app themes, on purpose. The embed's own defaults are
+        // written for a light host page (#33475b text on #ffffff fields), and
+        // marketing re-themes it by setting --rawr-embed-* on the host. Painting
+        // this box with the app's dark surface left that light text on a dark
+        // panel at about 1.8:1, and showed a preview no visitor would ever see.
+        style={{ background: '#ffffff', ...(narrow ? { maxWidth: '320px' } : {}) }}
       >
         <div data-rawr-form>
           <div className="rawr-form">
@@ -121,6 +127,9 @@ const PreviewField = ({
           ))}
         </select>
       ) : field.type === 'multi_select' ? (
+        // The preview renders the public form's own stylesheet, where a <fieldset>
+        // would need its own reset to look the same. role="group" names the set.
+        // biome-ignore lint/a11y/useSemanticElements: see above
         <div className="rawr-choices" role="group">
           {(field.options ?? []).map((option) => (
             <label key={option.value}>

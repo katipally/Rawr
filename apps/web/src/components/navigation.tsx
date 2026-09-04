@@ -55,7 +55,9 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
   )
 
   // The transition ends when the new route commits. The address is what the
-  // person sees, so it is what clears the target, not the pending flag alone.
+  // person sees, so it is what clears the target, not the pending flag alone:
+  // pathname is a trigger here rather than something the body reads.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!pending && targetRef.current !== null) {
       targetRef.current = null

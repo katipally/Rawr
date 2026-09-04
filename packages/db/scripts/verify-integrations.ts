@@ -55,7 +55,7 @@ const fail = (what: string, detail: string) => {
   console.log(`FAIL  ${what}\n      ${detail}`)
 }
 
-const check = async (what: string, fn: () => Promise<string | void>): Promise<void> => {
+const check = async (what: string, fn: () => Promise<string | undefined>): Promise<void> => {
   try {
     const detail = await fn()
     pass(what, detail ?? '')

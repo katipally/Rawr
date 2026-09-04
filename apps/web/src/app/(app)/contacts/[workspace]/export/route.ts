@@ -43,12 +43,15 @@ export const GET = async (
   const ctx = contextFrom(session)
   const encoder = new TextEncoder()
 
-  let rows
+  let rows: ReturnType<typeof exportCsv>
+  // Declared out here rather than with `var` inside the try: both survive the
+  // block, and only one of them says so where a reader is looking.
+  let first: Awaited<ReturnType<ReturnType<typeof exportCsv>['next']>>
   try {
     rows = exportCsv(ctx, { objectKey: object, columns, filters, sorts, search: search.get('q') ?? '' })
     // Pull the header eagerly so a bad column set fails as a real message rather
     // than as a truncated download.
-    var first = await rows.next()
+    first = await rows.next()
   } catch (cause) {
     return NextResponse.json(
       { error: cause instanceof Error ? cause.message : String(cause) },

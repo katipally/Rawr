@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { Lexend_Deca } from 'next/font/google'
-import { themeScript } from '~/components/theme.tsx'
+import { ThemeScript } from '~/components/theme.tsx'
 import './globals.css'
 
 /** HubSpot's product font. Loaded with the weights the design system actually
@@ -19,10 +19,10 @@ export const metadata: Metadata = {
 
 const RootLayout = ({ children }: { children: React.ReactNode }) => (
   <html lang="en" className={lexend.className} suppressHydrationWarning>
-    <head>
-      <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-    </head>
-    <body>{children}</body>
+    <body>
+      <ThemeScript />
+      {children}
+    </body>
   </html>
 )
 

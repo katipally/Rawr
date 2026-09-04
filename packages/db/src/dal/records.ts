@@ -13,7 +13,6 @@ import {
   scopeFor,
   type Cursor,
   type FilterGroup,
-  type QueryScope,
   type Sort,
 } from './query.ts'
 import { fieldOrThrow, getRegistry, getRegistryIn, objectOrThrow, type Registry, type RegistryField, type RegistryObject } from './registry.ts'

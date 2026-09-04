@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { SubscriptionTypeRow } from '@rawr/db'
@@ -20,6 +20,7 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
   const [description, setDescription] = useState('')
   const [isInternal, setIsInternal] = useState(false)
   const [removing, setRemoving] = useState<SubscriptionTypeRow | null>(null)
+  const [renaming, setRenaming] = useState<SubscriptionTypeRow | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -118,15 +119,7 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
                   <Button
                     variant="tertiary"
                     busy={busy}
-                    onClick={() => {
-                      const next = window.prompt('Rename this subscription type to', row.name)
-                      if (next && next !== row.name) {
-                        void run(
-                          () => api.admin.subscriptionTypes.update.mutate({ id: row.id, name: next }),
-                          'Renamed.',
-                        )
-                      }
-                    }}
+                    onClick={() => setRenaming(row)}
                   >
                     Rename
                   </Button>
@@ -178,6 +171,21 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
           </div>
         ) : null}
       </Modal>
+
+      <RenamePrompt
+        value={renaming?.name ?? null}
+        title={`Rename ${renaming?.name ?? ''}`}
+        label="Subscription type name"
+        busy={busy}
+        onCancel={() => setRenaming(null)}
+        onRename={(name) => {
+          if (!renaming) return
+          void run(
+            () => api.admin.subscriptionTypes.update.mutate({ id: renaming.id, name }),
+            'Renamed.',
+          ).then((ok) => ok && setRenaming(null))
+        }}
+      />
     </div>
   )
 }

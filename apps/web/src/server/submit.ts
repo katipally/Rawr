@@ -20,6 +20,28 @@ export type SubmitOptions = {
   attributionOverride?: { referrer?: string | null; pagePath?: string | null }
 }
 
+/** The answers out of a posted form, without the transport.
+ *
+ *  Three things ride along that are not answers: the two fields the hosted page
+ *  uses to say which form this is, and React's own $ACTION_ID and its relatives,
+ *  which it posts on the no-JS path so the server knows which action to run. The
+ *  schema allowlist refuses anything it does not recognise, so leaving React's in
+ *  made every submission without JavaScript fail with
+ *  '"$ACTION_ID_..." is not a field on this form.'
+ *
+ *  A field key is ^[a-z][a-z0-9_]*$, so nothing a form can legitimately ask for
+ *  starts with a dollar sign. Repeated keys become an array, which is how a
+ *  multi_select arrives from a plain HTML form. */
+export const answersFromFormData = (data: FormData): Record<string, unknown> => {
+  const body: Record<string, unknown> = {}
+  for (const key of new Set(data.keys())) {
+    if (key === 'rawr_form_id' || key === 'rawr_path' || key.startsWith('$')) continue
+    const all = data.getAll(key).map((value) => String(value))
+    body[key] = all.length > 1 ? all : (all[0] ?? '')
+  }
+  return body
+}
+
 const text = (body: Record<string, unknown>, key: string): string | null => {
   const value = body[key]
   return typeof value === 'string' && value !== '' ? value : null

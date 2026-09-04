@@ -1,8 +1,7 @@
-import { generateCodeVerifier, generateState } from 'arctic'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
-import { googleClient, SIGN_IN_SCOPES } from '~/server/auth/google.ts'
+import { generateCodeVerifier, generateState, googleClient, SIGN_IN_SCOPES } from '~/server/auth/google.ts'
 import { safeNext } from '~/server/auth/next.ts'
 
 export const GET = async (request: NextRequest): Promise<NextResponse> => {

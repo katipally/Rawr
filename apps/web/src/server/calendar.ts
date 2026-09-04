@@ -7,9 +7,8 @@ import {
   type StoredGrant,
   type WorkspaceContext,
 } from '@rawr/db'
-import { OAuth2RequestError } from 'arctic'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
-import { googleClient } from './auth/google.ts'
+import { googleClient, OAuth2RequestError } from './auth/google.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.

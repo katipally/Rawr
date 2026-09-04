@@ -1,6 +1,7 @@
 import { attachConference, publicEdgeContext, readBooking, recordDeadLetter } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { bookedPath } from '~/lib/links.ts'
+import { inBackground } from './background.ts'
 import { patchCalendarEvent } from './calendar.ts'
 import { queueHostAlert } from './notify.ts'
 import { createZoomMeeting } from './zoom.ts'
@@ -35,13 +36,12 @@ export type PendingConference = {
 
 const ATTEMPTS = 4
 
-/** Fired and not awaited: the booking is already committed and the visitor is
- *  looking at their confirmation. */
+/** Not awaited: the booking is already committed and the visitor is looking at
+ *  their confirmation. The chase backs off across four attempts and can run for
+ *  over a minute, which is far longer than the response it follows, so it is
+ *  registered with the runtime rather than left as a promise nobody holds. */
 export const queueConferenceBackfill = (pending: PendingConference): void => {
-  void chase(pending).catch(() => {
-    // chase() reports its own failures. This catch only stops an unhandled
-    // rejection from taking the process down.
-  })
+  inBackground(`zoom backfill for booking ${pending.bookingId}`, () => chase(pending))
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

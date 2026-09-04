@@ -1,5 +1,6 @@
 import { publicEdgeContext, recordDeadLetter, type Attribution, type WorkspaceContext } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
+import { inBackground } from './background.ts'
 import { postToSlack, slackReady, type SlackBody } from './integrations/slack.ts'
 
 /** Replaces what HubSpot posts to #sales-leads-2026 today. Trevor flagged this
@@ -26,14 +27,14 @@ export type SlackNotification = {
   channel?: string | null
 }
 
-/** Fired and not awaited by the route, so the visitor's response is never waiting
- *  on Slack. Failures are recorded rather than thrown, because there is nobody
+/** Not awaited by the route, so the visitor's response is never waiting on Slack,
+ *  and registered with the runtime so the post still completes after that response
+ *  is written. Failures are recorded rather than thrown, because there is nobody
  *  left to throw to. */
 export const queueSlackNotification = (notification: SlackNotification): void => {
-  void deliver(notification).catch(() => {
-    // deliver() already dead-letters. This catch exists so an unhandled rejection
-    // cannot take the process down on a bad day.
-  })
+  inBackground(`slack notification for submission ${notification.submissionId}`, () =>
+    deliver(notification),
+  )
 }
 
 const deliver = async (notification: SlackNotification): Promise<void> => {
@@ -94,14 +95,14 @@ export const queueHostAlert = (alert: {
     text: alert.text,
     blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
   }
-  void send(publicEdgeContext(alert.workspaceId), {
-    key: alert.idempotencyKey,
-    jobName: alert.jobName,
-    body,
-    payload: { ...alert.payload, idempotencyKey: alert.idempotencyKey, body },
-  }).catch(() => {
-    // send() already records its own failures.
-  })
+  inBackground(alert.idempotencyKey, () =>
+    send(publicEdgeContext(alert.workspaceId), {
+      key: alert.idempotencyKey,
+      jobName: alert.jobName,
+      body,
+      payload: { ...alert.payload, idempotencyKey: alert.idempotencyKey, body },
+    }),
+  )
 }
 
 const deadLetter = async (ctx: WorkspaceContext, outbound: Outbound, error: string): Promise<void> => {

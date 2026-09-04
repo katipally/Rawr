@@ -1,6 +1,6 @@
 import { collect, isBot, isVisitorId, publicSite } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
+import { byteLength, clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
 
 /** GET and POST /e — the collector, F4 §2.
  *
@@ -137,7 +137,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const declared = Number(request.headers.get('content-length') ?? '0')
     if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return done()
     const text = await request.text()
-    if (text.length > MAX_BODY_BYTES) return done()
+    if (byteLength(text) > MAX_BODY_BYTES) return done()
     const parsed: unknown = JSON.parse(text)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return done()
     body = parsed as Record<string, unknown>

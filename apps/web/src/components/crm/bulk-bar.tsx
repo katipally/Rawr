@@ -72,7 +72,6 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-small text-secondary">Change</span>
           <Select
-            aria-label="Which field to change"
             value={fieldKey}
             onChange={(event) => {
               setFieldKey(event.target.value)

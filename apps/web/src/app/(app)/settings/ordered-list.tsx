@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -25,6 +25,7 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState('')
   const [removing, setRemoving] = useState<OrderedRow | null>(null)
+  const [renaming, setRenaming] = useState<OrderedRow | null>(null)
   const [destination, setDestination] = useState('')
 
   const routes = api.admin[namespace]
@@ -122,12 +123,7 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
                 <Button
                   variant="tertiary"
                   busy={busy}
-                  onClick={() => {
-                    const next = window.prompt(`Rename this ${noun} to`, row.name)
-                    if (next && next !== row.name) {
-                      void run(() => routes.rename.mutate({ id: row.id, name: next }), 'Renamed.')
-                    }
-                  }}
+                  onClick={() => setRenaming(row)}
                 >
                   Rename
                 </Button>
@@ -145,6 +141,20 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
           ))
         )}
       </ol>
+
+      <RenamePrompt
+        value={renaming?.name ?? null}
+        title={`Rename ${renaming?.name ?? ''}`}
+        label={`${noun.charAt(0).toUpperCase()}${noun.slice(1)} name`}
+        busy={busy}
+        onCancel={() => setRenaming(null)}
+        onRename={(name) => {
+          if (!renaming) return
+          void run(() => routes.rename.mutate({ id: renaming.id, name }), 'Renamed.').then(
+            (ok) => ok && setRenaming(null),
+          )
+        }}
+      />
 
       <Modal open={removing !== null} title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
         {removing ? (

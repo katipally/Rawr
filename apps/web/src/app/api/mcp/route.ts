@@ -1,7 +1,15 @@
 import { callerForToken, touchMcpToken } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { handle, PROTOCOL_VERSIONS, type JsonRpcRequest } from '~/server/mcp/protocol.ts'
-import { clientIp, rateLimit } from '~/server/edge.ts'
+import {
+  handle,
+  INTERNAL,
+  INVALID_REQUEST,
+  METHOD_NOT_FOUND,
+  PARSE_ERROR,
+  PROTOCOL_VERSIONS,
+  type JsonRpcRequest,
+} from '~/server/mcp/protocol.ts'
+import { byteLength, clientIp, rateLimit } from '~/server/edge.ts'
 import { challengeHeader } from '~/server/mcp/oauth.ts'
 
 /** F5 §1. The MCP endpoint. One path, POST for messages, and nothing else.
@@ -16,6 +24,11 @@ import { challengeHeader } from '~/server/mcp/oauth.ts'
 
 export const dynamic = 'force-dynamic'
 
+/** JSON-RPC leaves -32000 to -32099 to the server. These two are this endpoint's:
+ *  one for a credential it will not accept, one for a caller going too fast. */
+const UNAUTHORIZED = -32001
+const RATE_LIMITED = -32000
+
 /** Requests come from an agent, not a browser, and one conversation can fire a
  *  dozen calls in a burst. Generous per minute, hard enough that a loop stops. */
 const PER_MINUTE = 120
@@ -26,7 +39,7 @@ const MAX_BODY_BYTES = 256 * 1024
 
 const unauthorized = (message: string): NextResponse =>
   NextResponse.json(
-    { jsonrpc: '2.0', id: null, error: { code: -32001, message } },
+    { jsonrpc: '2.0', id: null, error: { code: UNAUTHORIZED, message } },
     {
       status: 401,
       // Where the OAuth metadata is, so a client connects by signing in rather
@@ -37,11 +50,35 @@ const unauthorized = (message: string): NextResponse =>
 
 export const GET = (): NextResponse =>
   NextResponse.json(
-    { jsonrpc: '2.0', id: null, error: { code: -32601, message: 'This endpoint answers POST only.' } },
+    { jsonrpc: '2.0', id: null, error: { code: METHOD_NOT_FOUND, message: 'This endpoint answers POST only.' } },
     { status: 405, headers: { allow: 'POST' } },
   )
 
 export const DELETE = GET
+
+/** 2026-07-28 asks a client to repeat the JSON-RPC method, and the tool name for a
+ *  tools/call, in headers, so a gateway or a rate limiter can route and meter on
+ *  them without parsing a body. They are a hint and never the authority: what runs
+ *  is what the body says. Mismatched, they are worth refusing rather than obeying,
+ *  because anything in front of us metered the request as something it was not.
+ *
+ *  Absent is fine. Every client before this revision omits them. */
+const headerRoutingDisagrees = (
+  request: NextRequest,
+  message: JsonRpcRequest,
+): string | null => {
+  const method = request.headers.get('mcp-method')
+  if (method && method !== message.method) {
+    return `The Mcp-Method header says "${method}" and the body says "${message.method ?? 'nothing'}".`
+  }
+  if (message.method !== 'tools/call') return null
+  const name = request.headers.get('mcp-name')
+  const called = typeof message.params?.name === 'string' ? message.params.name : null
+  if (name && name !== called) {
+    return `The Mcp-Name header says "${name}" and the call names "${called ?? 'nothing'}".`
+  }
+  return null
+}
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
   // The transport requires the client to declare which protocol it is speaking on
@@ -54,7 +91,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
         jsonrpc: '2.0',
         id: null,
         error: {
-          code: -32600,
+          code: INVALID_REQUEST,
           message: `This server does not speak MCP ${declared}. It speaks ${PROTOCOL_VERSIONS.join(', ')}.`,
         },
       },
@@ -82,7 +119,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
         jsonrpc: '2.0',
         id: null,
         error: {
-          code: -32000,
+          code: RATE_LIMITED,
           message: `Too many calls from this token. Try again in ${limit.retryAfterSeconds} seconds.`,
         },
       },
@@ -91,12 +128,13 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const raw = await request.text()
-  if (raw.length > MAX_BODY_BYTES) {
+  const size = byteLength(raw)
+  if (size > MAX_BODY_BYTES) {
     return NextResponse.json(
       {
         jsonrpc: '2.0',
         id: null,
-        error: { code: -32600, message: `That request is ${Math.round(raw.length / 1024)}KB; ${MAX_BODY_BYTES / 1024}KB is the limit.` },
+        error: { code: INVALID_REQUEST, message: `That request is ${Math.round(size / 1024)}KB; ${MAX_BODY_BYTES / 1024}KB is the limit.` },
       },
       { status: 413 },
     )
@@ -108,7 +146,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     if (Array.isArray(parsed)) {
       // Batching was removed from the protocol and no current client sends it.
       return NextResponse.json(
-        { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Send one JSON-RPC message per request.' } },
+        { jsonrpc: '2.0', id: null, error: { code: INVALID_REQUEST, message: 'Send one JSON-RPC message per request.' } },
         { status: 400 },
       )
     }
@@ -116,7 +154,15 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     message = parsed as JsonRpcRequest
   } catch {
     return NextResponse.json(
-      { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'That request body is not JSON.' } },
+      { jsonrpc: '2.0', id: null, error: { code: PARSE_ERROR, message: 'That request body is not JSON.' } },
+      { status: 400 },
+    )
+  }
+
+  const disagreement = headerRoutingDisagrees(request, message)
+  if (disagreement) {
+    return NextResponse.json(
+      { jsonrpc: '2.0', id: message.id ?? null, error: { code: INVALID_REQUEST, message: disagreement } },
       { status: 400 },
     )
   }
@@ -135,7 +181,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
       {
         jsonrpc: '2.0',
         id: message.id ?? null,
-        error: { code: -32603, message: cause instanceof Error ? cause.message : String(cause) },
+        error: { code: INTERNAL, message: cause instanceof Error ? cause.message : String(cause) },
       },
       { status: 200 },
     )

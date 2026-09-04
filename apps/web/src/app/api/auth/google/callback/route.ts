@@ -1,9 +1,14 @@
-import { decodeIdToken } from 'arctic'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { membershipsForUser, signInWithGoogle } from '@rawr/db'
 import { env } from '~/lib/env.ts'
-import { googleClient, identityFromIdToken } from '~/server/auth/google.ts'
+import { workspaceInPath } from '~/lib/links.ts'
+import {
+  decodeIdToken,
+  googleClient,
+  identityFromIdToken,
+  type GoogleIdentity,
+} from '~/server/auth/google.ts'
 import { safeNext } from '~/server/auth/next.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
@@ -31,7 +36,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied('That sign-in attempt did not match this browser. Start again.')
   }
 
-  let identity
+  let identity: GoogleIdentity
   try {
     const tokens = await googleClient().validateAuthorizationCode(code, codeVerifier)
     identity = identityFromIdToken(decodeIdToken(tokens.idToken()))
@@ -56,7 +61,11 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     hostedDomain: identity.hostedDomain,
   })
   const memberships = await membershipsForUser(userId)
-  const membership = memberships[0]
+  // Somebody following a link into a particular workspace should arrive in that
+  // workspace. Without this they land in whichever membership came back first and
+  // the page they asked for then bounces them through the switch handler.
+  const asked = workspaceInPath(next)
+  const membership = memberships.find((m) => m.workspaceSlug === asked) ?? memberships[0]
   if (!membership) {
     return denied(`${identity.email} signed in, but no workspace exists for ${identity.hostedDomain}.`)
   }

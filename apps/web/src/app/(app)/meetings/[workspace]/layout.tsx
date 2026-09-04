@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { workspaceHome } from '~/lib/links.ts'
 import { readSession } from '~/server/session.ts'
 
-/** The middleware already redirects a link into another workspace through the
+/** The proxy already redirects a link into another workspace through the
  *  switch handler. This is the second gate: if the slug still does not match, the
  *  person is not a member of it, and saying so beats a blank screen. */
 const WorkspaceLayout = async ({

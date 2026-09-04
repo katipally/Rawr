@@ -193,6 +193,10 @@ export const DataTable = <Row,>({
                 {column.header}
                 {/* Focusable and driven by the arrow keys, because a pointer is
                     not the only way somebody arrives at this table. */}
+                {/* biome-ignore lint/a11y/useSemanticElements: there is no HTML
+                    element for a column resize handle. A focusable separator
+                    carrying aria-valuenow is the widget ARIA defines for it, and
+                    <hr>, the rule's suggestion, cannot hold the behaviour. */}
                 <span
                   role="separator"
                   tabIndex={0}
@@ -220,6 +224,10 @@ export const DataTable = <Row,>({
         </thead>
         <tbody>
           {rows.map((row) => (
+            // The row's first cell already renders a real link to the same
+            // destination, so every row is reachable and announced without this
+            // handler. Giving the <tr> its own tab stop would put two on every row
+            // and make keyboard use of a long list worse, not better.
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
@@ -230,6 +238,10 @@ export const DataTable = <Row,>({
               )}
             >
               {selection ? (
+                // Not a control. The handler only stops a tick on the checkbox from
+                // also opening the row; the checkbox inside is what is operated,
+                // and it is an ordinary keyboard-reachable input.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: see above
                 <td className="h-row px-3 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
                   <input
                     type="checkbox"

@@ -7,16 +7,14 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "DATABASE_URL=postgres://unit:test@127.0.0.1:5432/none DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none AUTH_SECRET=unit-test-secret-at-least-32-chars AUTH_URL=http://localhost:3000 GOOGLE_HOSTED_DOMAIN=example.test node --import ./scripts/test-hooks.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@rawr/db": "workspace:*",
     "@rawr/ui": "workspace:*",
-    "@tanstack/react-query": "catalog:",
     "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
-    "@trpc/tanstack-react-query": "catalog:",
-    "arctic": "catalog:",
     "drizzle-orm": "catalog:",
     "exceljs": "^4.4.0",
     "jose": "catalog:",

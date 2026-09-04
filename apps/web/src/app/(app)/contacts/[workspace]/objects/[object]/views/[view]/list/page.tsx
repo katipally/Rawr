@@ -1,4 +1,4 @@
-import { isObjectKey, listRecords, resolveView, listViews, withWorkspaceReads } from '@rawr/db'
+import { isObjectKey, listRecords, parseFilters, resolveView, listViews, withWorkspaceReads } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
@@ -52,7 +52,7 @@ const ListPage = async ({
 
     // Anything in the URL wins over what the view stored, which is what makes a
     // filtered screen shareable without saving it first.
-    const urlFilters = search.filters ? (decodeFilters(search.filters) as never) : null
+    const urlFilters = search.filters ? parseFilters(decodeFilters(search.filters)) : null
     const filters = urlFilters ?? view.view.filters
     const sorts = search.sort ? decodeSort(search.sort) : view.view.sorts
     const columns = view.view.columns.length > 0 ? view.view.columns : crm.object.fields.slice(0, 8).map((f) => f.key)
@@ -81,7 +81,9 @@ const ListPage = async ({
     redirect(objectView(workspace, objectParam, resolved.view.slug, 'list', search as ListParams))
   }
 
-  const urlFilters = search.filters ? (decodeFilters(search.filters) as never) : null
+  // Normalised, not cast: the toolbar reads group.conditions, and a hand-edited
+  // URL holding a bare condition list has no groups in it at all.
+  const urlFilters = search.filters ? parseFilters(decodeFilters(search.filters)) : null
   const filters = urlFilters ?? resolved.view.filters
   const sorts = search.sort ? decodeSort(search.sort) : resolved.view.sorts
   const columns = resolved.view.columns.length > 0 ? resolved.view.columns : object.fields.slice(0, 8).map((f) => f.key)

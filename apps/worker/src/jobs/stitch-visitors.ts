@@ -92,28 +92,24 @@ export const stitchVisitor = defineJob({
     let passes = 0
     let done = false
 
-    try {
-      while (passes < MAX_PASSES) {
-        const result = await backfillVisitor(ctx, { visitorId, contactId })
-        moved += result.pageViews + result.events
-        passes += 1
-        if (result.done) {
-          done = true
-          break
-        }
+    while (passes < MAX_PASSES) {
+      const result = await backfillVisitor(ctx, { visitorId, contactId })
+      moved += result.pageViews + result.events
+      passes += 1
+      if (result.done) {
+        done = true
+        break
       }
-    } catch (cause) {
-      // Deliberately not resolved here. Marking the alias done on the way out of a
-      // failure retired it on the first transient error, and the four retries that
-      // followed had nothing left to finish — the contact kept a half-moved
-      // timeline and nothing said so. The dispatcher re-claims it instead.
-      throw cause
     }
 
     // Recomputed rather than incremented, so the panel is right regardless of how
     // many passes it took or which of them was retried.
     await refreshContactActivity(ctx, contactId)
 
+    // Only on the way out of a clean pass. Resolving on a failure retired the
+    // alias on the first transient error, and the four retries that followed had
+    // nothing left to finish: the contact kept a half-moved timeline and nothing
+    // said so. A throw above leaves it claimable and the dispatcher re-claims it.
     if (done) await markAliasResolved(ctx, aliasId)
     else console.log(`[activity.stitch] ${visitorId} has more to move; leaving it queued.`)
 

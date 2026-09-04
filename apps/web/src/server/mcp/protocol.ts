@@ -5,16 +5,21 @@ import { contextFor, explain, type ToolResult } from './tools.ts'
 /** F5 §1. JSON-RPC over one endpoint, written against two versions of the spec.
  *
  *  The 2026-07-28 revision dropped the initialize handshake and protocol-level
- *  sessions in favour of `server/discover` and `_meta`; 2025-06-18 clients still
- *  send `initialize`. Both are answered here, which costs one extra method and a
- *  few extra result fields, and means a client is never turned away for speaking
- *  the version it was built against.
+ *  sessions in favour of `server/discover` and `_meta`; every earlier revision
+ *  still sends `initialize`. Both are answered here, which costs one extra method
+ *  and a few extra result fields, and means a client is never turned away for
+ *  speaking the version it was built against.
+ *
+ *  2025-11-25 is on the list because it was the stable revision immediately before
+ *  2026-07-28 and is what a client that has not upgraded yet still declares.
+ *  Leaving it out turned those clients away with a 400 naming three versions,
+ *  none of which they spoke.
  *
  *  Stateless either way. Nothing is remembered between requests, no session id is
  *  issued, and the credential is the bearer token on every call, which is what the
  *  newer spec requires and the older one permits. */
 
-const SUPPORTED = ['2026-07-28', '2025-06-18', '2025-03-26'] as const
+const SUPPORTED = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26'] as const
 const LATEST = SUPPORTED[0]
 
 /** Long enough that a client is not refetching the catalogue between tool calls,
@@ -35,11 +40,13 @@ export type JsonRpcResponse =
   | { jsonrpc: '2.0'; id: JsonRpcId; result: unknown }
   | { jsonrpc: '2.0'; id: JsonRpcId; error: { code: number; message: string; data?: unknown } }
 
-const PARSE_ERROR = -32700
-const INVALID_REQUEST = -32600
-const METHOD_NOT_FOUND = -32601
+/** JSON-RPC 2.0 §5.1, exported because the route spells the same codes and two
+ *  copies of a number nobody recognises on sight is how they drift. */
+export const PARSE_ERROR = -32700
+export const INVALID_REQUEST = -32600
+export const METHOD_NOT_FOUND = -32601
 const INVALID_PARAMS = -32602
-const INTERNAL = -32603
+export const INTERNAL = -32603
 
 const ok = (id: JsonRpcId, result: unknown): JsonRpcResponse => ({ jsonrpc: '2.0', id, result })
 

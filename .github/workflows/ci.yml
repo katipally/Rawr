@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Everything that needs no database and no secrets, so a fork's pull request
+  # gets the same answer as a push to main.
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Parseable, never reachable. The pool is constructed at import and does not
+      # connect until something queries, which nothing here does.
+      DATABASE_URL: postgres://unit:test@127.0.0.1:5432/none
+      DATABASE_URL_OWNER: postgres://unit:test@127.0.0.1:5432/none
+      AUTH_SECRET: unit-test-secret-at-least-32-chars
+      AUTH_URL: http://localhost:3000
+      GOOGLE_HOSTED_DOMAIN: example.test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm lint:ci
+      - run: pnpm test
+      - run: pnpm build
+
+  # The nine suites run against a real Postgres with row level security on, which
+  # is the only way they prove anything. Skipped rather than failed where no
+  # database is configured, so this workflow is useful before open item 9 lands.
+  verify:
+    runs-on: ubuntu-latest
+    needs: check
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Is there a database to verify against
+        id: db
+        run: echo "present=${{ secrets.DATABASE_URL != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Write the environment the scripts read
+        if: steps.db.outputs.present == 'true'
+        run: |
+          cat > .env.local <<'ENV'
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          DATABASE_URL_OWNER=${{ secrets.DATABASE_URL_OWNER }}
+          AUTH_SECRET=${{ secrets.AUTH_SECRET }}
+          AUTH_URL=http://localhost:3000
+          GOOGLE_HOSTED_DOMAIN=${{ secrets.GOOGLE_HOSTED_DOMAIN }}
+          TOKEN_ENCRYPTION_KEY=${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          RAWR_DEV_LOGIN=1
+          RAWR_DEV_CALENDAR=1
+          RAWR_DEV_GMAIL=1
+          RAWR_DEV_INTEGRATIONS=1
+          RAWR_INTERNAL_SECRET=${{ secrets.RAWR_INTERNAL_SECRET }}
+          ENV
+
+      - name: Migrate
+        if: steps.db.outputs.present == 'true'
+        run: pnpm db:migrate
+
+      # verify:mcp calls the real endpoint, so the app has to be up. A small pool
+      # on purpose: the suites and the server together otherwise exhaust the
+      # Supabase pooler and the failures read as logic errors.
+      - name: Start the app
+        if: steps.db.outputs.present == 'true'
+        run: |
+          DATABASE_POOL_MAX=5 pnpm dev > /tmp/dev.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3000/sign-in && exit 0
+            sleep 1
+          done
+          echo "the app never came up:"; cat /tmp/dev.log; exit 1
+
+      - name: Verify
+        if: steps.db.outputs.present == 'true'
+        run: pnpm verify
+
+      - name: The app's log, when something failed
+        if: failure() && steps.db.outputs.present == 'true'
+        run: cat /tmp/dev.log
+
+      - name: No database configured
+        if: steps.db.outputs.present != 'true'
+        run: echo "DATABASE_URL is not set as a repository secret, so the nine suites did not run."
