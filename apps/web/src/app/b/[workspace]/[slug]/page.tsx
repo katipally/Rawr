@@ -198,7 +198,15 @@ const BookingPublicPage = async ({
   const errors = parseErrors(single('err'))
 
   return (
-    <Shell page={summary} timezone={timezone} explicitTimezone={explicitTimezone} monthKey={monthKey} workspace={workspace} slug={slug}>
+    <Shell
+      page={summary}
+      timezone={timezone}
+      explicitTimezone={explicitTimezone}
+      monthKey={monthKey}
+      date={selectedDay ?? undefined}
+      workspace={workspace}
+      slug={slug}
+    >
       {problem ? (
         <div className="rawr-b-note" data-bad role="alert">
           {problem}
@@ -379,6 +387,7 @@ const Shell = ({
   timezone,
   explicitTimezone,
   monthKey,
+  date,
   workspace,
   slug,
   children,
@@ -387,6 +396,8 @@ const Shell = ({
   timezone: string
   explicitTimezone: boolean
   monthKey: string
+  /** The day on screen, when one is chosen. */
+  date?: string | undefined
   workspace: string
   slug: string
   children: React.ReactNode
@@ -412,7 +423,10 @@ const Shell = ({
           <TimezonePicker
             timezone={timezone}
             explicit={explicitTimezone}
-            basePath={bookingPublicPath(workspace, slug, { month: monthKey })}
+            // The day carries too. Without it, switching zone (or the automatic
+            // switch on first load) threw away the date a shared link named and
+            // dropped the reader back on the month.
+            basePath={bookingPublicPath(workspace, slug, { month: monthKey, date })}
           />
         </header>
         {children}

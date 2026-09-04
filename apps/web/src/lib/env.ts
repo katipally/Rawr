@@ -66,8 +66,14 @@ if (!parsed.success) {
 export const env = parsed.data
 
 /** The values .env.example and the dev setup use are fine on a laptop and a
- *  breach in production. Refused at boot, by name, rather than discovered later. */
-if (env.NODE_ENV === 'production') {
+ *  breach in production. Refused at boot, by name, rather than discovered later.
+ *
+ *  Called from instrumentation.ts rather than run here. `next build` sets
+ *  NODE_ENV=production and renders pages that reach this module, so running the
+ *  check at import refused the build on any machine holding dev secrets. A build
+ *  is not a boot: what matters is that the server does not start on them. */
+export const assertProductionSecrets = (): void => {
+  if (env.NODE_ENV !== 'production') return
   const placeholders: string[] = []
   if (/^dev-|not-a-real-secret|replace-before-deploy/.test(env.AUTH_SECRET)) placeholders.push('AUTH_SECRET')
   if (/^dev-|not-for-production/.test(env.RAWR_INTERNAL_SECRET)) placeholders.push('RAWR_INTERNAL_SECRET')

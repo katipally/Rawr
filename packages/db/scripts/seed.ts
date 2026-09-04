@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
+import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
 import { provisionWorkspace } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
@@ -374,7 +375,7 @@ try {
       .from(s.site)
       .where(eq(s.site.workspaceId, datasaur))
     const seen = await db
-      .select({ id: s.contact.id, email: s.contact.email })
+      .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
       .from(s.contact)
       .where(eq(s.contact.workspaceId, datasaur))
 
@@ -490,7 +491,7 @@ try {
             formId: form.id,
             values: {
               email: session.contact!.email ?? `seed${i}@partner${i}.example`,
-              first_name: `Contact${i + 1}`,
+              first_name: session.contact!.firstName ?? `Contact${i + 1}`,
               message: held ? 'CHEAP BACKLINKS http://spam.example' : 'We would like a demo.',
             },
             attribution: readAttribution({
@@ -501,9 +502,16 @@ try {
             }),
             contactId: held ? null : session.contact!.id,
             visitorId: session.visitorId,
-            spamScore: held ? 78 : 0,
+            spamScore: held ? SPAM_WEIGHTS.tooManyLinks + SPAM_WEIGHTS.disposableDomain : 0,
             spamState: held ? ('quarantined' as const) : ('clean' as const),
-            spamReasons: held ? ['link_in_message', 'shouting'] : [],
+            // The scorer's own shape, so the review queue renders a reason a
+            // person can read rather than a bullet with nothing after it.
+            spamReasons: held
+              ? [
+                  { rule: 'tooManyLinks', points: SPAM_WEIGHTS.tooManyLinks, detail: '2 links in one short message' },
+                  { rule: 'disposableDomain', points: SPAM_WEIGHTS.disposableDomain, detail: 'spam.example is a throwaway domain' },
+                ]
+              : [],
             at: session.startedAt,
           }
         }),
@@ -638,7 +646,10 @@ try {
           // Relative to the real clock rather than to the seed's own anchor,
           // because "upcoming" has to still be upcoming whenever the seed is run.
           const day = new Date()
-          day.setUTCHours(17, 0, 0, 0)
+          // Half past, and not on the hour: verify-booking pins a slot at an
+          // absolute instant on the hour, and a seeded meeting landing on it
+          // makes a host busy that the suite expects to be free.
+          day.setUTCHours(15, 30, 0, 0)
           const startsAt = new Date(day.getTime() + (i < 2 ? 3 + i * 4 : -(4 + i * 3)) * 86_400_000)
           return {
             workspaceId: ws,

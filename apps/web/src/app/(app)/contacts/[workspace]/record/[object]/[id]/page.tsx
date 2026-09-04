@@ -262,8 +262,11 @@ const RecordPage = async ({
         </dl>
       </header>
 
-      {/* One column on a phone, three on a wide screen. Nothing is a fixed width. */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_minmax(0,20rem)]">
+      {/* One column when there is no room, three when there is. Measured against
+          the card this sits in rather than the window, because collapsing the rail
+          widens the card without the window changing size, and a viewport rule
+          would keep squeezing three columns into eight hundred pixels. */}
+      <div className="grid gap-4 @3xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_minmax(0,20rem)]">
         <div className="flex min-w-0 flex-col gap-3">
           <PropertyPanel
             object={objectParam}
