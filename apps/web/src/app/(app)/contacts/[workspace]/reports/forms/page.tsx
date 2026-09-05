@@ -52,7 +52,10 @@ const FormsReport = async ({
                 <thead>
                   <tr className="border-b border-divider text-left text-secondary">
                     <th scope="col" className="py-1 pr-3 font-medium">Form</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Seen</th>
                     <th scope="col" className="py-1 pr-3 text-right font-medium">Fills</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Filled in</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">Pages</th>
                     <th scope="col" className="py-1 pr-3 text-right font-medium">Held</th>
                     <th scope="col" className="py-1 pr-3 text-right font-medium">Contacts</th>
                     <th scope="col" className="py-1 text-right font-medium">Deals after</th>
@@ -62,7 +65,16 @@ const FormsReport = async ({
                   {report.forms.map((row) => (
                     <tr key={row.form} className="border-b border-divider last:border-0">
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.form}</th>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {row.views === 0 ? '—' : row.views.toLocaleString()}
+                      </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.submissions}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {row.views === 0 ? '—' : `${((row.submissions / row.views) * 100).toFixed(1)}%`}
+                      </td>
+                      <td className="py-1 pr-3 text-right tabular-nums">
+                        {row.appearsOn === 0 ? '—' : row.appearsOn}
+                      </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.held}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.contacts}</td>
                       <td className="py-1 text-right tabular-nums">{row.deals}</td>
@@ -72,6 +84,12 @@ const FormsReport = async ({
               </table>
             </div>
           )}
+          <p className="mt-2 max-w-prose text-small text-secondary">
+            &ldquo;Seen&rdquo; counts the embed painting the form, through the same consent gate
+            every other event goes through, so a visitor who declined analytics is not in it and the
+            rate reads low rather than wrong. A dash means the form was only ever opened on its
+            hosted page, where nothing counts a view.
+          </p>
           <p className="mt-2 max-w-prose text-small text-secondary">
             "Deals after" counts deals opened at the form's company after the fill. It is a
             coincidence in time, not a claim that the form caused the deal; the attribution report is

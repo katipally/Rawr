@@ -379,7 +379,16 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
         if (!r.ok) throw new Error('unavailable');
         return r.json();
       })
-      .then(function (form) { paint(mount, formId, form); })
+      .then(function (form) {
+        paint(mount, formId, form);
+        // B11. One view per painted form, through the collector rather than
+        // through the schema route: that route is cached for a minute, so a
+        // second visitor to the same page never reaches the server and would
+        // never be counted. This goes through the same consent gate every other
+        // event does, which means a visitor who declined analytics is not
+        // counted. The conversion rate says so rather than pretending otherwise.
+        trackEvent('form_view', { form_id: formId, page: location.pathname });
+      })
       .catch(function () {
         // Degrade to the hosted page rather than leaving a dead container. The
         // form still works there, and works without JavaScript at all; it just

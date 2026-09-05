@@ -15,6 +15,12 @@ export type BoardCard = {
   companyName: string | null
   nextStep: string | null
   nextStepDate: string | null
+  /** Days since this deal last moved stage, or since it was created if it never
+   *  has. Derived from the stage_change activity the move already writes, so
+   *  nothing new is stored to answer it. */
+  daysInStage: number
+  /** When anything last happened on it, in days. Null when nothing ever has. */
+  daysSinceActivity: number | null
 }
 
 export type BoardColumn = {
@@ -151,9 +157,11 @@ export const readBoard = async (
       next_step_date: string | null
       owner_name: string | null
       company_name: string | null
+      days_in_stage: number
+      days_since_activity: number | null
     }>(sql`
       select id, group_key, name, amount, currency, close_date, next_step, next_step_date,
-             owner_name, company_name
+             owner_name, company_name, days_in_stage, days_since_activity
         from (
           select "deal"."id" as id,
                  ${groupExpr} as group_key,
@@ -165,6 +173,19 @@ export const readBoard = async (
                  "deal"."next_step_date"::text as next_step_date,
                  u."name" as owner_name,
                  coalesce(c."name", c."domain") as company_name,
+                 -- Two correlated reads per visible card, capped at fifty per
+                 -- column by the window below, over the index the timeline already
+                 -- has. Not a join: a deal with four hundred activities would
+                 -- multiply every row of the board.
+                 extract(day from now() - coalesce((
+                   select max(l."occurred_at") from "activity_link" l
+                     join "activity" a on a.id = l."activity_id"
+                    where l."entity_type" = 'deal' and l."entity_id" = "deal"."id"
+                      and a."type" = 'stage_change'
+                 ), "deal"."created_at"))::int as days_in_stage,
+                 (select extract(day from now() - max(l."occurred_at"))::int
+                    from "activity_link" l
+                   where l."entity_type" = 'deal' and l."entity_id" = "deal"."id") as days_since_activity,
                  row_number() over (
                    partition by ${groupExpr}
                    order by "deal"."close_date" asc nulls last, "deal"."id" desc
@@ -213,6 +234,11 @@ export const readBoard = async (
           companyName: card.company_name,
           nextStep: card.next_step,
           nextStepDate: card.next_step_date,
+          daysInStage: Number(card.days_in_stage ?? 0),
+          daysSinceActivity:
+            card.days_since_activity === null || card.days_since_activity === undefined
+              ? null
+              : Number(card.days_since_activity),
         })),
       }
     })

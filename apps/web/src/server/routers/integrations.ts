@@ -14,7 +14,13 @@ import {
 import { z } from 'zod'
 import { call } from '../errors.ts'
 import { enrichCompanyRecord, enrichRecord, INTEGRATIONS, readIntegrations, testConnection } from '../integrations/index.ts'
-import { pushSegmentToBrevo } from '../integrations/brevo.ts'
+import {
+  listBrevoCampaigns,
+  listBrevoTemplates,
+  pushSegmentToBrevo,
+  scheduleBrevoCampaign,
+  sendBrevoCampaign,
+} from '../integrations/brevo.ts'
 import {
   apolloContactUrl,
   syncSequenceActivity,
@@ -76,6 +82,44 @@ export const integrationsRouter = router({
 
   /** A Rawr segment becomes a Brevo list. Nobody who has opted out is included,
    *  and running it twice pushes each contact once. F6 §2. */
+  /** B12. Brevo keeps the designer and the sending reputation; Rawr owns the
+   *  audience, the opt-out, the schedule and the numbers. */
+  brevoTemplates: protectedProcedure.query(({ ctx }) => call(() => listBrevoTemplates(ctx.workspace))),
+
+  brevoCampaigns: protectedProcedure.query(({ ctx }) => call(() => listBrevoCampaigns(ctx.workspace))),
+
+  scheduleCampaign: protectedProcedure
+    .input(
+      z.object({
+        segmentId: z.uuid(),
+        listId: z.number().int().positive(),
+        name: z.string().min(1).max(120),
+        subject: z.string().min(1).max(200),
+        senderName: z.string().min(1).max(120),
+        senderEmail: z.email(),
+        templateId: z.number().int().positive(),
+        scheduledAt: z.string().datetime().nullish(),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      call(() =>
+        scheduleBrevoCampaign(ctx.workspace, {
+          segmentId: input.segmentId,
+          listId: input.listId,
+          name: input.name,
+          subject: input.subject,
+          senderName: input.senderName,
+          senderEmail: input.senderEmail,
+          templateId: input.templateId,
+          ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
+        }),
+      ),
+    ),
+
+  sendCampaign: protectedProcedure
+    .input(z.object({ campaignId: z.number().int().positive() }))
+    .mutation(({ ctx, input }) => call(() => sendBrevoCampaign(ctx.workspace, input.campaignId))),
+
   pushSegment: protectedProcedure
     .input(z.object({ segmentId: z.uuid(), listId: z.number().int().min(1) }))
     .mutation(({ ctx, input }) =>

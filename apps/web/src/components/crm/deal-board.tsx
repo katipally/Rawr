@@ -20,7 +20,14 @@ export type BoardCard = {
   companyName: string | null
   nextStep: string | null
   nextStepDate: string | null
+  daysInStage: number
+  daysSinceActivity: number | null
 }
+
+/** When a card starts reading as stuck. Thirty days is a sales month: shorter
+ *  and every board is amber, longer and nobody notices in time. Not configurable
+ *  until somebody asks, because a setting with one right answer is a setting. */
+const STALE_DAYS = 30
 
 export type BoardColumn = {
   key: string
@@ -247,6 +254,22 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                           {card.nextStep}
                         </p>
                       ) : null}
+                      {/* How long it has sat here, and how long since anything
+                          happened. Both derived from the timeline, and both the
+                          first thing anybody looks for on a board: a deal is
+                          rarely in trouble because of its amount. */}
+                      <p className="mt-1 flex flex-wrap gap-x-2 text-small text-secondary tabular-nums">
+                        <span className={cn(card.daysInStage >= STALE_DAYS && 'text-warning')}>
+                          {card.daysInStage === 0 ? 'Moved here today' : `${card.daysInStage}d in stage`}
+                        </span>
+                        <span>
+                          {card.daysSinceActivity === null
+                            ? 'Nothing logged yet'
+                            : card.daysSinceActivity === 0
+                              ? 'Active today'
+                              : `${card.daysSinceActivity}d quiet`}
+                        </span>
+                      </p>
                       {card.ownerName ? (
                         <p className="mt-1 flex min-w-0 items-center gap-1.5 text-small text-secondary">
                           <Avatar name={card.ownerName} size="sm" />

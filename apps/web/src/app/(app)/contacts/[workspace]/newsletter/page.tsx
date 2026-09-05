@@ -3,6 +3,7 @@ import { Badge, Card, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { CampaignPanel } from './campaign-panel.tsx'
 import { NewsletterPanel } from './newsletter-panel.tsx'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
@@ -76,6 +77,15 @@ const NewsletterPage = async ({ params }: { params: Promise<{ workspace: string 
 
       <Card title="Push an audience across">
         <NewsletterPanel
+          segments={segments.map((segment) => ({ id: segment.id, name: segment.name }))}
+          defaultListId={listId}
+          canWrite={allowed}
+          role={session.role}
+        />
+      </Card>
+
+      <Card title="Campaigns">
+        <CampaignPanel
           segments={segments.map((segment) => ({ id: segment.id, name: segment.name }))}
           defaultListId={listId}
           canWrite={allowed}

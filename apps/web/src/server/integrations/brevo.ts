@@ -284,3 +284,184 @@ export const propagateSubscriptionToBrevo = async (
       }),
   )
 }
+
+/* -- B12: the campaign, aimed and measured from here ----------------------- */
+
+export type BrevoTemplate = { id: number; name: string; subject: string | null; isActive: boolean }
+
+/** Brevo's own template gallery, so a compose step picks a design rather than
+ *  editing one. `/v3/smtp/templates` is documented as the transactional list; a
+ *  campaign's `templateId` says "existing active templates". If a workspace's
+ *  campaign designs turn out not to be in this list, the compose step still works
+ *  by naming a template id, which is why the id is shown beside every name. */
+export const listBrevoTemplates = async (ctx: WorkspaceContext): Promise<BrevoTemplate[]> => {
+  if (devIntegrationsEnabled) {
+    return [{ id: 1, name: 'Development template', subject: 'A newsletter', isActive: true }]
+  }
+  const { secret } = await credentials(ctx)
+  const answer = await json<{
+    templates?: { id: number; name: string; subject?: string; isActive?: boolean }[]
+  }>({ url: `${API}/smtp/templates?limit=100&sort=desc`, headers: headers(secret!) })
+  return (answer.templates ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    subject: row.subject ?? null,
+    isActive: row.isActive !== false,
+  }))
+}
+
+export type BrevoCampaign = {
+  id: number
+  name: string
+  subject: string | null
+  status: string
+  sentAt: string | null
+  /** Null until Brevo has something to report, which is not the same as zero. */
+  stats: {
+    sent: number
+    delivered: number
+    opens: number
+    uniqueOpens: number
+    clicks: number
+    uniqueClicks: number
+    bounces: number
+    unsubscribes: number
+    complaints: number
+  } | null
+}
+
+type BrevoStats = {
+  sent?: number
+  delivered?: number
+  viewed?: number
+  uniqueViews?: number
+  clickers?: number
+  uniqueClicks?: number
+  hardBounces?: number
+  softBounces?: number
+  unsubscriptions?: number
+  complaints?: number
+}
+
+const statsOf = (global: BrevoStats | undefined): BrevoCampaign['stats'] =>
+  global
+    ? {
+        sent: global.sent ?? 0,
+        delivered: global.delivered ?? 0,
+        opens: global.viewed ?? 0,
+        uniqueOpens: global.uniqueViews ?? 0,
+        clicks: global.clickers ?? 0,
+        uniqueClicks: global.uniqueClicks ?? 0,
+        // One number, because a hard bounce and a soft one are the same fact to
+        // somebody deciding whether the list has gone stale.
+        bounces: (global.hardBounces ?? 0) + (global.softBounces ?? 0),
+        unsubscribes: global.unsubscriptions ?? 0,
+        complaints: global.complaints ?? 0,
+      }
+    : null
+
+export const listBrevoCampaigns = async (ctx: WorkspaceContext): Promise<BrevoCampaign[]> => {
+  if (devIntegrationsEnabled) return []
+  const { secret } = await credentials(ctx)
+  const answer = await json<{
+    campaigns?: {
+      id: number
+      name: string
+      subject?: string
+      status: string
+      sentDate?: string
+      statistics?: { globalStats?: BrevoStats }
+    }[]
+  }>({
+    url: `${API}/emailCampaigns?limit=50&sort=desc&statistics=globalStats`,
+    headers: headers(secret!),
+    timeoutMs: 30_000,
+  })
+  return (answer.campaigns ?? []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    subject: row.subject ?? null,
+    status: row.status,
+    sentAt: row.sentDate ?? null,
+    stats: statsOf(row.statistics?.globalStats),
+  }))
+}
+
+export type ScheduleInput = {
+  segmentId: string
+  listId: number
+  name: string
+  subject: string
+  senderName: string
+  senderEmail: string
+  templateId: number
+  /** ISO. Absent leaves the campaign a draft, to be sent by hand. */
+  scheduledAt?: string | null
+}
+
+/** Push the audience, then create the campaign against the list it went into.
+ *
+ *  In that order and never the reverse: a campaign created first would be aimed
+ *  at whatever the list held before this push, which is the previous send's
+ *  audience. The push is the same idempotent walk `pushSegmentToBrevo` does, so
+ *  running this twice does not double the list. */
+export const scheduleBrevoCampaign = async (
+  ctx: WorkspaceContext,
+  input: ScheduleInput,
+): Promise<{ campaignId: number | null; pushed: number; skipped: number }> => {
+  assertCanWrite(ctx, 'segment')
+  const push = await pushSegmentToBrevo(ctx, { segmentId: input.segmentId, listId: input.listId })
+  if (push.pushed === 0) {
+    throw new Error('Nobody in that segment can be mailed, so there is nothing to send to.')
+  }
+
+  if (devIntegrationsEnabled) return { campaignId: null, ...push }
+
+  const { secret, id } = await credentials(ctx)
+  const key = `brevo:campaign:${input.listId}:${createHash('sha256')
+    .update(`${input.name} ${input.subject} ${input.templateId} ${input.scheduledAt ?? 'draft'}`)
+    .digest('hex')
+    .slice(0, 32)}`
+
+  const outcome = await once(ctx, { key, operation: 'brevo.create_campaign', integrationId: id }, () =>
+    attempt(
+      { ctx, kind: 'brevo', jobName: 'brevo.create_campaign', payload: { listId: input.listId, name: input.name } },
+      () =>
+        json<{ id?: number }>({
+          url: `${API}/emailCampaigns`,
+          method: 'POST',
+          headers: headers(secret!),
+          body: {
+            name: input.name,
+            subject: input.subject,
+            sender: { name: input.senderName, email: input.senderEmail },
+            templateId: input.templateId,
+            recipients: { listIds: [input.listId] },
+            ...(input.scheduledAt ? { scheduledAt: input.scheduledAt } : {}),
+          },
+          timeoutMs: 30_000,
+        }),
+    ),
+  )
+
+  return { campaignId: (outcome.response as { id?: number } | null)?.id ?? null, ...push }
+}
+
+/** Send a campaign that is already a draft in Brevo. Separate from creating one
+ *  on purpose: "write it" and "send it to eighteen hundred people" are different
+ *  decisions and belong behind different buttons. */
+export const sendBrevoCampaign = async (ctx: WorkspaceContext, campaignId: number): Promise<void> => {
+  assertCanWrite(ctx, 'segment')
+  if (devIntegrationsEnabled) return
+  const { secret, id } = await credentials(ctx)
+  await once(ctx, { key: `brevo:send:${campaignId}`, operation: 'brevo.send_campaign', integrationId: id }, () =>
+    attempt({ ctx, kind: 'brevo', jobName: 'brevo.send_campaign', payload: { campaignId } }, () =>
+      json<null>({
+        url: `${API}/emailCampaigns/${campaignId}/sendNow`,
+        method: 'POST',
+        headers: headers(secret!),
+        timeoutMs: 30_000,
+      }),
+    ),
+  )
+}

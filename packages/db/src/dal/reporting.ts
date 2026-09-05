@@ -137,7 +137,19 @@ export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promi
 
 export type FormsReport = {
   days: { day: string; clean: number; held: number }[]
-  forms: { form: string; submissions: number; held: number; contacts: number; deals: number }[]
+  forms: {
+    form: string
+    submissions: number
+    held: number
+    contacts: number
+    deals: number
+    /** Times the embed painted this form, through the consent-gated collector.
+     *  Zero for a form only ever opened on its hosted page, and undercounted by
+     *  whoever declined analytics, which is what a consent gate is for. */
+    views: number
+    /** Distinct pages it was painted on. */
+    appearsOn: number
+  }[]
 }
 
 /** Fills per day, and what each form actually produced.
@@ -157,14 +169,30 @@ export const formsReport = async (ctx: WorkspaceContext, range: Range): Promise<
        order by 1
        limit ${MAX_ROWS}`)
 
+    // Views come from their own grouped scan rather than a join: joining a
+    // per-view table to a per-submission one multiplies both counts, which is how
+    // a conversion rate ends up over a hundred percent.
+    const views = await tx.execute<{ form_id: string; views: number; pages: number }>(sql`
+      select e.properties ->> 'form_id' as form_id,
+             count(*)::int as views,
+             count(distinct e.properties ->> 'page')::int as pages
+        from custom_event e
+       where e.name = 'form_view'
+         and e.properties ->> 'form_id' is not null
+         and ${bounds(range, 'e.at')}
+       group by 1
+       limit ${MAX_ROWS}`)
+    const viewsByForm = new Map(views.map((row) => [String(row.form_id), row]))
+
     const forms = await tx.execute<{
+      id: string
       form: string
       submissions: number
       held: number
       contacts: number
       deals: number
     }>(sql`
-      select f.name as form,
+      select f.id, f.name as form,
              count(s.id)::int as submissions,
              count(s.id) filter (where s.spam_state <> 'clean')::int as held,
              count(distinct s.contact_id)::int as contacts,
@@ -179,13 +207,18 @@ export const formsReport = async (ctx: WorkspaceContext, range: Range): Promise<
 
     return {
       days: days.map((row) => ({ day: String(row.day), clean: Number(row.clean), held: Number(row.held) })),
-      forms: forms.map((row) => ({
-        form: row.form,
-        submissions: Number(row.submissions),
-        held: Number(row.held),
-        contacts: Number(row.contacts),
-        deals: Number(row.deals),
-      })),
+      forms: forms.map((row) => {
+        const seen = viewsByForm.get(String(row.id))
+        return {
+          form: row.form,
+          submissions: Number(row.submissions),
+          held: Number(row.held),
+          contacts: Number(row.contacts),
+          deals: Number(row.deals),
+          views: Number(seen?.views ?? 0),
+          appearsOn: Number(seen?.pages ?? 0),
+        }
+      }),
     }
   })
 
