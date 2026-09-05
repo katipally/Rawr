@@ -49,9 +49,15 @@ const AutomationsPage = async () => {
               days&rdquo; trigger: it is the one useful rule that is not an event.
             </p>
             <p>
-              Conditions use the same filter language segments do. Actions run in order and a
+              Conditions use the same filter language segments do. Steps run in order and a
               failure stops the rest, because a rule half-applied leaves a record in a state no rule
               describes. Every firing is logged, including the ones whose conditions were false.
+            </p>
+            <p>
+              A rule can wait. A step that waits parks the record and the worker picks it up when
+              the time comes, and a step that checks looks at the record again as it is then — so
+              &ldquo;wait three days, and if they still have not replied, make a task&rdquo; is
+              three steps in a row. A run still waiting shows in the log before the finished ones.
             </p>
           </>
         }
@@ -60,10 +66,29 @@ const AutomationsPage = async () => {
       <AutomationList
         rows={rows.map((row) => ({
           ...row,
+          // The editor holds every config value as a string, because each one came
+          // out of an input. The server coerces on the way back in.
+          steps: row.steps.map((step) =>
+            step.kind === 'action'
+              ? {
+                  kind: 'action' as const,
+                  type: step.type,
+                  config: Object.fromEntries(
+                    Object.entries(step.config).map(([key, value]) => [key, String(value ?? '')]),
+                  ),
+                }
+              : step.kind === 'delay'
+                ? { kind: 'delay' as const, minutes: step.minutes }
+                : { kind: 'guard' as const },
+          ),
           createdAt: row.createdAt.toISOString(),
           lastRunAt: row.lastRunAt?.toISOString() ?? null,
         }))}
-        runs={runs.map((run) => ({ ...run, at: run.at.toISOString() }))}
+        runs={runs.map((run) => ({
+          ...run,
+          resumeAt: run.resumeAt?.toISOString() ?? null,
+          at: run.at.toISOString(),
+        }))}
         people={people.map((person) => ({ id: person.userId, name: person.name }))}
         stages={stages.map((stage) => stage.name)}
         fieldsByObject={{

@@ -1,4 +1,5 @@
-import { boolean, index, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
 import { automationStateEnum, automationTriggerEnum, entityTypeEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
@@ -29,10 +30,13 @@ export const automation = pgTable(
     /** FilterGroup[], compiled against the record that triggered it, exactly as a
      *  segment's are. One filter language in the product, not two. */
     conditions: jsonb('conditions').notNull().default([]),
-    /** Ordered {type, config}. Run in order, and a failure stops the rest: an
-     *  automation half-applied is worse than one that did not run, because the
-     *  record ends up in a state no rule describes. */
-    actions: jsonb('actions').notNull().default([]),
+    /** Ordered steps. Three kinds: an action, a delay that parks the run, and a
+     *  guard that re-reads the record and stops if it no longer matches.
+     *
+     *  Run in order, and a failure stops the rest: an automation half-applied is
+     *  worse than one that did not run, because the record ends up in a state no
+     *  rule describes. */
+    steps: jsonb('steps').notNull().default([]),
     createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -43,11 +47,15 @@ export const automation = pgTable(
   ],
 )
 
-/** Every firing, including the ones that did nothing.
+/** Every firing, including the ones that did nothing and the ones still going.
  *
  *  "It did not run" and "it ran and the conditions were false" are different
  *  answers to the only question anybody asks about an automation, and a log that
- *  records just the successes cannot tell them apart. */
+ *  records just the successes cannot tell them apart.
+ *
+ *  Once a rule can wait, this is the run itself and not only its epitaph: a row
+ *  in `waiting` is one record parked partway through, and the set of them is the
+ *  dispatcher's entire queue. */
 export const automationRun = pgTable(
   'automation_run',
   {
@@ -62,10 +70,25 @@ export const automationRun = pgTable(
     /** What happened, in the words the screen shows: which actions ran, or the
      *  condition that was false, or the error verbatim. */
     detail: text('detail'),
+    /** The next step to run. Left where it stopped, so a failure says how far it
+     *  got and not only that it failed. */
+    stepIndex: integer('step_index').notNull().default(0),
+    /** When to pick this run up again. Null unless it is waiting, which is what
+     *  makes the index below the queue rather than the history. */
+    resumeAt: timestamp('resume_at', { withTimezone: true }),
+    /** Held while a resume is in flight, so two workers cannot advance one run
+     *  twice. Swept like a sequence enrollment's. */
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    /** What each finished step did, in order. `detail` is one string and a run
+     *  spanning three days is written in three pieces. */
+    trail: jsonb('trail').notNull().default([]),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('automation_run_recent_idx').on(t.workspaceId, t.automationId, t.at.desc()),
     index('automation_run_entity_idx').on(t.workspaceId, t.entityId),
+    index('automation_run_due_idx')
+      .on(t.workspaceId, t.resumeAt)
+      .where(sql`resume_at is not null`),
   ],
 )

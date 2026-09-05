@@ -44,6 +44,30 @@ export const ACTION_TYPES: ActionType[] = [
 
 export type AutomationAction = { type: ActionType; config: Record<string, unknown> }
 
+/** One step of a rule.
+ *
+ *  A rule used to be a list of actions run inside the request that triggered it,
+ *  which cannot say "wait, then look again". Three kinds cover what teams ask
+ *  for, and they compose in a straight line:
+ *
+ *    action  do one of the five things
+ *    delay   park the run and come back to it later
+ *    guard   re-read the record now and stop unless it still matches
+ *
+ *  A guard is how a branch is written here. "Wait three days, and if they have
+ *  not replied, make a task" is a delay then a guard then an action, and it is a
+ *  list a person can read down. Two arms would need a graph, an editor for the
+ *  graph, and a way to resume into either arm; a second arm is a second rule. */
+export type AutomationStep =
+  | ({ kind: 'action' } & AutomationAction)
+  | { kind: 'delay'; minutes: number }
+  | { kind: 'guard'; conditions: FilterGroup[] }
+
+/** A day is the unit people reach for, but a delay measured in minutes lets
+ *  "twenty minutes after the form" exist too. Capped at a year: a rule that fires
+ *  after longer than that is a rule nobody will remember writing. */
+export const MAX_DELAY_MINUTES = 366 * 24 * 60
+
 export type AutomationRow = {
   id: string
   name: string
@@ -55,7 +79,7 @@ export type AutomationRow = {
   objectKey: ObjectKey
   triggerConfig: Record<string, unknown>
   conditions: FilterGroup[]
-  actions: AutomationAction[]
+  steps: AutomationStep[]
   /** Denormalised for the list: how many times it has fired, and when last. */
   runCount: number
   lastRunAt: Date | null
@@ -78,12 +102,28 @@ const objectOf = (row: { triggerConfig: unknown; trigger: string }): ObjectKey =
   return (allowed.includes(configured as ObjectKey) ? configured : allowed[0]) as ObjectKey
 }
 
-const asActions = (input: unknown): AutomationAction[] =>
+/** Anything unrecognised is dropped rather than throwing: a rule saved by a newer
+ *  version, or one hand-edited in the database, should run the steps it can and
+ *  not take the screen down. */
+const asSteps = (input: unknown): AutomationStep[] =>
   Array.isArray(input)
-    ? input.flatMap((entry) => {
-        const action = entry as { type?: string; config?: unknown }
-        if (!ACTION_TYPES.includes(action.type as ActionType)) return []
-        return [{ type: action.type as ActionType, config: (action.config ?? {}) as Record<string, unknown> }]
+    ? input.flatMap((entry): AutomationStep[] => {
+        const step = entry as { kind?: string; type?: string; config?: unknown; minutes?: unknown; conditions?: unknown }
+        if (step.kind === 'delay') {
+          const minutes = Math.floor(Number(step.minutes))
+          return Number.isFinite(minutes) && minutes > 0
+            ? [{ kind: 'delay', minutes: Math.min(minutes, MAX_DELAY_MINUTES) }]
+            : []
+        }
+        if (step.kind === 'guard') return [{ kind: 'guard', conditions: parseFilters(step.conditions) }]
+        // No kind at all is an action: that is the shape every rule had before
+        // steps existed, and one may still be sitting in a column somewhere.
+        if (!ACTION_TYPES.includes(step.type as ActionType)) return []
+        return [{
+          kind: 'action',
+          type: step.type as ActionType,
+          config: (step.config ?? {}) as Record<string, unknown>,
+        }]
       })
     : []
 
@@ -94,7 +134,7 @@ const SELECT = {
   trigger: automation.trigger,
   triggerConfig: automation.triggerConfig,
   conditions: automation.conditions,
-  actions: automation.actions,
+  steps: automation.steps,
   createdAt: automation.createdAt,
 }
 
@@ -106,7 +146,7 @@ const shape = (row: Record<string, unknown>): AutomationRow => ({
   objectKey: objectOf(row as { triggerConfig: unknown; trigger: string }),
   triggerConfig: (row.triggerConfig ?? {}) as Record<string, unknown>,
   conditions: parseFilters(row.conditions),
-  actions: asActions(row.actions),
+  steps: asSteps(row.steps),
   runCount: Number(row.runCount ?? 0),
   lastRunAt: row.lastRunAt ? new Date(String(row.lastRunAt)) : null,
   createdAt: new Date(String(row.createdAt)),
@@ -139,7 +179,7 @@ export type SaveAutomationInput = {
   objectKey: ObjectKey
   triggerConfig?: Record<string, unknown>
   conditions: FilterGroup[]
-  actions: AutomationAction[]
+  steps: AutomationStep[]
   isActive?: boolean
 }
 
@@ -154,8 +194,11 @@ export const saveAutomation = async (
     if (!OBJECTS_FOR_TRIGGER[input.trigger].includes(input.objectKey)) {
       throw new Error(`${input.trigger.replace('_', ' ')} does not happen to a ${input.objectKey}.`)
     }
-    if (input.actions.length === 0) {
-      throw new Error('An automation with no actions would watch for something and then do nothing.')
+    if (input.steps.length === 0) {
+      throw new Error('An automation with no steps would watch for something and then do nothing.')
+    }
+    if (input.steps.every((step) => step.kind !== 'action')) {
+      throw new Error('An automation that only waits and checks never does anything. Add an action.')
     }
 
     // Refused at save with the field and operator named, rather than failing on
@@ -167,13 +210,20 @@ export const saveAutomation = async (
     // means. `scopeFor(null)` resolves those tokens to nothing and the save is
     // refused with the field named.
     compileFilters(object, input.conditions, scopeFor(null))
+    // A guard is the same filter language against the same object, so it is
+    // checked the same way and at the same moment: a rule with an unusable guard
+    // is refused here rather than three days later, parked mid-run, where the
+    // person who wrote it is no longer looking.
+    for (const step of input.steps) {
+      if (step.kind === 'guard') compileFilters(object, step.conditions, scopeFor(null))
+    }
 
     const values = {
       name,
       trigger: input.trigger,
       triggerConfig: { ...(input.triggerConfig ?? {}), object: input.objectKey },
       conditions: input.conditions,
-      actions: input.actions,
+      steps: input.steps,
       isActive: input.isActive ?? false,
       updatedAt: new Date(),
     }
@@ -269,52 +319,164 @@ export const conditionsHold = async (
   })
 }
 
+/** The slug this workspace lives under, for the link an action puts in Slack.
+ *
+ *  Everywhere else it arrives from the session or the public page's own URL. A
+ *  resumed run has neither: it is picked up by the worker days after whoever
+ *  triggered it went home. Row level security makes the `limit 1` exact, because
+ *  a scoped transaction can see exactly one workspace row. */
+export const workspaceSlugFor = async (ctx: WorkspaceContext): Promise<string> =>
+  withWorkspace(ctx, async (tx) => {
+    const [row] = await tx.execute<{ slug: string }>(sql`select slug from workspace limit 1`)
+    if (!row) throw new Error('That workspace no longer exists.')
+    return String(row.slug)
+  })
+
+export type AutomationRunState = 'waiting' | 'done' | 'skipped' | 'failed'
+
 export type AutomationRunRow = {
   id: string
   automationId: string
   automationName: string
   entityType: string
   entityId: string
-  state: 'done' | 'skipped' | 'failed'
+  state: AutomationRunState
   detail: string | null
+  /** Which step it is parked before, and when it wakes. Null on a finished run. */
+  stepIndex: number
+  resumeAt: Date | null
   at: Date
 }
 
-export const recordAutomationRun = async (
+/** Opens the run. One row per firing, written before the first step so that a
+ *  process dying mid-run leaves evidence rather than silence. */
+export const openAutomationRun = async (
   ctx: WorkspaceContext,
-  input: {
-    automationId: string
-    entityType: ObjectKey
-    entityId: string
-    state: 'done' | 'skipped' | 'failed'
-    detail?: string | null
-  },
+  input: { automationId: string; entityType: ObjectKey; entityId: string },
+): Promise<string> =>
+  withWorkspace(ctx, async (tx) => {
+    const [row] = await tx
+      .insert(automationRun)
+      .values({
+        workspaceId: ctx.workspaceId,
+        automationId: input.automationId,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        state: 'waiting',
+        stepIndex: 0,
+      })
+      .returning({ id: automationRun.id })
+    if (!row) throw new Error('The automation run could not be opened.')
+    return row.id
+  })
+
+/** Parks a run at a step, to be picked up by the dispatcher. */
+export const parkAutomationRun = async (
+  ctx: WorkspaceContext,
+  runId: string,
+  input: { stepIndex: number; resumeAt: Date; trail: string[] },
 ): Promise<void> => {
   await withWorkspace(ctx, (tx) =>
-    tx.insert(automationRun).values({
-      workspaceId: ctx.workspaceId,
-      automationId: input.automationId,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      state: input.state,
-      detail: input.detail?.slice(0, 1000) ?? null,
-    }),
+    tx
+      .update(automationRun)
+      .set({
+        state: 'waiting',
+        stepIndex: input.stepIndex,
+        resumeAt: input.resumeAt,
+        leaseUntil: null,
+        trail: input.trail,
+      })
+      .where(eq(automationRun.id, runId)),
   )
 }
+
+/** Closes the run. `resumeAt` is cleared, which is what takes it out of the
+ *  dispatcher's partial index: a finished run costs the queue nothing. */
+export const finishAutomationRun = async (
+  ctx: WorkspaceContext,
+  runId: string,
+  input: { state: Exclude<AutomationRunState, 'waiting'>; stepIndex: number; trail: string[]; detail?: string | null },
+): Promise<void> => {
+  await withWorkspace(ctx, (tx) =>
+    tx
+      .update(automationRun)
+      .set({
+        state: input.state,
+        stepIndex: input.stepIndex,
+        resumeAt: null,
+        leaseUntil: null,
+        trail: input.trail,
+        detail: (input.detail ?? input.trail.join(', ')).slice(0, 1000) || null,
+      })
+      .where(eq(automationRun.id, runId)),
+  )
+}
+
+/** Takes a due run, if nobody else has it. The lease is what stops two workers
+ *  advancing the same run, and it is checked and set in one statement so there is
+ *  no window between the two.
+ *
+ *  There is deliberately no sweep alongside this, unlike sequences. A lease a
+ *  dead process left behind simply expires, and the next dispatch tick claims the
+ *  run because that is the same condition this statement already tests. A sweep
+ *  would be a second job to say what `lease_until < now()` says here. */
+export const claimAutomationRun = async (
+  ctx: WorkspaceContext,
+  runId: string,
+  leaseMinutes = 5,
+): Promise<{ automationId: string; entityType: ObjectKey; entityId: string; stepIndex: number; trail: string[] } | null> =>
+  withWorkspace(ctx, async (tx) => {
+    const [row] = await tx.execute<{
+      automation_id: string
+      entity_type: ObjectKey
+      entity_id: string
+      step_index: number
+      trail: unknown
+    }>(sql`
+      update automation_run
+         set lease_until = now() + ${`${leaseMinutes} minutes`}::interval
+       where id = ${runId}::uuid
+         and state = 'waiting'
+         and resume_at is not null
+         and resume_at <= now()
+         and (lease_until is null or lease_until < now())
+      returning automation_id, entity_type, entity_id, step_index, trail`)
+    if (!row) return null
+    return {
+      automationId: String(row.automation_id),
+      entityType: row.entity_type,
+      entityId: String(row.entity_id),
+      stepIndex: Number(row.step_index),
+      trail: Array.isArray(row.trail) ? (row.trail as string[]) : [],
+    }
+  })
+
 
 export const listAutomationRuns = async (
   ctx: WorkspaceContext,
   filter: { automationId?: string } = {},
 ): Promise<AutomationRunRow[]> =>
   withWorkspace(ctx, async (tx) => {
-    const rows = await tx.execute<AutomationRunRow & { automation_name: string }>(sql`
+    const rows = await tx.execute<
+      Omit<AutomationRunRow, 'stepIndex' | 'resumeAt' | 'at'> & {
+        automation_name: string
+        step_index: number
+        resume_at: unknown
+        at: unknown
+      }
+    >(sql`
       select r.id, r.automation_id as "automationId", a.name as automation_name,
              r.entity_type as "entityType", r.entity_id as "entityId",
-             r.state, r.detail, r.at
+             r.state, r.detail, r.step_index, r.resume_at, r.at
         from automation_run r join automation a on a.id = r.automation_id
        ${filter.automationId ? sql`where r.automation_id = ${filter.automationId}::uuid` : sql``}
-       order by r.at desc
+       -- Runs still waiting first, whatever their age: what a rule is about to do
+       -- is more use than what it did last week, and a run parked three days ago
+       -- would otherwise sink below a hundred finished ones.
+       order by (r.resume_at is not null) desc, coalesce(r.resume_at, r.at) desc
        limit 200`)
+    const when = (value: unknown): Date | null =>
+      value == null ? null : value instanceof Date ? value : new Date(String(value))
     return rows.map((row) => ({
       id: String(row.id),
       automationId: String(row.automationId),
@@ -323,7 +485,9 @@ export const listAutomationRuns = async (
       entityId: String(row.entityId),
       state: row.state,
       detail: row.detail,
-      at: row.at instanceof Date ? row.at : new Date(String(row.at)),
+      stepIndex: Number(row.step_index ?? 0),
+      resumeAt: when(row.resume_at),
+      at: when(row.at) ?? new Date(),
     }))
   })
 

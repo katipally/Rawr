@@ -247,4 +247,11 @@ export const automationTriggerEnum = pgEnum('rawr_automation_trigger', [
 /** `skipped` is the interesting one: the automation was armed, the event
  *  happened, and a condition was false. Without it a log of successes cannot say
  *  whether a rule is broken or simply not matching. */
-export const automationStateEnum = pgEnum('rawr_automation_state', ['done', 'skipped', 'failed'])
+export const automationStateEnum = pgEnum('rawr_automation_state', [
+  /** Parked partway through, waiting on a delay. The set of these is the
+   *  dispatcher's queue. */
+  'waiting',
+  'done',
+  'skipped',
+  'failed',
+])

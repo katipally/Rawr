@@ -1,0 +1,21 @@
+-- A rule becomes a sequence of steps, and a run becomes something that can wait.
+--
+-- The rules until now were "when this happens, do these things", all of it inside
+-- the request that caused it. That cannot express the thing every team asks for
+-- first: wait, then look again, and only then act. So an automation holds ordered
+-- steps rather than ordered actions, and three kinds cover it:
+--
+--   action  the five that already existed, unchanged
+--   delay   park the run and come back to it
+--   guard   look at the record as it is NOW, and stop if it no longer matches
+--
+-- Linear, with an early exit, rather than a branching graph. "Wait three days,
+-- and if they have not replied, make a task" is a guard, and a guard is one row
+-- in a list; two arms would be a graph editor for a case nothing here needs. A
+-- second arm, when something wants one, is a second rule.
+--
+-- The state value is alone in this file because Postgres refuses to use an enum
+-- value in the same transaction that added it, and the migrator runs one
+-- transaction per file. Everything that reads 'waiting' is in the next one.
+
+ALTER TYPE "rawr_automation_state" ADD VALUE IF NOT EXISTS 'waiting' BEFORE 'done';

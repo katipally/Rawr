@@ -1,10 +1,14 @@
 import {
   armedFor,
+  claimAutomationRun,
   conditionsHold,
   createTask,
+  finishAutomationRun,
   getRecord,
   listLifecycleStages,
-  recordAutomationRun,
+  openAutomationRun,
+  readAutomation,
+  parkAutomationRun,
   updateRecord,
   type AutomationAction,
   type AutomationRow,
@@ -117,45 +121,67 @@ const runAction = async (
   }
 }
 
-const runOne = async (
+/** Walks the steps from `from`, and returns when it either finishes or parks.
+ *
+ *  The one function both entry points use: the trigger runs it from step zero,
+ *  and the dispatcher runs it from wherever a delay left it. A run that never
+ *  waits does the whole list in one pass, which is exactly what a rule did before
+ *  delays existed.
+ *
+ *  A failure stops the rest, unchanged: an automation half-applied leaves a
+ *  record in a state no rule describes, which is worse than one that did not run.
+ *  The trail says how far it got. */
+export const walkSteps = async (
   ctx: WorkspaceContext,
   event: AutomationEvent,
   rule: AutomationRow,
+  runId: string,
+  from: number,
+  trail: string[],
   name: string,
 ): Promise<void> => {
+  const done = [...trail]
   try {
-    if (!(await conditionsHold(ctx, event.objectKey, event.entityId, rule.conditions))) {
-      await recordAutomationRun(ctx, {
-        automationId: rule.id,
-        entityType: event.objectKey,
-        entityId: event.entityId,
-        state: 'skipped',
-        detail: 'The conditions did not hold for this record.',
-      })
-      return
+    for (let i = from; i < rule.steps.length; i += 1) {
+      const step = rule.steps[i]
+      if (!step) continue
+
+      if (step.kind === 'delay') {
+        await parkAutomationRun(ctx, runId, {
+          stepIndex: i + 1,
+          resumeAt: new Date(Date.now() + step.minutes * 60_000),
+          trail: [...done, `waited ${describeDelay(step.minutes)}`],
+        })
+        return
+      }
+
+      if (step.kind === 'guard') {
+        // Judged against the record as it is now, which after a delay is the
+        // whole point: three days later it may have been won, reassigned or
+        // deleted, and a guard reading a copy from before the wait would be a
+        // guard that lies.
+        if (!(await conditionsHold(ctx, event.objectKey, event.entityId, step.conditions))) {
+          await finishAutomationRun(ctx, runId, {
+            state: 'skipped',
+            stepIndex: i,
+            trail: done,
+            detail: [...done, 'stopped: the record no longer matches'].join(', '),
+          })
+          return
+        }
+        done.push('checked the record still matches')
+        continue
+      }
+
+      done.push(await runAction(ctx, event, step, rule.id, name))
     }
 
-    // In order, and a failure stops the rest: an automation half-applied leaves a
-    // record in a state no rule describes, which is worse than one that did not
-    // run at all. The log says how far it got.
-    const done: string[] = []
-    for (const action of rule.actions) {
-      done.push(await runAction(ctx, event, action, rule.id, name))
-    }
-
-    await recordAutomationRun(ctx, {
-      automationId: rule.id,
-      entityType: event.objectKey,
-      entityId: event.entityId,
-      state: 'done',
-      detail: done.join(', '),
-    })
+    await finishAutomationRun(ctx, runId, { state: 'done', stepIndex: rule.steps.length, trail: done })
   } catch (cause) {
-    await recordAutomationRun(ctx, {
-      automationId: rule.id,
-      entityType: event.objectKey,
-      entityId: event.entityId,
+    await finishAutomationRun(ctx, runId, {
       state: 'failed',
+      stepIndex: from,
+      trail: done,
       detail: cause instanceof Error ? cause.message : String(cause),
     }).catch(() => {
       // The database is the last place to record this. If it is unreachable the
@@ -163,6 +189,100 @@ const runOne = async (
       // that mattered.
     })
   }
+}
+
+/** "3 days", "2 hours", "20 minutes". For the run log, which a person reads. */
+const describeDelay = (minutes: number): string => {
+  if (minutes % 1440 === 0) {
+    const days = minutes / 1440
+    return `${days} day${days === 1 ? '' : 's'}`
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60
+    return `${hours} hour${hours === 1 ? '' : 's'}`
+  }
+  return `${minutes} minute${minutes === 1 ? '' : 's'}`
+}
+
+const runOne = async (
+  ctx: WorkspaceContext,
+  event: AutomationEvent,
+  rule: AutomationRow,
+  name: string,
+): Promise<void> => {
+  const runId = await openAutomationRun(ctx, {
+    automationId: rule.id,
+    entityType: event.objectKey,
+    entityId: event.entityId,
+  })
+
+  if (!(await conditionsHold(ctx, event.objectKey, event.entityId, rule.conditions))) {
+    await finishAutomationRun(ctx, runId, {
+      state: 'skipped',
+      stepIndex: 0,
+      trail: [],
+      detail: 'The conditions did not hold for this record.',
+    })
+    return
+  }
+
+  await walkSteps(ctx, event, rule, runId, 0, [], name)
+}
+
+/** Pick a parked run back up. Called by the worker through the internal route,
+ *  never by a request.
+ *
+ *  Every reason not to continue is answered the same way: end the run with a
+ *  sentence saying why. A rule switched off, deleted, or pointing at a record
+ *  that has since gone are all ordinary, and none of them is a failure to retry. */
+export const resumeAutomation = async (
+  ctx: WorkspaceContext,
+  runId: string,
+  workspaceSlug: string,
+): Promise<{ resumed: boolean; reason?: string }> => {
+  const claimed = await claimAutomationRun(ctx, runId)
+  // Somebody else has it, or it is not due. Not an error: the dispatcher is
+  // allowed to be optimistic and the lease is what settles it.
+  if (!claimed) return { resumed: false, reason: 'not due, or already in flight' }
+
+  const rule = await readAutomation(ctx, claimed.automationId)
+  if (!rule || !rule.isActive) {
+    await finishAutomationRun(ctx, runId, {
+      state: 'skipped',
+      stepIndex: claimed.stepIndex,
+      trail: claimed.trail,
+      detail: [...claimed.trail, rule ? 'stopped: the rule was switched off' : 'stopped: the rule was deleted'].join(', '),
+    })
+    return { resumed: false, reason: 'the rule is no longer running' }
+  }
+
+  const record = await getRecord(ctx, claimed.entityType, claimed.entityId)
+  if (!record) {
+    await finishAutomationRun(ctx, runId, {
+      state: 'skipped',
+      stepIndex: claimed.stepIndex,
+      trail: claimed.trail,
+      detail: [...claimed.trail, 'stopped: the record was deleted while it waited'].join(', '),
+    })
+    return { resumed: false, reason: 'the record is gone' }
+  }
+
+  await walkSteps(
+    ctx,
+    {
+      trigger: rule.trigger,
+      objectKey: claimed.entityType,
+      entityId: claimed.entityId,
+      displayName: record.displayName,
+      workspaceSlug,
+    },
+    rule,
+    runId,
+    claimed.stepIndex,
+    claimed.trail,
+    record.displayName,
+  )
+  return { resumed: true }
 }
 
 /** Fire everything armed for this event. Never awaited by a request. */

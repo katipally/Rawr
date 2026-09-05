@@ -1,5 +1,6 @@
 import {
   ACTION_TYPES,
+  MAX_DELAY_MINUTES,
   AUTOMATION_TRIGGERS,
   FIELD_TYPES,
   ROLES,
@@ -10,7 +11,6 @@ import {
   removeAutomation,
   saveAutomation,
   setAutomationActive,
-  type AutomationAction,
   addMember,
   auditEntities,
   deleteTeam,
@@ -333,10 +333,27 @@ export const adminRouter = router({
           trigger: z.enum(AUTOMATION_TRIGGERS),
           object: objectKey,
           conditions: z.array(z.unknown()).max(10),
-          actions: z
-            .array(z.object({ type: z.enum(ACTION_TYPES), config: z.record(z.string().max(64), z.unknown()) }))
+          /** A discriminated union so a delay cannot arrive without its minutes
+           *  and a guard cannot arrive without its conditions. Twenty steps is
+           *  more than any readable rule and well short of anything that could
+           *  make the runner slow. */
+          steps: z
+            .array(
+              z.discriminatedUnion('kind', [
+                z.object({
+                  kind: z.literal('action'),
+                  type: z.enum(ACTION_TYPES),
+                  config: z.record(z.string().max(64), z.unknown()),
+                }),
+                z.object({
+                  kind: z.literal('delay'),
+                  minutes: z.number().int().min(1).max(MAX_DELAY_MINUTES),
+                }),
+                z.object({ kind: z.literal('guard'), conditions: z.array(z.unknown()).max(10) }),
+              ]),
+            )
             .min(1)
-            .max(10),
+            .max(20),
           isActive: z.boolean().optional(),
         }),
       )
@@ -348,7 +365,11 @@ export const adminRouter = router({
             trigger: input.trigger,
             objectKey: input.object,
             conditions: parseFilters(input.conditions),
-            actions: input.actions as AutomationAction[],
+            steps: input.steps.map((step) =>
+              step.kind === 'guard'
+                ? { kind: 'guard' as const, conditions: parseFilters(step.conditions) }
+                : step,
+            ),
             ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
           }),
         ),

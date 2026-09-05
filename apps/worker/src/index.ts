@@ -1,6 +1,7 @@
 import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
 import { owner, recordDeadLetter } from './db.ts'
+import { automationJobs, dispatchAutomations } from './jobs/automations.ts'
 import { checkIntegrations } from './jobs/check-integrations.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
@@ -21,6 +22,7 @@ const JOBS: Job[] = [
   evaluateSegments,
   ...mailJobs,
   ...sequenceJobs,
+  ...automationJobs,
   checkIntegrations,
   syncApollo,
 ]
@@ -102,6 +104,10 @@ await boss.schedule(dispatchMailboxBodies.name, '*/5 * * * *', {})
 // of the next hour, and the scan is one indexed range over the due queue.
 await boss.schedule(dispatchSequences.name, '* * * * *', {})
 await boss.schedule(sweepSequenceLeases.name, '*/10 * * * *', {})
+// B11. Every minute, for the same reason a sequence step is: a rule that says
+// "wait twenty minutes" should not wait until the top of the hour, and the scan
+// is one indexed range over the runs that are actually parked.
+await boss.schedule(dispatchAutomations.name, '* * * * *', {})
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})

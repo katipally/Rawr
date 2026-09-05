@@ -10,13 +10,21 @@ type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_
 type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task' | 'notify_slack'
 type ObjectKey = 'contact' | 'company' | 'deal'
 
+/** What the editor holds. Config values are strings here and coerced on save:
+ *  every one of them comes out of an input, and a half-typed number is a string
+ *  either way. */
+export type StepView =
+  | { kind: 'action'; type: ActionType; config: Record<string, string> }
+  | { kind: 'delay'; minutes: number }
+  | { kind: 'guard' }
+
 export type AutomationRowView = {
   id: string
   name: string
   isActive: boolean
   trigger: Trigger
   objectKey: ObjectKey
-  actions: { type: ActionType; config: Record<string, unknown> }[]
+  steps: StepView[]
   runCount: number
   lastRunAt: string | null
   createdAt: string
@@ -27,8 +35,10 @@ export type RunView = {
   automationName: string
   entityType: string
   entityId: string
-  state: 'done' | 'skipped' | 'failed'
+  state: 'waiting' | 'done' | 'skipped' | 'failed'
   detail: string | null
+  /** Set only while it is parked, which is what the list leads with. */
+  resumeAt: string | null
   at: string
 }
 
@@ -58,7 +68,169 @@ const ACTIONS: { key: ActionType; label: string }[] = [
 
 const OBJECT_LABEL: Record<ObjectKey, string> = { contact: 'Contact', company: 'Company', deal: 'Deal' }
 
-const STATE_TONE = { done: 'ok', skipped: 'neutral', failed: 'error' } as const
+const STATE_TONE = { waiting: 'accent', done: 'ok', skipped: 'neutral', failed: 'error' } as const
+
+/** The delays a person actually reaches for, so the common case is one click and
+ *  the odd one is still typeable in minutes. */
+const DELAYS: { minutes: number; label: string }[] = [
+  { minutes: 15, label: '15 minutes' },
+  { minutes: 60, label: '1 hour' },
+  { minutes: 60 * 4, label: '4 hours' },
+  { minutes: 60 * 24, label: '1 day' },
+  { minutes: 60 * 24 * 3, label: '3 days' },
+  { minutes: 60 * 24 * 7, label: '1 week' },
+  { minutes: 60 * 24 * 14, label: '2 weeks' },
+  { minutes: 60 * 24 * 30, label: '30 days' },
+]
+
+const describeDelay = (minutes: number): string =>
+  DELAYS.find((entry) => entry.minutes === minutes)?.label ??
+  (minutes % 1440 === 0
+    ? `${minutes / 1440} days`
+    : minutes % 60 === 0
+      ? `${minutes / 60} hours`
+      : `${minutes} minutes`)
+
+/** One line per step, for the row in the list. */
+const summarise = (step: StepView): string => {
+  if (step.kind === 'delay') return `wait ${describeDelay(step.minutes)}`
+  if (step.kind === 'guard') return 'check it still matches'
+  return ACTIONS.find((entry) => entry.key === step.type)?.label.toLowerCase() ?? step.type
+}
+
+const replace = (steps: StepView[], at: number, step: StepView): StepView[] =>
+  steps.map((existing, index) => (index === at ? step : existing))
+
+const swap = (steps: StepView[], a: number, b: number): StepView[] =>
+  steps.map((step, index) => (index === a ? steps[b] : index === b ? steps[a] : step) as StepView)
+
+/** What the dropdown's value means. An action's value is its own type, so the two
+ *  groups share one control and the reader picks a step rather than picking a
+ *  kind and then a step. */
+const kindFrom = (value: string): StepView =>
+  value === 'delay'
+    ? { kind: 'delay', minutes: 60 * 24 }
+    : value === 'guard'
+      ? { kind: 'guard' }
+      : { kind: 'action', type: value as ActionType, config: {} }
+
+/** The fields one action needs, which differ per action and per object.
+ *
+ *  Its own component because there are now as many of these on screen as the rule
+ *  has steps, each with its own config, and inlining them meant one `config`
+ *  state for the whole form. Ids carry the step number so two "Task title" labels
+ *  in one dialog still point at their own input. */
+const ActionFields = ({
+  index,
+  type,
+  config,
+  object,
+  people,
+  stages,
+  fieldsByObject,
+  onChange,
+}: {
+  index: number
+  type: ActionType
+  config: Record<string, string>
+  object: ObjectKey
+  people: { id: string; name: string }[]
+  stages: string[]
+  fieldsByObject: Record<ObjectKey, string[]>
+  onChange: (config: Record<string, string>) => void
+}) => {
+  const id = (part: string) => `automation-${index}-${part}`
+  const set = (key: string, value: string) => onChange({ ...config, [key]: value })
+
+  if (type === 'set_field') {
+    return (
+      <div className="grid gap-2 @md:grid-cols-2">
+        <Field id={id('field')} label="Field">
+          <Select id={id('field')} value={config.field ?? ''} onChange={(e) => set('field', e.target.value)}>
+            <option value="">Pick one</option>
+            {(fieldsByObject[object] ?? []).map((key) => (
+              <option key={key} value={key}>
+                {key}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field id={id('value')} label="To">
+          <TextInput id={id('value')} value={config.value ?? ''} onChange={(e) => set('value', e.target.value)} />
+        </Field>
+      </div>
+    )
+  }
+
+  if (type === 'set_lifecycle') {
+    return (
+      <Field id={id('stage')} label="Stage">
+        <Select id={id('stage')} value={config.stage ?? ''} onChange={(e) => set('stage', e.target.value)}>
+          <option value="">Pick one</option>
+          {stages.map((stage) => (
+            <option key={stage} value={stage}>
+              {stage}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    )
+  }
+
+  if (type === 'assign_owner') {
+    return (
+      <Field id={id('owner')} label="Owner">
+        <Select id={id('owner')} value={config.userId ?? ''} onChange={(e) => set('userId', e.target.value)}>
+          <option value="">Pick one</option>
+          {people.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    )
+  }
+
+  if (type === 'create_task') {
+    return (
+      <div className="grid gap-2 @md:grid-cols-2">
+        <Field id={id('title')} label="Task title" hint="{{name}} becomes the record's name.">
+          <TextInput
+            id={id('title')}
+            value={config.title ?? ''}
+            placeholder="Follow up on {{name}}"
+            onChange={(e) => set('title', e.target.value)}
+          />
+        </Field>
+        <Field id={id('due')} label="Due in days" hint="Leave empty for no due date.">
+          <TextInput
+            id={id('due')}
+            inputMode="numeric"
+            value={config.dueInDays ?? ''}
+            onChange={(e) => set('dueInDays', e.target.value)}
+          />
+        </Field>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-2 @md:grid-cols-2">
+      <Field id={id('message')} label="Message" hint="{{name}} becomes the record's name.">
+        <TextInput
+          id={id('message')}
+          value={config.message ?? ''}
+          placeholder="{{name}} reached Proposal"
+          onChange={(e) => set('message', e.target.value)}
+        />
+      </Field>
+      <Field id={id('channel')} label="Channel" hint="Leave empty for the integration's default.">
+        <TextInput id={id('channel')} value={config.channel ?? ''} onChange={(e) => set('channel', e.target.value)} />
+      </Field>
+    </div>
+  )
+}
 
 export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: AutomationListProps) => {
   const router = useRouter()
@@ -70,8 +242,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
   const [name, setName] = useState('')
   const [trigger, setTrigger] = useState<Trigger>('record_created')
   const [object, setObject] = useState<ObjectKey>('contact')
-  const [actionType, setActionType] = useState<ActionType>('create_task')
-  const [config, setConfig] = useState<Record<string, string>>({})
+  const [steps, setSteps] = useState<StepView[]>([])
 
   const allowedObjects = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? ['contact']
 
@@ -79,8 +250,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
     setName('')
     setTrigger('record_created')
     setObject('contact')
-    setActionType('create_task')
-    setConfig({})
+    setSteps([{ kind: 'action', type: 'create_task', config: {} }])
     setEditing('new')
   }
 
@@ -88,11 +258,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
     setName(row.name)
     setTrigger(row.trigger)
     setObject(row.objectKey)
-    const first = row.actions[0]
-    setActionType(first?.type ?? 'create_task')
-    setConfig(
-      Object.fromEntries(Object.entries(first?.config ?? {}).map(([key, value]) => [key, String(value ?? '')])),
-    )
+    setSteps(row.steps.length > 0 ? row.steps : [{ kind: 'action', type: 'create_task', config: {} }])
     setEditing(row)
   }
 
@@ -120,10 +286,16 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
           trigger,
           object,
           conditions: [],
-          // One action for now, on purpose: the engine runs a list in order and
-          // this screen writes a list of one. A second action is a row in this
-          // form, not a change to anything behind it.
-          actions: [{ type: actionType, config }],
+          steps: steps.map((step) =>
+            step.kind === 'action'
+              ? { kind: 'action' as const, type: step.type, config: step.config }
+              : step.kind === 'delay'
+                ? { kind: 'delay' as const, minutes: step.minutes }
+                : // A guard with no conditions of its own re-checks the rule's,
+                  // which is the reading somebody means by "and if it still
+                  // matches". Its own filters are the next thing this form grows.
+                  { kind: 'guard' as const, conditions: [] },
+          ),
         }),
       'Saved. Turn it on when you are ready.',
     )
@@ -156,7 +328,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
                 <p className="text-small text-secondary">
                   When {TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a{' '}
                   {OBJECT_LABEL[row.objectKey].toLowerCase()}:{' '}
-                  {row.actions.map((action) => ACTIONS.find((a) => a.key === action.type)?.label).join(', ')}
+                  {row.steps.map(summarise).join(', then ')}
                 </p>
                 <p className="text-small text-secondary tabular-nums">
                   {row.runCount === 0
@@ -203,9 +375,14 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
               <li key={entry.id} className="flex flex-wrap items-baseline gap-x-2 border-b border-divider px-3 py-1.5 last:border-0">
                 <Badge tone={STATE_TONE[entry.state]}>{entry.state}</Badge>
                 <span className="font-medium">{entry.automationName}</span>
-                <span className="text-secondary">{entry.detail}</span>
-                <span className="ml-auto text-small text-secondary tabular-nums">
-                  {new Date(entry.at).toLocaleString()}
+                <span className="min-w-0 truncate text-secondary">{entry.detail}</span>
+                {/* A waiting run's useful time is when it wakes, not when it
+                    started: "fired an hour ago" says nothing about a rule that
+                    has two more days to sit. */}
+                <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
+                  {entry.resumeAt
+                    ? `continues ${new Date(entry.resumeAt).toLocaleString()}`
+                    : new Date(entry.at).toLocaleString()}
                 </span>
               </li>
             ))}
@@ -265,123 +442,109 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
             </Select>
           </Field>
 
-          <Field id="automation-action" label="Do">
-            <Select
-              id="automation-action"
-              value={actionType}
-              onChange={(event) => {
-                setActionType(event.target.value as ActionType)
-                setConfig({})
-              }}
-            >
-              {ACTIONS.map((entry) => (
-                <option key={entry.key} value={entry.key}>
-                  {entry.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          {actionType === 'set_field' ? (
-            <>
-              <Field id="automation-field" label="Field">
-                <Select
-                  id="automation-field"
-                  value={config.field ?? ''}
-                  onChange={(event) => setConfig({ ...config, field: event.target.value })}
+          <div className="flex flex-col gap-2">
+            <p className="font-medium">Then, in order</p>
+            <ol className="flex flex-col gap-2">
+              {steps.map((step, index) => (
+                <li
+                  key={index}
+                  className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3"
                 >
-                  <option value="">Pick one</option>
-                  {(fieldsByObject[object] ?? []).map((key) => (
-                    <option key={key} value={key}>
-                      {key}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field id="automation-value" label="To">
-                <TextInput
-                  id="automation-value"
-                  value={config.value ?? ''}
-                  onChange={(event) => setConfig({ ...config, value: event.target.value })}
-                />
-              </Field>
-            </>
-          ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-small text-secondary tabular-nums">{index + 1}</span>
+                    <Select
+                      aria-label={`Step ${index + 1}`}
+                      className="w-auto"
+                      value={step.kind === 'action' ? step.type : step.kind}
+                      onChange={(event) => setSteps(replace(steps, index, kindFrom(event.target.value)))}
+                    >
+                      <optgroup label="Do">
+                        {ACTIONS.map((entry) => (
+                          <option key={entry.key} value={entry.key}>
+                            {entry.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Then">
+                        <option value="delay">Wait</option>
+                        <option value="guard">Check it still matches</option>
+                      </optgroup>
+                    </Select>
 
-          {actionType === 'set_lifecycle' ? (
-            <Field id="automation-stage" label="Stage">
-              <Select
-                id="automation-stage"
-                value={config.stage ?? ''}
-                onChange={(event) => setConfig({ ...config, stage: event.target.value })}
-              >
-                <option value="">Pick one</option>
-                {stages.map((stage) => (
-                  <option key={stage} value={stage}>
-                    {stage}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
+                    {step.kind === 'delay' ? (
+                      <Select
+                        aria-label={`How long step ${index + 1} waits`}
+                        className="w-auto"
+                        value={String(step.minutes)}
+                        onChange={(event) =>
+                          setSteps(replace(steps, index, { kind: 'delay', minutes: Number(event.target.value) }))
+                        }
+                      >
+                        {DELAYS.map((entry) => (
+                          <option key={entry.minutes} value={entry.minutes}>
+                            {entry.label}
+                          </option>
+                        ))}
+                      </Select>
+                    ) : null}
 
-          {actionType === 'assign_owner' ? (
-            <Field id="automation-owner" label="Owner">
-              <Select
-                id="automation-owner"
-                value={config.userId ?? ''}
-                onChange={(event) => setConfig({ ...config, userId: event.target.value })}
-              >
-                <option value="">Pick one</option>
-                {people.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          ) : null}
+                    <span className="ml-auto flex items-center gap-0.5">
+                      <IconButton
+                        label={`Move step ${index + 1} up`}
+                        icon={<ACTION_ICONS.moveUp size={16} />}
+                        disabled={index === 0}
+                        onClick={() => setSteps(swap(steps, index, index - 1))}
+                      />
+                      <IconButton
+                        label={`Move step ${index + 1} down`}
+                        icon={<ACTION_ICONS.moveDown size={16} />}
+                        disabled={index === steps.length - 1}
+                        onClick={() => setSteps(swap(steps, index, index + 1))}
+                      />
+                      <IconButton
+                        label={`Remove step ${index + 1}`}
+                        tone="destructive"
+                        icon={<ACTION_ICONS.delete size={16} />}
+                        disabled={steps.length === 1}
+                        onClick={() => setSteps(steps.filter((_, at) => at !== index))}
+                      />
+                    </span>
+                  </div>
 
-          {actionType === 'create_task' ? (
-            <>
-              <Field id="automation-title" label="Task title" hint="{{name}} becomes the record's name.">
-                <TextInput
-                  id="automation-title"
-                  value={config.title ?? ''}
-                  placeholder="Follow up on {{name}}"
-                  onChange={(event) => setConfig({ ...config, title: event.target.value })}
-                />
-              </Field>
-              <Field id="automation-due" label="Due in days" hint="Leave empty for no due date.">
-                <TextInput
-                  id="automation-due"
-                  inputMode="numeric"
-                  value={config.dueInDays ?? ''}
-                  onChange={(event) => setConfig({ ...config, dueInDays: event.target.value })}
-                />
-              </Field>
-            </>
-          ) : null}
+                  {step.kind === 'guard' ? (
+                    <p className="text-small text-secondary">
+                      Looks at the record again, as it is now, and stops the rule here unless it
+                      still matches the conditions above. This is how a rule waits and then changes
+                      its mind.
+                    </p>
+                  ) : null}
 
-          {actionType === 'notify_slack' ? (
-            <>
-              <Field id="automation-message" label="Message" hint="{{name}} becomes the record's name.">
-                <TextInput
-                  id="automation-message"
-                  value={config.message ?? ''}
-                  placeholder="{{name}} reached Proposal"
-                  onChange={(event) => setConfig({ ...config, message: event.target.value })}
-                />
-              </Field>
-              <Field id="automation-channel" label="Channel" hint="Leave empty for the integration's default.">
-                <TextInput
-                  id="automation-channel"
-                  value={config.channel ?? ''}
-                  onChange={(event) => setConfig({ ...config, channel: event.target.value })}
-                />
-              </Field>
-            </>
-          ) : null}
+                  {step.kind === 'action' ? (
+                    <ActionFields
+                      index={index}
+                      type={step.type}
+                      config={step.config}
+                      object={object}
+                      people={people}
+                      stages={stages}
+                      fieldsByObject={fieldsByObject}
+                      onChange={(config) => setSteps(replace(steps, index, { ...step, config }))}
+                    />
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => setSteps([...steps, { kind: 'action', type: 'create_task', config: {} }])}>
+                Add an action
+              </Button>
+              <Button onClick={() => setSteps([...steps, { kind: 'delay', minutes: 60 * 24 }])}>
+                Add a wait
+              </Button>
+              <Button onClick={() => setSteps([...steps, { kind: 'guard' }])}>Add a check</Button>
+            </div>
+          </div>
 
           <Alert tone="info">
             A new rule is saved off. Nothing happens until you turn it on, so a half-written rule

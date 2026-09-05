@@ -21,7 +21,10 @@ import {
   listAutomationRuns,
   listAutomations,
   readAutomation,
-  recordAutomationRun,
+  claimAutomationRun,
+  finishAutomationRun,
+  openAutomationRun,
+  parkAutomationRun,
   removeAutomation,
   saveAutomation,
   setAutomationActive,
@@ -917,7 +920,7 @@ try {
         trigger: 'record_created',
         objectKey: 'contact',
         conditions: [],
-        actions: [],
+        steps: [],
       }),
     ),
   )
@@ -929,7 +932,7 @@ try {
         trigger: 'stage_changed',
         objectKey: 'contact',
         conditions: [],
-        actions: [{ type: 'create_task', config: { title: 'x' } }],
+        steps: [{ kind: 'action', type: 'create_task', config: { title: 'x' } }],
       }),
     ),
   )
@@ -941,7 +944,7 @@ try {
         trigger: 'record_created',
         objectKey: 'contact',
         conditions: [{ conjunction: 'and', conditions: [{ field: 'not_a_field', operator: 'is', value: 'x' }] }],
-        actions: [{ type: 'create_task', config: { title: 'x' } }],
+        steps: [{ kind: 'action', type: 'create_task', config: { title: 'x' } }],
       }),
     ),
   )
@@ -952,7 +955,7 @@ try {
       trigger: 'record_created',
       objectKey: 'contact',
       conditions: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: stamp }] }],
-      actions: [{ type: 'create_task', config: { title: 'Follow up on {{name}}' } }],
+      steps: [{ kind: 'action', type: 'create_task', config: { title: 'Follow up on {{name}}' } }],
     })
     automationId = created.id
     const row = await readAutomation(admin, automationId)
@@ -994,11 +997,15 @@ try {
 
   await check('a firing is logged whether it did anything or not', async () => {
     const target = await createRecord(admin, 'contact', { email: `logged-${stamp}@example.test` })
-    await recordAutomationRun(admin, {
+    const runId = await openAutomationRun(admin, {
       automationId,
       entityType: 'contact',
       entityId: target.id,
+    })
+    await finishAutomationRun(admin, runId, {
       state: 'skipped',
+      stepIndex: 0,
+      trail: [],
       detail: 'The conditions did not hold for this record.',
     })
     const runs = await listAutomationRuns(admin, { automationId })
@@ -1007,6 +1014,77 @@ try {
     // the only question anybody asks about an automation.
     expect(runs.some((run) => run.state === 'skipped'), runs.map((run) => run.state).join(', '))
     return 'a skip is a result, not a silence'
+  })
+
+  await check('a rule that only waits and checks is refused', async () =>
+    refuses('a rule that watches, waits and then does nothing', () =>
+      saveAutomation(admin, {
+        name: `Verify no action ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [],
+        steps: [{ kind: 'delay', minutes: 60 }, { kind: 'guard', conditions: [] }],
+      }),
+    ),
+  )
+
+  await check('a guard on a field that does not exist is refused at save', async () =>
+    // The same refusal the trigger conditions get, and for the sharper reason:
+    // a broken guard would not fail until the run woke up days later, parked,
+    // with nobody watching.
+    refuses('a guard nobody would see fail', () =>
+      saveAutomation(admin, {
+        name: `Verify bad guard ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [],
+        steps: [
+          { kind: 'action', type: 'create_task', config: { title: 'x' } },
+          { kind: 'guard', conditions: [{ conjunction: 'and', conditions: [{ field: 'nope', operator: 'is', value: 'x' }] }] },
+        ],
+      }),
+    ),
+  )
+
+  await check('a parked run is claimed once and only when it is due', async () => {
+    const target = await createRecord(admin, 'contact', { email: `parked-${stamp}@example.test` })
+    const runId = await openAutomationRun(admin, {
+      automationId,
+      entityType: 'contact',
+      entityId: target.id,
+    })
+
+    // Parked into the future: the dispatcher must not pick this up yet.
+    await parkAutomationRun(admin, runId, {
+      stepIndex: 1,
+      resumeAt: new Date(Date.now() + 3_600_000),
+      trail: ['waited 1 hour'],
+    })
+    expect((await claimAutomationRun(admin, runId)) === null, 'a run was claimed before it was due')
+
+    // Now due.
+    await parkAutomationRun(admin, runId, {
+      stepIndex: 1,
+      resumeAt: new Date(Date.now() - 1000),
+      trail: ['waited 1 hour'],
+    })
+    const first = await claimAutomationRun(admin, runId)
+    expect(first !== null, 'a due run was not claimed')
+    expect(first!.stepIndex === 1, `resumed at ${first!.stepIndex}, not where it parked`)
+    expect(first!.trail.join() === 'waited 1 hour', 'the trail was lost across the wait')
+
+    // The lease is the whole point: a second worker must get nothing.
+    expect((await claimAutomationRun(admin, runId)) === null, 'two workers both claimed one run')
+
+    // A waiting run is in the log, ahead of the finished ones, so somebody can
+    // see what a rule is about to do and not only what it did.
+    const listed = await listAutomationRuns(admin, { automationId })
+    expect(listed.some((run) => run.id === runId && run.state === 'waiting'), 'a parked run is invisible')
+
+    await finishAutomationRun(admin, runId, { state: 'done', stepIndex: 2, trail: ['waited 1 hour', 'created a task'] })
+    const after = await listAutomationRuns(admin, { automationId })
+    expect(after.find((run) => run.id === runId)?.resumeAt === null, 'a finished run stayed in the queue')
+    return 'claimed once, resumed where it parked, and out of the queue when done'
   })
 
   await check('the list carries how often each rule has fired', async () => {
@@ -1024,7 +1102,7 @@ try {
         trigger: 'record_created',
         objectKey: 'contact',
         conditions: [],
-        actions: [{ type: 'create_task', config: { title: 'x' } }],
+        steps: [{ kind: 'action', type: 'create_task', config: { title: 'x' } }],
       }),
     )
     expect(wrote.includes('automation'), wrote)
