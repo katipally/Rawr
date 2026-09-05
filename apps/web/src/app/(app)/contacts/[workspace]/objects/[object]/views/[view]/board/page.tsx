@@ -1,16 +1,24 @@
-import { isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
+import { calendarFields, isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
 import { Alert, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard } from '~/components/crm/deal-board.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeFilters, exportCsvPath, objectView, type ListParams } from '~/lib/links.ts'
+import { decodeFilters, exportCsvPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 type Params = { workspace: string; object: string; view: string }
 type Search = { q?: string; filters?: string; pipeline?: string; group?: string }
+
+/** Which shapes this object can be looked at in. A board needs a pipeline, which
+ *  only a deal has; a calendar needs a date field, which the registry knows. */
+const kindsFor = (object: Parameters<typeof calendarFields>[0]): ViewKind[] => [
+  'list',
+  ...(object.key === 'deal' ? (['board'] as const) : []),
+  ...(calendarFields(object).length > 0 ? (['calendar'] as const) : []),
+]
 
 const BoardPage = async ({
   params,
@@ -103,6 +111,7 @@ const BoardPage = async ({
         }))}
         current={resolved.view.slug}
         currentKind="board"
+        kinds={kindsFor(object)}
         params={listParams}
         canWrite={canWrite}
       />

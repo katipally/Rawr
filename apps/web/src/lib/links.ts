@@ -37,7 +37,10 @@ export const workspaceInPath = (path: string | null | undefined): string | null 
   }
 }
 
-export type ViewKind = 'list' | 'board'
+/** The URL segment for a view. The stored kind is 'table', the segment is
+ *  'list', and they have differed since before there was a board; the other two
+ *  are the same word in both places. */
+export type ViewKind = 'list' | 'board' | 'calendar'
 
 /** Every member is optionally undefined so a caller can clear one by passing
  *  undefined rather than having to rebuild the object. */
@@ -50,6 +53,10 @@ export type ListParams = {
   pipeline?: string | undefined
   /** Board only: which field's values become the columns. */
   group?: string | undefined
+  /** Calendar only: the month on screen, as 2026-09. In the URL for the reason
+   *  the filters are — a month somebody navigated to should paste — and it is
+   *  what makes Earlier and Later plain links rather than state. */
+  month?: string | undefined
   /** Comma-separated field keys, when a person has chosen columns that the saved
    *  view does not hold. In the URL for the same reason filters are: a screen
    *  somebody arranged should paste. */

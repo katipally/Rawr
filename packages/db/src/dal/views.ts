@@ -11,7 +11,7 @@ export type ViewDefinition = {
   id: string | null
   slug: string
   name: string
-  kind: 'table' | 'board'
+  kind: 'table' | 'board' | 'calendar'
   columns: string[]
   filters: FilterGroup[]
   sorts: Sort[]
@@ -51,7 +51,7 @@ const toDefinition = (row: {
   id: string
   slug: string
   name: string
-  kind: 'table' | 'board'
+  kind: 'table' | 'board' | 'calendar'
   columns: unknown
   filters: unknown
   sorts: unknown
@@ -144,7 +144,7 @@ export type SaveViewInput = {
   objectKey: string
   id?: string | null
   name: string
-  kind: 'table' | 'board'
+  kind: 'table' | 'board' | 'calendar'
   columns: string[]
   filters: FilterGroup[]
   sorts: Sort[]

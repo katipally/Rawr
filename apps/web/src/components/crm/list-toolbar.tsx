@@ -6,7 +6,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useSearchParams } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ObjectKey } from '@rawr/db'
-import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
+import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
@@ -17,7 +17,7 @@ export type ListToolbarProps = {
   objectLabel: string
   view: string
   viewId: string | null
-  kind: 'list' | 'board'
+  kind: ViewKind
   params: ListParams
   filters: Group[]
   columns: string[]
@@ -118,7 +118,9 @@ export const ListToolbar = ({
         object,
         id: into,
         name,
-        kind: kind === 'board' ? 'board' : 'table',
+        // 'list' is the URL segment; the stored kind for it is 'table'. The
+        // other two are the same word in both places.
+        kind: kind === 'list' ? 'table' : kind,
         columns: nextColumns,
         filters: filters as never,
         sorts,

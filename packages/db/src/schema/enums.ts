@@ -109,7 +109,13 @@ export const subscriptionStateEnum = pgEnum('rawr_subscription_state', [
   'unspecified',
 ])
 
-export const viewKindEnum = pgEnum('rawr_view_kind', ['table', 'board'])
+export const viewKindEnum = pgEnum('rawr_view_kind', [
+  'table',
+  'board',
+  /** Placed on days by a date field, which `group_by_field_id` names: a board
+   *  points that at a stage, a calendar points it at a date. */
+  'calendar',
+])
 
 export const entityTypeEnum = pgEnum('rawr_entity_type', ['company', 'contact', 'deal'])
 

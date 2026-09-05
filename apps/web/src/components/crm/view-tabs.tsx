@@ -7,8 +7,10 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { useNavigation } from '~/components/navigation.tsx'
-import { objectView, type ListParams } from '~/lib/links.ts'
+import { objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+
+const KIND_LABEL: Record<ViewKind, string> = { list: 'Table', board: 'Board', calendar: 'Calendar' }
 
 export type ViewTab = {
   /** Null for the view every workspace falls back to before one is saved. It has
@@ -16,7 +18,7 @@ export type ViewTab = {
   id: string | null
   slug: string
   name: string
-  kind: 'table' | 'board'
+  kind: 'table' | 'board' | 'calendar'
   isShared: boolean
   pinned: boolean
 }
@@ -26,7 +28,11 @@ export type ViewTabsProps = {
   object: ObjectKey
   views: ViewTab[]
   current: string
-  currentKind: 'list' | 'board'
+  currentKind: ViewKind
+  /** Which shapes this object can be looked at in, decided by the page: a board
+   *  needs a stage, a calendar needs a date field, and only the registry knows
+   *  whether this object has either. */
+  kinds: ViewKind[]
   /** Carried onto every tab so switching views keeps the search a person typed. */
   params: ListParams
   canWrite: boolean
@@ -51,6 +57,7 @@ export const ViewTabs = ({
   views,
   current,
   currentKind,
+  kinds,
   params,
   canWrite,
 }: ViewTabsProps) => {
@@ -60,7 +67,7 @@ export const ViewTabs = ({
   const [renaming, setRenaming] = useState<ViewTab | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const href = (view: { slug: string }, kind: 'list' | 'board' = currentKind): string =>
+  const href = (view: { slug: string }, kind: ViewKind = currentKind): string =>
     objectView(workspace, object, view.slug, kind, withoutCursor(params))
 
   // The open tab always shows, even when it is not pinned, so a link into an
@@ -211,9 +218,9 @@ export const ViewTabs = ({
         </Link>
       ) : null}
 
-      {object === 'deal' ? (
+      {kinds.length > 1 ? (
         <span className="ml-auto flex gap-1 pb-1">
-          {(['list', 'board'] as const).map((kind) => (
+          {kinds.map((kind) => (
             <Link
               key={kind}
               href={href({ slug: current }, kind)}
@@ -223,7 +230,7 @@ export const ViewTabs = ({
                 currentKind === kind ? 'border-line-interactive bg-accent-subtle text-link' : 'border-line text-secondary',
               )}
             >
-              {kind === 'list' ? 'Table' : 'Board'}
+              {KIND_LABEL[kind]}
             </Link>
           ))}
         </span>

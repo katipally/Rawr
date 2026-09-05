@@ -29,6 +29,7 @@ import {
   reorderViews,
   setViewPinned,
   readBoard,
+  readCalendar,
   readImportRun,
   listImportRuns,
   readSubscriptions,
@@ -297,7 +298,7 @@ export const crmRouter = router({
           object: objectKey,
           id: z.uuid().nullish(),
           name: z.string().trim().min(1).max(80),
-          kind: z.enum(['table', 'board']),
+          kind: z.enum(['table', 'board', 'calendar']),
           columns: z.array(z.string().max(64)).min(1).max(60),
           filters: z.array(filterGroup).max(5),
           sorts: z.array(sortSchema).max(3),
@@ -382,6 +383,35 @@ export const crmRouter = router({
           fireChangeAutomations(ctx, 'deal', input.dealId, result)
           return result
         }),
+      ),
+  }),
+
+  /** The third way to look at a list: placed on days by a date field. Read-only,
+   *  because moving a record to another square is editing a date and the record
+   *  page and the table already do that with the validation and the audit row a
+   *  drag here would have to duplicate. */
+  calendar: router({
+    read: protectedProcedure
+      .input(
+        z.object({
+          object: objectKey,
+          /** Any day in the month wanted. The layer takes the month from it. */
+          month: z.string().regex(/^\d{4}-\d{2}(-\d{2})?$/, 'A month looks like 2026-09.'),
+          field: z.string().min(1).max(64),
+          filters: z.array(filterGroup).max(5).optional(),
+          search: z.string().max(200).optional(),
+        }),
+      )
+      .query(({ ctx, input }) =>
+        call(() =>
+          readCalendar(ctx.workspace, {
+            object: input.object,
+            month: input.month.length === 7 ? `${input.month}-01` : input.month,
+            fieldKey: input.field,
+            filters: (input.filters ?? []) as never,
+            search: input.search ?? '',
+          }),
+        ),
       ),
   }),
 

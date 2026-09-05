@@ -1,18 +1,10 @@
-import { isObjectKey, listRecords, parseFilters, resolveView, listViews, withWorkspaceReads } from '@rawr/db'
+import { calendarFields, isObjectKey, listRecords, listViews, parseFilters, resolveView, withWorkspaceReads } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import {
-  decodeCursor,
-  decodeFilters,
-  decodeSort,
-  encodeCursor,
-  exportCsvPath,
-  objectView,
-  type ListParams,
-} from '~/lib/links.ts'
+import { decodeCursor, decodeFilters, decodeSort, encodeCursor, exportCsvPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -52,6 +44,14 @@ const columnsFrom = (
   if (asked.length > 0) return asked
   return stored.length > 0 ? stored : object.fields.slice(0, 8).map((field) => field.key)
 }
+
+/** Which shapes this object can be looked at in. A board needs a pipeline, which
+ *  only a deal has; a calendar needs a date field, which the registry knows. */
+const kindsFor = (object: Parameters<typeof calendarFields>[0]): ViewKind[] => [
+  'list',
+  ...(object.key === 'deal' ? (['board'] as const) : []),
+  ...(calendarFields(object).length > 0 ? (['calendar'] as const) : []),
+]
 
 const ListPage = async ({
   params,
@@ -177,6 +177,7 @@ const ListPage = async ({
         }))}
         current={resolved.view.slug}
         currentKind="list"
+        kinds={kindsFor(object)}
         params={listParams}
         canWrite={canWrite}
       />
