@@ -85,6 +85,7 @@ export type TypeMeta = {
     | 'datetime'
     | 'select'
     | 'multi_select'
+    | 'rich_text'
     | 'user'
     | 'relation'
     | 'json'
@@ -103,6 +104,9 @@ export const FIELD_TYPES = fieldTypeEnum.enumValues
 export const TYPE_META: Record<FieldType, TypeMeta> = {
   text: { jsonbCast: 'text', operators: TEXTUAL, editor: 'text' },
   long_text: { jsonbCast: 'text', operators: TEXTUAL, editor: 'textarea' },
+  /** Markdown, never HTML. Rendered to React elements, so a bracket somebody
+   *  types stays a bracket on every path and there is nothing to sanitise. */
+  rich_text: { jsonbCast: 'text', operators: TEXTUAL, editor: 'rich_text' },
   number: { jsonbCast: 'numeric', operators: NUMERIC, editor: 'number', numeric: true },
   currency: { jsonbCast: 'numeric', operators: NUMERIC, editor: 'number', numeric: true },
   percent: { jsonbCast: 'numeric', operators: NUMERIC, editor: 'number', numeric: true },
@@ -143,4 +147,5 @@ export const MAX_TEXT_LENGTH: Partial<Record<FieldType, number>> = {
   address: 1000,
   select: 200,
   long_text: 65_536,
+  rich_text: 65_536,
 }

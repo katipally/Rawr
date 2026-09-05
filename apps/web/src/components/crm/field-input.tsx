@@ -3,6 +3,7 @@
 import { Select, TextArea, TextInput } from '@rawr/ui'
 import type { FieldType, ObjectKey } from '@rawr/db'
 import { RecordPicker } from './record-picker.tsx'
+import { RichTextInput } from './rich-text-input.tsx'
 
 export type Choice = { id: string; label: string }
 
@@ -66,6 +67,17 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
   }
 
   switch (field.type) {
+    case 'rich_text':
+      return (
+        <RichTextInput
+          id={id}
+          label={field.label}
+          value={String(value ?? '')}
+          onChange={onChange}
+          {...(autoFocus ? { autoFocus } : {})}
+        />
+      )
+
     case 'long_text':
     case 'address':
       return <TextArea {...common} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} />

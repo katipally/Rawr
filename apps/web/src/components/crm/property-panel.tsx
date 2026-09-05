@@ -1,10 +1,11 @@
 'use client'
 
-import { Button, cn, useToast } from '@rawr/ui'
+import { Button, IconButton, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, type EditableField } from './field-input.tsx'
 import { Value } from './value.tsx'
 
@@ -136,8 +137,22 @@ export const PropertyPanel = ({
                   const error = errors[field.key]
                   const editable = canWrite && !field.readOnly
 
+                  // A note is written to be read, and the value column of a
+                  // two-column panel is about ten characters wide. So rich text
+                  // stacks: the label on its own line and the note under it,
+                  // using the whole panel. Every other type stays in the grid,
+                  // where a label beside its value is what makes the panel
+                  // scannable.
+                  const stacked = field.type === 'rich_text'
+
                   return (
-                    <div key={field.key} className="grid grid-cols-1 gap-x-3 py-1 sm:grid-cols-[minmax(0,10rem)_1fr]">
+                    <div
+                      key={field.key}
+                      className={cn(
+                        'grid grid-cols-1 gap-x-3 py-1',
+                        !stacked && 'sm:grid-cols-[minmax(0,10rem)_1fr]',
+                      )}
+                    >
                       <dt className="min-w-0 text-secondary">{field.label}</dt>
                       <dd className="min-w-0">
                         {isEditing ? (
@@ -171,6 +186,32 @@ export const PropertyPanel = ({
                                 Cancel
                               </Button>
                             </div>
+                          </div>
+                        ) : field.type === 'rich_text' ? (
+                          // Its own shape, because the click-to-edit affordance
+                          // below is a <button>, and a formatted note is blocks
+                          // and links. Neither is valid inside one, and a link
+                          // inside a button cannot be followed anyway. So the
+                          // note is read as itself and the pencil sits beside it.
+                          <div className="flex min-w-0 items-start gap-1">
+                            <div className="min-w-0 flex-1 px-1.5 py-0.5">
+                              <Value
+                                type={field.type}
+                                value={local[field.key]}
+                                label={labels[field.key]}
+                                placeholder={editable ? 'Empty' : '—'}
+                              />
+                            </div>
+                            {editable ? (
+                              <IconButton
+                                label={`Edit ${field.label}`}
+                                icon={<ACTION_ICONS.edit size={16} />}
+                                onClick={() => {
+                                  setEditing(field.key)
+                                  setDraft(local[field.key] ?? '')
+                                }}
+                              />
+                            ) : null}
                           </div>
                         ) : (
                           <button

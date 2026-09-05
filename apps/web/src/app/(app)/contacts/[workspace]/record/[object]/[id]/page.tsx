@@ -257,6 +257,7 @@ const RecordPage = async ({
                   label={record.labels[field.key]}
                   currency={String(record.values.currency ?? 'USD')}
                   placeholder="—"
+                  oneLine
                 />
               </dd>
             </div>

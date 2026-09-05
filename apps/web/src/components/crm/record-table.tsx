@@ -131,6 +131,7 @@ export const RecordTable = ({
             label={row.labels[column.key]}
             currency={String(row.values.currency ?? 'USD')}
             placeholder="—"
+            oneLine
           />
         </span>
       )

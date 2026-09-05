@@ -91,6 +91,9 @@ const WIDTHS: Partial<Record<string, number>> = {
   relation: 200,
   user: 170,
   long_text: 280,
+  // Wider than a paragraph: a formatted note is written to be read, and a
+  // column that cuts it at the first line is a column showing nothing.
+  rich_text: 320,
   json: 220,
 }
 

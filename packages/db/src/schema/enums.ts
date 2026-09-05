@@ -81,6 +81,7 @@ export const fieldStorageEnum = pgEnum('rawr_field_storage', ['column', 'jsonb']
 export const fieldTypeEnum = pgEnum('rawr_field_type', [
   'text',
   'long_text',
+  'rich_text',
   'number',
   'currency',
   'percent',

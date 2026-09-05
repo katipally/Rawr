@@ -200,6 +200,7 @@ export const RecordActions = ({
                               value={side === 'survivor' ? values[field.key] : absorbed.values[field.key]}
                               label={side === 'survivor' ? labels[field.key] : absorbed.labels[field.key]}
                               placeholder="Empty"
+                              oneLine
                             />
                             <span className="ml-2 text-small text-secondary">
                               {side === 'survivor' ? 'this record' : 'the other one'}

@@ -83,6 +83,12 @@ export const coerce = (field: RegistryField, input: unknown): Coerced => {
     case 'address':
       return truncate(field, String(input).trim())
 
+    // Markdown is text, and stored as the person typed it. Nothing is stripped
+    // here: it is rendered to React elements rather than to markup, so there is
+    // no tag that could survive into a page and nothing to sanitise against.
+    case 'rich_text':
+      return truncate(field, String(input).trimEnd())
+
     case 'number':
     case 'currency':
     case 'percent':

@@ -1,4 +1,6 @@
 import type { FieldType } from '@rawr/db'
+import { Markdown } from './markdown.tsx'
+import { toPlainText } from './markdown.ts'
 import type { ReactNode } from 'react'
 
 /** How a stored value is read on screen. One rule per field type, matching the
@@ -117,6 +119,10 @@ export type ValueProps = {
   currency?: string
   /** Renders the empty state as the placeholder rather than nothing at all. */
   placeholder?: string
+  /** A row of a table, where the value has one line and the container is a span.
+   *  Only rich text renders differently for it, and only because it is the one
+   *  type whose full rendering is blocks. */
+  oneLine?: boolean
 }
 
 /** The keys of a source blob that are worth putting on screen, and nothing else.
@@ -138,7 +144,7 @@ const readableEntries = (value: unknown): [string, string][] => {
     .slice(0, 6)
 }
 
-export const Value = ({ type, value, label, currency = 'USD', placeholder = '' }: ValueProps): ReactNode => {
+export const Value = ({ type, value, label, currency = 'USD', placeholder = '', oneLine = false }: ValueProps): ReactNode => {
   if (label !== undefined && label !== '') return <span className="break-words">{label}</span>
 
   // A relation or user holds a uuid, which means nothing to a reader. With no
@@ -153,6 +159,25 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '' }
   const text = formatValue(type, value, currency)
   if (!text) {
     return placeholder ? <span className="text-secondary">{placeholder}</span> : null
+  }
+
+  // Markdown, rendered to elements. The stored value is the characters somebody
+  // typed and nothing here turns any of it into markup, so a tag in a note is a
+  // tag on the screen rather than a tag in the page.
+  //
+  // A table cell gets the words on one line instead. A heading, a list and three
+  // paragraphs do not fit a row, and the cell is inside a span, where a block
+  // element is not valid content at all.
+  if (type === 'rich_text') {
+    if (oneLine) {
+      const plain = toPlainText(text)
+      return (
+        <span className="block truncate" title={plain}>
+          {plain}
+        </span>
+      )
+    }
+    return <Markdown source={text} />
   }
 
   if (type === 'multi_select' && Array.isArray(value)) {

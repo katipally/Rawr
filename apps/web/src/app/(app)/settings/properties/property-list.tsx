@@ -15,10 +15,10 @@ export type PropertyListProps = {
 }
 
 /** Field types that need a list of choices, and the types a person actually reaches
- *  for. The registry knows all nineteen; offering them in the order somebody thinks
+ *  for. The registry knows all twenty; offering them in the order somebody thinks
  *  about them is a UI decision, so it lives here. */
 const TYPE_GROUPS: { label: string; types: FieldType[] }[] = [
-  { label: 'Text', types: ['text', 'long_text', 'email', 'phone', 'url', 'linkedin', 'address'] },
+  { label: 'Text', types: ['text', 'long_text', 'rich_text', 'email', 'phone', 'url', 'linkedin', 'address'] },
   { label: 'Numbers', types: ['number', 'currency', 'percent', 'rating'] },
   { label: 'Choices', types: ['select', 'multi_select', 'boolean'] },
   { label: 'Dates', types: ['date', 'datetime'] },
