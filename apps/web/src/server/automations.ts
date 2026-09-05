@@ -3,7 +3,6 @@ import {
   claimAutomationRun,
   conditionsHold,
   createTask,
-  isObjectKey,
   finishAutomationRun,
   getRecord,
   listLifecycleStages,
@@ -14,7 +13,6 @@ import {
   type AutomationAction,
   type AutomationRow,
   type AutomationTrigger,
-  type ObjectKey,
   type WorkspaceContext,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
@@ -38,7 +36,8 @@ import { publicBaseUrl } from '~/lib/env.ts'
 
 export type AutomationEvent = {
   trigger: AutomationTrigger
-  objectKey: ObjectKey
+  /** An object key, core or invented. */
+  objectKey: string
   entityId: string
   /** The name the record goes by, for the Slack message and the run log. Read at
    *  the trigger where the caller already has it, because by the time an action
@@ -303,18 +302,12 @@ export const reportEvent = (
   event: (Omit<AutomationEvent, 'objectKey'> & { objectKey: string }) | undefined,
 ): void => {
   if (!event) return
-  // A rule's run log and a webhook's payload both name an entity type that is an
-  // enum of the three core objects, so there is nowhere to record either for a
-  // custom one. Skipped in silence: nothing is armed for an object that cannot
-  // be a trigger, so nothing is being missed.
-  if (!isObjectKey(event.objectKey)) return
-  const core: AutomationEvent = { ...event, objectKey: event.objectKey }
-  runAutomations(ctx, core)
+  runAutomations(ctx, event)
   notifySubscribers(ctx, {
-    objectKey: core.objectKey,
-    trigger: core.trigger,
-    entityId: core.entityId,
-    workspaceSlug: core.workspaceSlug,
+    objectKey: event.objectKey,
+    trigger: event.trigger,
+    entityId: event.entityId,
+    workspaceSlug: event.workspaceSlug,
   })
 }
 

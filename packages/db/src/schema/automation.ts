@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
-import { automationStateEnum, automationTriggerEnum, entityTypeEnum } from './enums.ts'
+import { automationStateEnum, automationTriggerEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 
 /** B11. When this happens, do that.
@@ -64,7 +64,7 @@ export const automationRun = pgTable(
     automationId: uuid('automation_id')
       .notNull()
       .references(() => automation.id, { onDelete: 'cascade' }),
-    entityType: entityTypeEnum('entity_type').notNull(),
+    entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
     state: automationStateEnum('state').notNull(),
     /** What happened, in the words the screen shows: which actions ran, or the

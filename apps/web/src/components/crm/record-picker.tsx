@@ -2,13 +2,13 @@
 
 import { cn } from '@rawr/ui'
 import { useEffect, useId, useRef, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { api } from '~/lib/rpc.ts'
 
 export type PickedRecord = { id: string; label: string; detail?: string | null }
 
 export type RecordPickerProps = {
-  object: ObjectKey
+  /** An object key, core or invented. */
+  object: string
   /** What is chosen now, so the control can show a name rather than a uuid. */
   value: PickedRecord | null
   onChange: (next: PickedRecord | null) => void

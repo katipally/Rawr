@@ -19,24 +19,25 @@ type Procedure = {
 
 /** What each router is for, in the words a model needs to pick the right one. */
 const GROUPS: Record<string, string> = {
-  crm: 'Records, views, board, timeline, tasks, associations, imports and exports.',
+  crm: 'Records of every object including ones an admin invented, views, board, calendar, timeline, tasks, associations, files, imports and exports.',
   segments: 'Saved audiences built from filters, and who is in them.',
   booking: 'Meeting pages, availability, calendars and booked meetings.',
   forms: 'Lead forms, their submissions and the review queue.',
   analytics: 'Website page views, events and tracked sites.',
   mail: 'Connected Gmail mailboxes and the email threads on a contact.',
-  integrations: 'Brevo, Apollo, Clay, Lusha, Woodpecker, Slack, GA4 and Zoom, and reading a HubSpot export: connection, health, enrichment and replay.',
-  admin: 'Workspace settings: fields, pipelines, stages, lifecycle, subscription types, members.',
+  integrations: 'Brevo, Apollo, Clay, Lusha, Woodpecker, Slack, GA4 and Zoom, and reading a HubSpot export: connection, health, enrichment and replay. Also outbound webhooks: the endpoints Rawr posts to, what they subscribe to and their signing secrets.',
+  admin: 'Workspace settings: objects an admin invents, fields, pipelines, stages, lifecycle, subscription types, members, and automation rules with their run log.',
   mcp: 'Agent access tokens.',
   sequences: 'Multi-step outreach sent from a member\'s own Gmail, or handed to a Woodpecker campaign: the sequences, their steps, and who is in them.',
   org: 'The organisation above this workspace: its workspaces, its people, their seats and the history of those decisions.',
   notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
   teams: 'Named groups inside this workspace, used to rotate assignment within a team.',
   jobs: 'Failed jobs and dead letters.',
+  account: 'The signed-in person\'s own sessions.',
   reporting: 'Six reports over a date range: the pipeline, forms, sequences, email, the website, and which channels the contacts who buy first arrived through.',
 }
 
-const DESTRUCTIVE = /delete|remove|merge|purge|revoke|disconnect|erase|bulk|dismiss/i
+const DESTRUCTIVE = /delete|remove|merge|purge|revoke|disconnect|erase|bulk|dismiss|signOut|roll/i
 
 const words = (camel: string): string =>
   camel.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()

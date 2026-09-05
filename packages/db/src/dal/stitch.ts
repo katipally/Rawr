@@ -169,7 +169,7 @@ const claimChunk = async (
       returning id, occurred_at
     ), linked as (
       insert into activity_link (workspace_id, activity_id, entity_type, entity_id, type, occurred_at)
-      select ${ctx.workspaceId}, l.id, 'contact'::rawr_entity_type, ${input.contactId},
+      select ${ctx.workspaceId}, l.id, 'contact'::text, ${input.contactId},
              ${activityType}::rawr_activity_type, l.occurred_at
         from logged l
       on conflict do nothing

@@ -4,7 +4,6 @@ import { Button, EmptyState, IconButton, Select, TextInput, cn, useToast } from 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -16,7 +15,8 @@ export type TaskRow = {
   dueDate: string | null
   status: 'open' | 'done'
   assigneeName: string | null
-  entityType: ObjectKey | null
+  /** An object key, core or invented. Null for a task that hangs on nothing. */
+  entityType: string | null
   entityId: string | null
   entityName: string | null
 }
@@ -26,7 +26,7 @@ export type TasksPanelProps = {
   rows: TaskRow[]
   assignees: { id: string; label: string }[]
   /** Set on a record page, so a new task is filed against that record. */
-  entity?: { entityType: ObjectKey; entityId: string }
+  entity?: { entityType: string; entityId: string }
   canWrite: boolean
   /** Rendered as a boxed panel on a record, and bare on the tasks page. */
   heading?: string

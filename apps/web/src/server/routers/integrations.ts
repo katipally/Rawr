@@ -15,7 +15,7 @@ import {
   rollWebhookSecret,
   saveIntegration,
   updateWebhookEndpoint,
-  WEBHOOK_EVENTS,
+  webhookEventsFor,
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -41,6 +41,10 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 // Mirrors INTEGRATION_KINDS. A kind the registry knows and this does not is a
 // settings page that cannot save it.
 const kind = z.enum(INTEGRATION_KINDS)
+
+/** More than any endpoint subscribes to. The catalogue grows by one per object an
+ *  admin invents, so the cap cannot be the fixed list's own length. */
+const MAX_SUBSCRIBED_EVENTS = 100
 
 export const integrationsRouter = router({
   /** Readable by anybody signed in, because a degraded integration explains why a
@@ -192,14 +196,14 @@ export const integrationsRouter = router({
   webhooks: router({
     list: adminProcedure.query(({ ctx }) => call(() => listWebhookEndpoints(ctx.workspace))),
 
-    events: adminProcedure.query(() => [...WEBHOOK_EVENTS]),
+    events: adminProcedure.query(({ ctx }) => call(() => webhookEventsFor(ctx.workspace))),
 
     create: adminProcedure
       .input(
         z.object({
           name: z.string().min(1).max(80),
           url: z.string().min(1).max(2000),
-          events: z.array(z.string().max(64)).max(WEBHOOK_EVENTS.length),
+          events: z.array(z.string().max(64)).max(MAX_SUBSCRIBED_EVENTS),
         }),
       )
       // The secret comes back exactly once, here, the way an agent token does.
@@ -211,7 +215,7 @@ export const integrationsRouter = router({
           id: z.uuid(),
           name: z.string().min(1).max(80).optional(),
           url: z.string().min(1).max(2000).optional(),
-          events: z.array(z.string().max(64)).max(WEBHOOK_EVENTS.length).optional(),
+          events: z.array(z.string().max(64)).max(MAX_SUBSCRIBED_EVENTS).optional(),
           isActive: z.boolean().optional(),
         }),
       )

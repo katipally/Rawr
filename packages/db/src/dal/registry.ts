@@ -179,7 +179,18 @@ const load = async (tx: Tx): Promise<Registry> => {
     object.labelFieldKey = named?.key ?? object.fields[0]?.key ?? null
   }
 
-  const list = [...objects.values()]
+  // The order every surface reads objects in: the navigation, the association
+  // rail, the search results, the object argument an agent is offered. The three
+  // the system is built on keep the order they are always named in, and invented
+  // ones follow alphabetically. The query orders by key, which would put a
+  // company before a contact and an "Asset" before both.
+  const list = [...objects.values()].sort((a, b) => {
+    const rank = (object: RegistryObject) => {
+      const index = (OBJECT_KEYS as readonly string[]).indexOf(object.key)
+      return index === -1 ? OBJECT_KEYS.length : index
+    }
+    return rank(a) - rank(b) || a.namePlural.localeCompare(b.namePlural)
+  })
   return { objects: list, byKey: new Map(list.map((o) => [o.key, o])) }
 }
 

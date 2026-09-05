@@ -1,8 +1,7 @@
 import {
   describeAmbiguity,
-  isObjectKey,
   resolveRecord,
-  type ObjectKey,
+  type Registry,
   type RegistryObject,
   type WorkspaceContext,
 } from '@rawr/db'
@@ -195,7 +194,7 @@ const relationValue = async (
     }
     throw new FieldError(
       describeAmbiguity(
-        'company',
+        { singular: 'company', plural: 'companies' },
         wanted,
         resolution.kind === 'many' ? resolution.candidates : resolution.suggestions,
       ),
@@ -206,11 +205,24 @@ const relationValue = async (
 }
 
 /** Shared by every tool that takes an `object` argument, so "Deals" and "deal" and
- *  "deals" all mean the same thing and a typo names the valid set. */
-export const objectKeyOrThrow = (value: unknown): ObjectKey => {
-  const key = String(value ?? '').trim().toLowerCase().replace(/s$/, '')
-  if (!isObjectKey(key)) {
-    throw new FieldError(`"${String(value)}" is not an object here. Valid objects: contact, company, deal.`)
+ *  "deals" all mean the same thing and a typo names the valid set.
+ *
+ *  Matched against the registry rather than a fixed list of three, so an object an
+ *  admin invented is reachable by its key, its singular name or its plural the day
+ *  it exists, with no tool definition to change. */
+export const objectFromArg = (registry: Registry, value: unknown): RegistryObject => {
+  const wanted = String(value ?? '').trim().toLowerCase()
+  const match = registry.objects.find(
+    (object) =>
+      object.key === wanted ||
+      object.nameSingular.toLowerCase() === wanted ||
+      object.namePlural.toLowerCase() === wanted ||
+      // "deals" against the key, which is how a model most often writes it.
+      object.key === wanted.replace(/s$/, ''),
+  )
+  if (!match) {
+    const valid = registry.objects.map((object) => object.key).join(', ')
+    throw new FieldError(`"${String(value)}" is not an object here. Valid objects: ${valid}.`)
   }
-  return key
+  return match
 }

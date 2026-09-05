@@ -18,7 +18,8 @@ export type TaskRow = {
   status: 'open' | 'done'
   assigneeName: string | null
   assigneeId: string | null
-  entityType: 'company' | 'contact' | 'deal' | null
+  /** An object key, core or invented. Null for a task that hangs on nothing. */
+  entityType: string | null
   entityId: string | null
   entityName: string | null
 }
@@ -27,6 +28,14 @@ const ENTITY_NAME = sql<string | null>`case
   when ${task.entityType} = 'contact' then (select coalesce(nullif(trim(coalesce(c.first_name,'') || ' ' || coalesce(c.last_name,'')), ''), c.email) from contact c where c.id = ${task.entityId})
   when ${task.entityType} = 'company' then (select coalesce(co.name, co.domain) from company co where co.id = ${task.entityId})
   when ${task.entityType} = 'deal' then (select d.name from deal d where d.id = ${task.entityId})
+  -- An object an admin invented. Its name is whichever field it nominated, in
+  -- the blob, so the key has to be read from the registry tables rather than
+  -- written into this expression.
+  else (select nullif(trim(r.custom ->> f.key), '')
+          from custom_record r
+          join object_def o on o.id = r.object_id
+          join field_def f on f.id = o.label_field_id
+         where r.id = ${task.entityId} and o.key = ${task.entityType})
 end`
 
 const SELECT = {

@@ -14,7 +14,6 @@ import {
   isActivityType,
   listTasks,
   logActivity,
-  objectOrThrow,
   readBoard,
   readSchedule,
   readTimeline,
@@ -29,7 +28,7 @@ import {
 } from '@rawr/db'
 import { readLookups, type Lookups } from '~/server/crm.ts'
 import { resolveDate, todayFor } from './dates.ts'
-import { FieldError, objectKeyOrThrow, prepareFields } from './fields.ts'
+import { FieldError, objectFromArg, prepareFields } from './fields.ts'
 
 /** F5 §2. The ten tools, and the one place that knows what each one does.
  *
@@ -78,7 +77,13 @@ export type ToolDefinition = {
 const DEFAULT_ROWS = 25
 const MAX_ROWS = 100
 
-const object = { type: 'string', enum: ['contact', 'company', 'deal'] } as const
+/** Every object the workspace has, so a model is offered the ones an admin
+ *  invented alongside the three the system is built on. Built per request from the
+ *  registry rather than written out, which is why it is a function. */
+const objectArg = (registry: Registry) => ({
+  type: 'string',
+  enum: registry.objects.map((entry) => entry.key),
+})
 
 const limit = (max: number) => ({
   type: 'integer',
@@ -113,50 +118,41 @@ const searchRecords: ToolDefinition = {
   name: 'search_records',
   title: 'Search records',
   writes: false,
-  description: () =>
-    'Find contacts, companies and deals by name, email or domain. Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. Omit `object` to search all three.',
-  inputSchema: () => ({
+  description: ({ registry }) =>
+    `Find records by name, email or domain across every object in this workspace (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}). Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. Omit \`object\` to search everything.`,
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
       query: { type: 'string', description: 'What to look for.' },
-      object: { ...object, description: 'Narrow to one object. Omit to search all three.' },
+      object: { ...objectArg(registry), description: 'Narrow to one object. Omit to search every object.' },
       limit: limit(25),
     },
     required: ['query'],
     additionalProperties: false,
   }),
-  run: async ({ caller }, args) => {
+  run: async ({ caller, registry }, args) => {
     const query = String(args.query ?? '').trim()
     if (!query) return { text: 'Give something to search for.', isError: true }
     const perObject = clamp(args.limit, 8, 25)
 
     const results = await searchAll(caller.ctx, query, perObject)
-    const wanted = args.object ? objectKeyOrThrow(args.object) : null
-    const groups: [ObjectKey, typeof results.contacts][] = [
-      ['contact', results.contacts],
-      ['company', results.companies],
-      ['deal', results.deals],
-    ]
-    const shown = groups.filter(([key]) => !wanted || key === wanted)
-    const total = shown.reduce((sum, [, hits]) => sum + hits.length, 0)
+    const wanted = args.object ? objectFromArg(registry, args.object).key : null
+    const shown = results.groups.filter((group) => !wanted || group.objectKey === wanted)
+    const total = shown.reduce((sum, group) => sum + group.hits.length, 0)
 
     if (total === 0) return { text: `Nothing matches "${query}".`, data: { total: 0, results: [] } }
 
-    const lines = shown.flatMap(([key, hits]) =>
-      hits.length === 0
-        ? []
-        : [
-            `${key === 'company' ? 'Companies' : `${key[0]!.toUpperCase()}${key.slice(1)}s`}:`,
-            ...hits.map((hit) => `  ${hit.displayName}${hit.detail ? ` — ${hit.detail}` : ''} (id ${hit.id})`),
-          ],
-    )
+    const lines = shown.flatMap((group) => [
+      `${group.namePlural}:`,
+      ...group.hits.map((hit) => `  ${hit.displayName}${hit.detail ? ` (${hit.detail})` : ''} (id ${hit.id})`),
+    ])
 
     return {
       text: [`${total} match${total === 1 ? '' : 'es'} for "${query}".`, ...lines].join('\n'),
       data: {
         total,
-        results: shown.flatMap(([key, hits]) =>
-          hits.map((hit) => ({ object: key, id: hit.id, name: hit.displayName, detail: hit.detail })),
+        results: shown.flatMap((group) =>
+          group.hits.map((hit) => ({ object: group.objectKey, id: hit.id, name: hit.displayName, detail: hit.detail })),
         ),
       },
     }
@@ -169,29 +165,29 @@ const getRecordTool: ToolDefinition = {
   writes: false,
   description: ({ registry }) =>
     [
-      'Read one contact, company or deal in full, by id or by name. Every field the registry knows about, with relations shown as their readable label.',
+      'Read one record in full, by id or by name, of any object in this workspace. Every field the registry knows about, with relations shown as their readable label.',
       '',
       'Fields:',
       fieldCatalogue(registry),
     ].join('\n'),
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object.' },
+      object: { ...objectArg(registry), description: 'Which object.' },
       id: { type: 'string', description: NAME_HINT },
     },
     required: ['object', 'id'],
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
     const record = await getRecord(context.caller.ctx, key, found.id)
     if (!record) return { text: 'That record no longer exists.', isError: true }
 
-    const object = objectOrThrow(context.registry, key)
     const lines = object.fields
       .map((field) => {
         const value = record.labels[field.key] ?? record.values[field.key]
@@ -288,10 +284,10 @@ const listActivities: ToolDefinition = {
   writes: false,
   description: () =>
     `Everything that has happened on one record, newest first: notes, calls, meetings, emails, stage changes, form fills, bookings. Filter with \`type\`. Valid types: ${ACTIVITY_TYPES.join(', ')}.`,
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object the record is.' },
+      object: { ...objectArg(registry), description: 'Which object the record is.' },
       id: { type: 'string', description: NAME_HINT },
       type: {
         type: 'array',
@@ -304,8 +300,9 @@ const listActivities: ToolDefinition = {
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
     const requested = Array.isArray(args.type) ? args.type.map(String) : []
@@ -429,7 +426,7 @@ const updateRecordTool: ToolDefinition = {
   writes: true,
   description: ({ registry }) =>
     [
-      'Change fields on one contact, company or deal. Dates may be written the way a person says them ("October 15th", "next Friday") and are resolved in your timezone; the response states the ISO date that was actually set.',
+      'Change fields on one record, of any object in this workspace. Dates may be written the way a person says them ("October 15th", "next Friday") and are resolved in your timezone; the response states the ISO date that was actually set.',
       'Stages, owners and companies may be named rather than given as ids. A name that matches more than one record changes nothing and comes back with the candidates.',
       '',
       'Fields, with their types and allowed values:',
@@ -438,7 +435,7 @@ const updateRecordTool: ToolDefinition = {
   inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object.' },
+      object: { ...objectArg(registry), description: 'Which object.' },
       id: { type: 'string', description: NAME_HINT },
       fields: {
         type: 'object',
@@ -450,11 +447,11 @@ const updateRecordTool: ToolDefinition = {
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
-    const object = objectOrThrow(context.registry, key)
     const prepared = await prepareFields(
       context.caller.ctx,
       object,
@@ -493,23 +490,23 @@ const createRecordTool: ToolDefinition = {
   writes: true,
   description: ({ registry }) =>
     [
-      'Create a contact, company or deal. A contact created with a work email is associated to its company automatically by the same domain rules the forms use.',
+      'Create a record of any object in this workspace. A contact created with a work email is associated to its company automatically by the same domain rules the forms use.',
       '',
       'Fields:',
       fieldCatalogue(registry),
     ].join('\n'),
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object to create.' },
+      object: { ...objectArg(registry), description: 'Which object to create.' },
       fields: { type: 'object', description: 'The values, keyed by field key.', additionalProperties: true },
     },
     required: ['object', 'fields'],
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const object = objectOrThrow(context.registry, key)
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
     const prepared = await prepareFields(
       context.caller.ctx,
       object,
@@ -541,10 +538,10 @@ const createNoteTool: ToolDefinition = {
   writes: true,
   description: () =>
     'Put a note on a record\'s timeline. It appears on that record and on the ones associated with it, the same as a note typed into the app.',
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object the record is.' },
+      object: { ...objectArg(registry), description: 'Which object the record is.' },
       id: { type: 'string', description: NAME_HINT },
       body: { type: 'string', description: 'The note.' },
     },
@@ -552,8 +549,9 @@ const createNoteTool: ToolDefinition = {
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
     const body = String(args.body ?? '').trim()
@@ -577,10 +575,10 @@ const createTaskTool: ToolDefinition = {
   writes: true,
   description: () =>
     'Create a task against a record. The due date may be written the way a person says it; the response states the ISO date that was set. Unassigned tasks come to you.',
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object the record is.' },
+      object: { ...objectArg(registry), description: 'Which object the record is.' },
       id: { type: 'string', description: NAME_HINT },
       title: { type: 'string', description: 'What needs doing.' },
       due_date: { type: 'string', description: 'YYYY-MM-DD, or a phrase like "next Friday".' },
@@ -591,8 +589,9 @@ const createTaskTool: ToolDefinition = {
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
     const title = String(args.title ?? '').trim()
@@ -649,10 +648,10 @@ const logActivityTool: ToolDefinition = {
   writes: true,
   description: () =>
     `Record something that happened outside Rawr: a call, a meeting, an email. It lands on the record's timeline dated when it happened, not when it was logged. Valid types: ${LOGGABLE.join(', ')}.`,
-  inputSchema: () => ({
+  inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
-      object: { ...object, description: 'Which object the record is.' },
+      object: { ...objectArg(registry), description: 'Which object the record is.' },
       id: { type: 'string', description: NAME_HINT },
       type: { type: 'string', enum: LOGGABLE, description: 'What kind of thing happened.' },
       subject: { type: 'string', description: 'One line summarising it.' },
@@ -663,8 +662,9 @@ const logActivityTool: ToolDefinition = {
     additionalProperties: false,
   }),
   run: async (context, args) => {
-    const key = objectKeyOrThrow(args.object)
-    const found = await resolveOrExplain(context, key, String(args.id ?? ''))
+    const object = objectFromArg(context.registry, args.object)
+    const key = object.key
+    const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
     const type = String(args.type ?? '')
@@ -727,20 +727,21 @@ export const CURATED_TOOLS: ToolDefinition[] = [
  *  refusal carries enough detail on each candidate that the answer is obvious. */
 const resolveOrExplain = async (
   context: ToolContext,
-  key: ObjectKey,
+  object: RegistryObject,
   query: string,
 ): Promise<{ id: string; displayName: string } | { problem: ToolResult }> => {
+  const names = { singular: object.nameSingular, plural: object.namePlural }
   if (!query.trim()) {
-    return { problem: { text: `Which ${key}? Give a name or an id.`, isError: true } }
+    return { problem: { text: `Which ${names.singular.toLowerCase()}? Give a name or an id.`, isError: true } }
   }
-  const resolution = await resolveRecord(context.caller.ctx, key, query)
+  const resolution = await resolveRecord(context.caller.ctx, object.key, query)
   if (resolution.kind === 'one') {
     return { id: resolution.record.id, displayName: resolution.record.displayName }
   }
   return {
     problem: {
       text: describeAmbiguity(
-        key,
+        names,
         query,
         resolution.kind === 'many' ? resolution.candidates : resolution.suggestions,
       ),

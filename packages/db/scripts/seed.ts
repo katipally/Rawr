@@ -260,9 +260,7 @@ try {
           stageId: enterpriseStages[i % enterpriseStages.length]!.id,
           // Zero and null amounts both exist in the real portal.
           amount: i === 0 ? '0' : i === 11 ? null : String((i + 1) * 25_000),
-          // One deal off USD, so the board proves it subtotals per currency
-          // instead of adding two currencies together.
-          currency: i === 14 ? 'EUR' : 'USD',
+          currency: 'USD',
           closeDate: i === 12 ? null : dayAgo(-(i + 5)).toISOString().slice(0, 10),
           nextStep: i % 3 === 0 ? null : 'Send revised pricing',
           // Rows 2 and 5 are already overdue, which is the Monday list.

@@ -1,4 +1,4 @@
-import { canWrite, type Role } from '@rawr/db'
+import { canWrite, getRegistry, type Role } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavSection } from '~/components/app-shell.tsx'
@@ -25,14 +25,17 @@ import {
   tasksPath,
   workspaceHome,
 } from '~/lib/links.ts'
-import { memberships, readSession } from '~/server/session.ts'
+import { contextFrom, memberships, readSession } from '~/server/session.ts'
 
 const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const workspace = session.workspaceSlug
-  const mine = await memberships(session.userId)
+  const [mine, registry] = await Promise.all([
+    memberships(session.userId),
+    getRegistry(contextFrom(session)),
+  ])
   // Built from the session, because every CRM address carries its workspace.
   // The four sections are HubSpot's: the records and the work on them, what goes
   // out to the market, what the numbers say, and the plumbing. Settings is not a
@@ -46,11 +49,13 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       groups: [
         {
           label: 'Records',
-          items: [
-            { href: objectView(workspace, 'contact', 'all'), label: 'Contacts', match: `/contacts/${workspace}/objects/contact` },
-            { href: objectView(workspace, 'company', 'all'), label: 'Companies', match: `/contacts/${workspace}/objects/company` },
-            { href: objectView(workspace, 'deal', 'all'), label: 'Deals', match: `/contacts/${workspace}/objects/deal` },
-          ],
+          // From the registry, so an object an admin invents is in the menu the
+          // moment it exists rather than only at an address somebody typed.
+          items: registry.objects.map((object) => ({
+            href: objectView(workspace, object.key, 'all'),
+            label: object.namePlural,
+            match: `/contacts/${workspace}/objects/${object.key}`,
+          })),
         },
         {
           label: 'Work',

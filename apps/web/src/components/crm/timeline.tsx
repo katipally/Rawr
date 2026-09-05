@@ -4,7 +4,6 @@ import { Alert, Button, EmptyState, TextArea, TextInput, cn, useToast } from '@r
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { pageViewPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, formatDateTime } from './value.tsx'
@@ -26,7 +25,8 @@ export type TimelineEntry = {
 export type TimelineGroup = { label: string; types: string[] }
 
 export type TimelineProps = {
-  object: ObjectKey
+  /** An object key, core or invented. */
+  object: string
   workspace: string
   /** Whose record this is. Tracking entries are attributed to the person, the way
    *  HubSpot reads "Muhammad Owais viewed Data Studio", because "public viewed" or

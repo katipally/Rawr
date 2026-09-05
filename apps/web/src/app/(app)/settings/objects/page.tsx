@@ -26,9 +26,15 @@ const ObjectsPage = async () => {
               sorts a little more slowly than contacts do.
             </p>
             <p>
-              Records of it have fields, filters, sorting and search. They do not have a timeline,
-              associations or tasks yet: all three name a record type that is fixed to the three
-              built-in objects, and widening that is its own change.
+              Records of it carry what a contact does: fields, filters, sorting, search, a
+              timeline, associations to any other object, tasks and files. Automations can watch
+              one being created, webhooks can announce it, and an agent on the MCP endpoint reaches
+              it through the same tools it reaches a deal through.
+            </p>
+            <p>
+              Three things stay with the built-in three, because each one works off a shape written
+              per object rather than a general one: merging two records, enriching from an email or
+              a domain, and importing a file.
             </p>
           </>
         }

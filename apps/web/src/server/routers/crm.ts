@@ -52,7 +52,6 @@ import {
   updateRecord,
   withWorkspace,
   schema,
-  type ObjectKey,
   type UpdateResult,
   type WorkspaceContext,
 } from '@rawr/db'
@@ -65,17 +64,17 @@ import { announceStageChange } from '../stage-alerts.ts'
 import { NOT_CONFIGURED, removeObject, signedDownload, signedUpload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
-/** The three the system is built on. Used where a procedure genuinely needs one:
- *  a timeline entry, an association and a task all name an entity type that is an
- *  enum of exactly these, so widening it here would let a request in that the
- *  database cannot store. */
+/** The three the system is built on. Used only where a procedure genuinely needs
+ *  one: merging two records and importing a file both work off a shape that is
+ *  written out per object, and neither has a general form. Everything else takes
+ *  `anyObject` and asks the registry. */
 const objectKey = z.enum(['contact', 'company', 'deal'])
 
 /** Any object in the workspace, including one an admin invented. The registry is
  *  what decides whether it exists — this only proves the string is shaped like a
  *  key, because it reaches SQL as an alias and appears in a URL. */
 const anyObject = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
-const entityRef = z.object({ entityType: objectKey, entityId: z.uuid() })
+const entityRef = z.object({ entityType: anyObject, entityId: z.uuid() })
 
 const condition = z.object({
   field: z.string().min(1).max(64),
@@ -94,7 +93,7 @@ const cursorSchema = z.object({ value: z.union([z.string(), z.number(), z.null()
 const recordValues = z.record(z.string().max(64), z.unknown())
 
 const listInput = z.object({
-  object: objectKey,
+  object: anyObject,
   columns: z.array(z.string().max(64)).max(60).optional(),
   filters: z.array(filterGroup).max(5).optional(),
   sorts: z.array(sortSchema).max(3).optional(),
@@ -196,13 +195,12 @@ export const crmRouter = router({
 
     /** What every record picker reads. A capped, ranked answer to "which record
      *  did you mean", never the whole object. */
-    /** The relation picker. Core objects only: what a record is called in a
-     *  picker is a per-object expression, and a relation pointing at a custom
-     *  object is a later change than this one. */
+    /** The relation picker. Any object: what a record is called in a picker is a
+     *  per-object expression, and the registry supplies it for an invented one. */
     options: protectedProcedure
       .input(
         z.object({
-          object: objectKey,
+          object: anyObject,
           query: z.string().max(200).optional(),
           limit: z.number().int().min(1).max(50).optional(),
           excludeId: z.uuid().nullish(),
@@ -355,7 +353,7 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) => call(() => setViewPinned(ctx.workspace, input.id, input.pinned))),
 
     reorder: protectedProcedure
-      .input(z.object({ object: objectKey, ids: z.array(z.uuid()).min(1).max(100) }))
+      .input(z.object({ object: anyObject, ids: z.array(z.uuid()).min(1).max(100) }))
       .mutation(({ ctx, input }) => call(() => reorderViews(ctx.workspace, input.object, input.ids))),
 
     remove: protectedProcedure
@@ -417,7 +415,7 @@ export const crmRouter = router({
    *  a filename somebody can click and nothing behind it. */
   attachments: router({
     list: protectedProcedure
-      .input(z.object({ entityType: objectKey, entityId: z.uuid() }))
+      .input(z.object({ entityType: anyObject, entityId: z.uuid() }))
       .query(({ ctx, input }) =>
         call(async () => ({
           configured: storageConfigured,
@@ -428,7 +426,7 @@ export const crmRouter = router({
     sign: protectedProcedure
       .input(
         z.object({
-          entityType: objectKey,
+          entityType: anyObject,
           entityId: z.uuid(),
           filename: z.string().min(1).max(255),
           bytes: z.number().int().positive().max(MAX_ATTACHMENT_BYTES),
@@ -450,7 +448,7 @@ export const crmRouter = router({
     confirm: protectedProcedure
       .input(
         z.object({
-          entityType: objectKey,
+          entityType: anyObject,
           entityId: z.uuid(),
           storageKey: z.string().min(1).max(500),
           filename: z.string().min(1).max(255),
@@ -502,7 +500,7 @@ export const crmRouter = router({
     read: protectedProcedure
       .input(
         z.object({
-          object: objectKey,
+          object: anyObject,
           /** Any day in the month wanted. The layer takes the month from it. */
           month: z.string().regex(/^\d{4}-\d{2}(-\d{2})?$/, 'A month looks like 2026-09.'),
           field: z.string().min(1).max(64),

@@ -15,7 +15,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { createdAt, pk, searchVector, tsvector, updatedAt, workspaceId } from './columns.ts'
-import { activityTypeEnum, actorKindEnum, entityTypeEnum, taskStatusEnum } from './enums.ts'
+import { activityTypeEnum, actorKindEnum, taskStatusEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 
 export const lifecycleStage = pgTable(
@@ -194,9 +194,9 @@ export const association = pgTable(
   'association',
   {
     workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
-    fromType: entityTypeEnum('from_type').notNull(),
+    fromType: text('from_type').notNull(),
     fromId: uuid('from_id').notNull(),
-    toType: entityTypeEnum('to_type').notNull(),
+    toType: text('to_type').notNull(),
     toId: uuid('to_id').notNull(),
     label: text('label'),
     createdAt: createdAt(),
@@ -241,7 +241,7 @@ export const activityLink = pgTable(
     activityId: uuid('activity_id')
       .notNull()
       .references(() => activity.id, { onDelete: 'cascade' }),
-    entityType: entityTypeEnum('entity_type').notNull(),
+    entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
     /** Copied from the activity, written in the same transaction. A contact with
      *  4,000 activities is keyset paginated and counted straight off the index
@@ -279,7 +279,7 @@ export const task = pgTable(
     status: taskStatusEnum('status').notNull().default('open'),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     assigneeId: uuid('assignee_id').references(() => userAccount.id, { onDelete: 'set null' }),
-    entityType: entityTypeEnum('entity_type'),
+    entityType: text('entity_type'),
     entityId: uuid('entity_id'),
     createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
@@ -305,9 +305,9 @@ export const attachment = pgTable(
   {
     id: pk(),
     workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
-    /** Not a foreign key: the type decides which of three tables it points at,
-     *  and no constraint spans them. The shape activityLink already uses. */
-    entityType: entityTypeEnum('entity_type').notNull(),
+    /** An object key. Not a foreign key: the type decides which table it points
+     *  at, and no constraint spans them. The shape activityLink already uses. */
+    entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
     /** The path inside the bucket, carrying the workspace, so one tenant's prefix
      *  is never another's even if a bucket is ever shared or misconfigured. */

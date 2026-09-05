@@ -3,7 +3,6 @@
 import { Alert, Button, EmptyState, IconButton, useToast } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useRef, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -31,9 +30,8 @@ export const AttachmentsPanel = ({
   configured,
   canWrite,
 }: {
-  /** Core objects only: an attachment names an entity type that is an enum of
-   *  the three, so a custom object has nowhere to hang one yet. */
-  object: ObjectKey
+  /** An object key, core or invented. */
+  object: string
   recordId: string
   rows: AttachmentView[]
   configured: boolean

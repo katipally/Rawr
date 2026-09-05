@@ -4,6 +4,7 @@ import {
   listAutomations,
   listFields,
   listLifecycleStages,
+  getRegistry,
 } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { AutomationList } from './automation-list.tsx'
@@ -27,13 +28,25 @@ const AutomationsPage = async () => {
   }
 
   const ctx = contextFrom(session)
-  const [rows, runs, people, stages, fields] = await Promise.all([
+  const [rows, runs, people, stages, fields, registry] = await Promise.all([
     listAutomations(ctx),
     listAutomationRuns(ctx),
     listAssignable(ctx),
     listLifecycleStages(ctx),
     listFields(ctx),
+    getRegistry(ctx),
   ])
+
+  // Every object in the workspace, not the three written out: "a record is
+  // created" happens to an object an admin invented exactly as it does to a
+  // contact.
+  const objects = registry.objects.map((object) => ({ key: object.key, label: object.nameSingular }))
+  const fieldsByObject = Object.fromEntries(
+    registry.objects.map((object) => [
+      object.key,
+      fields.filter((field) => field.objectKey === object.key).map((field) => field.key),
+    ]),
+  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -91,11 +104,8 @@ const AutomationsPage = async () => {
         }))}
         people={people.map((person) => ({ id: person.userId, name: person.name }))}
         stages={stages.map((stage) => stage.name)}
-        fieldsByObject={{
-          contact: fields.filter((field) => field.objectKey === 'contact').map((field) => field.key),
-          company: fields.filter((field) => field.objectKey === 'company').map((field) => field.key),
-          deal: fields.filter((field) => field.objectKey === 'deal').map((field) => field.key),
-        }}
+        objects={objects}
+        fieldsByObject={fieldsByObject}
       />
     </div>
   )

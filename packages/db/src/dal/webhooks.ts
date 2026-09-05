@@ -1,9 +1,9 @@
 import { asc, eq } from 'drizzle-orm'
 import { webhookEndpoint } from '../schema/platform.ts'
-import type { ObjectKey } from '../registry/core.ts'
 import { randomToken } from '../internal/crypto.ts'
 import type { WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace } from './index.ts'
+import { getRegistry } from './registry.ts'
 
 /** Who is subscribed to what happens in Rawr, and the key that proves a delivery
  *  came from us.
@@ -35,7 +35,7 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]
 /** The name an event carries on the wire, from the pair that already describes
  *  it everywhere else. Not every pair is a real event, so this can return one
  *  nothing subscribes to, and nothing subscribing to it is the correct outcome. */
-export const eventNameFor = (objectKey: ObjectKey, trigger: string): string =>
+export const eventNameFor = (objectKey: string, trigger: string): string =>
   `${objectKey}.${trigger === 'record_created' ? 'created' : trigger}`
 
 export type WebhookEndpointRow = {
@@ -109,10 +109,21 @@ const checkUrl = (raw: string): string => {
   return parsed.toString()
 }
 
-const checkEvents = (events: string[]): string[] => {
-  const unknown = events.filter((event) => !(WEBHOOK_EVENTS as readonly string[]).includes(event))
+const checkEvents = (known: readonly string[], events: string[]): string[] => {
+  const unknown = events.filter((event) => !known.includes(event))
   if (unknown.length > 0) throw new Error(`Rawr does not send ${unknown.join(', ')}.`)
   return [...new Set(events)]
+}
+
+/** What this workspace can send, which is the fixed list plus one per object an
+ *  admin invented. A custom object only has creation to announce: a stage and a
+ *  lifecycle are things the core three have and it does not. */
+export const webhookEventsFor = async (ctx: WorkspaceContext): Promise<string[]> => {
+  const registry = await getRegistry(ctx)
+  return [
+    ...WEBHOOK_EVENTS,
+    ...registry.objects.filter((object) => object.isCustom).map((object) => `${object.key}.created`),
+  ]
 }
 
 export const listWebhookEndpoints = async (ctx: WorkspaceContext): Promise<WebhookEndpointRow[]> =>
@@ -152,7 +163,7 @@ export const createWebhookEndpoint = async (
     const name = input.name.trim()
     if (!name) throw new Error('Give the endpoint a name, so the right one can be turned off later.')
     const url = checkUrl(input.url)
-    const events = checkEvents(input.events)
+    const events = checkEvents(await webhookEventsFor(ctx), input.events)
     const secret = `whsec_${randomToken(32)}`
 
     const [created] = await tx
@@ -185,7 +196,7 @@ export const updateWebhookEndpoint = async (
     const values = {
       ...(input.name === undefined ? {} : { name: input.name.trim() }),
       ...(input.url === undefined ? {} : { url: checkUrl(input.url) }),
-      ...(input.events === undefined ? {} : { events: checkEvents(input.events) }),
+      ...(input.events === undefined ? {} : { events: checkEvents(await webhookEventsFor(ctx), input.events) }),
       ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
       updatedAt: new Date(),
     }

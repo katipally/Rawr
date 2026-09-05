@@ -11,11 +11,11 @@ import { mutate, withWorkspace } from './index.ts'
  *  anywhere to put the rows, which is `custom_record`. This is the small amount
  *  of code that creates one and takes it away again.
  *
- *  A custom object is deliberately less than a core one for now: it has records,
- *  fields, a list and a record page. It has no timeline, no associations and no
- *  tasks, because all three name an entity type that is an enum of the three the
- *  system is built on. Those come with widening that enum, which is its own
- *  change. Where a path needs one, `assertCore` says so rather than half-running. */
+ *  A custom object now carries what a core one does: records, fields, a list, a
+ *  record page, a timeline, associations, tasks and files. What stays core-only
+ *  is the handful of paths that know a specific shape rather than a general one:
+ *  merging two records, enriching from a domain, and importing a file. Those say
+ *  so through `assertCore` rather than half-running. */
 
 export type CustomObjectRow = {
   id: string
@@ -175,6 +175,36 @@ export const deleteCustomObject = async (ctx: WorkspaceContext, id: string): Pro
     const [{ n = 0 } = { n: 0 }] = await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from custom_record where object_id = ${id}::uuid and deleted_at is null`,
     )
+
+    // What pointed at those records by key. None of these is a foreign key, so
+    // the cascade that takes the rows cannot take these with it, and a link left
+    // behind would be a card on some other record naming an object that is gone.
+    for (const statement of [
+      sql`delete from association where from_type = ${before.key} or to_type = ${before.key}`,
+      sql`delete from task where entity_type = ${before.key}`,
+      sql`delete from attachment where entity_type = ${before.key}`,
+      sql`delete from automation_run where entity_type = ${before.key}`,
+    ]) {
+      await tx.execute(statement)
+    }
+
+    // An activity is written once and linked to every record it touches. Taking
+    // its last link leaves history of nothing, so the two go together; one that
+    // also sat on a contact keeps that link and stays.
+    //
+    // Three statements rather than one with a data-modifying CTE: the outer half
+    // of such a statement reads the snapshot from before the CTE ran, so it would
+    // still see the links this one just deleted and delete nothing.
+    const touched = await tx.execute<{ activity_id: string }>(
+      sql`delete from activity_link where entity_type = ${before.key} returning activity_id`,
+    )
+    if (touched.length > 0) {
+      const ids = [...new Set(touched.map((row) => row.activity_id))]
+      await tx.execute(sql`
+        delete from activity a
+         where a.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+           and not exists (select 1 from activity_link l where l.activity_id = a.id)`)
+    }
 
     await tx.delete(objectDef).where(eq(objectDef.id, id))
     forgetRegistry(ctx.workspaceId)

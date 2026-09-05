@@ -1,6 +1,5 @@
 import { Badge, Card, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
-import type { ObjectKey } from '@rawr/db'
 import { recordPath, threadPath } from '~/lib/links.ts'
 import { formatDate } from './value.tsx'
 
@@ -30,7 +29,8 @@ export type Touch = { channel: string; at: string | null } | null
 
 export type RecordOverviewProps = {
   workspace: string
-  object: ObjectKey
+  /** An object key, core or invented. */
+  object: string
   tasks: OverviewTask[]
   threads: OverviewThread[]
   deals: OverviewDeal[]

@@ -75,7 +75,6 @@ const objectKey = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an obj
  *  record created, stage changed, lifecycle changed and form submitted — all
  *  four are things that only happen to a core object, and its run log names an
  *  entity type that is an enum of exactly them. */
-const coreObjectKey = z.enum(['contact', 'company', 'deal'])
 const name = z.string().trim().min(1).max(120)
 const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
 
@@ -376,7 +375,7 @@ export const adminRouter = router({
           id: z.uuid().nullish(),
           name: z.string().min(1).max(120),
           trigger: z.enum(AUTOMATION_TRIGGERS),
-          object: coreObjectKey,
+          object: objectKey,
           conditions: z.array(z.unknown()).max(10),
           /** A discriminated union so a delay cannot arrive without its minutes
            *  and a guard cannot arrive without its conditions. Twenty steps is

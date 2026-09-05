@@ -151,8 +151,8 @@ export const ObjectList = ({
 
           <Alert tone="info">
             It starts with one field, Name, which is what its records are called. Add the rest under
-            Properties. Records of an object you create have fields, a list, filters and search;
-            they do not have a timeline, associations or tasks yet.
+            Properties. Records of it get a list, filters, search, a timeline, associations, tasks
+            and files, the same as a contact.
           </Alert>
         </div>
       </Modal>

@@ -6,7 +6,7 @@ import { assertCanWrite, type WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import { coreKeyOf, getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
+import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
 
 /** A segment is a saved query with remembered membership. D15 put it in F1 rather
  *  than a later feature, and everything downstream assumes it: F6 pushes a segment
@@ -271,28 +271,20 @@ export const evaluateSegmentIn = async (
      where held.id is null
     returning entity_id`)
 
-  // A segment over a custom object has no timeline to write to: the fanout
-  // writes activity rows, whose entity type is an enum of the core three.
-  // The membership is written either way. Only the timeline entries are skipped
-  // for a custom object, because an activity names an entity type of the three
-  // core objects and there is nowhere to put one.
-  const entityType = coreKeyOf(object)
-  if (entityType) {
-    await recordActivityFanout(tx, ctx, {
-      type: 'segment_change',
-      subject: `entered ${row.name}`,
-      payload: { segmentId, segmentName: row.name, direction: 'entered' },
-      entityType,
-      entityIds: entered.map((member) => member.entity_id),
-    })
-    await recordActivityFanout(tx, ctx, {
-      type: 'segment_change',
-      subject: `left ${row.name}`,
-      payload: { segmentId, segmentName: row.name, direction: 'exited' },
-      entityType,
-      entityIds: exited.map((member) => member.entity_id),
-    })
-  }
+  await recordActivityFanout(tx, ctx, {
+    type: 'segment_change',
+    subject: `entered ${row.name}`,
+    payload: { segmentId, segmentName: row.name, direction: 'entered' },
+    entityType: object.key,
+    entityIds: entered.map((member) => member.entity_id),
+  })
+  await recordActivityFanout(tx, ctx, {
+    type: 'segment_change',
+    subject: `left ${row.name}`,
+    payload: { segmentId, segmentName: row.name, direction: 'exited' },
+    entityType: object.key,
+    entityIds: exited.map((member) => member.entity_id),
+  })
 
   await tx.update(segment).set({ lastEvaluatedAt: new Date() }).where(eq(segment.id, segmentId))
 

@@ -117,6 +117,11 @@ export const viewKindEnum = pgEnum('rawr_view_kind', [
   'calendar',
 ])
 
+/** Only `import_job.object_type` still holds this. Every other column that points
+ *  at a record (a timeline link, an association, a task, a file, an automation
+ *  run) is text, because an admin invents objects and an enum cannot be widened
+ *  to hold a name nobody has typed yet. Importing into a custom object is not
+ *  built, so this column really does hold one of three. */
 export const entityTypeEnum = pgEnum('rawr_entity_type', ['company', 'contact', 'deal'])
 
 /** 01-crm.md A3. Twenty types, reduced from HubSpot's 44-type filter set to what

@@ -5,9 +5,8 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
-import type { ObjectKey } from '@rawr/db'
 
-type Hit = { objectKey: ObjectKey; id: string; displayName: string; detail: string | null }
+type Hit = { objectKey: string; id: string; displayName: string; detail: string | null }
 type Group = { label: string; hits: Hit[] }
 
 const DEBOUNCE_MS = 180
@@ -51,13 +50,9 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         .then((results) => {
           if (cancelled) return
           setError(null)
-          setGroups(
-            [
-              { label: 'Contacts', hits: results.contacts },
-              { label: 'Companies', hits: results.companies },
-              { label: 'Deals', hits: results.deals },
-            ].filter((group) => group.hits.length > 0),
-          )
+          // Whatever the workspace has, named by the registry, so an object an
+          // admin invented is searched from here the day it exists.
+          setGroups(results.groups.map((group) => ({ label: group.namePlural, hits: group.hits })))
           setActive(0)
         })
         .catch((cause: unknown) => {
@@ -119,7 +114,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         role="combobox"
         aria-expanded={showing}
         aria-controls={listId}
-        aria-label="Search contacts, companies and deals"
+        aria-label="Search records"
         placeholder="Search  ⌘K"
         onChange={(event) => {
           setText(event.target.value)

@@ -39,7 +39,7 @@ import {
 } from '../src/dal/attachments.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { readBoard } from '../src/dal/board.ts'
-import { searchAll } from '../src/dal/search.ts'
+import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
 import {
   deleteView,
@@ -51,7 +51,7 @@ import {
   saveView,
   setViewPinned,
 } from '../src/dal/views.ts'
-import { readAssociations, associate } from '../src/dal/associations.ts'
+import { readAssociations, associate, groupFor } from '../src/dal/associations.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingIsUsable } from '../src/dal/imports.ts'
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'
@@ -467,15 +467,15 @@ try {
   console.log('\n-- search, views, export ---------------------------------------------')
 
   await check('search finds a company by a misspelled name', async () => {
-    const results = await searchAll(sales, 'Softwre Partnr')
-    expect(results.companies.length > 0, 'trigram search returned nothing')
-    return `${results.companies.length} companies, top: ${results.companies[0]!.displayName}`
+    const companies = hitsOf(await searchAll(sales, 'Softwre Partnr'), 'company')
+    expect(companies.length > 0, 'trigram search returned nothing')
+    return `${companies.length} companies, top: ${companies[0]!.displayName}`
   })
 
   await check('search finds a contact by an email prefix', async () => {
-    const results = await searchAll(sales, 'contact1@')
-    expect(results.contacts.length > 0, 'no contact matched the prefix')
-    return results.contacts[0]!.displayName
+    const contacts = hitsOf(await searchAll(sales, 'contact1@'), 'contact')
+    expect(contacts.length > 0, 'no contact matched the prefix')
+    return contacts[0]!.displayName
   })
 
   await check('a filtered list returns only matching rows and pages by keyset', async () => {
@@ -790,38 +790,45 @@ try {
       .from(s.company)
       .where(eq(s.company.workspaceId, datasaur.id))
       .limit(1)
-    const all = await readAssociations(admin, { entityType: 'company', entityId: company!.id })
-    expect(all.totals.contacts === all.contacts.length, 'an unsearched rail disagreed with its own total')
+    const contactsIn = (rail: Awaited<ReturnType<typeof readAssociations>>) =>
+      groupFor(rail, 'contact') ?? { records: [], total: 0 }
 
-    const target = all.contacts[0]
+    const all = contactsIn(await readAssociations(admin, { entityType: 'company', entityId: company!.id }))
+    expect(all.total === all.records.length, 'an unsearched rail disagreed with its own total')
+
+    const target = all.records[0]
     if (!target) return 'the seeded company has no contacts to search'
 
-    const found = await readAssociations(
-      admin,
-      { entityType: 'company', entityId: company!.id },
-      { q: target.displayName.slice(0, 4) },
+    const found = contactsIn(
+      await readAssociations(
+        admin,
+        { entityType: 'company', entityId: company!.id },
+        { q: target.displayName.slice(0, 4) },
+      ),
     )
-    expect(found.contacts.length <= all.contacts.length, 'searching widened the rail')
+    expect(found.records.length <= all.records.length, 'searching widened the rail')
     expect(
-      found.contacts.some((row) => row.id === target.id),
+      found.records.some((row) => row.id === target.id),
       'the searched-for contact was not returned',
     )
     expect(
-      found.totals.contacts === all.totals.contacts,
-      `the count moved when searching: ${found.totals.contacts} vs ${all.totals.contacts}`,
+      found.total === all.total,
+      `the count moved when searching: ${found.total} vs ${all.total}`,
     )
 
-    const byName = await readAssociations(
-      admin,
-      { entityType: 'company', entityId: company!.id },
-      { sort: 'name' },
+    const byName = contactsIn(
+      await readAssociations(
+        admin,
+        { entityType: 'company', entityId: company!.id },
+        { sort: 'name' },
+      ),
     )
-    const names = byName.contacts.map((row) => row.displayName)
+    const names = byName.records.map((row) => row.displayName)
     expect(
       names.every((name, index) => index === 0 || names[index - 1]!.localeCompare(name) <= 0),
       'sort by name came back unordered',
     )
-    return `${all.totals.contacts} linked, search and A-to-Z both hold`
+    return `${all.total} linked, search and A-to-Z both hold`
   })
 
   await check('B8. a list page reports its total alongside a capped page', async () => {

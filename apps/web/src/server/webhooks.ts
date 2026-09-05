@@ -45,7 +45,7 @@ export type WebhookJob = {
  *  in order, and nothing over HTTP promises that. */
 export const buildDelivery = async (
   ctx: WorkspaceContext,
-  input: { event: string; objectKey: 'contact' | 'company' | 'deal'; entityId: string; workspaceSlug: string },
+  input: { event: string; objectKey: string; entityId: string; workspaceSlug: string },
 ): Promise<WebhookJob[]> => {
   const endpoints = await endpointsFor(ctx, input.event)
   if (endpoints.length === 0) return []
@@ -140,7 +140,7 @@ const describe = (cause: unknown, url: string): string => {
  *  down must not fail that write at all. */
 export const notifySubscribers = (
   ctx: WorkspaceContext,
-  input: { objectKey: 'contact' | 'company' | 'deal'; trigger: string; entityId: string; workspaceSlug: string },
+  input: { objectKey: string; trigger: string; entityId: string; workspaceSlug: string },
 ): void => {
   const event = eventNameFor(input.objectKey, input.trigger)
   inBackground(`webhooks for ${event}`, async () => {

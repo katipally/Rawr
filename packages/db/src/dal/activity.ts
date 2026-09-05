@@ -2,12 +2,17 @@ import { randomUUID } from 'node:crypto'
 import { and, count, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { activity, activityLink } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
-import type { activityTypeEnum, entityTypeEnum } from '../schema/enums.ts'
+import type { activityTypeEnum } from '../schema/enums.ts'
 import type { WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 
 export type ActivityType = (typeof activityTypeEnum.enumValues)[number]
-export type EntityType = (typeof entityTypeEnum.enumValues)[number]
+/** The key of the object a link, a task or a file points at.
+ *
+ *  Text, not an enum: an admin invents an object long after any migration ran,
+ *  so `object_def` is what says which keys exist. Every write path here resolves
+ *  the object through the registry before it gets this far. */
+export type EntityType = string
 
 export type EntityRef = { entityType: EntityType; entityId: string }
 
@@ -131,7 +136,7 @@ export const recordActivityFanout = async (
 
     await tx.execute(sql`
       insert into activity_link (workspace_id, activity_id, entity_type, entity_id, type, occurred_at)
-      select ${ctx.workspaceId}::uuid, t.activity_id, ${entry.entityType}::rawr_entity_type, t.entity_id,
+      select ${ctx.workspaceId}::uuid, t.activity_id, ${entry.entityType}::text, t.entity_id,
              ${entry.type}::rawr_activity_type, ${occurredAt}::timestamptz
         from unnest(${idArray}::uuid[], ${entityArray}::uuid[]) as t(activity_id, entity_id)
       on conflict do nothing`)

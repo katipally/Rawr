@@ -5,7 +5,6 @@ import { ArrowDownUp, Plus, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { shortName } from '~/components/crm/value.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
@@ -15,11 +14,23 @@ import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 
 export type Associated = {
   id: string
-  objectKey: ObjectKey
+  objectKey: string
   displayName: string
   detail: string | null
   isPrimary: boolean
   label: string | null
+}
+
+/** One card: everything of one object that is linked to this record. Named by the
+ *  registry, so an object an admin invented gets a card that reads like the rest. */
+export type AssociationCard = {
+  objectKey: string
+  nameSingular: string
+  namePlural: string
+  records: Associated[]
+  /** How many are linked, before a search narrowed the rows. The badge counts
+   *  these, so a search does not make a card look emptier than the record is. */
+  total: number
 }
 
 /** How many rows a card holds before searching it is worth offering. Below this
@@ -28,56 +39,42 @@ const SEARCHABLE_FROM = 5
 
 export type AssociationRailProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   recordId: string
-  contacts: Associated[]
-  companies: Associated[]
-  deals: Associated[]
-  /** Which objects can be linked from here, narrowed to the sensible pairs. The
-   *  records themselves are searched, never listed: a deal's next contact is very
-   *  rarely among the newest few hundred. */
-  linkable: ObjectKey[]
+  cards: AssociationCard[]
+  /** Which objects can be linked from here. The records themselves are searched,
+   *  never listed: a deal's next contact is very rarely among the newest few
+   *  hundred. */
+  linkable: string[]
   /** The create form for each linkable object, so a deal's new contact is made
    *  here and linked in one step rather than created elsewhere and searched for. */
-  createFields: Partial<Record<ObjectKey, CreateField[]>>
+  createFields: Record<string, CreateField[]>
   /** Prefilled onto a record created from here: a contact or deal made from a
    *  company page starts with that company as its primary. */
   createInitial: Record<string, unknown>
   canWrite: boolean
-  /** How many are linked, before a search narrowed the rows. The badge counts
-   *  these, so a search does not make a card look emptier than the record is. */
-  totals: { contacts: number; companies: number; deals: number }
-}
-
-const TITLES: Record<ObjectKey, string> = {
-  contact: 'Contacts',
-  company: 'Companies',
-  deal: 'Deals',
 }
 
 export const AssociationRail = ({
   workspace,
   object,
   recordId,
-  contacts,
-  companies,
-  deals,
+  cards,
   linkable,
   createFields,
   createInitial,
   canWrite,
-  totals,
 }: AssociationRailProps) => {
   const router = useRouter()
   const toast = useToast()
-  const [adding, setAdding] = useState<ObjectKey | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
   const [choice, setChoice] = useState<PickedRecord | null>(null)
-  const [creating, setCreating] = useState<ObjectKey | null>(null)
+  const [creating, setCreating] = useState<AssociationCard | null>(null)
   const [busy, setBusy] = useState(false)
   // Per card, because a person searching a company's contacts is not searching
   // its deals at the same time.
-  const [needles, setNeedles] = useState<Partial<Record<ObjectKey, string>>>({})
-  const [sorts, setSorts] = useState<Partial<Record<ObjectKey, 'recent' | 'name'>>>({})
+  const [needles, setNeedles] = useState<Record<string, string>>({})
+  const [sorts, setSorts] = useState<Record<string, 'recent' | 'name'>>({})
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -94,64 +91,57 @@ export const AssociationRail = ({
     }
   }
 
-  const sections: { key: ObjectKey; rows: Associated[]; total: number }[] = [
-    { key: 'contact', rows: contacts, total: totals.contacts },
-    { key: 'company', rows: companies, total: totals.companies },
-    { key: 'deal', rows: deals, total: totals.deals },
-  ]
-
   /** Over the rows already on the page. The rail is capped per object, and a card
    *  that says "12 of 340" is honest about what the box is filtering. */
-  const shown = (key: ObjectKey, rows: Associated[]): Associated[] => {
-    const needle = (needles[key] ?? '').trim().toLowerCase()
+  const shown = (card: AssociationCard): Associated[] => {
+    const needle = (needles[card.objectKey] ?? '').trim().toLowerCase()
     const filtered = needle
-      ? rows.filter(
+      ? card.records.filter(
           (row) =>
             row.displayName.toLowerCase().includes(needle) ||
             (row.detail?.toLowerCase().includes(needle) ?? false),
         )
-      : rows
-    return (sorts[key] ?? 'recent') === 'name'
+      : card.records
+    return (sorts[card.objectKey] ?? 'recent') === 'name'
       ? [...filtered].sort((a, b) => a.displayName.localeCompare(b.displayName))
       : filtered
   }
 
   return (
     <div className="flex flex-col gap-3">
-      {sections.map((section) => {
-        if (section.key === object && section.rows.length === 0) return null
-        const canLink = linkable.includes(section.key)
-
-        const rows = shown(section.key, section.rows)
-        const searchable = section.rows.length >= SEARCHABLE_FROM
-        const needle = needles[section.key] ?? ''
+      {cards.map((card) => {
+        const canLink = linkable.includes(card.objectKey)
+        const rows = shown(card)
+        const searchable = card.records.length >= SEARCHABLE_FROM
+        const needle = needles[card.objectKey] ?? ''
+        const plural = card.namePlural.toLowerCase()
 
         return (
           <Card
-            key={section.key}
+            key={card.objectKey}
             flush
             title={
               <span className="flex items-center gap-1.5">
-                {TITLES[section.key]}
-                <Badge tone="neutral">{section.total}</Badge>
+                {card.namePlural}
+                <Badge tone="neutral">{card.total}</Badge>
               </span>
             }
             action={
               canWrite && canLink ? (
                 <>
-                  {createFields[section.key] ? (
+                  {createFields[card.objectKey] ? (
                     <IconButton
-                      label={`New ${section.key}`}
+                      label={`New ${card.nameSingular.toLowerCase()}`}
                       icon={<Plus aria-hidden="true" className="size-4" />}
-                      onClick={() => setCreating(section.key)}
+                      onClick={() => setCreating(card)}
                     />
                   ) : null}
                   <Button
                     variant="tertiary"
-                    aria-expanded={adding === section.key}
+                    aria-expanded={adding === card.objectKey}
                     onClick={() => {
                       setChoice(null)
-                      setAdding(adding === section.key ? null : section.key)
+                      setAdding(adding === card.objectKey ? null : card.objectKey)
                     }}
                   >
                     Add
@@ -167,24 +157,24 @@ export const AssociationRail = ({
                   <TextInput
                     type="search"
                     value={needle}
-                    aria-label={`Search linked ${TITLES[section.key].toLowerCase()}`}
-                    placeholder={`Search ${TITLES[section.key].toLowerCase()}`}
+                    aria-label={`Search linked ${plural}`}
+                    placeholder={`Search ${plural}`}
                     onChange={(event) =>
-                      setNeedles({ ...needles, [section.key]: event.target.value })
+                      setNeedles({ ...needles, [card.objectKey]: event.target.value })
                     }
                     className="pl-8"
                   />
                 </span>
                 <label className="flex shrink-0 items-center gap-1">
                   <ArrowDownUp aria-hidden="true" className="size-4 text-secondary" />
-                  <span className="sr-only">Sort {TITLES[section.key].toLowerCase()}</span>
+                  <span className="sr-only">Sort {plural}</span>
                   <Select
-                    value={sorts[section.key] ?? 'recent'}
-                    aria-label={`Sort ${TITLES[section.key].toLowerCase()}`}
+                    value={sorts[card.objectKey] ?? 'recent'}
+                    aria-label={`Sort ${plural}`}
                     onChange={(event) =>
                       setSorts({
                         ...sorts,
-                        [section.key]: event.target.value === 'name' ? 'name' : 'recent',
+                        [card.objectKey]: event.target.value === 'name' ? 'name' : 'recent',
                       })
                     }
                     className="w-auto"
@@ -196,13 +186,13 @@ export const AssociationRail = ({
               </div>
             ) : null}
 
-            {adding === section.key && canLink ? (
+            {adding === card.objectKey && canLink ? (
               <div className="flex flex-col gap-2 border-b border-divider px-3 py-2">
                 <RecordPicker
-                  object={section.key}
-                  label={`Pick a ${section.key} to link`}
-                  placeholder={`Search ${TITLES[section.key].toLowerCase()}`}
-                  excludeId={section.key === object ? recordId : null}
+                  object={card.objectKey}
+                  label={`Pick a ${card.nameSingular.toLowerCase()} to link`}
+                  placeholder={`Search ${plural}`}
+                  excludeId={card.objectKey === object ? recordId : null}
                   value={choice}
                   onChange={setChoice}
                 />
@@ -214,7 +204,7 @@ export const AssociationRail = ({
                     onClick={() => {
                       const picked = choice
                       if (!picked) return
-                      if (section.rows.some((row) => row.id === picked.id)) {
+                      if (card.records.some((row) => row.id === picked.id)) {
                         toast('info', `${picked.label} is already linked here.`)
                         return
                       }
@@ -222,7 +212,7 @@ export const AssociationRail = ({
                         () =>
                           api.crm.associations.add.mutate({
                             a: { entityType: object, entityId: recordId },
-                            b: { entityType: section.key, entityId: picked.id },
+                            b: { entityType: card.objectKey, entityId: picked.id },
                             label: null,
                           }),
                         'Linked.',
@@ -240,7 +230,7 @@ export const AssociationRail = ({
 
             {rows.length === 0 ? (
               <p className="px-3 py-3 text-secondary">
-                {section.rows.length === 0 ? (
+                {card.records.length === 0 ? (
                   <>
                     Nothing linked yet.{' '}
                     {canWrite && canLink
@@ -298,31 +288,32 @@ export const AssociationRail = ({
               </ul>
             )}
 
-            {rows.length > 0 && rows.length < section.total ? (
+            {rows.length > 0 && rows.length < card.total ? (
               <p className="border-t border-divider px-3 py-2 text-small text-secondary">
-                Showing {rows.length} of {section.total}.
+                Showing {rows.length} of {card.total}.
               </p>
             ) : null}
           </Card>
         )
       })}
 
-      {creating && createFields[creating] ? (
+      {creating && createFields[creating.objectKey] ? (
         <CreateRecordDialog
           workspace={workspace}
-          object={creating}
-          objectLabel={TITLES[creating].replace(/s$/, '').replace('Companie', 'Company')}
-          fields={createFields[creating] ?? []}
+          object={creating.objectKey}
+          objectLabel={creating.nameSingular}
+          fields={createFields[creating.objectKey] ?? []}
           // A contact or deal made from a company already points at it through
           // company_id, so the link exists without an association row.
           initial={createInitial}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
-            const already = object === 'company' && (creating === 'contact' || creating === 'deal')
+            const target = creating.objectKey
+            const already = object === 'company' && (target === 'contact' || target === 'deal')
             if (!already) {
               await api.crm.associations.add.mutate({
                 a: { entityType: object, entityId: recordId },
-                b: { entityType: creating, entityId: id },
+                b: { entityType: target, entityId: id },
                 label: null,
               })
             }

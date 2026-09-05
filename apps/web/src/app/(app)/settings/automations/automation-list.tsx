@@ -8,7 +8,6 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
 type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task' | 'notify_slack'
-type ObjectKey = 'contact' | 'company' | 'deal'
 
 /** What the editor holds. Config values are strings here and coerced on save:
  *  every one of them comes out of an input, and a half-typed number is a string
@@ -23,7 +22,7 @@ export type AutomationRowView = {
   name: string
   isActive: boolean
   trigger: Trigger
-  objectKey: ObjectKey
+  objectKey: string
   steps: StepView[]
   runCount: number
   lastRunAt: string | null
@@ -47,12 +46,17 @@ export type AutomationListProps = {
   runs: RunView[]
   people: { id: string; name: string }[]
   stages: string[]
-  fieldsByObject: Record<ObjectKey, string[]>
+  /** Every object in the workspace, named. A rule can watch one an admin
+   *  invented, so this cannot be written out here. */
+  objects: { key: string; label: string }[]
+  fieldsByObject: Record<string, string[]>
 }
 
-/** The words a person uses, against the words the enum uses. */
-const TRIGGERS: { key: Trigger; label: string; objects: ObjectKey[] }[] = [
-  { key: 'record_created', label: 'a record is created', objects: ['contact', 'company', 'deal'] },
+/** The words a person uses, against the words the enum uses. `objects: null` means
+ *  any object in the workspace; the rest are fixed by what the trigger needs (only
+ *  a deal has a pipeline, only a contact comes from a form fill). */
+const TRIGGERS: { key: Trigger; label: string; objects: string[] | null }[] = [
+  { key: 'record_created', label: 'a record is created', objects: null },
   { key: 'stage_changed', label: 'a deal changes stage', objects: ['deal'] },
   { key: 'lifecycle_changed', label: 'a lifecycle stage changes', objects: ['contact', 'company'] },
   { key: 'form_submitted', label: 'a form is submitted', objects: ['contact'] },
@@ -65,8 +69,6 @@ const ACTIONS: { key: ActionType; label: string }[] = [
   { key: 'create_task', label: 'Create a task' },
   { key: 'notify_slack', label: 'Post to Slack' },
 ]
-
-const OBJECT_LABEL: Record<ObjectKey, string> = { contact: 'Contact', company: 'Company', deal: 'Deal' }
 
 const STATE_TONE = { waiting: 'accent', done: 'ok', skipped: 'neutral', failed: 'error' } as const
 
@@ -133,10 +135,10 @@ const ActionFields = ({
   index: number
   type: ActionType
   config: Record<string, string>
-  object: ObjectKey
+  object: string
   people: { id: string; name: string }[]
   stages: string[]
-  fieldsByObject: Record<ObjectKey, string[]>
+  fieldsByObject: Record<string, string[]>
   onChange: (config: Record<string, string>) => void
 }) => {
   const id = (part: string) => `automation-${index}-${part}`
@@ -232,7 +234,7 @@ const ActionFields = ({
   )
 }
 
-export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: AutomationListProps) => {
+export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByObject }: AutomationListProps) => {
   const router = useRouter()
   const toast = useToast()
   const [editing, setEditing] = useState<AutomationRowView | 'new' | null>(null)
@@ -241,10 +243,12 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
 
   const [name, setName] = useState('')
   const [trigger, setTrigger] = useState<Trigger>('record_created')
-  const [object, setObject] = useState<ObjectKey>('contact')
+  const [object, setObject] = useState<string>('contact')
   const [steps, setSteps] = useState<StepView[]>([])
 
-  const allowedObjects = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? ['contact']
+  const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
+  const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
+  const labelOf = (key: string): string => objects.find((entry) => entry.key === key)?.label ?? key
 
   const openNew = () => {
     setName('')
@@ -327,7 +331,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
                 </p>
                 <p className="text-small text-secondary">
                   When {TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a{' '}
-                  {OBJECT_LABEL[row.objectKey].toLowerCase()}:{' '}
+                  {labelOf(row.objectKey).toLowerCase()}:{' '}
                   {row.steps.map(summarise).join(', then ')}
                 </p>
                 <p className="text-small text-secondary tabular-nums">
@@ -416,8 +420,8 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
               onChange={(event) => {
                 const next = event.target.value as Trigger
                 setTrigger(next)
-                const objects = TRIGGERS.find((entry) => entry.key === next)?.objects ?? ['contact']
-                if (!objects.includes(object)) setObject(objects[0] as ObjectKey)
+                const allowed = TRIGGERS.find((entry) => entry.key === next)?.objects ?? null
+                if (allowed && !allowed.includes(object)) setObject(allowed[0]!)
               }}
             >
               {TRIGGERS.map((entry) => (
@@ -432,11 +436,11 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
             <Select
               id="automation-object"
               value={object}
-              onChange={(event) => setObject(event.target.value as ObjectKey)}
+              onChange={(event) => setObject(event.target.value)}
             >
-              {allowedObjects.map((key) => (
-                <option key={key} value={key}>
-                  {OBJECT_LABEL[key]}
+              {allowedObjects.map((entry) => (
+                <option key={entry.key} value={entry.key}>
+                  {entry.label}
                 </option>
               ))}
             </Select>

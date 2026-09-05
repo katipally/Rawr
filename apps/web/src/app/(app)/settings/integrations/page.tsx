@@ -1,5 +1,5 @@
 import { Alert, PageHeader } from '@rawr/ui'
-import { listSites, listUnmatchedEvents, listWebhookEndpoints, WEBHOOK_EVENTS } from '@rawr/db'
+import { listSites, listUnmatchedEvents, listWebhookEndpoints, webhookEventsFor } from '@rawr/db'
 import { devIntegrationsEnabled, publicBaseUrl } from '~/lib/env.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -20,12 +20,13 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
   const { open } = await searchParams
 
   const ctx = contextFrom(session)
-  const [rows, unmatched, sites, hooks] = await Promise.all([
+  const [rows, unmatched, sites, hooks, webhookEvents] = await Promise.all([
     readIntegrations(ctx),
     listUnmatchedEvents(ctx, 25),
     listSites(ctx),
     // Only an admin may read them, and only an admin can open this page.
     session.role === 'admin' ? listWebhookEndpoints(ctx) : Promise.resolve([]),
+    session.role === 'admin' ? webhookEventsFor(ctx) : Promise.resolve([]),
   ])
   // The webhook URL names the workspace through a tracked site's key; the first
   // active one is the workspace's public identity for that purpose.
@@ -80,7 +81,7 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
           lastError: row.lastError,
           lastErrorAt: row.lastErrorAt?.toISOString() ?? null,
         }))}
-        events={[...WEBHOOK_EVENTS]}
+        events={webhookEvents}
         canWrite={session.role === 'admin'}
       />
     </div>

@@ -1,4 +1,10 @@
 import { createCustomObject, deleteCustomObject, listCustomObjects } from '../src/dal/objects.ts'
+import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
+import { associate, groupFor, readAssociations } from '../src/dal/associations.ts'
+import { createTask, listTasks, logByHand } from '../src/dal/tasks.ts'
+import { listAttachments, recordAttachment } from '../src/dal/attachments.ts'
+import { hitsOf, searchAll } from '../src/dal/search.ts'
+import { resolveRecord } from '../src/dal/resolve.ts'
 import { createField } from '../src/dal/admin-fields.ts'
 import { createRecord, getRecord, listRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
@@ -129,6 +135,71 @@ try {
     return 'renamed, and findable by the new name'
   })
 
+
+  // ---- what widening rawr_entity_type unlocked -----------------------------
+
+  await check('creating it wrote a timeline entry', async () => {
+    const counts = await timelineCounts(ctx, { entityType: key, entityId: recordId })
+    const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
+    expect(total > 0, 'the timeline is empty, so nothing linked to a custom record')
+    return `${total} entries, including the field_change from the create`
+  })
+
+  await check('a note lands on it and reads back', async () => {
+    await logByHand(ctx, { type: 'note', body: 'Kicked off with the client.', entity: { entityType: key, entityId: recordId } })
+    const page = await readTimeline(ctx, { entity: { entityType: key, entityId: recordId }, types: ['note'], limit: 10 })
+    expect(page.rows.length === 1, `${page.rows.length} notes`)
+    return page.rows[0]!.body ?? ''
+  })
+
+  await check('a task hangs on it and knows what it is called', async () => {
+    await createTask(ctx, { title: 'Confirm the scope', entity: { entityType: key, entityId: recordId } })
+    const [row] = await listTasks(ctx, { entity: { entityType: key, entityId: recordId } })
+    expect(Boolean(row), 'the task did not come back')
+    expect(row!.entityName === 'Atlas rollout phase two', `named "${row!.entityName}"`)
+    return `"${row!.title}" on "${row!.entityName}"`
+  })
+
+  await check('it associates with a contact, and the rail names both sides', async () => {
+    const [someone] = await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.workspaceId, ws!.id)).limit(1)
+    await associate(ctx, { entityType: key, entityId: recordId }, { entityType: 'contact', entityId: someone!.id })
+
+    const fromProject = groupFor(await readAssociations(ctx, { entityType: key, entityId: recordId }), 'contact')
+    expect(Boolean(fromProject?.records.some((row) => row.id === someone!.id)), 'the contact is not on the project')
+
+    const fromContact = groupFor(await readAssociations(ctx, { entityType: 'contact', entityId: someone!.id }), key)
+    expect(Boolean(fromContact?.records.some((row) => row.id === recordId)), 'the project is not on the contact')
+    expect(fromContact!.namePlural === 'Projects', fromContact!.namePlural)
+    return 'linked, and the card is named by the registry both ways'
+  })
+
+  await check('a file hangs on it', async () => {
+    await recordAttachment(ctx, {
+      entityType: key,
+      entityId: recordId,
+      storageKey: `${ws!.id}/${key}/${recordId}/verify/plan.pdf`,
+      filename: 'plan.pdf',
+      bytes: 1024,
+      mime: 'application/pdf',
+    })
+    const files = await listAttachments(ctx, { entityType: key, entityId: recordId })
+    expect(files.length === 1, `${files.length} files`)
+    return files[0]!.filename
+  })
+
+  await check('global search returns it under its own object', async () => {
+    const hits = hitsOf(await searchAll(ctx, 'Atlas'), key)
+    expect(hits.length === 1, `${hits.length} hits`)
+    expect(hits[0]!.id === recordId, 'a different record came back')
+    return `"${hits[0]!.displayName}" under ${key}`
+  })
+
+  await check('an agent can resolve it by name', async () => {
+    const found = await resolveRecord(ctx, key, 'Atlas rollout phase two')
+    expect(found.kind === 'one', `resolution was ${found.kind}`)
+    return found.kind === 'one' ? found.record.displayName : ''
+  })
+
   await check('it deletes softly and leaves the list', async () => {
     await deleteRecord(ctx, key, recordId)
     const page = await listRecords(ctx, { object: key, limit: 50 })
@@ -142,9 +213,32 @@ try {
       `select count(*)::int as n from custom_record where object_id = '${objectId}'` as never,
     )
     expect(Number(n) === 0, `${n} records survived`)
+
+    // None of these is a foreign key, so the cascade cannot reach them. A link
+    // left behind is a card on a contact naming an object that is gone.
+    for (const [table, column] of [
+      ['activity_link', 'entity_type'],
+      ['task', 'entity_type'],
+      ['attachment', 'entity_type'],
+      ['association', 'from_type'],
+      ['association', 'to_type'],
+    ]) {
+      const [{ n: left = 0 } = { n: 0 }] = await db.execute<{ n: number }>(
+        `select count(*)::int as n from ${table} where ${column} = '${key}'` as never,
+      )
+      expect(Number(left) === 0, `${left} rows left in ${table}.${column}`)
+    }
+
+    // The note written on it went with its last link, rather than being left as
+    // history of nothing.
+    const [{ n: notes = 0 } = { n: 0 }] = await db.execute<{ n: number }>(
+      `select count(*)::int as n from activity where body = 'Kicked off with the client.'` as never,
+    )
+    expect(Number(notes) === 0, `${notes} orphaned activities survived`)
+
     forgetRegistry(ctx.workspaceId)
     expect(!(await getRegistry(ctx)).byKey.has(key), 'it is still in the registry')
-    return 'gone, the way dropping a table would have taken them'
+    return 'gone, with its links, the way dropping a table would have taken them'
   })
 
   await check('a core object cannot be deleted', async () => {

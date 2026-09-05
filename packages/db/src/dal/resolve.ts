@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import type { ObjectKey } from '../registry/core.ts'
 import type { WorkspaceContext } from './context.ts'
 import { withWorkspace } from './index.ts'
+import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
 
 /** F5 §3. Turning "MGG production opportunity" into one record, or refusing to.
  *
@@ -12,7 +13,7 @@ import { withWorkspace } from './index.ts'
  *  enough detail on each candidate that the answer is obvious. */
 
 export type RecordCandidate = {
-  objectKey: ObjectKey
+  objectKey: string
   id: string
   displayName: string
   /** Stage, amount, company and close date for a deal; the email and company for a
@@ -111,47 +112,50 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const resolveRecord = async (
   ctx: WorkspaceContext,
-  objectKey: ObjectKey,
+  objectKey: string,
   query: string,
 ): Promise<Resolution> => {
   const needle = query.trim()
   if (!needle) return { kind: 'none', suggestions: [] }
 
   return withWorkspace(ctx, async (tx) => {
-    const base = QUERIES[objectKey](needle)
+    const object = objectOrThrow(await getRegistryIn(tx), objectKey)
+    const base = object.isCustom ? customQuery(object, needle) : QUERIES[objectKey as ObjectKey](needle)
+    const exactly = object.isCustom ? customExact(object, needle) : EXACT[objectKey as ObjectKey](needle)
+    const roughly = object.isCustom ? customTrigram(object, needle) : TRIGRAM[objectKey as ObjectKey](needle)
 
     if (UUID.test(needle)) {
-      const rows = await tx.execute<Row>(sql`${base} and ${sql.raw(alias(objectKey))}.id = ${needle} limit 1`)
+      const rows = await tx.execute<Row>(sql`${base} and ${sql.raw(alias(object))}.id = ${needle} limit 1`)
       const row = rows[0]
       return row
-        ? ({ kind: 'one', record: toCandidate(objectKey, row) } as const)
+        ? ({ kind: 'one', record: toCandidate(object.key, row) } as const)
         : ({ kind: 'none', suggestions: [] } as const)
     }
 
     // Step 1. An exact name wins outright, even against a better-scoring near miss,
     // because somebody who typed the whole name meant that record.
     const exact = await tx.execute<Row>(
-      sql`${base} and (${EXACT[objectKey](needle)}) order by score desc limit ${MAX_CANDIDATES + 1}`,
+      sql`${base} and (${exactly}) order by score desc limit ${MAX_CANDIDATES + 1}`,
     )
-    if (exact.length === 1) return { kind: 'one', record: toCandidate(objectKey, exact[0]!) }
+    if (exact.length === 1) return { kind: 'one', record: toCandidate(object.key, exact[0]!) }
     if (exact.length > 1) {
-      return { kind: 'many', candidates: exact.slice(0, MAX_CANDIDATES).map((r) => toCandidate(objectKey, r)) }
+      return { kind: 'many', candidates: exact.slice(0, MAX_CANDIDATES).map((r) => toCandidate(object.key, r)) }
     }
 
     // Step 2. Fuzzy, over the rows the trigram index says are worth scoring.
     const near = await tx.execute<Row>(sql`
-      with matches as (${base} and (${TRIGRAM[objectKey](needle)}))
+      with matches as (${base} and (${roughly}))
       select * from matches
        where score >= ${SUGGEST}
        order by score desc, label asc
        limit ${MAX_CANDIDATES + 1}`)
 
     const confident = near.filter((row) => Number(row.score) >= CONFIDENT)
-    if (confident.length === 1) return { kind: 'one', record: toCandidate(objectKey, confident[0]!) }
+    if (confident.length === 1) return { kind: 'one', record: toCandidate(object.key, confident[0]!) }
     if (confident.length > 1) {
       return {
         kind: 'many',
-        candidates: confident.slice(0, MAX_CANDIDATES).map((r) => toCandidate(objectKey, r)),
+        candidates: confident.slice(0, MAX_CANDIDATES).map((r) => toCandidate(object.key, r)),
       }
     }
 
@@ -159,15 +163,15 @@ export const resolveRecord = async (
     // suggestions so the next attempt succeeds instead of guessing again.
     return {
       kind: 'none',
-      suggestions: near.slice(0, MAX_CANDIDATES).map((r) => toCandidate(objectKey, r)),
+      suggestions: near.slice(0, MAX_CANDIDATES).map((r) => toCandidate(object.key, r)),
     }
   })
 }
 
-const alias = (objectKey: ObjectKey): string =>
-  objectKey === 'deal' ? 'd' : objectKey === 'contact' ? 'k' : 'c'
+const alias = (object: RegistryObject): string =>
+  object.isCustom ? 'r' : object.key === 'deal' ? 'd' : object.key === 'contact' ? 'k' : 'c'
 
-const toCandidate = (objectKey: ObjectKey, row: Row): RecordCandidate => ({
+const toCandidate = (objectKey: string, row: Row): RecordCandidate => ({
   objectKey,
   id: row.id,
   displayName: row.label?.trim() || '(no name)',
@@ -177,14 +181,44 @@ const toCandidate = (objectKey: ObjectKey, row: Row): RecordCandidate => ({
 
 /** The sentence the agent shows a person when resolution could not decide. Written
  *  here rather than in the tool so the wording is the same everywhere. */
-export const describeAmbiguity = (objectKey: ObjectKey, query: string, candidates: RecordCandidate[]): string => {
+export const describeAmbiguity = (
+  /** Named rather than keyed, so an object an admin invented reads as "3 Projects
+   *  match" and not as "3 projects". */
+  names: { singular: string; plural: string },
+  query: string,
+  candidates: RecordCandidate[],
+): string => {
   if (candidates.length === 0) {
-    return `No ${objectKey} matches "${query}". Nothing was changed. Try a search first, or give the exact name.`
+    return `No ${names.singular.toLowerCase()} matches "${query}". Nothing was changed. Try a search first, or give the exact name.`
   }
-  const lines = candidates.map((c) => `  - ${c.displayName}${c.detail ? ` — ${c.detail}` : ''} (id ${c.id})`)
+  const lines = candidates.map((c) => `  - ${c.displayName}${c.detail ? ` (${c.detail})` : ''} (id ${c.id})`)
   return [
-    `"${query}" matches ${candidates.length} ${objectKey === 'company' ? 'companies' : `${objectKey}s`}. Nothing was changed. Which one?`,
+    `"${query}" matches ${candidates.length} ${names.plural.toLowerCase()}. Nothing was changed. Which one?`,
     ...lines,
     'Call again with the id.',
   ].join('\n')
 }
+
+/** The same three expressions for an object an admin invented, built from its
+ *  registry entry rather than written out.
+ *
+ *  There is no trigram index behind these: the core three index a name column and
+ *  a custom record's name is a jsonb key, so the fuzzy step here is a scan of one
+ *  object's rows. That is the right trade at the size a custom object is, and it
+ *  is the reason the exact step below runs first. */
+const customLabel = (object: RegistryObject): SQL =>
+  object.labelFieldKey ? sql`coalesce(r.custom ->> ${object.labelFieldKey}, '')` : sql`''::text`
+
+const customQuery = (object: RegistryObject, needle: string): SQL => sql`
+  select r.id,
+         nullif(trim(${customLabel(object)}), '') as label,
+         null::text as detail,
+         extensions.similarity(${customLabel(object)}, ${needle}) as score
+    from custom_record r
+   where r.deleted_at is null and r.object_id = ${object.id}::uuid`
+
+const customExact = (object: RegistryObject, needle: string): SQL =>
+  sql`lower(${customLabel(object)}) = lower(${needle})`
+
+const customTrigram = (object: RegistryObject, needle: string): SQL =>
+  sql`${customLabel(object)} OPERATOR(extensions.%) ${needle}`

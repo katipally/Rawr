@@ -5,7 +5,7 @@ import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { mutate, withWorkspace } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
-import { getRegistryIn, objectOrThrow } from './registry.ts'
+import { getRegistryIn, objectOrThrow, rowsOf, tableFor } from './registry.ts'
 
 /** B11. When this happens, do that.
  *
@@ -76,7 +76,7 @@ export type AutomationRow = {
   /** Which object this watches. Every trigger names one, because a condition is
    *  compiled against that object's fields and there is no such thing as a
    *  filter that spans two. */
-  objectKey: ObjectKey
+  objectKey: string
   triggerConfig: Record<string, unknown>
   conditions: FilterGroup[]
   steps: AutomationStep[]
@@ -88,18 +88,20 @@ export type AutomationRow = {
 
 /** Which object a trigger can watch. `stage_changed` is deals only because only a
  *  deal has a pipeline; `form_submitted` is contacts only because a form fill
- *  produces a person. */
-export const OBJECTS_FOR_TRIGGER: Record<AutomationTrigger, ObjectKey[]> = {
-  record_created: ['contact', 'company', 'deal'],
+ *  produces a person. `record_created` is null for "any object in this workspace",
+ *  which is the only honest answer once an admin can invent one. */
+export const OBJECTS_FOR_TRIGGER: Record<AutomationTrigger, ObjectKey[] | null> = {
+  record_created: null,
   stage_changed: ['deal'],
   lifecycle_changed: ['contact', 'company'],
   form_submitted: ['contact'],
 }
 
-const objectOf = (row: { triggerConfig: unknown; trigger: string }): ObjectKey => {
+const objectOf = (row: { triggerConfig: unknown; trigger: string }): string => {
   const configured = (row.triggerConfig as { object?: string } | null)?.object
-  const allowed = OBJECTS_FOR_TRIGGER[row.trigger as AutomationTrigger] ?? ['contact']
-  return (allowed.includes(configured as ObjectKey) ? configured : allowed[0]) as ObjectKey
+  const allowed = OBJECTS_FOR_TRIGGER[row.trigger as AutomationTrigger]
+  if (allowed === null || allowed === undefined) return configured ?? 'contact'
+  return allowed.includes(configured as ObjectKey) ? (configured as string) : allowed[0]!
 }
 
 /** Anything unrecognised is dropped rather than throwing: a rule saved by a newer
@@ -176,7 +178,7 @@ export type SaveAutomationInput = {
   id?: string | null
   name: string
   trigger: AutomationTrigger
-  objectKey: ObjectKey
+  objectKey: string
   triggerConfig?: Record<string, unknown>
   conditions: FilterGroup[]
   steps: AutomationStep[]
@@ -191,7 +193,8 @@ export const saveAutomation = async (
     const name = input.name.trim()
     if (!name) throw new Error('An automation needs a name.')
     if (!AUTOMATION_TRIGGERS.includes(input.trigger)) throw new Error('That is not a trigger.')
-    if (!OBJECTS_FOR_TRIGGER[input.trigger].includes(input.objectKey)) {
+    const allowed = OBJECTS_FOR_TRIGGER[input.trigger]
+    if (allowed !== null && !allowed.includes(input.objectKey as ObjectKey)) {
       throw new Error(`${input.trigger.replace('_', ' ')} does not happen to a ${input.objectKey}.`)
     }
     if (input.steps.length === 0) {
@@ -283,7 +286,7 @@ export const removeAutomation = async (ctx: WorkspaceContext, id: string): Promi
 export const armedFor = async (
   ctx: WorkspaceContext,
   trigger: AutomationTrigger,
-  objectKey: ObjectKey,
+  objectKey: string,
 ): Promise<AutomationRow[]> =>
   withWorkspace(ctx, async (tx) => {
     const rows = await tx
@@ -300,7 +303,7 @@ export const armedFor = async (
  *  condition judged against a stale copy is a condition that lies. */
 export const conditionsHold = async (
   ctx: WorkspaceContext,
-  objectKey: ObjectKey,
+  objectKey: string,
   entityId: string,
   conditions: FilterGroup[],
 ): Promise<boolean> => {
@@ -310,9 +313,10 @@ export const conditionsHold = async (
     const object = objectOrThrow(registry, objectKey)
     const where = compileFilters(object, conditions, scopeFor(null))
     const [row] = await tx.execute<{ hit: number }>(sql`
-      select 1 as hit from ${sql.raw(`"${objectKey}"`)}
+      select 1 as hit from ${tableFor(object)}
        where ${sql.raw(`"${objectKey}"."id"`)} = ${entityId}::uuid
          and ${sql.raw(`"${objectKey}"."deleted_at"`)} is null
+         and ${rowsOf(object)}
          ${where ? sql`and ${where}` : sql``}
        limit 1`)
     return Boolean(row)
@@ -352,7 +356,7 @@ export type AutomationRunRow = {
  *  process dying mid-run leaves evidence rather than silence. */
 export const openAutomationRun = async (
   ctx: WorkspaceContext,
-  input: { automationId: string; entityType: ObjectKey; entityId: string },
+  input: { automationId: string; entityType: string; entityId: string },
 ): Promise<string> =>
   withWorkspace(ctx, async (tx) => {
     const [row] = await tx
@@ -424,11 +428,11 @@ export const claimAutomationRun = async (
   ctx: WorkspaceContext,
   runId: string,
   leaseMinutes = 5,
-): Promise<{ automationId: string; entityType: ObjectKey; entityId: string; stepIndex: number; trail: string[] } | null> =>
+): Promise<{ automationId: string; entityType: string; entityId: string; stepIndex: number; trail: string[] } | null> =>
   withWorkspace(ctx, async (tx) => {
     const [row] = await tx.execute<{
       automation_id: string
-      entity_type: ObjectKey
+      entity_type: string
       entity_id: string
       step_index: number
       trail: unknown

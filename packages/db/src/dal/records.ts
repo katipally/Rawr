@@ -17,7 +17,6 @@ import {
 } from './query.ts'
 import {
   assertCore,
-  coreKeyOf,
   fieldOrThrow,
   getRegistry,
   getRegistryIn,
@@ -542,17 +541,11 @@ export const createRecord = async (
       before: null,
       after: values,
     })
-    // A custom object has no timeline yet: activity_link points at an enum of
-    // the three core objects, so there is nowhere to write this. Skipped rather
-    // than failing the create, which is the part somebody asked for.
-    const coreKey = coreKeyOf(object)
-    if (coreKey) {
-      await recordActivity(tx, ctx, {
-        type: 'field_change',
-        subject: `${name} was created`,
-        links: linksFor(coreKey, row.id, prepared.columns),
-      })
-    }
+    await recordActivity(tx, ctx, {
+      type: 'field_change',
+      subject: `${name} was created`,
+      links: linksFor(object.key, row.id, prepared.columns),
+    })
 
     return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, values) }
   })
@@ -562,7 +555,7 @@ export const createRecord = async (
  *  contacts, on those too. Kept to the direct references here; the association
  *  table fans a note out further at the point it is written. */
 const linksFor = (
-  objectKey: ObjectKey,
+  objectKey: string,
   id: string,
   columns: Record<string, unknown>,
 ): { entityType: EntityType; entityId: string }[] => {
@@ -792,11 +785,7 @@ const writeChangeActivities = async (
 ): Promise<{ stageChange: StageChange | undefined; lifecycleChanged: boolean }> => {
   let stageChange: StageChange | undefined
   let lifecycleChanged = false
-  const coreKey = coreKeyOf(object)
-  // Same as create: nothing to link a change to until a custom object has a
-  // timeline of its own.
-  if (!coreKey) return { stageChange: undefined, lifecycleChanged: false }
-  const links = linksFor(coreKey, id, {
+  const links = linksFor(object.key, id, {
     company_id: after.company_id ?? before.company_id,
   })
   const name = displayName(object, { ...before, ...after })

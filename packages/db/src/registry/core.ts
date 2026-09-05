@@ -101,7 +101,7 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'pipeline_id', label: 'Pipeline', type: 'relation', columnName: 'pipeline_id', isRequired: true, position: 1 },
       { key: 'stage_id', label: 'Deal stage', type: 'relation', columnName: 'stage_id', isRequired: true, trackChanges: true, position: 2 },
       { key: 'amount', label: 'Amount', type: 'currency', columnName: 'amount', trackChanges: true, position: 3 },
-      { key: 'currency', label: 'Currency', type: 'select', columnName: 'currency', options: ['USD', 'EUR', 'GBP', 'SGD', 'IDR', 'AUD', 'JPY'], position: 4 },
+      { key: 'currency', label: 'Currency', type: 'select', columnName: 'currency', options: ['USD'], position: 4 },
       { key: 'close_date', label: 'Close date', type: 'date', columnName: 'close_date', trackChanges: true, position: 5 },
       { key: 'next_step', label: 'Next step', type: 'long_text', columnName: 'next_step', trackChanges: true, position: 6 },
       { key: 'next_step_date', label: 'Next step date', type: 'date', columnName: 'next_step_date', trackChanges: true, position: 7 },
