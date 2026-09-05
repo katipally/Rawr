@@ -236,10 +236,10 @@ export const evaluateSegmentIn = async (
   // Temporary tables fix both: they are owned by this session, so `analyze` is
   // permitted where it is refused on segment_membership, and the join then has
   // real row counts on both sides. They drop with the transaction.
-  // Created if absent and emptied rather than dropped and rebuilt, because
-  // `evaluateAllSegments` runs every segment inside one transaction and the
-  // previous segment's tables are still there. A plain drop works too and says
-  // so in a NOTICE on the first pass, which is noise in a worker log.
+  // `if not exists` and a truncate rather than a plain create: these drop at
+  // commit, but a pooled backend that was handed back mid-transaction can still
+  // be holding a pair from an earlier caller, and a create that fails there would
+  // fail the evaluation rather than reuse them.
   await tx.execute(sql`create temporary table if not exists segment_candidate (id uuid primary key) on commit drop`)
   await tx.execute(sql`create temporary table if not exists segment_held (id uuid primary key) on commit drop`)
   await tx.execute(sql`truncate segment_candidate, segment_held`)
@@ -306,36 +306,45 @@ const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: Worksp
 }
 
 /** Every segment, on a schedule and after a bulk write. Returned per segment so a
- *  run that goes wrong on one does not read as a run that did nothing. */
+ *  run that goes wrong on one does not read as a run that did nothing.
+ *
+ *  A transaction each, not one transaction with a savepoint each. At the size of
+ *  the portal, 129 lists at seconds apiece is a transaction open for minutes: it
+ *  pins the vacuum horizon so nothing anywhere in the database can be cleaned
+ *  while it runs, it holds every membership row it has touched locked against
+ *  somebody editing that segment in the app, and a dropped connection or a
+ *  statement timeout at minute nine throws away the first eight minutes of work.
+ *  Committing each segment gives all three back, and the caller was already
+ *  reading the results one segment at a time.
+ *
+ *  Sequential on purpose. This is an hourly background job, and running it wide
+ *  would put several whole-table writes on the pool at once for no gain that
+ *  anybody is waiting on. */
 export const evaluateAllSegments = async (
   ctx: WorkspaceContext,
 ): Promise<{ segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[]> => {
   assertCanWrite(ctx, 'segment')
-  return withWorkspace(ctx, async (tx) => {
-    const rows = await tx.select({ id: segment.id, name: segment.name }).from(segment)
-    const out: { segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[] = []
+  const rows = await withWorkspace(ctx, (tx) =>
+    tx.select({ id: segment.id, name: segment.name }).from(segment),
+  )
 
-    for (const row of rows) {
-      // A savepoint per segment: one segment whose filter refers to a field that
-      // has since been deleted must not abandon the others.
-      const point = `seg_${out.length}`
-      await tx.execute(sql.raw(`savepoint "${point}"`))
-      try {
-        const result = await evaluateSegmentIn(tx, ctx, row.id)
-        await tx.execute(sql.raw(`release savepoint "${point}"`))
-        out.push({ segmentId: row.id, name: row.name, result, error: null })
-      } catch (cause) {
-        await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
-        out.push({
-          segmentId: row.id,
-          name: row.name,
-          result: null,
-          error: cause instanceof Error ? cause.message : String(cause),
-        })
-      }
+  const out: { segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[] = []
+  for (const row of rows) {
+    try {
+      const result = await withWorkspace(ctx, (tx) => evaluateSegmentIn(tx, ctx, row.id))
+      out.push({ segmentId: row.id, name: row.name, result, error: null })
+    } catch (cause) {
+      // One segment whose filter names a field that has since been deleted must
+      // not take the others with it. Its own transaction has already rolled back.
+      out.push({
+        segmentId: row.id,
+        name: row.name,
+        result: null,
+        error: cause instanceof Error ? cause.message : String(cause),
+      })
     }
-    return out
-  })
+  }
+  return out
 }
 
 export type SegmentMember = { id: string; displayName: string; enteredAt: Date }

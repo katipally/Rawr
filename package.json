@@ -31,7 +31,8 @@
     "db:verify:sequences": "pnpm --filter @rawr/db verify:sequences",
     "db:verify:reporting": "pnpm --filter @rawr/db verify:reporting",
     "db:verify:scale": "pnpm --filter @rawr/db verify:scale",
-    "db:reclaim": "pnpm --filter @rawr/db reclaim"
+    "db:reclaim": "pnpm --filter @rawr/db reclaim",
+    "db:probe:large": "pnpm --filter @rawr/db probe:large"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
