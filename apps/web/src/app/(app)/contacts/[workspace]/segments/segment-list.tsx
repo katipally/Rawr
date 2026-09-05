@@ -365,7 +365,11 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
           <ul className="flex flex-col gap-1">
             {members.map((member) => (
               <li key={member.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                <Link href={recordPath(workspace, viewing?.objectKey ?? 'contact', member.id)}>
+                <Link
+                  href={recordPath(workspace, viewing?.objectKey ?? 'contact', member.id)}
+                  title={member.displayName}
+                  className="min-w-0 truncate"
+                >
                   {member.displayName}
                 </Link>
                 <span className="text-small text-secondary">

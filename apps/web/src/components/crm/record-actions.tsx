@@ -2,6 +2,7 @@
 
 import { Alert, Button, Modal, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
+import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { ComposeDialog } from './compose-dialog.tsx'
 import { EnrollDialog } from './enroll-dialog.tsx'
@@ -153,7 +154,7 @@ export const RecordActions = ({
         />
       ) : null}
 
-      <Modal open={showMerge} title={`Merge into ${displayName}`} onClose={() => setShowMerge(false)}>
+      <Modal open={showMerge} title={`Merge into ${shortName(displayName)}`} onClose={() => setShowMerge(false)}>
         <div className="flex flex-col gap-3">
           <Alert tone="warning">
             Merging cannot be undone. Everything on the other record moves here: its timeline, its
@@ -224,16 +225,23 @@ export const RecordActions = ({
         </div>
       </Modal>
 
-      <Modal open={showDelete} size="sm" title={`Delete ${displayName}`} onClose={() => setShowDelete(false)}>
+      <Modal open={showDelete} size="sm" title={`Delete ${shortName(displayName)}`} onClose={() => setShowDelete(false)}>
         <div className="flex flex-col gap-3">
           <p>
             The record is hidden everywhere immediately. Its timeline entries stay on the records
             they also touched, reading as a deleted {objectLabel.toLowerCase()}, so history is not
             rewritten.
           </p>
-          <p className="text-secondary">Type the name to confirm.</p>
+          <p className="text-secondary">Type the name to confirm:</p>
+          {/* The name is shown here, in full and selectable, rather than only in
+              the dialog's title. The title is truncated, and a record whose name
+              runs to hundreds of characters was one nobody could ever type back
+              and therefore one nobody could delete. */}
+          <p className="max-h-24 overflow-y-auto rounded-hs border border-divider bg-fill px-2 py-1 font-medium break-words select-all">
+            {displayName}
+          </p>
           <TextInput
-            aria-label={`Type ${displayName} to confirm`}
+            aria-label={`Type ${shortName(displayName)} to confirm`}
             value={confirmText}
             onChange={(event) => setConfirmText(event.target.value)}
           />

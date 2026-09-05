@@ -54,7 +54,9 @@ export const Modal = ({ open, onClose, title, size = 'md', children, footer }: M
         )}
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-divider px-4 py-3">
-          <h2 className="min-w-0 font-medium">{title}</h2>
+          <h2 className="min-w-0 truncate font-medium" title={title}>
+            {title}
+          </h2>
           <button
             type="button"
             onClick={onClose}

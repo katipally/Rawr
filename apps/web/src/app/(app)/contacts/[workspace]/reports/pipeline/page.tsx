@@ -2,7 +2,7 @@ import { pipelineReport } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { BarChart, Funnel } from '~/components/reports/chart.tsx'
-import { formatCurrency } from '~/components/crm/value.tsx'
+import { formatCurrency, formatDayShort } from '~/components/crm/value.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { rangeFrom } from '../range.ts'
@@ -10,8 +10,6 @@ import { rangeFrom } from '../range.ts'
 /** Amounts are summed without converting between currencies: converting at
  *  today's rate would make last quarter's number move every morning. */
 const money = (value: number) => formatCurrency(value)
-
-const week = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
 const PipelineReport = async ({
   params,
@@ -44,7 +42,7 @@ const PipelineReport = async ({
         <Card className="@4xl:col-span-2">
           <BarChart
             title="Deals each week"
-            labels={report.weeks.map((row) => week(row.week))}
+            labels={report.weeks.map((row) => formatDayShort(row.week))}
             series={[
               { label: 'Created', values: report.weeks.map((row) => row.created), tone: 'accent' },
               { label: 'Won', values: report.weeks.map((row) => row.won), tone: 'success' },

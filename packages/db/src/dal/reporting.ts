@@ -47,6 +47,29 @@ export const clampRange = (input: {
  *  Monday whatever the server's locale thinks. */
 const weekly = (column: string) => sql.raw(`date_trunc('week', ${column})::date`)
 
+/** Every bucket in the range, including the empty ones.
+ *
+ *  A `group by` over the rows returns only the buckets that have any, so a quiet
+ *  fortnight vanished from the axis instead of being drawn flat, and the line
+ *  closed the gap as though the weeks either side were adjacent. The calendar is
+ *  generated here and the counts are joined onto it, so the shape of the chart is
+ *  decided by the range asked for rather than by which days happened to be busy.
+ *
+ *  Bounded by the range clamp: 366 days, or 53 weeks. That is why these two are
+ *  the queries with no MAX_ROWS on them. A `limit` on a calendar does not trim a
+ *  chart, it silently ends it early — a year of submissions used to stop in
+ *  August and look complete. */
+const calendar = (range: Range, step: 'day' | 'week') =>
+  step === 'week'
+    ? sql`select generate_series(
+            date_trunc('week', ${range.from.toISOString()}::timestamptz),
+            date_trunc('week', ${range.to.toISOString()}::timestamptz),
+            interval '1 week')::date as bucket`
+    : sql`select generate_series(
+            ${range.from.toISOString()}::timestamptz::date,
+            ${range.to.toISOString()}::timestamptz::date,
+            interval '1 day')::date as bucket`
+
 const bounds = (range: Range, column: string) =>
   sql`${sql.raw(column)} >= ${range.from.toISOString()}::timestamptz and ${sql.raw(column)} < ${range.to.toISOString()}::timestamptz`
 
@@ -86,17 +109,19 @@ export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promi
       lost: number
       won_amount: string | null
     }>(sql`
-      select ${weekly('d.created_at')} as week,
-             count(*)::int as created,
-             count(*) filter (where s.is_closed_won)::int as won,
-             count(*) filter (where s.is_closed_lost)::int as lost,
+      with weeks as (${calendar(range, 'week')})
+      select w.bucket as week,
+             count(d.id)::int as created,
+             count(d.id) filter (where s.is_closed_won)::int as won,
+             count(d.id) filter (where s.is_closed_lost)::int as lost,
              coalesce(sum(d.amount) filter (where s.is_closed_won), 0)::text as won_amount
-        from deal d
+        from weeks w
+        left join deal d
+          on ${weekly('d.created_at')} = w.bucket
+         and d.deleted_at is null and ${bounds(range, 'd.created_at')}
         left join pipeline_stage s on s.id = d.stage_id
-       where d.deleted_at is null and ${bounds(range, 'd.created_at')}
-       group by 1
-       order by 1
-       limit ${MAX_ROWS}`)
+       group by w.bucket
+       order by w.bucket`)
 
     const funnel = await tx.execute<{
       pipeline_id: string
@@ -188,14 +213,15 @@ export type FormsReport = {
 export const formsReport = async (ctx: WorkspaceContext, range: Range): Promise<FormsReport> =>
   withWorkspace(ctx, async (tx) => {
     const days = await tx.execute<{ day: string; clean: number; held: number }>(sql`
-      select s.at::date as day,
-             count(*) filter (where s.spam_state = 'clean')::int as clean,
-             count(*) filter (where s.spam_state <> 'clean')::int as held
-        from form_submission s
-       where ${bounds(range, 's.at')}
-       group by 1
-       order by 1
-       limit ${MAX_ROWS}`)
+      with days as (${calendar(range, 'day')})
+      select c.bucket as day,
+             count(s.id) filter (where s.spam_state = 'clean')::int as clean,
+             count(s.id) filter (where s.spam_state <> 'clean')::int as held
+        from days c
+        left join form_submission s
+          on s.at::date = c.bucket and ${bounds(range, 's.at')}
+       group by c.bucket
+       order by c.bucket`)
 
     // Views come from their own grouped scan rather than a join: joining a
     // per-view table to a per-submission one multiplies both counts, which is how

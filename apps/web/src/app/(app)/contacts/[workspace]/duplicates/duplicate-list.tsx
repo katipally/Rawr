@@ -4,6 +4,7 @@ import { Alert, Button, EmptyState, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { shortName } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -96,14 +97,24 @@ export const DuplicateList = ({ workspace, object, pairs }: DuplicateListProps) 
               <p className="text-secondary">{pair.because}</p>
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <Link href={recordPath(workspace, object, survivor.id)} className="font-medium">
+                <Link
+                  href={recordPath(workspace, object, survivor.id)}
+                  title={survivor.displayName}
+                  className="min-w-0 truncate font-medium"
+                >
                   {survivor.displayName}
                 </Link>
                 <span className="text-small text-secondary">kept, here since {when(survivor.createdAt)}</span>
                 <span aria-hidden="true" className="text-secondary">
                   &larr;
                 </span>
-                <Link href={recordPath(workspace, object, absorbed.id)}>{absorbed.displayName}</Link>
+                <Link
+                  href={recordPath(workspace, object, absorbed.id)}
+                  title={absorbed.displayName}
+                  className="min-w-0 truncate"
+                >
+                  {absorbed.displayName}
+                </Link>
                 <span className="text-small text-secondary">merged in, here since {when(absorbed.createdAt)}</span>
               </div>
 
@@ -113,7 +124,7 @@ export const DuplicateList = ({ workspace, object, pairs }: DuplicateListProps) 
                   busy={busy === key}
                   onClick={() => void merge(pair)}
                 >
-                  Merge into {survivor.displayName}
+                  Merge into {shortName(survivor.displayName)}
                 </Button>
                 <Button
                   onClick={() =>

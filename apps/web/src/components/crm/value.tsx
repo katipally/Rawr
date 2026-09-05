@@ -40,6 +40,29 @@ export const formatDate = (value: unknown): string => {
   return date ? date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : ''
 }
 
+/** A record's name, cut to something that can be a tooltip or an accessible name.
+ *
+ *  Names are user data with no length limit: a company called
+ *  "Ludwigshafen Interkontinentale Datenverarbeitungsgesellschaft…" repeated to
+ *  five hundred characters is a real row, and putting it whole into an aria-label
+ *  gives a screen reader a paragraph to read before it says what the button does.
+ *  The visible text is clamped by CSS; this is for the places CSS cannot reach. */
+export const shortName = (value: string, max = 40): string =>
+  value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`
+
+/** A calendar day, as month and day, for a chart axis where the year is already
+ *  in the range above it.
+ *
+ *  Goes through `asDate` for the reason `asDate` exists: a `date` column arrives
+ *  as "2026-08-07", which is a day, not an instant. Reading it as UTC midnight and
+ *  then formatting it in the reader's own zone moves it to the 6th for everybody
+ *  west of Greenwich, so an axis silently disagreed with the range printed above
+ *  it. The report pages each had their own copy of this that did exactly that. */
+export const formatDayShort = (value: unknown): string => {
+  const date = asDate(value)
+  return date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
+}
+
 export const formatDateTime = (value: unknown): string => {
   const date = asDate(value)
   return date ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''

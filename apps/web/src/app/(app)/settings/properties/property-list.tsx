@@ -251,27 +251,32 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
               ) : null}
             </div>
 
-            <div className="flex shrink-0 flex-wrap gap-2">
+            <div className="flex shrink-0 items-center gap-0.5">
               {filtered ? null : (
                 <>
-                  <Button variant="tertiary" busy={busy} onClick={() => move(index, -1)} disabled={index === 0}>
-                    Up
-                  </Button>
-                  <Button
-                    variant="tertiary"
-                    busy={busy}
+                  <IconButton
+                    label={`Move ${field.label} up`}
+                    icon={<ACTION_ICONS.moveUp size={16} />}
+                    disabled={busy || index === 0}
+                    onClick={() => move(index, -1)}
+                  />
+                  <IconButton
+                    label={`Move ${field.label} down`}
+                    icon={<ACTION_ICONS.moveDown size={16} />}
+                    disabled={busy || index === rows.length - 1}
                     onClick={() => move(index, 1)}
-                    disabled={index === rows.length - 1}
-                  >
-                    Down
-                  </Button>
+                  />
                 </>
               )}
               {field.isSystem ? null : (
-                <Button variant="tertiary" onClick={() => openEdit(field)}>
-                  Edit
-                </Button>
+                <IconButton
+                  label={`Edit ${field.label}`}
+                  icon={<ACTION_ICONS.edit size={16} />}
+                  onClick={() => openEdit(field)}
+                />
               )}
+              {/* Keeps its words: "index it" is a decision about cost and speed,
+                  not a routine row action, and no glyph says it. */}
               {field.isCustom && field.storage === 'jsonb' && !field.isHot ? (
                 <Button
                   variant="tertiary"
@@ -287,9 +292,12 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                 </Button>
               ) : null}
               {field.isCustom && field.storage === 'jsonb' ? (
-                <Button variant="destructive" onClick={() => void openRemove(field)}>
-                  Delete
-                </Button>
+                <IconButton
+                  label={`Delete ${field.label}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  onClick={() => void openRemove(field)}
+                />
               ) : null}
             </div>
           </li>

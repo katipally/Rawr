@@ -86,6 +86,8 @@ const SignIn = async ({ searchParams }: Props) => {
           <input
             name="workspace"
             type="text"
+            aria-label="Workspace slug, optional"
+            suppressHydrationWarning
             placeholder="workspace slug (optional)"
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           />

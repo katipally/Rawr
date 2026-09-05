@@ -221,7 +221,9 @@ const RecordPage = async ({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-small text-secondary uppercase">{object.nameSingular}</p>
-            <h1 className="break-words text-lg font-medium">{record.displayName}</h1>
+            <h1 className="line-clamp-2 break-words text-lg font-medium" title={record.displayName}>
+              {record.displayName}
+            </h1>
             <RecordQuickActions
               workspace={workspace}
               object={objectParam}

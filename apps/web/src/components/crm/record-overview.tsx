@@ -117,7 +117,11 @@ export const RecordOverview = ({
             <ul className="flex flex-col gap-1">
               {deals.slice(0, 5).map((deal) => (
                 <li key={deal.id} className="min-w-0">
-                  <Link href={recordPath(workspace, 'deal', deal.id)} className="break-words">
+                  <Link
+                    href={recordPath(workspace, 'deal', deal.id)}
+                    title={deal.displayName}
+                    className="line-clamp-2 break-words"
+                  >
                     {deal.displayName}
                   </Link>
                   {deal.detail ? (

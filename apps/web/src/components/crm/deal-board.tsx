@@ -5,6 +5,7 @@ import { MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -208,7 +209,8 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                       <div className="flex items-start gap-1">
                         <Link
                           href={recordPath(workspace, 'deal', card.id)}
-                          className="block min-w-0 flex-1 break-words font-medium"
+                          title={card.displayName}
+                          className="line-clamp-2 min-w-0 flex-1 break-words font-medium"
                         >
                           {card.displayName}
                         </Link>
@@ -216,7 +218,7 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                           // Shown on hover and whenever it holds focus, so the
                           // keyboard reaches what the pointer does.
                           <DropdownMenu
-                            label={`Actions for ${card.displayName}`}
+                            label={`Actions for ${shortName(card.displayName)}`}
                             groups={menuFor(card, column.key)}
                             trigger={(props) => (
                               <button
@@ -225,7 +227,7 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                                 className="shrink-0 rounded-hs p-0.5 text-secondary opacity-0 hover:bg-fill-hover hover:text-body focus-visible:opacity-100 group-hover:opacity-100"
                               >
                                 <MoreHorizontal aria-hidden="true" className="size-4" />
-                                <span className="sr-only">Actions for {card.displayName}</span>
+                                <span className="sr-only">Actions for {shortName(card.displayName)}</span>
                               </button>
                             )}
                           />

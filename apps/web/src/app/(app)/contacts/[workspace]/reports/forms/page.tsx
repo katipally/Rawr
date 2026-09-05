@@ -1,13 +1,11 @@
 import { formsReport } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
+import { formatDayShort } from '~/components/crm/value.tsx'
 import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { rangeFrom } from '../range.ts'
-
-const day = (value: string) =>
-  new Date(`${value}T00:00:00Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
 const FormsReport = async ({
   params,
@@ -31,7 +29,7 @@ const FormsReport = async ({
         <Card>
           <BarChart
             title="Fills each day"
-            labels={report.days.map((row) => day(row.day))}
+            labels={report.days.map((row) => formatDayShort(row.day))}
             series={[
               { label: 'Kept', values: report.days.map((row) => row.clean), tone: 'accent' },
               { label: 'Held for review', values: report.days.map((row) => row.held), tone: 'warning' },

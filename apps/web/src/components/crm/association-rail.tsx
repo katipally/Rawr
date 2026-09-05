@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
+import { shortName } from '~/components/crm/value.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -258,7 +259,11 @@ export const AssociationRail = ({
                     className="flex items-start justify-between gap-2 border-b border-divider px-3 py-2 last:border-0"
                   >
                     <span className="min-w-0">
-                      <Link href={recordPath(workspace, row.objectKey, row.id)} className="block break-words">
+                      <Link
+                        href={recordPath(workspace, row.objectKey, row.id)}
+                        title={row.displayName}
+                        className="line-clamp-2 break-words"
+                      >
                         {row.displayName}
                       </Link>
                       {row.detail ? (
@@ -271,7 +276,7 @@ export const AssociationRail = ({
 
                     {canWrite && !row.isPrimary ? (
                       <IconButton
-                        label={`Unlink ${row.displayName}`}
+                        label={`Unlink ${shortName(row.displayName)}`}
                         icon={<ACTION_ICONS.unlink size={16} />}
                         disabled={busy}
                         onClick={() =>
