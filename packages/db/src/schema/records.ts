@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   date,
   index,
@@ -288,5 +289,39 @@ export const task = pgTable(
     index('task_queue_idx').on(t.workspaceId, t.status, t.dueDate, t.id),
     index('task_assignee_idx').on(t.workspaceId, t.assigneeId, t.status, t.dueDate),
     index('task_entity_idx').on(t.workspaceId, t.entityType, t.entityId),
+  ],
+)
+
+/** A file on a record.
+ *
+ *  The bytes live in object storage; this names one and says who put it there. A
+ *  database is the wrong place for a forty megabyte PDF, and keeping one there
+ *  would put it in every backup and replica of the rows people actually query.
+ *
+ *  `message_attachment` is a different thing and stays separate: that one belongs
+ *  to an email and arrived with it. This one somebody chose to put on a deal. */
+export const attachment = pgTable(
+  'attachment',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    /** Not a foreign key: the type decides which of three tables it points at,
+     *  and no constraint spans them. The shape activityLink already uses. */
+    entityType: entityTypeEnum('entity_type').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    /** The path inside the bucket, carrying the workspace, so one tenant's prefix
+     *  is never another's even if a bucket is ever shared or misconfigured. */
+    storageKey: text('storage_key').notNull(),
+    filename: text('filename').notNull(),
+    bytes: bigint('bytes', { mode: 'number' }).notNull(),
+    mime: text('mime').notNull(),
+    uploadedBy: uuid('uploaded_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('attachment_entity_idx').on(t.workspaceId, t.entityType, t.entityId, t.at.desc()),
+    /** An upload retried writes the same key, and without this the record would
+     *  show the same file twice. */
+    uniqueIndex('attachment_storage_key').on(t.workspaceId, t.storageKey),
   ],
 )

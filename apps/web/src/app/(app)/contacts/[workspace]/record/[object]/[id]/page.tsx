@@ -16,6 +16,7 @@ import {
   readTimeline,
   timelineCounts,
   websiteActivity,
+  listAttachments,
   withWorkspaceReads,
   type ObjectKey,
 } from '@rawr/db'
@@ -31,6 +32,7 @@ import { RecordQuickActions } from '~/components/crm/record-quick-actions.tsx'
 import { MailPanel } from '~/components/crm/mail-panel.tsx'
 import { SegmentsPanel } from '~/components/crm/segments-panel.tsx'
 import { SubscriptionsPanel } from '~/components/crm/subscriptions-panel.tsx'
+import { AttachmentsPanel } from '~/components/crm/attachments-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
@@ -38,6 +40,7 @@ import { Value } from '~/components/crm/value.tsx'
 import { objectView, recordPath, workspaceHome } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
+import { storageConfigured } from '~/server/storage.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** HubSpot's record anatomy, because familiarity is the point. 00-context.md
@@ -130,7 +133,7 @@ const RecordPage = async ({
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
     // panels only need the id, and a missing record just discards their answers.
-    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations] = await Promise.all([
+    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments] = await Promise.all([
       loadCrmContext(ctx, objectParam),
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
@@ -145,9 +148,12 @@ const RecordPage = async ({
       objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([]),
       enrichable ? listSuggestions(ctx, objectParam, id) : Promise.resolve([]),
       enrichable ? listIntegrations(ctx) : Promise.resolve([]),
+      // Only when storage is connected: reading a table to draw a panel that
+      // can only say "not connected" is a query for nothing.
+      storageConfigured ? listAttachments(ctx, entity) : Promise.resolve([]),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations }
+    return { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments }
   })
 
   if (!screen) {
@@ -161,7 +167,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations } = screen
+  const { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments } = screen
 
   const health = (kind: 'apollo' | 'clay') => {
     const row = integrations.find((i) => i.kind === kind)
@@ -440,6 +446,19 @@ const RecordPage = async ({
             entity={entity}
             canWrite={canWrite}
             startNew={task === 'new'}
+          />
+          <AttachmentsPanel
+            object={objectParam}
+            recordId={id}
+            configured={storageConfigured}
+            canWrite={canWrite}
+            rows={attachments.map((row) => ({
+              id: row.id,
+              filename: row.filename,
+              bytes: row.bytes,
+              mime: row.mime,
+              at: row.at.toISOString(),
+            }))}
           />
         </div>
       </div>

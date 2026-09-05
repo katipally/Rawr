@@ -28,7 +28,14 @@ import {
   renameView,
   reorderViews,
   setViewPinned,
+  assertCanAttach,
+  listAttachments,
+  MAX_ATTACHMENT_BYTES,
+  readAttachment,
   readBoard,
+  recordAttachment,
+  removeAttachment,
+  storageKeyFor,
   readCalendar,
   readImportRun,
   listImportRuns,
@@ -55,6 +62,7 @@ import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
 import { announceStageChange } from '../stage-alerts.ts'
+import { NOT_CONFIGURED, removeObject, signedDownload, signedUpload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 const objectKey = z.enum(['contact', 'company', 'deal'])
@@ -382,6 +390,92 @@ export const crmRouter = router({
           announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, 'deal', input.dealId, result)
           return result
+        }),
+      ),
+  }),
+
+  /** Files on a record.
+   *
+   *  Three calls, in this order, and the order is the design. `sign` checks the
+   *  role and the size and hands back a URL scoped to one key; the browser PUTs
+   *  the bytes straight to storage; `confirm` writes the row. A row therefore
+   *  never exists for a file that did not land, which is the failure that leaves
+   *  a filename somebody can click and nothing behind it. */
+  attachments: router({
+    list: protectedProcedure
+      .input(z.object({ entityType: objectKey, entityId: z.uuid() }))
+      .query(({ ctx, input }) =>
+        call(async () => ({
+          configured: storageConfigured,
+          rows: storageConfigured ? await listAttachments(ctx.workspace, input) : [],
+        })),
+      ),
+
+    sign: protectedProcedure
+      .input(
+        z.object({
+          entityType: objectKey,
+          entityId: z.uuid(),
+          filename: z.string().min(1).max(255),
+          bytes: z.number().int().positive().max(MAX_ATTACHMENT_BYTES),
+          mime: z.string().max(120),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          if (!storageConfigured) throw new Error(NOT_CONFIGURED)
+          // Both refusals happen before a byte moves, so somebody is told while
+          // they are still looking at the dialog rather than after the wait.
+          assertCanAttach(ctx.workspace, input.bytes)
+          const storageKey = storageKeyFor(ctx.workspace, input)
+          const { url } = await signedUpload(storageKey)
+          return { storageKey, url }
+        }),
+      ),
+
+    confirm: protectedProcedure
+      .input(
+        z.object({
+          entityType: objectKey,
+          entityId: z.uuid(),
+          storageKey: z.string().min(1).max(500),
+          filename: z.string().min(1).max(255),
+          bytes: z.number().int().positive().max(MAX_ATTACHMENT_BYTES),
+          mime: z.string().max(120),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          // The key is rebuilt from the workspace on the session, so a client
+          // cannot confirm a row against a path in somebody else's prefix.
+          if (!input.storageKey.startsWith(`${ctx.workspace.workspaceId}/`)) {
+            throw new Error('That file does not belong to this workspace.')
+          }
+          return recordAttachment(ctx.workspace, input)
+        }),
+      ),
+
+    /** A link that stops working, minted per click. The row is read first, which
+     *  is what proves the key belongs to this workspace before one is issued. */
+    link: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          const row = await readAttachment(ctx.workspace, input.id)
+          if (!row) throw new Error('That file is gone.')
+          return { url: await signedDownload(row.storageKey, 120, row.filename) }
+        }),
+      ),
+
+    remove: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          const { storageKey } = await removeAttachment(ctx.workspace, input.id)
+          // The row went first. Bytes left behind are invisible and cost pennies;
+          // a row pointing at nothing is a broken link on a record, so of the two
+          // ways for this to fail halfway, this is the better one.
+          await removeObject(storageKey).catch(() => {})
         }),
       ),
   }),

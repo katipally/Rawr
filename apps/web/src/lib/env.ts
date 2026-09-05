@@ -36,6 +36,16 @@ const schema = z.object({
   /** Bumping this re-prompts everyone whose stored choice predates the change. */
   CONSENT_POLICY_VERSION: z.string().default('2026-08-24'),
 
+  /** Object storage for files on records. Supabase Storage, on the project the
+   *  database already lives in, so there is no second vendor and no second
+   *  credential to rotate. Absent means the feature says it is not connected
+   *  rather than half-working, the same way an unconfigured provider does. */
+  SUPABASE_URL: z.string().default(''),
+  /** The service key. Never reaches the browser: what does is a token scoped to
+   *  one path and one operation, minted per upload and per read. */
+  SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
+  SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),
+
   /** --- F2 booking ------------------------------------------------------- */
   /** 32 bytes, base64 or hex, from a secrets store. It encrypts the calendar and
    *  mailbox tokens Rawr holds, and must not live in the database it protects

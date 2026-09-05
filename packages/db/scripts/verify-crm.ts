@@ -29,6 +29,14 @@ import {
   saveAutomation,
   setAutomationActive,
 } from '../src/dal/automations.ts'
+import {
+  assertCanAttach,
+  listAttachments,
+  MAX_ATTACHMENT_BYTES,
+  recordAttachment,
+  removeAttachment,
+  storageKeyFor,
+} from '../src/dal/attachments.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { searchAll } from '../src/dal/search.ts'
@@ -1014,6 +1022,80 @@ try {
     // the only question anybody asks about an automation.
     expect(runs.some((run) => run.state === 'skipped'), runs.map((run) => run.state).join(', '))
     return 'a skip is a result, not a silence'
+  })
+
+  // ------------------------------------------------ files on a record
+
+  // Any seeded deal: these checks are about keys and roles, not about which one.
+  const [anyDeal] = await db
+    .select({ id: s.deal.id })
+    .from(s.deal)
+    .where(eq(s.deal.workspaceId, datasaur.id))
+    .limit(1)
+  const dealId = anyDeal!.id
+
+  await check('a key puts every file under its own workspace', async () => {
+    const key = storageKeyFor(admin, { entityType: 'deal', entityId: dealId, filename: 'Order form.pdf' })
+    // Belt and braces beside the row level security: even a misconfigured bucket
+    // policy cannot put one tenant's file under another's prefix.
+    expect(key.startsWith(`${datasaur!.id}/deal/${dealId}/`), key)
+    // The name is slugged, so nothing user-typed becomes a path segment.
+    expect(key.endsWith('/Order-form.pdf'), key)
+    return 'workspace first, then a random segment, then a safe name'
+  })
+
+  await check('a filename cannot climb out of its prefix', async () => {
+    for (const nasty of ['../../etc/passwd', 'a/b/c.txt', '....//x.pdf']) {
+      const key = storageKeyFor(admin, { entityType: 'deal', entityId: dealId, filename: nasty })
+      expect(key.startsWith(`${datasaur!.id}/deal/${dealId}/`), key)
+      // Five segments exactly: workspace, type, id, random, name. A slash that
+      // survived the slug would make a sixth.
+      expect(key.split('/').length === 5, key)
+    }
+    return 'a slash in a filename is not a slash in a path'
+  })
+
+  await check('a file larger than the limit is refused before it is uploaded', async () =>
+    refuses('a file nobody should be waiting on', async () =>
+      assertCanAttach(admin, MAX_ATTACHMENT_BYTES + 1),
+    ),
+  )
+
+  await check('a viewer may read files and not add one', async () => {
+    const said = await refuses('a viewer attaching a file', async () =>
+      assertCanAttach(ctxFor('viewer'), 1024),
+    )
+    expect(said.includes('attachment'), said)
+    // Reading is the point of a viewer, and this must not throw.
+    await listAttachments(ctxFor('viewer'), { entityType: 'deal', entityId: dealId })
+    return said
+  })
+
+  await check('a file is recorded, listed and deleted', async () => {
+    const key = storageKeyFor(admin, { entityType: 'deal', entityId: dealId, filename: 'Contract.pdf' })
+    const made = await recordAttachment(admin, {
+      entityType: 'deal',
+      entityId: dealId,
+      storageKey: key,
+      filename: 'Contract.pdf',
+      bytes: 2048,
+      mime: 'application/pdf',
+    })
+    const listed = await listAttachments(admin, { entityType: 'deal', entityId: dealId })
+    expect(listed.some((row) => row.id === made.id), 'the file is not on the record')
+
+    // The key comes back so the caller can delete the bytes too.
+    const { storageKey } = await removeAttachment(admin, made.id)
+    expect(storageKey === key, storageKey)
+    const after = await listAttachments(admin, { entityType: 'deal', entityId: dealId })
+    expect(!after.some((row) => row.id === made.id), 'the file survived its deletion')
+    return 'recorded after the bytes land, and the key comes back to delete them'
+  })
+
+  await check('one tenant cannot see another’s files', async () => {
+    const theirs = await listAttachments(probeCtx, { entityType: 'deal', entityId: dealId })
+    expect(theirs.length === 0, `${theirs.length} files leaked`)
+    return 'row level security covers attachment'
   })
 
   await check('a rule that only waits and checks is refused', async () =>

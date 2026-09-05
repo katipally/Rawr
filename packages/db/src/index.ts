@@ -1,5 +1,6 @@
 export * from './dal/index.ts'
 export * from './dal/activity.ts'
+export * from './dal/attachments.ts'
 export * from './dal/audit.ts'
 export * from './dal/admin-fields.ts'
 export * from './dal/analytics.ts'

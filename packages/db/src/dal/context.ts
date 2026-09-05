@@ -55,6 +55,9 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
    *  hand to whoever can write one record. Admins only, both to write the rule
    *  and to read the log of what it did. */
   automation: ['admin'],
+  /** A file on a record is content about that record, so whoever may write the
+   *  record may file something against it. A viewer reads it and cannot. */
+  attachment: ['admin', 'sales', 'marketing'],
   /** F6. A dead letter is replayed by whoever can see it, which is an admin. */
   dead_letter: ['admin'],
   /** An endpoint is a standing copy of everything that happens in this workspace,
