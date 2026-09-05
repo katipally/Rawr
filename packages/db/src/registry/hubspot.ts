@@ -143,6 +143,12 @@ const shapeOf = (
   nameSingular,
   namePlural,
   icon: null,
+  // Never queried: this shape exists so the mapper and the coercion rules run
+  // unchanged against a file carrying something other than records. The table
+  // it names is the one it borrows its key from, and is never read.
+  isCustom: false,
+  table: 'contact',
+  labelFieldKey: null,
   fields,
   byKey: new Map(fields.map((entry) => [entry.key, entry])),
 })
@@ -169,6 +175,10 @@ export const ACTIVITY_IMPORT: RegistryObject = (() => {
   return {
     id: 'activity',
     key: 'contact',
+    // Same as shapeOf above: read by the mapper, never queried.
+    isCustom: false,
+    table: 'contact',
+    labelFieldKey: null,
     nameSingular: 'Activity',
     namePlural: 'Activities',
     icon: null,

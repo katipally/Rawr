@@ -34,7 +34,7 @@ export type CalendarEntry = {
 }
 
 export type CalendarMonth = {
-  objectKey: ObjectKey
+  objectKey: string
   /** Which field placed these. */
   fieldKey: string
   fieldLabel: string
@@ -114,7 +114,7 @@ export const readCalendar = async (
       truncated,
       entries: rows.slice(0, MAX_ENTRIES).map((row) => ({
         id: String(row.id),
-        displayName: displayName(object.key, row),
+        displayName: displayName(object, row),
         day: String(row.calendar_day).slice(0, 10),
         time: (row.calendar_time as string | null) ?? null,
       })),

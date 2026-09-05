@@ -15,7 +15,19 @@ import {
   type FilterGroup,
   type Sort,
 } from './query.ts'
-import { fieldOrThrow, getRegistry, getRegistryIn, objectOrThrow, type Registry, type RegistryField, type RegistryObject } from './registry.ts'
+import {
+  assertCore,
+  coreKeyOf,
+  fieldOrThrow,
+  getRegistry,
+  getRegistryIn,
+  objectOrThrow,
+  rowsOf,
+  tableFor,
+  type Registry,
+  type RegistryField,
+  type RegistryObject,
+} from './registry.ts'
 import { coerce, ValueError } from './values.ts'
 
 export type RecordValues = Record<string, unknown>
@@ -54,22 +66,78 @@ export class DuplicateError extends Error {
 }
 
 /** What a record is called on screen, in a link, and in a timeline sentence. */
-export const displayName = (objectKey: ObjectKey, values: RecordValues): string => {
-  if (objectKey === 'contact') {
+/** What a record is called.
+ *
+ *  The core three each have their own rule, because a contact is a first and a
+ *  last name falling back to an email and a company is a name falling back to a
+ *  domain — neither of which is expressible as "one field". A custom object has
+ *  no such rule, so the admin picks the field, and `labelFieldKey` is it.
+ *
+ *  Takes the object rather than its key, which is what makes both possible. */
+export const displayName = (object: RegistryObject, values: RecordValues): string => {
+  if (object.isCustom) {
+    const named = object.labelFieldKey ? values[object.labelFieldKey] : null
+    const text = named === null || named === undefined ? '' : String(named).trim()
+    return text || `Unnamed ${object.nameSingular.toLowerCase()}`
+  }
+  if (object.key === 'contact') {
     const full = [values.first_name, values.last_name].filter(Boolean).join(' ').trim()
     return full || String(values.email ?? '') || 'Unnamed contact'
   }
-  if (objectKey === 'company') {
+  if (object.key === 'company') {
     return String(values.name ?? '') || String(values.domain ?? '') || 'Unnamed company'
   }
   return String(values.name ?? '') || 'Unnamed deal'
 }
 
+/** What a custom record is findable by.
+ *
+ *  Every textual value it holds, in one vector. A core table generates its own
+ *  from named columns and Postgres keeps it in step; the shared table cannot,
+ *  because the fields are whatever the admin made and a generated expression
+ *  cannot know them. So it is written on every write.
+ *
+ *  Built from a jsonb expression rather than from the values in hand, which is
+ *  what lets the insert and the update share it. An update merges the incoming
+ *  keys into the stored blob, so the vector has to come from the merged result:
+ *  computing it from the incoming keys alone would drop every word in a field
+ *  this particular write did not touch.
+ *
+ *  'simple' rather than a stemming dictionary, matching the core tables: stemming
+ *  mangles company and person names, which is most of what anybody searches. */
+const searchVectorFrom = (object: RegistryObject, blob: SQL): SQL => {
+  const parts = object.fields
+    .filter((field) => TEXTUAL_FOR_SEARCH.has(field.type))
+    .map((field) => sql`${blob} ->> ${field.key}`)
+  if (parts.length === 0) return sql`to_tsvector('simple'::regconfig, '')`
+  return sql`to_tsvector('simple'::regconfig, concat_ws(' ', ${sql.join(parts, sql`, `)}))`
+}
+
+/** The types worth putting in a search vector. A number or a date is found by
+ *  filtering, not by typing it into a search box. */
+const TEXTUAL_FOR_SEARCH: ReadonlySet<string> = new Set([
+  'text',
+  'long_text',
+  'rich_text',
+  'email',
+  'phone',
+  'url',
+  'linkedin',
+  'address',
+  'select',
+])
+
 const selectExpression = (object: RegistryObject, field: RegistryField): SQL =>
   sql`${fieldExpression(object, field)} as ${sql.raw(`"${field.key}"`)}`
 
+/** Live rows of this object, and only this object.
+ *
+ *  The second half is what a shared table needs and a core table does not: a
+ *  custom object's rows sit beside every other custom object's, so the predicate
+ *  that keeps them apart travels with the one that hides deleted rows. Bundled so
+ *  no query can remember one and forget the other. */
 const NOT_DELETED = (object: RegistryObject): SQL =>
-  sql.raw(`"${object.key}"."deleted_at" is null`)
+  sql`${sql.raw(`"${object.key}"."deleted_at" is null`)} and ${rowsOf(object)}`
 
 /** Resolves relation and user ids to the names a person reads, one query per
  *  referenced table for the whole page rather than one per row. */
@@ -176,7 +244,7 @@ export const listRecords = async (
           (
             await tx.execute<{ n: string }>(sql`
               select count(*) as n
-                from ${sql.raw(`"${object.key}"`)}
+                from ${tableFor(object)}
                where ${sql.join(where, sql` and `)}`)
           )[0]?.n ?? 0,
         ),
@@ -190,7 +258,7 @@ export const listRecords = async (
     withWorkspace(ctx, async (tx) => {
       const rows = await tx.execute<RecordValues & { id: string }>(sql`
         select ${sql.join(selected, sql`, `)}
-          from ${sql.raw(`"${object.key}"`)}
+          from ${tableFor(object)}
          where ${sql.join(pageWhere, sql` and `)}
          order by ${plan.orderBy}
          limit ${limit + 1}`)
@@ -214,7 +282,7 @@ export const listRecords = async (
           : null,
       rows: page.map((row) => ({
         id: String(row.id),
-        displayName: displayName(object.key, row),
+        displayName: displayName(object, row),
         values: row,
         labels: Object.fromEntries(
           columns
@@ -253,7 +321,9 @@ const columnsFor = (object: RegistryObject, requested?: string[]): RegistryField
 
 export type RecordDetail = {
   id: string
-  objectKey: ObjectKey
+  /** Not `ObjectKey`: an admin can invent an object, and a record of one is
+   *  read, edited and deleted through exactly these functions. */
+  objectKey: string
   displayName: string
   values: RecordValues
   labels: Record<string, string>
@@ -275,7 +345,7 @@ export const getRecord = async (
     const [row] = await tx.execute<RecordValues & { id: string; updated_at: Date; created_at: Date }>(sql`
       select ${sql.raw(`"${object.key}"."id" as "id", "${object.key}"."updated_at" as "updated_at"`)},
              ${sql.join(fields.map((field) => selectExpression(object, field)), sql`, `)}
-        from ${sql.raw(`"${object.key}"`)}
+        from ${tableFor(object)}
        where ${sql.raw(`"${object.key}"."id"`)} = ${id} and ${NOT_DELETED(object)}
        limit 1`)
 
@@ -285,7 +355,7 @@ export const getRecord = async (
     return {
       id: String(row.id),
       objectKey: object.key,
-      displayName: displayName(object.key, row),
+      displayName: displayName(object, row),
       values: row,
       updatedAt: asDate(row.updated_at),
       createdAt: asDate(row.created_at),
@@ -354,7 +424,7 @@ const findDuplicate = async (
   for (const check of checks) {
     const column = sql.raw(`"${check.column}"`)
     const [found] = await tx.execute<{ id: string }>(sql`
-      select id from ${sql.raw(`"${object.key}"`)}
+      select id from ${tableFor(object)}
        where ${check.caseInsensitive ? sql`lower(${column}) = lower(${check.value})` : sql`${column} = ${check.value}`}
          and deleted_at is null
          ${excludeId ? sql`and id <> ${excludeId}` : sql``}
@@ -437,18 +507,34 @@ export const createRecord = async (
       }
     }
 
-    const columns = { ...prepared.columns, workspace_id: ctx.workspaceId, custom: prepared.custom }
+    const columns: Record<string, unknown> = {
+      ...prepared.columns,
+      workspace_id: ctx.workspaceId,
+      custom: prepared.custom,
+      // Which object this row is one of. Only a shared-table row needs it; a
+      // core record's table already answers the question.
+      ...(object.isCustom ? { object_id: object.id } : {}),
+    }
     const names = Object.keys(columns).map((c) => sql.raw(`"${c}"`))
-    const values_ = Object.values(columns).map(bind)
+    const values_: SQL[] = Object.values(columns).map(bind)
+
+    // A core table's search column is generated, so Postgres keeps it in step on
+    // its own. The shared table cannot be: which field names a record is the
+    // admin's choice, and a generated expression cannot know it. So it is
+    // written here, on the same statement, rather than left to drift.
+    if (object.isCustom) {
+      names.push(sql.raw('"search"'))
+      values_.push(searchVectorFrom(object, sql`${JSON.stringify(prepared.custom)}::jsonb`))
+    }
 
     const [row] = await tx.execute<{ id: string }>(sql`
-      insert into ${sql.raw(`"${object.key}"`)} (${sql.join(names, sql`, `)})
+      insert into ${tableFor(object)} (${sql.join(names, sql`, `)})
       values (${sql.join(values_, sql`, `)})
       returning id`)
 
     if (!row) throw new Error(`The ${object.nameSingular.toLowerCase()} could not be created.`)
 
-    const name = displayName(object.key, values)
+    const name = displayName(object, values)
     await writeAudit(tx, ctx, {
       entity: object.key,
       entityId: row.id,
@@ -456,13 +542,19 @@ export const createRecord = async (
       before: null,
       after: values,
     })
-    await recordActivity(tx, ctx, {
-      type: 'field_change',
-      subject: `${name} was created`,
-      links: linksFor(object.key, row.id, prepared.columns),
-    })
+    // A custom object has no timeline yet: activity_link points at an enum of
+    // the three core objects, so there is nowhere to write this. Skipped rather
+    // than failing the create, which is the part somebody asked for.
+    const coreKey = coreKeyOf(object)
+    if (coreKey) {
+      await recordActivity(tx, ctx, {
+        type: 'field_change',
+        subject: `${name} was created`,
+        links: linksFor(coreKey, row.id, prepared.columns),
+      })
+    }
 
-    return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object.key, values) }
+    return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, values) }
   })
 }
 
@@ -547,13 +639,18 @@ const updateRecordIn = async (
   if (duplicate) throw new DuplicateError(duplicate.what, duplicate.id)
 
   const assignments = quotedAssignments(prepared.columns)
+  const merged = sql`coalesce("custom", '{}'::jsonb) || ${JSON.stringify(prepared.custom)}::jsonb`
   if (Object.keys(prepared.custom).length > 0) {
-    assignments.push(sql`"custom" = coalesce("custom", '{}'::jsonb) || ${JSON.stringify(prepared.custom)}::jsonb`)
+    assignments.push(sql`"custom" = ${merged}`)
+    // Rebuilt from the merged blob in the same statement, so a record cannot be
+    // left findable by a name it no longer has. A core table's is generated and
+    // needs nothing here.
+    if (object.isCustom) assignments.push(sql`"search" = ${searchVectorFrom(object, merged)}`)
   }
   assignments.push(sql`"updated_at" = now()`)
 
   const [row] = await tx.execute<{ updated_at: unknown }>(sql`
-    update ${sql.raw(`"${object.key}"`)}
+    update ${tableFor(object)}
        set ${sql.join(assignments, sql`, `)}
      where id = ${id} and deleted_at is null
      returning updated_at`)
@@ -574,7 +671,7 @@ const updateRecordIn = async (
     warnings: prepared.warnings,
     stageChange: changes.stageChange,
     lifecycleChanged: changes.lifecycleChanged,
-    displayName: displayName(object.key, { ...before, ...values }),
+    displayName: displayName(object, { ...before, ...values }),
   }
 }
 
@@ -639,7 +736,7 @@ export const bulkUpdateRecords = async (
         const row = await readForWrite(tx, object, id).catch(() => undefined)
         result.failed.push({
           id,
-          displayName: row ? displayName(object.key, row) : id,
+          displayName: row ? displayName(object, row) : id,
           reason: cause instanceof Error ? cause.message : String(cause),
         })
       }
@@ -662,7 +759,7 @@ const readForWrite = async (
   const [row] = await tx.execute<RecordValues & { updated_at: Date }>(sql`
     select ${sql.raw(`"${object.key}"."updated_at"`)},
            ${sql.join(fields.map((field) => selectExpression(object, field)), sql`, `)}
-      from ${sql.raw(`"${object.key}"`)}
+      from ${tableFor(object)}
      where ${sql.raw(`"${object.key}"."id"`)} = ${id} and ${NOT_DELETED(object)}
      limit 1`)
   if (!row) return undefined
@@ -695,10 +792,14 @@ const writeChangeActivities = async (
 ): Promise<{ stageChange: StageChange | undefined; lifecycleChanged: boolean }> => {
   let stageChange: StageChange | undefined
   let lifecycleChanged = false
-  const links = linksFor(object.key, id, {
+  const coreKey = coreKeyOf(object)
+  // Same as create: nothing to link a change to until a custom object has a
+  // timeline of its own.
+  if (!coreKey) return { stageChange: undefined, lifecycleChanged: false }
+  const links = linksFor(coreKey, id, {
     company_id: after.company_id ?? before.company_id,
   })
-  const name = displayName(object.key, { ...before, ...after })
+  const name = displayName(object, { ...before, ...after })
 
   for (const [key, next] of Object.entries(after)) {
     const field = object.byKey.get(key)
@@ -775,7 +876,7 @@ export const deleteRecord = async (
     if (!before) throw new Error('That record has already been deleted.')
 
     await tx.execute(
-      sql`update ${sql.raw(`"${object.key}"`)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
+      sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
     )
 
     // Views are detached rather than deleted, so aggregate counts stay honest.
@@ -794,7 +895,7 @@ export const deleteRecord = async (
         entity: object.key,
         entityId: id,
         action: 'delete',
-        before: { deletedAt: null, name: displayName(object.key, before) },
+        before: { deletedAt: null, name: displayName(object, before) },
         after: { deletedAt: 'now' },
       },
     }
@@ -833,12 +934,12 @@ export const mergeRecords = async (
     if (!survivor) throw new Error('The record being kept no longer exists.')
     if (!absorbed) throw new Error('The record being merged no longer exists.')
 
-    const absorbedName = displayName(object.key, absorbed)
+    const absorbedName = displayName(object, absorbed)
 
     // The absorbed row goes first so its email or domain frees the unique index
     // before the survivor tries to claim it.
     await tx.execute(
-      sql`update ${sql.raw(`"${object.key}"`)} set deleted_at = now(), updated_at = now() where id = ${input.absorbedId}`,
+      sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${input.absorbedId}`,
     )
 
     const chosen: RecordValues = {}
@@ -863,17 +964,21 @@ export const mergeRecords = async (
     assignments.push(sql`"updated_at" = now()`)
 
     await tx.execute(sql`
-      update ${sql.raw(`"${object.key}"`)}
+      update ${tableFor(object)}
          set ${sql.join(assignments, sql`, `)}
        where id = ${input.survivorId}`)
 
+    // Merging moves activities, associations and browsing history, none of
+    // which a custom object has yet. Refused with a sentence rather than
+    // half-run.
+    const coreKey = assertCore(object, 'be merged')
     const activitiesMoved = await moveActivityLinks(
       tx,
       ctx,
-      { entityType: object.key, entityId: input.absorbedId },
-      { entityType: object.key, entityId: input.survivorId },
+      { entityType: coreKey, entityId: input.absorbedId },
+      { entityType: coreKey, entityId: input.survivorId },
     )
-    await moveRelated(tx, ctx, object.key, input.absorbedId, input.survivorId)
+    await moveRelated(tx, ctx, coreKey, input.absorbedId, input.survivorId)
     // A merged contact keeps their browsing history. Without this the visitor
     // aliases and the denormalised contact_id on both event tables would still
     // point at the record that no longer exists. F4 §3.
@@ -892,7 +997,7 @@ export const mergeRecords = async (
       type: 'merge',
       subject: `${absorbedName} was merged into this record`,
       payload: { absorbedId: input.absorbedId, absorbedName, picks: input.picks },
-      links: [{ entityType: object.key, entityId: input.survivorId }],
+      links: [{ entityType: coreKey, entityId: input.survivorId }],
     })
 
     return { id: input.survivorId, activitiesMoved }

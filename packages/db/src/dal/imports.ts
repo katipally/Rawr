@@ -21,7 +21,7 @@ import { isUuid, mutate, withWorkspace } from './index.ts'
 import { createField, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
-import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { assertCore, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { coerce, ValueError } from './values.ts'
 
 export type ImportRow = Record<string, string>
@@ -554,7 +554,9 @@ export const createImportRun = async (
       .insert(importRun)
       .values({
         workspaceId: ctx.workspaceId,
-        objectType: kind === 'activities' ? 'contact' : object.key,
+        // Importing into a custom object comes with the import surface itself,
+        // in a later pass; object_type is an enum of the core three.
+        objectType: kind === 'activities' ? 'contact' : assertCore(object, 'be imported into'),
         importKind: kind,
         source: input.source ?? null,
         filename: input.filename,

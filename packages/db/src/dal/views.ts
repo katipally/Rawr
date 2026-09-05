@@ -29,8 +29,11 @@ export type ViewDefinition = {
  *  workspace where every saved view has been deleted. */
 export const DEFAULT_VIEW_SLUG = 'all'
 
-const fallbackView = (objectKey: ObjectKey, slug: string): ViewDefinition => {
-  const seeded = CORE_VIEWS[objectKey].find((view) => view.slug === slug) ?? CORE_VIEWS[objectKey][0]
+const fallbackView = (objectKey: string, slug: string): ViewDefinition => {
+  // A custom object has no seeded views, so it falls through to the defaults
+  // below, which are "everything, newest first" — the right answer for one.
+  const seeded = (CORE_VIEWS[objectKey as keyof typeof CORE_VIEWS] ?? []).find((view) => view.slug === slug)
+    ?? CORE_VIEWS[objectKey as keyof typeof CORE_VIEWS]?.[0]
   return {
     id: null,
     slug: seeded?.slug ?? DEFAULT_VIEW_SLUG,

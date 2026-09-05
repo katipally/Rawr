@@ -6,7 +6,7 @@ import type { WorkspaceContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { withWorkspace, writeAudit, type Tx } from './index.ts'
 import { recordFieldSource } from './integrations.ts'
-import { fieldOrThrow, getRegistryIn, objectOrThrow } from './registry.ts'
+import { assertCore, fieldOrThrow, getRegistryIn, objectOrThrow } from './registry.ts'
 import { coerce } from './values.ts'
 
 /** F6 §4. The rule, and the only place it lives:
@@ -146,7 +146,7 @@ export const applyEnrichment = async (
             ? `${input.provider} filled ${result.written.length} field${result.written.length === 1 ? '' : 's'}`
             : `${input.provider} suggested ${result.suggested.length} change${result.suggested.length === 1 ? '' : 's'}`,
         payload: { provider: input.provider, ...result },
-        links: [{ entityType: object.key, entityId: input.entityId }],
+        links: [{ entityType: assertCore(object, 'be enriched'), entityId: input.entityId }],
       })
     }
 

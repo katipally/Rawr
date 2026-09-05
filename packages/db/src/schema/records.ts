@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, searchVector, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, searchVector, tsvector, updatedAt, workspaceId } from './columns.ts'
 import { activityTypeEnum, actorKindEnum, entityTypeEnum, taskStatusEnum } from './enums.ts'
 import { userAccount, workspace } from './identity.ts'
 
@@ -324,4 +324,33 @@ export const attachment = pgTable(
      *  show the same file twice. */
     uniqueIndex('attachment_storage_key').on(t.workspaceId, t.storageKey),
   ],
+)
+
+/** A row of an object an admin invented.
+ *
+ *  One table for every custom object rather than a table each, keyed by which
+ *  object the row belongs to. The same storage a cold custom field already uses
+ *  on a core record, applied one level up: from fields to whole objects.
+ *
+ *  The core three keep their own tables. This is deliberately not the place they
+ *  are moving to — their columns, indexes and generated search vectors work, and
+ *  rewriting them for uniformity would be a large change to code that is right. */
+export const customRecord = pgTable(
+  'custom_record',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    /** Deleting the object takes its records, the way dropping a table would. */
+    objectId: uuid('object_id').notNull(),
+    /** Every value, including the one that names the record. */
+    custom: jsonb('custom').notNull().default({}),
+    /** Written by the layer rather than generated: which field names a record is
+     *  the admin's choice, and a generated expression cannot know it. */
+    search: tsvector('search'),
+    ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [index('custom_record_object_idx').on(t.workspaceId, t.objectId, t.createdAt.desc())],
 )

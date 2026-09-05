@@ -226,7 +226,7 @@ export const readBoard = async (
         hasMore: count > columnCards.length,
         cards: columnCards.map((card) => ({
           id: card.id,
-          displayName: displayName('deal', { name: card.name }),
+          displayName: displayName(object, { name: card.name }),
           amount: card.amount,
           currency: card.currency,
           closeDate: card.close_date,

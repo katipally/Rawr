@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { TYPE_META, type FieldType, type Operator } from '../registry/types.ts'
 import type { ObjectKey } from '../registry/core.ts'
@@ -10,6 +10,10 @@ export const OBJECT_KEYS = ['contact', 'company', 'deal'] as const
 
 export const isObjectKey = (value: string): value is ObjectKey =>
   (OBJECT_KEYS as readonly string[]).includes(value)
+
+/** What an invented object key may be. It reaches SQL as a jsonb key and appears
+ *  in a URL, so it is the same alphabet a field key is held to and nothing else. */
+const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
 
 /** Fields the system owns. They are in the registry because every surface has to
  *  be able to read, sort, filter and export them, and they are refused on the write
@@ -44,18 +48,37 @@ export type RegistryField = {
 
 export type RegistryObject = {
   id: string
-  key: ObjectKey
+  /** Not `ObjectKey`: an admin can invent one. `ObjectKey` still names the three
+   *  the system builds on — the ones with associations, activities and tasks —
+   *  and `isCoreObject` below is how a caller asks whether this is one. */
+  key: string
   nameSingular: string
   namePlural: string
   icon: string | null
+  /** Invented by an admin. Its rows live in the shared `custom_record` table
+   *  rather than in one of its own, so every value is in the jsonb blob and no
+   *  field of it can be promoted to a hot column. */
+  isCustom: boolean
+  /** The physical table its rows are in. For the core three this is the key; for
+   *  a custom object it is `custom_record`, and `scope` below is the extra
+   *  predicate that keeps one object's rows apart from another's. */
+  table: string
+  /** Which field is the record's name. Null on the core three, which each know
+   *  their own naming rule. */
+  labelFieldKey: string | null
   fields: RegistryField[]
   byKey: Map<string, RegistryField>
 }
 
 export type Registry = {
   objects: RegistryObject[]
-  byKey: Map<ObjectKey, RegistryObject>
+  byKey: Map<string, RegistryObject>
 }
+
+/** One of the three the system is built on. They have their own tables, and they
+ *  are the only things an association, an activity or a task can point at. */
+export const isCoreObject = (object: RegistryObject): object is RegistryObject & { key: ObjectKey } =>
+  !object.isCustom
 
 /** Per workspace, short lived. The registry changes only when an admin edits a
  *  field, which is rare, but a stale cache would show the wrong columns, so the
@@ -75,6 +98,10 @@ const load = async (tx: Tx): Promise<Registry> => {
       nameSingular: objectDef.nameSingular,
       namePlural: objectDef.namePlural,
       icon: objectDef.icon,
+      // Both object_def and field_def have an is_custom; this one is the
+      // object's, and the field's keeps the plain name below.
+      objectIsCustom: objectDef.isCustom,
+      labelFieldId: objectDef.labelFieldId,
       fieldId: fieldDef.id,
       key: fieldDef.key,
       label: fieldDef.label,
@@ -96,8 +123,14 @@ const load = async (tx: Tx): Promise<Registry> => {
     .orderBy(asc(objectDef.key), asc(fieldDef.position))
 
   const objects = new Map<string, RegistryObject>()
+  const labelFieldIds = new Map<string, string>()
   for (const row of rows) {
-    if (!isObjectKey(row.objectKey)) continue
+    // A key that is neither one of the three nor a usable identifier is dropped:
+    // it reaches SQL as a table name or a jsonb key, and nothing unchecked does.
+    const custom = row.objectIsCustom === true
+    if (!custom && !isObjectKey(row.objectKey)) continue
+    if (custom && !USABLE_OBJECT_KEY.test(row.objectKey)) continue
+
     let object = objects.get(row.objectId)
     if (!object) {
       object = {
@@ -106,10 +139,14 @@ const load = async (tx: Tx): Promise<Registry> => {
         nameSingular: row.nameSingular,
         namePlural: row.namePlural,
         icon: row.icon,
+        isCustom: custom,
+        table: custom ? 'custom_record' : row.objectKey,
+        labelFieldKey: null,
         fields: [],
         byKey: new Map(),
       }
       objects.set(row.objectId, object)
+      if (row.labelFieldId) labelFieldIds.set(row.objectId, row.labelFieldId)
     }
     if (!row.fieldId || !row.key) continue
     const field: RegistryField = {
@@ -130,6 +167,16 @@ const load = async (tx: Tx): Promise<Registry> => {
     }
     object.fields.push(field)
     object.byKey.set(field.key, field)
+  }
+
+  // Resolved after the fields are loaded, because the label field is one of
+  // them and the rows arrive in no guaranteed order.
+  for (const object of objects.values()) {
+    const wanted = labelFieldIds.get(object.id)
+    const named = wanted ? object.fields.find((field) => field.id === wanted) : undefined
+    // Falling back to the first field means a custom object always has something
+    // to be called, even one whose label field was deleted.
+    object.labelFieldKey = named?.key ?? object.fields[0]?.key ?? null
   }
 
   const list = [...objects.values()]
@@ -156,10 +203,54 @@ export class UnknownFieldError extends Error {
 }
 
 export const objectOrThrow = (registry: Registry, key: string): RegistryObject => {
-  const object = isObjectKey(key) ? registry.byKey.get(key) : undefined
+  const object = registry.byKey.get(key)
   if (!object) throw new Error(`"${key}" is not an object in this workspace.`)
   return object
 }
+
+/** The object's key, when it is one of the three the system is built on.
+ *
+ *  Activities, activity links, associations and tasks all point at an
+ *  `entityType`, which is an enum of exactly those three. A custom object has
+ *  none of them yet, so a path that needs one asks here and skips rather than
+ *  writing a row the enum cannot hold. */
+export const coreKeyOf = (object: RegistryObject): ObjectKey | null =>
+  object.isCustom ? null : (object.key as ObjectKey)
+
+/** For a path that cannot work at all without them, and should say so rather
+ *  than half-run. */
+export const assertCore = (object: RegistryObject, what: string): ObjectKey => {
+  const key = coreKeyOf(object)
+  if (!key) {
+    throw new Error(
+      `${object.namePlural} cannot ${what} yet. That is only for contacts, companies and deals.`,
+    )
+  }
+  return key
+}
+
+/** The FROM clause for an object's rows.
+ *
+ *  Aliased to the object's key, which is the whole trick: a custom object's rows
+ *  are in `custom_record`, but `from custom_record as "project"` means every
+ *  expression built elsewhere — `"project"."custom" ->> 'status'`, the filters,
+ *  the sorts — is the same string it would be for a table of its own. Nothing
+ *  downstream of here has to know which kind of object it is looking at. */
+export const tableFor = (object: RegistryObject): SQL =>
+  object.isCustom
+    ? sql.raw(`"custom_record" as "${object.key}"`)
+    : sql.raw(`"${object.key}"`)
+
+/** What keeps one custom object's rows apart from another's, and nothing for a
+ *  core object, which has a table to itself. Always joined with `and`, so the
+ *  core case has to be the identity rather than a missing clause.
+ *
+ *  Named for the rows rather than `scopeFor`, which in query.ts already means
+ *  the person a saved filter's "@me" resolves to. */
+export const rowsOf = (object: RegistryObject): SQL =>
+  object.isCustom
+    ? sql`${sql.raw(`"${object.key}"."object_id"`)} = ${object.id}::uuid`
+    : sql`true`
 
 export const fieldOrThrow = (object: RegistryObject, key: string): RegistryField => {
   const field = object.byKey.get(key)
@@ -168,6 +259,11 @@ export const fieldOrThrow = (object: RegistryObject, key: string): RegistryField
   // column name a column-stored field resolves to.
   assertUsableFieldKey(field.key)
   if (field.storage === 'column') {
+    // A custom object has no columns of its own: its rows share one table, so a
+    // column-stored field on one would be a column on everybody's.
+    if (object.isCustom) {
+      throw new Error(`${object.key}.${field.key} cannot be a column: a custom object stores every value in its blob.`)
+    }
     if (!field.columnName) {
       throw new Error(`${object.key}.${field.key} claims column storage but has no column.`)
     }

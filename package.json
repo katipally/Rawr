@@ -18,7 +18,7 @@
     "lint": "biome lint .",
     "lint:ci": "biome ci . --diagnostic-level=error",
     "test": "pnpm -r --if-present test",
-    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:org && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:seed",
+    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:org && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:seed",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
     "db:verify:forms": "pnpm --filter @rawr/db verify:forms",
     "db:verify:booking": "pnpm --filter @rawr/db verify:booking",
@@ -32,7 +32,8 @@
     "db:verify:reporting": "pnpm --filter @rawr/db verify:reporting",
     "db:verify:scale": "pnpm --filter @rawr/db verify:scale",
     "db:reclaim": "pnpm --filter @rawr/db reclaim",
-    "db:probe:large": "pnpm --filter @rawr/db probe:large"
+    "db:probe:large": "pnpm --filter @rawr/db probe:large",
+    "db:verify:objects": "pnpm --filter @rawr/db verify:objects"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

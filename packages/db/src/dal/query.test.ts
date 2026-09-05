@@ -48,6 +48,9 @@ const contact: RegistryObject = {
   nameSingular: 'Contact',
   namePlural: 'Contacts',
   icon: null,
+  isCustom: false,
+  table: 'contact',
+  labelFieldKey: null,
   fields: FIELDS,
   byKey: new Map(FIELDS.map((f) => [f.key, f])),
 }
