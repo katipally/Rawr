@@ -1,7 +1,7 @@
 import { listForms } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
@@ -27,21 +27,25 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
 
   return (
     <div className="w-full max-w-6xl">
-      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-medium">Forms</h1>
-        <span className="text-sm text-secondary">
-          {forms.length === 1 ? '1 form' : `${forms.length} forms`}
-        </span>
-        {held > 0 ? (
-          <Link
-            href={submissionsPath(workspace, { state: 'quarantined' })}
-            className="text-sm font-semibold text-link"
-          >
-            {held === 1 ? '1 submission held for review' : `${held} submissions held for review`}
-          </Link>
-        ) : null}
-        <span className="ml-auto">{newForm}</span>
-      </header>
+      <PageHeader
+        className="mb-4"
+        title="Forms"
+        lead={
+          <>
+            {forms.length === 1 ? '1 form' : `${forms.length} forms`}
+            {held > 0 ? (
+              <>
+                {' · '}
+                <Link href={submissionsPath(workspace, { state: 'quarantined' })} className="font-semibold text-link">
+                  {held === 1 ? '1 submission held for review' : `${held} submissions held for review`}
+                </Link>
+              </>
+            ) : null}
+          </>
+        }
+        why="Every form in the workspace with the two numbers that matter on a Monday: how many leads it has taken, and how many are sitting in review waiting for a person."
+        action={newForm}
+      />
 
       {forms.length === 0 ? (
         <EmptyState

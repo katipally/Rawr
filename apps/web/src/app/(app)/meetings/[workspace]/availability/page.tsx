@@ -1,3 +1,4 @@
+import { Alert, PageHeader } from '@rawr/ui'
 import { listGrants, pagesHostedBy, readSchedule } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -44,28 +45,30 @@ const AvailabilityScreen = async ({
 
   return (
     <div className="w-full max-w-4xl">
-      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-medium">
-          {subject === session.userId ? 'My working hours' : `${person?.label ?? 'Working hours'}`}
-        </h1>
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
-          <Link href={bookingPagesPath(workspace)} className="text-link">
-            Meeting links
-          </Link>
-          <Link href={calendarsPath(workspace)} className="text-link">
-            Calendars
-          </Link>
-        </div>
-      </header>
+      <PageHeader
+        className="mb-4"
+        title={subject === session.userId ? 'My working hours' : `${person?.label ?? 'Working hours'}`}
+        lead="The window a meeting may be offered in, before the calendar narrows it further."
+        action={
+          <>
+            <Link href={bookingPagesPath(workspace)} className="text-sm text-link">
+              Meeting links
+            </Link>
+            <Link href={calendarsPath(workspace)} className="text-sm text-link">
+              Calendars
+            </Link>
+          </>
+        }
+      />
 
       {!grant || grant.state !== 'connected' ? (
-        <p className="mb-4 rounded-panel border border-line bg-warning-subtle p-3 text-sm">
+        <Alert tone="warning" className="mb-4">
           {subject === session.userId ? 'You have' : `${person?.label ?? 'This person'} has`} no
           connected calendar, so no times are offered on any page{' '}
           {subject === session.userId ? 'you host' : 'they host'}. A host without a calendar is
           treated as unavailable rather than free, because guessing would double book a real person.{' '}
           <Link href={calendarsPath(workspace)}>Connect one</Link>.
-        </p>
+        </Alert>
       ) : null}
 
       {session.role === 'admin' && lookups.users.length > 1 ? (

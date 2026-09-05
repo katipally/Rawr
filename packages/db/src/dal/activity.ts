@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { and, count, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { activity, activityLink } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
@@ -81,6 +82,64 @@ export const recordActivity = async (
     .onConflictDoNothing()
 
   return row.id
+}
+
+/** How many entities go into one round trip. Chosen so the two uuid arrays stay
+ *  a few hundred kilobytes rather than several megabytes on a segment that takes
+ *  in a whole imported list. */
+const FANOUT_CHUNK = 2_000
+
+/** The same entry written once per entity: a segment that just took in eighty
+ *  thousand contacts, and the eighty thousand timelines that have to say so.
+ *
+ *  Two statements per chunk however many entities there are. Calling
+ *  `recordActivity` in a loop instead costs two round trips each, which at a
+ *  hundred thousand members was seventeen minutes inside an hourly job.
+ *
+ *  Ids are generated here rather than read back from `returning`, because
+ *  pairing a returned id to the row that produced it relies on an insertion
+ *  order Postgres does not promise. */
+export const recordActivityFanout = async (
+  tx: Tx,
+  ctx: WorkspaceContext,
+  entry: Omit<NewActivity, 'links'> & { entityType: EntityType; entityIds: string[] },
+): Promise<number> => {
+  // ISO text rather than a Date: these statements are raw SQL, and the driver
+  // under drizzle serialises a bare Date as text and refuses it.
+  const occurredAt = (entry.occurredAt ?? new Date()).toISOString()
+  const payload = entry.payload === undefined ? null : JSON.stringify(entry.payload)
+  let written = 0
+
+  for (let from = 0; from < entry.entityIds.length; from += FANOUT_CHUNK) {
+    const entities = entry.entityIds.slice(from, from + FANOUT_CHUNK)
+    const ids = entities.map(() => randomUUID())
+    // Postgres array literals rather than JavaScript arrays: drizzle expands an
+    // array parameter into one placeholder per element, which turns `unnest` into
+    // a syntax error and defeats the point of batching. Both are bound
+    // parameters, and `::uuid[]` is what validates them.
+    const idArray = `{${ids.join(',')}}`
+    const entityArray = `{${entities.join(',')}}`
+
+    await tx.execute(sql`
+      insert into activity
+        (id, workspace_id, type, subject, body, occurred_at, actor_id, actor_kind, source, payload)
+      select a.id, ${ctx.workspaceId}::uuid, ${entry.type}::rawr_activity_type,
+             ${entry.subject ?? null}::text, ${entry.body ?? null}::text, ${occurredAt}::timestamptz,
+             ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind, ${entry.source ?? null}::text,
+             ${payload}::jsonb
+        from unnest(${idArray}::uuid[]) as a(id)`)
+
+    await tx.execute(sql`
+      insert into activity_link (workspace_id, activity_id, entity_type, entity_id, type, occurred_at)
+      select ${ctx.workspaceId}::uuid, t.activity_id, ${entry.entityType}::rawr_entity_type, t.entity_id,
+             ${entry.type}::rawr_activity_type, ${occurredAt}::timestamptz
+        from unnest(${idArray}::uuid[], ${entityArray}::uuid[]) as t(activity_id, entity_id)
+      on conflict do nothing`)
+
+    written += entities.length
+  }
+
+  return written
 }
 
 /** The same write, from outside a transaction. `recordActivity` is deliberately

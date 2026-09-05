@@ -1,6 +1,10 @@
 import {
   attributionReport,
   clampRange,
+  deleteReportDashboard,
+  listReportDashboards,
+  readReportDashboard,
+  saveReportDashboard,
   emailReport,
   formsReport,
   pipelineReport,
@@ -52,4 +56,31 @@ export const reportingRouter = router({
   attribution: protectedProcedure
     .input(range)
     .query(({ ctx, input }) => call(() => attributionReport(ctx.workspace, within(input)))),
+
+  /** B11. A dashboard is a saved arrangement of the figures above. Reading one is
+   *  open to anybody signed in for the same reason the reports are; writing one is
+   *  open to a viewer too, because a viewer arranging their own four numbers adds
+   *  nothing they could not already read. */
+  dashboards: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listReportDashboards(ctx.workspace))),
+
+    read: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .query(({ ctx, input }) => call(() => readReportDashboard(ctx.workspace, input.id))),
+
+    save: protectedProcedure
+      .input(
+        z.object({
+          id: z.uuid().nullish(),
+          name: z.string().min(1).max(120),
+          cards: z.array(z.string().max(64)).min(1).max(24),
+          isShared: z.boolean(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => saveReportDashboard(ctx.workspace, input))),
+
+    remove: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => deleteReportDashboard(ctx.workspace, input.id))),
+  }),
 })

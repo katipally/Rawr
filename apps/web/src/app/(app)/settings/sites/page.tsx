@@ -1,5 +1,5 @@
 import { listCollectorNotices, listSites } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -63,10 +63,11 @@ const SitesPage = async () => {
         ) : (
           <ul className="flex flex-col gap-2">
             {notices.map((row) => (
-              <li
-                key={`${row.kind}-${row.key}-${row.day}-${row.siteName}`}
-                className="rounded-panel border border-error bg-error-subtle p-3"
-              >
+              <li key={`${row.kind}-${row.key}-${row.day}-${row.siteName}`}>
+                {/* Warning rather than error: twenty of these are a log of what
+                    already happened, and an error alert is a live region that
+                    would announce all twenty at once on page load. */}
+                <Alert tone="warning">
                 <p className="break-words font-medium">
                   {row.kind === 'pii'
                     ? `"${row.key}" carried personal data`
@@ -82,6 +83,7 @@ const SitesPage = async () => {
                 <pre className="mt-1 overflow-x-auto text-small text-secondary">
                   {JSON.stringify(row.detail)}
                 </pre>
+                </Alert>
               </li>
             ))}
           </ul>

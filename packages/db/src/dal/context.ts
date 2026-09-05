@@ -42,6 +42,11 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   subscription_state: ['admin', 'marketing'],
   segment: ['admin', 'marketing'],
   saved_view: ['admin', 'sales', 'marketing'],
+  /** B11. Anybody who can read the reports can arrange them, including a viewer:
+   *  a dashboard adds no figure the six reports do not already show that role,
+   *  and the person who most wants their own four numbers on one screen is
+   *  usually the one who only reads. */
+  report_dashboard: ['admin', 'sales', 'marketing', 'viewer'],
   import_run: ['admin', 'sales', 'marketing'],
   object_def: ['admin'],
   field_def: ['admin'],

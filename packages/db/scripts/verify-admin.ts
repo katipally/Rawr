@@ -446,6 +446,26 @@ try {
     return timeline.rows[0]!.subject ?? ''
   })
 
+  await check('every member gets one, not just the first chunk', async () => {
+    // The evaluator writes these in batched statements rather than one call per
+    // member, which is the difference between a second and seventeen minutes on a
+    // segment the size of the portal. What that rewrite could get wrong is the
+    // chunk boundary, so the count is the check.
+    const members = await readSegmentMembers(marketing, segmentId, 1000)
+    const [written] = await db.execute<{ n: number }>(sql`
+      select count(distinct l.entity_id)::int as n
+        from activity a
+        join activity_link l on l.activity_id = a.id
+       where a.workspace_id = ${datasaur.id}
+         and a.type = 'segment_change'
+         and a.subject = ${`entered Verify partners ${stamp}`}`)
+    expect(
+      Number(written?.n) === members.length,
+      `${members.length} members, ${written?.n} timelines say so`,
+    )
+    return `${members.length} members, ${written?.n} timeline entries`
+  })
+
   await check('leaving writes another, and the spell is kept', async () => {
     const members = await readSegmentMembers(marketing, segmentId, 1)
     const leaver = members[0]!

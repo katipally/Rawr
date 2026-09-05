@@ -1,7 +1,7 @@
 import { asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
-import { recordActivity, type EntityType } from './activity.ts'
+import { recordActivityFanout, type EntityType } from './activity.ts'
 import { assertCanWrite, type WorkspaceContext } from './context.ts'
 import { mutate, withWorkspace, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
@@ -222,40 +222,70 @@ export const evaluateSegmentIn = async (
 
   const matching = matchingIds(object, parseFilters(row.query), ctx)
 
+  // Both sides are put into temporary tables first, and both are analysed.
+  //
+  // The shape matters more than the wording here, and two things went wrong
+  // before this. `not in` against a subquery cannot be turned into an anti-join
+  // at all, because a null in the subquery would change the answer. And once
+  // that was a left join, the planner still chose a nested loop, because a list
+  // arriving from HubSpot puts eighty thousand rows into segment_membership
+  // before autovacuum has looked at it, so the estimate for that side was one
+  // row. A hundred thousand member segment re-evaluated on that plan had not
+  // finished after twelve minutes.
+  //
+  // Temporary tables fix both: they are owned by this session, so `analyze` is
+  // permitted where it is refused on segment_membership, and the join then has
+  // real row counts on both sides. They drop with the transaction.
+  // Created if absent and emptied rather than dropped and rebuilt, because
+  // `evaluateAllSegments` runs every segment inside one transaction and the
+  // previous segment's tables are still there. A plain drop works too and says
+  // so in a NOTICE on the first pass, which is noise in a worker log.
+  await tx.execute(sql`create temporary table if not exists segment_candidate (id uuid primary key) on commit drop`)
+  await tx.execute(sql`create temporary table if not exists segment_held (id uuid primary key) on commit drop`)
+  await tx.execute(sql`truncate segment_candidate, segment_held`)
+  await tx.execute(sql`insert into segment_candidate (id) select id from (${matching}) as m(id)`)
+  await tx.execute(sql`
+    insert into segment_held (id)
+    select entity_id from segment_membership where segment_id = ${segmentId} and exited_at is null`)
+  await tx.execute(sql`analyze segment_candidate`)
+  await tx.execute(sql`analyze segment_held`)
+
   const exited = await tx.execute<{ entity_id: string }>(sql`
     update segment_membership m
        set exited_at = now()
+      from (
+        select held.id from segment_held held
+          left join segment_candidate candidate on candidate.id = held.id
+         where candidate.id is null
+      ) gone
      where m.segment_id = ${segmentId}
        and m.exited_at is null
-       and m.entity_id not in (${matching})
+       and m.entity_id = gone.id
     returning m.entity_id`)
 
   const entered = await tx.execute<{ entity_id: string }>(sql`
     insert into segment_membership (workspace_id, segment_id, entity_id)
     select ${ctx.workspaceId}, ${segmentId}, candidate.id
-      from (${matching}) as candidate(id)
-     where not exists (
-       select 1 from segment_membership m
-        where m.segment_id = ${segmentId} and m.entity_id = candidate.id and m.exited_at is null)
+      from segment_candidate candidate
+      left join segment_held held on held.id = candidate.id
+     where held.id is null
     returning entity_id`)
 
   const entityType = ENTITY_TYPE[object.key]
-  for (const member of entered) {
-    await recordActivity(tx, ctx, {
-      type: 'segment_change',
-      subject: `entered ${row.name}`,
-      payload: { segmentId, segmentName: row.name, direction: 'entered' },
-      links: [{ entityType, entityId: member.entity_id }],
-    })
-  }
-  for (const member of exited) {
-    await recordActivity(tx, ctx, {
-      type: 'segment_change',
-      subject: `left ${row.name}`,
-      payload: { segmentId, segmentName: row.name, direction: 'exited' },
-      links: [{ entityType, entityId: member.entity_id }],
-    })
-  }
+  await recordActivityFanout(tx, ctx, {
+    type: 'segment_change',
+    subject: `entered ${row.name}`,
+    payload: { segmentId, segmentName: row.name, direction: 'entered' },
+    entityType,
+    entityIds: entered.map((member) => member.entity_id),
+  })
+  await recordActivityFanout(tx, ctx, {
+    type: 'segment_change',
+    subject: `left ${row.name}`,
+    payload: { segmentId, segmentName: row.name, direction: 'exited' },
+    entityType,
+    entityIds: exited.map((member) => member.entity_id),
+  })
 
   await tx.update(segment).set({ lastEvaluatedAt: new Date() }).where(eq(segment.id, segmentId))
 

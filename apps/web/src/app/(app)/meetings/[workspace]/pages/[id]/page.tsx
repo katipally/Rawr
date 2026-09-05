@@ -1,5 +1,5 @@
 import { getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { publicBaseUrl } from '~/lib/env.ts'
@@ -74,30 +74,34 @@ const BookingPageEditorScreen = async ({
 
   return (
     <div className="w-full max-w-5xl">
-      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <Link href={bookingPagesPath(workspace)} className="text-sm font-semibold text-link">
+      <nav className="mb-1 text-sm">
+        <Link href={bookingPagesPath(workspace)} className="font-semibold text-link">
           Meeting links
         </Link>
-        <span className="text-secondary">/</span>
-        <h1 className="text-lg font-medium">{page.name}</h1>
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
-          <Link href={bookedPath(workspace, { page: page.bookingPageId })} className="text-link">
-            Booked meetings
-          </Link>
-          <Link href={availabilityPath(workspace)} className="text-link">
-            My hours
-          </Link>
-          <Link href={calendarsPath(workspace)} className="text-link">
-            Calendars
-          </Link>
-        </div>
-      </header>
+      </nav>
+      <PageHeader
+        className="mb-4"
+        title={page.name}
+        action={
+          <>
+            <Link href={bookedPath(workspace, { page: page.bookingPageId })} className="text-sm text-link">
+              Booked meetings
+            </Link>
+            <Link href={availabilityPath(workspace)} className="text-sm text-link">
+              My hours
+            </Link>
+            <Link href={calendarsPath(workspace)} className="text-sm text-link">
+              Calendars
+            </Link>
+          </>
+        }
+      />
 
       {!editable ? (
-        <p className="mb-4 rounded-panel border border-line bg-warning-subtle p-3 text-sm">
+        <Alert tone="warning" className="mb-4">
           Your role ({session.role}) can read this page but not change it. A shared round robin is an
-          admin's to configure.
-        </p>
+          admin&apos;s to configure.
+        </Alert>
       ) : null}
 
       <PageEditor

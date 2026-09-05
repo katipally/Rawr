@@ -250,6 +250,10 @@ export const activityLink = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.workspaceId, t.activityId, t.entityType, t.entityId] }),
+    /** The foreign key's own index. Every other index here leads with
+     *  workspace_id, which serves the timeline read and cannot serve the cascade
+     *  from activity: without this, deleting one activity scans the whole table. */
+    index('activity_link_activity_idx').on(t.activityId),
     index('activity_link_timeline_idx').on(
       t.workspaceId,
       t.entityType,

@@ -29,7 +29,8 @@
     "db:verify:org": "pnpm --filter @rawr/db verify:org",
     "db:verify:mail": "pnpm --filter @rawr/db verify:mail",
     "db:verify:sequences": "pnpm --filter @rawr/db verify:sequences",
-    "db:verify:reporting": "pnpm --filter @rawr/db verify:reporting"
+    "db:verify:reporting": "pnpm --filter @rawr/db verify:reporting",
+    "db:verify:scale": "pnpm --filter @rawr/db verify:scale"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

@@ -1,7 +1,7 @@
 import { listSubmissions } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import { submissionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReviewList } from './review-list.tsx'
@@ -49,12 +49,12 @@ const SubmissionsPage = async ({
 
   return (
     <div className="w-full max-w-6xl">
-      <header className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-medium">Submissions</h1>
-        <span className="text-sm text-secondary">
-          {rows.length === 1 ? '1 submission' : `${rows.length} submissions`}
-        </span>
-      </header>
+      <PageHeader
+        className="mb-3"
+        title="Submissions"
+        lead={rows.length === 1 ? '1 submission' : `${rows.length} submissions`}
+        why="Nothing the spam engine catches is dropped. A false positive is recovered here rather than lost invisibly, and the state sits in the URL so a held queue is a link somebody can send."
+      />
 
       <nav aria-label="Submission state" className="mb-4 flex flex-wrap gap-1 border-b border-divider">
         {STATES.map((option) => (

@@ -1,4 +1,4 @@
-import { Tabs } from '@rawr/ui'
+import { PageHeader, Tabs } from '@rawr/ui'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
 import { reportsPath } from '~/lib/links.ts'
 
@@ -16,6 +16,7 @@ const TABS = [
   { key: 'email', label: 'Email' },
   { key: 'website', label: 'Website' },
   { key: 'attribution', label: 'Attribution' },
+  { key: 'dashboards', label: 'Dashboards' },
 ]
 
 export const ReportsHeader = ({
@@ -31,15 +32,12 @@ export const ReportsHeader = ({
   to: string
 }) => (
   <>
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <div className="min-w-0">
-        <h1 className="text-lg font-medium">Reports</h1>
-        <p className="text-secondary">
-          {from} to {to}. Every chart carries the same figures as a table underneath it.
-        </p>
-      </div>
-      <RangePicker from={from} to={to} />
-    </div>
+    <PageHeader
+      title="Reports"
+      lead={`${from} to ${to}`}
+      why="Every chart carries the same figures as a table underneath it, so a number can be read off rather than estimated from a shape. The range lives in the URL, which means a link to a report is a link to the period somebody was looking at."
+      action={<RangePicker from={from} to={to} />}
+    />
 
     <div className="border-b border-divider">
       <Tabs

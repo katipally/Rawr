@@ -1,5 +1,5 @@
 import { listBookingPages, listBookings } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { bookedPath, bookingPagesPath, recordPath } from '~/lib/links.ts'
@@ -47,13 +47,16 @@ const BookedScreen = async ({
 
   return (
     <div className="w-full max-w-6xl">
-      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-2">
-        <h1 className="text-lg font-medium">Booked meetings</h1>
-        {pageName ? <span className="text-sm text-secondary">{pageName}</span> : null}
-        <Link href={bookingPagesPath(workspace)} className="ml-auto text-sm font-semibold text-link">
-          Meeting links
-        </Link>
-      </header>
+      <PageHeader
+        className="mb-4"
+        title="Booked meetings"
+        lead={pageName ?? 'Everything anybody booked, on every page.'}
+        action={
+          <Link href={bookingPagesPath(workspace)} className="text-sm font-semibold text-link">
+            Meeting links
+          </Link>
+        }
+      />
 
       <nav className="mb-3 flex flex-wrap items-center gap-2 text-sm">
         {(['upcoming', 'past'] as const).map((option) => (

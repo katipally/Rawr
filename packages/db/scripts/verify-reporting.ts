@@ -8,6 +8,12 @@ import { backfillVisitor } from '../src/dal/stitch.ts'
 import { collect, publicSite } from '../src/dal/collect.ts'
 import { createSite } from '../src/dal/analytics.ts'
 import { createRecord } from '../src/dal/records.ts'
+import {
+  deleteReportDashboard,
+  listReportDashboards,
+  readReportDashboard,
+  saveReportDashboard,
+} from '../src/dal/report-dashboards.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 
 /** B7 against the real database.
@@ -282,6 +288,103 @@ try {
       `probe sees ${mine?.sessions ?? 0}, its own table holds ${counted?.n}`,
     )
     return 'row level security, not a where clause somebody has to remember'
+  })
+
+  console.log('')
+  console.log('-- B11: reports somebody assembled -------------------------------')
+
+  let dashboardId = ''
+
+  await check('a dashboard with no cards is refused', async () => {
+    try {
+      await saveReportDashboard(admin, { name: `Empty ${stamp}`, cards: [], isShared: false })
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : String(cause)
+    }
+    throw new Error('a blank page was saved as a dashboard')
+  })
+
+  await check('a viewer may build one', async () => {
+    // Deliberately the widest write role in the product. A dashboard shows no
+    // figure the six reports do not already show a viewer, and the person who
+    // most wants four numbers on one screen is usually the one who only reads.
+    const created = await saveReportDashboard(viewer, {
+      name: `Viewer ${stamp}`,
+      cards: ['deals_created', 'form_fills'],
+      isShared: false,
+    })
+    await deleteReportDashboard(viewer, created.id)
+    return 'arranging what you can already read is not a new permission'
+  })
+
+  await check('a private one is invisible to somebody else', async () => {
+    const created = await saveReportDashboard(viewer, {
+      name: `Private ${stamp}`,
+      cards: ['site_sessions'],
+      isShared: false,
+    })
+    const listed = await listReportDashboards(ctxFor('marketing'))
+    expect(!listed.some((row) => row.id === created.id), 'a private dashboard is in somebody else’s list')
+    // An admin can still open one, because an admin can open everything in the
+    // workspace and pretending otherwise would be a lie about the role.
+    expect(Boolean(await readReportDashboard(admin, created.id)), 'an admin could not open it')
+    await deleteReportDashboard(viewer, created.id)
+    return 'private is about clutter, not about secrecy'
+  })
+
+  await check('a shared one is in everybody’s list', async () => {
+    const created = await saveReportDashboard(admin, {
+      name: `Shared ${stamp}`,
+      cards: ['deals_created', 'pipeline_funnel', 'first_touch'],
+      isShared: true,
+    })
+    dashboardId = created.id
+    const listed = await listReportDashboards(viewer)
+    expect(listed.some((row) => row.id === dashboardId), 'a shared dashboard is missing from a viewer’s list')
+    return `${listed.length} visible to a viewer`
+  })
+
+  await check('somebody else’s dashboard cannot be edited', async () => {
+    try {
+      await saveReportDashboard(viewer, {
+        id: dashboardId,
+        name: 'Hijacked',
+        cards: ['site_sessions'],
+        isShared: true,
+      })
+    } catch (cause) {
+      return cause instanceof Error ? cause.message : String(cause)
+    }
+    throw new Error('a viewer rewrote an admin’s dashboard')
+  })
+
+  await check('the card order is what comes back', async () => {
+    const order = ['first_touch', 'deals_created', 'pipeline_funnel']
+    await saveReportDashboard(admin, {
+      id: dashboardId,
+      name: `Shared ${stamp}`,
+      cards: order,
+      isShared: true,
+    })
+    const read = await readReportDashboard(admin, dashboardId)
+    expect(read?.cards.join(',') === order.join(','), read?.cards.join(',') ?? 'nothing came back')
+    return 'order is the only layout a dashboard has, so it is stored'
+  })
+
+  await check('a card that no longer exists does not break it', async () => {
+    await saveReportDashboard(admin, {
+      id: dashboardId,
+      name: `Shared ${stamp}`,
+      cards: ['deals_created', 'a_card_that_was_retired'],
+      isShared: true,
+    })
+    const read = await readReportDashboard(admin, dashboardId)
+    // Stored as written. Dropping it happens where the dashboard is drawn, so a
+    // card removed from the catalogue and put back does not lose its place.
+    expect(read?.cards.length === 2, `${read?.cards.length} keys stored`)
+    await deleteReportDashboard(admin, dashboardId)
+    expect((await readReportDashboard(admin, dashboardId)) === null, 'it survived its deletion')
+    return 'an unknown key is dropped when drawn, not when stored'
   })
 
   console.log('')

@@ -1,5 +1,5 @@
 import { listTasks, overdueNextSteps } from '@rawr/db'
-import { EmptyState, cn } from '@rawr/ui'
+import { EmptyState, PageHeader, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
@@ -43,7 +43,10 @@ const TasksPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-lg font-medium">Tasks</h1>
+      <PageHeader
+        title="Tasks"
+        lead="What is overdue, and what somebody told themselves they would do next."
+      />
 
       <nav aria-label="Task filter" className="flex flex-wrap gap-1">
         {filters.map((option) => (

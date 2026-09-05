@@ -1,3 +1,4 @@
+import { Alert, PageHeader } from '@rawr/ui'
 import { listGrants } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -38,33 +39,33 @@ const CalendarsScreen = async ({
 
   return (
     <div className="w-full max-w-4xl">
-      <header className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h1 className="text-lg font-medium">Calendars</h1>
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-sm">
-          <Link href={bookingPagesPath(workspace)} className="text-link">
-            Meeting links
-          </Link>
-          <Link href={availabilityPath(workspace)} className="text-link">
-            My hours
-          </Link>
-        </div>
-      </header>
+      <PageHeader
+        className="mb-4"
+        title="Calendars"
+        lead="Whose free-busy Rawr may read when it offers somebody a time."
+        action={
+          <>
+            <Link href={bookingPagesPath(workspace)} className="text-sm text-link">
+              Meeting links
+            </Link>
+            <Link href={availabilityPath(workspace)} className="text-sm text-link">
+              My hours
+            </Link>
+          </>
+        }
+      />
 
-      {error ? (
-        <p role="alert" className="mb-4 rounded-panel border border-error bg-error-subtle p-3 text-sm">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Alert className="mb-4">{error}</Alert> : null}
 
       {!googleCalendarConfigured ? (
-        <p className="mb-4 rounded-panel border border-line bg-warning-subtle p-3 text-sm">
+        <Alert tone="warning" className="mb-4">
           Google Calendar is not configured on this deployment. It needs a Google Cloud project with
           an internal consent screen (open item 3) and an encryption key held outside the database
           (open item 9). Until then, free-busy cannot be read and no host can offer real times.
           {devCalendarEnabled
             ? ' The development provider below is available in the meantime: it treats a host as available except where Rawr already holds a booking, which exercises the whole engine without touching anybody’s real calendar.'
             : ''}
-        </p>
+        </Alert>
       ) : null}
 
       <ul className="flex flex-col gap-2">

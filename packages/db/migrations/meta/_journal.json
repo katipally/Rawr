@@ -260,6 +260,20 @@
       "when": 1787950000000,
       "tag": "0036_automation",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787960000000,
+      "tag": "0037_report_dashboard",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787970000000,
+      "tag": "0038_activity_link_fk_index",
+      "breakpoints": true
     }
   ]
 }

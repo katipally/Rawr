@@ -202,6 +202,13 @@ export const reportsPath = (
   return `/${CRM_ROOT}/${workspace}/reports${tab ? `/${tab}` : ''}${query(rest)}`
 }
 
+/** B11. One assembled dashboard, carrying the range it is read over. */
+export const dashboardPath = (
+  workspace: string,
+  id: string,
+  params: { from?: string; to?: string } = {},
+): string => `/${CRM_ROOT}/${workspace}/reports/dashboards/${id}${query(params)}`
+
 /** Brevo's seam: the audience and the opt-out are Rawr's, the send is Brevo's. */
 export const newsletterPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/newsletter`
 

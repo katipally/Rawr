@@ -404,8 +404,9 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
         }
       >
         <p>
-          The rule stops. Everything it already did stays: the tasks it created, the fields it set,
-          and the log of every time it fired.
+          The rule stops. The work it did stays: the tasks it created, the fields it set, and the
+          timeline entries it wrote. Its log of when it fired goes with it, so take what you need
+          from &ldquo;What they did&rdquo; first.
         </p>
       </Modal>
     </div>
