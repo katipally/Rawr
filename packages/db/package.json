@@ -28,7 +28,8 @@
     "verify:mail": "node --env-file=../../.env.local scripts/verify-mail.ts",
     "verify:sequences": "node --env-file=../../.env.local scripts/verify-sequences.ts",
     "verify:reporting": "node --env-file=../../.env.local scripts/verify-reporting.ts",
-    "verify:scale": "DATABASE_POOL_MAX=8 node --env-file=../../.env.local scripts/verify-scale.ts"
+    "verify:scale": "DATABASE_POOL_MAX=8 node --env-file=../../.env.local scripts/verify-scale.ts",
+    "reclaim": "node --env-file=../../.env.local scripts/reclaim.mjs"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",
