@@ -31,6 +31,8 @@ export const AttachmentsPanel = ({
   configured,
   canWrite,
 }: {
+  /** Core objects only: an attachment names an entity type that is an enum of
+   *  the three, so a custom object has nowhere to hang one yet. */
   object: ObjectKey
   recordId: string
   rows: AttachmentView[]

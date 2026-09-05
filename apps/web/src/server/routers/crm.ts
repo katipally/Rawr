@@ -65,7 +65,16 @@ import { announceStageChange } from '../stage-alerts.ts'
 import { NOT_CONFIGURED, removeObject, signedDownload, signedUpload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
+/** The three the system is built on. Used where a procedure genuinely needs one:
+ *  a timeline entry, an association and a task all name an entity type that is an
+ *  enum of exactly these, so widening it here would let a request in that the
+ *  database cannot store. */
 const objectKey = z.enum(['contact', 'company', 'deal'])
+
+/** Any object in the workspace, including one an admin invented. The registry is
+ *  what decides whether it exists — this only proves the string is shaped like a
+ *  key, because it reaches SQL as an alias and appears in a URL. */
+const anyObject = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
 const entityRef = z.object({ entityType: objectKey, entityId: z.uuid() })
 
 const condition = z.object({
@@ -99,7 +108,9 @@ const listInput = z.object({
  *  reports exactly one of them per write, because they are different columns. */
 const fireChangeAutomations = (
   ctx: { workspace: WorkspaceContext; session: { workspaceSlug: string } },
-  object: ObjectKey,
+  // Any object: a custom one has no stage or lifecycle, so `trigger` below is
+  // null for it and this returns before reportEvent is reached at all.
+  object: string,
   id: string,
   result: UpdateResult,
 ): void => {
@@ -180,11 +191,14 @@ export const crmRouter = router({
     ),
 
     get: protectedProcedure
-      .input(z.object({ object: objectKey, id: z.uuid() }))
+      .input(z.object({ object: anyObject, id: z.uuid() }))
       .query(({ ctx, input }) => call(() => getRecord(ctx.workspace, input.object, input.id))),
 
     /** What every record picker reads. A capped, ranked answer to "which record
      *  did you mean", never the whole object. */
+    /** The relation picker. Core objects only: what a record is called in a
+     *  picker is a per-object expression, and a relation pointing at a custom
+     *  object is a later change than this one. */
     options: protectedProcedure
       .input(
         z.object({
@@ -206,7 +220,7 @@ export const crmRouter = router({
       ),
 
     create: protectedProcedure
-      .input(z.object({ object: objectKey, values: recordValues }))
+      .input(z.object({ object: anyObject, values: recordValues }))
       .mutation(({ ctx, input }) =>
         call(async () => {
           const result = await createRecord(ctx.workspace, input.object, input.values)
@@ -224,7 +238,7 @@ export const crmRouter = router({
     update: protectedProcedure
       .input(
         z.object({
-          object: objectKey,
+          object: anyObject,
           id: z.uuid(),
           values: recordValues,
           /** Sent by every editor. A stale write is refused rather than silently
@@ -252,7 +266,7 @@ export const crmRouter = router({
     bulkUpdate: protectedProcedure
       .input(
         z.object({
-          object: objectKey,
+          object: anyObject,
           ids: z.array(z.uuid()).min(1).max(500),
           values: recordValues,
         }),
@@ -262,7 +276,7 @@ export const crmRouter = router({
       ),
 
     remove: protectedProcedure
-      .input(z.object({ object: objectKey, id: z.uuid() }))
+      .input(z.object({ object: anyObject, id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteRecord(ctx.workspace, input.object, input.id))),
 
     /** The review queue behind the merge dialog. Read-only, gated on write: it
@@ -297,13 +311,13 @@ export const crmRouter = router({
 
   views: router({
     list: protectedProcedure
-      .input(z.object({ object: objectKey }))
+      .input(z.object({ object: anyObject }))
       .query(({ ctx, input }) => call(() => listViews(ctx.workspace, input.object))),
 
     save: protectedProcedure
       .input(
         z.object({
-          object: objectKey,
+          object: anyObject,
           id: z.uuid().nullish(),
           name: z.string().trim().min(1).max(80),
           kind: z.enum(['table', 'board', 'calendar']),
@@ -694,7 +708,7 @@ export const crmRouter = router({
 
   /** Used by the duplicate banner: given an id, what is it called. */
   nameOf: protectedProcedure
-    .input(z.object({ object: objectKey, id: z.uuid() }))
+    .input(z.object({ object: anyObject, id: z.uuid() }))
     .query(({ ctx, input }) =>
       call(async () => {
         const record = await getRecord(ctx.workspace, input.object, input.id)

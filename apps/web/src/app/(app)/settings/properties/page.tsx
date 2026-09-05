@@ -1,15 +1,9 @@
-import { isObjectKey, listDeletedFields, listFields, type ObjectKey } from '@rawr/db'
+import { getRegistry, listDeletedFields, listFields } from '@rawr/db'
 import { PageHeader, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { propertiesPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { PropertyList } from './property-list.tsx'
-
-const OBJECTS: { key: ObjectKey; label: string }[] = [
-  { key: 'contact', label: 'Contacts' },
-  { key: 'company', label: 'Companies' },
-  { key: 'deal', label: 'Deals' },
-]
 
 /** D4's premise, made reachable: marketing adds a property without a deploy.
  *
@@ -25,9 +19,14 @@ const PropertiesPage = async ({
   if (!session) return null
 
   const { object } = await searchParams
-  const current: ObjectKey = object && isObjectKey(object) ? object : 'contact'
-
   const ctx = contextFrom(session)
+
+  // From the registry rather than a list here, so an object an admin invented
+  // gets its own tab the moment it exists.
+  const registry = await getRegistry(ctx)
+  const objects = registry.objects.map((entry) => ({ key: entry.key, label: entry.namePlural }))
+  const current = objects.some((entry) => entry.key === object) ? object! : 'contact'
+
   const [fields, deleted] = await Promise.all([
     listFields(ctx, current),
     session.role === 'admin' ? listDeletedFields(ctx) : Promise.resolve([]),
@@ -49,7 +48,7 @@ const PropertiesPage = async ({
       />
 
       <nav aria-label="Object" className="flex flex-wrap gap-1">
-        {OBJECTS.map((entry) => (
+        {objects.map((entry) => (
           <Link
             key={entry.key}
             href={propertiesPath(entry.key)}

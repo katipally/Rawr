@@ -1,4 +1,3 @@
-import type { ObjectKey } from '@rawr/db'
 
 /** Every address in the CRM, built here and nowhere else.
  *
@@ -15,6 +14,10 @@ import type { ObjectKey } from '@rawr/db'
  *  string, so any screen a person is looking at can be pasted to someone else. */
 
 export const CRM_ROOT = 'contacts'
+
+/** An object in an address is a string, not one of the three. An admin can
+ *  invent one, and its list and record pages are these same builders. Whether
+ *  the key names a real object is the registry's answer, not a URL's. */
 
 /** The reverse of every builder below: which workspace an address names, or null
  *  when it names none. Both scoped families put the slug in the same position,
@@ -83,7 +86,7 @@ export const workspaceHome = (workspace: string): string => `/${CRM_ROOT}/${work
 
 export const objectView = (
   workspace: string,
-  object: ObjectKey,
+  object: string,
   view: string,
   kind: ViewKind = 'list',
   params: ListParams = {},
@@ -97,7 +100,7 @@ export const objectView = (
  *  link somebody can be sent. */
 export const recordPath = (
   workspace: string,
-  object: ObjectKey,
+  object: string,
   id: string,
   params: {
     tab?: string | undefined
@@ -111,7 +114,7 @@ export const recordPath = (
 /** The + in the top bar. It lands on the object's own list, which is where the
  *  create dialog lives, so there is one create form per object rather than a
  *  second copy in the shell that would have to learn the same fields. */
-export const createRecordPath = (workspace: string, object: ObjectKey): string =>
+export const createRecordPath = (workspace: string, object: string): string =>
   `${objectView(workspace, object, 'all')}?new=1`
 
 /** The export screen, and the file it hands over. The CSV lives one segment
@@ -156,6 +159,8 @@ export const membersPath = (): string => '/settings/members'
 
 export const propertiesPath = (object?: string): string =>
   object ? `/settings/properties?object=${object}` : '/settings/properties'
+
+export const objectsPath = (): string => '/settings/objects'
 
 export const pipelinesPath = (): string => '/settings/pipelines'
 

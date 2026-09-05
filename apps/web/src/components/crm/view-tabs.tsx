@@ -25,7 +25,7 @@ export type ViewTab = {
 
 export type ViewTabsProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   views: ViewTab[]
   current: string
   currentKind: ViewKind

@@ -9,7 +9,7 @@ import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'
 
 export type BulkBarProps = {
-  object: ObjectKey
+  object: string
   objectLabel: string
   /** Ids ticked in the table. The bar only exists while this is non-empty. */
   ids: string[]

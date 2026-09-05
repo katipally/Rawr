@@ -8,7 +8,7 @@ import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type PropertyListProps = {
-  object: ObjectKey
+  object: string
   rows: AdminField[]
   deleted: AdminField[]
   role: string

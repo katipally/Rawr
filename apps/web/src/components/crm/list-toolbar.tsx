@@ -13,7 +13,7 @@ import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 
 export type ListToolbarProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   objectLabel: string
   view: string
   viewId: string | null

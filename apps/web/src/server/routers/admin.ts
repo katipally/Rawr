@@ -1,5 +1,9 @@
 import {
   ACTION_TYPES,
+  createCustomObject,
+  deleteCustomObject,
+  listCustomObjects,
+  renameCustomObject,
   MAX_DELAY_MINUTES,
   AUTOMATION_TRIGGERS,
   FIELD_TYPES,
@@ -62,7 +66,16 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
  *  see the same stage names on a board would be theatre. Writes go through the data
  *  access layer's role matrix, which is the thing that actually decides. */
 
-const objectKey = z.enum(['contact', 'company', 'deal'])
+/** Any object in the workspace, including one an admin invented: a field belongs
+ *  to whichever object the registry says exists, and fields are the whole point
+ *  of inventing one. Shaped-like-a-key only; the registry decides the rest. */
+const objectKey = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
+
+/** Where one of the three is genuinely required. An automation's triggers are
+ *  record created, stage changed, lifecycle changed and form submitted — all
+ *  four are things that only happen to a core object, and its run log names an
+ *  entity type that is an enum of exactly them. */
+const coreObjectKey = z.enum(['contact', 'company', 'deal'])
 const name = z.string().trim().min(1).max(120)
 const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
 
@@ -126,6 +139,38 @@ export const adminRouter = router({
           .optional(),
       )
       .query(({ ctx, input }) => call(() => listAudit(ctx.workspace, input ?? {}))),
+  }),
+
+  /** Objects an admin invents. The three Rawr is built on are not here: they
+   *  cannot be created, renamed or deleted, and the layer refuses each. */
+  objects: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listCustomObjects(ctx.workspace))),
+
+    create: adminProcedure
+      .input(
+        z.object({
+          nameSingular: z.string().min(1).max(60),
+          namePlural: z.string().min(1).max(60),
+          labelFieldLabel: z.string().max(60).optional(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => createCustomObject(ctx.workspace, input))),
+
+    rename: adminProcedure
+      .input(
+        z.object({
+          id: z.uuid(),
+          nameSingular: z.string().min(1).max(60),
+          namePlural: z.string().min(1).max(60),
+        }),
+      )
+      .mutation(({ ctx, input: { id, ...names } }) =>
+        call(() => renameCustomObject(ctx.workspace, id, names)),
+      ),
+
+    remove: adminProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => deleteCustomObject(ctx.workspace, input.id))),
   }),
 
   fields: router({
@@ -331,7 +376,7 @@ export const adminRouter = router({
           id: z.uuid().nullish(),
           name: z.string().min(1).max(120),
           trigger: z.enum(AUTOMATION_TRIGGERS),
-          object: objectKey,
+          object: coreObjectKey,
           conditions: z.array(z.unknown()).max(10),
           /** A discriminated union so a delay cannot arrive without its minutes
            *  and a guard cannot arrive without its conditions. Twenty steps is

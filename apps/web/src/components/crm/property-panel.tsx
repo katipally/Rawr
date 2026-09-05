@@ -12,7 +12,7 @@ import { Value } from './value.tsx'
 export type PropertySection = { title: string; fieldKeys: string[] }
 
 export type PropertyPanelProps = {
-  object: ObjectKey
+  object: string
   recordId: string
   fields: EditableField[]
   values: Record<string, unknown>

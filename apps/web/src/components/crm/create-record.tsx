@@ -13,7 +13,7 @@ export type CreateField = EditableField
 
 export type CreateRecordDialogProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   objectLabel: string
   fields: CreateField[]
   onClose: () => void

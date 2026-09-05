@@ -22,7 +22,7 @@ export type TableRow = {
 
 export type RecordTableProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   view: string
   columns: TableColumn[]
   rows: TableRow[]

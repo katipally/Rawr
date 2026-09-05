@@ -3,6 +3,7 @@ import {
   claimAutomationRun,
   conditionsHold,
   createTask,
+  isObjectKey,
   finishAutomationRun,
   getRecord,
   listLifecycleStages,
@@ -294,14 +295,26 @@ export const resumeAutomation = async (
  *  a webhook that fires on three of four triggers happens.
  *
  *  Never awaited by a request. */
-export const reportEvent = (ctx: WorkspaceContext, event: AutomationEvent | undefined): void => {
+export const reportEvent = (
+  ctx: WorkspaceContext,
+  // Widened at the door rather than at every call site: a record of a custom
+  // object goes through the same create and update procedures, and asking each
+  // of them to narrow first would be five copies of the check below.
+  event: (Omit<AutomationEvent, 'objectKey'> & { objectKey: string }) | undefined,
+): void => {
   if (!event) return
-  runAutomations(ctx, event)
+  // A rule's run log and a webhook's payload both name an entity type that is an
+  // enum of the three core objects, so there is nowhere to record either for a
+  // custom one. Skipped in silence: nothing is armed for an object that cannot
+  // be a trigger, so nothing is being missed.
+  if (!isObjectKey(event.objectKey)) return
+  const core: AutomationEvent = { ...event, objectKey: event.objectKey }
+  runAutomations(ctx, core)
   notifySubscribers(ctx, {
-    objectKey: event.objectKey,
-    trigger: event.trigger,
-    entityId: event.entityId,
-    workspaceSlug: event.workspaceSlug,
+    objectKey: core.objectKey,
+    trigger: core.trigger,
+    entityId: core.entityId,
+    workspaceSlug: core.workspaceSlug,
   })
 }
 

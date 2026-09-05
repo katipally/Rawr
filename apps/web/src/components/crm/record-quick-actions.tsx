@@ -8,7 +8,7 @@ import { recordPath } from '~/lib/links.ts'
 
 export type RecordQuickActionsProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   recordId: string
   /** Null when this record has no address to write to, which disables Email and
    *  says why rather than offering a button that cannot do anything. */

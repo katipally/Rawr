@@ -99,6 +99,9 @@ const touchFrom = (value: unknown): Touch => {
   return { channel: source.channel, at: typeof at === 'string' ? at : null }
 }
 
+/** Shaped like an object key. The registry decides whether it is one. */
+const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
+
 const RecordPage = async ({
   params,
   searchParams,
@@ -116,7 +119,10 @@ const RecordPage = async ({
   if (!session) redirect('/sign-in')
 
   const { workspace, object: objectParam, id } = await params
-  if (!isObjectKey(objectParam)) notFound()
+  // Not `isObjectKey`: an admin can invent an object, and its records are opened
+  // through exactly this page. Whether the key names one is the registry's
+  // answer, which loadCrmContext gives below.
+  if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
   const { type, tab, log, task, compose } = await searchParams
   // Overview is the landing tab, the way HubSpot opens on a summary rather than
   // on a wall of history. An unknown value falls back rather than 404ing.
@@ -129,7 +135,10 @@ const RecordPage = async ({
   // panels all take the id as given, so a mangled link is stopped here rather
   // than by whichever of them Postgres rejects first.
   const screen = !isUuid(id) ? null : await withWorkspaceReads(ctx, async () => {
-    const entity = { entityType: objectParam, entityId: id }
+    // Narrowed once, here: `entity` is what every core-only read below takes,
+    // and its type is the enum those tables actually hold.
+    const core = isObjectKey(objectParam) ? objectParam : null
+    const entity = { entityType: core ?? 'contact', entityId: id }
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
     // panels only need the id, and a missing record just discards their answers.
@@ -138,10 +147,16 @@ const RecordPage = async ({
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
       // A hand-edited type in a link is dropped rather than failing the page.
-      readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
-      timelineCounts(ctx, entity),
-      readAssociations(ctx, entity),
-      listTasks(ctx, { entity }),
+      // A custom object has no timeline, associations or tasks: all three name
+      // an entity type that is an enum of the three core objects. Not read at
+      // all rather than read and discarded, which would be four queries for a
+      // panel that cannot be drawn.
+      core
+        ? readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 })
+        : Promise.resolve({ rows: [], nextCursor: null }),
+      core ? timelineCounts(ctx, entity) : Promise.resolve({} as Record<string, number>),
+      core ? readAssociations(ctx, entity) : Promise.resolve({ companies: [], contacts: [], deals: [], totals: {} }),
+      core ? listTasks(ctx, { entity }) : Promise.resolve([]),
       objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
       objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
       readMemberships(ctx, id),
@@ -150,10 +165,10 @@ const RecordPage = async ({
       enrichable ? listIntegrations(ctx) : Promise.resolve([]),
       // Only when storage is connected: reading a table to draw a panel that
       // can only say "not connected" is a query for nothing.
-      storageConfigured ? listAttachments(ctx, entity) : Promise.resolve([]),
+      core && storageConfigured ? listAttachments(ctx, entity) : Promise.resolve([]),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments }
+    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments }
   })
 
   if (!screen) {
@@ -167,7 +182,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, entity, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments } = screen
+  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments } = screen
 
   const health = (kind: 'apollo' | 'clay') => {
     const row = integrations.find((i) => i.kind === kind)
@@ -187,14 +202,20 @@ const RecordPage = async ({
   const timelineTotal = Object.values(counts).reduce((sum, n) => sum + n, 0)
 
   const fields = toEditableFields(object, lookups, { includeReadOnly: true })
-  // Every field the layout above does not place, in registry order. This is what
-  // makes a property created in Settings show up here without a deploy (D4).
-  const placed = new Set(SECTIONS[objectParam].flatMap((section) => section.fieldKeys))
+  // The core three have a hand-made layout, because which fields belong beside
+  // each other on a contact is a judgement nobody can derive. A custom object
+  // has no such layout and needs none: its fields are in the order the admin put
+  // them in, which is the only order that means anything.
+  const layout = object.isCustom ? [] : (SECTIONS[objectParam as ObjectKey] ?? [])
+  // Every field the layout does not place, in registry order. This is what makes
+  // a property created in Settings show up here without a deploy (D4), and for a
+  // custom object it is every field it has.
+  const placed = new Set(layout.flatMap((section) => section.fieldKeys))
   const unplaced = fields.filter((field) => !placed.has(field.key)).map((field) => field.key)
   const sections = unplaced.length
-    ? [...SECTIONS[objectParam], { title: 'More properties', fieldKeys: unplaced }]
-    : SECTIONS[objectParam]
-  const headerFields = HEADER_FIELDS[objectParam].flatMap((key) => {
+    ? [...layout, { title: object.isCustom ? 'Details' : 'More properties', fieldKeys: unplaced }]
+    : layout
+  const headerFields = (object.isCustom ? [] : (HEADER_FIELDS[objectParam as ObjectKey] ?? [])).flatMap((key) => {
     const field = object.byKey.get(key)
     return field ? [field] : []
   })
@@ -230,6 +251,9 @@ const RecordPage = async ({
             <h1 className="line-clamp-2 break-words text-lg font-medium" title={record.displayName}>
               {record.displayName}
             </h1>
+            {/* Log a note, a call, a meeting: every one of them writes an
+                activity, so a custom record has none of them to offer. */}
+            {core ? (
             <RecordQuickActions
               workspace={workspace}
               object={objectParam}
@@ -237,6 +261,7 @@ const RecordPage = async ({
               email={email}
               canWrite={canWrite}
             />
+            ) : null}
           </div>
           <RecordActions
             startCompose={compose === '1'}
@@ -302,12 +327,12 @@ const RecordPage = async ({
           {memberships.length > 0 || objectParam === 'contact' ? (
             <SegmentsPanel workspace={workspace} recordName={record.displayName} rows={memberships} />
           ) : null}
-          {objectParam !== 'deal' ? (
+          {core && core !== 'deal' ? (
             <EnrichmentPanel
               workspace={workspace}
-              object={objectParam}
+              object={core}
               recordId={id}
-              matchKey={objectParam === 'contact' ? email : domain}
+              matchKey={core === 'contact' ? email : domain}
               blankFields={blankFields}
               apolloUrl={email ? apolloContactUrl(email) : null}
               apollo={health('apollo')}
@@ -340,7 +365,10 @@ const RecordPage = async ({
         </div>
 
         <div className="flex min-w-0 flex-col gap-3">
-          <div className="border-b border-divider">
+          {/* Two tabs over content only a core record has. Without them a custom
+              record showed an Overview and an Activities tab that were both
+              empty and always would be. */}
+          <div className={core ? 'border-b border-divider' : 'hidden'}>
             <Tabs
               label="Record sections"
               items={[
@@ -361,10 +389,13 @@ const RecordPage = async ({
             />
           </div>
 
-          {activeTab === 'overview' ? (
+          {/* Both of these are core-only: the overview reads the association
+              rail and the timeline reads activities, and a custom object has
+              neither. It gets its properties and nothing it cannot have. */}
+          {!core ? null : activeTab === 'overview' ? (
             <RecordOverview
               workspace={workspace}
-              object={objectParam}
+              object={core}
               tasks={tasks.map((row) => ({
                 id: row.id,
                 title: row.title,
@@ -388,7 +419,7 @@ const RecordPage = async ({
           ) : (
           <Timeline
             openKind={openKind}
-            object={objectParam}
+            object={core}
             recordId={id}
             workspace={workspace}
             recordName={record.displayName}
@@ -416,15 +447,20 @@ const RecordPage = async ({
           )}
         </div>
 
+        {/* The right column is entirely core-only: associations, tasks and
+            attachments each name an entity type that is an enum of the three, so
+            a custom record has none of them. Not rendered rather than hidden — a
+            hidden column is still built, and this one is three panels of it. */}
+        {!core ? null : (
         <div className="flex min-w-0 flex-col gap-3">
           <AssociationRail
             workspace={workspace}
-            object={objectParam}
+            object={core ?? 'contact'}
             recordId={id}
             contacts={rail.contacts}
             companies={rail.companies}
             deals={rail.deals}
-            totals={rail.totals}
+            totals={'contacts' in rail.totals ? rail.totals : { contacts: 0, companies: 0, deals: 0 }}
             linkable={linkable}
             createFields={createFields}
             createInitial={createInitial}
@@ -448,7 +484,7 @@ const RecordPage = async ({
             startNew={task === 'new'}
           />
           <AttachmentsPanel
-            object={objectParam}
+            object={core ?? 'contact'}
             recordId={id}
             configured={storageConfigured}
             canWrite={canWrite}
@@ -461,6 +497,7 @@ const RecordPage = async ({
             }))}
           />
         </div>
+        )}
       </div>
     </div>
   )

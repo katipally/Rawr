@@ -14,6 +14,9 @@ import { contextFrom, readSession } from '~/server/session.ts'
  *  navigated to pastes like every other screen, and Earlier and Later are plain
  *  links rather than state. */
 
+/** Shaped like an object key. The registry decides whether it is one. */
+const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
+
 type Params = { workspace: string; object: string; view: string }
 type Search = { q?: string; filters?: string; month?: string; group?: string }
 
@@ -41,7 +44,10 @@ const CalendarPage = async ({
   if (!session) redirect('/sign-in')
 
   const { workspace, object: objectParam, view: viewSlug } = await params
-  if (!isObjectKey(objectParam)) notFound()
+  // Not `isObjectKey`: an admin can invent an object, and its records are read
+  // through exactly this page. Whether the key names one is the registry's
+  // answer, and loadCrmContext below throws with a sentence if it does not.
+  if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
 
   const search = await searchParams
   const ctx = contextFrom(session)

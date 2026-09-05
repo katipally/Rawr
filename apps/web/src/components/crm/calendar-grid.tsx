@@ -73,7 +73,7 @@ export const CalendarGrid = ({
   params,
 }: {
   workspace: string
-  object: ObjectKey
+  object: string
   view: string
   month: string
   /** The reader's own today, passed in rather than computed, so the highlight is

@@ -96,8 +96,8 @@ export type CreateObjectInput = {
   namePlural: string
   /** The field every record of this object is called by. Created with it, because
    *  an object whose records have no name is a list of uuids. */
-  labelFieldLabel?: string
-  icon?: string | null
+  labelFieldLabel?: string | undefined
+  icon?: string | null | undefined
 }
 
 export const createCustomObject = async (

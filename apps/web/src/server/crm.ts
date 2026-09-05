@@ -157,9 +157,13 @@ export type CrmContext = {
   canWrite: boolean
 }
 
-export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: ObjectKey): Promise<CrmContext> => {
+export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: string): Promise<CrmContext> => {
   const [registry, lookups] = await Promise.all([getRegistry(ctx), readLookups(ctx)])
   const object = registry.byKey.get(objectKey)
   if (!object) throw new Error(`This workspace has no object called "${objectKey}".`)
-  return { object, lookups, canWrite: canWrite(ctx.role, objectKey) }
+  // A custom object has no write role of its own. Whoever may write a record may
+  // write one of its records: the three roles that can change a contact. An admin
+  // still decides what objects exist at all, which is the object_def role.
+  const entity = object.isCustom ? 'contact' : objectKey
+  return { object, lookups, canWrite: canWrite(ctx.role, entity) }
 }

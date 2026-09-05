@@ -16,7 +16,7 @@ import type { EditableField } from './field-input.tsx'
 
 export type RecordActionsProps = {
   workspace: string
-  object: ObjectKey
+  object: string
   objectLabel: string
   recordId: string
   displayName: string
@@ -28,6 +28,11 @@ export type RecordActionsProps = {
    *  dialog is here, next to the address it sends to. */
   startCompose?: boolean | undefined
 }
+
+/** The three that can be merged. Written out rather than imported from
+ *  '@rawr/db': a runtime value from the barrel pulls the Postgres driver into
+ *  the client bundle, which is what the form builder's note next door is about. */
+const MERGEABLE = new Set(['contact', 'company', 'deal'])
 
 export const RecordActions = ({
   workspace,
@@ -80,7 +85,13 @@ export const RecordActions = ({
       const decided = Object.fromEntries(
         differing.map((field) => [field.key, picks[field.key] ?? defaultSide(field.key)]),
       )
-      const result = await api.crm.records.merge.mutate({ object, survivorId: recordId, absorbedId, picks: decided })
+      if (!MERGEABLE.has(object)) throw new Error('Only contacts, companies and deals can be merged.')
+      const result = await api.crm.records.merge.mutate({
+        object: object as 'contact' | 'company' | 'deal',
+        survivorId: recordId,
+        absorbedId,
+        picks: decided,
+      })
       toast('success', `Merged. ${result.activitiesMoved} timeline entries moved onto this record.`)
       setShowMerge(false)
       router.refresh()
@@ -131,7 +142,9 @@ export const RecordActions = ({
       {object === 'contact' ? (
         <Button onClick={() => setShowEnroll(true)}>Add to a sequence</Button>
       ) : null}
-      <Button onClick={() => setShowMerge(true)}>Merge</Button>
+      {/* Merging moves activities, associations and browsing history, and a
+          custom object has none of them. Offered only where it can work. */}
+      {MERGEABLE.has(object) ? <Button onClick={() => setShowMerge(true)}>Merge</Button> : null}
       <Button variant="destructive" onClick={() => setShowDelete(true)}>
         Delete
       </Button>
@@ -164,7 +177,7 @@ export const RecordActions = ({
           {/* Searched rather than listed: a duplicate is almost never among the
               most recently created records, which is all a capped list could offer. */}
           <RecordPicker
-            object={object}
+            object={MERGEABLE.has(object) ? (object as 'contact' | 'company' | 'deal') : 'contact'}
             label={`Which ${objectLabel.toLowerCase()} to merge in`}
             placeholder={`Search for the ${objectLabel.toLowerCase()} to merge in`}
             excludeId={recordId}

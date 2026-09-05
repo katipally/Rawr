@@ -58,7 +58,7 @@ const monthStart = (day: string): string => `${day.slice(0, 7)}-01`
 export const readCalendar = async (
   ctx: WorkspaceContext,
   input: {
-    object: ObjectKey
+    object: string
     /** Any day in the month to show. */
     month: string
     fieldKey: string

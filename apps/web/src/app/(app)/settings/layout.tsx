@@ -10,6 +10,7 @@ import {
   lifecyclePath,
   mailboxesPath,
   membersPath,
+  objectsPath,
   organisationPath,
   pipelinesPath,
   propertiesPath,
@@ -48,6 +49,7 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Data management',
     sections: [
+      { href: objectsPath(), label: 'Objects' },
       { href: propertiesPath(), label: 'Properties' },
       { href: pipelinesPath(), label: 'Pipelines' },
       { href: lifecyclePath(), label: 'Lifecycle' },
