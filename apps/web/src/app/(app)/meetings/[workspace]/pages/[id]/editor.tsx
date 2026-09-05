@@ -1,8 +1,9 @@
 'use client'
 
 import type { BookingPageConfig, FormField, PageHostRow } from '@rawr/db'
-import { Button, Field, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, IconButton, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useMemo, useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { BookingLinkSnippet } from '../snippet.tsx'
 import { QuestionList, type MappingTarget } from './questions.tsx'
@@ -325,17 +326,17 @@ export const PageEditor = ({
                         }
                       />
                     </label>
-                    <Button
-                      type="button"
+                    <IconButton
+                      label={`Remove ${label} as a host`}
+                      tone="destructive"
+                      icon={<ACTION_ICONS.delete size={16} />}
                       disabled={!editable}
                       onClick={() =>
                         setHostRows((current) =>
                           current.filter((existing) => existing.userId !== row.userId),
                         )
                       }
-                    >
-                      Remove
-                    </Button>
+                    />
                   </li>
                 )
               })}

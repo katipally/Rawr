@@ -63,7 +63,7 @@ const FormsReport = async ({
                 </thead>
                 <tbody>
                   {report.forms.map((row) => (
-                    <tr key={row.form} className="border-b border-divider last:border-0">
+                    <tr key={row.id} className="border-b border-divider last:border-0">
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.form}</th>
                       <td className="py-1 pr-3 text-right tabular-nums">
                         {row.views === 0 ? '—' : row.views.toLocaleString()}

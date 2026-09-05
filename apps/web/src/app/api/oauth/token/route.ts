@@ -1,6 +1,6 @@
 import { issueOauthToken, redeemOauthCode, refreshOauthToken } from '@rawr/db'
 import type { NextRequest } from 'next/server'
-import { oauthError, pkceMatches, resolveClient, RESOURCE } from '~/server/mcp/oauth.ts'
+import { oauthError, pkceMatches, resolveClient, resource as ourResource } from '~/server/mcp/oauth.ts'
 import { clientIp, rateLimit } from '~/server/edge.ts'
 
 /** The token endpoint. Form-encoded in, JSON out, RFC 6749 error codes only:
@@ -46,8 +46,9 @@ export const POST = async (request: NextRequest): Promise<Response> => {
       return oauthError('invalid_grant', 'redirect_uri does not match the one the code was issued for.')
     }
     if (!pkceMatches(verifier, redeemed.codeChallenge)) return oauthError('invalid_grant', 'The PKCE verifier does not match.')
-    const resource = form.get('resource')
-    if (resource && resource !== RESOURCE) return oauthError('invalid_target', `Tokens here are for ${RESOURCE}.`)
+    const asked = form.get('resource')
+    const ours = await ourResource()
+    if (asked && asked !== ours) return oauthError('invalid_target', `Tokens here are for ${ours}.`)
 
     const issued = await issueOauthToken({
       workspaceId: redeemed.workspaceId,

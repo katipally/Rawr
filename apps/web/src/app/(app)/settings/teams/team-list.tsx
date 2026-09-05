@@ -114,6 +114,7 @@ export const TeamList = ({
       {editing ? (
         <Modal
           open
+          size="sm"
           title={editing.id ? `Rename ${editing.name}` : 'Create a team'}
           onClose={() => setEditing(null)}
         >
@@ -201,7 +202,7 @@ export const TeamList = ({
       ) : null}
 
       {deleting ? (
-        <Modal open title={`Delete ${deleting.name}`} onClose={() => setDeleting(null)}>
+        <Modal open size="sm" title={`Delete ${deleting.name}`} onClose={() => setDeleting(null)}>
           <div className="flex flex-col gap-3">
             <p>
               The team goes; nobody loses their seat. Anything set to round-robin within it falls back to

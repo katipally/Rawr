@@ -194,7 +194,7 @@ export const FormBuilder = ({
         </div>
       </header>
 
-      <Modal open={showDelete} title={`Delete ${form.name}`} onClose={() => setShowDelete(false)}>
+      <Modal open={showDelete} size="sm" title={`Delete ${form.name}`} onClose={() => setShowDelete(false)}>
         <div className="flex flex-col gap-3">
           <p>
             The embed and the hosted page stop working the moment it is gone. A form that has taken

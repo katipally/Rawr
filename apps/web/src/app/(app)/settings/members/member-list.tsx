@@ -1,24 +1,11 @@
 'use client'
 
 import type { Role } from '@rawr/db'
-import {
-  Avatar,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
-  Combobox,
-  DropdownMenu,
-  EmptyState,
-  Field,
-  Modal,
-  Select,
-  TextInput,
-  useToast,
-} from '@rawr/ui'
+import { Avatar, Badge, Button, Card, Checkbox, Combobox, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type MemberListRow = {
@@ -313,8 +300,9 @@ export const MemberList = ({
                       ? 'Expired'
                       : `Expires ${new Date(row.expiresAt).toLocaleDateString()}`}
                   </Badge>
-                  <Button
-                    variant="tertiary"
+                  <IconButton
+                    label={`Send ${row.email} a fresh invitation link`}
+                    icon={<ACTION_ICONS.resend size={16} />}
                     disabled={busy}
                     onClick={() =>
                       void api.org.members.resend
@@ -326,11 +314,11 @@ export const MemberList = ({
                         })
                         .catch((cause) => toast('error', errorMessage(cause)))
                     }
-                  >
-                    Resend
-                  </Button>
-                  <Button
-                    variant="tertiary"
+                  />
+                  <IconButton
+                    label={`Revoke the invitation to ${row.email}`}
+                    tone="destructive"
+                    icon={<ACTION_ICONS.revoke size={16} />}
                     disabled={busy}
                     onClick={() =>
                       void run(
@@ -338,9 +326,7 @@ export const MemberList = ({
                         `The invitation to ${row.email} was revoked.`,
                       )
                     }
-                  >
-                    Revoke
-                  </Button>
+                  />
                 </li>
               ))}
             </ul>
@@ -441,7 +427,7 @@ export const MemberList = ({
       ) : null}
 
       {link ? (
-        <Modal open title="Send them this link" onClose={() => setLink(null)}>
+        <Modal open size="sm" title="Send them this link" onClose={() => setLink(null)}>
           <div className="flex flex-col gap-3">
             <p className="text-secondary">
               This is the only time it is shown. If it is lost, resend the invitation to make a new one.
@@ -468,7 +454,7 @@ export const MemberList = ({
       ) : null}
 
       {ending ? (
-        <Modal open title={`End access for ${ending.name}`} onClose={() => setEnding(null)}>
+        <Modal open size="sm" title={`End access for ${ending.name}`} onClose={() => setEnding(null)}>
           <div className="flex flex-col gap-3">
             <p>
               {ending.name} loses access to every workspace in this organisation, and every session they

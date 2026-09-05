@@ -1,8 +1,9 @@
 'use client'
 
-import { Badge, Button, Card, Field, Modal, Switch, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Card, Field, IconButton, Modal, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Organisation = {
@@ -154,9 +155,11 @@ export const OrganisationPanel = ({
                   created {new Date(workspace.createdAt).toLocaleDateString()}
                 </span>
               </span>
-              <Button variant="tertiary" onClick={() => setRenaming(workspace)}>
-                Rename
-              </Button>
+              <IconButton
+                label={`Rename ${workspace.name}`}
+                icon={<ACTION_ICONS.rename size={16} />}
+                onClick={() => setRenaming(workspace)}
+              />
             </li>
           ))}
         </ul>
@@ -221,7 +224,7 @@ export const OrganisationPanel = ({
       ) : null}
 
       {renaming ? (
-        <Modal open title={`Rename ${renaming.name}`} onClose={() => setRenaming(null)}>
+        <Modal open size="sm" title={`Rename ${renaming.name}`} onClose={() => setRenaming(null)}>
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {

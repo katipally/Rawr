@@ -41,7 +41,7 @@ export const ShortcutSheet = () => {
   }, [])
 
   return (
-    <Modal open={open} onClose={() => setOpen(false)} title="Keyboard shortcuts">
+    <Modal open={open} onClose={() => setOpen(false)} size="lg" title="Keyboard shortcuts">
       <ul className="flex flex-col">
         {SHORTCUTS.map((shortcut) => (
           <li

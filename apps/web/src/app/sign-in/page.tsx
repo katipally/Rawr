@@ -70,12 +70,16 @@ const SignIn = async ({ searchParams }: Props) => {
               production.
             </p>
           </div>
+          {/* Password managers and mail-alias extensions decorate an email input
+              with their own attributes before React hydrates, which reads as a
+              server/client mismatch on a field the server rendered correctly. */}
           <input
             id="dev-email"
             name="email"
             type="email"
             required
             autoComplete="off"
+            suppressHydrationWarning
             placeholder={`admin@${domain}`}
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           />

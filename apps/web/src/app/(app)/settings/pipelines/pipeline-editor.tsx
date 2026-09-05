@@ -1,9 +1,10 @@
 'use client'
 
-import { Button, Field, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, IconButton, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { PipelineRow, StageRow } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type PipelineEditorProps = {
@@ -148,30 +149,33 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
                       {stage.dealCount.toLocaleString()} deal{stage.dealCount === 1 ? '' : 's'}
                     </span>
                   </span>
-                  <span className="flex shrink-0 flex-wrap gap-2">
-                    <Button variant="tertiary" busy={busy} disabled={index === 0} onClick={() => moveStage(pipeline, index, -1)}>
-                      Up
-                    </Button>
-                    <Button
-                      variant="tertiary"
-                      busy={busy}
-                      disabled={index === pipeline.stages.length - 1}
+                  <span className="flex shrink-0 items-center gap-0.5">
+                    <IconButton
+                      label={`Move ${stage.name} up`}
+                      icon={<ACTION_ICONS.moveUp size={16} />}
+                      disabled={busy || index === 0}
+                      onClick={() => moveStage(pipeline, index, -1)}
+                    />
+                    <IconButton
+                      label={`Move ${stage.name} down`}
+                      icon={<ACTION_ICONS.moveDown size={16} />}
+                      disabled={busy || index === pipeline.stages.length - 1}
                       onClick={() => moveStage(pipeline, index, 1)}
-                    >
-                      Down
-                    </Button>
-                    <Button variant="tertiary" onClick={() => setEditing(stage)}>
-                      Edit
-                    </Button>
-                    <Button
-                      variant="destructive"
+                    />
+                    <IconButton
+                      label={`Edit ${stage.name}`}
+                      icon={<ACTION_ICONS.edit size={16} />}
+                      onClick={() => setEditing(stage)}
+                    />
+                    <IconButton
+                      label={`Delete ${stage.name}`}
+                      tone="destructive"
+                      icon={<ACTION_ICONS.delete size={16} />}
                       onClick={() => {
                         setRemoving({ stage, pipeline })
                         setDestination('')
                       }}
-                    >
-                      Delete
-                    </Button>
+                    />
                   </span>
                 </li>
               ))
@@ -242,6 +246,7 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
 
       <Modal
         open={removing !== null}
+        size="sm"
         title={`Delete ${removing?.stage.name ?? ''}`}
         onClose={() => setRemoving(null)}
       >

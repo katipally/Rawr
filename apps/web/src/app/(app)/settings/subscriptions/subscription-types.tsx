@@ -1,9 +1,10 @@
 'use client'
 
-import { Alert, Button, Field, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, Field, IconButton, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { SubscriptionTypeRow } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type SubscriptionTypesProps = {
@@ -115,17 +116,19 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
                 </p>
               </div>
               {canWrite ? (
-                <span className="flex shrink-0 flex-wrap gap-2">
-                  <Button
-                    variant="tertiary"
-                    busy={busy}
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <IconButton
+                    label={`Rename ${row.name}`}
+                    icon={<ACTION_ICONS.rename size={16} />}
+                    disabled={busy}
                     onClick={() => setRenaming(row)}
-                  >
-                    Rename
-                  </Button>
-                  <Button variant="destructive" onClick={() => setRemoving(row)}>
-                    Delete
-                  </Button>
+                  />
+                  <IconButton
+                    label={`Delete ${row.name}`}
+                    tone="destructive"
+                    icon={<ACTION_ICONS.delete size={16} />}
+                    onClick={() => setRemoving(row)}
+                  />
                 </span>
               ) : null}
             </li>
@@ -133,7 +136,7 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
         )}
       </ul>
 
-      <Modal open={removing !== null} title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
+      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
         {removing ? (
           <div className="flex flex-col gap-3">
             {removing.unsubscribed > 0 ? (

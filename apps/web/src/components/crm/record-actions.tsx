@@ -224,7 +224,7 @@ export const RecordActions = ({
         </div>
       </Modal>
 
-      <Modal open={showDelete} title={`Delete ${displayName}`} onClose={() => setShowDelete(false)}>
+      <Modal open={showDelete} size="sm" title={`Delete ${displayName}`} onClose={() => setShowDelete(false)}>
         <div className="flex flex-col gap-3">
           <p>
             The record is hidden everywhere immediately. Its timeline entries stay on the records

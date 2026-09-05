@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
@@ -269,9 +270,10 @@ export const AssociationRail = ({
                     </span>
 
                     {canWrite && !row.isPrimary ? (
-                      <Button
-                        variant="tertiary"
-                        busy={busy}
+                      <IconButton
+                        label={`Unlink ${row.displayName}`}
+                        icon={<ACTION_ICONS.unlink size={16} />}
+                        disabled={busy}
                         onClick={() =>
                           void run(
                             () =>
@@ -282,9 +284,7 @@ export const AssociationRail = ({
                             'Unlinked.',
                           )
                         }
-                      >
-                        Unlink
-                      </Button>
+                      />
                     ) : row.isPrimary ? (
                       <span className="shrink-0 text-small text-secondary">Primary</span>
                     ) : null}

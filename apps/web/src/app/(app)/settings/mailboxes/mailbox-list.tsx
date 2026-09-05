@@ -1,9 +1,10 @@
 'use client'
 
-import { Alert, Badge, Button, Field, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 
@@ -296,15 +297,15 @@ export const MailboxList = ({
                     {entry.userId === null ? 'everybody' : entry.userId === currentUserId ? 'mine' : 'somebody else'}
                   </span>
                 </span>
-                <Button
-                  variant="tertiary"
-                  busy={busy}
+                <IconButton
+                  label={`Stop excluding ${entry.pattern}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  disabled={busy}
                   onClick={() =>
                     void run(() => api.mail.blocklist.remove.mutate({ id: entry.id }), 'Removed.')
                   }
-                >
-                  Remove
-                </Button>
+                />
               </li>
             ))}
           </ul>

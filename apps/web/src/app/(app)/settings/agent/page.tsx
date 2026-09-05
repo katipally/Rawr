@@ -1,26 +1,28 @@
 import { PageHeader } from '@rawr/ui'
 import { listMcpTokens } from '@rawr/db'
-import { publicBaseUrl } from '~/lib/env.ts'
+import { requestOrigin } from '~/server/origin.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { TokenList } from './token-list.tsx'
 
-/** F5 §1. Where a person creates the token their assistant uses.
+/** F5 §1. Where a person connects their assistant, or creates the token it uses.
  *
- *  Not an admin screen. Trevor's daily workflow is "open Claude and say update the
- *  close date", and putting his own access behind somebody else's approval would
- *  break exactly the thing this feature exists to keep working. */
+ *  Not an admin screen. The daily workflow is "open an assistant and say update the
+ *  close date", and putting somebody's own access behind another person's approval
+ *  would break exactly the thing this feature exists to keep working. */
 const AgentAccessPage = async () => {
   const session = await readSession()
   if (!session) return null
 
   const tokens = await listMcpTokens(contextFrom(session))
-  const endpoint = `${publicBaseUrl}/api/mcp`
+  // The address the person is reading this on is the address their client should
+  // be given, whatever host this deployment answers as.
+  const endpoint = `${await requestOrigin()}/api/mcp`
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Agent access"
-        lead="An assistant connects by signing in, or with a token created here."
+        lead="Any MCP client connects by signing in, or with a token created here."
         why={
           <p>
             Either way it reads and changes records as you, with your role: it can do nothing you

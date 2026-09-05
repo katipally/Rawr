@@ -4,9 +4,12 @@ import { cn } from '@rawr/ui'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-export type SettingsSection = { href: string; label: string; hint: string }
+export type SettingsSection = { href: string; label: string }
 export type SettingsGroup = { label: string; sections: SettingsSection[] }
 
+/** Labels only. Every settings page opens with its own title and a sentence
+ *  saying what it is for, so repeating that sentence sixteen times in the rail
+ *  made a list of sixteen names into a wall of prose nobody reads. */
 export const SettingsNav = ({ groups }: { groups: SettingsGroup[] }) => {
   const pathname = usePathname()
   // The query string on a properties link picks an object, not a page, so the
@@ -30,12 +33,11 @@ export const SettingsNav = ({ groups }: { groups: SettingsGroup[] }) => {
                       href={section.href}
                       aria-current={current ? 'page' : undefined}
                       className={cn(
-                        'block rounded-hs px-2 py-1.5 no-underline',
+                        'block truncate rounded-hs px-2 py-1.5 font-medium no-underline',
                         current ? 'bg-accent-subtle text-link' : 'text-body hover:bg-fill',
                       )}
                     >
-                      <span className="block font-medium">{section.label}</span>
-                      <span className="block text-small text-secondary">{section.hint}</span>
+                      {section.label}
                     </Link>
                   </li>
                 )

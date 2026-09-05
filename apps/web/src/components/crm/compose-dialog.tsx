@@ -55,7 +55,7 @@ export const ComposeDialog = ({
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
 
   return (
-    <Modal open title={threadId ? `Reply to ${to}` : `Email ${to}`} onClose={onClose}>
+    <Modal open size="lg" title={threadId ? `Reply to ${to}` : `Email ${to}`} onClose={onClose}>
       {!mailboxes ? <Spinner label="Loading mailboxes" /> : null}
 
       {mailboxes ? (

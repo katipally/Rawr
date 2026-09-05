@@ -66,6 +66,7 @@ export const CardPicker = ({
     <Modal
       open={open}
       onClose={onClose}
+      size="lg"
       title={title}
       footer={
         <div className="flex gap-2">

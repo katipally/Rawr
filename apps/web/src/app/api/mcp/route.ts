@@ -37,14 +37,14 @@ const PER_MINUTE = 120
  *  arguments is a mistake or an attack. §Edge cases, "an agent sends 500 fields". */
 const MAX_BODY_BYTES = 256 * 1024
 
-const unauthorized = (message: string): NextResponse =>
+const unauthorized = async (message: string): Promise<NextResponse> =>
   NextResponse.json(
     { jsonrpc: '2.0', id: null, error: { code: UNAUTHORIZED, message } },
     {
       status: 401,
       // Where the OAuth metadata is, so a client connects by signing in rather
       // than by reading a bare 401; a person holding a stale token reads the message.
-      headers: { 'www-authenticate': challengeHeader() },
+      headers: { 'www-authenticate': await challengeHeader() },
     },
   )
 
@@ -102,14 +102,14 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   const authorization = request.headers.get('authorization') ?? ''
   const token = authorization.toLowerCase().startsWith('bearer ') ? authorization.slice(7).trim() : ''
   if (!token) {
-    return unauthorized('This endpoint needs a Rawr token. Connect through OAuth (sign in when your client asks), or create a token in Settings and send it as "Authorization: Bearer rawr_mcp_…".')
+    return await unauthorized('This endpoint needs a Rawr token. Connect through OAuth (sign in when your client asks), or create a token in Settings and send it as "Authorization: Bearer rawr_mcp_…".')
   }
 
   const caller = await callerForToken(token)
   if (!caller) {
     // One message for wrong, revoked and never-existed alike: which of the three it
     // is would tell somebody probing whether they had guessed a real prefix.
-    return unauthorized('That token is not valid. It may have been revoked; create a new one in Settings.')
+    return await unauthorized('That token is not valid. It may have been revoked; create a new one in Settings.')
   }
 
   const limit = rateLimit(`mcp:${caller.tokenId}`, PER_MINUTE, 60)

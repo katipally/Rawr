@@ -97,16 +97,8 @@ export const TokenList = ({
           </code>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button onClick={() => void copy(issued, 'Token')}>Copy token</Button>
-            <Button
-              variant="secondary"
-              onClick={() =>
-                void copy(
-                  `claude mcp add --transport http rawr ${endpoint} --header "Authorization: Bearer ${issued}"`,
-                  'Command',
-                )
-              }
-            >
-              Copy the Claude Code command
+            <Button variant="secondary" onClick={() => void copy(endpoint, 'Endpoint')}>
+              Copy the endpoint
             </Button>
             <Button variant="secondary" onClick={() => setIssued(null)}>
               Done
@@ -136,37 +128,62 @@ export const TokenList = ({
         </div>
       </div>
 
-      <div className="rounded-panel border border-line p-4">
-        <h2 className="font-medium">Connecting an assistant</h2>
-        <p className="text-secondary">
-          Rawr speaks MCP over HTTP and signs you in with OAuth, so most clients need no token at
-          all: add the server, approve the connection in the browser, and it acts as you.
+      <div className="flex flex-col gap-3 rounded-panel border border-line p-4">
+        <div>
+          <h2 className="font-medium">Connecting an assistant</h2>
+          <p className="text-secondary">
+            Rawr is a standard MCP server over HTTP, with OAuth 2.1 and dynamic client
+            registration. Any MCP client can connect: give it this address, approve the
+            connection in the browser, and it acts as you, under your role.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto rounded-hs bg-fill p-2 text-small break-all">
+            {endpoint}
+          </code>
+          <Button variant="secondary" onClick={() => void copy(endpoint, 'Endpoint')}>
+            Copy
+          </Button>
+        </div>
+
+        <p className="text-small text-secondary">
+          Most clients need nothing else: they read{' '}
+          <code className="rounded-hs bg-fill px-1">/.well-known/oauth-protected-resource</code> from
+          that address, register themselves, and open the sign-in page. No client id, no secret, no
+          token to paste.
         </p>
-        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-small">
-          <dt className="text-secondary">claude.ai, Claude Desktop</dt>
-          <dd>
-            Settings, Connectors, Add custom connector. Paste{' '}
-            <code className="rounded-hs bg-fill px-1 break-all">{endpoint}</code> and leave the client
-            secret empty.
-          </dd>
-          <dt className="text-secondary">Claude Code</dt>
-          <dd>
-            <code className="block overflow-x-auto rounded-hs bg-fill p-2">
-              claude mcp add --transport http rawr {endpoint}
-            </code>
-            then <code>/mcp</code> to sign in.
-          </dd>
-          <dt className="text-secondary">A fixed token</dt>
-          <dd>
-            For a client that cannot open a browser, create a token above and send it as{' '}
-            <code>Authorization: Bearer YOUR_TOKEN</code>. A stdio-only client can run{' '}
-            <code>node apps/web/scripts/mcp-stdio.ts</code> with <code>RAWR_MCP_URL</code> and{' '}
-            <code>RAWR_MCP_TOKEN</code> set.
-          </dd>
-        </dl>
-        <p className="mt-3 text-secondary">
-          Every screen has a tool, under your role. An OAuth connection appears below under the
-          client&apos;s name and is revoked the same way.
+
+        <details className="text-small">
+          <summary className="cursor-pointer text-secondary">
+            Where the address goes, in a few common clients
+          </summary>
+          <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <dt className="text-secondary">A desktop or web assistant</dt>
+            <dd>
+              Look for Connectors, Integrations or MCP servers in its settings, choose to add a
+              custom or remote server, and paste the address. Leave any client secret field empty.
+            </dd>
+            <dt className="text-secondary">A command-line agent</dt>
+            <dd>
+              Most take an HTTP MCP server directly, for example{' '}
+              <code className="block overflow-x-auto rounded-hs bg-fill p-2">
+                claude mcp add --transport http rawr {endpoint}
+              </code>
+            </dd>
+            <dt className="text-secondary">A client that cannot open a browser</dt>
+            <dd>
+              Create a token above and send it as{' '}
+              <code>Authorization: Bearer YOUR_TOKEN</code>. A stdio-only client can run{' '}
+              <code>node apps/web/scripts/mcp-stdio.ts</code> with <code>RAWR_MCP_URL</code> and{' '}
+              <code>RAWR_MCP_TOKEN</code> set.
+            </dd>
+          </dl>
+        </details>
+
+        <p className="text-secondary">
+          Every screen in Rawr has a tool behind it. A connection made through OAuth appears below
+          under the client&apos;s own name and is revoked the same way as a token.
         </p>
       </div>
 

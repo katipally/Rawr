@@ -1,10 +1,11 @@
 'use client'
 
-import { Button, EmptyState, Select, TextInput, cn, useToast } from '@rawr/ui'
+import { Button, EmptyState, IconButton, Select, TextInput, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDate, isPast } from './value.tsx'
@@ -189,13 +190,13 @@ export const TasksPanel = ({
               </span>
 
               {canWrite ? (
-                <Button
-                  variant="tertiary"
-                  busy={busy}
+                <IconButton
+                  label={`Delete “${row.title}”`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  disabled={busy}
                   onClick={() => void run(() => api.crm.tasks.remove.mutate({ id: row.id }), 'Task deleted.')}
-                >
-                  Delete
-                </Button>
+                />
               ) : null}
             </li>
           ))}

@@ -54,7 +54,19 @@ const bounds = (range: Range, column: string) =>
 
 export type PipelineReport = {
   weeks: { week: string; created: number; won: number; lost: number; wonAmount: number }[]
-  funnel: { stage: string; position: number; deals: number; amount: number }[]
+  /** One entry per stage of every pipeline, in pipeline then stage order. Two
+   *  pipelines routinely name a stage the same thing, so the stage id is what
+   *  identifies a row and the pipeline is what a reader groups by. Merging them
+   *  on name alone reported a funnel that belonged to no pipeline at all. */
+  funnel: {
+    pipelineId: string
+    pipeline: string
+    stageId: string
+    stage: string
+    position: number
+    deals: number
+    amount: number
+  }[]
   owners: { owner: string; open: number; won: number; wonAmount: number }[]
 }
 
@@ -86,15 +98,25 @@ export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promi
        order by 1
        limit ${MAX_ROWS}`)
 
-    const funnel = await tx.execute<{ stage: string; position: number; deals: number; amount: string | null }>(sql`
-      select s.name as stage, s.position::int as position,
+    const funnel = await tx.execute<{
+      pipeline_id: string
+      pipeline: string
+      stage_id: string
+      stage: string
+      position: number
+      deals: number
+      amount: string | null
+    }>(sql`
+      select p.id as pipeline_id, p.name as pipeline,
+             s.id as stage_id, s.name as stage, s.position::int as position,
              count(d.id)::int as deals,
              coalesce(sum(d.amount), 0)::text as amount
         from pipeline_stage s
+        join pipeline p on p.id = s.pipeline_id
         left join deal d
           on d.stage_id = s.id and d.deleted_at is null and ${bounds(range, 'd.created_at')}
-       group by s.id, s.name, s.position
-       order by s.position
+       group by p.id, p.name, p.position, s.id, s.name, s.position
+       order by p.position, p.name, s.position
        limit ${MAX_ROWS}`)
 
     const owners = await tx.execute<{ owner: string | null; open: number; won: number; won_amount: string | null }>(sql`
@@ -119,6 +141,9 @@ export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promi
         wonAmount: Number(row.won_amount ?? 0),
       })),
       funnel: funnel.map((row) => ({
+        pipelineId: row.pipeline_id,
+        pipeline: row.pipeline,
+        stageId: row.stage_id,
         stage: row.stage,
         position: Number(row.position),
         deals: Number(row.deals),
@@ -138,6 +163,9 @@ export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promi
 export type FormsReport = {
   days: { day: string; clean: number; held: number }[]
   forms: {
+    /** Names are not unique: `form` is unique on its slug, so two forms may
+     *  share a title and only the id tells them apart. */
+    id: string
     form: string
     submissions: number
     held: number
@@ -210,6 +238,7 @@ export const formsReport = async (ctx: WorkspaceContext, range: Range): Promise<
       forms: forms.map((row) => {
         const seen = viewsByForm.get(String(row.id))
         return {
+          id: String(row.id),
           form: row.form,
           submissions: Number(row.submissions),
           held: Number(row.held),

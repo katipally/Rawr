@@ -1,8 +1,9 @@
 'use client'
 
-import { Button, Field, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, IconButton, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type OrderedRow = { id: string; name: string; detail: string; usedBy: number }
@@ -108,34 +109,34 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
                 <span className="font-medium">{row.name}</span>
                 <span className="text-small text-secondary">{row.detail}</span>
               </span>
-              <span className="flex shrink-0 flex-wrap gap-2">
-                <Button variant="tertiary" busy={busy} disabled={index === 0} onClick={() => move(index, -1)}>
-                  Up
-                </Button>
-                <Button
-                  variant="tertiary"
-                  busy={busy}
-                  disabled={index === rows.length - 1}
+              <span className="flex shrink-0 items-center gap-0.5">
+                <IconButton
+                  label={`Move ${row.name} up`}
+                  icon={<ACTION_ICONS.moveUp size={16} />}
+                  disabled={busy || index === 0}
+                  onClick={() => move(index, -1)}
+                />
+                <IconButton
+                  label={`Move ${row.name} down`}
+                  icon={<ACTION_ICONS.moveDown size={16} />}
+                  disabled={busy || index === rows.length - 1}
                   onClick={() => move(index, 1)}
-                >
-                  Down
-                </Button>
-                <Button
-                  variant="tertiary"
-                  busy={busy}
+                />
+                <IconButton
+                  label={`Rename ${row.name}`}
+                  icon={<ACTION_ICONS.rename size={16} />}
+                  disabled={busy}
                   onClick={() => setRenaming(row)}
-                >
-                  Rename
-                </Button>
-                <Button
-                  variant="destructive"
+                />
+                <IconButton
+                  label={`Delete ${row.name}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
                   onClick={() => {
                     setRemoving(row)
                     setDestination('')
                   }}
-                >
-                  Delete
-                </Button>
+                />
               </span>
             </li>
           ))
@@ -156,7 +157,7 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
         }}
       />
 
-      <Modal open={removing !== null} title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
+      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
         {removing ? (
           <div className="flex flex-col gap-3">
             {removing.usedBy === 0 ? (

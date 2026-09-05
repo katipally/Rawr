@@ -1,10 +1,10 @@
 'use client'
 
-import { Badge, Button, Checkbox, IconButton, Modal, TextInput, useToast } from '@rawr/ui'
-import { ArrowDown, ArrowUp, Columns3, Filter } from 'lucide-react'
+import { Badge, Button, Checkbox, IconButton, Modal, TextInput, Tooltip, useToast } from '@rawr/ui'
+import { ArrowDown, ArrowUp, BookmarkPlus, Columns3, Download, Filter, Search, X } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -32,6 +32,29 @@ export type ListToolbarProps = {
    *  orders them, which is the order a person sees on the record page. */
   allColumns: { key: string; label: string }[]
 }
+
+/** A count pinned to the corner of an icon button. The number is what the label
+ *  used to carry in words, and losing it would make "Filters" and "Filters, three
+ *  applied" look identical. The tooltip and the accessible name still say it in
+ *  full, so this is decoration for the eye only. */
+const Counted = ({
+  count,
+  tone,
+  children,
+}: {
+  count: number
+  tone: 'accent' | 'neutral'
+  children: ReactNode
+}) => (
+  <span className="relative inline-flex shrink-0">
+    {children}
+    {count > 0 ? (
+      <span aria-hidden="true" className="pointer-events-none absolute -top-1 -right-1">
+        <Badge tone={tone}>{count}</Badge>
+      </span>
+    ) : null}
+  </span>
+)
 
 export const ListToolbar = ({
   workspace,
@@ -162,43 +185,61 @@ export const ListToolbar = ({
             onChange={(event) => setSearch(event.target.value)}
             className="min-w-0 flex-1"
           />
-          <Button type="submit" className="shrink-0">
-            Search
-          </Button>
+          <IconButton
+            type="submit"
+            label={`Search ${objectLabel.toLowerCase()}`}
+            icon={<Search size={16} />}
+          />
           {params.q ? (
-            <Button variant="tertiary" onClick={() => { setSearch(''); goTo({ q: undefined }) }}>
-              Clear
-            </Button>
+            <IconButton
+              label="Clear the search"
+              icon={<X size={16} />}
+              onClick={() => { setSearch(''); goTo({ q: undefined }) }}
+            />
           ) : null}
         </form>
 
-        <Button onClick={() => setShowFilters((open) => !open)} aria-expanded={showFilters}>
-          <Filter aria-hidden="true" className="size-4" />
-          Filters
-          {activeConditions > 0 ? <Badge tone="accent">{activeConditions}</Badge> : null}
-        </Button>
+        <Counted count={activeConditions} tone="accent">
+          <IconButton
+            label={activeConditions > 0 ? `Filters (${activeConditions} applied)` : 'Filters'}
+            icon={<Filter size={16} />}
+            tone={showFilters ? 'accent' : 'default'}
+            aria-expanded={showFilters}
+            onClick={() => setShowFilters((open) => !open)}
+          />
+        </Counted>
 
-        <Button onClick={openColumns} aria-haspopup="dialog">
-          <Columns3 aria-hidden="true" className="size-4" />
-          Columns
-          <Badge tone="neutral">{columns.length}</Badge>
-        </Button>
+        <Counted count={columns.length} tone="neutral">
+          <IconButton
+            label={`Columns (${columns.length} shown)`}
+            icon={<Columns3 size={16} />}
+            aria-haspopup="dialog"
+            onClick={openColumns}
+          />
+        </Counted>
 
         {/* A plain link, so the browser downloads it and the export survives a
-            closed tab. It carries the same filters the table is showing. Styled
-            as a button rather than wrapping one: a <button> inside an <a> is
-            nested interactive content, which assistive technology cannot resolve. */}
-        <a
-          href={exportHref}
-          download
-          className="inline-flex min-h-9 items-center justify-center rounded-hs border border-line bg-surface px-3 py-1.5 font-medium text-body no-underline transition-colors duration-150 hover:border-line-pressed hover:bg-fill-hover"
-        >
-          Export CSV
-        </a>
+            closed tab. It carries the same filters the table is showing. An <a>
+            rather than a button wrapping one: a <button> inside an <a> is nested
+            interactive content, which assistive technology cannot resolve. */}
+        <Tooltip label="Export this list as CSV">
+          <a
+            href={exportHref}
+            download
+            aria-label="Export this list as CSV"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-hs text-secondary no-underline transition-colors duration-150 hover:bg-fill-hover hover:text-body"
+          >
+            <Download size={16} aria-hidden="true" />
+          </a>
+        </Tooltip>
 
         {canWrite ? (
           <>
-            <Button onClick={() => setShowSave(true)}>Save as view</Button>
+            <IconButton
+              label="Save these filters and columns as a view"
+              icon={<BookmarkPlus size={16} />}
+              onClick={() => setShowSave(true)}
+            />
             <Button variant="primary" onClick={() => setShowCreate(true)}>
               Create {objectLabel.toLowerCase()}
             </Button>
@@ -266,7 +307,7 @@ export const ListToolbar = ({
         </div>
       </Modal>
 
-      <Modal open={showColumns} title="Edit columns" onClose={() => setShowColumns(false)}>
+      <Modal open={showColumns} size="lg" title="Edit columns" onClose={() => setShowColumns(false)}>
         <div className="flex flex-col gap-3">
           <p className="text-secondary">
             {draftColumns.length} of {allColumns.length} fields. The order here is the order

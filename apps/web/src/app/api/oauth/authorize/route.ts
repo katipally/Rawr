@@ -1,14 +1,15 @@
 import { createOauthCode } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { checkAuthorizeRequest, ISSUER } from '~/server/mcp/oauth.ts'
+import { checkAuthorizeRequest, issuer } from '~/server/mcp/oauth.ts'
 import { memberships, readSession } from '~/server/session.ts'
 
 /** The Approve or Cancel press on the consent screen. The request is checked
  *  again here rather than trusted from the form, because the form is the
  *  browser's and the code is ours. */
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
+  const origin = await issuer()
   const session = await readSession()
-  if (!session) return NextResponse.redirect(new URL('/sign-in', ISSUER))
+  if (!session) return NextResponse.redirect(new URL('/sign-in', origin))
 
   const form = await request.formData()
   const params = new URLSearchParams()
@@ -18,14 +19,14 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
 
   const checked = await checkAuthorizeRequest(params)
   if (!checked.ok) {
-    return NextResponse.redirect(new URL(`/oauth/authorize?${params.toString()}`, ISSUER))
+    return NextResponse.redirect(new URL(`/oauth/authorize?${params.toString()}`, origin))
   }
   const { request: asked } = checked
 
   const back = new URL(asked.redirectUri)
   if (asked.state) back.searchParams.set('state', asked.state)
   // RFC 9207: the client checks who answered before it redeems anything.
-  back.searchParams.set('iss', ISSUER)
+  back.searchParams.set('iss', origin)
 
   if (params.get('decision') !== 'approve') {
     back.searchParams.set('error', 'access_denied')

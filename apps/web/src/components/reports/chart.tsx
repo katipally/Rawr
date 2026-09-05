@@ -82,7 +82,9 @@ const Table = ({
       </thead>
       <tbody>
         {labels.map((label, index) => (
-          <tr key={label} className="border-b border-divider last:border-0">
+          // A category axis is positional, and the labels are user data: two
+          // sequences may share a name. The column number is the identity.
+          <tr key={index} className="border-b border-divider last:border-0">
             <th scope="row" className="py-1 pr-3 text-left font-normal">
               {label}
             </th>
@@ -145,7 +147,7 @@ export const BarChart = ({ title, labels, series, format = nice, className }: Ch
                 vectorEffect="non-scaling-stroke"
               />
               {labels.map((label, column) => (
-                <g key={label}>
+                <g key={column}>
                   {series.map((entry, index) => {
                     const value = entry.values[column] ?? 0
                     const barHeight = Math.max(value === 0 ? 0 : 2, (value / top) * (height - 4))
@@ -167,9 +169,9 @@ export const BarChart = ({ title, labels, series, format = nice, className }: Ch
             </svg>
 
             <div className="flex min-w-0" aria-hidden="true">
-              {labels.map((label) => (
+              {labels.map((label, column) => (
                 <span
-                  key={label}
+                  key={column}
                   title={label}
                   className="min-w-0 flex-1 truncate px-0.5 text-center text-small text-secondary"
                 >
@@ -186,7 +188,10 @@ export const BarChart = ({ title, labels, series, format = nice, className }: Ch
   )
 }
 
-export type FunnelStep = { label: string; value: number; detail?: string | undefined }
+/** `id` rather than the label as the React key: two pipelines may both have a
+ *  stage called "Closed Won", and identifying a step by its text silently merged
+ *  them. */
+export type FunnelStep = { id: string; label: string; value: number; detail?: string | undefined }
 
 /** A funnel, drawn as proportional bars rather than a tapering polygon. A trapezoid
  *  makes a step look smaller than the one above it even when it is larger, which is
@@ -212,7 +217,7 @@ export const Funnel = ({
       ) : (
         <ol className="flex flex-col gap-1.5">
           {steps.map((step, index) => (
-            <li key={step.label} className="flex min-w-0 flex-col gap-0.5">
+            <li key={step.id} className="flex min-w-0 flex-col gap-0.5">
               <p className="flex flex-wrap items-baseline justify-between gap-x-2">
                 <span className="min-w-0 font-medium">{step.label}</span>
                 <span className="text-small text-secondary tabular-nums">

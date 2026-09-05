@@ -145,8 +145,11 @@ export const DashboardView = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {card.data.rows.map((row) => (
-                        <tr key={String(row[0])} className="border-b border-divider last:border-0">
+                      {/* The first cell is a name, and names repeat: two sequences
+                          may share one. A report table is positional, so the row
+                          number is what identifies a row. */}
+                      {card.data.rows.map((row, rowIndex) => (
+                        <tr key={rowIndex} className="border-b border-divider last:border-0">
                           {row.map((cell, index) => (
                             <td
                               key={card.data.kind === 'table' ? card.data.columns[index] : index}

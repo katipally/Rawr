@@ -103,11 +103,19 @@ const CARDS: CardDef[] = [
     label: 'Where the open deals sit',
     report: 'pipeline',
     group: 'Pipeline',
-    render: ({ pipeline }) => ({
-      kind: 'table',
-      columns: ['Stage', 'Deals', 'Amount'],
-      rows: (pipeline?.funnel ?? []).slice(0, TOP).map((row) => [row.stage, row.deals, money(row.amount)]),
-    }),
+    render: ({ pipeline }) => {
+      const funnel = pipeline?.funnel ?? []
+      // Stage names repeat across pipelines, so the pipeline is prefixed once
+      // there is more than one. With a single pipeline it is only noise.
+      const many = new Set(funnel.map((row) => row.pipelineId)).size > 1
+      return {
+        kind: 'table',
+        columns: ['Stage', 'Deals', 'Amount'],
+        rows: funnel
+          .slice(0, TOP)
+          .map((row) => [many ? `${row.pipeline} · ${row.stage}` : row.stage, row.deals, money(row.amount)]),
+      }
+    },
   },
   {
     key: 'pipeline_owners',

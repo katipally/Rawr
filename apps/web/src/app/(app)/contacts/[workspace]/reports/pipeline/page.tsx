@@ -27,6 +27,15 @@ const PipelineReport = async ({
   const range = rangeFrom(await searchParams)
   const report = await pipelineReport(contextFrom(session), range)
 
+  // One funnel per pipeline. The rows arrive in pipeline then stage order, so
+  // grouping is a single pass and the stages inside each group keep their order.
+  const pipelines: { id: string; name: string; steps: typeof report.funnel }[] = []
+  for (const row of report.funnel) {
+    const last = pipelines.at(-1)
+    if (last?.id === row.pipelineId) last.steps.push(row)
+    else pipelines.push({ id: row.pipelineId, name: row.pipeline, steps: [row] })
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <ReportsHeader workspace={workspace} current="pipeline" from={range.fromDay} to={range.toDay} />
@@ -44,16 +53,19 @@ const PipelineReport = async ({
           />
         </Card>
 
-        <Card>
-          <Funnel
-            title="Where the deals created in this range are now"
-            steps={report.funnel.map((row) => ({
-              label: row.stage,
-              value: row.deals,
-              detail: row.amount > 0 ? money(row.amount) : undefined,
-            }))}
-          />
-        </Card>
+        {pipelines.map((group) => (
+          <Card key={group.id}>
+            <Funnel
+              title={`${group.name}: where the deals created in this range are now`}
+              steps={group.steps.map((row) => ({
+                id: row.stageId,
+                label: row.stage,
+                value: row.deals,
+                detail: row.amount > 0 ? money(row.amount) : undefined,
+              }))}
+            />
+          </Card>
+        ))}
 
         <Card title="By owner">
           {report.owners.length === 0 ? (

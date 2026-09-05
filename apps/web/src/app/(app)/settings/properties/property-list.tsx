@@ -1,9 +1,10 @@
 'use client'
 
-import { Alert, Button, Field, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, Field, IconButton, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { AdminField, FieldType, ObjectKey } from '@rawr/db'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type PropertyListProps = {
@@ -314,20 +315,22 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                   <span className="font-medium">{field.label}</span>{' '}
                   <code className="text-small text-secondary">{field.key}</code>
                 </span>
-                <span className="flex shrink-0 gap-2">
-                  <Button
-                    variant="tertiary"
-                    busy={busy}
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <IconButton
+                    label={`Restore ${field.label}`}
+                    icon={<ACTION_ICONS.restore size={16} />}
+                    disabled={busy}
                     onClick={() =>
                       void run(() => api.admin.fields.restore.mutate({ id: field.id }), 'Restored.')
                     }
-                  >
-                    Restore
-                  </Button>
+                  />
                   {role === 'admin' ? (
-                    <Button variant="destructive" onClick={() => setPurging(field)}>
-                      Purge
-                    </Button>
+                    <IconButton
+                      label={`Purge ${field.label} from every record`}
+                      tone="destructive"
+                      icon={<ACTION_ICONS.delete size={16} />}
+                      onClick={() => setPurging(field)}
+                    />
                   ) : null}
                 </span>
               </li>
@@ -454,7 +457,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
       </Modal>
 
       {/* ---------------------------------------------------------- delete */}
-      <Modal open={removing !== null} title={`Delete ${removing?.label ?? ''}`} onClose={() => setRemoving(null)}>
+      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.label ?? ''}`} onClose={() => setRemoving(null)}>
         <div className="flex flex-col gap-3">
           <p>
             The property disappears from every screen immediately.{' '}
@@ -490,7 +493,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
       </Modal>
 
       {/* ----------------------------------------------------------- purge */}
-      <Modal open={purging !== null} title={`Purge ${purging?.label ?? ''}`} onClose={() => setPurging(null)}>
+      <Modal open={purging !== null} size="sm" title={`Purge ${purging?.label ?? ''}`} onClose={() => setPurging(null)}>
         <div className="flex flex-col gap-3">
           <Alert>
             This strips <code>{purging?.key}</code> out of every record in the workspace and removes

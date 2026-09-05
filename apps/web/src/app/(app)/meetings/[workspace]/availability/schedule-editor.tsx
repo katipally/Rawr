@@ -1,10 +1,11 @@
 'use client'
 
 import type { Schedule } from '@rawr/db'
-import { Button, Field, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, IconButton, Select, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMemo, useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -259,14 +260,14 @@ export const ScheduleEditor = ({
                     ? 'Unavailable all day'
                     : override.blocks.map(([from, to]) => `${from}–${to}`).join(', ')}
                 </span>
-                <Button
-                  type="button"
+                <IconButton
                   className="ml-auto"
+                  label={`Remove the override for ${override.day}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
                   disabled={!editable}
                   onClick={() => void clearOverride(override.day)}
-                >
-                  Remove
-                </Button>
+                />
               </li>
             ))}
           </ul>

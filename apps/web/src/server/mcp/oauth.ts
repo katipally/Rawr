@@ -1,40 +1,52 @@
 import { createHash } from 'node:crypto'
 import { readMcpClient, saveMcpClient, type McpClientRow } from '@rawr/db'
-import { publicBaseUrl } from '~/lib/env.ts'
+import { requestOrigin } from '~/server/origin.ts'
 
 /** F5 §1, the OAuth 2.1 half. Rawr is both the resource server (/api/mcp) and the
  *  authorization server, on one origin, so the two discovery documents point at
  *  the same host and a client that reads either finds everything.
  *
+ *  Any MCP client can connect; nothing here is written for a particular one.
  *  Clients identify themselves one of two ways, and both are public clients with
  *  PKCE and no secret:
- *    DCR   POST /api/oauth/register, RFC 7591. Claude.ai and Claude Desktop.
- *    CIMD  the client_id is an https URL serving its own metadata. Claude Code.
+ *    DCR   POST /api/oauth/register, RFC 7591. What a hosted or desktop client does.
+ *    CIMD  the client_id is an https URL serving its own metadata. What a
+ *          command-line client with no server of its own does.
  *  Both end up as an mcp_client row: a name to show on the consent screen and the
  *  redirect URIs the code may be sent back to. */
 
 export const MCP_PATH = '/api/mcp'
-export const ISSUER = publicBaseUrl.replace(/\/$/, '')
-export const RESOURCE = `${ISSUER}${MCP_PATH}`
+
+/** Resolved per request rather than at boot, so moving this deployment to another
+ *  host needs no configuration: the discovery documents, the endpoints inside them
+ *  and the resource identifier all name the origin the client actually reached.
+ *  See server/origin.ts for why this differs from `publicBaseUrl`. */
+export const issuer = requestOrigin
+export const resource = async (): Promise<string> => `${await requestOrigin()}${MCP_PATH}`
 
 /** What a token may do is decided by the person's role, not by scope; one scope
  *  names the whole thing so clients that insist on asking for one have an answer. */
 export const SCOPES = ['rawr', 'offline_access'] as const
 export const SCOPE_DESCRIPTION = 'Read and change records as you, with your role.'
 
-export const protectedResourceMetadata = () => ({
-  resource: RESOURCE,
-  authorization_servers: [ISSUER],
-  scopes_supported: [...SCOPES],
-  bearer_methods_supported: ['header'],
-  resource_name: 'Rawr CRM',
-})
+export const protectedResourceMetadata = async () => {
+  const origin = await requestOrigin()
+  return {
+    resource: `${origin}${MCP_PATH}`,
+    authorization_servers: [origin],
+    scopes_supported: [...SCOPES],
+    bearer_methods_supported: ['header'],
+    resource_name: 'Rawr CRM',
+  }
+}
 
-export const authorizationServerMetadata = () => ({
-  issuer: ISSUER,
-  authorization_endpoint: `${ISSUER}/oauth/authorize`,
-  token_endpoint: `${ISSUER}/api/oauth/token`,
-  registration_endpoint: `${ISSUER}/api/oauth/register`,
+export const authorizationServerMetadata = async () => {
+  const origin = await requestOrigin()
+  return {
+  issuer: origin,
+  authorization_endpoint: `${origin}/oauth/authorize`,
+  token_endpoint: `${origin}/api/oauth/token`,
+  registration_endpoint: `${origin}/api/oauth/register`,
   scopes_supported: [...SCOPES],
   response_types_supported: ['code'],
   response_modes_supported: ['query'],
@@ -43,12 +55,13 @@ export const authorizationServerMetadata = () => ({
   code_challenge_methods_supported: ['S256'],
   client_id_metadata_document_supported: true,
   authorization_response_iss_parameter_supported: true,
-})
+  }
+}
 
 /** The 401 every client understands: where the metadata is, and which scope to
  *  ask for. A 200 carrying WWW-Authenticate is ignored by every client. */
-export const challengeHeader = (): string =>
-  `Bearer realm="Rawr MCP", resource_metadata="${ISSUER}/.well-known/oauth-protected-resource${MCP_PATH}", scope="rawr"`
+export const challengeHeader = async (): Promise<string> =>
+  `Bearer realm="Rawr MCP", resource_metadata="${await requestOrigin()}/.well-known/oauth-protected-resource${MCP_PATH}", scope="rawr"`
 
 // ------------------------------------------------------------------ clients
 
@@ -170,9 +183,12 @@ export const checkAuthorizeRequest = async (
   if (!codeChallenge || (params.get('code_challenge_method') ?? 'S256') !== 'S256') {
     return { ok: false, problem: 'A PKCE code_challenge with method S256 is required.' }
   }
-  const resource = params.get('resource')
-  if (resource && resource !== RESOURCE) {
-    return { ok: false, problem: `This server issues tokens for ${RESOURCE}, not ${resource}.` }
+  // RFC 8707. A client that names the resource it wants a token for must name
+  // this one, read from the origin it reached rather than from configuration.
+  const asked = params.get('resource')
+  const ours = await resource()
+  if (asked && asked !== ours) {
+    return { ok: false, problem: `This server issues tokens for ${ours}, not ${asked}.` }
   }
 
   return {
@@ -184,7 +200,7 @@ export const checkAuthorizeRequest = async (
       state: params.get('state'),
       codeChallenge,
       scope: params.get('scope'),
-      resource,
+      resource: asked,
     },
   }
 }

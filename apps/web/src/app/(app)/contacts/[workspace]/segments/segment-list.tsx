@@ -238,6 +238,7 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
       {/* --------------------------------------------------------- editor */}
       <Modal
         open={editing !== null}
+        size="lg"
         title={editing === 'new' ? 'New segment' : `Edit ${editing === null ? '' : editing.name}`}
         onClose={() => setEditing(null)}
       >
@@ -350,7 +351,7 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
       {/* -------------------------------------------------------- members */}
       <Modal
         open={viewing !== null}
-        title={`Who is in ${viewing?.name ?? ''}`}
+        size="lg" title={`Who is in ${viewing?.name ?? ''}`}
         onClose={() => setViewing(null)}
       >
         {members === null ? (

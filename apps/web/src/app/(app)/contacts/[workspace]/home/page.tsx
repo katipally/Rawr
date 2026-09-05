@@ -38,31 +38,93 @@ import { contextFrom, readSession } from '~/server/session.ts'
 
 type Tile = { label: string; value: string; href: string; tone?: 'error' | 'warning' }
 
+const TILE_TONES = {
+  error: 'text-error',
+  warning: 'text-warning',
+  default: 'text-body',
+} as const
+
+/** The numbers, above everything else on the page.
+ *
+ *  The label sits under the figure rather than over it: the eye lands on the
+ *  number first and reads what it counts second, which is the order somebody
+ *  opening this at nine on a Monday actually wants. A multi-currency workspace
+ *  puts three parts in one value, so the track is wide enough to hold them
+ *  before it wraps. */
 const Tiles = ({ tiles }: { tiles: Tile[] }) => (
-  <ul className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(10rem,1fr))]">
+  <ul className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
     {tiles.map((tile) => (
       <li key={tile.label}>
         <Link
           href={tile.href}
-          className="flex h-full flex-col gap-1 rounded-panel border border-line bg-surface p-3 no-underline hover:border-line-pressed"
+          className="flex h-full flex-col justify-between gap-1 rounded-panel border border-line bg-surface p-3 no-underline transition-colors hover:border-line-pressed hover:bg-fill"
         >
-          <span className="text-small text-secondary">{tile.label}</span>
           <span
-            className={
-              tile.tone === 'error'
-                ? 'text-lg font-medium text-error'
-                : tile.tone === 'warning'
-                  ? 'text-lg font-medium text-warning'
-                  : 'text-lg font-medium text-body'
-            }
+            className={`text-xl leading-tight font-medium tabular-nums ${TILE_TONES[tile.tone ?? 'default']}`}
           >
             {tile.value}
           </span>
+          <span className="text-small text-secondary">{tile.label}</span>
         </Link>
       </li>
     ))}
   </ul>
 )
+
+/** What an admin has left to switch on.
+ *
+ *  A checklist is loud on day one and clutter by day ten, and it used to be the
+ *  same height either way: seven rows above the numbers, every visit, forever.
+ *  So it opens itself only while most of it is still undone, and otherwise sits
+ *  as one line the reader can open. It disappears entirely when finished. */
+const Setup = ({ items }: { items: { done: boolean; label: string; href: string }[] }) => {
+  const done = items.filter((item) => item.done).length
+  if (done === items.length) return null
+
+  return (
+    <details
+      open={done * 2 < items.length}
+      className="rounded-panel border border-line bg-surface px-3 py-2"
+    >
+      <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium">Set up Rawr</span>
+        <span className="text-small text-secondary tabular-nums">
+          {done} of {items.length} done
+        </span>
+        <span
+          aria-hidden="true"
+          className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-fill"
+        >
+          <span
+            className="block h-full rounded-full bg-success"
+            style={{ width: `${(done / items.length) * 100}%` }}
+          />
+        </span>
+      </summary>
+      <ul className="mt-2 flex flex-col divide-y divide-divider border-t border-divider pt-1">
+        {items.map((item) => (
+          <li key={item.label} className="flex items-center gap-3 py-1.5">
+            <span
+              aria-hidden="true"
+              className={
+                item.done
+                  ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-small text-white'
+                  : 'size-5 shrink-0 rounded-full border border-line'
+              }
+            >
+              {item.done ? '✓' : ''}
+            </span>
+            {item.done ? (
+              <span className="text-secondary line-through">{item.label}</span>
+            ) : (
+              <Link href={item.href}>{item.label}</Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
 
 const Panel = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
   <section className="flex min-w-0 flex-col rounded-panel border border-line bg-surface">
@@ -118,7 +180,6 @@ const HomePage = async ({
         ]
       })()
     : []
-  const remaining = checklist.filter((item) => !item.done)
 
   const openCount = board.stages.reduce((sum, stage) => sum + stage.count, 0)
   // Per currency, never across: adding dollars to euros would be a number that
@@ -184,35 +245,14 @@ const HomePage = async ({
         </section>
       ) : null}
 
-      {remaining.length > 0 ? (
-        <Panel title={`Set up Rawr (${checklist.length - remaining.length} of ${checklist.length} done)`}>
-          <ul className="flex flex-col divide-y divide-divider">
-            {checklist.map((item) => (
-              <li key={item.label} className="flex items-center gap-3 py-1.5 first:pt-0 last:pb-0">
-                <span
-                  aria-hidden="true"
-                  className={
-                    item.done
-                      ? 'flex size-5 shrink-0 items-center justify-center rounded-full bg-success text-small text-white'
-                      : 'size-5 shrink-0 rounded-full border border-line'
-                  }
-                >
-                  {item.done ? '✓' : ''}
-                </span>
-                {item.done ? (
-                  <span className="text-secondary line-through">{item.label}</span>
-                ) : (
-                  <Link href={item.href}>{item.label}</Link>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      ) : null}
-
       <Tiles tiles={tiles} />
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      {checklist.length > 0 ? <Setup items={checklist} /> : null}
+
+      {/* A container query, not a viewport one: this grid lives inside the shell's
+          content pane, and whether two columns fit is a question about that pane,
+          not about the window a narrow rail may be sharing. */}
+      <div className="grid gap-4 @3xl:grid-cols-2">
         <Panel
           title="Pipeline by stage"
           action={<Link href={objectView(workspace, 'deal', 'all', 'board')}>Open the board</Link>}

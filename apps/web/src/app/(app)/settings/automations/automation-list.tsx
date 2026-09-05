@@ -1,8 +1,9 @@
 'use client'
 
-import { Alert, Badge, Button, EmptyState, Field, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
@@ -175,12 +176,17 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
                     )
                   }}
                 />
-                <Button variant="tertiary" onClick={() => openEdit(row)}>
-                  Edit
-                </Button>
-                <Button variant="destructive" onClick={() => setRemoving(row)}>
-                  Delete
-                </Button>
+                <IconButton
+                  label={`Edit ${row.name}`}
+                  icon={<ACTION_ICONS.edit size={16} />}
+                  onClick={() => openEdit(row)}
+                />
+                <IconButton
+                  label={`Delete ${row.name}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  onClick={() => setRemoving(row)}
+                />
               </div>
             </li>
           ))}
@@ -210,6 +216,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
       <Modal
         open={editing !== null}
         onClose={() => setEditing(null)}
+        size="lg"
         title={editing === 'new' ? 'New automation' : 'Edit automation'}
         footer={
           <div className="flex gap-2">
@@ -386,6 +393,7 @@ export const AutomationList = ({ rows, runs, people, stages, fieldsByObject }: A
       <Modal
         open={removing !== null}
         onClose={() => setRemoving(null)}
+        size="sm"
         title={`Delete ${removing?.name ?? ''}?`}
         footer={
           <div className="flex gap-2">
