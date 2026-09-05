@@ -48,7 +48,7 @@ import {
   type UpdateResult,
   type WorkspaceContext,
 } from '@rawr/db'
-import { runAutomations } from '../automations.ts'
+import { reportEvent } from '../automations.ts'
 import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -96,7 +96,7 @@ const fireChangeAutomations = (
 ): void => {
   const trigger = result.stageChange ? 'stage_changed' : result.lifecycleChanged ? 'lifecycle_changed' : null
   if (!trigger) return
-  runAutomations(ctx.workspace, {
+  reportEvent(ctx.workspace, {
     trigger,
     objectKey: object,
     entityId: id,
@@ -201,7 +201,7 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) =>
         call(async () => {
           const result = await createRecord(ctx.workspace, input.object, input.values)
-          runAutomations(ctx.workspace, {
+          reportEvent(ctx.workspace, {
             trigger: 'record_created',
             objectKey: input.object,
             entityId: result.id,

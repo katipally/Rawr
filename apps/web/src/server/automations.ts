@@ -17,6 +17,7 @@ import {
   type WorkspaceContext,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
+import { notifySubscribers } from './webhooks.ts'
 import { queueHostAlert } from './notify.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
 
@@ -283,6 +284,25 @@ export const resumeAutomation = async (
     record.displayName,
   )
   return { resumed: true }
+}
+
+/** Report one thing that happened, to everything that cares about it.
+ *
+ *  Two consumers now: the rules inside Rawr, and whatever is subscribed outside
+ *  it. One call site per event rather than two, so a place that reports an event
+ *  cannot be updated for one and forgotten for the other — which is exactly how
+ *  a webhook that fires on three of four triggers happens.
+ *
+ *  Never awaited by a request. */
+export const reportEvent = (ctx: WorkspaceContext, event: AutomationEvent | undefined): void => {
+  if (!event) return
+  runAutomations(ctx, event)
+  notifySubscribers(ctx, {
+    objectKey: event.objectKey,
+    trigger: event.trigger,
+    entityId: event.entityId,
+    workspaceSlug: event.workspaceSlug,
+  })
 }
 
 /** Fire everything armed for this event. Never awaited by a request. */

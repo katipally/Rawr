@@ -16,6 +16,15 @@ import {
   rematchInbound,
   saveIntegration,
 } from '../src/dal/integrations.ts'
+import {
+  createWebhookEndpoint,
+  endpointsFor,
+  listWebhookEndpoints,
+  recordDelivery,
+  removeWebhookEndpoint,
+  rollWebhookSecret,
+  updateWebhookEndpoint,
+} from '../src/dal/webhooks.ts'
 import { acceptSuggestion, applyEnrichment, markSource } from '../src/dal/enrichment.ts'
 import { listSuggestions, readFieldSources } from '../src/dal/integrations.ts'
 import {
@@ -1198,6 +1207,144 @@ try {
     expect(suggestions.length === 0, `${suggestions.length} suggestions leaked`)
     return 'zero rows, not somebody else’s rows'
   })
+
+  // ------------------------------------------- B12: outgoing webhooks
+
+  console.log('')
+  console.log('-- what Rawr tells somebody else --------------------------------')
+
+  let endpointId = ''
+
+  // Both of the next two rules only apply in production, because the first
+  // receiver anybody writes runs on their own laptop over http. So they are
+  // asserted with NODE_ENV set to what production sets it to, and put back.
+  const inProduction = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const before = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      return await fn()
+    } finally {
+      if (before === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = before
+    }
+  }
+
+  await check('an endpoint has to be https in production', async () =>
+    inProduction(() =>
+      refuses('a record sent in plaintext', () =>
+        createWebhookEndpoint(admin, { name: 'Plain', url: 'http://example.com/hook', events: [] }),
+      ),
+    ),
+  )
+
+  await check('an endpoint on a private network is refused in production', async () =>
+    inProduction(async () => {
+      // Otherwise "add a webhook" is a request forgery any admin can aim at
+      // whatever else runs on the network Rawr itself is on — the cloud metadata
+      // service above all.
+      const said = await refuses('an endpoint pointing back inside', () =>
+        createWebhookEndpoint(admin, { name: 'Inside', url: 'https://169.254.169.254/latest/meta-data', events: [] }),
+      )
+      expect(said.includes('private network'), said)
+      return said
+    }),
+  )
+
+  await check('a laptop receiver is allowed outside production', async () => {
+    const made = await createWebhookEndpoint(admin, {
+      name: `Verify local ${stamp}`,
+      url: 'http://127.0.0.1:4599/hook',
+      events: [],
+    })
+    await removeWebhookEndpoint(admin, made.id)
+    return 'a webhook nobody can develop against is a webhook nobody uses'
+  })
+
+  await check('an event nothing sends is refused at save', async () =>
+    refuses('a subscription to something that never fires', () =>
+      createWebhookEndpoint(admin, { name: 'Ghost', url: 'https://example.com/hook', events: ['contact.exploded'] }),
+    ),
+  )
+
+  await check('the signing key comes back exactly once', async () => {
+    const made = await createWebhookEndpoint(admin, {
+      name: `Verify hook ${stamp}`,
+      url: 'https://example.com/hooks/rawr',
+      events: ['deal.stage_changed'],
+    })
+    endpointId = made.id
+    expect(made.secret.startsWith('whsec_'), made.secret.slice(0, 8))
+    const listed = await listWebhookEndpoints(admin)
+    const mine = listed.find((row) => row.id === endpointId)
+    expect(Boolean(mine), 'the endpoint is not in the list')
+    // Nothing on the read path carries it: a key a screen can redisplay is a key
+    // in a screenshot.
+    expect(!JSON.stringify(mine).includes(made.secret), 'the signing key is readable after creation')
+    return 'issued once, and never returned again'
+  })
+
+  await check('only the events it asked for reach it', async () => {
+    const wanted = await endpointsFor(admin, 'deal.stage_changed')
+    expect(wanted.some((row) => row.id === endpointId), 'it did not get the event it subscribed to')
+    const other = await endpointsFor(admin, 'contact.created')
+    expect(!other.some((row) => row.id === endpointId), 'it got an event it did not ask for')
+    return 'one subscription, one event'
+  })
+
+  await check('an empty list means every event, including later ones', async () => {
+    await updateWebhookEndpoint(admin, endpointId, { events: [] })
+    for (const event of ['contact.created', 'deal.stage_changed', 'contact.form_submitted']) {
+      const rows = await endpointsFor(admin, event)
+      expect(rows.some((row) => row.id === endpointId), `${event} did not reach it`)
+    }
+    return 'a warehouse subscribes once and stops re-editing a list'
+  })
+
+  await check('a switched-off endpoint is sent nothing', async () => {
+    await updateWebhookEndpoint(admin, endpointId, { isActive: false })
+    const rows = await endpointsFor(admin, 'contact.created')
+    expect(!rows.some((row) => row.id === endpointId), 'a switched-off endpoint was still sent an event')
+    await updateWebhookEndpoint(admin, endpointId, { isActive: true })
+    return 'off means off, without deleting the key'
+  })
+
+  await check('rolling the key replaces it, and the old one stops working', async () => {
+    const before = (await endpointsFor(admin, 'contact.created')).find((row) => row.id === endpointId)
+    const rolled = await rollWebhookSecret(admin, endpointId)
+    const after = (await endpointsFor(admin, 'contact.created')).find((row) => row.id === endpointId)
+    expect(rolled !== before?.secret, 'the key did not change')
+    expect(after?.secret === rolled, 'the new key is not the one being sent with')
+    return 'a rolled key is only rolled if the old one is dead'
+  })
+
+  await check('the last delivery is what the row leads with', async () => {
+    await recordDelivery(admin, endpointId, { ok: false, status: 500, error: 'The endpoint answered 500.' })
+    const failing = (await listWebhookEndpoints(admin)).find((row) => row.id === endpointId)
+    expect(failing?.lastError !== null, 'a failure left no trace')
+    expect(failing?.lastStatus === 500, `${failing?.lastStatus}`)
+    await recordDelivery(admin, endpointId, { ok: true, status: 200 })
+    const healthy = (await listWebhookEndpoints(admin)).find((row) => row.id === endpointId)
+    // A success clears the error: "failing since Tuesday" beside a row that has
+    // delivered since is worse than no health at all.
+    expect(healthy?.lastError === null, 'a success left the old failure showing')
+    expect(healthy?.lastOkAt !== null, 'a success was not recorded')
+    return 'a subscriber that quietly stopped receiving is visible'
+  })
+
+  await check('only an admin may subscribe anything to this workspace', async () => {
+    const said = await refuses('marketing adding an endpoint', () =>
+      createWebhookEndpoint(ctxFor('marketing'), { name: 'Nope', url: 'https://example.com/h', events: [] }),
+    )
+    expect(said.includes('webhook_endpoint'), said)
+    return said
+  })
+
+  await check('one tenant cannot see another’s endpoints', async () => {
+    expect((await listWebhookEndpoints(probeCtx)).length === 0, 'an endpoint leaked across tenants')
+    return 'row level security covers webhook_endpoint'
+  })
+
+  await removeWebhookEndpoint(admin, endpointId)
 
   // Leave the workspace as it was found: the seeded Brevo row was created here.
   await disconnectIntegration(admin, 'brevo')

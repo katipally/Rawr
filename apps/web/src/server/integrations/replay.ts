@@ -1,4 +1,6 @@
 import {
+  endpointsFor,
+  listWebhookEndpoints,
   promoteFieldToHot,
   type Replayable,
   type WorkspaceContext,
@@ -7,6 +9,7 @@ import { syncMailbox } from '../gmail.ts'
 import { enrichRecord, enrichCompanyRecord } from './index.ts'
 import { postToSlack } from './slack.ts'
 import { addProspect } from './woodpecker.ts'
+import { deliverWebhook, WEBHOOK_JOB } from '../webhooks.ts'
 
 /** F6 §1 and its edge case: "a dead-lettered item is replayed twice → the
  *  idempotency key makes the second a no-op."
@@ -44,6 +47,35 @@ export const replayJob = async (
         payload,
       })
       return { replayed: true, detail: result.detail }
+    }
+
+    case WEBHOOK_JOB: {
+      const endpointId = typeof payload.endpointId === 'string' ? payload.endpointId : null
+      const body = typeof payload.body === 'string' ? payload.body : null
+      const event = typeof payload.event === 'string' ? payload.event : null
+      if (!endpointId || !body || !event) {
+        throw new Error('That delivery has no payload left to re-send.')
+      }
+      // Read again rather than replayed from the payload: the endpoint may have
+      // been switched off, moved, or had its key rolled since it failed, and
+      // re-sending to the old address with the old key would fail identically
+      // forever. A deleted endpoint says so instead of quietly doing nothing.
+      const endpoint = (await listWebhookEndpoints(ctx)).find((row) => row.id === endpointId)
+      if (!endpoint) throw new Error('That endpoint has since been deleted.')
+      if (!endpoint.isActive) throw new Error(`${endpoint.name} is switched off. Turn it on before replaying.`)
+
+      const [job] = await endpointsFor(ctx, event).then((rows) => rows.filter((row) => row.id === endpointId))
+      if (!job) throw new Error(`${endpoint.name} no longer subscribes to ${event}.`)
+
+      await deliverWebhook({
+        workspaceId: ctx.workspaceId,
+        endpointId,
+        url: job.url,
+        secret: job.secret,
+        event,
+        body,
+      })
+      return { replayed: true, detail: `Re-sent ${event} to ${endpoint.name}.` }
     }
 
     case 'slack.booking-no-conference':

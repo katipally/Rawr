@@ -13,7 +13,7 @@ import {
 } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
-import { runAutomations } from '~/server/automations.ts'
+import { reportEvent } from '~/server/automations.ts'
 
 /** POST /f/:formId — the capture path, F3 §4.
  *
@@ -86,7 +86,7 @@ export const POST = async (
   // same background handle: a rule that sets a lifecycle stage must never make
   // a visitor wait, and must never fail their submission.
   if (result.contactId) {
-    runAutomations(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.workspaceId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,

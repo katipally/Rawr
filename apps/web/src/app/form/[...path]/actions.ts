@@ -10,7 +10,7 @@ import type { NextRequest } from 'next/server'
 import { checkSubmitLimits } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { answersFromFormData, runSubmission } from '~/server/submit.ts'
-import { runAutomations } from '~/server/automations.ts'
+import { reportEvent } from '~/server/automations.ts'
 
 /** The no-JS submit path.
  *
@@ -83,7 +83,7 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
   // same background handle: a rule that sets a lifecycle stage must never make
   // a visitor wait, and must never fail their submission.
   if (result.contactId) {
-    runAutomations(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.workspaceId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,

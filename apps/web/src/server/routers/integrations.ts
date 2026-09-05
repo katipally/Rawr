@@ -1,15 +1,21 @@
 import {
   acceptSuggestion,
   claimForReplay,
+  createWebhookEndpoint,
   dismissSuggestion,
   disconnectIntegration,
   INTEGRATION_KINDS,
   listSuggestions,
   listUnmatchedEvents,
+  listWebhookEndpoints,
   readFieldSources,
   rematchInbound,
   releaseReplay,
+  removeWebhookEndpoint,
+  rollWebhookSecret,
   saveIntegration,
+  updateWebhookEndpoint,
+  WEBHOOK_EVENTS,
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -178,6 +184,50 @@ export const integrationsRouter = router({
 
   /** F6 §1's replay, for every job family rather than one. The idempotency key on
    *  the outbound call is what makes replaying twice a no-op. */
+  /** B12. Who is subscribed to what happens here.
+   *
+   *  On the integrations router rather than a new one: an endpoint is a connected
+   *  service like any other, with the same health line and the same replay behind
+   *  it, and the screen it lives on is the one that already shows those. */
+  webhooks: router({
+    list: adminProcedure.query(({ ctx }) => call(() => listWebhookEndpoints(ctx.workspace))),
+
+    events: adminProcedure.query(() => [...WEBHOOK_EVENTS]),
+
+    create: adminProcedure
+      .input(
+        z.object({
+          name: z.string().min(1).max(80),
+          url: z.string().min(1).max(2000),
+          events: z.array(z.string().max(64)).max(WEBHOOK_EVENTS.length),
+        }),
+      )
+      // The secret comes back exactly once, here, the way an agent token does.
+      .mutation(({ ctx, input }) => call(() => createWebhookEndpoint(ctx.workspace, input))),
+
+    update: adminProcedure
+      .input(
+        z.object({
+          id: z.uuid(),
+          name: z.string().min(1).max(80).optional(),
+          url: z.string().min(1).max(2000).optional(),
+          events: z.array(z.string().max(64)).max(WEBHOOK_EVENTS.length).optional(),
+          isActive: z.boolean().optional(),
+        }),
+      )
+      .mutation(({ ctx, input: { id, ...rest } }) =>
+        call(() => updateWebhookEndpoint(ctx.workspace, id, rest)),
+      ),
+
+    rollSecret: adminProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => rollWebhookSecret(ctx.workspace, input.id))),
+
+    remove: adminProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => removeWebhookEndpoint(ctx.workspace, input.id))),
+  }),
+
   replay: adminProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) =>

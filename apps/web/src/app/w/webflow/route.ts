@@ -8,7 +8,7 @@ import { env } from '~/lib/env.ts'
 import { clientIp } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
-import { runAutomations } from '~/server/automations.ts'
+import { reportEvent } from '~/server/automations.ts'
 
 /** POST /w/webflow — the fallback path of F3 §7.
  *
@@ -124,7 +124,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   // same background handle: a rule that sets a lifecycle stage must never make
   // a visitor wait, and must never fail their submission.
   if (result.contactId) {
-    runAutomations(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.workspaceId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,

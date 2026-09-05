@@ -57,6 +57,10 @@ const WRITE_ROLES: Record<string, readonly Role[]> = {
   automation: ['admin'],
   /** F6. A dead letter is replayed by whoever can see it, which is an admin. */
   dead_letter: ['admin'],
+  /** An endpoint is a standing copy of everything that happens in this workspace,
+   *  sent somewhere Rawr does not control. That is an admin decision however
+   *  ordinary the row looks, and the same one as connecting an integration. */
+  webhook_endpoint: ['admin'],
   form: ['admin', 'marketing'],
   /** Reviewing the spam queue is sales work as much as marketing work: the lead
    *  being held is somebody's prospect. */

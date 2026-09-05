@@ -1,7 +1,7 @@
 import { boolean, integer, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
 import { fieldSourceEnum, integrationStateEnum } from './enums.ts'
-import { workspace } from './identity.ts'
+import { userAccount, workspace } from './identity.ts'
 
 /** Credentials are never stored here. secretRef points at the secrets store, which
  *  is deliberately not the database it protects. */
@@ -122,4 +122,41 @@ export const enrichmentSuggestion = pgTable(
     uniqueIndex('enrichment_suggestion_key').on(t.workspaceId, t.entity, t.entityId, t.fieldKey),
     index('enrichment_suggestion_entity_idx').on(t.workspaceId, t.entity, t.entityId),
   ],
+)
+
+/** Who is subscribed to what happens in Rawr.
+ *
+ *  The mirror of `inbound_event`, and mostly the same machinery pointed outward:
+ *  a delivery is a pg-boss job, so its retries, its backoff and its landing in
+ *  `dead_letter` on a final failure are the ones every other job already has, and
+ *  replaying one is the Failed jobs screen that already exists.
+ *
+ *  What is here is only the part that is genuinely new: who to tell, and the key
+ *  that proves a delivery came from us. */
+export const webhookEndpoint = pgTable(
+  'webhook_endpoint',
+  {
+    id: pk(),
+    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** https only, checked in the layer. A signature proves who sent a payload,
+     *  not that nobody else read it. */
+    url: text('url').notNull(),
+    /** Shown once, when created or rolled. A secret a screen can redisplay is a
+     *  secret in a screenshot. */
+    secret: text('secret').notNull(),
+    /** Event names this one wants. Empty means all of them, which is what piping
+     *  Rawr into a warehouse actually wants and saves re-editing the list every
+     *  time an event is added. */
+    events: jsonb('events').notNull().default([]),
+    isActive: boolean('is_active').notNull().default(true),
+    lastOkAt: timestamp('last_ok_at', { withTimezone: true }),
+    lastStatus: integer('last_status'),
+    lastError: text('last_error'),
+    lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+    createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('webhook_endpoint_live_idx').on(t.workspaceId, t.isActive)],
 )
