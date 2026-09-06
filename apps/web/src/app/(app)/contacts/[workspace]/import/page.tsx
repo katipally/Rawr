@@ -1,9 +1,9 @@
 import { canWrite, listImportRuns } from '@rawr/db'
-import { Alert, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
+import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
-import { importsPath } from '~/lib/links.ts'
+import { importsPath, integrationsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MAX_BYTES, MAX_ROWS } from '~/server/spreadsheet.ts'
 
@@ -24,9 +24,9 @@ const ImportPage = async ({
   const allowed = canWrite(session.role, 'contact')
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <PageHeader
-        title="Import"
+        title="Data integration"
         lead="Records, and the shape around them."
         why={
           <>
@@ -49,13 +49,16 @@ const ImportPage = async ({
         </Alert>
       ) : null}
 
+      <div className="grid gap-4 md:grid-cols-2">
       {allowed ? (
         <form
           action={`${importsPath(workspace)}/upload`}
           method="post"
           encType="multipart/form-data"
-          className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-3"
+          className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel"
         >
+          <h2 className="text-base font-semibold">Import a file</h2>
+          <p className="text-secondary">One-time import from a file, directly into the CRM.</p>
           <Field id="import-object" label="What is in the file">
             <Select id="import-object" name="object" defaultValue="contact">
               <option value="contact">Contacts</option>
@@ -102,36 +105,68 @@ const ImportPage = async ({
           </div>
         </form>
       ) : (
-        <p className="text-secondary">
+        <p className="rounded-panel border border-line bg-surface p-6 text-secondary shadow-panel">
           Your role ({session.role}) cannot create records, so it cannot import them either.
         </p>
       )}
+        <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
+          <h2 className="text-base font-semibold">Sync from apps</h2>
+          <p className="text-secondary">Keep data flowing between the CRM and the tools already connected to it: mail, enrichment, calendars and the rest.</p>
+          <div className="mt-auto">
+            <Link
+              href={integrationsPath()}
+              className="inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
+            >
+              Connect an app
+            </Link>
+          </div>
+        </section>
+      </div>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Recent imports</h2>
+      <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
+        <h2 className="text-base font-semibold">Monitor your imports</h2>
         {runs.length === 0 ? (
           <EmptyState
             title="Nothing has been imported yet"
             description="An import runs on the server, so you can close this tab and come back to it."
           />
         ) : (
-          <ul className="flex flex-col rounded-panel border border-line bg-surface">
-            {runs.map((run) => (
-              <li key={run.id} className="border-b border-divider px-3 py-2 last:border-0">
-                <p className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <Link href={importsPath(workspace, run.id)} className="min-w-0 break-words font-medium">
-                    {run.filename}
-                  </Link>
-                  <span className="text-secondary">{formatDateTime(run.createdAt)}</span>
-                </p>
-                <p className="text-secondary tabular-nums">
-                  {run.objectType} · {run.state} · {run.processedRows.toLocaleString()} of{' '}
-                  {run.totalRows.toLocaleString()} rows · {run.created} created, {run.updated} updated,{' '}
-                  {run.skipped} skipped, {run.errored} with a problem
-                </p>
-              </li>
-            ))}
-          </ul>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[56rem] border-t border-line text-left">
+              <thead>
+                <tr className="text-secondary">
+                  {['Import name', 'Object', 'State', 'Rows', 'New records', 'Updated', 'Skipped', 'Errors', 'Created'].map((label) => (
+                    <th key={label} scope="col" className="h-row border-b border-line px-6 font-normal">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => (
+                  <tr key={run.id} className="border-b border-line hover:bg-fill">
+                    <td className="h-row px-6 py-0.5">
+                      <Link href={importsPath(workspace, run.id)} className="font-semibold">
+                        {run.filename}
+                      </Link>
+                    </td>
+                    <td className="px-6">{run.objectType}</td>
+                    <td className="px-6">
+                      <Badge tone={run.state === 'done' ? 'ok' : run.state === 'failed' ? 'error' : 'neutral'}>{run.state}</Badge>
+                    </td>
+                    <td className="px-6 tabular-nums">
+                      {run.processedRows.toLocaleString()} / {run.totalRows.toLocaleString()}
+                    </td>
+                    <td className="px-6 tabular-nums">{run.created.toLocaleString()}</td>
+                    <td className="px-6 tabular-nums">{run.updated.toLocaleString()}</td>
+                    <td className="px-6 tabular-nums">{run.skipped.toLocaleString()}</td>
+                    <td className="px-6 tabular-nums">{run.errored.toLocaleString()}</td>
+                    <td className="px-6 whitespace-nowrap text-secondary">{formatDateTime(run.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>
