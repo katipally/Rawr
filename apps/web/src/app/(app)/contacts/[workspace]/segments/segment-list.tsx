@@ -1,6 +1,7 @@
 'use client'
 
-import { Button, EmptyState, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, PageHeader, Select, TextInput, useToast, type Column } from '@rawr/ui'
+import { MoreVertical, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -47,6 +48,7 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
   const [preview, setPreview] = useState<{ count: number; sample: { id: string; displayName: string }[] } | null>(null)
   const [showBuilder, setShowBuilder] = useState(false)
 
+  const [needle, setNeedle] = useState('')
   const [viewing, setViewing] = useState<SegmentRow | null>(null)
   const [members, setMembers] = useState<{ id: string; displayName: string; enteredAt: Date }[] | null>(null)
 
@@ -121,119 +123,201 @@ export const SegmentList = ({ workspace, rows, fieldsByObject, canWrite, role }:
   const conditionCount = (groups: Group[]) =>
     groups.reduce((sum, group) => sum + group.conditions.length, 0)
 
+  const query = needle.trim().toLowerCase()
+  const shown = query ? rows.filter((row) => row.name.toLowerCase().includes(query)) : rows
+
+  const recompute = (row: SegmentRow) =>
+    void run(async () => {
+      const result = await api.segments.evaluate.mutate({ id: row.id })
+      toast('info', `${result.members} members: ${result.entered} joined, ${result.exited} left.`)
+    }, 'Recomputed.')
+
+  const columns: Column<SegmentRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 320,
+      render: (row) => (
+        <span className="flex min-w-0 flex-col py-1">
+          <button type="button" onClick={() => void openMembers(row)} className="truncate text-left font-semibold text-link hover:underline">
+            {row.name}
+          </button>
+          {row.description ? <span className="truncate text-small text-secondary">{row.description}</span> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'size',
+      header: 'List size',
+      width: 110,
+      align: 'right',
+      render: (row) =>
+        row.lastEvaluatedAt === null ? (
+          <span className="text-secondary" title="Never recomputed, so the count is unknown rather than zero">--</span>
+        ) : (
+          <button type="button" onClick={() => void openMembers(row)} className="font-semibold text-link hover:underline">
+            {row.memberCount.toLocaleString()}
+          </button>
+        ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      width: 110,
+      render: () => (
+        <span className="inline-flex items-center gap-2">
+          <span aria-hidden="true" className="size-2 rounded-pill bg-success" />
+          Active
+        </span>
+      ),
+    },
+    { key: 'object', header: 'Object', width: 120, render: (row) => OBJECT_LABEL[row.objectKey] },
+    {
+      key: 'conditions',
+      header: 'Conditions',
+      width: 110,
+      align: 'right',
+      render: (row) => conditionCount(row.filters),
+    },
+    {
+      key: 'updated',
+      header: 'Last recomputed',
+      width: 200,
+      render: (row) => (row.lastEvaluatedAt === null ? <span className="text-secondary">Never</span> : formatDateTime(row.lastEvaluatedAt)),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: 64,
+      render: (row) => (
+        <DropdownMenu
+          label={`Actions for ${row.name}`}
+          groups={[
+            {
+              key: 'read',
+              items: [
+                { key: 'members', label: 'View members', onSelect: () => void openMembers(row) },
+                {
+                  key: 'list',
+                  label: 'Open as a list',
+                  href: objectView(workspace, row.objectKey, 'all', 'list', { filters: JSON.stringify(row.filters) }),
+                },
+              ],
+            },
+            ...(canWrite
+              ? [
+                  {
+                    key: 'write',
+                    items: [
+                      { key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) },
+                      { key: 'edit', label: 'Edit', onSelect: () => openEdit(row) },
+                    ],
+                  },
+                  {
+                    key: 'danger',
+                    items: [
+                      {
+                        key: 'delete',
+                        label: 'Delete',
+                        destructive: true,
+                        onSelect: () => void run(() => api.segments.remove.mutate({ id: row.id }), 'Segment deleted.'),
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ]}
+          trigger={(props) => <IconButton {...props} label={`Actions for ${row.name}`} icon={<MoreVertical className="size-4" />} />}
+        />
+      ),
+    },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
-      {/* Two separate questions. Whether the toolbar is worth drawing depends on
-          there being something to recompute; whether the read-only notice belongs
-          depends only on the role. Asking them as one told an admin looking at an
-          empty page that they could not change segments, directly above a button
-          that creates one. */}
-      {canWrite ? (
-        rows.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="primary" onClick={openNew}>
-              Create segment
-            </Button>
-            <Button
-              busy={busy}
-              onClick={() =>
-                void run(async () => {
-                  const results = await api.segments.evaluateAll.mutate()
-                  const failed = results.filter((entry) => entry.error !== null)
-                  if (failed.length > 0) {
-                    toast('error', `${failed[0]!.name}: ${failed[0]!.error}`)
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <PageHeader
+        title="Segments"
+        lead={`${rows.length.toLocaleString()} segment${rows.length === 1 ? '' : 's'}`}
+        why={
+          <p>
+            Membership is recomputed on a schedule and whenever you ask; entering and leaving both
+            land on the record&apos;s timeline, so a contact who left last month still shows why
+            they are no longer being mailed. An imported list is a snapshot instead, and says so.
+          </p>
+        }
+        action={
+          canWrite ? (
+            <span className="flex flex-wrap gap-2">
+              {rows.length > 0 ? (
+                <Button
+                  busy={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const results = await api.segments.evaluateAll.mutate()
+                      const failed = results.filter((entry) => entry.error !== null)
+                      if (failed.length > 0) {
+                        toast('error', `${failed[0]!.name}: ${failed[0]!.error}`)
+                      }
+                    }, 'Every segment recomputed.')
                   }
-                }, 'Every segment recomputed.')
-              }
-            >
-              Recompute all
-            </Button>
-          </div>
-        ) : null
-      ) : (
+                >
+                  Recompute all
+                </Button>
+              ) : null}
+              <Button variant="primary" onClick={openNew}>
+                Create segment
+              </Button>
+            </span>
+          ) : undefined
+        }
+      />
+
+      {canWrite ? null : (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
           Your role ({role}) can read segments and cannot change them. Marketing and admins own
           who is in a list.
         </p>
       )}
 
-      {rows.length === 0 ? (
-        <EmptyState
-          title="No segments yet"
-          description="A saved query that remembers who is in it."
-          action={canWrite ? <Button variant="primary" onClick={openNew}>Create segment</Button> : undefined}
+      <label className="relative w-full min-w-0 sm:w-64">
+        <span className="sr-only">Search segments</span>
+        <input
+          type="search"
+          value={needle}
+          placeholder="Search segments"
+          onChange={(event) => setNeedle(event.target.value)}
+          className="h-control w-full rounded-pill border border-line-strong bg-surface py-1 pr-9 pl-4 text-body placeholder:text-muted"
         />
-      ) : (
-        <ul className="flex flex-col rounded-panel border border-line bg-surface">
-          {rows.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">{row.name}</span>
-                  <span className="text-small text-secondary">{OBJECT_LABEL[row.objectKey]}</span>
-                  <span className="text-small text-secondary">
-                    {conditionCount(row.filters)} condition{conditionCount(row.filters) === 1 ? '' : 's'}
-                  </span>
-                </p>
-                {row.description ? <p className="text-small text-secondary">{row.description}</p> : null}
-                <p className="text-small text-secondary tabular-nums">
-                  {row.lastEvaluatedAt === null
-                    ? 'Never recomputed, so the member count is unknown rather than zero.'
-                    : `${row.memberCount.toLocaleString()} member${row.memberCount === 1 ? '' : 's'} · last recomputed ${formatDateTime(row.lastEvaluatedAt)}`}
-                </p>
-              </div>
+        <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
+      </label>
 
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Button variant="tertiary" onClick={() => void openMembers(row)}>
-                  Members
-                </Button>
-                <Link
-                  href={objectView(workspace, row.objectKey, 'all', 'list', {
-                    filters: JSON.stringify(row.filters),
-                  })}
-                  className="self-center text-small"
-                >
-                  Open as a list
-                </Link>
-                {canWrite ? (
-                  <>
-                    <Button
-                      variant="tertiary"
-                      busy={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          const result = await api.segments.evaluate.mutate({ id: row.id })
-                          toast(
-                            'info',
-                            `${result.members} members: ${result.entered} joined, ${result.exited} left.`,
-                          )
-                        }, 'Recomputed.')
-                      }
-                    >
-                      Recompute
-                    </Button>
-                    <Button variant="tertiary" onClick={() => openEdit(row)}>
-                      Edit
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      busy={busy}
-                      onClick={() =>
-                        void run(() => api.segments.remove.mutate({ id: row.id }), 'Segment deleted.')
-                      }
-                    >
-                      Delete
-                    </Button>
-                  </>
-                ) : null}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <DataTable
+        columns={columns}
+        rows={shown}
+        rowKey={(row) => row.id}
+        caption="Segments in this workspace"
+        storageKey="segments"
+        fill
+        empty={
+          <div className="flex flex-1 flex-col justify-center">
+          {query ? (
+            <EmptyState title="No segment matches that search" />
+          ) : (
+            <EmptyState
+              title="No segments yet"
+              description="A saved query that remembers who is in it."
+              {...(canWrite ? { action: <Button variant="primary" onClick={openNew}>Create segment</Button> } : {})}
+            />
+          )}
+          </div>
+        }
+      />
+
+      <div className="-mx-3 flex shrink-0 items-center border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
+        <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
+          {shown.length.toLocaleString()} {shown.length === 1 ? 'segment' : 'segments'}
+        </span>
+      </div>
 
       {/* --------------------------------------------------------- editor */}
       <Modal

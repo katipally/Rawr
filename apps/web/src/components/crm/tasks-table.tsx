@@ -148,10 +148,12 @@ export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }:
         storageKey="tasks"
         fill
         empty={
-          <EmptyState
-            title={emptyTitle}
-            {...(canWrite ? { description: 'Add one with the button above. Overdue tasks are what the Monday list is built from.' } : {})}
-          />
+          <div className="flex flex-1 flex-col justify-center">
+            <EmptyState
+              title={emptyTitle}
+              {...(canWrite ? { description: 'Add one with the button above. Overdue tasks are what the Monday list is built from.' } : {})}
+            />
+          </div>
         }
       />
       <div className="-mx-3 flex shrink-0 items-center border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">

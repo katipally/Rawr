@@ -1,4 +1,3 @@
-import { PageHeader } from '@rawr/ui'
 import { getRegistry, listSegments, type ObjectKey } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { toFilterFields } from '~/server/crm.ts'
@@ -23,30 +22,16 @@ const SegmentsPage = async ({ params }: { params: Promise<{ workspace: string }>
   )
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="Segments"
-        lead="A saved query that remembers who is in it."
-        why={
-          <p>
-            Membership is recomputed on a schedule and whenever you ask; entering and leaving both
-            land on the record&apos;s timeline, so a contact who left last month still shows why
-            they are no longer being mailed. An imported list is a snapshot instead, and says so.
-          </p>
-        }
-      />
-
-      <SegmentList
-        workspace={workspace}
-        rows={segments.map((row) => ({
-          ...row,
-          lastEvaluatedAt: row.lastEvaluatedAt?.toISOString() ?? null,
-        }))}
-        fieldsByObject={fieldsByObject}
-        canWrite={['admin', 'marketing'].includes(session.role)}
-        role={session.role}
-      />
-    </div>
+    <SegmentList
+      workspace={workspace}
+      rows={segments.map((row) => ({
+        ...row,
+        lastEvaluatedAt: row.lastEvaluatedAt?.toISOString() ?? null,
+      }))}
+      fieldsByObject={fieldsByObject}
+      canWrite={['admin', 'marketing'].includes(session.role)}
+      role={session.role}
+    />
   )
 }
 
