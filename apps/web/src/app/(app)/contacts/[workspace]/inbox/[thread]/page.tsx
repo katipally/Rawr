@@ -1,20 +1,29 @@
 import { isUuid, readThread } from '@rawr/db'
-import { Badge, Breadcrumb, Card } from '@rawr/ui'
+import { Badge, Card } from '@rawr/ui'
+import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { MessageView } from '~/components/crm/message-view.tsx'
 import { ReplyButton } from './reply.tsx'
 import { ThreadRead } from './thread-read.tsx'
-import { inboxPath, recordPath } from '~/lib/links.ts'
+import { inboxPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+import { InboxFrame, filtersFrom } from '../inbox-frame.tsx'
 
 /** One conversation, in full. Read from here rather than from Gmail, so it is the
  *  same thread for whoever opens it, for as long as the workspace keeps it. */
-const ThreadPage = async ({ params }: { params: Promise<{ workspace: string; thread: string }> }) => {
+const ThreadPage = async ({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ workspace: string; thread: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const { workspace, thread: threadId } = await params
+  const filters = filtersFrom(await searchParams)
   if (!isUuid(threadId)) notFound()
 
   const found = await readThread(contextFrom(session), threadId)
@@ -36,13 +45,14 @@ const ThreadPage = async ({ params }: { params: Promise<{ workspace: string; thr
     newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : (newest?.toAddrs[0] ?? null)
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <InboxFrame workspace={workspace} session={session} filters={filters} selected={threadId}>
       <ThreadRead threadId={threadId} />
 
-      <Breadcrumb items={[{ label: 'Inbox', href: inboxPath(workspace) }, { label: found.thread.subject ?? '(no subject)' }]} />
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Link href={inboxPath(workspace)} aria-label="Back to the inbox" className="grid size-8 place-items-center rounded-pill text-body no-underline hover:bg-fill md:hidden">
+            <ChevronLeft aria-hidden="true" className="size-4" />
+          </Link>
           <h1 className="min-w-0 text-lg font-medium">{found.thread.subject ?? '(no subject)'}</h1>
           <Badge>
             {found.thread.messageCount} message{found.thread.messageCount === 1 ? '' : 's'}
@@ -53,7 +63,7 @@ const ThreadPage = async ({ params }: { params: Promise<{ workspace: string; thr
         ) : null}
       </div>
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
+      <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
         <div className="flex min-w-0 flex-col gap-2">
           {found.messages.map((message) => (
             <MessageView key={message.id} message={message} />
@@ -70,7 +80,7 @@ const ThreadPage = async ({ params }: { params: Promise<{ workspace: string; thr
           </ul>
         </Card>
       </div>
-    </div>
+    </InboxFrame>
   )
 }
 

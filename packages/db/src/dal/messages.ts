@@ -1067,6 +1067,42 @@ export const listInboxThreads = async (
     }
   })
 
+export type InboxCounts = { all: number; mine: number; unreplied: number; unread: number }
+
+/** The numbers beside the inbox views: every thread this person may read, the
+ *  ones in their own mailboxes, the ones whose newest message is inbound, and
+ *  the ones they have not opened since the last message. One pass over the
+ *  visible threads, O(threads) in one round trip rather than four. */
+export const inboxCounts = async (ctx: WorkspaceContext): Promise<InboxCounts> =>
+  withWorkspace(ctx, async (tx) => {
+    const actor = ctx.actorId
+    const [row] = await tx.execute<{ all: number; mine: number; unreplied: number; unread: number }>(sql`
+      with visible as (
+        select m.thread_id, m.direction, m.sent_at, mb.user_id as mailbox_user
+          from message m
+          left join mailbox mb on mb.id = m.mailbox_id
+         where m.mailbox_id is null
+            or mb.visibility = 'team'
+            or mb.user_id = ${actor}::uuid
+            or ${ctx.role === 'admin'}
+      ),
+      newest as (
+        select distinct on (v.thread_id) v.thread_id, v.direction
+          from visible v
+         order by v.thread_id, v.sent_at desc
+      )
+      select count(*)::int as all,
+             count(*) filter (where exists (
+               select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))::int as mine,
+             count(*) filter (where n.direction = 'inbound')::int as unreplied,
+             count(*) filter (where r.last_read_at is null or r.last_read_at < t.last_at)::int as unread
+        from message_thread t
+        join newest n on n.thread_id = t.id
+        left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
+    `)
+    return { all: row?.all ?? 0, mine: row?.mine ?? 0, unreplied: row?.unreplied ?? 0, unread: row?.unread ?? 0 }
+  })
+
 /** How many bodies are still to fetch, and for which mailbox. Shown on the
  *  mailboxes screen so a long back-fill is visible rather than mysterious. */
 export const bodyProgress = async (

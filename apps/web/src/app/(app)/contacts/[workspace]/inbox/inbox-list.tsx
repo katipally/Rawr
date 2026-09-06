@@ -1,12 +1,11 @@
 'use client'
 
-import { Badge, Button, Card, Combobox, EmptyState, Spinner, Switch, TextInput, useToast } from '@rawr/ui'
-import { Mail, MailOpen } from 'lucide-react'
+import { Avatar, Badge, Button, EmptyState, Spinner, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useState } from 'react'
-import { useNavigation } from '~/components/navigation.tsx'
-import { inboxPath, threadPath } from '~/lib/links.ts'
+import { threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import type { InboxFilters } from './inbox-frame.tsx'
 
 type Thread = {
   id: string
@@ -23,40 +22,29 @@ type Thread = {
 
 type Cursor = { lastAt: string; id: string } | null
 
+/** Who a thread is with, the way HubSpot heads each row: the contact if one is
+ *  linked, else the newest sender's address. */
+const whoOf = (thread: Thread): string => thread.contacts[0]?.name ?? thread.lastFrom ?? 'Unknown sender'
+
+/** The middle pane: newest first, the open one marked, older pages fetched in
+ *  place so the scroll position survives. */
 export const InboxList = ({
   workspace,
   initial,
   cursor: initialCursor,
-  mailboxes,
   filters,
+  selected,
 }: {
   workspace: string
   initial: Thread[]
   cursor: Cursor
-  mailboxes: { id: string; email: string; own: boolean }[]
-  filters: { scope: 'mine' | 'all'; mailboxId: string | null; unreplied: boolean; unread: boolean; q: string | null }
+  filters: InboxFilters
+  selected: string | null
 }) => {
-  const { navigate } = useNavigation()
   const toast = useToast()
   const [threads, setThreads] = useState(initial)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
   const [busy, setBusy] = useState(false)
-  const [search, setSearch] = useState(filters.q ?? '')
-
-  /** Every filter is an address, so a filtered inbox pastes into Slack and the
-   *  back button works. */
-  const goTo = (next: Partial<typeof filters>) => {
-    const merged = { ...filters, ...next }
-    navigate(
-      inboxPath(workspace, {
-        scope: merged.scope === 'mine' ? 'mine' : undefined,
-        mailbox: merged.mailboxId ?? undefined,
-        unreplied: merged.unreplied ? '1' : undefined,
-        unread: merged.unread ? '1' : undefined,
-        q: merged.q ?? undefined,
-      }),
-    )
-  }
 
   const more = async () => {
     if (!cursor) return
@@ -76,130 +64,71 @@ export const InboxList = ({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex gap-1" role="tablist" aria-label="Whose mail">
-          {(['all', 'mine'] as const).map((scope) => (
-            <button
-              key={scope}
-              type="button"
-              role="tab"
-              aria-selected={filters.scope === scope}
-              onClick={() => goTo({ scope })}
-              className={
-                filters.scope === scope
-                  ? 'rounded-hs bg-accent-subtle px-3 py-1.5 font-medium text-link'
-                  : 'rounded-hs px-3 py-1.5 text-secondary hover:bg-fill'
-              }
-            >
-              {scope === 'all' ? 'Everyone' : 'Mine'}
-            </button>
-          ))}
-        </div>
-
-        <form
-          className="flex min-w-48 flex-1 gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            goTo({ q: search.trim() || null })
-          }}
-        >
-          <TextInput
-            aria-label="Search threads"
-            placeholder="Subject, sender or preview"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          <Button type="submit">Search</Button>
-        </form>
-
-        <Combobox
-          label="Mailbox"
-          className="w-56"
-          value={filters.mailboxId}
-          onChange={(mailboxId) => goTo({ mailboxId })}
-          options={mailboxes.map((box) => ({
-            value: box.id,
-            label: box.email,
-            hint: box.own ? 'Yours' : undefined,
-          }))}
-        />
-
-        <Switch
-          label="Waiting on us"
-          checked={filters.unreplied}
-          onChange={(event) => goTo({ unreplied: event.target.checked })}
-        />
-        <Switch label="Unread" checked={filters.unread} onChange={(event) => goTo({ unread: event.target.checked })} />
-      </div>
+    <div
+      className={cn(
+        'flex w-full shrink-0 flex-col border-r border-line bg-surface md:w-[19.75rem]',
+        // On a phone the list and the conversation take turns: the list until a
+        // thread is opened, then the conversation.
+        selected && 'hidden md:flex',
+      )}
+    >
+      <p className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 text-small">
+        <span className="text-secondary">{filters.q ? `Matching “${filters.q}”` : 'Newest first'}</span>
+        <span className="font-semibold">{threads.length.toLocaleString()}{cursor ? '+' : ''}</span>
+      </p>
 
       {threads.length === 0 ? (
         <EmptyState
           title="No threads match"
-          description="Clear a filter, or connect a mailbox under Settings, Mailboxes. Internal, personal and excluded threads are never stored."
+          description="Pick another view, or connect a mailbox under Inbox Settings. Internal, personal and excluded threads are never stored."
         />
       ) : (
-        <Card flush>
-          <ul className="divide-y divide-divider">
-            {threads.map((thread) => (
+        <ul className="min-h-0 flex-1 overflow-y-auto">
+          {threads.map((thread) => {
+            const open = thread.id === selected
+            return (
               <li key={thread.id}>
                 <Link
                   href={threadPath(workspace, thread.id)}
-                  // Centred, not baseline-aligned: a badge and an icon have their
-                  // own line boxes, and a baseline row drops them half a line.
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 no-underline hover:bg-fill-hover"
+                  aria-current={open ? 'page' : undefined}
+                  className={cn(
+                    'flex gap-3 border-b border-line border-l-[3px] px-4 py-3 no-underline hover:bg-fill',
+                    open ? 'border-l-body bg-canvas' : 'border-l-transparent',
+                  )}
                 >
-                  <span className="flex w-6 shrink-0 justify-center">
-                    {thread.unread ? (
-                      <Mail aria-label="Unread" className="size-4 text-link" />
-                    ) : (
-                      <MailOpen aria-label="Read" className="size-4 text-secondary" />
-                    )}
-                  </span>
+                  <Avatar name={whoOf(thread)} />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className={thread.unread ? 'truncate font-medium text-body' : 'truncate text-body'}>
-                        {thread.subject ?? '(no subject)'}
-                      </span>
-                      {/* Words, not an icon and words: the badge truncates its
-                          content as one block, so a glyph beside the label wraps
-                          onto its own line the moment the row gets narrow. */}
-                      {thread.lastDirection === 'inbound' ? <Badge tone="warn">Waiting on us</Badge> : null}
-                      {thread.messageCount > 1 ? <span className="text-small text-secondary">{thread.messageCount}</span> : null}
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className={cn('truncate text-body', thread.unread ? 'font-semibold' : 'font-medium')}>{whoOf(thread)}</span>
+                      <time className="shrink-0 text-small text-secondary tabular-nums" dateTime={thread.lastAt ?? undefined}>
+                        {thread.lastAt ? new Date(thread.lastAt).toLocaleDateString() : ''}
+                      </time>
                     </span>
-                    <span className="truncate text-small text-secondary">
-                      {thread.lastFrom ?? 'unknown sender'}
-                      {thread.snippet ? ` — ${thread.snippet}` : ''}
-                    </span>
-                    {thread.contacts.length > 0 ? (
-                      <span className="truncate text-small text-secondary">
-                        {thread.contacts.map((contact) => contact.name).join(', ')}
+                    <span className={cn('truncate text-body', thread.unread && 'font-semibold')}>{thread.subject ?? '(no subject)'}</span>
+                    <span className="truncate text-small text-secondary">{thread.snippet ?? ''}</span>
+                    {thread.lastDirection === 'inbound' ? (
+                      <span className="mt-1">
+                        <Badge tone="warn">Waiting on us</Badge>
                       </span>
                     ) : null}
                   </span>
-                  <time
-                    className="shrink-0 text-small text-secondary tabular-nums"
-                    dateTime={thread.lastAt ?? undefined}
-                  >
-                    {thread.lastAt ? new Date(thread.lastAt).toLocaleDateString() : ''}
-                  </time>
                 </Link>
               </li>
-            ))}
-          </ul>
-        </Card>
+            )
+          })}
+        </ul>
       )}
 
-      <div className="flex items-center gap-2">
-        {cursor ? (
-          <Button busy={busy} onClick={() => void more()}>
-            Show older
-          </Button>
-        ) : threads.length > 0 ? (
-          <p className="text-secondary">That is every thread that matches.</p>
-        ) : null}
-        {busy ? <Spinner label="Loading threads" /> : null}
-      </div>
+      {cursor || busy ? (
+        <div className="flex shrink-0 items-center gap-2 border-t border-line p-3">
+          {cursor ? (
+            <Button busy={busy} onClick={() => void more()}>
+              Show older
+            </Button>
+          ) : null}
+          {busy ? <Spinner label="Loading threads" /> : null}
+        </div>
+      ) : null}
     </div>
   )
 }

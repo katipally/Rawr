@@ -78,7 +78,7 @@ const RAIL_KEY = 'rawr.rail.expanded'
 const CLOSE_DELAY_MS = 160
 /** HubSpot opens the flyout 42px above the icon that owns it. */
 const FLYOUT_LIFT_PX = 42
-const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/', '/settings']
+const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/', '/settings', '/inbox']
 
 const CREATE_ICONS: Record<string, typeof Contact> = {
   contact: Contact,
