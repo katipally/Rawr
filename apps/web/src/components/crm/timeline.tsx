@@ -8,6 +8,9 @@ import { pageViewPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, formatDateTime } from './value.tsx'
 
+const monthOf = (iso: string): string =>
+  new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+
 export type TimelineEntry = {
   id: string
   type: string
@@ -358,8 +361,15 @@ export const Timeline = ({
         />
       ) : (
         <ol className="flex flex-col gap-2">
-          {rows.map((entry) => (
-            <li key={entry.id} className="rounded-panel border border-line bg-surface p-4">
+          {rows.map((entry, index) => {
+            // HubSpot heads each month; the rows arrive newest first, so a month
+            // starts wherever it differs from the row before.
+            const month = monthOf(entry.occurredAt)
+            const heads = index === 0 || monthOf(rows[index - 1]!.occurredAt) !== month
+            return (
+            <li key={entry.id} className="flex flex-col gap-2">
+              {heads ? <p className={cn('text-base', index > 0 && 'mt-2')}>{month}</p> : null}
+            <div className="rounded-panel border border-line bg-surface p-4">
               <p className="flex flex-wrap items-baseline gap-x-2">
                 <span className="font-semibold">
                   {TYPE_LABELS[entry.type] ?? entry.type}
@@ -431,8 +441,10 @@ export const Timeline = ({
                   )}
                 </div>
               ) : null}
+            </div>
             </li>
-          ))}
+            )
+          })}
         </ol>
       )}
 

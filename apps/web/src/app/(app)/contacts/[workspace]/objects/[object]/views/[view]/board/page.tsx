@@ -2,7 +2,7 @@ import { calendarFields, isObjectKey, listViews, parseFilters, readBoard, resolv
 import { Alert, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { DealBoard } from '~/components/crm/deal-board.tsx'
+import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
@@ -93,7 +93,7 @@ const BoardPage = async ({
   })
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <IndexHeader
         title={object.namePlural}
         currentObject={'deal'}
@@ -150,36 +150,11 @@ const BoardPage = async ({
               })}
               aria-current={field.key === board.groupByKey ? 'true' : undefined}
               className={cn(
-                'rounded-hs border px-2 py-1 no-underline',
-                field.key === board.groupByKey
-                  ? 'border-line-interactive bg-accent-subtle text-link'
-                  : 'border-line text-secondary',
+                'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
+                field.key === board.groupByKey ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
               )}
             >
               {field.label}
-            </Link>
-          ))}
-        </nav>
-      ) : null}
-
-      {byStage && lookups.pipelines.length > 1 ? (
-        <nav aria-label="Pipeline" className="flex flex-wrap gap-1">
-          {lookups.pipelines.map((pipeline) => (
-            <Link
-              key={pipeline.id}
-              href={objectView(workspace, 'deal', resolved.view.slug, 'board', {
-                ...listParams,
-                pipeline: pipeline.id,
-              })}
-              aria-current={pipeline.id === pipelineId ? 'true' : undefined}
-              className={cn(
-                'rounded-hs border px-2 py-1 no-underline',
-                pipeline.id === pipelineId
-                  ? 'border-line-interactive bg-accent-subtle text-link'
-                  : 'border-line text-secondary',
-              )}
-            >
-              {pipeline.label}
             </Link>
           ))}
         </nav>
@@ -201,6 +176,18 @@ const BoardPage = async ({
         createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
         allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
+        trailing={
+          byStage && lookups.pipelines.length > 1 ? (
+            <PipelinePicker
+              currentId={pipelineId ?? ''}
+              pipelines={lookups.pipelines.map((pipeline) => ({
+                id: pipeline.id,
+                label: pipeline.label,
+                href: objectView(workspace, 'deal', resolved.view.slug, 'board', { ...listParams, pipeline: pipeline.id }),
+              }))}
+            />
+          ) : null
+        }
       />
 
       {board && board.unassigned > 0 ? (

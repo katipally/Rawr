@@ -1,7 +1,7 @@
 'use client'
 
 import { Avatar, Badge, DropdownMenu, EmptyState, cn, useToast } from '@rawr/ui'
-import { MoreHorizontal } from 'lucide-react'
+import { ChevronDown, MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -52,6 +52,32 @@ export type DealBoardProps = {
   groupByKey: string
   canWrite: boolean
 }
+
+export type PipelineOption = { id: string; label: string; href: string }
+
+/** HubSpot's pipeline switcher: one pill naming the pipeline on screen, the rest
+ *  one click away. */
+export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOption[]; currentId: string }) => (
+  <DropdownMenu
+    label="Pipeline"
+    groups={[
+      {
+        key: 'pipelines',
+        items: pipelines.map((pipeline) => ({ key: pipeline.id, label: pipeline.label, href: pipeline.href, checked: pipeline.id === currentId })),
+      },
+    ]}
+    trigger={(props) => (
+      <button
+        {...props}
+        type="button"
+        className="inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-3 text-small font-light hover:bg-fill"
+      >
+        {pipelines.find((pipeline) => pipeline.id === currentId)?.label ?? 'Pipeline'}
+        <ChevronDown aria-hidden="true" className="size-3" />
+      </button>
+    )}
+  />
+)
 
 export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoardProps) => {
   const router = useRouter()
@@ -132,11 +158,11 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
 
   return (
     // The board scrolls inside its own box; the page never scrolls sideways.
-    <div className="w-full overflow-x-auto pb-2">
+    <div className="flex min-h-0 w-full flex-1 overflow-x-auto pb-2">
       {/* Stretch, not start: a column that sizes to its own cards leaves an empty
           stage as a header-high drop target, which is the one stage somebody most
           often drags into. Equal heights also stop the board reading as ragged. */}
-      <div className="flex min-w-max items-stretch gap-3">
+      <div className="flex min-h-0 min-w-max flex-1 items-stretch gap-3">
         {columns.map((column) => (
           // A drop target. Dragging is the pointer shortcut, not the only way: the
           // same stage change is on the record page and in bulk edit, both
@@ -162,21 +188,21 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
             className={cn(
               // One comfortable reading width, whatever the column count. Growing
               // to fill made a three-column board stretch each card to 470px.
-              'flex w-[min(18rem,85vw)] shrink-0 flex-col rounded-panel border bg-fill',
-              over === column.key ? 'border-line-interactive bg-accent-subtle' : 'border-line',
+              'flex w-[min(17.5rem,85vw)] shrink-0 flex-col rounded-panel bg-canvas',
+              over === column.key && 'bg-accent-subtle',
             )}
           >
-            <header className="flex items-baseline justify-between gap-2 border-b border-divider px-3 py-2">
-              <span className="min-w-0 truncate font-medium" title={column.name}>
+            <header className="flex items-baseline gap-1 px-2 pt-4 pb-3 text-small font-semibold">
+              <span className="min-w-0 truncate" title={column.name}>
                 {column.name}
               </span>
-              <span className="shrink-0 text-secondary tabular-nums">{column.count}</span>
+              <span className="shrink-0 tabular-nums">{column.count}</span>
             </header>
 
             {/* The card list scrolls, the board does not. Height follows the
                 viewport rather than a fixed pixel count so a short laptop screen
                 and a tall monitor both show whole cards. */}
-            <ol className="flex max-h-[min(65svh,50rem)] flex-col gap-2 overflow-y-auto p-2">
+            <ol className="flex min-h-0 max-h-[min(65svh,50rem)] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2 @[60rem]:max-h-none">
               {column.cards.length === 0 ? (
                 <li className="px-1 py-2 text-secondary">
                   Nothing {groupByKey === 'stage_id' ? 'in this stage' : 'here'} yet.
@@ -200,7 +226,7 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                       }}
                       aria-busy={moving === card.id || undefined}
                       className={cn(
-                        'group rounded-hs border border-line bg-surface p-2 shadow-panel',
+                        'group rounded-panel border border-line bg-surface p-3 text-small shadow-panel',
                         canWrite && 'cursor-grab active:cursor-grabbing',
                         moving === card.id && 'opacity-60',
                         dragging === card.id && 'opacity-40',
@@ -210,7 +236,7 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                         <Link
                           href={recordPath(workspace, 'deal', card.id)}
                           title={card.displayName}
-                          className="line-clamp-2 min-w-0 flex-1 break-words font-medium"
+                          className="line-clamp-2 min-w-0 flex-1 break-words text-body"
                         >
                           {card.displayName}
                         </Link>
@@ -233,21 +259,24 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                           />
                         ) : null}
                       </div>
-                      {card.companyName ? (
-                        <p className="truncate text-secondary" title={card.companyName}>
-                          {card.companyName}
-                        </p>
-                      ) : null}
-                      <p className="flex flex-wrap items-baseline justify-between gap-x-2 tabular-nums">
-                        <span>{card.amount === null ? '—' : formatCurrency(card.amount, card.currency)}</span>
+                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '--' : formatCurrency(card.amount, card.currency)}</p>
+                      <p className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
+                        Close date:
                         {card.closeDate === null ? (
-                          <span className="text-secondary">No close date</span>
+                          <span>--</span>
                         ) : isPast(card.closeDate) ? (
                           <Badge tone="error">{formatDate(card.closeDate)}</Badge>
                         ) : (
-                          <span className="text-secondary">{formatDate(card.closeDate)}</span>
+                          <span>{formatDate(card.closeDate)}</span>
                         )}
                       </p>
+                      {card.ownerName ? <p className="truncate">Deal owner: {card.ownerName}</p> : null}
+                      {card.companyName ? (
+                        <p className="mt-2 flex items-center gap-1.5 truncate border-t border-line pt-2 text-body" title={card.companyName}>
+                          <Avatar name={card.companyName} size="sm" />
+                          <span className="truncate">{card.companyName}</span>
+                        </p>
+                      ) : null}
                       {card.nextStep ? (
                         <p className="mt-1 break-words text-small text-secondary">
                           <span className={cn(isPast(card.nextStepDate) && 'font-medium text-error')}>
@@ -272,12 +301,6 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                               : `${card.daysSinceActivity}d quiet`}
                         </span>
                       </p>
-                      {card.ownerName ? (
-                        <p className="mt-1 flex min-w-0 items-center gap-1.5 text-small text-secondary">
-                          <Avatar name={card.ownerName} size="sm" />
-                          <span className="truncate">{card.ownerName}</span>
-                        </p>
-                      ) : null}
                     </div>
                   </li>
                 ))
@@ -292,22 +315,26 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
 
             {/* The money sits at the foot of the column, under the cards it adds
                 up, rather than in the header where it reads as a title. */}
-            <footer className="mt-auto border-t border-divider px-3 py-2">
+            <footer className="mt-auto border-t border-line px-2 py-1 text-small">
               {column.totals.length === 0 ? (
-                <p className="text-small text-secondary">No amounts</p>
+                <p>
+                  <span className="font-semibold">{formatCurrency(0, 'USD')}</span> | Total amount
+                </p>
               ) : (
                 column.totals.map((total) => (
-                  <p key={total.currency} className="text-small text-secondary tabular-nums">
-                    <span className="font-medium text-body">
-                      {formatCurrency(total.total, total.currency)}
-                    </span>
+                  <div key={total.currency} className="tabular-nums">
+                    <p>
+                      <span className="font-semibold">{formatCurrency(total.total, total.currency)}</span> | Total amount
+                    </p>
                     {column.probability !== null ? (
-                      <>
-                        {' · '}
-                        {formatCurrency(total.weighted, total.currency)} weighted at {column.probability}%
-                      </>
+                      <p>
+                        <span className="font-semibold">
+                          {formatCurrency(total.weighted, total.currency)} ({column.probability}%)
+                        </span>{' '}
+                        | Weighted amount
+                      </p>
                     ) : null}
-                  </p>
+                  </div>
                 ))
               )}
             </footer>

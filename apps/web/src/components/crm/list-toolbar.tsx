@@ -4,7 +4,7 @@ import { Badge, Button, Checkbox, DropdownMenu, IconButton, Modal, TextInput, cn
 import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, Settings, SlidersHorizontal, Search, X } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -30,6 +30,9 @@ export type ListToolbarProps = {
   /** Every field the object has, for the column chooser. Ordered as the registry
    *  orders them, which is the order a person sees on the record page. */
   allColumns: { key: string; label: string }[]
+  /** Sits at the right of the row, before the column and view controls: the
+   *  board's pipeline picker. */
+  trailing?: ReactNode
 }
 
 const pill =
@@ -51,6 +54,7 @@ export const ListToolbar = ({
   canWrite,
   viewLabel,
   allColumns,
+  trailing,
 }: ListToolbarProps) => {
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -227,6 +231,7 @@ export const ListToolbar = ({
         />
 
         <span className="ml-auto flex items-center gap-1">
+          {trailing}
           {canWrite ? (
             <IconButton
               label="Save these filters and columns as a view"
