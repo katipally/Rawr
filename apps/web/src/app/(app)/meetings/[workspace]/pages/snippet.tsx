@@ -14,10 +14,13 @@ export const BookingLinkSnippet = ({
   baseUrl,
   workspace,
   slug,
+  open,
 }: {
   baseUrl: string
   workspace: string
   slug: string
+  /** Expanded from the start, for a dialog that exists only to show it. */
+  open?: boolean
 }) => {
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -37,7 +40,7 @@ export const BookingLinkSnippet = ({
   }
 
   return (
-    <details className="mt-1 text-xs">
+    <details open={open} className="mt-1 text-xs">
       <summary className="cursor-pointer text-secondary">Link and embed code</summary>
 
       <div className="mt-2 flex flex-col gap-2">

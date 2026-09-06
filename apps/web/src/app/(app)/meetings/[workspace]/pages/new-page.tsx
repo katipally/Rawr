@@ -77,7 +77,7 @@ export const NewPageButton = ({
   return (
     <>
       <Button variant="primary" type="button" onClick={() => setOpen(true)}>
-        New page
+        Create scheduling page
       </Button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="New meeting page">
