@@ -57,10 +57,10 @@ const Tiles = ({ tiles }: { tiles: Tile[] }) => (
       <li key={tile.label}>
         <Link
           href={tile.href}
-          className="flex h-full flex-col justify-between gap-1 rounded-panel border border-line bg-surface p-3 no-underline transition-colors hover:border-line-pressed hover:bg-fill"
+          className="flex h-full flex-col justify-between gap-1 rounded-panel border border-line bg-surface p-4 no-underline shadow-panel transition-colors hover:bg-fill"
         >
           <span
-            className={`text-xl leading-tight font-medium tabular-nums ${TILE_TONES[tile.tone ?? 'default']}`}
+            className={`text-2xl leading-tight font-medium tabular-nums ${TILE_TONES[tile.tone ?? 'default']}`}
           >
             {tile.value}
           </span>
@@ -84,10 +84,10 @@ const Setup = ({ items }: { items: { done: boolean; label: string; href: string 
   return (
     <details
       open={done * 2 < items.length}
-      className="rounded-panel border border-line bg-surface px-3 py-2"
+      className="rounded-panel border border-line bg-surface px-6 py-4 shadow-panel"
     >
       <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium">Set up Rawr</span>
+        <span className="font-semibold">Set up Rawr</span>
         <span className="text-small text-secondary tabular-nums">
           {done} of {items.length} done
         </span>
@@ -127,12 +127,12 @@ const Setup = ({ items }: { items: { done: boolean; label: string; href: string 
 }
 
 const Panel = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
-  <section className="flex min-w-0 flex-col rounded-panel border border-line bg-surface">
-    <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
-      <h2 className="font-medium">{title}</h2>
+  <section className="flex min-w-0 flex-col rounded-panel border border-line bg-surface shadow-panel">
+    <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
+      <h2 className="text-base font-semibold">{title}</h2>
       {action}
     </header>
-    <div className="min-w-0 p-3">{children}</div>
+    <div className="min-w-0 px-6 pb-6">{children}</div>
   </section>
 )
 
@@ -208,12 +208,22 @@ const HomePage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-lg font-medium">Home</h1>
-        <p className="text-secondary">
-          {session.workspaceName}, {formatDate(new Date())}. Every number opens the list behind it.
-        </p>
+      {/* HubSpot's dashboard header: a white strip across the top of the canvas. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-6 py-4">
+        <div>
+          <h1 className="text-xl font-medium">Home</h1>
+          <p className="text-secondary">
+            {session.workspaceName}, {formatDate(new Date())}. Every number opens the list behind it.
+          </p>
+        </div>
+        <Link
+          href={objectView(workspace, 'deal', 'all', 'board')}
+          className="inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
+        >
+          Open the board
+        </Link>
       </div>
+      <div className="flex flex-col gap-4 px-2 pb-2 sm:px-4 sm:pb-4">
 
       {error ? (
         <Alert>
@@ -222,7 +232,7 @@ const HomePage = async ({
       ) : null}
 
       {session.role === 'viewer' ? (
-        <section className="rounded-panel border border-line-interactive bg-accent-subtle px-3 py-2">
+        <section className="rounded-panel border border-line-interactive bg-accent-subtle px-6 py-4">
           <p className="font-medium">You are in as a viewer.</p>
           <p className="text-secondary">
             Everything here is readable and nothing is editable yet. That is how every new
@@ -435,6 +445,7 @@ const HomePage = async ({
             </ul>
           )}
         </Panel>
+      </div>
       </div>
     </div>
   )

@@ -246,7 +246,7 @@ const RecordPage = async ({
     // column when there is no room, measured against the shell's card rather
     // than the window, because collapsing the rail widens the page without the
     // window changing size.
-    <div className="grid gap-4 @4xl:grid-cols-[minmax(0,25.5rem)_minmax(0,1fr)_minmax(0,26.25rem)]">
+    <div className="grid gap-4 p-2 @4xl:grid-cols-[minmax(0,25.5rem)_minmax(0,1fr)_minmax(0,26.25rem)] sm:p-4">
       <div className="flex min-w-0 flex-col gap-4">
         <div className="rounded-panel border border-line bg-surface shadow-panel">
           <div className="flex items-center justify-between gap-2 px-4 pt-3">

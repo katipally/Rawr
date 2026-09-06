@@ -79,6 +79,7 @@ const RAIL_KEY = 'rawr.rail.expanded'
 const CLOSE_DELAY_MS = 160
 /** HubSpot opens the flyout 42px above the icon that owns it. */
 const FLYOUT_LIFT_PX = 42
+const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/']
 
 const CREATE_ICONS: Record<string, typeof Contact> = {
   contact: Contact,
@@ -144,9 +145,9 @@ const Shell = ({
   const railRef = useRef<HTMLElement>(null)
 
   const inSettings = here.startsWith('/settings')
-  /** HubSpot frames every screen as one white card except a record, which is
-   *  three columns of cards straight on the canvas. */
-  const onCanvas = here.includes('/record/')
+  /** HubSpot frames every screen as one white card except a record, a dashboard
+   *  and Home, which are cards straight on the canvas. */
+  const onCanvas = CANVAS_ROUTES.some((route) => here.includes(route))
   /** The last page outside settings, so Back returns where the person came from
    *  rather than always to Home. */
   const cameFrom = useRef(homeHref)
@@ -599,7 +600,7 @@ const Shell = ({
             This is the one scrolling box on the page. */}
         <main
           aria-busy={pendingHref ? 'true' : undefined}
-          className="relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-canvas p-2 sm:p-4"
+          className={cn('relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-canvas', !onCanvas && 'p-2 sm:p-4')}
         >
           {/* The card is the frame and the scroller both: bounded to the window
               so it never grows past its own border, and scrolled inside so tall
