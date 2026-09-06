@@ -51,7 +51,7 @@ const SitesPage = async () => {
 
       <section className="flex flex-col gap-2">
         <div>
-          <h2 className="font-medium">What the collector refused</h2>
+          <h2 className="text-base font-semibold">What the collector refused</h2>
           <p className="text-secondary">
             Aggregated per day, so a loop firing the same rejected event ten thousand times is one
             row rather than ten thousand.

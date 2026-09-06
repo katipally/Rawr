@@ -55,8 +55,8 @@ export const SettingsNav = ({ groups, backHref }: { groups: SettingsGroup[]; bac
                       href={section.href}
                       aria-current={current ? 'page' : undefined}
                       className={cn(
-                        'block truncate rounded-hs px-3 py-[0.4375rem] font-light text-body no-underline',
-                        current ? 'bg-canvas' : 'hover:bg-fill',
+                        'block truncate border-l-[3px] py-[0.4375rem] pr-3 pl-[calc(0.75rem-3px)] font-light text-body no-underline',
+                        current ? 'border-body bg-canvas' : 'border-transparent hover:bg-fill',
                       )}
                     >
                       {section.label}

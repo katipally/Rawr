@@ -370,7 +370,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
       )}
 
       <section className="flex flex-col gap-2">
-        <h3 className="font-medium">What they did</h3>
+        <h3 className="text-base font-semibold">What they did</h3>
         {runs.length === 0 ? (
           <p className="text-secondary">Nothing has fired yet.</p>
         ) : (

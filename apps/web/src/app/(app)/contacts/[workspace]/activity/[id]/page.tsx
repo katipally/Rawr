@@ -92,8 +92,8 @@ const PageViewScreen = async ({
         </section>
       ) : null}
 
-      <section className="rounded-panel border border-line bg-surface">
-        <h2 className="border-b border-divider px-3 py-2 font-medium">
+      <section className="rounded-panel border border-line bg-surface shadow-panel">
+        <h2 className="px-6 pt-6 pb-4 text-base font-semibold">
           {view.session
             ? `This visit · ${view.session.pageCount.toLocaleString()} page${view.session.pageCount === 1 ? '' : 's'}`
             : 'This visit'}

@@ -307,7 +307,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
       {deleted.length > 0 ? (
         <section className="flex flex-col gap-2">
           <div>
-            <h3 className="font-medium">Deleted properties</h3>
+            <h3 className="text-base font-semibold">Deleted properties</h3>
             <p className="text-secondary">
               Hidden everywhere, data untouched. Restore puts one back exactly as it was. Purging
               strips the value out of every record and cannot be undone.

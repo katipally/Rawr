@@ -46,9 +46,9 @@ const zones = (): string[] => {
 }
 
 const Panel = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="rounded-panel border border-line bg-surface">
-    <h3 className="border-b border-divider px-3 py-2 font-medium">{title}</h3>
-    <div className="flex flex-col gap-3 px-3 py-3">{children}</div>
+  <section className="rounded-panel border border-line bg-surface shadow-panel">
+    <h3 className="px-6 pt-6 pb-4 text-base font-semibold">{title}</h3>
+    <div className="flex flex-col gap-3 px-6 pb-6">{children}</div>
   </section>
 )
 

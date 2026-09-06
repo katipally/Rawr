@@ -97,10 +97,10 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
       </form>
 
       {pipelines.map((pipeline) => (
-        <section key={pipeline.id} className="rounded-panel border border-line bg-surface">
-          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-divider px-3 py-2">
+        <section key={pipeline.id} className="rounded-panel border border-line bg-surface shadow-panel">
+          <header className="flex flex-wrap items-center justify-between gap-2 px-6 pt-6 pb-4">
             <h3 className="flex flex-wrap items-baseline gap-2">
-              <span className="font-medium">{pipeline.name}</span>
+              <span className="text-base font-semibold">{pipeline.name}</span>
               <span className="text-small text-secondary">
                 {pipeline.stages.length} stage{pipeline.stages.length === 1 ? '' : 's'} ·{' '}
                 {pipeline.dealCount.toLocaleString()} deal{pipeline.dealCount === 1 ? '' : 's'}
@@ -400,8 +400,8 @@ const StageForm = ({
 }
 
 const ReadOnlyPipeline = ({ pipeline }: { pipeline: PipelineRow }) => (
-  <section className="rounded-panel border border-line bg-surface">
-    <header className="border-b border-divider px-3 py-2 font-medium">{pipeline.name}</header>
+  <section className="rounded-panel border border-line bg-surface shadow-panel">
+    <header className="px-6 pt-6 pb-4 text-base font-semibold">{pipeline.name}</header>
     <ul className="flex flex-col">
       {pipeline.stages.map((stage) => (
         <li

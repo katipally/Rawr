@@ -245,7 +245,7 @@ export const MailboxList = ({
 
       <section className="flex flex-col gap-2">
         <div className="max-w-2xl">
-          <h3 className="font-medium">Never read these</h3>
+          <h3 className="text-base font-semibold">Never read these</h3>
           <p className="text-secondary">
             An address or a domain. Applied before anything is stored, so a match is never in the
             database at all. Threads where everybody is at {internalDomain}, and anything from a
