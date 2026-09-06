@@ -1,4 +1,4 @@
-import { readReportDashboard } from '@rawr/db'
+import { listReportDashboards, readReportDashboard } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -28,7 +28,7 @@ const DashboardScreen = async ({
   const { workspace, id } = await params
   const range = rangeFrom(await searchParams)
   const ctx = contextFrom(session)
-  const found = await readReportDashboard(ctx, id)
+  const [found, all] = await Promise.all([readReportDashboard(ctx, id), listReportDashboards(ctx)])
 
   if (!found) {
     return (
@@ -54,8 +54,7 @@ const DashboardScreen = async ({
   const retired = found.cards.length - cards.length
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <ReportsHeader workspace={workspace} current="dashboards" from={range.fromDay} to={range.toDay} />
+    <div className="flex min-w-0 flex-col">
       <DashboardView
         workspace={workspace}
         from={range.fromDay}
@@ -70,6 +69,7 @@ const DashboardScreen = async ({
           ownerName: found.ownerName,
         }}
         rendered={cards}
+        all={all.map((row) => ({ id: row.id, name: row.name }))}
         canEdit={found.ownerId === null || found.ownerId === session.userId || session.role === 'admin'}
       />
     </div>

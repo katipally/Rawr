@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, EmptyState, useToast } from '@rawr/ui'
+import { Badge, Button, DataTable, EmptyState, useToast, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -46,11 +46,34 @@ export const DashboardList = ({ workspace, rows, catalogue, from, to }: Dashboar
     }
   }
 
+  const columns: Column<DashboardSummary>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 320,
+      render: (row) => (
+        <Link href={dashboardPath(workspace, row.id, { from, to })} className="font-semibold" onClick={(event) => event.stopPropagation()}>
+          {row.name}
+        </Link>
+      ),
+    },
+    { key: 'owner', header: 'Owner', width: 180, render: (row) => (row.mine ? 'You' : (row.ownerName ?? <span className="text-secondary">Workspace</span>)) },
+    {
+      key: 'access',
+      header: 'Access',
+      width: 120,
+      render: (row) => (row.isShared ? <Badge tone="info">Shared</Badge> : <Badge tone="neutral">Private</Badge>),
+    },
+    { key: 'cards', header: 'Reports', width: 100, align: 'right', render: (row) => row.cards.length },
+    { key: 'updated', header: 'Last updated', width: 200, render: (row) => formatDateTime(row.updatedAt) },
+  ]
+
   return (
     <div className="flex flex-col gap-3">
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-secondary">{rows.length === 1 ? '1 dashboard' : `${rows.length} dashboards`}</p>
         <Button variant="primary" onClick={() => setComposing(true)}>
-          New dashboard
+          Create dashboard
         </Button>
       </div>
 
@@ -60,29 +83,13 @@ export const DashboardList = ({ workspace, rows, catalogue, from, to }: Dashboar
           description="Pick the figures you check every Monday and put them on one screen."
         />
       ) : (
-        <ul className="grid gap-3 @2xl:grid-cols-2">
-          {rows.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3"
-            >
-              <div className="flex flex-wrap items-baseline gap-2">
-                <Link
-                  href={dashboardPath(workspace, row.id, { from, to })}
-                  className="font-semibold text-link"
-                >
-                  {row.name}
-                </Link>
-                {row.isShared ? <Badge tone="info">Shared</Badge> : <Badge tone="neutral">Private</Badge>}
-              </div>
-              <p className="text-small text-secondary">
-                {row.cards.length === 1 ? '1 card' : `${row.cards.length} cards`}
-                {row.ownerName ? ` · ${row.mine ? 'yours' : row.ownerName}` : ''} · changed{' '}
-                {formatDateTime(row.updatedAt)}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          caption="Dashboards"
+          onRowClick={(row) => router.push(dashboardPath(workspace, row.id, { from, to }))}
+        />
       )}
 
       <CardPicker

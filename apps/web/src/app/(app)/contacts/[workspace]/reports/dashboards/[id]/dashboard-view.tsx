@@ -1,10 +1,12 @@
 'use client'
 
-import { Alert, Badge, Button, Card, EmptyState, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Card, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
+import { ChevronDown } from 'lucide-react'
+import { RangePicker } from '~/components/reports/range-picker.tsx'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { reportsPath } from '~/lib/links.ts'
+import { dashboardPath, reportsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CardPicker, type CardChoice } from '../card-picker.tsx'
 
@@ -22,6 +24,8 @@ export type DashboardViewProps = {
   retired: number
   dashboard: { id: string; name: string; isShared: boolean; cards: string[]; ownerName: string | null }
   rendered: RenderedCard[]
+  /** Every dashboard this person can open, for the picker beside the name. */
+  all: { id: string; name: string }[]
   canEdit: boolean
 }
 
@@ -33,6 +37,7 @@ export const DashboardView = ({
   retired,
   dashboard,
   rendered,
+  all,
   canEdit,
 }: DashboardViewProps) => {
   const router = useRouter()
@@ -65,22 +70,42 @@ export const DashboardView = ({
     }
   }
 
+  const pill =
+    'inline-flex h-control items-center gap-1 rounded-pill border border-line-strong bg-surface px-4 text-small font-light text-body no-underline hover:bg-fill'
+
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Link
-          href={reportsPath(workspace, { tab: 'dashboards', from, to })}
-          className="text-sm font-semibold text-link"
-        >
-          Dashboards
-        </Link>
-        <span className="text-secondary">/</span>
-        <h2 className="font-medium">{dashboard.name}</h2>
-        {dashboard.isShared ? <Badge tone="info">Shared</Badge> : <Badge tone="neutral">Private</Badge>}
-        {canEdit ? (
-          <div className="ml-auto flex gap-2">
-            <Button onClick={() => setEditing(true)}>Change cards</Button>
-            {confirming ? (
+    <div className="flex min-w-0 flex-col gap-4">
+      {/* HubSpot's dashboard header: the name is a picker across every dashboard,
+          and the actions sit at the right of a white strip over the canvas. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-6 py-4">
+        <DropdownMenu
+          label="Switch dashboard"
+          align="start"
+          groups={[
+            {
+              key: 'dashboards',
+              items: all.map((row) => ({
+                key: row.id,
+                label: row.name,
+                href: dashboardPath(workspace, row.id, { from, to }),
+                checked: row.id === dashboard.id,
+              })),
+            },
+          ]}
+          trigger={(props) => (
+            <button {...props} type="button" className="flex min-w-0 items-center gap-2 rounded-hs text-xl font-normal hover:bg-fill">
+              <h1 className="min-w-0 truncate">{dashboard.name}</h1>
+              {dashboard.isShared ? <Badge tone="info">Shared</Badge> : <Badge tone="neutral">Private</Badge>}
+              <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+            </button>
+          )}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={reportsPath(workspace, { tab: 'dashboards', from, to })} className="px-2 font-semibold">
+            Manage dashboards
+          </Link>
+          {canEdit ? (
+            confirming ? (
               <>
                 <Button variant="destructive" busy={busy} onClick={() => void remove()}>
                   Delete for good
@@ -88,14 +113,29 @@ export const DashboardView = ({
                 <Button onClick={() => setConfirming(false)}>Keep it</Button>
               </>
             ) : (
-              <Button variant="tertiary" onClick={() => setConfirming(true)}>
-                Delete
-              </Button>
-            )}
-          </div>
-        ) : null}
+              <DropdownMenu
+                label="Actions"
+                groups={[
+                  { key: 'edit', items: [{ key: 'cards', label: 'Change cards', onSelect: () => setEditing(true) }] },
+                  { key: 'danger', items: [{ key: 'delete', label: 'Delete dashboard', destructive: true, onSelect: () => setConfirming(true) }] },
+                ]}
+                trigger={(props) => (
+                  <button {...props} type="button" className={pill}>
+                    Actions
+                    <ChevronDown aria-hidden="true" className="size-3.5" />
+                  </button>
+                )}
+              />
+            )
+          ) : null}
+        </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 px-6">
+        <RangePicker from={from} to={to} />
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-3 px-6 pb-6">
       {retired > 0 ? (
         <Alert tone="warning">
           {retired === 1
@@ -172,6 +212,8 @@ export const DashboardView = ({
           ))}
         </div>
       )}
+
+      </div>
 
       <CardPicker
         open={editing}

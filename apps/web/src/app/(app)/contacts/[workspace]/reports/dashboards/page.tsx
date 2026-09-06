@@ -1,5 +1,4 @@
 import { listReportDashboards } from '@rawr/db'
-import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { cardCatalogue } from '~/server/dashboard-cards.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -30,23 +29,21 @@ const DashboardsScreen = async ({
     <div className="flex min-w-0 flex-col gap-4">
       <ReportsHeader workspace={workspace} current="dashboards" from={range.fromDay} to={range.toDay} />
 
-      <Card title="Dashboards">
-        <DashboardList
-          workspace={workspace}
-          from={range.fromDay}
-          to={range.toDay}
-          catalogue={cardCatalogue()}
-          rows={rows.map((row) => ({
-            id: row.id,
-            name: row.name,
-            ownerName: row.ownerName,
-            isShared: row.isShared,
-            cards: row.cards,
-            updatedAt: row.updatedAt.toISOString(),
-            mine: row.ownerId === session.userId,
-          }))}
-        />
-      </Card>
+      <DashboardList
+        workspace={workspace}
+        from={range.fromDay}
+        to={range.toDay}
+        catalogue={cardCatalogue()}
+        rows={rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          ownerName: row.ownerName,
+          isShared: row.isShared,
+          cards: row.cards,
+          updatedAt: row.updatedAt.toISOString(),
+          mine: row.ownerId === session.userId,
+        }))}
+      />
     </div>
   )
 }
