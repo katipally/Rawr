@@ -37,7 +37,7 @@ export const PageHeader = ({ title, lead, why, action, as = 'h1', className }: P
     <div className={cn('flex flex-wrap items-start justify-between gap-x-4 gap-y-2', className)}>
       <div className="min-w-0">
         <div className="flex items-center gap-1">
-          <Heading className={as === 'h1' ? 'text-lg font-medium' : 'text-base font-medium'}>{title}</Heading>
+          <Heading className={as === 'h1' ? 'text-2xl font-normal' : 'text-base font-semibold'}>{title}</Heading>
           {why ? (
             <>
               <IconButton

@@ -3,7 +3,6 @@
 import {
   Building2,
   ChevronDown,
-  ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
   CircleHelp,
@@ -79,7 +78,7 @@ const RAIL_KEY = 'rawr.rail.expanded'
 const CLOSE_DELAY_MS = 160
 /** HubSpot opens the flyout 42px above the icon that owns it. */
 const FLYOUT_LIFT_PX = 42
-const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/']
+const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/', '/settings']
 
 const CREATE_ICONS: Record<string, typeof Contact> = {
   contact: Contact,
@@ -144,17 +143,9 @@ const Shell = ({
   const closeTimer = useRef<number | null>(null)
   const railRef = useRef<HTMLElement>(null)
 
-  const inSettings = here.startsWith('/settings')
   /** HubSpot frames every screen as one white card except a record, a dashboard
    *  and Home, which are cards straight on the canvas. */
   const onCanvas = CANVAS_ROUTES.some((route) => here.includes(route))
-  /** The last page outside settings, so Back returns where the person came from
-   *  rather than always to Home. */
-  const cameFrom = useRef(homeHref)
-  useEffect(() => {
-    if (!pathname.startsWith('/settings')) cameFrom.current = pathname
-  }, [pathname])
-
   useEffect(() => setExpanded(read(RAIL_KEY) === '1'), [])
 
   // Neither the sheet nor a flyout survives a navigation, or the new page loads
@@ -415,36 +406,26 @@ const Shell = ({
         {/* The logo owns the rail's width, so the bar's contents start level
             with the page card below. */}
         <div className="flex w-rail shrink-0 items-center justify-center">
-          {inSettings ? (
-            <Link href={cameFrom.current} aria-label="Back" title="Back" className={cn('grid size-8 place-items-center rounded-pill', topbarIcon)}>
-              <ChevronLeft aria-hidden="true" className="size-4" />
-            </Link>
-          ) : (
-            <>
-              <button
-                type="button"
-                aria-expanded={sheetOpen}
-                aria-controls="primary-nav"
-                aria-label="Menu"
-                onClick={() => setSheetOpen((value) => !value)}
-                className={cn('grid size-8 place-items-center rounded-pill md:hidden', topbarIcon)}
-              >
-                <PanelLeft aria-hidden="true" className="size-4" />
-              </button>
-              <Link href={homeHref} aria-label="Rawr home" className="hidden rounded-hs p-1.5 md:block">
-                <span aria-hidden="true" className="grid size-6 place-items-center rounded-hs bg-brand font-semibold text-inverse">
-                  R
-                </span>
-              </Link>
-            </>
-          )}
+          <button
+            type="button"
+            aria-expanded={sheetOpen}
+            aria-controls="primary-nav"
+            aria-label="Menu"
+            onClick={() => setSheetOpen((value) => !value)}
+            className={cn('grid size-8 place-items-center rounded-pill md:hidden', topbarIcon)}
+          >
+            <PanelLeft aria-hidden="true" className="size-4" />
+          </button>
+          <Link href={homeHref} aria-label="Rawr home" className="hidden rounded-hs p-1.5 md:block">
+            <span aria-hidden="true" className="grid size-6 place-items-center rounded-hs bg-brand font-semibold text-inverse">
+              R
+            </span>
+          </Link>
         </div>
 
-        {inSettings ? <h1 className="min-w-0 truncate font-medium">Settings</h1> : null}
+        {search ? <div className="w-full min-w-0 max-w-[34.375rem]">{search}</div> : null}
 
-        {search && !inSettings ? <div className="w-full min-w-0 max-w-[34.375rem]">{search}</div> : null}
-
-        {create.length > 0 && !inSettings ? (
+        {create.length > 0 ? (
           <DropdownMenu
             label="Create"
             groups={[
@@ -480,7 +461,7 @@ const Shell = ({
           <IconButton
             label="Settings"
             icon={<Settings className="size-4" />}
-            className={cn(topbarIcon, inSettings && 'bg-nav-active')}
+            className={cn(topbarIcon, here.startsWith('/settings') && 'bg-nav-active')}
             onClick={() => window.location.assign(settingsHref)}
           />
 
@@ -520,9 +501,8 @@ const Shell = ({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* Wide screens: the rail. Hidden inside settings, which is its own place
-            with its own navigation, exactly as HubSpot does it. */}
-        {inSettings ? null : (
+        {/* Wide screens: the rail. */}
+        {(
           <aside
             className={cn(
               'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
