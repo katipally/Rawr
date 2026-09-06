@@ -201,7 +201,7 @@ const HomePage = async ({
     { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(workspace, 'deal', 'all', 'board') },
     { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(workspace, 'deal', 'all', 'board') },
     { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(workspace, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
-    { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(workspace, { filter: 'mine' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
+    { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(workspace, { mine: '1' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
     { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(workspace, 'contact', 'all', 'list', { sort: '-created_at' }) },
     { label: 'Submissions to review', value: board.quarantined.toLocaleString(), href: submissionsPath(workspace, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) },
   ]
@@ -393,7 +393,7 @@ const HomePage = async ({
           )}
         </Panel>
 
-        <Panel title="My tasks" action={<Link href={tasksPath(workspace, { filter: 'mine' })}>All mine</Link>}>
+        <Panel title="My tasks" action={<Link href={tasksPath(workspace, { mine: '1' })}>All mine</Link>}>
           {myTasks.length === 0 ? (
             <p className="text-secondary">No open tasks are assigned to you.</p>
           ) : (

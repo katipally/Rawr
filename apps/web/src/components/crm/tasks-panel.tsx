@@ -1,12 +1,13 @@
 'use client'
 
-import { Button, EmptyState, IconButton, Select, TextInput, cn, useToast } from '@rawr/ui'
+import { EmptyState, IconButton, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { TaskForm } from './task-form.tsx'
 import { formatDate, isPast } from './value.tsx'
 
 export type TaskRow = {
@@ -46,15 +47,7 @@ export const TasksPanel = ({
 }: TasksPanelProps) => {
   const router = useRouter()
   const toast = useToast()
-  const titleField = useRef<HTMLInputElement>(null)
-  const [title, setTitle] = useState('')
-  const [dueDate, setDueDate] = useState('')
-  const [assigneeId, setAssigneeId] = useState('')
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (startNew) titleField.current?.focus()
-  }, [startNew])
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -69,18 +62,6 @@ export const TasksPanel = ({
     }
   }
 
-  const create = () =>
-    run(async () => {
-      await api.crm.tasks.create.mutate({
-        title,
-        dueDate: dueDate || null,
-        assigneeId: assigneeId || null,
-        entity: entity ?? null,
-      })
-      setTitle('')
-      setDueDate('')
-    }, 'Task created.')
-
   const open = rows.filter((row) => row.status === 'open')
   const done = rows.filter((row) => row.status === 'done')
 
@@ -91,45 +72,12 @@ export const TasksPanel = ({
       </h3>
 
       {canWrite ? (
-        <form
+        <TaskForm
+          assignees={assignees}
+          entity={entity}
+          autoFocus={startNew}
           className="flex flex-wrap items-end gap-2 border-b border-divider px-6 py-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void create()
-          }}
-        >
-          <TextInput
-            ref={titleField}
-            value={title}
-            aria-label="Task title"
-            placeholder="What needs doing"
-            onChange={(event) => setTitle(event.target.value)}
-            className="min-w-40 flex-1"
-          />
-          <TextInput
-            type="date"
-            value={dueDate}
-            aria-label="Due date"
-            onChange={(event) => setDueDate(event.target.value)}
-            className="w-auto"
-          />
-          <Select
-            aria-label="Assignee"
-            value={assigneeId}
-            onChange={(event) => setAssigneeId(event.target.value)}
-            className="w-auto min-w-32"
-          >
-            <option value="">Me</option>
-            {assignees.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.label}
-              </option>
-            ))}
-          </Select>
-          <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
-            Add task
-          </Button>
-        </form>
+        />
       ) : null}
 
       {rows.length === 0 ? (

@@ -181,7 +181,11 @@ export const integrationsPath = (kind?: string): string =>
 export const segmentsPath = (workspace: string, id?: string): string =>
   id ? `/${CRM_ROOT}/${workspace}/segments/${id}` : `/${CRM_ROOT}/${workspace}/segments`
 
-export const tasksPath = (workspace: string, params: { filter?: string } = {}): string =>
+export type TaskView = 'all' | 'today' | 'overdue' | 'upcoming' | 'done'
+export const tasksPath = (
+  workspace: string,
+  params: { view?: TaskView; mine?: '1'; q?: string; new?: '1' } = {},
+): string =>
   `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
 
 /** The shared inbox. Every filter is in the address, so a filtered view pastes

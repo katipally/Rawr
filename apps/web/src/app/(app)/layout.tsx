@@ -174,7 +174,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           { key: 'contact', label: 'Contact', href: createRecordPath(workspace, 'contact'), entity: 'contact' },
           { key: 'company', label: 'Company', href: createRecordPath(workspace, 'company'), entity: 'company' },
           { key: 'deal', label: 'Deal', href: createRecordPath(workspace, 'deal'), entity: 'deal' },
-          { key: 'task', label: 'Task', href: tasksPath(workspace), entity: 'task' },
+          { key: 'task', label: 'Task', href: tasksPath(workspace, { new: '1' }), entity: 'task' },
         ].flatMap(({ entity, ...option }) =>
           canWrite(session.role as Role, entity) ? [option] : [],
         )}

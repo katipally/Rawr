@@ -78,9 +78,10 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
       if (url.hash && there === here) return
       // The public and API routes are not part of the app router tree.
       if (/^\/(api|b|f|form|c|e|w|t|u|invite|embed\.js|booking\.js)(\/|$)/.test(url.pathname)) return
+      // Next's own Link handler sees defaultPrevented and does not push a second
+      // time. Propagation carries on so the anchor's React handlers, a menu
+      // closing itself for one, still run.
       event.preventDefault()
-      // Stop Next's own Link handler from pushing a second time.
-      event.stopPropagation()
       navigate(there + url.hash)
     }
     document.addEventListener('click', onClick, true)

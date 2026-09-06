@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, lt, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, isNotNull, lt, sql } from 'drizzle-orm'
 import { task } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { recordActivity, type EntityRef } from './activity.ts'
@@ -55,6 +55,8 @@ export type TaskFilter = {
   status?: 'open' | 'done' | undefined
   assigneeId?: string | undefined
   overdueOnly?: boolean | undefined
+  /** Open tasks due today, or open tasks due after today. */
+  due?: 'today' | 'upcoming' | undefined
   entity?: EntityRef | undefined
 }
 
@@ -71,6 +73,8 @@ export const listTasks = async (ctx: WorkspaceContext, filter: TaskFilter = {}):
           filter.overdueOnly
             ? and(eq(task.status, 'open'), isNotNull(task.dueDate), lt(task.dueDate, sql`current_date`))
             : undefined,
+          filter.due === 'today' ? and(eq(task.status, 'open'), eq(task.dueDate, sql`current_date`)) : undefined,
+          filter.due === 'upcoming' ? and(eq(task.status, 'open'), gt(task.dueDate, sql`current_date`)) : undefined,
           filter.entity
             ? and(eq(task.entityType, filter.entity.entityType), eq(task.entityId, filter.entity.entityId))
             : undefined,
