@@ -256,7 +256,7 @@ export const Timeline = ({
   return (
     <div className="flex flex-col gap-3">
       {canWrite ? (
-        <div className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
+        <div className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-4 shadow-panel">
           <div className="flex flex-wrap gap-1">
             {LOGGABLE.map((entry) => (
               <Button
@@ -331,10 +331,8 @@ export const Timeline = ({
                 aria-pressed={selected.includes(type)}
                 onClick={() => toggle(type)}
                 className={cn(
-                  'rounded-hs border px-2 py-0.5 text-small',
-                  selected.includes(type)
-                    ? 'border-line-interactive bg-accent-subtle text-link'
-                    : 'border-line text-secondary hover:bg-fill-hover',
+                  'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light',
+                  selected.includes(type) ? 'bg-fill-hover text-body' : 'bg-surface text-body hover:bg-fill',
                 )}
               >
                 {TYPE_LABELS[type] ?? type} {counts[type]}
@@ -361,9 +359,9 @@ export const Timeline = ({
       ) : (
         <ol className="flex flex-col gap-2">
           {rows.map((entry) => (
-            <li key={entry.id} className="rounded-panel border border-line bg-surface p-3">
+            <li key={entry.id} className="rounded-panel border border-line bg-surface p-4">
               <p className="flex flex-wrap items-baseline gap-x-2">
-                <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">
+                <span className="font-semibold">
                   {TYPE_LABELS[entry.type] ?? entry.type}
                 </span>
                 <span className="min-w-0 break-words font-medium">

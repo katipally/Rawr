@@ -22,13 +22,13 @@ export type MailPanelProps = {
  *  outlives the mailbox that brought it in. Which threads are visible is decided
  *  by each mailbox's own sharing setting, in SQL. */
 export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) => (
-  <section className="rounded-panel border border-line bg-surface">
-    <header className="border-b border-divider px-3 py-2">
-      <h3 className="font-medium">Email ({threads.length})</h3>
+  <section className="rounded-panel border border-line bg-surface shadow-panel">
+    <header className="px-6 pt-6 pb-4">
+      <h3 className="text-base font-semibold">Email ({threads.length})</h3>
     </header>
 
     {engagement.lastContactedAt || engagement.lastRepliedAt ? (
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-divider px-3 py-2 text-small">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-divider px-6 py-2 text-small">
         <dt className="text-secondary">Last contacted</dt>
         <dd className="tabular-nums">{engagement.lastContactedAt ? formatDate(engagement.lastContactedAt) : '—'}</dd>
         <dt className="text-secondary">Last reply</dt>
@@ -48,7 +48,7 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
     ) : null}
 
     {threads.length === 0 ? (
-      <p className="px-3 py-3 text-secondary">
+      <p className="px-6 py-3 text-secondary">
         No threads with {contactName}. Mail appears here once somebody who has corresponded with
         them connects their mailbox, and only for threads that are not internal, personal or
         excluded.
@@ -88,7 +88,7 @@ const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
         type="button"
         onClick={() => void toggle()}
         aria-expanded={open}
-        className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-fill-hover"
+        className="flex w-full flex-col items-start gap-0.5 px-6 py-2 text-left hover:bg-fill-hover"
       >
         <span className="break-words font-medium">{thread.subject ?? '(no subject)'}</span>
         <span className="text-small text-secondary tabular-nums">
@@ -98,7 +98,7 @@ const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
       </button>
 
       {open ? (
-        <div className="flex flex-col gap-2 border-t border-divider bg-fill px-3 py-2">
+        <div className="flex flex-col gap-2 border-t border-divider bg-fill px-6 py-2">
           {loaded.state === 'loading' ? <Spinner /> : null}
           {loaded.state === 'error' ? (
             <p role="alert" className="text-small text-error">

@@ -1,9 +1,9 @@
 'use client'
 
 import { Button, IconButton, cn, useToast } from '@rawr/ui'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, type EditableField } from './field-input.tsx'
@@ -113,25 +113,27 @@ export const PropertyPanel = ({
         if (sectionFields.length === 0) return null
 
         return (
-          <section key={section.title} className="rounded-panel border border-line bg-surface">
-            <h3>
+          <section key={section.title} className="rounded-panel border border-line bg-surface shadow-panel">
+            <h3 className={cn('px-6 pt-6', isCollapsed ? 'pb-6' : 'pb-4')}>
               <button
                 type="button"
                 aria-expanded={!isCollapsed}
                 onClick={() =>
                   setCollapsed((current) => ({ ...current, [section.title]: !isCollapsed }))
                 }
-                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left font-medium"
+                className="flex w-full items-center gap-2 text-left text-base font-semibold"
               >
+                {isCollapsed ? (
+                  <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+                ) : (
+                  <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+                )}
                 {section.title}
-                <span aria-hidden className="text-secondary">
-                  {isCollapsed ? '▸' : '▾'}
-                </span>
               </button>
             </h3>
 
             {isCollapsed ? null : (
-              <dl className="flex flex-col gap-0 border-t border-divider px-3 py-2">
+              <dl className="flex flex-col gap-4 px-6 pb-6">
                 {sectionFields.map((field) => {
                   const isEditing = editing === field.key
                   const error = errors[field.key]
@@ -143,17 +145,9 @@ export const PropertyPanel = ({
                   // using the whole panel. Every other type stays in the grid,
                   // where a label beside its value is what makes the panel
                   // scannable.
-                  const stacked = field.type === 'rich_text'
-
                   return (
-                    <div
-                      key={field.key}
-                      className={cn(
-                        'grid grid-cols-1 gap-x-3 py-1',
-                        !stacked && 'sm:grid-cols-[minmax(0,10rem)_1fr]',
-                      )}
-                    >
-                      <dt className="min-w-0 text-secondary">{field.label}</dt>
+                    <div key={field.key} className="flex min-w-0 flex-col">
+                      <dt className="min-w-0 text-small text-secondary">{field.label}</dt>
                       <dd className="min-w-0">
                         {isEditing ? (
                           <div className="flex flex-col gap-1">
@@ -199,7 +193,7 @@ export const PropertyPanel = ({
                                 type={field.type}
                                 value={local[field.key]}
                                 label={labels[field.key]}
-                                placeholder={editable ? 'Empty' : '—'}
+                                placeholder="--"
                               />
                             </div>
                             {editable ? (
@@ -223,12 +217,8 @@ export const PropertyPanel = ({
                               setDraft(local[field.key] ?? '')
                             }}
                             className={cn(
-                              'group w-full min-w-0 rounded-hs border border-transparent px-1.5 py-0.5 text-left',
-                              // The dashed underline is the whole affordance: a
-                              // value that only looks editable on hover is a value
-                              // nobody finds out they can edit.
-                              editable &&
-                                'underline decoration-line decoration-dashed underline-offset-4 hover:border-line hover:bg-fill-hover',
+                              'group -mx-1.5 w-[calc(100%+0.75rem)] min-w-0 rounded-hs border border-transparent px-1.5 py-0.5 text-left',
+                              editable && 'hover:border-line hover:bg-fill',
                               !editable && 'cursor-default',
                             )}
                           >
@@ -237,7 +227,7 @@ export const PropertyPanel = ({
                               value={local[field.key]}
                               label={labels[field.key]}
                               currency={String(local.currency ?? 'USD')}
-                              placeholder={editable ? 'Empty' : '—'}
+                              placeholder="--"
                             />
                             {editable ? (
                               <span

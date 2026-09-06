@@ -1,13 +1,13 @@
 'use client'
 
 import { Badge, Button, Card, IconButton, Select, TextInput, useToast } from '@rawr/ui'
-import { ArrowDownUp, Plus, Search } from 'lucide-react'
+import { ArrowDownUp, ExternalLink, Plus, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { shortName } from '~/components/crm/value.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
-import { recordPath } from '~/lib/links.ts'
+import { encodeFilters, objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -120,38 +120,37 @@ export const AssociationRail = ({
           <Card
             key={card.objectKey}
             flush
-            title={
-              <span className="flex items-center gap-1.5">
-                {card.namePlural}
-                <Badge tone="neutral">{card.total}</Badge>
-              </span>
-            }
+            collapsible
+            title={`${card.namePlural} (${card.total.toLocaleString()})`}
             action={
               canWrite && canLink ? (
                 <>
                   {createFields[card.objectKey] ? (
                     <IconButton
                       label={`New ${card.nameSingular.toLowerCase()}`}
-                      icon={<Plus aria-hidden="true" className="size-4" />}
+                      icon={<Plus aria-hidden="true" className="size-3.5" />}
+                      className="size-6"
                       onClick={() => setCreating(card)}
                     />
                   ) : null}
-                  <Button
-                    variant="tertiary"
+                  <button
+                    type="button"
                     aria-expanded={adding === card.objectKey}
                     onClick={() => {
                       setChoice(null)
                       setAdding(adding === card.objectKey ? null : card.objectKey)
                     }}
+                    className="inline-flex h-6 items-center gap-1 rounded-pill px-2 text-small font-semibold hover:bg-fill"
                   >
+                    <Plus aria-hidden="true" className="size-3" />
                     Add
-                  </Button>
+                  </button>
                 </>
               ) : null
             }
           >
             {searchable ? (
-              <div className="flex items-center gap-1 border-b border-divider px-3 py-2">
+              <div className="flex items-center gap-1 px-6 pb-3">
                 <span className="relative flex min-w-0 flex-1 items-center">
                   <Search aria-hidden="true" className="absolute left-2 size-4 text-secondary" />
                   <TextInput
@@ -162,7 +161,7 @@ export const AssociationRail = ({
                     onChange={(event) =>
                       setNeedles({ ...needles, [card.objectKey]: event.target.value })
                     }
-                    className="pl-8"
+                    className="h-control min-h-0 rounded-pill py-1 pl-8"
                   />
                 </span>
                 <label className="flex shrink-0 items-center gap-1">
@@ -177,7 +176,7 @@ export const AssociationRail = ({
                         [card.objectKey]: event.target.value === 'name' ? 'name' : 'recent',
                       })
                     }
-                    className="w-auto"
+                    className="h-control min-h-0 w-auto rounded-pill py-1"
                   >
                     <option value="recent">Newest</option>
                     <option value="name">A to Z</option>
@@ -187,7 +186,7 @@ export const AssociationRail = ({
             ) : null}
 
             {adding === card.objectKey && canLink ? (
-              <div className="flex flex-col gap-2 border-b border-divider px-3 py-2">
+              <div className="flex flex-col gap-2 px-6 pb-4">
                 <RecordPicker
                   object={card.objectKey}
                   label={`Pick a ${card.nameSingular.toLowerCase()} to link`}
@@ -229,7 +228,7 @@ export const AssociationRail = ({
             ) : null}
 
             {rows.length === 0 ? (
-              <p className="px-3 py-3 text-secondary">
+              <p className="px-6 pb-6 text-center text-secondary">
                 {card.records.length === 0 ? (
                   <>
                     Nothing linked yet.{' '}
@@ -242,26 +241,29 @@ export const AssociationRail = ({
                 )}
               </p>
             ) : (
-              <ul className="flex flex-col">
+              <ul className="flex flex-col gap-3 px-6 pb-4">
                 {rows.map((row) => (
                   <li
                     key={`${row.objectKey}-${row.id}`}
-                    className="flex items-start justify-between gap-2 border-b border-divider px-3 py-2 last:border-0"
+                    className="flex items-start justify-between gap-2 rounded-panel border border-line px-3 py-3"
                   >
-                    <span className="min-w-0">
-                      <Link
-                        href={recordPath(workspace, row.objectKey, row.id)}
-                        title={row.displayName}
-                        className="line-clamp-2 break-words"
-                      >
-                        {row.displayName}
-                      </Link>
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={recordPath(workspace, row.objectKey, row.id)}
+                          title={row.displayName}
+                          className="line-clamp-2 break-words"
+                        >
+                          {row.displayName}
+                        </Link>
+                        {row.isPrimary ? <Badge tone="ok">Primary</Badge> : null}
+                      </span>
                       {row.detail ? (
                         <span className="block truncate text-secondary" title={row.detail}>
                           {row.detail}
                         </span>
                       ) : null}
-                      {row.label ? <span className="text-small text-secondary">{row.label}</span> : null}
+                      {row.label ? <Badge tone="neutral">{row.label}</Badge> : null}
                     </span>
 
                     {canWrite && !row.isPrimary ? (
@@ -280,17 +282,26 @@ export const AssociationRail = ({
                           )
                         }
                       />
-                    ) : row.isPrimary ? (
-                      <span className="shrink-0 text-small text-secondary">Primary</span>
                     ) : null}
                   </li>
                 ))}
               </ul>
             )}
 
-            {rows.length > 0 && rows.length < card.total ? (
-              <p className="border-t border-divider px-3 py-2 text-small text-secondary">
-                Showing {rows.length} of {card.total}.
+            {rows.length > 0 ? (
+              <p className="px-6 pb-6">
+                <Link
+                  // The list filtered to this record where a field carries the
+                  // link (a contact's company), else the whole list.
+                  href={objectView(workspace, card.objectKey, 'all', 'list', {
+                    filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: `${object}_id`, operator: 'is', value: recordId }] }]),
+                  })}
+                  className="inline-flex items-center gap-1"
+                >
+                  View all associated {card.namePlural}
+                  <ExternalLink aria-hidden="true" className="size-3" />
+                </Link>
+                {rows.length < card.total ? <span className="ml-2 text-small text-secondary">Showing {rows.length} of {card.total}.</span> : null}
               </p>
             ) : null}
           </Card>

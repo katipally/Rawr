@@ -1,6 +1,6 @@
 import { cn } from '../cn.ts'
 
-const SIZES = { sm: 'size-6 text-small', md: 'size-8', lg: 'size-10' } as const
+const SIZES = { sm: 'size-6 text-small', md: 'size-8', lg: 'size-12 text-base' } as const
 
 /** Deterministic tint from the name, so the same person is the same colour on
  *  every screen without storing one. Six hues, all carrying body text at 4.5:1. */

@@ -1,8 +1,6 @@
 'use client'
 
-import { IconButton } from '@rawr/ui'
 import { CalendarCheck, CircleCheck, Mail, Phone, StickyNote } from 'lucide-react'
-import type { ObjectKey } from '@rawr/db'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 
@@ -36,34 +34,31 @@ export const RecordQuickActions = ({
   const go = (params: Parameters<typeof recordPath>[3]) =>
     navigate(recordPath(workspace, object, recordId, { tab: 'activities', ...params }))
 
+  const actions = [
+    { label: 'Note', icon: StickyNote, onClick: () => go({ log: 'note' }) },
+    { label: 'Email', icon: Mail, onClick: () => go({ compose: '1' }), disabled: !email, title: email ? `Email ${email}` : 'No email address on this record' },
+    { label: 'Call', icon: Phone, onClick: () => go({ log: 'call' }) },
+    { label: 'Task', icon: CircleCheck, onClick: () => go({ task: 'new' }) },
+    { label: 'Meeting', icon: CalendarCheck, onClick: () => go({ log: 'meeting' }) },
+  ]
+
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      <IconButton
-        label="Add a note"
-        icon={<StickyNote aria-hidden="true" className="size-4" />}
-        onClick={() => go({ log: 'note' })}
-      />
-      <IconButton
-        label={email ? `Email ${email}` : 'No email address on this record'}
-        icon={<Mail aria-hidden="true" className="size-4" />}
-        disabled={!email}
-        onClick={() => go({ compose: '1' })}
-      />
-      <IconButton
-        label="Log a call"
-        icon={<Phone aria-hidden="true" className="size-4" />}
-        onClick={() => go({ log: 'call' })}
-      />
-      <IconButton
-        label="Create a task"
-        icon={<CircleCheck aria-hidden="true" className="size-4" />}
-        onClick={() => go({ task: 'new' })}
-      />
-      <IconButton
-        label="Log a meeting"
-        icon={<CalendarCheck aria-hidden="true" className="size-4" />}
-        onClick={() => go({ log: 'meeting' })}
-      />
+    <div className="flex flex-wrap items-start gap-2">
+      {actions.map(({ label, icon: Icon, onClick, disabled, title }) => (
+        <button
+          key={label}
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          title={title ?? label}
+          className="group flex w-10 flex-col items-center gap-1 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="grid size-8 place-items-center rounded-pill border border-line-strong bg-surface group-hover:bg-fill group-disabled:group-hover:bg-surface">
+            <Icon aria-hidden="true" className="size-4" />
+          </span>
+          <span className="w-full truncate text-center text-small">{label}</span>
+        </button>
+      ))}
     </div>
   )
 }

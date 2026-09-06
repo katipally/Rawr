@@ -17,16 +17,16 @@ export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProp
   const past = rows.filter((row) => row.exitedAt !== null)
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
-        <h3 className="font-medium">Segments ({live.length})</h3>
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
+        <h3 className="text-base font-semibold">Segments ({live.length})</h3>
         <Link href={segmentsPath(workspace)} className="text-small">
           Manage
         </Link>
       </header>
 
       {rows.length === 0 ? (
-        <p className="px-3 py-3 text-secondary">
+        <p className="px-6 py-3 text-secondary">
           {recordName} is not in any segment. A segment is a saved query, so membership appears
           here the next time one is recomputed.
         </p>
@@ -35,7 +35,7 @@ export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProp
           {live.map((row) => (
             <li
               key={`${row.segmentId}-${row.enteredAt.toISOString()}`}
-              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-3 py-1.5 last:border-0"
+              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-6 py-1.5 last:border-0"
             >
               <span className="min-w-0 break-words">{row.name}</span>
               <span className="shrink-0 text-small text-secondary">
@@ -46,7 +46,7 @@ export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProp
           {past.map((row) => (
             <li
               key={`${row.segmentId}-${row.enteredAt.toISOString()}-past`}
-              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-3 py-1.5 text-secondary last:border-0"
+              className="flex flex-wrap items-baseline justify-between gap-x-2 border-b border-divider px-6 py-1.5 text-secondary last:border-0"
             >
               <span className="min-w-0 break-words">{row.name}</span>
               <span className="shrink-0 text-small">

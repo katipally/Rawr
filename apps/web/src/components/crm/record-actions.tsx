@@ -1,13 +1,13 @@
 'use client'
 
-import { Alert, Button, Modal, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, DropdownMenu, Modal, TextInput, useToast } from '@rawr/ui'
+import { ChevronDown } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { ComposeDialog } from './compose-dialog.tsx'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { useEffect, useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { objectView } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { Value } from './value.tsx'
@@ -132,22 +132,32 @@ export const RecordActions = ({
   if (!canWrite) return null
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {/* Only a contact can be written to or enrolled: both send to a person. */}
-      {object === 'contact' && typeof values.email === 'string' && values.email ? (
-        <Button variant="primary" onClick={() => setShowCompose(true)}>
-          Email
-        </Button>
-      ) : null}
-      {object === 'contact' ? (
-        <Button onClick={() => setShowEnroll(true)}>Add to a sequence</Button>
-      ) : null}
-      {/* Merging moves activities, associations and browsing history, and a
-          custom object has none of them. Offered only where it can work. */}
-      {MERGEABLE.has(object) ? <Button onClick={() => setShowMerge(true)}>Merge</Button> : null}
-      <Button variant="destructive" onClick={() => setShowDelete(true)}>
-        Delete
-      </Button>
+    <>
+      <DropdownMenu
+        label="Actions"
+        groups={[
+          {
+            key: 'actions',
+            items: [
+              // Only a contact can be written to or enrolled: both send to a person.
+              ...(object === 'contact' && typeof values.email === 'string' && values.email
+                ? [{ key: 'email', label: 'Email', onSelect: () => setShowCompose(true) }]
+                : []),
+              ...(object === 'contact' ? [{ key: 'enroll', label: 'Enroll in sequence', onSelect: () => setShowEnroll(true) }] : []),
+              // Merging moves activities, associations and browsing history, and a
+              // custom object has none of them. Offered only where it can work.
+              ...(MERGEABLE.has(object) ? [{ key: 'merge', label: 'Merge', onSelect: () => setShowMerge(true) }] : []),
+            ],
+          },
+          { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setShowDelete(true) }] },
+        ]}
+        trigger={(props) => (
+          <button {...props} type="button" className="flex h-10 items-center gap-1 rounded-pill pr-3 pl-3 font-semibold hover:bg-fill">
+            Actions
+            <ChevronDown aria-hidden="true" className="size-3" />
+          </button>
+        )}
+      />
 
       {showCompose && typeof values.email === 'string' ? (
         <ComposeDialog
@@ -274,6 +284,6 @@ export const RecordActions = ({
           </div>
         </div>
       </Modal>
-    </div>
+    </>
   )
 }

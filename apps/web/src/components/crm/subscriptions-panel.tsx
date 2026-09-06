@@ -50,16 +50,16 @@ export const SubscriptionsPanel = ({ contactId, contactName, rows, canWrite }: S
   }
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <h3 className="border-b border-divider px-3 py-2 font-medium">Communication preferences</h3>
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">Communication preferences</h3>
 
       {allUnspecified ? (
-        <p className="px-3 pt-2 text-secondary">{contactName} has not specified any preferences.</p>
+        <p className="px-6 pt-2 text-secondary">{contactName} has not specified any preferences.</p>
       ) : null}
 
       <ul className="flex flex-col">
         {rows.map((row) => (
-          <li key={row.typeId} className="flex flex-wrap items-center gap-2 border-b border-divider px-3 py-2 last:border-0">
+          <li key={row.typeId} className="flex flex-wrap items-center gap-2 border-b border-divider px-6 py-2 last:border-0">
             <span className="min-w-0 flex-1">
               <span className="block break-words font-medium">{row.name}</span>
               {row.description ? <span className="block text-secondary">{row.description}</span> : null}

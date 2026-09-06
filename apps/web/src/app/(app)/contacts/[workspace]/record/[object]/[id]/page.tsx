@@ -21,7 +21,8 @@ import {
   withWorkspaceReads,
   type ObjectKey,
 } from '@rawr/db'
-import { Breadcrumb, EmptyState, Tabs } from '@rawr/ui'
+import { Avatar, EmptyState, cn } from '@rawr/ui'
+import { ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
@@ -38,7 +39,7 @@ import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value } from '~/components/crm/value.tsx'
-import { objectView, recordPath, workspaceHome } from '~/lib/links.ts'
+import { objectView, recordPath } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { storageConfigured } from '~/server/storage.ts'
@@ -84,7 +85,7 @@ const LOG_KINDS = ['note', 'call', 'meeting', 'email'] as const
 
 /** The two or three values worth reading before anything else. */
 const HEADER_FIELDS: Record<ObjectKey, string[]> = {
-  contact: ['title', 'email', 'last_contacted_at', 'owner_id'],
+  contact: [],
   company: ['domain', 'industry', 'country', 'owner_id'],
   deal: ['stage_id', 'amount', 'close_date', 'owner_id'],
 }
@@ -232,70 +233,101 @@ const RecordPage = async ({
   )
   const createInitial = objectParam === 'company' ? { company_id: id } : {}
 
-  return (
-    <div className="flex flex-col gap-4">
-      <Breadcrumb
-        items={[
-          { label: 'Home', href: workspaceHome(workspace) },
-          { label: object.namePlural, href: objectView(workspace, objectParam, 'all') },
-          { label: record.displayName },
-        ]}
-      />
+  const phone = typeof record.values.phone === 'string' && record.values.phone ? record.values.phone : null
+  const website = typeof record.values.domain === 'string' && record.values.domain ? record.values.domain : null
+  /** The line under the name: a contact's title at their company, a company's
+   *  domain, a deal's stage. */
+  const subtitle = [record.labels.title ?? (typeof record.values.title === 'string' ? record.values.title : null), record.labels.company_id]
+    .filter(Boolean)
+    .join(' at ') || record.labels.stage_id || null
 
-      <header className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-small text-secondary uppercase">{object.nameSingular}</p>
-            <h1 className="line-clamp-2 break-words text-lg font-medium" title={record.displayName}>
-              {record.displayName}
-            </h1>
-            <RecordQuickActions
+  return (
+    // HubSpot's record page: three columns of cards straight on the canvas. One
+    // column when there is no room, measured against the shell's card rather
+    // than the window, because collapsing the rail widens the page without the
+    // window changing size.
+    <div className="grid gap-4 @4xl:grid-cols-[minmax(0,25.5rem)_minmax(0,1fr)_minmax(0,26.25rem)]">
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="rounded-panel border border-line bg-surface shadow-panel">
+          <div className="flex items-center justify-between gap-2 px-4 pt-3">
+            <Link
+              href={objectView(workspace, objectParam, 'all')}
+              className="flex h-10 items-center gap-1 rounded-hs text-body no-underline hover:underline"
+            >
+              <ChevronLeft aria-hidden="true" className="size-4" />
+              {object.namePlural}
+            </Link>
+            <RecordActions
+              startCompose={compose === '1'}
               workspace={workspace}
               object={objectParam}
+              objectLabel={object.nameSingular}
               recordId={id}
-              email={email}
+              displayName={record.displayName}
+              fields={fields.filter((field) => !field.readOnly)}
+              values={record.values}
+              labels={record.labels}
               canWrite={canWrite}
             />
           </div>
-          <RecordActions
-            startCompose={compose === '1'}
-            workspace={workspace}
-            object={objectParam}
-            objectLabel={object.nameSingular}
-            recordId={id}
-            displayName={record.displayName}
-            fields={fields.filter((field) => !field.readOnly)}
-            values={record.values}
-            labels={record.labels}
-            canWrite={canWrite}
-          />
+          <div className="flex flex-col gap-2 px-4 pt-2 pb-6">
+            <div className="flex items-center gap-3">
+              <Avatar name={record.displayName} size="lg" />
+              <div className="min-w-0">
+                <h1 className="line-clamp-2 break-words text-[1.375rem] font-medium leading-tight" title={record.displayName}>
+                  {record.displayName}
+                </h1>
+              </div>
+            </div>
+            {subtitle ? <p className="break-words">{subtitle}</p> : null}
+            {email ? (
+              <p className="flex min-w-0 items-center gap-1">
+                <a href={`mailto:${email}`} className="min-w-0 truncate">{email}</a>
+                <ExternalLink aria-hidden="true" className="size-3 shrink-0 text-secondary" />
+              </p>
+            ) : null}
+            {website ? (
+              <p className="flex min-w-0 items-center gap-1">
+                <a href={`https://${website}`} target="_blank" rel="noreferrer" className="min-w-0 truncate">{website}</a>
+                <ExternalLink aria-hidden="true" className="size-3 shrink-0 text-secondary" />
+              </p>
+            ) : null}
+            {phone ? (
+              <p>
+                <a href={`tel:${phone}`}>{phone}</a>
+              </p>
+            ) : null}
+            {headerFields.length > 0 ? (
+              <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2">
+                {headerFields.map((field) => (
+                  <div key={field.key} className="min-w-0">
+                    <dt className="text-small text-secondary">{field.label}</dt>
+                    <dd className="min-w-0">
+                      <Value
+                        type={field.type}
+                        value={record.values[field.key]}
+                        label={record.labels[field.key]}
+                        currency={String(record.values.currency ?? 'USD')}
+                        placeholder="--"
+                        oneLine
+                      />
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            <div className="mt-2 flex justify-center">
+              <RecordQuickActions
+                workspace={workspace}
+                object={objectParam}
+                recordId={id}
+                email={email}
+                canWrite={canWrite}
+              />
+            </div>
+          </div>
         </div>
 
-        <dl className="flex flex-wrap gap-x-6 gap-y-1">
-          {headerFields.map((field) => (
-            <div key={field.key} className="min-w-0">
-              <dt className="text-small text-secondary">{field.label}</dt>
-              <dd className="min-w-0">
-                <Value
-                  type={field.type}
-                  value={record.values[field.key]}
-                  label={record.labels[field.key]}
-                  currency={String(record.values.currency ?? 'USD')}
-                  placeholder="—"
-                  oneLine
-                />
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </header>
-
-      {/* One column when there is no room, three when there is. Measured against
-          the card this sits in rather than the window, because collapsing the rail
-          widens the card without the window changing size, and a viewport rule
-          would keep squeezing three columns into eight hundred pixels. */}
-      <div className="grid gap-4 @3xl:grid-cols-[minmax(0,20rem)_minmax(0,1fr)_minmax(0,20rem)]">
-        <div className="flex min-w-0 flex-col gap-3">
           <PropertyPanel
             object={objectParam}
             recordId={id}
@@ -358,27 +390,25 @@ const RecordPage = async ({
           ) : null}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3">
-          <div className="border-b border-divider">
-            <Tabs
-              label="Record sections"
-              items={[
-                {
-                  key: 'overview',
-                  label: 'Overview',
-                  href: recordPath(workspace, objectParam, id),
-                  current: activeTab === 'overview',
-                },
-                {
-                  key: 'activities',
-                  label: 'Activities',
-                  href: recordPath(workspace, objectParam, id, { tab: 'activities' }),
-                  hint: timelineTotal.toLocaleString(),
-                  current: activeTab === 'activities',
-                },
-              ]}
-            />
-          </div>
+        <div className="flex min-w-0 flex-col gap-4">
+          <nav aria-label="Record sections" className="flex overflow-hidden rounded-t-hs border-b border-line">
+            {[
+              { key: 'overview', label: 'Overview', href: recordPath(workspace, objectParam, id) },
+              { key: 'activities', label: `Activities (${timelineTotal.toLocaleString()})`, href: recordPath(workspace, objectParam, id, { tab: 'activities' }) },
+            ].map((item) => (
+              <Link
+                key={item.key}
+                href={item.href}
+                aria-current={activeTab === item.key ? 'page' : undefined}
+                className={cn(
+                  'flex h-12 flex-1 items-center justify-center border-r border-line px-7 text-body no-underline last:border-r-0',
+                  activeTab === item.key ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </nav>
 
           {activeTab === 'overview' ? (
             <RecordOverview
@@ -435,7 +465,7 @@ const RecordPage = async ({
           )}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-4">
           <AssociationRail
             workspace={workspace}
             object={objectParam}
@@ -477,7 +507,6 @@ const RecordPage = async ({
             }))}
           />
         </div>
-      </div>
     </div>
   )
 }

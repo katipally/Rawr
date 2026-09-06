@@ -82,17 +82,17 @@ export const WebsiteActivity = ({
   }
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <h3 className="border-b border-divider px-3 py-2 font-medium">Website activity</h3>
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">Website activity</h3>
 
       {nothingYet ? (
-        <p className="px-3 py-2 text-secondary">
+        <p className="px-6 py-2 text-secondary">
           Nothing yet. Page views appear here once {contactName} has browsed the site with
           analytics cookies accepted.
         </p>
       ) : (
         <>
-          <dl className="flex flex-wrap gap-x-6 gap-y-2 px-3 py-2">
+          <dl className="flex flex-wrap gap-x-6 gap-y-2 px-6 py-2">
             <div>
               <dt className="text-small text-secondary uppercase">Site visits</dt>
               <dd className="text-lg">{siteVisits.toLocaleString()}</dd>
@@ -107,7 +107,7 @@ export const WebsiteActivity = ({
             </div>
           </dl>
 
-          <p className="px-3 pb-2">
+          <p className="px-6 pb-2">
             <Link
               className="text-link"
               href={recordPath(workspace, 'contact', contactId, { type: 'page_view' })}
@@ -122,7 +122,7 @@ export const WebsiteActivity = ({
       )}
 
       {isAdmin ? (
-        <div className="flex flex-wrap items-center gap-2 border-t border-divider px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 border-t border-divider px-6 py-2">
           <Button busy={busy === 'export'} onClick={() => void download()}>
             Export activity
           </Button>

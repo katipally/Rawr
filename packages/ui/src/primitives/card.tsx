@@ -36,30 +36,30 @@ export const Card = ({
   return (
     <section className={cn('@container rounded-panel border border-line bg-surface shadow-panel', className)}>
       {title || action ? (
-        <header className="flex items-center justify-between gap-2 border-b border-divider px-4 py-2.5">
+        <header className={cn('flex items-center justify-between gap-2 px-6 pt-6', showing ? 'pb-4' : 'pb-6')}>
           {collapsible ? (
             <button
               type="button"
               aria-expanded={open}
               aria-controls={id}
               onClick={() => setOpen((value) => !value)}
-              className="flex min-w-0 items-center gap-1.5 rounded-hs font-medium hover:text-link"
+              className="flex min-w-0 items-center gap-2 rounded-hs text-base font-semibold"
             >
               {open ? (
-                <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+                <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
               ) : (
-                <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+                <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
               )}
               <span className="min-w-0 truncate">{title}</span>
             </button>
           ) : (
-            <h2 className="min-w-0 truncate font-medium">{title}</h2>
+            <h2 className="min-w-0 truncate text-base font-semibold">{title}</h2>
           )}
           {action ? <div className="flex shrink-0 items-center gap-1">{action}</div> : null}
         </header>
       ) : null}
       {showing ? (
-        <div id={id} className={cn(flush ? '' : 'p-4')}>
+        <div id={id} className={cn(flush ? '' : title || action ? 'px-6 pb-6' : 'p-6')}>
           {children}
         </div>
       ) : null}

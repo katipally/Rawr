@@ -144,6 +144,9 @@ const Shell = ({
   const railRef = useRef<HTMLElement>(null)
 
   const inSettings = here.startsWith('/settings')
+  /** HubSpot frames every screen as one white card except a record, which is
+   *  three columns of cards straight on the canvas. */
+  const onCanvas = here.includes('/record/')
   /** The last page outside settings, so Back returns where the person came from
    *  rather than always to Home. */
   const cameFrom = useRef(homeHref)
@@ -603,7 +606,12 @@ const Shell = ({
               content stays within it. One scroller, so a page that wants to fill
               the window (a list with a sticky header and a pager at the foot) can
               ask for h-full and get a real height back. */}
-          <div className="@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-panel bg-surface p-3 shadow-panel sm:p-6 sm:pt-5">
+          <div
+            className={cn(
+              '@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto',
+              !onCanvas && 'rounded-panel bg-surface p-3 shadow-panel sm:p-6 sm:pt-5',
+            )}
+          >
             {children}
           </div>
           {pendingHref ? (

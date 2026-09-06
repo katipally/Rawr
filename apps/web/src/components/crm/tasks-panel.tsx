@@ -85,14 +85,14 @@ export const TasksPanel = ({
   const done = rows.filter((row) => row.status === 'done')
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <h3 className="border-b border-divider px-3 py-2 font-medium">
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">
         {heading} ({open.length} open)
       </h3>
 
       {canWrite ? (
         <form
-          className="flex flex-wrap items-end gap-2 border-b border-divider px-3 py-2"
+          className="flex flex-wrap items-end gap-2 border-b border-divider px-6 py-2"
           onSubmit={(event) => {
             event.preventDefault()
             void create()
@@ -146,7 +146,7 @@ export const TasksPanel = ({
           {[...open, ...done].map((row) => (
             <li
               key={row.id}
-              className="flex flex-wrap items-center gap-2 border-b border-divider px-3 py-2 last:border-0"
+              className="flex flex-wrap items-center gap-2 border-b border-divider px-6 py-2 last:border-0"
             >
               <input
                 type="checkbox"

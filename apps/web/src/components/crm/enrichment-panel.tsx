@@ -103,9 +103,9 @@ export const EnrichmentPanel = ({
   const matchLabel = object === 'contact' ? 'email' : 'domain'
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <header className="flex items-center justify-between gap-2 border-b border-divider px-3 py-2">
-        <h3 className="font-medium">Enrichment and outreach</h3>
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
+        <h3 className="text-base font-semibold">Enrichment and outreach</h3>
         {canEnrich ? (
           <Button onClick={() => void enrich()} busy={busy === 'enrich'}>
             Enrich
@@ -113,7 +113,7 @@ export const EnrichmentPanel = ({
         ) : null}
       </header>
 
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 py-2 text-small">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-6 py-2 text-small">
         <dt className="text-secondary">Apollo</dt>
         <dd className={HEALTH[apollo.state].tone} title={apollo.lastError ?? undefined}>
           {HEALTH[apollo.state].label}
@@ -137,33 +137,33 @@ export const EnrichmentPanel = ({
       </dl>
 
       {!usable(apollo) ? (
-        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+        <p className="border-t border-divider px-6 py-2 text-small text-secondary">
           <Link href={integrationsPath('apollo')}>Connect Apollo</Link>
           {blankFields.length > 0 ? ` to fill ${blankFields.join(', ')} from its data` : ` to keep this ${object} current from its data`}
           {object === 'contact' ? ', enrol this person in a sequence, and see opens, clicks and replies here' : ''}.
           {!usable(clay) ? ' Clay fills whatever Apollo leaves blank on a company.' : ''}
         </p>
       ) : blankFields.length > 0 ? (
-        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+        <p className="border-t border-divider px-6 py-2 text-small text-secondary">
           Blank and fillable: {blankFields.join(', ')}.
           {!matchKey ? ` Add ${object === 'contact' ? 'an email address' : 'a domain'} first: that is what Apollo matches on.` : ''}
         </p>
       ) : null}
 
       {usable(apollo) && !matchKey && blankFields.length === 0 ? (
-        <p className="border-t border-divider px-3 py-2 text-small text-secondary">
+        <p className="border-t border-divider px-6 py-2 text-small text-secondary">
           No {matchLabel}, so nothing to look up in Apollo.
         </p>
       ) : null}
 
       {apollo.state === 'degraded' || apollo.state === 'disconnected' ? (
-        <p className="border-t border-divider px-3 py-2 text-small text-warning">
+        <p className="border-t border-divider px-6 py-2 text-small text-warning">
           Recent opens, clicks and sequence steps may be missing. {apollo.lastError ?? 'The last sync did not succeed.'}
         </p>
       ) : null}
 
       {object === 'contact' ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-divider px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-divider px-6 py-2">
           {apolloUrl && matchKey ? (
             <a href={apolloUrl} target="_blank" rel="noreferrer">
               Open in Apollo
@@ -184,7 +184,7 @@ export const EnrichmentPanel = ({
       {suggestions.length > 0 ? (
         <ul className="flex flex-col border-t border-divider">
           {suggestions.map((s) => (
-            <li key={s.id} className="flex flex-col gap-1 border-b border-divider px-3 py-2 last:border-0">
+            <li key={s.id} className="flex flex-col gap-1 border-b border-divider px-6 py-2 last:border-0">
               <p className="text-small text-secondary">
                 {s.provider} suggests <span className="font-medium text-body">{s.fieldLabel}</span>
                 {s.current ? ' should change' : ''}
@@ -262,7 +262,7 @@ const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () 
   }, [load])
 
   return (
-    <div className="flex flex-col gap-2 border-t border-divider px-3 py-2">
+    <div className="flex flex-col gap-2 border-t border-divider px-6 py-2">
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-small font-medium">Apollo sequences</h4>
         {loaded.state !== 'loading' ? (

@@ -113,11 +113,11 @@ export const AttachmentsPanel = ({
   }
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
-      <h3 className="border-b border-divider px-3 py-2 font-medium">
+    <section className="rounded-panel border border-line bg-surface shadow-panel">
+      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">
         Files{files.length > 0 ? ` (${files.length})` : ''}
       </h3>
-      <div className="flex min-w-0 flex-col gap-2 p-3">
+      <div className="flex min-w-0 flex-col gap-2 px-6 pb-6">
       {!configured ? (
         <Alert tone="info">
           File storage is not connected, so nothing can be attached yet. An admin sets
