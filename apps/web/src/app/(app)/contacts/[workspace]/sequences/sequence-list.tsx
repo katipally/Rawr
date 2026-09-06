@@ -1,7 +1,7 @@
 'use client'
 
 import type { SequenceRow } from '@rawr/db'
-import { Badge, Button, Card, EmptyState, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Card, EmptyState, Field, Modal, TextArea, TextInput, useToast, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -38,13 +38,24 @@ export const SequenceList = ({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {canWrite ? (
-        <div>
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            Create sequence
-          </Button>
-        </div>
-      ) : (
+      <PageHeader
+        title="Sequences"
+        lead="A run of emails and tasks, sent from your own Gmail."
+        why={
+          <p>
+            The mail comes from you and lands in the same conversation as everything else. A reply
+            stops it on the sync that reads the reply.
+          </p>
+        }
+        action={
+          canWrite ? (
+            <Button variant="primary" onClick={() => setCreating(true)}>
+              Create sequence
+            </Button>
+          ) : undefined
+        }
+      />
+      {canWrite ? null : (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
           Your role ({role}) can read these and cannot change them.
         </p>
