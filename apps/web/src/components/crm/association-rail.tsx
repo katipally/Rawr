@@ -292,9 +292,12 @@ export const AssociationRail = ({
               <p className="px-6 pb-6">
                 <Link
                   // The list filtered to this record where a field carries the
-                  // link (a contact's company), else the whole list.
+                  // link (a contact's or a deal's company), else the whole list.
                   href={objectView(workspace, card.objectKey, 'all', 'list', {
-                    filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: `${object}_id`, operator: 'is', value: recordId }] }]),
+                    filters:
+                      object === 'company' && (card.objectKey === 'contact' || card.objectKey === 'deal')
+                        ? encodeFilters([{ conjunction: 'and', conditions: [{ field: 'company_id', operator: 'is', value: recordId }] }])
+                        : undefined,
                   })}
                   className="inline-flex items-center gap-1"
                 >

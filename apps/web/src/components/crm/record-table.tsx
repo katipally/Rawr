@@ -33,6 +33,7 @@ export type RecordTableProps = {
   sort: { key: string; direction: 'asc' | 'desc' } | null
   totalHint: number | null
   objectLabel: string
+  objectPlural: string
   /** What a bulk edit may set. Empty for a role that cannot write, which is what
    *  removes the checkbox column entirely rather than showing a dead one. */
   bulkFields: EditableField[]
@@ -57,6 +58,7 @@ export const RecordTable = ({
   sort,
   totalHint,
   objectLabel,
+  objectPlural,
   bulkFields,
   exportHref,
 }: RecordTableProps) => {
@@ -208,8 +210,8 @@ export const RecordTable = ({
           it survives a closed tab. */}
       <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-          {(totalHint ?? rows.length).toLocaleString()} {objectLabel.toLowerCase()}
-          {(totalHint ?? rows.length) === 1 ? '' : 's'}
+          {(totalHint ?? rows.length).toLocaleString()}{' '}
+          {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
         </span>
         <a
           href={exportHref}

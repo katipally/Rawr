@@ -246,6 +246,7 @@ const ListPage = async ({
           sort={sorts[0] ?? null}
           totalHint={page!.total}
           objectLabel={object.nameSingular}
+          objectPlural={object.namePlural}
           bulkFields={bulkFields}
           exportHref={exportHref}
         />
