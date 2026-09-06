@@ -162,9 +162,9 @@ const CalendarPage = async ({
               })}
               aria-current={field.key === calendar?.fieldKey ? 'true' : undefined}
               className={cn(
-                'rounded-hs border px-2 py-1 no-underline',
+                'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
                 field.key === calendar?.fieldKey
-                  ? 'border-line-interactive bg-accent-subtle text-link'
+                  ? 'bg-fill-hover'
                   : 'border-line text-body hover:bg-fill',
               )}
             >

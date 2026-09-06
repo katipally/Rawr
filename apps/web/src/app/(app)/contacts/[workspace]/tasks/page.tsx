@@ -55,10 +55,10 @@ const TasksPage = async ({
             href={tasksPath(workspace, option.key ? { filter: option.key } : {})}
             aria-current={(filter ?? '') === option.key ? 'true' : undefined}
             className={cn(
-              'rounded-hs border px-2 py-1 no-underline',
+              'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
               (filter ?? '') === option.key
-                ? 'border-line-interactive bg-accent-subtle text-link'
-                : 'border-line text-secondary',
+                ? 'bg-fill-hover'
+                : 'bg-surface hover:bg-fill',
             )}
           >
             {option.label}

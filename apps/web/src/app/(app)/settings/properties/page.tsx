@@ -54,10 +54,10 @@ const PropertiesPage = async ({
             href={propertiesPath(entry.key)}
             aria-current={entry.key === current ? 'page' : undefined}
             className={cn(
-              'rounded-hs border px-2 py-1 no-underline',
+              'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
               entry.key === current
-                ? 'border-line-interactive bg-accent-subtle text-link'
-                : 'border-line text-secondary',
+                ? 'bg-fill-hover'
+                : 'bg-surface hover:bg-fill',
             )}
           >
             {entry.label}
