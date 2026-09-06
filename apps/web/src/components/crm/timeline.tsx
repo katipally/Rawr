@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, Button, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, DropdownMenu, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
@@ -63,6 +64,19 @@ type Loggable = (typeof LOGGABLE)[number]['type']
 
 const STORAGE_PREFIX = 'rawr.timeline.types.'
 
+/** HubSpot's sub-tabs over the timeline. Each one is a preset of the type
+ *  filter, so "Emails" and ticking Email and Marketing email are the same view. */
+const SUBTABS: { label: string; types: string[] }[] = [
+  { label: 'All activities', types: [] },
+  { label: 'Notes', types: ['note'] },
+  { label: 'Emails', types: ['email', 'marketing_email'] },
+  { label: 'Calls', types: ['call'] },
+  { label: 'Tasks', types: ['task'] },
+  { label: 'Meetings', types: ['meeting', 'booking'] },
+]
+
+const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((type) => b.includes(type))
+
 /** The two types whose actor is the person the record is about, not a user, a job
  *  or "public". F4 §4. */
 const TRACKED = new Set(['page_view', 'custom_event'])
@@ -107,6 +121,8 @@ export const Timeline = ({
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
+  const [needle, setNeedle] = useState('')
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
   const shownCount = selected.length === 0 ? total : selected.reduce((sum, type) => sum + (counts[type] ?? 0), 0)
@@ -180,8 +196,7 @@ export const Timeline = ({
     }
   }
 
-  const toggle = (type: string) => {
-    const next = selected.includes(type) ? selected.filter((t) => t !== type) : [...selected, type]
+  const choose = (next: string[]) => {
     setSelected(next)
     try {
       window.localStorage.setItem(`${STORAGE_PREFIX}${object}`, next.join(','))
@@ -195,6 +210,13 @@ export const Timeline = ({
     window.history.replaceState(null, '', `?${search.toString()}`)
     void load(next, null, false)
   }
+  const toggle = (type: string) => choose(selected.includes(type) ? selected.filter((t) => t !== type) : [...selected, type])
+
+  const query = needle.trim().toLowerCase()
+  const shown = query
+    ? rows.filter((entry) => `${entry.subject ?? ''} ${entry.body ?? ''} ${entry.actorName ?? ''}`.toLowerCase().includes(query))
+    : rows
+  const allCollapsed = shown.length > 0 && shown.every((entry) => collapsed.has(entry.id))
 
   const compose = LOGGABLE.find((entry) => entry.type === kind) ?? LOGGABLE[0]
 
@@ -297,51 +319,97 @@ export const Timeline = ({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="font-medium">
-          Activity ({shownCount.toLocaleString()}/{total.toLocaleString()})
-        </p>
+      <nav aria-label="Activity type" className="flex flex-wrap border-b border-line">
+        {SUBTABS.map((tab) => {
+          const active = sameSet(tab.types, selected)
+          return (
+            <button
+              key={tab.label}
+              type="button"
+              aria-current={active ? 'true' : undefined}
+              onClick={() => choose(tab.types)}
+              className={cn(
+                '-mb-px border-b-[3px] px-3 py-2 font-normal',
+                active ? 'border-body text-body' : 'border-transparent text-secondary hover:text-body',
+              )}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
+      </nav>
+
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="relative w-full min-w-0 sm:w-52">
+          <span className="sr-only">Search activities</span>
+          <input
+            type="search"
+            value={needle}
+            placeholder="Search activities"
+            onChange={(event) => setNeedle(event.target.value)}
+            className="h-control w-full rounded-pill border border-line-strong bg-surface py-1 pr-9 pl-4 text-body placeholder:text-muted"
+          />
+          <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
+        </label>
+        {shown.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(shown.map((entry) => entry.id)))}
+            className="inline-flex items-center gap-1 rounded-hs px-2 py-1 font-medium text-body hover:bg-fill"
+          >
+            {allCollapsed ? 'Expand all' : 'Collapse all'}
+            <ChevronDown aria-hidden="true" className="size-4" />
+          </button>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <DropdownMenu
+          label="Filter the timeline by type"
+          align="start"
+          groups={groups.map((group) => ({
+            key: group.label,
+            label: group.label,
+            items: group.types
+              .filter((type) => (counts[type] ?? 0) > 0)
+              .map((type) => ({
+                key: type,
+                label: TYPE_LABELS[type] ?? type,
+                hint: counts[type],
+                checked: selected.includes(type),
+                onSelect: () => toggle(type),
+              })),
+          }))}
+          trigger={(props) => (
+            <button
+              {...props}
+              type="button"
+              className={cn(
+                'inline-flex h-control items-center gap-1 rounded-pill border border-line-strong px-4 text-small font-light text-body',
+                selected.length > 0 ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
+              )}
+            >
+              Activity ({shownCount.toLocaleString()}/{total.toLocaleString()})
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            </button>
+          )}
+        />
         {selected.length > 0 ? (
           <Button
             variant="tertiary"
             onClick={() => {
-              setSelected([])
               try {
                 // Forgotten, not only cleared: otherwise the next record opens filtered again.
                 window.localStorage.removeItem(`${STORAGE_PREFIX}${object}`)
               } catch {
                 // Nothing depends on this surviving.
               }
-              void load([], null, false)
+              choose([])
             }}
           >
-            Show all
+            Clear all
           </Button>
         ) : null}
-      </div>
-
-      {/* biome-ignore lint/a11y/useSemanticElements: a row of filter buttons is
-          not a form control set, so <fieldset> would be the wrong element. The
-          role and the label are what a screen reader needs here. */}
-      <div className="flex flex-wrap gap-1" role="group" aria-label="Filter the timeline by type">
-        {groups.flatMap((group) =>
-          group.types
-            .filter((type) => (counts[type] ?? 0) > 0)
-            .map((type) => (
-              <button
-                key={type}
-                type="button"
-                aria-pressed={selected.includes(type)}
-                onClick={() => toggle(type)}
-                className={cn(
-                  'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light',
-                  selected.includes(type) ? 'bg-fill-hover text-body' : 'bg-surface text-body hover:bg-fill',
-                )}
-              >
-                {TYPE_LABELS[type] ?? type} {counts[type]}
-              </button>
-            )),
-        )}
       </div>
 
       {error ? (
@@ -350,30 +418,50 @@ export const Timeline = ({
         </Alert>
       ) : null}
 
-      {rows.length === 0 && hydrated ? (
+      {shown.length === 0 && hydrated ? (
         <EmptyState
-          title={selected.length > 0 ? 'Nothing of that type yet' : 'Nothing has happened here yet'}
+          title={query ? 'Nothing matches that search' : selected.length > 0 ? 'Nothing of that type yet' : 'Nothing has happened here yet'}
           description={
-            selected.length > 0
-              ? 'Clear the filter above to see everything on this record.'
-              : 'Notes, emails, meetings and property changes all land here as they happen.'
+            query
+              ? 'Only what is loaded is searched. Load older entries to search further back.'
+              : selected.length > 0
+                ? 'Clear the filter above to see everything on this record.'
+                : 'Notes, emails, meetings and property changes all land here as they happen.'
           }
         />
       ) : (
         <ol className="flex flex-col gap-2">
-          {rows.map((entry, index) => {
+          {shown.map((entry, index) => {
             // HubSpot heads each month; the rows arrive newest first, so a month
             // starts wherever it differs from the row before.
             const month = monthOf(entry.occurredAt)
-            const heads = index === 0 || monthOf(rows[index - 1]!.occurredAt) !== month
+            const heads = index === 0 || monthOf(shown[index - 1]!.occurredAt) !== month
+            const folded = collapsed.has(entry.id)
+            const fold = () =>
+              setCollapsed((current) => {
+                const next = new Set(current)
+                if (folded) next.delete(entry.id)
+                else next.add(entry.id)
+                return next
+              })
             return (
             <li key={entry.id} className="flex flex-col gap-2">
               {heads ? <p className={cn('text-base', index > 0 && 'mt-2')}>{month}</p> : null}
             <div className="rounded-panel border border-line bg-surface p-4">
               <p className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-semibold">
+                <button
+                  type="button"
+                  aria-expanded={!folded}
+                  onClick={fold}
+                  className="inline-flex items-center gap-1 rounded-hs font-semibold hover:bg-fill"
+                >
+                  {folded ? (
+                    <ChevronRight aria-hidden="true" className="size-4" />
+                  ) : (
+                    <ChevronDown aria-hidden="true" className="size-4" />
+                  )}
                   {TYPE_LABELS[entry.type] ?? entry.type}
-                </span>
+                </button>
                 <span className="min-w-0 break-words font-medium">
                   {TRACKED.has(entry.type)
                     ? `${recordName} `
@@ -398,7 +486,7 @@ export const Timeline = ({
                   {formatDateTime(entry.occurredAt)}
                 </time>
               </p>
-              {editing?.id === entry.id ? (
+              {folded ? null : editing?.id === entry.id ? (
                 <div className="mt-2 flex flex-col gap-2">
                   <TextArea
                     value={editing.body}
@@ -417,7 +505,7 @@ export const Timeline = ({
               ) : entry.body ? (
                 <p className="mt-1 break-words whitespace-pre-wrap">{entry.body}</p>
               ) : null}
-              {canTouch(entry) && editing?.id !== entry.id ? (
+              {!folded && canTouch(entry) && editing?.id !== entry.id ? (
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-small">
                   {removing === entry.id ? (
                     <>
