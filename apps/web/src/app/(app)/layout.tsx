@@ -6,7 +6,10 @@ import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
 import {
   accountPath,
+  availabilityPath,
+  bookedPath,
   bookingPagesPath,
+  calendarsPath,
   createRecordPath,
   formsPath,
   duplicatesPath,
@@ -14,6 +17,7 @@ import {
   importsPath,
   inboxPath,
   integrationsPath,
+  objectsPath,
   objectView,
   propertiesPath,
   segmentsPath,
@@ -58,10 +62,10 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Work',
           items: [
+            { href: segmentsPath(workspace), label: 'Segments (Lists)', match: `/contacts/${workspace}/segments` },
             { href: inboxPath(workspace), label: 'Inbox', match: `/contacts/${workspace}/inbox` },
-            { href: segmentsPath(workspace), label: 'Segments', match: `/contacts/${workspace}/segments` },
+            { href: bookedPath(workspace), label: 'Meetings', match: `/meetings/${workspace}/booked` },
             { href: tasksPath(workspace), label: 'Tasks' },
-            { href: bookingPagesPath(workspace), label: 'Meetings', match: `/meetings/${workspace}` },
           ],
         },
       ],
@@ -74,15 +78,61 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Capture',
           items: [
+            { href: newsletterPath(workspace), label: 'Email', match: `/contacts/${workspace}/newsletter` },
             { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
-            { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Review', match: `/contacts/${workspace}/submissions` },
+            { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Form submissions', match: `/contacts/${workspace}/submissions` },
           ],
         },
         {
-          label: 'Outreach',
+          label: 'Analytics',
           items: [
+            { href: reportsPath(workspace, { tab: 'forms' }), label: 'Marketing Analytics', match: `/contacts/${workspace}/reports/forms` },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'sales',
+      label: 'Sales',
+      icon: 'sales',
+      groups: [
+        {
+          label: 'Selling',
+          items: [
+            { href: calendarsPath(workspace), label: 'Calendar', match: `/meetings/${workspace}/calendars` },
+            { href: availabilityPath(workspace), label: 'Availability', match: `/meetings/${workspace}/availability` },
+            { href: bookingPagesPath(workspace), label: 'Meetings Scheduler', match: `/meetings/${workspace}/pages` },
             { href: sequencesPath(workspace), label: 'Sequences', match: `/contacts/${workspace}/sequences` },
-            { href: newsletterPath(workspace), label: 'Newsletter', match: `/contacts/${workspace}/newsletter` },
+          ],
+        },
+        {
+          label: 'Analytics',
+          items: [
+            { href: reportsPath(workspace, { tab: 'pipeline' }), label: 'Sales Analytics', match: `/contacts/${workspace}/reports/pipeline` },
+          ],
+        },
+      ],
+    },
+    {
+      key: 'data',
+      label: 'Data Management',
+      icon: 'data',
+      groups: [
+        {
+          label: 'Move data',
+          items: [
+            { href: importsPath(workspace), label: 'Data Integration', match: `/contacts/${workspace}/import` },
+            { href: exportPath(workspace), label: 'Export' },
+            { href: duplicatesPath(workspace), label: 'Duplicates' },
+          ],
+        },
+        {
+          label: 'Configure',
+          items: [
+            { href: objectsPath(), label: 'Data Model' },
+            { href: propertiesPath(), label: 'Properties' },
+            { href: sitesPath(), label: 'Event Management' },
+            { href: integrationsPath(), label: 'Data Enrichment' },
           ],
         },
       ],
@@ -95,36 +145,8 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Reports',
           items: [
-            { href: reportsPath(workspace), label: 'Overview', match: `/contacts/${workspace}/reports` },
-            { href: reportsPath(workspace, { tab: 'pipeline' }), label: 'Pipeline' },
-            { href: reportsPath(workspace, { tab: 'forms' }), label: 'Forms' },
-            { href: reportsPath(workspace, { tab: 'sequences' }), label: 'Sequences' },
-            { href: reportsPath(workspace, { tab: 'email' }), label: 'Email' },
-            { href: reportsPath(workspace, { tab: 'website' }), label: 'Website' },
-            { href: reportsPath(workspace, { tab: 'attribution' }), label: 'Attribution' },
-          ],
-        },
-      ],
-    },
-    {
-      key: 'data',
-      label: 'Data management',
-      icon: 'data',
-      groups: [
-        {
-          label: 'Move data',
-          items: [
-            { href: importsPath(workspace), label: 'Import' },
-            { href: exportPath(workspace), label: 'Export' },
-            { href: duplicatesPath(workspace), label: 'Duplicates' },
-          ],
-        },
-        {
-          label: 'Configure',
-          items: [
-            { href: propertiesPath(), label: 'Properties' },
-            { href: integrationsPath(), label: 'Integrations' },
-            { href: sitesPath(), label: 'Tracked sites' },
+            { href: reportsPath(workspace, { tab: 'dashboards' }), label: 'Dashboards', match: `/contacts/${workspace}/reports/dashboards` },
+            { href: reportsPath(workspace), label: 'Reports', match: `/contacts/${workspace}/reports` },
           ],
         },
       ],
