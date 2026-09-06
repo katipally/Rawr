@@ -18,9 +18,11 @@
 
   --color-body: var(--rawr-text);
   --color-secondary: var(--rawr-text-secondary);
+  --color-muted: var(--rawr-text-muted);
   --color-inverse: var(--rawr-text-inverse);
 
   --color-line: var(--rawr-border);
+  --color-line-strong: var(--rawr-border-strong);
   --color-divider: var(--rawr-divider);
   --color-line-interactive: var(--rawr-border-interactive);
   --color-line-pressed: var(--rawr-border-pressed);
@@ -31,6 +33,7 @@
   --color-cta: var(--rawr-cta);
   --color-cta-hover: var(--rawr-cta-hover);
   --color-cta-subtle: var(--rawr-cta-subtle);
+  --color-brand: var(--rawr-brand);
   --color-success: var(--rawr-success);
   --color-success-subtle: var(--rawr-success-subtle);
   --color-error: var(--rawr-error);
@@ -48,6 +51,7 @@
   --color-nav-text: var(--rawr-nav-text);
   --color-nav-muted: var(--rawr-nav-muted);
   --color-nav-accent: var(--rawr-nav-accent);
+  --color-nav-line: var(--rawr-nav-border);
 
   --font-sans: var(--rawr-font-sans);
 
@@ -63,12 +67,15 @@
   --font-weight-link: var(--rawr-weight-link);
   --radius-hs: var(--rawr-radius);
   --radius-panel: var(--rawr-radius-panel);
+  --radius-pill: var(--rawr-radius-pill);
   --shadow-panel: var(--rawr-shadow-panel);
   --shadow-overlay: var(--rawr-shadow-overlay);
   --spacing-row: var(--rawr-row-height);
   --spacing-topbar: var(--rawr-topbar-height);
   --spacing-rail: var(--rawr-rail-width);
-  --spacing-rail-open: var(--rawr-rail-width-expanded);
+  --spacing-rail-item: var(--rawr-rail-item-height);
+  --spacing-flyout: var(--rawr-flyout-width);
+  --spacing-control: var(--rawr-control-height);
 
   --z-index-rail: var(--rawr-z-rail);
   --z-index-topbar: var(--rawr-z-topbar);
@@ -129,7 +136,7 @@
   select {
     appearance: none;
     -webkit-appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23516f90' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23333333' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
     padding-right: 1.75rem;

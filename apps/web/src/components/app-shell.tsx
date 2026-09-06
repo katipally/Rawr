@@ -1,8 +1,8 @@
 'use client'
 
 import {
-  Bell,
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
@@ -24,7 +24,6 @@ import { Avatar, cn, DropdownMenu, IconButton, Spinner, type MenuGroup } from '@
 import { SECTION_ICONS, type IconKey } from './icons.ts'
 import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
 import { NotificationBell } from './notifications.tsx'
-import { THEMES, useTheme } from './theme.tsx'
 
 export type NavItem = {
   href: string
@@ -34,12 +33,12 @@ export type NavItem = {
   match?: string
 }
 
-/** A named run of items inside a section's flyout. HubSpot heads each run, which
- *  is what keeps a ten-item menu readable. */
+/** A run of items inside a section's flyout. HubSpot separates runs with a rule
+ *  and heads none of them; the label is kept for the phone sheet. */
 export type NavGroup = { label?: string; items: NavItem[] }
 
 /** A section is one icon on the rail. With groups it opens a flyout listing them;
- *  with only a href it is a plain link, which is what Home is. */
+ *  with only a href it is a plain link. */
 export type NavSection = {
   key: string
   label: string
@@ -67,7 +66,7 @@ export type AppShellProps = {
   settingsHref: string
   /** The signed-in person's own screen, behind their name in the top bar. */
   accountHref: string
-  /** Where "Back" leaves settings when nothing else has been visited. */
+  /** Where the logo and "Back" from settings go. */
   homeHref: string
   /** The command palette, rendered by the layout so the shell needs no data. */
   search?: ReactNode
@@ -78,6 +77,8 @@ const RAIL_KEY = 'rawr.rail.expanded'
 /** How long the pointer may be between the rail and its flyout before the flyout
  *  closes. Long enough to cross the gap diagonally, short enough not to linger. */
 const CLOSE_DELAY_MS = 160
+/** HubSpot opens the flyout 42px above the icon that owns it. */
+const FLYOUT_LIFT_PX = 42
 
 const CREATE_ICONS: Record<string, typeof Contact> = {
   contact: Contact,
@@ -103,11 +104,12 @@ const write = (key: string, value: string): void => {
   }
 }
 
-/** HubSpot's frame: a navy rail down the full height with the wordmark on top, the
- *  top bar starting to its right, and the page itself a white card on the canvas.
- *  The rail opens a flyout of grouped links on hover or focus and pins open to
- *  icons plus labels when asked. Below the sidebar breakpoint the same sections
- *  render as a sheet, because hover does not exist on a phone. */
+/** HubSpot's 2026 frame: a charcoal top bar across the whole window with the
+ *  logo, the "Find or Ask" pill and the account controls; a 64px icon rail under
+ *  it down the left; and the page itself a white 16px-radius card on the grey
+ *  canvas. A rail icon opens a dark flyout of its hub's links on hover or focus.
+ *  Below the sidebar breakpoint the same sections render as a sheet, because
+ *  hover does not exist on a phone. */
 export const AppShell = (props: AppShellProps) => (
   <NavigationProvider>
     <Shell {...props} />
@@ -140,7 +142,6 @@ const Shell = ({
   const [unfolded, setUnfolded] = useState<string[]>([])
   const closeTimer = useRef<number | null>(null)
   const railRef = useRef<HTMLElement>(null)
-  const [theme, setTheme] = useTheme()
 
   const inSettings = here.startsWith('/settings')
   /** The last page outside settings, so Back returns where the person came from
@@ -193,38 +194,35 @@ const Shell = ({
       : (section.groups ?? []).some((group) => group.items.some(isCurrent))
 
   const open = flyout ? nav.find((section) => section.key === flyout) : null
-  /** The flyout sits level with its icon; measured on open so it follows the
-   *  rail whether collapsed or expanded, and at any zoom. */
+  /** The flyout sits just above its icon; measured on open so it follows the
+   *  rail at any zoom, and clamped so it never runs off the bottom. */
   const [flyoutTop, setFlyoutTop] = useState(0)
 
   const showFlyout = (section: NavSection, target: HTMLElement) => {
     if (!section.groups) return
     cancelClose()
-    const railTop = railRef.current?.getBoundingClientRect().top ?? 0
-    setFlyoutTop(target.getBoundingClientRect().top - railTop)
+    const rail = railRef.current?.getBoundingClientRect()
+    const railTop = rail?.top ?? 0
+    const wanted = target.getBoundingClientRect().top - railTop - FLYOUT_LIFT_PX
+    setFlyoutTop(Math.max(0, wanted))
     setFlyout(section.key)
   }
 
-  const itemLinks = (section: NavSection, dense: boolean) =>
+  /** One hub's links. `pill` is the flyout look: 40px rounded rows on charcoal,
+   *  the current one filled. The sheet uses the same rows, indented. */
+  const itemLinks = (section: NavSection) =>
     (section.groups ?? []).map((group, index) => (
-      <div key={group.label ?? index} className={cn(index > 0 && 'mt-1 border-t border-nav-active/60 pt-1')}>
-        {group.label ? (
-          <p className="px-3 pt-1 pb-0.5 text-small font-medium uppercase tracking-wide text-nav-muted/70">
-            {group.label}
-          </p>
-        ) : null}
-        <ul className="flex flex-col">
+      <div key={group.label ?? index}>
+        {index > 0 ? <hr className="mx-4 my-4 border-nav-active" /> : null}
+        <ul className="flex flex-col gap-1">
           {group.items.map((item) => (
             <li key={item.href}>
               <Link
                 href={item.href}
                 aria-current={isCurrent(item) ? 'page' : undefined}
                 className={cn(
-                  'block border-l-2 no-underline',
-                  dense ? 'py-1.5 pr-3 pl-3' : 'py-2 pr-4 pl-4',
-                  isCurrent(item)
-                    ? 'border-nav-accent bg-nav-active text-nav-text'
-                    : 'border-transparent text-nav-muted hover:bg-nav-hover hover:text-nav-text',
+                  'flex min-h-10 items-center rounded-pill px-4 py-2 font-light text-nav-text no-underline',
+                  isCurrent(item) ? 'bg-nav-active' : 'hover:bg-nav-hover',
                 )}
               >
                 {item.label}
@@ -242,24 +240,28 @@ const Shell = ({
       aria-label="Sections"
       onMouseLeave={scheduleClose}
       onMouseEnter={cancelClose}
-      className="relative flex min-h-0 flex-1 flex-col py-2"
+      className="relative flex min-h-0 flex-1 flex-col"
     >
       {nav.map((section) => {
         const Icon = SECTION_ICONS[section.icon]
         const current = sectionIsCurrent(section)
         const showing = flyout === section.key
         const face = cn(
-          'flex w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left no-underline',
-          current ? 'border-nav-accent bg-nav-active text-nav-text' : 'border-transparent text-nav-muted',
-          showing && !current && 'bg-nav-hover text-nav-text',
-          'hover:bg-nav-hover hover:text-nav-text focus-visible:bg-nav-hover focus-visible:text-nav-text focus-visible:outline-none',
+          'group flex h-rail-item w-full items-center gap-3 px-3 text-left text-nav-text no-underline focus-visible:outline-none',
+          !expanded && 'justify-center',
         )
         const body = (
           <>
-            <Icon aria-hidden="true" className="size-5 shrink-0" />
-            <span className={cn('min-w-0 flex-1 truncate font-medium', !expanded && 'sr-only')}>
-              {section.label}
+            <span
+              aria-hidden="true"
+              className={cn(
+                'grid size-8 shrink-0 place-items-center rounded-pill transition-colors',
+                current || showing ? 'bg-nav-active' : 'group-hover:bg-nav-hover group-focus-visible:bg-nav-hover',
+              )}
+            >
+              <Icon className="size-4" />
             </span>
+            <span className={cn('min-w-0 flex-1 truncate', !expanded && 'sr-only')}>{section.label}</span>
           </>
         )
 
@@ -309,12 +311,10 @@ const Shell = ({
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}
           style={{ top: flyoutTop }}
-          className="absolute left-full z-flyout w-56 rounded-r-panel border-l border-nav-active bg-nav py-1 text-nav-text shadow-overlay"
+          className="absolute left-[calc(100%+0.25rem)] z-flyout max-h-[calc(100dvh-var(--spacing-topbar)-1rem)] w-flyout overflow-y-auto rounded-panel bg-nav px-2 py-3 text-nav-text shadow-overlay"
         >
-          <p className="px-3 pt-1 pb-2 text-small font-semibold uppercase tracking-wider text-nav-muted/70">
-            {open.label}
-          </p>
-          {itemLinks(open, true)}
+          <h2 className="px-4 pt-2 pb-3 text-base font-semibold">{open.label}</h2>
+          {itemLinks(open)}
         </div>
       ) : null}
     </nav>
@@ -351,37 +351,29 @@ const Shell = ({
   const accountMenu: MenuGroup[] = [
     { key: 'you', items: [{ key: 'account', label: 'Your account', href: accountHref, icon: <UserRound className="size-4" /> }] },
     ...(workspaces.length > 1 ? workspaceGroups : []),
-    {
-      key: 'theme',
-      label: 'Appearance',
-      items: THEMES.map(({ value, label, icon: Icon }) => ({
-        key: value,
-        label,
-        icon: <Icon className="size-4" />,
-        checked: theme === value,
-        onSelect: () => setTheme(value),
-      })),
-    },
   ]
 
   /** The phone sheet: same sections, inline lists, no hover. Ends with who is
    *  signed in and, for members of more than one workspace, the switcher the
    *  top bar has no room for at this width. */
   const sheet = (
-    <nav aria-label="Sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
+    <nav aria-label="Sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2">
+      <Link href={homeHref} className="flex min-h-10 items-center rounded-pill px-4 font-light text-nav-text no-underline hover:bg-nav-hover">
+        Home
+      </Link>
       {nav.map((section) => {
         const Icon = SECTION_ICONS[section.icon]
         const current = sectionIsCurrent(section)
         const isOpen = unfolded.includes(section.key) || current
         const face = cn(
-          'flex w-full items-center gap-3 border-l-2 px-3 py-2.5 text-left no-underline',
-          current ? 'border-nav-accent text-nav-text' : 'border-transparent text-nav-muted',
+          'flex min-h-10 w-full items-center gap-3 rounded-pill px-4 text-left text-nav-text no-underline',
+          current ? 'bg-nav-active' : 'hover:bg-nav-hover',
         )
         if (section.href) {
           return (
             <Link key={section.key} href={section.href} aria-current={current ? 'page' : undefined} className={face}>
-              <Icon aria-hidden="true" className="size-5 shrink-0" />
-              <span className="font-medium">{section.label}</span>
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              <span>{section.label}</span>
             </Link>
           )
         }
@@ -395,74 +387,33 @@ const Shell = ({
               }
               className={face}
             >
-              <Icon aria-hidden="true" className="size-5 shrink-0" />
-              <span className="font-medium">{section.label}</span>
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              <span className="flex-1">{section.label}</span>
+              <ChevronDown aria-hidden="true" className={cn('size-4 transition-transform', isOpen && 'rotate-180')} />
             </button>
-            {isOpen ? <div className="pb-1 pl-6">{itemLinks(section, true)}</div> : null}
+            {isOpen ? <div className="py-1 pl-4">{itemLinks(section)}</div> : null}
           </div>
         )
       })}
     </nav>
   )
 
+  const topbarIcon = 'text-nav-text hover:bg-nav-hover'
+
   return (
     // The shell owns the scroll: the viewport is exactly one screen tall and only
-    // <main> moves. That is what lets a table header stick and keeps the rail and
-    // the top bar from scrolling away. The rail runs the full height with the bar
-    // beside it, which is HubSpot's frame and what makes the wordmark sit over
-    // the navigation rather than over the page.
-    <div className="flex h-dvh overflow-hidden">
-      {/* Wide screens: the rail. Hidden inside settings, which is its own place
-          with its own navigation, exactly as HubSpot does it. */}
-      {inSettings ? null : (
-        <aside
-          className={cn(
-            'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
-            expanded ? 'w-rail-open' : 'w-rail',
-          )}
-        >
-          <Link
-            href={homeHref}
-            aria-label="Rawr home"
-            className="flex h-topbar shrink-0 items-center gap-2 border-b border-nav-active/60 px-3 font-semibold tracking-tight text-nav-text no-underline"
-          >
-            <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-hs bg-nav-accent text-inverse">
-              R
-            </span>
-            <span className={expanded ? 'truncate' : 'sr-only'}>Rawr</span>
-          </Link>
-          {rail}
-          <button
-            type="button"
-            onClick={() => {
-              setExpanded(!expanded)
-              write(RAIL_KEY, expanded ? '0' : '1')
-              setFlyout(null)
-            }}
-            aria-pressed={expanded}
-            title={expanded ? 'Collapse' : 'Expand'}
-            className="flex shrink-0 items-center gap-3 border-t border-nav-active/60 px-3 py-2.5 text-nav-muted hover:bg-nav-hover hover:text-nav-text"
-          >
-            {expanded ? (
-              <ChevronsLeft aria-hidden="true" className="size-5 shrink-0" />
-            ) : (
-              <ChevronsRight aria-hidden="true" className="size-5 shrink-0" />
-            )}
-            <span className={expanded ? 'truncate' : 'sr-only'}>{expanded ? 'Collapse' : 'Expand'}</span>
-          </button>
-        </aside>
-      )}
+    // the page card moves. That is what lets a table header stick and keeps the
+    // rail and the top bar from scrolling away.
+    <div className="flex h-dvh flex-col overflow-hidden bg-nav">
+      <header className="relative z-topbar flex h-topbar shrink-0 items-center gap-2 pr-3 text-nav-text">
+        <NavigationProgress />
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="relative z-topbar flex h-topbar shrink-0 items-center gap-2 border-b border-divider bg-surface px-3">
-          <NavigationProgress />
+        {/* The logo owns the rail's width, so the bar's contents start level
+            with the page card below. */}
+        <div className="flex w-rail shrink-0 items-center justify-center">
           {inSettings ? (
-            <Link
-              href={cameFrom.current}
-              className="flex shrink-0 items-center gap-1 font-medium text-secondary no-underline hover:text-body"
-            >
+            <Link href={cameFrom.current} aria-label="Back" title="Back" className={cn('grid size-8 place-items-center rounded-pill', topbarIcon)}>
               <ChevronLeft aria-hidden="true" className="size-4" />
-              Back
             </Link>
           ) : (
             <>
@@ -472,124 +423,143 @@ const Shell = ({
                 aria-controls="primary-nav"
                 aria-label="Menu"
                 onClick={() => setSheetOpen((value) => !value)}
-                className="rounded-hs p-1.5 text-body hover:bg-fill-hover md:hidden"
+                className={cn('grid size-8 place-items-center rounded-pill md:hidden', topbarIcon)}
               >
-                <PanelLeft aria-hidden="true" className="size-5" />
+                <PanelLeft aria-hidden="true" className="size-4" />
               </button>
-              <Link href={homeHref} className="shrink-0 font-semibold tracking-tight text-cta no-underline md:hidden">
-                Rawr
+              <Link href={homeHref} aria-label="Rawr home" className="hidden rounded-hs p-1.5 md:block">
+                <span aria-hidden="true" className="grid size-6 place-items-center rounded-hs bg-brand font-semibold text-inverse">
+                  R
+                </span>
               </Link>
             </>
           )}
+        </div>
 
-          {inSettings ? <h1 className="min-w-0 truncate font-medium">Settings</h1> : null}
+        {inSettings ? <h1 className="min-w-0 truncate font-medium">Settings</h1> : null}
 
-          {search ? <div className="mx-auto w-full min-w-0 max-w-md">{search}</div> : null}
+        {search && !inSettings ? <div className="w-full min-w-0 max-w-[34.375rem]">{search}</div> : null}
 
-          <div className={cn('flex shrink-0 items-center gap-1', search ? '' : 'ml-auto')}>
-            {create.length > 0 && !inSettings ? (
-              <DropdownMenu
-                label="Create"
-                groups={[
+        {create.length > 0 && !inSettings ? (
+          <DropdownMenu
+            label="Create"
+            groups={[
+              {
+                key: 'create',
+                items: create.map((option) => {
+                  const Icon = CREATE_ICONS[option.key] ?? Plus
+                  return { key: option.key, label: option.label, href: option.href, icon: <Icon className="size-4" /> }
+                }),
+              },
+            ]}
+            trigger={(props) => (
+              <IconButton {...props} label="Create new" icon={<Plus className="size-4" />} className={cn('border border-nav-line', topbarIcon)} />
+            )}
+          />
+        ) : null}
+
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          <DropdownMenu
+            label="Help"
+            groups={[
+              {
+                key: 'help',
+                items: [
+                  { key: 'agent', label: 'Connect an assistant', href: '/settings/agent' },
+                  { key: 'account', label: 'Your account', href: accountHref },
+                ],
+              },
+            ]}
+            trigger={(props) => <IconButton {...props} label="Help" icon={<CircleHelp className="size-4" />} className={topbarIcon} />}
+          />
+
+          <IconButton
+            label="Settings"
+            icon={<Settings className="size-4" />}
+            className={cn(topbarIcon, inSettings && 'bg-nav-active')}
+            onClick={() => window.location.assign(settingsHref)}
+          />
+
+          <NotificationBell workspaceSlug={workspaceSlug} />
+
+          <DropdownMenu
+            label={`${email}, ${role}`}
+            groups={[
+              ...accountMenu,
+              {
+                key: 'session',
+                items: [
                   {
-                    key: 'create',
-                    items: create.map((option) => {
-                      const Icon = CREATE_ICONS[option.key] ?? Plus
-                      return {
-                        key: option.key,
-                        label: option.label,
-                        href: option.href,
-                        icon: <Icon className="size-4" />,
-                      }
-                    }),
-                  },
-                ]}
-                trigger={(props) => (
-                  <IconButton {...props} label="Create" icon={<Plus className="size-5" />} tone="accent" />
-                )}
-              />
-            ) : null}
-
-            <DropdownMenu
-              label="Help"
-              groups={[
-                {
-                  key: 'help',
-                  items: [
-                    { key: 'agent', label: 'Connect an assistant', href: '/settings/agent' },
-                    { key: 'account', label: 'Your account', href: accountHref },
-                  ],
-                },
-              ]}
-              trigger={(props) => (
-                <IconButton {...props} label="Help" icon={<CircleHelp className="size-5" />} />
-              )}
-            />
-
-            <NotificationBell workspaceSlug={workspaceSlug} />
-
-            <IconButton
-              label="Settings"
-              tone={inSettings ? 'accent' : 'default'}
-              icon={<Settings className="size-5" />}
-              onClick={() => window.location.assign(settingsHref)}
-            />
-
-            <DropdownMenu
-              label={`${email}, ${role}`}
-              groups={[
-                ...accountMenu,
-                {
-                  key: 'session',
-                  items: [
-                    {
-                      key: 'sign-out',
-                      label: 'Sign out',
-                      icon: <LogOut className="size-4" />,
-                      onSelect: () => {
-                        const form = document.createElement('form')
-                        form.method = 'post'
-                        form.action = '/api/auth/sign-out'
-                        document.body.append(form)
-                        form.submit()
-                      },
+                    key: 'sign-out',
+                    label: 'Sign out',
+                    icon: <LogOut className="size-4" />,
+                    onSelect: () => {
+                      const form = document.createElement('form')
+                      form.method = 'post'
+                      form.action = '/api/auth/sign-out'
+                      document.body.append(form)
+                      form.submit()
                     },
-                  ],
-                },
-              ]}
-              trigger={(props) => (
-                <button
-                  {...props}
-                  type="button"
-                  className="flex min-h-8 items-center gap-2 rounded-hs px-1 hover:bg-fill-hover"
-                >
-                  <Avatar name={email} size="sm" />
-                  <span className="hidden min-w-0 max-w-40 truncate text-secondary lg:inline">
-                    {workspaceName}
-                  </span>
-                </button>
-              )}
-            />
-          </div>
-        </header>
+                  },
+                ],
+              },
+            ]}
+            trigger={(props) => (
+              <button {...props} type="button" className={cn('flex h-8 items-center gap-2 rounded-pill pr-2 pl-2', topbarIcon)}>
+                <Avatar name={email} size="sm" />
+                <span className="hidden min-w-0 max-w-40 truncate lg:inline">{workspaceName}</span>
+                <ChevronDown aria-hidden="true" className="hidden size-3 lg:block" />
+              </button>
+            )}
+          />
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1">
+        {/* Wide screens: the rail. Hidden inside settings, which is its own place
+            with its own navigation, exactly as HubSpot does it. */}
+        {inSettings ? null : (
+          <aside
+            className={cn(
+              'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
+              expanded ? 'w-flyout' : 'w-rail',
+            )}
+          >
+            {rail}
+            <button
+              type="button"
+              onClick={() => {
+                setExpanded(!expanded)
+                write(RAIL_KEY, expanded ? '0' : '1')
+                setFlyout(null)
+              }}
+              aria-pressed={expanded}
+              title={expanded ? 'Collapse' : 'Expand'}
+              className={cn('mb-2 flex h-10 shrink-0 items-center gap-3 self-center rounded-pill px-3 hover:bg-nav-hover', expanded && 'self-stretch mx-3')}
+            >
+              {expanded ? <ChevronsLeft aria-hidden="true" className="size-4 shrink-0" /> : <ChevronsRight aria-hidden="true" className="size-4 shrink-0" />}
+              <span className={expanded ? 'truncate' : 'sr-only'}>{expanded ? 'Collapse' : 'Expand'}</span>
+            </button>
+          </aside>
+        )}
 
         {/* Phones: the same sections as a sheet over the content. */}
         {sheetOpen ? (
           <>
             <div id="primary-nav" className="fixed inset-y-0 left-0 z-overlay flex w-64 flex-col bg-nav text-nav-text md:hidden">
-              <div className="flex h-topbar shrink-0 items-center justify-between gap-2 border-b border-nav-active/60 px-3">
+              <div className="flex h-topbar shrink-0 items-center justify-between gap-2 px-4">
                 <span className="font-semibold tracking-tight">Rawr</span>
                 <button
                   type="button"
                   aria-label="Close menu"
                   onClick={() => setSheetOpen(false)}
-                  className="rounded-hs p-1.5 text-nav-muted hover:bg-nav-hover hover:text-nav-text"
+                  className={cn('grid size-8 place-items-center rounded-pill', topbarIcon)}
                 >
-                  <X aria-hidden="true" className="size-5" />
+                  <X aria-hidden="true" className="size-4" />
                 </button>
               </div>
               {sheet}
-              <div className="flex flex-col gap-2 border-t border-nav-active/60 px-3 py-3 text-small text-nav-muted">
+              <div className="flex flex-col gap-2 border-t border-nav-active px-4 py-3 text-small text-nav-muted">
                 <Link href={accountHref} className="truncate text-nav-muted no-underline hover:text-nav-text" title={email}>
                   {email} · {role}
                 </Link>
@@ -599,7 +569,7 @@ const Shell = ({
                     <select
                       value={workspaceSlug}
                       onChange={(event) => switchTo(event.target.value)}
-                      className="max-w-full min-h-8 truncate rounded-hs border border-nav-active bg-nav pl-2 pr-7 text-small text-nav-text"
+                      className="max-w-full min-h-8 truncate rounded-pill border border-nav-line bg-nav pl-3 pr-7 text-small text-nav-text"
                     >
                       {workspaces.map((option) => (
                         <option key={option.slug} value={option.slug}>
@@ -633,7 +603,7 @@ const Shell = ({
               content stays within it. One scroller, so a page that wants to fill
               the window (a list with a sticky header and a pager at the foot) can
               ask for h-full and get a real height back. */}
-          <div className="@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-panel border border-line bg-surface p-3 shadow-panel sm:p-6">
+          <div className="@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-panel bg-surface p-3 shadow-panel sm:p-6 sm:pt-5">
             {children}
           </div>
           {pendingHref ? (

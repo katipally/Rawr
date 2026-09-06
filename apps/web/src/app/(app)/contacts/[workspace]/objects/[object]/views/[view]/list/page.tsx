@@ -1,10 +1,11 @@
 import { calendarFields, isObjectKey, listRecords, listViews, parseFilters, resolveView, withWorkspaceReads } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
+import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeCursor, decodeFilters, decodeSort, encodeCursor, exportCsvPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { decodeCursor, decodeFilters, decodeSort, duplicatesPath, encodeCursor, exportCsvPath, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -78,7 +79,7 @@ const ListPage = async ({
   // One transaction for the whole screen. Each of these reads used to open its
   // own, and BEGIN plus the set_config plus COMMIT is three network round trips
   // before a row is fetched.
-  const { object, lookups, canWrite, views, resolved, page, queryError } = await withWorkspaceReads(ctx, async () => {
+  const { object, objects, lookups, canWrite, views, resolved, page, queryError } = await withWorkspaceReads(ctx, async () => {
     const [crm, list, view] = await Promise.all([
       loadCrmContext(ctx, objectParam),
       listViews(ctx, objectParam),
@@ -165,10 +166,27 @@ const ListPage = async ({
         </Alert>
       ) : null}
 
-      <div className="flex flex-wrap items-baseline gap-x-3">
-        <h1 className="text-lg font-medium">{object.namePlural}</h1>
-        <p className="text-secondary">{resolved.view.name}</p>
-      </div>
+      <IndexHeader
+        title={object.namePlural}
+        currentObject={objectParam}
+        objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(workspace, other.key, 'all') }))}
+        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        add={
+          canWrite
+            ? [
+                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(workspace, objectParam, resolved.view.slug, 'list', { ...listParams, new: '1' } as ListParams) },
+                { label: 'Import', href: importsPath(workspace) },
+              ]
+            : []
+        }
+        more={[
+          { key: 'import', label: 'Import', href: importsPath(workspace) },
+          { key: 'export', label: 'Export', href: exportPath(workspace) },
+          ...(objectParam === 'contact' || objectParam === 'company'
+            ? [{ key: 'duplicates', label: 'Manage duplicates', href: duplicatesPath(workspace, objectParam) }]
+            : []),
+        ]}
+      />
 
       <ViewTabs
         workspace={workspace}
@@ -203,7 +221,6 @@ const ListPage = async ({
         filterFields={toFilterFields(object)}
         createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
-        exportHref={exportHref}
         allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
       />
 
@@ -230,6 +247,7 @@ const ListPage = async ({
           totalHint={page!.total}
           objectLabel={object.nameSingular}
           bulkFields={bulkFields}
+          exportHref={exportHref}
         />
       )}
     </div>

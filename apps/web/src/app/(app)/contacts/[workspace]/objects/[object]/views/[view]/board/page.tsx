@@ -4,8 +4,9 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard } from '~/components/crm/deal-board.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
+import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeFilters, exportCsvPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { decodeFilters, exportCsvPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -38,7 +39,7 @@ const BoardPage = async ({
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const [{ object, lookups, canWrite }, views, resolved] = await Promise.all([
+  const [{ object, objects, lookups, canWrite }, views, resolved] = await Promise.all([
     loadCrmContext(ctx, 'deal'),
     listViews(ctx, 'deal'),
     resolveView(ctx, 'deal', viewSlug),
@@ -93,10 +94,24 @@ const BoardPage = async ({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline gap-x-3">
-        <h1 className="text-lg font-medium">{object.namePlural}</h1>
-        <p className="text-secondary">{resolved.view.name}</p>
-      </div>
+      <IndexHeader
+        title={object.namePlural}
+        currentObject={'deal'}
+        objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(workspace, other.key, 'all') }))}
+        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        add={
+          canWrite
+            ? [
+                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(workspace, 'deal', resolved.view.slug, 'board', { ...listParams, new: '1' } as ListParams) },
+                { label: 'Import', href: importsPath(workspace) },
+              ]
+            : []
+        }
+        more={[
+          { key: 'import', label: 'Import', href: importsPath(workspace) },
+          { key: 'export', label: 'Export this view', href: exportHref },
+        ]}
+      />
 
       <ViewTabs
         workspace={workspace}
@@ -185,7 +200,6 @@ const BoardPage = async ({
         filterFields={toFilterFields(object)}
         createFields={toEditableFields(object, lookups)}
         canWrite={canWrite}
-        exportHref={exportHref}
         allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
       />
 

@@ -20,20 +20,20 @@ export type CheckboxProps = BaseProps & {
 /** A real input under a drawn box, so the browser keeps the focus ring, the
  *  keyboard behaviour and form participation, and we only own the paint. */
 export const Checkbox = ({ label, hint, hideLabel, indeterminate, className, ...rest }: CheckboxProps) => (
-  <label className={cn('flex min-w-0 cursor-pointer items-start gap-2', rest.disabled && 'cursor-not-allowed opacity-60', className)}>
-    <span className="relative flex size-4 shrink-0 items-center justify-center">
+  <label className={cn('flex min-w-0 cursor-pointer items-start gap-2', hideLabel && 'items-center', rest.disabled && 'cursor-not-allowed opacity-60', className)}>
+    <span className="relative flex size-5 shrink-0 items-center justify-center">
       <input
         {...rest}
         type="checkbox"
         ref={(node) => {
           if (node) node.indeterminate = indeterminate ?? false
         }}
-        className="peer size-4 appearance-none rounded-[2px] border border-line bg-surface checked:border-accent checked:bg-accent indeterminate:border-accent indeterminate:bg-accent disabled:bg-disabled"
+        className="peer size-5 appearance-none rounded-hs border border-body bg-surface checked:border-accent checked:bg-accent indeterminate:border-accent indeterminate:bg-accent disabled:border-line disabled:bg-disabled"
       />
       {indeterminate ? (
-        <Minus aria-hidden="true" className="pointer-events-none absolute size-3 text-white" />
+        <Minus aria-hidden="true" className="pointer-events-none absolute size-3.5 text-white" />
       ) : (
-        <Check aria-hidden="true" className="pointer-events-none absolute hidden size-3 text-white peer-checked:block" />
+        <Check aria-hidden="true" className="pointer-events-none absolute hidden size-3.5 text-white peer-checked:block" />
       )}
     </span>
     <span className={cn('min-w-0', hideLabel && 'sr-only')}>

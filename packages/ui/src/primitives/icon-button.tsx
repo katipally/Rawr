@@ -43,7 +43,7 @@ export const IconButton = ({
       type={rest.type ?? 'button'}
       aria-label={label}
       className={cn(
-        'inline-flex size-8 shrink-0 items-center justify-center rounded-hs transition-colors duration-150',
+        'inline-flex size-8 shrink-0 items-center justify-center rounded-pill transition-colors duration-150',
         'disabled:cursor-not-allowed disabled:text-secondary disabled:opacity-60 disabled:hover:bg-transparent',
         TONES[tone],
         className,

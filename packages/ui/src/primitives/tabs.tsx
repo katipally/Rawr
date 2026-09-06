@@ -20,17 +20,15 @@ export type TabsProps = {
 /** Address-driven tabs: each one is a link, so a tab is shareable, survives a
  *  reload and works with the back button. Nothing here holds state. */
 export const Tabs = ({ label, items, className }: TabsProps) => (
-  <nav aria-label={label} className={cn('-mb-px flex min-w-0 gap-1 overflow-x-auto', className)}>
+  <nav aria-label={label} className={cn('flex min-w-0 gap-1 overflow-x-auto', className)}>
     {items.map((item) => (
       <a
         key={item.key}
         href={item.href}
         aria-current={item.current ? 'page' : undefined}
         className={cn(
-          'flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 font-medium no-underline',
-          item.current
-            ? 'border-accent text-body'
-            : 'border-transparent text-secondary hover:border-line hover:text-body',
+          'flex min-h-control shrink-0 items-center gap-1.5 rounded-hs px-3 py-1 font-normal no-underline',
+          item.current ? 'bg-fill-hover text-body' : 'text-secondary hover:bg-fill hover:text-body',
         )}
       >
         <span className="truncate">{item.label}</span>

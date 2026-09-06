@@ -1,6 +1,9 @@
 import {
   BarChart3,
   Ban,
+  Bookmark,
+  Bot,
+  Briefcase,
   Building2,
   CalendarDays,
   ChartNoAxesColumn,
@@ -9,13 +12,16 @@ import {
   Contact,
   Copy,
   Database,
+  FileText,
   Handshake,
   Hash,
   Home,
+  LifeBuoy,
   Mail,
   Megaphone,
   Pencil,
   Phone,
+  Receipt,
   RotateCcw,
   Send,
   Sparkles,
@@ -32,14 +38,32 @@ import type { IntegrationKind, ObjectKey } from '@rawr/db'
  *  One map, so the rail, the command palette, the create menu and a record header
  *  cannot drift into showing three different marks for the same thing. */
 
-export type IconKey = 'home' | 'crm' | 'marketing' | 'reporting' | 'data'
+export type IconKey =
+  | 'home'
+  | 'bookmarks'
+  | 'crm'
+  | 'marketing'
+  | 'content'
+  | 'sales'
+  | 'commerce'
+  | 'service'
+  | 'data'
+  | 'agents'
+  | 'reporting'
 
+/** HubSpot's rail, top to bottom. */
 export const SECTION_ICONS: Record<IconKey, LucideIcon> = {
   home: Home,
+  bookmarks: Bookmark,
   crm: Contact,
   marketing: Megaphone,
-  reporting: ChartNoAxesColumn,
+  content: FileText,
+  sales: Briefcase,
+  commerce: Receipt,
+  service: LifeBuoy,
   data: Database,
+  agents: Bot,
+  reporting: ChartNoAxesColumn,
 }
 
 export const OBJECT_ICONS: Record<ObjectKey, LucideIcon> = {

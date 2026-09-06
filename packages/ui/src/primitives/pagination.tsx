@@ -36,44 +36,42 @@ export const Pagination = ({
 }: PaginationProps) => {
   const range = pageRange({ count, offset, total, hasMore, noun })
   const face =
-    'inline-flex min-h-8 items-center gap-1 rounded-hs border border-line px-2 font-medium hover:bg-fill-hover disabled:cursor-not-allowed disabled:bg-disabled disabled:text-secondary'
+    'inline-flex min-h-8 items-center gap-1 rounded-pill px-2 font-semibold hover:bg-fill disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent'
 
   return (
     <nav
       aria-label="Pagination"
-      className={cn('flex flex-wrap items-center justify-between gap-3 py-2', className)}
+      className={cn('flex flex-wrap items-center justify-center gap-1 py-2', className)}
     >
+      <button type="button" onClick={onPrevious} disabled={!range.canPrevious} className={face}>
+        <ChevronLeft aria-hidden="true" className="size-4" />
+        Prev
+      </button>
       {/* Polite, not assertive: the count changing is worth hearing after the
           rows, not over the top of them. */}
-      <p aria-live="polite" className="text-secondary">
+      <p aria-live="polite" className="px-2 text-secondary">
         {range.label}
       </p>
-      <div className="flex items-center gap-2">
-        {onPerPage ? (
-          <label className="flex items-center gap-1.5 text-secondary">
-            <span>Per page</span>
-            <select
-              value={perPage}
-              onChange={(event) => onPerPage(Number(event.target.value))}
-              className="min-h-8 rounded-hs border border-line bg-surface pl-2 text-body"
-            >
-              {SIZES.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <button type="button" onClick={onPrevious} disabled={!range.canPrevious} className={face}>
-          <ChevronLeft aria-hidden="true" className="size-4" />
-          Previous
-        </button>
-        <button type="button" onClick={onNext} disabled={!range.canNext} className={face}>
-          Next
-          <ChevronRight aria-hidden="true" className="size-4" />
-        </button>
-      </div>
+      <button type="button" onClick={onNext} disabled={!range.canNext} className={face}>
+        Next
+        <ChevronRight aria-hidden="true" className="size-4" />
+      </button>
+      {onPerPage ? (
+        <label className="ml-2 flex items-center">
+          <span className="sr-only">Rows per page</span>
+          <select
+            value={perPage}
+            onChange={(event) => onPerPage(Number(event.target.value))}
+            className="min-h-8 rounded-pill bg-transparent pl-3 font-semibold text-body hover:bg-fill"
+          >
+            {SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size} per page
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
     </nav>
   )
 }

@@ -26,7 +26,7 @@ export type BadgeProps = {
 export const Badge = ({ tone = 'neutral', dot = false, className, children }: BadgeProps) => (
   <span
     className={cn(
-      'inline-flex max-w-full items-center gap-1.5 rounded-hs border px-1.5 py-0.5 text-small font-medium',
+      'inline-flex max-w-full items-center gap-1.5 rounded-pill border px-2 py-0.5 text-small font-medium',
       TONES[tone],
       className,
     )}

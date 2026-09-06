@@ -37,11 +37,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
     getRegistry(contextFrom(session)),
   ])
   // Built from the session, because every CRM address carries its workspace.
-  // The four sections are HubSpot's: the records and the work on them, what goes
-  // out to the market, what the numbers say, and the plumbing. Settings is not a
-  // section; it is its own place, reached from the top bar.
+  // The sections are HubSpot's hubs in HubSpot's order. Home is the logo, and
+  // Settings is its own place, reached from the top bar.
   const nav: NavSection[] = [
-    { key: 'home', label: 'Home', icon: 'home', href: workspaceHome(workspace) },
     {
       key: 'crm',
       label: 'CRM',

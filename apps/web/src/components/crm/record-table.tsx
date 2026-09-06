@@ -1,6 +1,7 @@
 'use client'
 
 import { DataTable, EmptyState, Pagination, cn, type Column } from '@rawr/ui'
+import { Download } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
@@ -35,6 +36,8 @@ export type RecordTableProps = {
   /** What a bulk edit may set. Empty for a role that cannot write, which is what
    *  removes the checkbox column entirely rather than showing a dead one. */
   bulkFields: EditableField[]
+  /** The CSV of exactly this list: same filters, columns and sort. */
+  exportHref: string
 }
 
 const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
@@ -55,6 +58,7 @@ export const RecordTable = ({
   totalHint,
   objectLabel,
   bulkFields,
+  exportHref,
 }: RecordTableProps) => {
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -65,16 +69,6 @@ export const RecordTable = ({
   // ticked would make the count lie about what Apply is going to touch.
   const onPage = new Set(rows.map((row) => row.id))
   const live = [...selected].filter((id) => onPage.has(id))
-
-  const sortHref = (key: string): string => {
-    // Clicking the sorted column flips it; clicking another starts descending,
-    // which is what a person wants from a date or an amount.
-    const direction = sort?.key === key && sort.direction === 'desc' ? 'asc' : 'desc'
-    // A new order starts from the first page; a cursor from the old order is meaningless.
-    const next: ListParams = { ...params, cursor: undefined, sort: direction === 'desc' ? `-${key}` : key }
-    delete next.cursor
-    return objectView(workspace, object, view, 'list', next)
-  }
 
   const tableColumns: Column<TableRow>[] = columns.map((column, index) => ({
     key: column.key,
@@ -147,29 +141,7 @@ export const RecordTable = ({
   const pageHref = (next: ListParams): string => objectView(workspace, object, view, 'list', next)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* The header row is its own control strip so the sort links stay reachable
-          by keyboard rather than being buried in the table header. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 text-secondary">
-        <span className="flex flex-wrap items-center gap-1">
-          Sort:
-          {columns.slice(0, 6).map((column) => (
-            <Link
-              key={column.key}
-              href={sortHref(column.key)}
-              scroll={false}
-              className={cn(
-                'rounded-hs px-1.5 py-0.5 no-underline',
-                sort?.key === column.key ? 'bg-accent-subtle text-link' : 'text-secondary',
-              )}
-            >
-              {column.label}
-              {sort?.key === column.key ? (sort.direction === 'desc' ? ' ↓' : ' ↑') : ''}
-            </Link>
-          ))}
-        </span>
-      </div>
-
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {canBulk && live.length > 0 ? (
         <BulkBar
           object={object}
@@ -230,6 +202,24 @@ export const RecordTable = ({
           navigate(pageHref({ ...params, limit: String(size), cursor: undefined, skip: undefined }))
         }
       />
+
+      {/* HubSpot's footer: the total on the left, what to do with the whole list
+          on the right. The export is a plain link so the browser downloads it and
+          it survives a closed tab. */}
+      <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
+        <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
+          {(totalHint ?? rows.length).toLocaleString()} {objectLabel.toLowerCase()}
+          {(totalHint ?? rows.length) === 1 ? '' : 's'}
+        </span>
+        <a
+          href={exportHref}
+          download
+          className="inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
+        >
+          <Download aria-hidden="true" className="size-3.5" />
+          Export
+        </a>
+      </div>
     </div>
   )
 }

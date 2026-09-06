@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge, DropdownMenu, RenamePrompt, cn, useToast } from '@rawr/ui'
-import { ChevronDown, MoreHorizontal, Pin, Plus } from 'lucide-react'
+import { CalendarDays, ChevronDown, Columns3, MoreHorizontal, Pin, Plus, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -11,6 +11,8 @@ import { objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 const KIND_LABEL: Record<ViewKind, string> = { list: 'Table', board: 'Board', calendar: 'Calendar' }
+const KIND_ICON: Record<ViewKind, typeof Table2> = { list: Table2, board: Columns3, calendar: CalendarDays }
+const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
 
 export type ViewTab = {
   /** Null for the view every workspace falls back to before one is saved. It has
@@ -134,28 +136,29 @@ export const ViewTabs = ({
   ]
 
   return (
-    <div className="flex flex-wrap items-end gap-x-1 gap-y-1 border-b border-divider">
+    <div className="flex flex-wrap items-center gap-1 border-b border-line pb-1">
       {tabs.map((view) => {
         const active = view.slug === current
+        const Icon = TAB_ICON[view.kind]
         return (
           <span
             key={view.slug}
             className={cn(
-              '-mb-px flex items-center border-b-2',
-              active ? 'border-accent' : 'border-transparent',
+              'flex min-h-control items-center rounded-hs',
+              active ? 'bg-fill-hover text-body' : 'text-secondary hover:bg-fill hover:text-body',
             )}
           >
             <Link
               href={href(view)}
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'max-w-56 truncate py-1.5 pl-3 font-medium no-underline',
-                active ? 'text-link' : 'text-secondary hover:text-body',
+                'flex max-w-56 items-center gap-2 truncate py-1 pl-3 font-normal text-current no-underline',
                 view.id && canWrite ? 'pr-1' : 'pr-3',
               )}
             >
-              {view.name}
-              {view.isShared ? null : <span className="ml-1 text-small text-secondary">(mine)</span>}
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              <span className="truncate">{view.name}</span>
+              {view.isShared ? null : <span className="text-small text-secondary">(mine)</span>}
             </Link>
             {view.id && canWrite ? (
               <DropdownMenu
@@ -166,7 +169,7 @@ export const ViewTabs = ({
                     {...props}
                     type="button"
                     disabled={busy}
-                    className="mr-1 rounded-hs p-1 text-secondary hover:bg-fill-hover hover:text-body disabled:cursor-not-allowed"
+                    className="mr-1 rounded-pill p-1 text-secondary hover:bg-fill-hover hover:text-body disabled:cursor-not-allowed"
                   >
                     <MoreHorizontal aria-hidden="true" className="size-4" />
                     <span className="sr-only">Actions for {view.name}</span>
@@ -198,7 +201,7 @@ export const ViewTabs = ({
             <button
               {...props}
               type="button"
-              className="-mb-px flex items-center gap-1 border-b-2 border-transparent px-3 py-1.5 text-secondary hover:text-body"
+              className="flex min-h-control items-center gap-1 rounded-hs px-3 py-1 text-secondary hover:bg-fill hover:text-body"
             >
               All views
               <Badge tone="neutral">{unpinned.length}</Badge>
@@ -211,28 +214,34 @@ export const ViewTabs = ({
       {canWrite ? (
         <Link
           href={`${currentHref}${currentHref.includes('?') ? '&' : '?'}view=new`}
-          className="-mb-px flex items-center gap-1 border-b-2 border-transparent px-2 py-1.5 text-secondary no-underline hover:text-body"
+          aria-label="Add view"
+          title="Add view"
+          className="grid size-8 place-items-center rounded-pill text-body no-underline hover:bg-fill"
         >
           <Plus aria-hidden="true" className="size-4" />
-          Add view
         </Link>
       ) : null}
 
       {kinds.length > 1 ? (
-        <span className="ml-auto flex gap-1 pb-1">
-          {kinds.map((kind) => (
-            <Link
-              key={kind}
-              href={href({ slug: current }, kind)}
-              aria-current={currentKind === kind ? 'true' : undefined}
-              className={cn(
-                'rounded-hs border px-2 py-1 no-underline',
-                currentKind === kind ? 'border-line-interactive bg-accent-subtle text-link' : 'border-line text-secondary',
-              )}
-            >
-              {KIND_LABEL[kind]}
-            </Link>
-          ))}
+        <span className="ml-auto flex h-control items-center gap-0.5 rounded-pill border border-line px-0.5">
+          {kinds.map((kind) => {
+            const Icon = KIND_ICON[kind]
+            return (
+              <Link
+                key={kind}
+                href={href({ slug: current }, kind)}
+                aria-current={currentKind === kind ? 'true' : undefined}
+                aria-label={KIND_LABEL[kind]}
+                title={KIND_LABEL[kind]}
+                className={cn(
+                  'grid size-7 place-items-center rounded-pill text-body no-underline',
+                  currentKind === kind ? 'border border-line-strong bg-surface' : 'hover:bg-fill',
+                )}
+              >
+                <Icon aria-hidden="true" className="size-4" />
+              </Link>
+            )
+          })}
         </span>
       ) : null}
 

@@ -1,10 +1,10 @@
 'use client'
 
-import { Badge, Button, Checkbox, IconButton, Modal, TextInput, Tooltip, useToast } from '@rawr/ui'
-import { ArrowDown, ArrowUp, BookmarkPlus, Columns3, Download, Filter, Search, X } from 'lucide-react'
+import { Badge, Button, Checkbox, DropdownMenu, IconButton, Modal, TextInput, cn, useToast } from '@rawr/ui'
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, Settings, SlidersHorizontal, Search, X } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -27,34 +27,13 @@ export type ListToolbarProps = {
   canWrite: boolean
   /** The view's own name, so "update this view" can save without renaming it. */
   viewLabel: string
-  exportHref: string
   /** Every field the object has, for the column chooser. Ordered as the registry
    *  orders them, which is the order a person sees on the record page. */
   allColumns: { key: string; label: string }[]
 }
 
-/** A count pinned to the corner of an icon button. The number is what the label
- *  used to carry in words, and losing it would make "Filters" and "Filters, three
- *  applied" look identical. The tooltip and the accessible name still say it in
- *  full, so this is decoration for the eye only. */
-const Counted = ({
-  count,
-  tone,
-  children,
-}: {
-  count: number
-  tone: 'accent' | 'neutral'
-  children: ReactNode
-}) => (
-  <span className="relative inline-flex shrink-0">
-    {children}
-    {count > 0 ? (
-      <span aria-hidden="true" className="pointer-events-none absolute -top-1 -right-1">
-        <Badge tone={tone}>{count}</Badge>
-      </span>
-    ) : null}
-  </span>
-)
+const pill =
+  'inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 text-small font-light text-body hover:bg-fill'
 
 export const ListToolbar = ({
   workspace,
@@ -71,7 +50,6 @@ export const ListToolbar = ({
   createFields,
   canWrite,
   viewLabel,
-  exportHref,
   allColumns,
 }: ListToolbarProps) => {
   const { navigate } = useNavigation()
@@ -173,7 +151,7 @@ export const ListToolbar = ({
           with four buttons and overlapping them. */}
       <div className="flex flex-wrap items-center gap-2">
         <form
-          className="flex w-full min-w-0 items-center gap-2 sm:w-auto sm:min-w-64 sm:flex-1"
+          className="relative w-full min-w-0 sm:w-56"
           onSubmit={(event) => {
             event.preventDefault()
             goTo({ q: search })
@@ -183,70 +161,88 @@ export const ListToolbar = ({
             type="search"
             value={search}
             aria-label={`Search ${objectLabel.toLowerCase()}`}
-            placeholder={`Search ${objectLabel.toLowerCase()}`}
+            placeholder="Search ( / )"
             onChange={(event) => setSearch(event.target.value)}
-            className="min-w-0 flex-1"
+            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4"
           />
-          <IconButton
+          <button
             type="submit"
-            label={`Search ${objectLabel.toLowerCase()}`}
-            icon={<Search size={16} />}
-          />
+            aria-label={`Search ${objectLabel.toLowerCase()}`}
+            className="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded-pill text-body hover:bg-fill"
+          >
+            <Search aria-hidden="true" className="size-4" />
+          </button>
           {params.q ? (
-            <IconButton
-              label="Clear the search"
-              icon={<X size={16} />}
+            <button
+              type="button"
+              aria-label="Clear the search"
               onClick={() => { setSearch(''); goTo({ q: undefined }) }}
-            />
+              className="absolute top-1/2 right-7 grid size-6 -translate-y-1/2 place-items-center rounded-pill text-body hover:bg-fill"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </button>
           ) : null}
         </form>
 
-        <Counted count={activeConditions} tone="accent">
-          <IconButton
-            label={activeConditions > 0 ? `Filters (${activeConditions} applied)` : 'Filters'}
-            icon={<Filter size={16} />}
-            tone={showFilters ? 'accent' : 'default'}
-            aria-expanded={showFilters}
-            onClick={() => setShowFilters((open) => !open)}
-          />
-        </Counted>
+        <button
+          type="button"
+          aria-expanded={showFilters}
+          onClick={() => setShowFilters((open) => !open)}
+          className={cn(pill, (showFilters || activeConditions > 0) && 'bg-fill-hover')}
+        >
+          <SlidersHorizontal aria-hidden="true" className="size-3.5" />
+          Filter
+          {activeConditions > 0 ? <Badge tone="neutral">{activeConditions}</Badge> : null}
+        </button>
 
-        <Counted count={columns.length} tone="neutral">
+        <DropdownMenu
+          label="Sort by"
+          align="start"
+          groups={[
+            {
+              key: 'sort',
+              items: columns.map((key) => {
+                const active = sorts[0]?.key === key
+                // Choosing the sorted column flips it; choosing another starts
+                // descending, which is what a person wants from a date or an amount.
+                const direction = active && sorts[0]?.direction === 'desc' ? 'asc' : 'desc'
+                return {
+                  key,
+                  label: labelOf(key),
+                  checked: active,
+                  hint: active ? (sorts[0]?.direction === 'desc' ? 'Descending' : 'Ascending') : undefined,
+                  onSelect: () => goTo({ sort: direction === 'desc' ? `-${key}` : key }),
+                }
+              }),
+            },
+          ]}
+          trigger={(props) => (
+            <button {...props} type="button" className={cn(pill, sorts.length > 0 && params.sort && 'bg-fill-hover')}>
+              <ArrowUpDown aria-hidden="true" className="size-3.5" />
+              Sort by
+              {sorts[0] ? <span className="text-secondary">{labelOf(sorts[0].key)}</span> : null}
+              <ChevronDown aria-hidden="true" className="size-3" />
+            </button>
+          )}
+        />
+
+        <span className="ml-auto flex items-center gap-1">
+          {canWrite ? (
+            <IconButton
+              label="Save these filters and columns as a view"
+              icon={<BookmarkPlus className="size-4" />}
+              className="border border-line-strong text-body"
+              onClick={() => setShowSave(true)}
+            />
+          ) : null}
           <IconButton
-            label={`Columns (${columns.length} shown)`}
-            icon={<Columns3 size={16} />}
+            label={`Edit columns (${columns.length} shown)`}
+            icon={<Settings className="size-4" />}
+            className="border border-line-strong text-body"
             aria-haspopup="dialog"
             onClick={openColumns}
           />
-        </Counted>
-
-        {/* A plain link, so the browser downloads it and the export survives a
-            closed tab. It carries the same filters the table is showing. An <a>
-            rather than a button wrapping one: a <button> inside an <a> is nested
-            interactive content, which assistive technology cannot resolve. */}
-        <Tooltip label="Export this list as CSV">
-          <a
-            href={exportHref}
-            download
-            aria-label="Export this list as CSV"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-hs text-secondary no-underline transition-colors duration-150 hover:bg-fill-hover hover:text-body"
-          >
-            <Download size={16} aria-hidden="true" />
-          </a>
-        </Tooltip>
-
-        {canWrite ? (
-          <>
-            <IconButton
-              label="Save these filters and columns as a view"
-              icon={<BookmarkPlus size={16} />}
-              onClick={() => setShowSave(true)}
-            />
-            <Button variant="primary" onClick={() => setShowCreate(true)}>
-              Create {objectLabel.toLowerCase()}
-            </Button>
-          </>
-        ) : null}
+        </span>
       </div>
 
       {showFilters ? (

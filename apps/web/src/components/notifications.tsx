@@ -89,7 +89,8 @@ export const NotificationBell = ({ workspaceSlug }: { workspaceSlug: string }) =
         <IconButton
           ref={trigger}
           label={summary && summary.total > 0 ? `Notifications, ${summary.total} waiting` : 'Notifications'}
-          icon={<Bell className="size-5" />}
+          icon={<Bell className="size-4" />}
+          className="text-nav-text hover:bg-nav-hover"
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
@@ -97,7 +98,7 @@ export const NotificationBell = ({ workspaceSlug }: { workspaceSlug: string }) =
         {summary && summary.total > 0 ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-full bg-cta px-1 text-[0.625rem] font-medium leading-4 text-white"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 grid min-w-4 place-items-center rounded-pill bg-brand px-1 text-[0.625rem] font-medium leading-4 text-white"
           >
             {summary.total > 99 ? '99+' : summary.total}
           </span>

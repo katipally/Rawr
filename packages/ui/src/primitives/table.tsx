@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../cn.ts'
+import { Checkbox } from './choice.tsx'
 
 export type Column<Row> = {
   key: string
@@ -41,7 +42,7 @@ export type DataTableProps<Row> = {
 
 const MIN_WIDTH = 64
 const DEFAULT_WIDTH = 180
-const SELECT_WIDTH = 40
+const SELECT_WIDTH = 45
 const KEY_STEP = 16
 
 const readWidths = (storageKey: string | undefined): Record<string, number> => {
@@ -147,7 +148,7 @@ export const DataTable = <Row,>({
     // box is the thing that scrolls, which is what `fill` arranges.
     <div
       className={cn(
-        'w-full overflow-auto rounded-panel border border-line bg-surface',
+        'w-full overflow-auto border-t border-line bg-surface',
         fill && 'min-h-0 flex-1',
       )}
     >
@@ -169,13 +170,13 @@ export const DataTable = <Row,>({
             {selection ? (
               <th
                 scope="col"
-                className="sticky top-0 z-10 border-b border-line bg-fill px-3 py-2"
+                className="sticky top-0 z-10 h-row border-b border-line bg-surface px-3 align-middle"
               >
-                <input
-                  type="checkbox"
+                <Checkbox
+                  hideLabel
                   checked={allTicked}
                   onChange={toggleAll}
-                  aria-label={`Select every ${selection.noun} on this page`}
+                  label={`Select every ${selection.noun} on this page`}
                 />
               </th>
             ) : null}
@@ -184,8 +185,8 @@ export const DataTable = <Row,>({
                 key={column.key}
                 scope="col"
                 className={cn(
-                  'relative sticky top-0 z-10 border-b border-line px-3 py-2',
-                  'truncate bg-fill text-small font-medium text-secondary',
+                  'relative sticky top-0 z-10 h-row border-b border-line px-6 align-middle',
+                  'truncate bg-surface font-normal text-secondary',
                   column.align === 'right' && 'text-right',
                 )}
                 title={column.header}
@@ -232,8 +233,8 @@ export const DataTable = <Row,>({
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={cn(
-                'border-b border-divider last:border-0',
-                onRowClick && 'cursor-pointer hover:bg-fill-hover',
+                'border-b border-line',
+                onRowClick && 'cursor-pointer hover:bg-fill',
                 selection?.selected.has(rowKey(row)) && 'bg-accent-subtle',
               )}
             >
@@ -242,12 +243,12 @@ export const DataTable = <Row,>({
                 // also opening the row; the checkbox inside is what is operated,
                 // and it is an ordinary keyboard-reachable input.
                 // biome-ignore lint/a11y/useKeyWithClickEvents: see above
-                <td className="h-row px-3 py-1.5 align-middle" onClick={(event) => event.stopPropagation()}>
-                  <input
-                    type="checkbox"
+                <td className="h-row px-3 py-0.5 align-middle" onClick={(event) => event.stopPropagation()}>
+                  <Checkbox
+                    hideLabel
                     checked={selection.selected.has(rowKey(row))}
                     onChange={() => toggleOne(rowKey(row))}
-                    aria-label={`Select this ${selection.noun}`}
+                    label={`Select this ${selection.noun}`}
                   />
                 </td>
               ) : null}
@@ -255,7 +256,7 @@ export const DataTable = <Row,>({
                 <td
                   key={column.key}
                   className={cn(
-                    'h-row overflow-hidden px-3 py-1.5 align-middle',
+                    'h-row overflow-hidden px-6 py-0.5 align-middle',
                     column.align === 'right' && 'text-right tabular-nums',
                   )}
                 >

@@ -1,5 +1,6 @@
 'use client'
 
+import { Search } from 'lucide-react'
 import { cn } from '@rawr/ui'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
@@ -107,6 +108,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
 
   return (
     <div className="relative min-w-0">
+      <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 right-4 size-4 -translate-y-1/2 text-nav-text" />
       <input
         ref={input}
         type="search"
@@ -115,7 +117,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         aria-expanded={showing}
         aria-controls={listId}
         aria-label="Search records"
-        placeholder="Search  ⌘K"
+        placeholder="Find or Ask"
         onChange={(event) => {
           setText(event.target.value)
           setOpen(true)
@@ -123,7 +125,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}
-        className="min-h-9 w-full min-w-0 rounded-hs border border-line bg-fill px-3 py-1.5 outline-none focus:border-line-interactive focus:bg-surface"
+        className="h-8 w-full min-w-0 rounded-pill border border-nav-line bg-nav pl-4 pr-10 text-nav-text placeholder:text-nav-text outline-none focus:border-nav-text"
       />
 
       {showing ? (

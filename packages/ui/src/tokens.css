@@ -1,92 +1,84 @@
-/* Sampled from the running HubSpot app, 00-context.md section 11. Body copy is
-   weight 300; that single detail is what makes the clone read as authentic.
+/* Sampled from app.hubspot.com on 2026-09-05 (docs/hubspot-replica/). Every
+   value is the computed style HubSpot ships, not an adjusted one: this app is a
+   replica, and the body copy at weight 300 is what makes it read as one.
 
-   Light keeps HubSpot's measured backgrounds exactly. Its semantic colours are
-   darkened from the sampled values: HubSpot uses #0091AE, #F2545B and #00BDA5 as
-   fills, and this app uses them as text, where they land at 3.7:1, 3.4:1 and
-   2.4:1 on white. Each one here is the same hue taken down to 4.5:1 on both
-   white and the canvas.
-
-   Dark is ours. It is a slate ladder rather than HubSpot's navy family, because
-   five background tokens inside one 5% luminance band read as a single colour. */
+   Light only. HubSpot has no dark theme and neither does this. */
 
 :root {
   color-scheme: light;
 
-  --rawr-canvas: #f5f8fa;
+  --rawr-canvas: #f0f0f0;
   --rawr-surface: #ffffff;
   --rawr-surface-raised: #ffffff;
-  --rawr-fill: #f5f8fa;
-  --rawr-fill-hover: #eaf0f6;
-  --rawr-disabled: #eaf0f6;
+  --rawr-fill: #f5f5f5;
+  --rawr-fill-hover: #e6e6e6;
+  --rawr-disabled: #f5f5f5;
 
-  --rawr-text: #33475b;
-  --rawr-text-secondary: #516f90;
+  --rawr-text: #333333;
+  --rawr-text-secondary: #666666;
+  --rawr-text-muted: #8a8a8a;
   --rawr-text-inverse: #ffffff;
 
-  --rawr-border: #cbd6e2;
-  --rawr-divider: #dfe3eb;
-  /* HubSpot's #7FD1DE is 1.4:1 on white, so a focused input had no visible edge.
-     The accent carries the focus state instead, at 3:1 as WCAG 1.4.11 requires
-     of a non-text indicator. */
-  --rawr-border-interactive: #007d91;
-  --rawr-border-pressed: #99acc2;
+  --rawr-border: #cccccc;
+  --rawr-divider: #e6e6e6;
+  --rawr-border-strong: #8a8a8a;
+  --rawr-border-interactive: #00494b;
+  --rawr-border-pressed: #8a8a8a;
 
-  --rawr-link: #007d96;
-  --rawr-accent: #007d91;
-  --rawr-accent-subtle: #e5f5f8;
-  /* The primary button fill, carrying a white label at 4.5:1. HubSpot's own
-     #FF7A59 is 2.6:1 there. Same hue, taken down until the label is readable. */
-  --rawr-cta: #bc5a42;
-  --rawr-cta-hover: #a44f39;
-  --rawr-cta-subtle: #fff1ee;
-  --rawr-success: #008170;
+  --rawr-link: #006162;
+  --rawr-accent: #00494b;
+  --rawr-accent-subtle: #e6f2f2;
+  /* HubSpot's primary button is the dark teal; the orange lives only in the logo. */
+  --rawr-cta: #00494b;
+  --rawr-cta-hover: #003536;
+  --rawr-cta-subtle: #e6f2f2;
+  --rawr-brand: #ff7a59;
+  --rawr-success: #00bda5;
   --rawr-success-subtle: #e5f8f6;
-  --rawr-error: #c6454b;
-  --rawr-error-subtle: #fdeaeb;
-  --rawr-warning: #8a6e3c;
+  --rawr-error: #f2545b;
+  --rawr-error-subtle: #fdedee;
+  --rawr-warning: #f5c26b;
   --rawr-warning-subtle: #fef8f0;
-  --rawr-info: #3b5a9a;
-  --rawr-info-subtle: #eef3fc;
+  --rawr-info: #0091ae;
+  --rawr-info-subtle: #e5f5f8;
 
-  --rawr-scrim: rgb(51 71 91 / 0.4);
+  --rawr-scrim: rgb(51 51 51 / 0.4);
 
-  /* The navigation rail is HubSpot navy in both themes: it is the one surface
-     that does not follow the canvas, which is what makes it read as chrome. */
-  --rawr-nav: #2d3e50;
-  --rawr-nav-hover: #3b5068;
-  --rawr-nav-active: #516f90;
+  /* The chrome: rail, top bar and flyout share one charcoal, the item pill is a
+     step lighter, and everything on it is white. */
+  --rawr-nav: #333333;
+  --rawr-nav-hover: #4d4d4d;
+  --rawr-nav-active: #666666;
   --rawr-nav-text: #ffffff;
-  --rawr-nav-muted: #cbd6e2;
+  --rawr-nav-muted: #cccccc;
   --rawr-nav-accent: #ff7a59;
+  --rawr-nav-border: #8a8a8a;
 
-  --rawr-shadow-panel: 0 1px 2px rgb(51 71 91 / 0.12);
-  --rawr-shadow-overlay: 0 8px 24px rgb(51 71 91 / 0.2);
+  --rawr-shadow-panel: 0 1px 8px 0 rgb(20 20 20 / 0.08);
+  --rawr-shadow-overlay: 0 24px 48px 0 rgb(20 20 20 / 0.08);
 
-  --rawr-font-sans: 'Lexend Deca', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
-    sans-serif;
+  --rawr-font-sans: 'Lexend Deca', Helvetica, Arial, sans-serif;
   --rawr-text-body: 0.875rem;
   --rawr-text-small: 0.75rem;
   --rawr-weight-body: 300;
   --rawr-weight-label: 500;
   --rawr-weight-link: 600;
 
-  /* HubSpot's table is 36px rows with 12px horizontal padding. This is a working
-     tool, not a marketing site. */
-  --rawr-row-height: 2.25rem;
-  --rawr-cell-padding-x: 0.75rem;
-  --rawr-radius: 3px;
-  --rawr-radius-panel: 6px;
+  /* Tables: 40px rows, 24px horizontal cell padding. */
+  --rawr-row-height: 2.5rem;
+  --rawr-cell-padding-x: 1.5rem;
+  /* Three radii: 6px on small controls, 16px on any card or page, and a pill on
+     every button. */
+  --rawr-radius: 6px;
+  --rawr-radius-panel: 16px;
+  --rawr-radius-pill: 999999px;
+  --rawr-control-height: 2rem;
 
-  /* The frame. HubSpot's rail runs the full height with the bar beside it, so
-     both measurements are shared: the rail sets the bar's left edge and the bar
-     sets where a flyout may start. */
-  --rawr-topbar-height: 3rem;
-  --rawr-rail-width: 3.25rem;
-  --rawr-rail-width-expanded: 13rem;
+  --rawr-topbar-height: 2.75rem;
+  --rawr-rail-width: 4rem;
+  --rawr-rail-item-height: 3.25rem;
+  --rawr-flyout-width: 13.25rem;
 
-  /* Stacking order, in one place. These used to be literals spread across the
-     shell, the overlays and the toast host, where a new layer had to guess. */
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;
   --rawr-z-flyout: 45;
@@ -97,55 +89,4 @@
   --rawr-duration-base: 200ms;
   --rawr-duration-slow: 300ms;
   --rawr-easing: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* One dark block. `ThemeScript` resolves `system` to an explicit `data-theme`
-   before the first paint and follows the OS while the stored preference is
-   `system`, so the media query that used to duplicate every value below is not
-   needed and cannot drift from it. */
-:root[data-theme='dark'] {
-  color-scheme: dark;
-
-  /* A slate ladder, not one navy. Each background step is ~6-9 points of CIE
-     lightness apart, which is what makes a card read as a card without leaning
-     on its border. */
-  --rawr-canvas: #131c28;
-  --rawr-surface: #222d3a;
-  --rawr-surface-raised: #344151;
-  --rawr-fill: #2f3a49;
-  --rawr-fill-hover: #3b4858;
-  --rawr-disabled: #2a3441;
-
-  --rawr-text: #eaeef4;
-  --rawr-text-secondary: #acb7c5;
-  --rawr-text-inverse: #131c28;
-
-  --rawr-border: #4e5d71;
-  --rawr-divider: #3c4857;
-  --rawr-border-interactive: #7fd1de;
-  --rawr-border-pressed: #6c7e95;
-
-  /* Lightened off the light-mode hues until each clears 4.5:1 on every one of
-     the five backgrounds above, because these are text colours here. */
-  --rawr-link: #7fd1de;
-  --rawr-accent: #57c3d3;
-  --rawr-accent-subtle: #1b4757;
-  --rawr-cta: #bc5a42;
-  --rawr-cta-hover: #a44f39;
-  --rawr-cta-subtle: #533e41;
-  --rawr-success: #2fc9b6;
-  --rawr-success-subtle: #1b4d52;
-  --rawr-error: #f79b9f;
-  --rawr-error-subtle: #503641;
-  --rawr-warning: #f5c26b;
-  --rawr-warning-subtle: #504e45;
-  --rawr-info: #8fb8f0;
-  --rawr-info-subtle: #24374f;
-
-  /* Black at 30% over a dark canvas is nearly invisible, so the scrim is its own
-     token rather than a hardcoded bg-black/30 in each overlay. */
-  --rawr-scrim: rgb(0 0 0 / 0.65);
-
-  --rawr-shadow-panel: 0 1px 2px rgb(0 0 0 / 0.5);
-  --rawr-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.65);
 }

@@ -4,8 +4,8 @@ import { cn } from '../cn.ts'
 type Variant = 'primary' | 'secondary' | 'tertiary' | 'destructive'
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-cta text-white hover:bg-cta-hover border-transparent',
-  secondary: 'bg-surface text-body border-line hover:bg-fill-hover hover:border-line-pressed',
+  primary: 'bg-cta text-white hover:bg-cta-hover border-cta hover:border-cta-hover',
+  secondary: 'bg-surface text-body border-line-strong hover:bg-fill-hover',
   tertiary: 'bg-transparent text-link border-transparent hover:underline',
   // Outlined, not filled. Twenty of the twenty-three destructive buttons are
   // per-row triggers, and filling them made a stack of ten Delete buttons the
@@ -35,8 +35,8 @@ export const Button = ({
     aria-busy={busy || undefined}
     className={cn(
       // min-h rather than h: a long label at large text sizes must wrap, not clip.
-      'inline-flex min-h-9 items-center justify-center gap-2 rounded-hs border px-3 py-1.5',
-      'font-medium transition-colors duration-150',
+      'inline-flex min-h-control items-center justify-center gap-2 rounded-pill border px-4 py-2',
+      'text-small font-light leading-none transition-colors duration-150',
       // A faded coral primary reads as broken rather than as not-yet-available.
       // Every filled button drops to the neutral fill when disabled, so "nothing
       // to save yet" and "this is dead" never look alike. A tertiary button is a

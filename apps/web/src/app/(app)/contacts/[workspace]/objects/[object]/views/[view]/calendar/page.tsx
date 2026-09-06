@@ -3,8 +3,9 @@ import { Alert, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
+import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { decodeFilters, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -51,7 +52,7 @@ const CalendarPage = async ({
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const [{ object, canWrite }, views, resolved] = await Promise.all([
+  const [{ object, objects, canWrite }, views, resolved] = await Promise.all([
     loadCrmContext(ctx, objectParam),
     listViews(ctx, objectParam),
     resolveView(ctx, objectParam, viewSlug),
@@ -104,10 +105,24 @@ const CalendarPage = async ({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline gap-x-3">
-        <h1 className="text-lg font-medium">{object.namePlural}</h1>
-        <p className="text-secondary">{resolved.view.name}</p>
-      </div>
+      <IndexHeader
+        title={object.namePlural}
+        currentObject={objectParam}
+        objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(workspace, other.key, 'all') }))}
+        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        add={
+          canWrite
+            ? [
+                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(workspace, objectParam, resolved.view.slug, 'calendar', { ...listParams, new: '1' } as ListParams) },
+                { label: 'Import', href: importsPath(workspace) },
+              ]
+            : []
+        }
+        more={[
+          { key: 'import', label: 'Import', href: importsPath(workspace) },
+          { key: 'export', label: 'Export', href: exportPath(workspace) },
+        ]}
+      />
 
       <ViewTabs
         workspace={workspace}

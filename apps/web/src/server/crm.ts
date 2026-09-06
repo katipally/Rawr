@@ -155,6 +155,8 @@ export type CrmContext = {
   object: RegistryObject
   lookups: Lookups
   canWrite: boolean
+  /** Every object in the workspace, for the switcher beside an index page's title. */
+  objects: RegistryObject[]
 }
 
 export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: string): Promise<CrmContext> => {
@@ -165,5 +167,5 @@ export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: string): 
   // write one of its records: the three roles that can change a contact. An admin
   // still decides what objects exist at all, which is the object_def role.
   const entity = object.isCustom ? 'contact' : objectKey
-  return { object, lookups, canWrite: canWrite(ctx.role, entity) }
+  return { object, lookups, canWrite: canWrite(ctx.role, entity), objects: registry.objects }
 }
