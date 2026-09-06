@@ -18,10 +18,11 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Avatar, cn, DropdownMenu, IconButton, Spinner, type MenuGroup } from '@rawr/ui'
 import { SECTION_ICONS, type IconKey } from './icons.ts'
 import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
+import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
 
 export type NavItem = {
@@ -73,6 +74,10 @@ export type AppShellProps = {
 }
 
 const RAIL_KEY = 'rawr.rail.expanded'
+
+/** HubSpot's first rail item, above a divider from the hubs. Its flyout is the
+ *  bookmarks panel rather than a list of links, so it is drawn by hand below. */
+const BOOKMARKS: NavSection = { key: 'bookmarks', label: 'Bookmarks', icon: 'bookmarks', groups: [] }
 /** How long the pointer may be between the rail and its flyout before the flyout
  *  closes. Long enough to cross the gap diagonally, short enough not to linger. */
 const CLOSE_DELAY_MS = 160
@@ -188,7 +193,8 @@ const Shell = ({
       ? here.startsWith(section.href)
       : (section.groups ?? []).some((group) => group.items.some(isCurrent))
 
-  const open = flyout ? nav.find((section) => section.key === flyout) : null
+  const sections = [BOOKMARKS, ...nav]
+  const open = flyout ? sections.find((section) => section.key === flyout) : null
   /** The flyout sits just above its icon; measured on open so it follows the
    *  rail at any zoom, and clamped so it never runs off the bottom. */
   const [flyoutTop, setFlyoutTop] = useState(0)
@@ -237,10 +243,11 @@ const Shell = ({
       onMouseEnter={cancelClose}
       className="relative flex min-h-0 flex-1 flex-col"
     >
-      {nav.map((section) => {
+      {sections.map((section) => {
         const Icon = SECTION_ICONS[section.icon]
         const current = sectionIsCurrent(section)
         const showing = flyout === section.key
+        const divider = section.key === BOOKMARKS.key ? <hr className="mx-5 my-1 border-nav-active" /> : null
         const face = cn(
           'group flex h-rail-item w-full items-center gap-3 px-3 text-left text-nav-text no-underline focus-visible:outline-none',
           !expanded && 'justify-center',
@@ -277,20 +284,22 @@ const Shell = ({
         }
 
         return (
-          <button
-            key={section.key}
-            type="button"
-            title={expanded ? undefined : section.label}
-            aria-haspopup="true"
-            aria-expanded={showing}
-            aria-controls={`flyout-${section.key}`}
-            onMouseEnter={(event) => showFlyout(section, event.currentTarget)}
-            onFocus={(event) => showFlyout(section, event.currentTarget)}
-            onClick={(event) => (showing ? setFlyout(null) : showFlyout(section, event.currentTarget))}
-            className={face}
-          >
-            {body}
-          </button>
+          <Fragment key={section.key}>
+            <button
+              type="button"
+              title={expanded ? undefined : section.label}
+              aria-haspopup="true"
+              aria-expanded={showing}
+              aria-controls={`flyout-${section.key}`}
+              onMouseEnter={(event) => showFlyout(section, event.currentTarget)}
+              onFocus={(event) => showFlyout(section, event.currentTarget)}
+              onClick={(event) => (showing ? setFlyout(null) : showFlyout(section, event.currentTarget))}
+              className={face}
+            >
+              {body}
+            </button>
+            {divider}
+          </Fragment>
         )
       })}
 
@@ -309,7 +318,7 @@ const Shell = ({
           className="absolute left-[calc(100%+0.25rem)] z-flyout max-h-[calc(100dvh-var(--spacing-topbar)-1rem)] w-flyout overflow-y-auto rounded-panel bg-nav px-2 py-3 text-nav-text shadow-overlay"
         >
           <h2 className="px-4 pt-2 pb-3 text-base font-semibold">{open.label}</h2>
-          {itemLinks(open)}
+          {open.key === BOOKMARKS.key ? <BookmarksPanel here={here} /> : itemLinks(open)}
         </div>
       ) : null}
     </nav>
@@ -356,7 +365,7 @@ const Shell = ({
       <Link href={homeHref} className="flex min-h-10 items-center rounded-pill px-4 font-light text-nav-text no-underline hover:bg-nav-hover">
         Home
       </Link>
-      {nav.map((section) => {
+      {sections.map((section) => {
         const Icon = SECTION_ICONS[section.icon]
         const current = sectionIsCurrent(section)
         const isOpen = unfolded.includes(section.key) || current
@@ -386,7 +395,9 @@ const Shell = ({
               <span className="flex-1">{section.label}</span>
               <ChevronDown aria-hidden="true" className={cn('size-4 transition-transform', isOpen && 'rotate-180')} />
             </button>
-            {isOpen ? <div className="py-1 pl-4">{itemLinks(section)}</div> : null}
+            {isOpen ? (
+              <div className="py-1 pl-4">{section.key === BOOKMARKS.key ? <BookmarksPanel here={here} /> : itemLinks(section)}</div>
+            ) : null}
           </div>
         )
       })}
