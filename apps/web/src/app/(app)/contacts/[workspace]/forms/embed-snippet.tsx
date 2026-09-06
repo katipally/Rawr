@@ -14,11 +14,14 @@ export const EmbedSnippet = ({
   formId,
   workspace,
   slug,
+  open = false,
 }: {
   baseUrl: string
   formId: string
   workspace: string
   slug: string
+  /** Already unfolded, for a dialog that exists only to show it. */
+  open?: boolean
 }) => {
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -38,7 +41,7 @@ export const EmbedSnippet = ({
   }
 
   return (
-    <details className="mt-1 text-xs">
+    <details open={open} className="mt-1 text-xs">
       <summary className="cursor-pointer text-secondary">Embed code</summary>
 
       <div className="mt-2 flex flex-col gap-2">

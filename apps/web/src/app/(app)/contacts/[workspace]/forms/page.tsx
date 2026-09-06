@@ -1,11 +1,11 @@
 import { listForms } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { Button, EmptyState, PageHeader } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { EmbedSnippet } from './embed-snippet.tsx'
+import { FormsTable } from './forms-table.tsx'
 
 /** Every form in the workspace, with the two numbers that matter on a Monday:
  *  how many leads it has taken, and how many are sitting in review waiting for a
@@ -20,13 +20,15 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
   const held = forms.reduce((total, form) => total + form.quarantined, 0)
   const canCreate = session.role === 'admin' || session.role === 'marketing'
   const newForm = canCreate ? (
-    <Link href={formsPath(workspace, 'new')} className="text-sm font-semibold text-link">
-      New form
+    <Link href={formsPath(workspace, 'new')} className="no-underline">
+      <Button variant="primary" tabIndex={-1}>
+        Create form
+      </Button>
     </Link>
   ) : null
 
   return (
-    <div className="w-full max-w-6xl">
+    <div className="flex flex-col">
       <PageHeader
         className="mb-4"
         title="Forms"
@@ -54,58 +56,20 @@ const FormsPage = async ({ params }: { params: Promise<{ workspace: string }> })
           action={newForm}
         />
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {forms.map((form) => (
-            <li
-              key={form.id}
-              className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3"
-            >
-              <div className="flex flex-wrap items-baseline gap-2">
-                <Link href={formsPath(workspace, form.id)} className="font-semibold text-link">
-                  {form.name}
-                </Link>
-                {!form.isActive ? (
-                  <span className="rounded-hs bg-disabled px-1.5 py-0.5 text-xs text-secondary">
-                    Off
-                  </span>
-                ) : null}
-              </div>
-
-              <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary">
-                <div>
-                  <dt className="inline">Fields </dt>
-                  <dd className="inline font-medium text-body">{form.fieldCount}</dd>
-                </div>
-                <div>
-                  <dt className="inline">Leads </dt>
-                  <dd className="inline font-medium text-body">{form.submissions}</dd>
-                </div>
-                <div>
-                  <dt className="inline">Held </dt>
-                  <dd className="inline font-medium text-body">{form.quarantined}</dd>
-                </div>
-                <div>
-                  <dt className="inline">Last </dt>
-                  <dd className="inline font-medium text-body">
-                    {form.lastSubmissionAt
-                      ? form.lastSubmissionAt.toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                        })
-                      : 'never'}
-                  </dd>
-                </div>
-              </dl>
-
-              <EmbedSnippet
-                baseUrl={publicBaseUrl}
-                formId={form.id}
-                workspace={workspace}
-                slug={form.slug}
-              />
-            </li>
-          ))}
-        </ul>
+        <FormsTable
+          workspace={workspace}
+          baseUrl={publicBaseUrl}
+          rows={forms.map((form) => ({
+            id: form.id,
+            name: form.name,
+            slug: form.slug,
+            isActive: form.isActive,
+            fieldCount: form.fieldCount,
+            submissions: form.submissions,
+            quarantined: form.quarantined,
+            lastSubmissionAt: form.lastSubmissionAt?.toISOString() ?? null,
+          }))}
+        />
       )}
     </div>
   )
