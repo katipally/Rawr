@@ -59,7 +59,25 @@ const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', '
   )
   const id = rows[0]?.id
   if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
-  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
+  // Seated on a real member, because this context writes: it creates sites and
+  // erases visitors, and every one of those lands in audit_log. Claiming to be a
+  // person and naming nobody left rows that verify-account rightly refuses —
+  // which it only noticed on the run after this suite, since the two share a
+  // database and account goes first.
+  // Through withAccount, because membership is tenant-scoped and the bare pool
+  // has no account pinned: unscoped it returns nothing at all, which is the
+  // whole point of the tenancy suite.
+  const [seat] = await withAccount(
+    { accountId: id, actorId: null, actorKind: 'job', isSuperAdmin: false, viewHubs: [], editHubs: [] },
+    (tx) =>
+      tx.execute<{ id: string }>(
+        sql`select m.user_id as id from membership m
+             where m.is_super_admin and m.deactivated_at is null
+             order by m.created_at limit 1`,
+      ) as Promise<{ id: string }[]>,
+  )
+  if (!seat) throw new Error(`account ${slug} has no super admin seated. Run pnpm db:seed.`)
+  return { accountId: id, actorId: seat.id, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(
@@ -141,7 +159,7 @@ try {
   await setSiteActive(datasaur, created.id, true)
 
   const sites = await listSites(datasaur)
-  check('the admin list shows this account only', sites.every((row) => row.siteKey !== 'probe-www'))
+  check('the admin list shows this account only', sites.every((row) => row.siteKey !== 'peer-www'))
 
   // -------------------------------------------------------------------------
   section('what the collector refuses')
@@ -549,7 +567,7 @@ try {
   // -------------------------------------------------------------------------
   section('tenancy')
 
-  const probeSite = await publicSite('probe-www')
+  const probeSite = await publicSite('peer-www')
   if (!probeSite) throw new Error('the probe site is missing. Run pnpm db:seed.')
   const probeVid = vid(PEER.slug)
   const probeView = await collect({
@@ -577,7 +595,7 @@ try {
   )
   check(
     'and a site key belonging to one tenant resolves only that tenant',
-    (await publicSite('probe-www'))?.accountId === probe.accountId,
+    (await publicSite('peer-www'))?.accountId === probe.accountId,
   )
 
   // -------------------------------------------------------------------------

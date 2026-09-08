@@ -275,9 +275,16 @@ try {
   const marketingOwn = await held(marketingSeat.id)
   await scopeTo(marketingSeat.id, 'team')
   const marketingTeam = await held(marketingSeat.id)
-  check(marketingTeam === ownOnly + marketingOwn,
+  // Every scope sees an unowned record, which is the next check and the whole
+  // reason a scoped account does not strand its leads. So it is in both of the
+  // "own" counts, and adding them without taking it back out counts it twice:
+  // team = sales' own + marketing's own - the unowned they share.
+  const [unowned] = await owner<{ n: number }[]>`
+    select count(*)::int as n from contact
+     where account_id = ${accountId} and owner_id is null and deleted_at is null`
+  check(marketingTeam === ownOnly + marketingOwn - unowned!.n,
     "a team scope reaches exactly its team's records and no further",
-    `${marketingTeam} = ${ownOnly} + ${marketingOwn}`)
+    `${marketingTeam} = ${ownOnly} + ${marketingOwn} - ${unowned!.n} unowned`)
 
   // A lead nobody holds must stay reachable, or scoping an account strands every
   // unassigned record in it.
