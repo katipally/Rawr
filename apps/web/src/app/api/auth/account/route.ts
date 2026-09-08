@@ -29,7 +29,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     const back = new URL('/', env.AUTH_URL)
     back.searchParams.set(
       'error',
-      `That link belongs to a account called "${wanted}", and this account is not a member of it.`,
+      `That link belongs to an account called "${wanted}", and you do not have a seat in it.`,
     )
     return NextResponse.redirect(back)
   }
