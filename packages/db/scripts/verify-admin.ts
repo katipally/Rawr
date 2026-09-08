@@ -46,6 +46,7 @@ import { readBoard, groupableFields } from '../src/dal/board.ts'
 import { recordOptions } from '../src/dal/search.ts'
 import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** The parts of F1 that had no code: the metadata registry's write side, pipeline
  *  and lifecycle administration, subscription types, segments, bulk edit, board
@@ -88,8 +89,8 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 const stamp = Math.random().toString(36).slice(2, 8)
 
 try {
-  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, SANDBOX.slug))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, PEER.slug))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
@@ -107,7 +108,7 @@ try {
   /** The seeded seats are named for the access they carry, so the suite asks for
    *  one by name and gets whatever grants the seed gave it. */
   const ctxFor = (seat: string): AccountContext => {
-    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    const member = members.find((m) => m.email === `${seat}@sandbox.test`)
     if (!member) throw new Error(`no seeded ${seat}`)
     return {
       accountId: datasaur.id,

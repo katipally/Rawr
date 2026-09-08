@@ -6,6 +6,7 @@ import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { SANDBOX } from './fixture.ts'
 
 /** Proves the hub matrix and the audit trail by calling the mutation directly,
  *  not by checking that a button is hidden. */
@@ -40,7 +41,7 @@ const contextFor = (accountId: string, userId: string, seat: Seat): AccountConte
 })
 
 try {
-  const [ws] = await owner`select id from account where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = ws.id as string
 

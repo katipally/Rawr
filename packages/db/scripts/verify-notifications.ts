@@ -12,6 +12,7 @@ import {
   unreadCount,
 } from '../src/dal/notifications.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** The stored notification model, proved by writing and reading it rather than by
  *  looking at a bell.
@@ -40,8 +41,8 @@ const contextFor = (accountId: string, actorId: string): AccountContext => ({
 })
 
 try {
-  const [ws] = await owner`select id from account where slug = 'datasaur'`
-  const [other] = await owner`select id from account where slug = 'probe'`
+  const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
+  const [other] = await owner`select id from account where slug = ${PEER.slug}`
   if (!ws || !other) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = ws.id as string
   const otherId = other.id as string

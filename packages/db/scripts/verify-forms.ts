@@ -25,6 +25,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** F3's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-crm.ts. */
@@ -85,20 +86,20 @@ const actorCtx = async (slug: string, email: string, editHubs: string[]): Promis
 const minutesAgo = (n: number) => Date.now() - n * 60_000
 
 try {
-  const datasaur = await ctxFor('datasaur')
-  const probe = await ctxFor('probe')
+  const datasaur = await ctxFor(SANDBOX.slug)
+  const probe = await ctxFor(PEER.slug)
 
   // ---------------------------------------------------------------- schema
   section('form schema rules')
 
-  const contactUs = await publicFormBySlug('datasaur', 'contact-us')
+  const contactUs = await publicFormBySlug(SANDBOX.slug, 'contact-us')
   check('the seeded production forms resolve by account and slug', !!contactUs,
     contactUs ? `${contactUs.name}, ${contactUs.fields.length} fields` : 'contact-us not found')
   if (!contactUs) throw new Error('cannot continue without the contact-us form')
 
   const byId = await publicFormById(contactUs.formId)
   check('the same form resolves by id, and carries its account slug',
-    byId?.formId === contactUs.formId && byId?.accountSlug === 'datasaur',
+    byId?.formId === contactUs.formId && byId?.accountSlug === SANDBOX.slug,
     `accountSlug: ${byId?.accountSlug}`)
 
   check('a form with no email field is refused, because nothing could dedupe a contact',
@@ -144,7 +145,7 @@ try {
     missing.errors.length === 2,
     missing.errors.map((e) => e.message).join(' '))
 
-  const consult = await publicFormBySlug('datasaur', 'free-consultation')
+  const consult = await publicFormBySlug(SANDBOX.slug, 'free-consultation')
   if (consult) {
     const hiddenRequired = validateAnswers(consult.fields, {
       first_name: 'A', email: 'a@b-corp.com', team_size: '1-5',
@@ -342,12 +343,33 @@ try {
   check('a fast but genuine submission is held rather than lost',
     quarantined.state === 'quarantined' && quarantined.contactId === null, 'held')
 
+  // The round-robin fallback names its pool in raw SQL, so a column the schema
+  // drops out from under it fails here and nowhere else: a public form is the
+  // one caller, and it fails at submit time in front of a stranger.
+  await saveForm(await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']), {
+    name: `Rotating ${stamp}`,
+    slug: `rotating-${stamp}`,
+    isActive: true,
+    fields: [{ key: 'email', label: 'Email', type: 'email', required: true }],
+    settings: { ...contactUs.settings, assignOwner: { mode: 'round_robin', pool: [] } },
+  })
+  const rotated = await submitForm({
+    form: (await publicFormBySlug(SANDBOX.slug, `rotating-${stamp}`))!,
+    body: { email: `rotate.${stamp}@verify-corp.example`, rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+  const owned = await scoped<{ owner_id: string | null }>(datasaur, sql`
+    select owner_id from contact where id = ${rotated.contactId}`)
+  check('round robin with no pool falls back to the seats that can work a deal',
+    !!owned[0]?.owner_id, owned[0]?.owner_id ? `owned by ${owned[0].owner_id.slice(0, 8)}` : 'nobody')
+
   const queue = await listSubmissions(datasaur, { state: 'quarantined' })
   check('the review queue shows it with the rule that caught it',
     queue.some((row) => row.id === quarantined.submissionId && row.spamReasons.length > 0),
     queue.find((r) => r.id === quarantined.submissionId)?.spamReasons[0]?.detail)
 
-  const reviewer = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  const reviewer = await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
   const released = await releaseSubmission(reviewer, quarantined.submissionId)
   check('releasing it creates the contact', !!released.contactId, released.contactId?.slice(0, 8))
 
@@ -374,7 +396,7 @@ try {
   // ---------------------------------------------------------------- roles
   section('roles and tenancy')
 
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
+  const viewer = await actorCtx(SANDBOX.slug, 'viewer@sandbox.test', [])
   check('a viewer can read the queue', (await listSubmissions(viewer, { state: 'clean' })).length >= 0,
     'read allowed')
   check('a viewer cannot release a held lead',
@@ -385,7 +407,7 @@ try {
       fields: [{ key: 'email', type: 'email', label: 'Email', required: true }],
     })), 'refused')
 
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
+  const sales = await actorCtx(SANDBOX.slug, 'sales@sandbox.test', ['contacts', 'sales'])
   check('sales can act on the review queue but cannot rebuild a form',
     await refusesAsync(() => saveForm(sales, {
       name: 'Nope', slug: 'nope-2', isActive: true, settings: contactUs.settings,

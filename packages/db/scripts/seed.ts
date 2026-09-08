@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, notLike, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
@@ -6,6 +6,7 @@ import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
 import { provisionAccount } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** Roughly 20 of each, covering every state the UI has to survive: empty, one, a
  *  500-character name, missing owner, missing company, zero amount. Production-scale
@@ -24,8 +25,8 @@ const db = drizzle(client, { schema: s })
  *  separate portals. The second exists so the cross-tenant tests have something
  *  real to fail against. */
 const ACCOUNTS = [
-  { name: 'Datasaur', slug: 'datasaur', domain: 'datasaur.ai', seatLimit: 25 },
-  { name: 'Probe Tenant', slug: 'probe', domain: 'probe.example', seatLimit: null },
+  { ...SANDBOX, seatLimit: 25 },
+  { ...PEER, seatLimit: null },
 ] as const
 
 /** One seat per shape of access, named for the shape. A real person signs in with
@@ -36,28 +37,28 @@ const ACCOUNTS = [
  *  address, and `sales@` is still the seat that can work deals. */
 const PEOPLE = [
   {
-    email: 'admin@datasaur.ai',
+    email: 'admin@sandbox.test',
     name: 'Admin',
     isSuperAdmin: true,
     editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const,
     viewHubs: [] as const,
   },
   {
-    email: 'sales@datasaur.ai',
+    email: 'sales@sandbox.test',
     name: 'Sales',
     isSuperAdmin: false,
     editHubs: ['contacts', 'sales'] as const,
     viewHubs: ['reports'] as const,
   },
   {
-    email: 'marketing@datasaur.ai',
+    email: 'marketing@sandbox.test',
     name: 'Marketing',
     isSuperAdmin: false,
     editHubs: ['contacts', 'marketing'] as const,
     viewHubs: ['reports'] as const,
   },
   {
-    email: 'viewer@datasaur.ai',
+    email: 'viewer@sandbox.test',
     name: 'Viewer',
     isSuperAdmin: false,
     editHubs: [] as const,
@@ -84,9 +85,30 @@ const dayAgo = (n: number) => new Date(Date.UTC(2026, 7, 23) - n * 86_400_000)
 try {
   // Idempotent: the whole account goes, cascades take every record in it.
   const existing = await db
-    .select({ id: s.account.id })
+    .select({ id: s.account.id, slug: s.account.slug })
     .from(s.account)
     .where(inArray(s.account.slug, ACCOUNTS.map((a) => a.slug)))
+
+  // A cascade from `account` is total, and it once took a live Gmail mailbox with
+  // it. The fixture slugs are on reserved `.test` domains precisely so nothing
+  // real can hold one, but the check is here rather than in the naming: a seat
+  // whose sub came from Google is somebody who actually signed in, and no
+  // fixture ever has one.
+  for (const account of existing) {
+    const [real] = await db
+      .select({ email: s.userAccount.email })
+      .from(s.membership)
+      .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
+      .where(and(eq(s.membership.accountId, account.id), notLike(s.userAccount.googleSub, 'dev:%')))
+      .limit(1)
+    if (real) {
+      throw new Error(
+        `Account ${account.slug} seats ${real.email}, who signed in with Google. ` +
+          'Seeding would delete the account and everything in it. Move the fixtures to another slug, or remove that seat first.',
+      )
+    }
+  }
+
   if (existing.length) {
     await db.delete(s.account).where(inArray(s.account.id, existing.map((a) => a.id)))
   }
@@ -109,17 +131,17 @@ try {
     if (!found) throw new Error(`account ${slug} was not created`)
     return found.id
   }
-  const datasaur = wsId('datasaur')
-  const probe = wsId('probe')
+  const sandbox = wsId(SANDBOX.slug)
+  const peer = wsId(PEER.slug)
 
   const users = await db
     .insert(s.userAccount)
     .values([
       ...PEOPLE.map((p) => ({ email: p.email, name: p.name, googleSub: `dev:${p.email}` })),
-      { email: 'admin@probe.example', name: 'Probe Admin', googleSub: 'dev:admin@probe.example' },
+      { email: 'admin@peer.test', name: 'Peer Admin', googleSub: 'dev:admin@peer.test' },
       // Somebody whose access was ended. The row stays so the audit trail still
       // names them, and every membership they hold stops answering.
-      { email: 'former@datasaur.ai', name: 'Former', googleSub: 'dev:former@datasaur.ai' },
+      { email: 'former@sandbox.test', name: 'Former', googleSub: 'dev:former@sandbox.test' },
     ])
     .onConflictDoUpdate({ target: s.userAccount.email, set: { name: sql`excluded.name` } })
     .returning({ id: s.userAccount.id, email: s.userAccount.email })
@@ -132,54 +154,54 @@ try {
 
   await db.insert(s.membership).values([
     ...PEOPLE.map((p) => ({
-      accountId: datasaur,
+      accountId: sandbox,
       userId: userId(p.email),
       isSuperAdmin: p.isSuperAdmin,
       editHubs: [...p.editHubs],
       viewHubs: [...p.viewHubs],
     })),
     {
-      accountId: probe,
-      userId: userId('admin@probe.example'),
+      accountId: peer,
+      userId: userId('admin@peer.test'),
       isSuperAdmin: true,
       editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
     },
     // Somebody whose access was ended. The row stays so the audit trail still
     // names them, and their membership stops answering.
     {
-      accountId: datasaur,
-      userId: userId('former@datasaur.ai'),
+      accountId: sandbox,
+      userId: userId('former@sandbox.test'),
       editHubs: ['contacts', 'sales'],
       state: 'deactivated' as const,
       deactivatedAt: dayAgo(3),
-      deactivatedBy: userId('admin@datasaur.ai'),
+      deactivatedBy: userId('admin@sandbox.test'),
     },
   ])
 
   // One seat offered and not yet claimed, so the pending tab is never empty in
   // development. The hash is of a token nobody holds; the link cannot be used.
   await db.insert(s.invitation).values({
-    accountId: datasaur,
-    email: 'newstarter@datasaur.ai',
+    accountId: sandbox,
+    email: 'newstarter@sandbox.test',
     editHubs: ['contacts', 'sales'],
     tokenHash: 'seed-invitation-hash-not-a-usable-token',
-    invitedBy: userId('admin@datasaur.ai'),
+    invitedBy: userId('admin@sandbox.test'),
     expiresAt: new Date(Date.UTC(2026, 8, 30)),
   })
 
   const [salesTeam] = await db
     .insert(s.team)
-    .values({ accountId: datasaur, name: 'Sales EMEA', description: 'Works European inbound.' })
+    .values({ accountId: sandbox, name: 'Sales EMEA', description: 'Works European inbound.' })
     .returning({ id: s.team.id })
   if (!salesTeam) throw new Error('the team was not created')
   await db.insert(s.teamMember).values([
-    { accountId: datasaur, teamId: salesTeam.id, userId: userId('sales@datasaur.ai'), isLead: true },
-    { accountId: datasaur, teamId: salesTeam.id, userId: userId('marketing@datasaur.ai') },
+    { accountId: sandbox, teamId: salesTeam.id, userId: userId('sales@sandbox.test'), isLead: true },
+    { accountId: sandbox, teamId: salesTeam.id, userId: userId('marketing@sandbox.test') },
   ])
 
   const owners = PEOPLE.filter((p) => p.editHubs.length > 0).map((p) => userId(p.email))
 
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [sandbox, peer]) {
     // The same provisioning a account created from the organisation screen gets,
     // so a seeded account and a real one cannot differ.
     await provisionAccount(db as unknown as Parameters<typeof provisionAccount>[0], ws)
@@ -199,10 +221,10 @@ try {
     const enterpriseId = enterpriseStages[0]?.pipelineId
     if (!enterpriseId) throw new Error('the Enterprise pipeline was not provisioned')
 
-    // The probe tenant gets one record of each, which is also the "exactly one row"
+    // The peer tenant gets one record of each, which is also the "exactly one row"
     // case every list has to render correctly.
-    const scale = ws === datasaur ? 20 : 1
-    const ownerFor = (i: number) => (ws === datasaur ? (owners[i % owners.length] ?? null) : null)
+    const scale = ws === sandbox ? 20 : 1
+    const ownerFor = (i: number) => (ws === sandbox ? (owners[i % owners.length] ?? null) : null)
 
     const companies = await db
       .insert(s.company)
@@ -347,9 +369,9 @@ try {
     }
   }
 
-  // F3. Every account gets the same starting forms, including the probe tenant,
+  // F3. Every account gets the same starting forms, including the peer tenant,
   // so the cross-tenant test has a form on both sides to prove isolation with.
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [sandbox, peer]) {
     await db.insert(s.form).values(
       SEED_FORMS.map((form) => ({
         accountId: ws,
@@ -365,8 +387,8 @@ try {
   // F4. One site per tenant. Nothing is collected until one exists, so the
   // collector tests and the local embed both need this row to be here.
   await db.insert(s.site).values([
-    { accountId: datasaur, name: 'Marketing site', host: 'datasaur.ai', siteKey: 'datasaur-www' },
-    { accountId: probe, name: 'Probe site', host: 'probe.example', siteKey: 'probe-www' },
+    { accountId: sandbox, name: 'Marketing site', host: 'datasaur.ai', siteKey: 'sandbox-www' },
+    { accountId: peer, name: 'Probe site', host: 'probe.example', siteKey: 'peer-www' },
   ])
 
   // F4 and B7. Traffic, so the website and attribution reports have something to
@@ -377,11 +399,11 @@ try {
     const [site] = await db
       .select({ id: s.site.id })
       .from(s.site)
-      .where(eq(s.site.accountId, datasaur))
+      .where(eq(s.site.accountId, sandbox))
     const seen = await db
       .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
       .from(s.contact)
-      .where(eq(s.contact.accountId, datasaur))
+      .where(eq(s.contact.accountId, sandbox))
 
     const PATHS = ['/', '/pricing', '/blog', '/product/data-studio', '/contact']
     const DEVICES = ['desktop', 'mobile', 'tablet']
@@ -409,7 +431,7 @@ try {
     // however many aliases point at it.
     await db.insert(s.visitor).values(
       sessions.map((session) => ({
-        accountId: datasaur,
+        accountId: sandbox,
         id: session.visitorId,
         contactId: session.contact?.id ?? null,
         firstReferrer: session.referrer,
@@ -424,7 +446,7 @@ try {
       .insert(s.visitorSession)
       .values(
         sessions.map((session) => ({
-          accountId: datasaur,
+          accountId: sandbox,
           visitorId: session.visitorId,
           siteId: site?.id ?? null,
           startedAt: session.startedAt,
@@ -445,7 +467,7 @@ try {
     await db.insert(s.pageView).values(
       sessions.flatMap((session) =>
         Array.from({ length: session.pages }, (_, page) => ({
-          accountId: datasaur,
+          accountId: sandbox,
           visitorId: session.visitorId,
           contactId: session.contact?.id ?? null,
           sessionId: idOf.get(session.visitorId) ?? null,
@@ -468,7 +490,7 @@ try {
         .insert(s.visitorAlias)
         .values(
           identified.map((session) => ({
-            accountId: datasaur,
+            accountId: sandbox,
             visitorId: session.visitorId,
             contactId: session.contact!.id,
             via: 'form_submission' as const,
@@ -484,14 +506,14 @@ try {
     const forms = await db
       .select({ id: s.form.id, slug: s.form.slug })
       .from(s.form)
-      .where(eq(s.form.accountId, datasaur))
+      .where(eq(s.form.accountId, sandbox))
     if (forms.length > 0) {
       await db.insert(s.formSubmission).values(
         identified.slice(0, 14).map((session, i) => {
           const held = i === 3 || i === 9
           const form = forms[i % forms.length]!
           return {
-            accountId: datasaur,
+            accountId: sandbox,
             formId: form.id,
             values: {
               email: session.contact!.email ?? `seed${i}@partner${i}.example`,
@@ -529,11 +551,11 @@ try {
   // only shows up across timezones has to be visible in the seed.
   const BOOKING_ZONES = ['America/Los_Angeles', 'Asia/Jakarta', 'Europe/Berlin']
 
-  for (const ws of [datasaur, probe]) {
+  for (const ws of [sandbox, peer]) {
     const staff =
-      ws === datasaur
+      ws === sandbox
         ? PEOPLE.filter((p) => p.editHubs.length > 0).map((p) => userId(p.email))
-        : [userId('admin@probe.example')]
+        : [userId('admin@peer.test')]
 
     await db.insert(s.availability).values(
       staff.map((id, i) => ({
@@ -679,7 +701,7 @@ try {
     // F2. Meetings on the books, two ahead and two behind, so the booked list is
     // not an empty screen on a seeded database and the upcoming and past tabs
     // both have something to show.
-    if (ws === datasaur) {
+    if (ws === sandbox) {
       const booked = await db
         .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
         .from(s.contact)

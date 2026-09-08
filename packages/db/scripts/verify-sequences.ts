@@ -22,6 +22,7 @@ import {
   setSequenceState,
   unsubscribeByToken,
 } from '../src/dal/sequences.ts'
+import { SANDBOX } from './fixture.ts'
 
 /** The engine, end to end, without Google: enrolment and every rule that refuses
  *  it, the claim that stops two workers sending the same step, and every way a
@@ -48,12 +49,12 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 const stamp = Date.now()
 
 try {
-  const [ws] = await owner`select id from account where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = ws.id as string
 
-  const [salesUser] = await owner`select id, email from user_account where email = 'sales@datasaur.ai'`
-  const [adminUser] = await owner`select id from user_account where email = 'admin@datasaur.ai'`
+  const [salesUser] = await owner`select id, email from user_account where email = 'sales@sandbox.test'`
+  const [adminUser] = await owner`select id from user_account where email = 'admin@sandbox.test'`
 
   const ctxFor = (userId: string, editHubs: string[]): AccountContext => ({
     accountId,
@@ -80,7 +81,7 @@ try {
   // it is refused. Idempotent, so a failed earlier run does not block this one.
   const [readOnlyBox] = await owner`
     insert into mailbox (account_id, user_id, email, access_token, refresh_token, can_send)
-    values (${accountId}, ${adminUser!.id}, ${`readonly-${stamp}@datasaur.ai`}, 'x', 'y', false)
+    values (${accountId}, ${adminUser!.id}, ${`readonly-${stamp}@sandbox.test`}, 'x', 'y', false)
     on conflict (account_id, user_id) do update set can_send = false, email = excluded.email
     returning id`
 
@@ -170,7 +171,7 @@ try {
     stepId: claim!.step!.id,
     mailboxId: box.id,
     providerMessageId: `pm-${stamp}`,
-    internetMessageId: `<seq-${stamp}@datasaur.ai>`,
+    internetMessageId: `<seq-${stamp}@sandbox.test>`,
     token: sendToken,
     links: [{ token: linkToken, url: 'https://datasaur.ai/pricing' }],
     subject: 'Hello there',
@@ -224,8 +225,8 @@ try {
     sentAt: new Date(),
     snippet: 'Sounds good.',
     internetMessageId: `<reply-${stamp}@partner1.example>`,
-    inReplyTo: `<seq-${stamp}@datasaur.ai>`,
-    references: [`<seq-${stamp}@datasaur.ai>`],
+    inReplyTo: `<seq-${stamp}@sandbox.test>`,
+    references: [`<seq-${stamp}@sandbox.test>`],
     hasAttachments: false,
   }
   await ingestMessage(sales, {
@@ -264,7 +265,7 @@ try {
     stepId: autoClaim!.step!.id,
     mailboxId: box.id,
     providerMessageId: `pm-auto-${stamp}`,
-    internetMessageId: `<auto-out-${stamp}@datasaur.ai>`,
+    internetMessageId: `<auto-out-${stamp}@sandbox.test>`,
     token: `tok-auto-${stamp}`,
     links: [],
     subject: 'Hello',
@@ -277,8 +278,8 @@ try {
       providerMessageId: `auto-reply-${stamp}`,
       from: `auto-${stamp}@partner1.example`,
       internetMessageId: `<auto-reply-${stamp}@partner1.example>`,
-      inReplyTo: `<auto-out-${stamp}@datasaur.ai>`,
-      references: [`<auto-out-${stamp}@datasaur.ai>`],
+      inReplyTo: `<auto-out-${stamp}@sandbox.test>`,
+      references: [`<auto-out-${stamp}@sandbox.test>`],
       subject: 'Out of office',
       headers: { 'auto-submitted': 'auto-replied' },
     },
@@ -308,7 +309,7 @@ try {
     stepId: bounceClaim!.step!.id,
     mailboxId: box.id,
     providerMessageId: `pm-b-${stamp}`,
-    internetMessageId: `<bounce-out-${stamp}@datasaur.ai>`,
+    internetMessageId: `<bounce-out-${stamp}@sandbox.test>`,
     token: `tok-b-${stamp}`,
     links: [],
     subject: 'Hello',
@@ -321,8 +322,8 @@ try {
       providerMessageId: `bounce-msg-${stamp}`,
       from: 'mailer-daemon@googlemail.com',
       internetMessageId: `<bounce-${stamp}@googlemail.com>`,
-      inReplyTo: `<bounce-out-${stamp}@datasaur.ai>`,
-      references: [`<bounce-out-${stamp}@datasaur.ai>`],
+      inReplyTo: `<bounce-out-${stamp}@sandbox.test>`,
+      references: [`<bounce-out-${stamp}@sandbox.test>`],
       subject: 'Delivery Status Notification (Failure)',
     },
     ownerEmail: salesUser!.email as string,

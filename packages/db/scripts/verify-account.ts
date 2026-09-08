@@ -16,6 +16,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
 import { addMember, listMembers, setMemberGrants } from '../src/dal/members.ts'
 import { membershipsForUser } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
+import { SANDBOX } from './fixture.ts'
 
 /** The account layer: seats, invitations, grants, teams and the history of those
  *  decisions. Every check calls the data access layer directly, so hiding a button
@@ -41,7 +42,7 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 const ALL_HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
 
 try {
-  const [row] = await owner`select id from account where slug = 'datasaur'`
+  const [row] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!row) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = row.id as string
 
@@ -50,8 +51,8 @@ try {
     if (!found) throw new Error(`${email} is not seeded`)
     return found.id as string
   }
-  const adminId = await seat('admin@datasaur.ai')
-  const salesId = await seat('sales@datasaur.ai')
+  const adminId = await seat('admin@sandbox.test')
+  const salesId = await seat('sales@sandbox.test')
 
   const superAdmin: AccountContext = {
     accountId,
@@ -68,8 +69,8 @@ try {
   console.log('-- scope -------------------------------------------------------')
 
   const account = await readAccount(superAdmin)
-  check(account.slug === 'datasaur', 'the account reads its own row', account.slug)
-  check(account.hostedDomain === 'datasaur.ai', 'and carries the domain that claims it', account.hostedDomain)
+  check(account.slug === SANDBOX.slug, 'the account reads its own row', account.slug)
+  check(account.hostedDomain === SANDBOX.domain, 'and carries the domain that claims it', account.hostedDomain)
   check(account.seatsUsed > 0, 'seats in use are counted from live memberships', `${account.seatsUsed}`)
 
   console.log('\n-- seating is a super admin act --------------------------------')
@@ -79,7 +80,7 @@ try {
     'holding every hub does not let you change the account',
   )
   check(
-    (await refused(() => invite(hubAdmin, { email: `probe-${Date.now()}@datasaur.ai` }))) !== null,
+    (await refused(() => invite(hubAdmin, { email: `probe-${Date.now()}@sandbox.test` }))) !== null,
     'nor invite anybody',
   )
   check(
@@ -89,7 +90,7 @@ try {
 
   console.log('\n-- invitations -------------------------------------------------')
 
-  const email = `verify-${Date.now()}@datasaur.ai`
+  const email = `verify-${Date.now()}@sandbox.test`
   const { token, id: invitationId } = await invite(superAdmin, {
     email,
     editHubs: ['contacts', 'sales'],
@@ -118,7 +119,7 @@ try {
 
   console.log('\n-- grants ------------------------------------------------------')
 
-  const probeEmail = `grant-${Date.now()}@datasaur.ai`
+  const probeEmail = `grant-${Date.now()}@sandbox.test`
   const { userId: probeId } = await addMember(superAdmin, {
     email: probeEmail,
     editHubs: ['contacts'],

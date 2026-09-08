@@ -13,6 +13,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** F5's definition of done, run against the real endpoint over HTTP.
  *
@@ -186,10 +187,10 @@ try {
     process.exit(1)
   }
 
-  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
-  const probe = await actorCtx('probe', 'admin@probe.example', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  const admin = await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  const sales = await actorCtx(SANDBOX.slug, 'sales@sandbox.test', ['contacts', 'sales'])
+  const viewer = await actorCtx(SANDBOX.slug, 'viewer@sandbox.test', [])
+  const probe = await actorCtx(PEER.slug, 'admin@peer.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
 
   const issue = async (ctx: AccountContext, name: string): Promise<string> => {
     const issued = await createMcpToken(ctx, { name: `${MARK} ${name}` })
@@ -199,7 +200,7 @@ try {
 
   const salesToken = await issue(sales, 'sales')
   const viewerToken = await issue(viewer, 'viewer')
-  const probeToken = await issue(probe, 'probe')
+  const probeToken = await issue(probe, PEER.slug)
   const doomedToken = await issue(admin, 'doomed')
 
   // The deal Trevor names out loud, plus two that share a word, which is the case
@@ -463,7 +464,7 @@ try {
 
   const devLogin = await fetch(`${BASE}/api/auth/dev`, {
     method: 'POST',
-    body: new URLSearchParams({ email: 'sales@datasaur.ai' }),
+    body: new URLSearchParams({ email: 'sales@sandbox.test' }),
     redirect: 'manual',
   })
   const cookie = devLogin.headers.get('set-cookie')?.split(';')[0] ?? ''
@@ -998,7 +999,7 @@ try {
   })
   check('a batch is refused with a reason', batched.status === 400)
 } finally {
-  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']).catch(() => null)
+  const admin = await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']).catch(() => null)
   if (admin) {
     await withAccount(admin, async (tx) => {
       await tx.execute(sql`delete from activity_link where activity_id in (

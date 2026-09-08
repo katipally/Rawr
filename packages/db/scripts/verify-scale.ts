@@ -10,6 +10,7 @@ import { evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { findDuplicates } from '../src/dal/duplicates.ts'
 import { attributionReport, formsReport, pipelineReport } from '../src/dal/reporting.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { PEER } from './fixture.ts'
 
 /** B9. Whether any of this holds at the size of the portal it has to replace.
  *
@@ -91,7 +92,7 @@ let built = false
 let finished = false
 
 try {
-  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, PEER.slug))
   if (!probe) throw new Error('Run pnpm db:seed first.')
   const [member] = await db
     .select({ id: s.userAccount.id })
@@ -267,7 +268,7 @@ try {
   if (built) {
     console.log('')
     console.log('-- clearing up')
-    const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
+    const [probe] = await db.select().from(s.account).where(eq(s.account.slug, PEER.slug))
     if (probe) {
       // Segment first: its membership rows reference the contacts.
       await db.execute(sql`delete from segment where account_id = ${probe.id} and name = ${`Scale ${stamp}`}`)

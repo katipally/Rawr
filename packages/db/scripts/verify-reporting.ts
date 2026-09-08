@@ -15,6 +15,7 @@ import {
   saveReportDashboard,
 } from '../src/dal/report-dashboards.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** B7 against the real database.
  *
@@ -50,8 +51,8 @@ const stamp = Math.random().toString(36).slice(2, 8)
 const DAY = 86_400_000
 
 try {
-  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, SANDBOX.slug))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, PEER.slug))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
@@ -69,7 +70,7 @@ try {
   /** The seeded seats are named for the access they carry, so the suite asks for
    *  one by name and gets whatever grants the seed gave it. */
   const ctxFor = (seat: string): AccountContext => {
-    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    const member = members.find((m) => m.email === `${seat}@sandbox.test`)
     if (!member) throw new Error(`no seeded ${seat}`)
     return {
       accountId: datasaur.id,

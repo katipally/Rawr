@@ -14,10 +14,11 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { eq } from 'drizzle-orm'
 import * as s from '../src/schema/index.ts'
+import { SANDBOX } from './fixture.ts'
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 const db = drizzle(owner, { schema: s })
-const [ws] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur')).limit(1)
+const [ws] = await db.select().from(s.account).where(eq(s.account.slug, SANDBOX.slug)).limit(1)
 const [me] = await db.select().from(s.userAccount).limit(1)
 
 const ctx: AccountContext = { accountId: ws!.id, actorId: me!.id, actorKind: 'user', isSuperAdmin: true, viewHubs: [], editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] }

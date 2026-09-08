@@ -26,6 +26,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** F4's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-forms.ts. */
@@ -88,13 +89,13 @@ const newContact = async (ctx: AccountContext, email: string): Promise<string> =
 }
 
 try {
-  const datasaur = await ctxFor('datasaur')
-  const probe = await ctxFor('probe')
+  const datasaur = await ctxFor(SANDBOX.slug)
+  const probe = await ctxFor(PEER.slug)
 
   // -------------------------------------------------------------------------
   section('sites')
 
-  const site = await publicSite('datasaur-www')
+  const site = await publicSite('sandbox-www')
   check('the seeded site key resolves a account', site?.accountId === datasaur.accountId)
   check('an unknown site key resolves nothing', (await publicSite('no-such-site')) === null)
   check(
@@ -113,7 +114,7 @@ try {
   check(
     'a site key already held by another tenant is refused with a real message',
     await refusesAsyncWith(
-      () => createSite(probe, { name: 'Collision', host: 'probe.example', siteKey: 'datasaur-www' }),
+      () => createSite(probe, { name: 'Collision', host: PEER.domain, siteKey: 'sandbox-www' }),
       'already in use',
     ),
     'the unique index is the test, not a check-then-insert row level security hides',
@@ -163,7 +164,7 @@ try {
 
   check(
     'an email in a property is caught',
-    piiViolations({ plan: 'pro', who: 'someone@datasaur.ai' }).includes('who'),
+    piiViolations({ plan: 'pro', who: 'someone@sandbox.test' }).includes('who'),
   )
   check('a phone number is caught', piiViolations({ contact: '+1 415 555 0134' }).includes('contact'))
   check('a property named email is caught whatever it holds', piiViolations({ email: 'x' }).length === 1)
@@ -250,7 +251,7 @@ try {
     url: 'https://datasaur.ai/app',
     path: '/app',
     userAgent: CHROME,
-    event: { name: 'signed_up', properties: { plan: 'pro', email: 'someone@datasaur.ai' } },
+    event: { name: 'signed_up', properties: { plan: 'pro', email: 'someone@sandbox.test' } },
   })
   check('an event carrying an email is rejected', dirty.rejected === 'pii')
 
@@ -496,7 +497,7 @@ try {
   )
   check('and the visitor identities that pointed at them', noVisitor[0]?.n === '0')
 
-  const salesCtx = await ctxFor('datasaur', ['contacts', 'sales'])
+  const salesCtx = await ctxFor(SANDBOX.slug, ['contacts', 'sales'])
   check(
     'erasure is refused to anybody but an admin',
     await refusesAsync(() => eraseContactActivity(salesCtx, survivor)),
@@ -550,7 +551,7 @@ try {
 
   const probeSite = await publicSite('probe-www')
   if (!probeSite) throw new Error('the probe site is missing. Run pnpm db:seed.')
-  const probeVid = vid('probe')
+  const probeVid = vid(PEER.slug)
   const probeView = await collect({
     site: probeSite,
     visitorId: probeVid,

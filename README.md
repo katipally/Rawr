@@ -17,7 +17,7 @@ This file is only how to run it.
  pnpm install
  cp .env.example .env.local     # fill in the database URLs
  pnpm db:migrate                # schema, then row level security on every table
- pnpm db:seed                   # two accounts, ~20 records each, edge cases included
+ pnpm db:seed                   # two fixture accounts, ~20 records each, edge cases included
 ```
 
 Needs Node 24+ and pnpm 11 (`packageManager` pins the exact version, so
@@ -62,12 +62,12 @@ above the grid. A super admin sets them under Settings, Users and Teams, invites
 people who are not on the domain, and ends somebody's access. Settings, Your
 account is the person's own screen: timezone, Gmail and Calendar connections,
 agent tokens, and sign out everywhere. A seeded address whose email matches is
-claimed by that sign-in, so `admin@datasaur.ai` signing in with Google is the
+claimed by that sign-in, so `admin@sandbox.test` signing in with Google is the
 seeded admin.
 
 Without Google credentials, `/sign-in` also offers a development form that takes
-a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
-`admin@probe.example` for the second account. The seed builds two accounts, which
+a seeded address: `admin@sandbox.test`, `sales@`, `marketing@`, `viewer@`, and
+`admin@peer.test` for the second account. The seed builds two accounts, which
 is what the cross-tenant checks need something real to fail against. That form refuses to render unless
 `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
 
@@ -110,11 +110,12 @@ together exhaust the connection limit and the failures read as logic errors:
 ```
 
 All of them run against the real database and exit non-zero on failure, so they
-can gate a build. They run inside the two seeded accounts and leave records,
+can gate a build. They run inside the two fixture accounts and leave records,
 timeline rows and settings behind. Nothing reseeds on its own: `pnpm db:seed`
-drops the `datasaur` and `probe` accounts and everything cascading from
-them, so run it deliberately, when the leftovers get in the way and you are
-willing to lose whatever you created by hand. `/design` renders every primitive in its empty, single-row and
+drops the `sandbox` and `peer` accounts and everything cascading from them, so
+run it deliberately, when the leftovers get in the way and you are willing to
+lose whatever you created by hand. It touches no other account, and refuses
+outright if a fixture slug is seated by somebody who signed in with Google. `/design` renders every primitive in its empty, single-row and
 500-character states; `/design?rows=10000` is the large-result check.
 
 ## The public edge

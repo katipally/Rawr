@@ -57,6 +57,7 @@ import { listFields } from '../src/dal/admin-fields.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
 import { recordDeadLetter } from '../src/dal/jobs.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** F6's definition of done, plus F1 phase B, run against the real database.
  *
@@ -99,8 +100,8 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 const stamp = Math.random().toString(36).slice(2, 8)
 
 try {
-  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, SANDBOX.slug))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, PEER.slug))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
@@ -118,7 +119,7 @@ try {
   /** The seeded seats are named for the access they carry, so the suite asks for
    *  one by name and gets whatever grants the seed gave it. */
   const ctxFor = (seat: string): AccountContext => {
-    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    const member = members.find((m) => m.email === `${seat}@sandbox.test`)
     if (!member) throw new Error(`no seeded ${seat}`)
     return {
       accountId: datasaur.id,
@@ -146,7 +147,7 @@ try {
   // and every save and disconnect below runs in the account scope.
   const orgAdmin = admin
   const orgMember = sales
-  const salesUser = members.find((m) => m.email === 'sales@datasaur.ai')!
+  const salesUser = members.find((m) => m.email === 'sales@sandbox.test')!
   const probeOrg = probeCtx
 
   console.log('-- the framework -----------------------------------------------')
@@ -1069,12 +1070,12 @@ try {
   await check('which domain counts as internal is per account', async () => {
     const mine = await internalDomainOf(sales)
     const theirs = await internalDomainOf(probeCtx)
-    expect(mine === 'datasaur.ai', `this account was told its domain is ${mine}`)
-    expect(theirs === 'probe.example', `the other account was told its domain is ${theirs}`)
+    expect(mine === SANDBOX.domain, `this account was told its domain is ${mine}`)
+    expect(theirs === PEER.domain, `the other account was told its domain is ${theirs}`)
     expect(mine !== theirs, 'both accounts were handed the same domain')
-    // Read through the account's organisation, never from a process-wide
-    // setting: one process serves every tenant, and the wrong domain inverts
-    // every internal/external decision the ingest makes.
+    // Read from the account's own row, never from a process-wide setting: one
+    // process serves every tenant, and the wrong domain inverts every
+    // internal/external decision the ingest makes.
     return `${mine} for one, ${theirs} for the other`
   })
 
@@ -1204,7 +1205,7 @@ try {
     )
     await ingestMessage(admin, {
       incoming: incoming({ providerMessageId: `m2-${stamp}`, from: `verify-mail-${stamp}@partner1.example` }),
-      ownerEmail: 'admin@datasaur.ai',
+      ownerEmail: 'admin@sandbox.test',
       mailboxId,
       internalDomain,
       blocked: new Set(),
@@ -1598,8 +1599,10 @@ try {
     await db.execute(sql`update ${sql.raw(entity)} set deleted_at = now() where id = ${id}`)
   }
 
-  // Leave the account as it was found: the seeded Brevo row was created here.
+  // Leave the account as it was found: every row saved above was created here,
+  // and one left behind reads as a real connection on the Connected apps page.
   await disconnectIntegration(orgAdmin, 'brevo')
+  await disconnectIntegration(orgAdmin, 'woodpecker')
 
   console.log('')
   if (failures > 0) {

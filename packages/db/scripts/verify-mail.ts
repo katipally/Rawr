@@ -19,6 +19,7 @@ import {
   TEXT_LIMIT_BYTES,
   type IncomingMessage,
 } from '../src/dal/messages.ts'
+import { SANDBOX } from './fixture.ts'
 
 /** What B3 added: bodies kept here rather than fetched from somebody's mailbox,
  *  a sharing rule enforced in SQL, and a shared inbox.
@@ -47,7 +48,7 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 const stamp = Date.now()
 
 try {
-  const [ws] = await owner`select id from account where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = ws.id as string
 
@@ -56,9 +57,9 @@ try {
     if (!row) throw new Error(`no seeded user ${email}`)
     return row as { id: string; email: string; name: string }
   }
-  const salesUser = await person('sales@datasaur.ai')
-  const marketingUser = await person('marketing@datasaur.ai')
-  const adminUser = await person('admin@datasaur.ai')
+  const salesUser = await person('sales@sandbox.test')
+  const marketingUser = await person('marketing@sandbox.test')
+  const adminUser = await person('admin@sandbox.test')
 
   const ctxFor = (userId: string, editHubs: string[]): AccountContext => ({
     accountId,

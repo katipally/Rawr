@@ -142,7 +142,7 @@ const assignOwner = async (
   let ownerId: string | null = null
   if (rule.mode === 'user') {
     const [member] = await tx.execute<{ user_id: string }>(
-      sql`select user_id from membership where user_id = ${rule.userId ?? ''} limit 1`,
+      sql`select user_id from membership where user_id = ${rule.userId ?? ''} and state = 'active' limit 1`,
     )
     ownerId = member?.user_id ?? null
   } else {
@@ -151,7 +151,8 @@ const assignOwner = async (
       select m.user_id
         from membership m
         left join contact c on c.owner_id = m.user_id and c.deleted_at is null
-       where ${pool.length > 0 ? sql`m.user_id in (${sql.join(pool.map((id) => sql`${id}::uuid`), sql`, `)})` : sql`m.role in ('admin', 'sales')`}
+       where m.state = 'active'
+         and ${pool.length > 0 ? sql`m.user_id in (${sql.join(pool.map((id) => sql`${id}::uuid`), sql`, `)})` : sql`(m.is_super_admin or 'sales' = any(m.edit_hubs))`}
        group by m.user_id
        order by count(c.id) asc, m.user_id asc
        limit 1`)

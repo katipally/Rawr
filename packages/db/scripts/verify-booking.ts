@@ -41,6 +41,7 @@ import {
   type Provisioner,
   type AccountContext,
 } from '../src/index.ts'
+import { SANDBOX, PEER } from './fixture.ts'
 
 /** F2's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-crm.ts and verify-forms.ts.
@@ -158,7 +159,7 @@ const iso = (value: Date) => value.toISOString()
 const hostFixture = (over: Partial<HostAvailability> = {}): HostAvailability => ({
   userId: over.userId ?? '00000000-0000-0000-0000-000000000001',
   name: over.name ?? 'Host',
-  email: over.email ?? 'host@datasaur.ai',
+  email: over.email ?? 'host@sandbox.test',
   weight: over.weight ?? 1,
   isRequired: over.isRequired ?? true,
   lastAssignedAt: over.lastAssignedAt ?? null,
@@ -217,8 +218,8 @@ const cleanUp = async (ctx: AccountContext): Promise<void> => {
 }
 
 try {
-  const datasaur = await ctxFor('datasaur')
-  const probe = await ctxFor('probe')
+  const datasaur = await ctxFor(SANDBOX.slug)
+  const probe = await ctxFor(PEER.slug)
   await cleanUp(datasaur)
   await cleanUp(probe)
 
@@ -694,7 +695,7 @@ try {
     companyName: 'Acme',
     companyFallback: 'a new team',
     hostName: 'Admin',
-    hostEmail: 'admin@datasaur.ai',
+    hostEmail: 'admin@sandbox.test',
     pageName: 'Talk to sales',
     durationMinutes: 30,
   })
@@ -710,7 +711,7 @@ try {
     companyName: null,
     companyFallback: 'a new team',
     hostName: 'Admin',
-    hostEmail: 'admin@datasaur.ai',
+    hostEmail: 'admin@sandbox.test',
     pageName: 'Talk to sales',
     durationMinutes: 30,
   })
@@ -1297,7 +1298,7 @@ try {
   // -----------------------------------------------------------------------
   section('roles')
 
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
+  const viewer = await actorCtx(SANDBOX.slug, 'viewer@sandbox.test', [])
   check(
     'a viewer can read the booked list',
     (await listBookings(viewer, { when: 'upcoming' })).rows.length >= 0,
@@ -1313,7 +1314,7 @@ try {
     await refusesAsync(() => saveSchedule(viewer, { userId: viewer.actorId!, timezone: 'UTC', weekly: {} })),
   )
 
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
+  const sales = await actorCtx(SANDBOX.slug, 'sales@sandbox.test', ['contacts', 'sales'])
   check(
     'sales cannot create a shared round robin',
     await refusesAsync(() =>
@@ -1356,7 +1357,7 @@ try {
   })
   check('with themselves as the only host', ownHosts.length === 1 && ownHosts[0]?.userId === sales.actorId)
 
-  const marketing = await actorCtx('datasaur', 'marketing@datasaur.ai', ['contacts', 'marketing'])
+  const marketing = await actorCtx(SANDBOX.slug, 'marketing@sandbox.test', ['contacts', 'marketing'])
   check(
     'somebody else cannot change that personal link',
     await refusesAsync(() => setPageActive(marketing, ownLink, true)),
@@ -1404,7 +1405,7 @@ try {
     `${probeHosts.length} host on the probe tenant`,
   )
 
-  const publicPage = await publicBookingPage('datasaur', 'sales-team')
+  const publicPage = await publicBookingPage(SANDBOX.slug, 'sales-team')
   check(
     'the public resolver returns a page without its templates',
     publicPage !== null && !('titleTpl' in publicPage),
@@ -1412,7 +1413,7 @@ try {
   )
   check(
     'and nothing at all for an address that does not exist',
-    (await publicBookingPage('datasaur', 'no-such-page')) === null,
+    (await publicBookingPage(SANDBOX.slug, 'no-such-page')) === null,
   )
   check(
     'the public page says who the meeting is with',

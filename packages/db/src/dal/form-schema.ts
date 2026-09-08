@@ -132,8 +132,9 @@ export type FormSettings = {
    *  live with the stylesheet that reads them. */
   theme?: FormTheme | undefined
   /** Who a new lead belongs to. 'user' names one person; 'round_robin' shares
-   *  them across the pool, or across every admin and sales member when the pool
-   *  is empty. A contact that already has an owner keeps them. */
+   *  them across the pool, or across every super admin and every seat that can
+   *  edit the sales hub when the pool is empty. Either way the seat has to still
+   *  be active. A contact that already has an owner keeps them. */
   assignOwner?: AssignOwner | undefined
 }
 
