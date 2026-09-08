@@ -530,6 +530,32 @@ export const recordConsent = async (
   })
 }
 
+/** This visitor's latest choice, or null if they have never made one.
+ *
+ *  The banner stops the collector client-side, so an event arriving at all
+ *  implies analytics consent — but "the script should not have sent it" is not
+ *  the same as "we may forward it to Google", and a beacon can be replayed by
+ *  anything that can read a site key. Read from the newest row over
+ *  consent_record_visitor_idx, which is on (account_id, visitor_id, at desc)
+ *  for exactly this. */
+export const latestConsent = async (
+  accountId: string,
+  visitorId: string,
+): Promise<{ analytics: boolean; advertisement: boolean } | null> => {
+  const ctx = publicEdgeContext(accountId)
+  return withAccount(ctx, async (tx) => {
+    const [row] = await tx
+      .select({ categories: consentRecord.categories })
+      .from(consentRecord)
+      .where(and(eq(consentRecord.accountId, accountId), eq(consentRecord.visitorId, visitorId)))
+      .orderBy(desc(consentRecord.at))
+      .limit(1)
+    if (!row) return null
+    const categories = row.categories as { analytics?: unknown; advertisement?: unknown }
+    return { analytics: categories.analytics === true, advertisement: categories.advertisement === true }
+  })
+}
+
 /** The account a public site key belongs to, resolved through the same
  *  security-definer path as a form so the edge never reads the account table
  *  unscoped.

@@ -1,6 +1,9 @@
-import { collect, isBot, isVisitorId, publicSite } from '@rawr/db'
+import { collect, isBot, isVisitorId, latestConsent, publicEdgeContext, publicSite } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
+import { randomUUID } from 'node:crypto'
+import { inBackground } from '~/server/background.ts'
 import { byteLength, clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
+import { forwardToGa4 } from '~/server/integrations/ga4.ts'
 
 /** GET and POST /e — the collector, F4 §2.
  *
@@ -118,6 +121,31 @@ const handle = async (
         null,
       event: name ? { name, properties: properties(payload.props) } : undefined,
     })
+
+    // F6 §6. Page views already reach GA4 through GTM on the site itself; what
+    // GTM cannot see is a custom event Rawr's own embed raised, so that is the
+    // half forwarded here. After the response, never before it: an aggregate hit
+    // must not put five seconds of Google between a visitor and their next page.
+    if (name) {
+      const forwarded = { name, properties: properties(payload.props) }
+      inBackground(`ga4 ${name}`, async () => {
+        const consent = await latestConsent(site.accountId, visitorId)
+        const outcome = await forwardToGa4(publicEdgeContext(site.accountId), {
+          // A fresh id per event, so GA4's own reporting cannot rejoin them into
+          // a person. D13 rules that out and the visitor id would hand it over.
+          clientId: randomUUID(),
+          name: forwarded.name,
+          properties: forwarded.properties,
+          analyticsConsent: consent?.analytics === true,
+        })
+        // ga4.ts refuses a key that could name a person rather than dropping it
+        // quietly, on the grounds that one arriving means something upstream is
+        // wrong. That only helps if it is said out loud somewhere.
+        if (outcome.refused.length > 0) {
+          console.log(`[ga4] ${name}: refused ${outcome.refused.join(', ')} — something upstream is sending personal data.`)
+        }
+      })
+    }
   } catch {
     // Deliberately swallowed, like the consent endpoint. A page view that could
     // not be stored is a lost row; a page view that surfaces a database error at
