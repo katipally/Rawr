@@ -297,22 +297,17 @@ export const bookingPublicPath = (
     date?: string | undefined
     tz?: string | undefined
     slot?: string | undefined
-    /** Round-trip state for the no-JavaScript path: the confirmation, the instant
-     *  confirmed, the attendee's own manage tokens, a message, and per-field
-     *  errors. All in the URL because a plain form post has nowhere else to put
-     *  them and a redirect is what stops a refresh booking twice. */
+    /** Where a script that confirmed a booking and then failed sends the person:
+     *  the same booking, shown by the page itself, with the manage tokens they
+     *  would otherwise only have had in an email that may not have arrived yet.
+     *
+     *  `e`, `err`, `w` and `hold` used to sit here too, for a no-JavaScript path
+     *  that posted a form per step. That path went in 75cfaa7 and the page reads
+     *  none of the four. */
     confirmed?: string | undefined
     at?: string | undefined
     r?: string | undefined
     c?: string | undefined
-    e?: string | undefined
-    err?: string | undefined
-    /** A non-fatal note on an otherwise successful booking, such as a joining
-     *  link that is still being created. */
-    w?: string | undefined
-    /** The soft hold on the chosen slot. Carried in the URL because the hosted
-     *  page has no script and nowhere else to keep it between renders. */
-    hold?: string | undefined
   } = {},
 ): string => `/b/${accountSlug}/${slug}${query(params)}`
 

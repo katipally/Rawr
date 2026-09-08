@@ -1,4 +1,4 @@
-import { HOLD_MINUTES, placeHold, publicBookingPage, releaseHold } from '@rawr/db'
+import { HOLD_MINUTES, publicBookingPage, releaseHold, renewHold } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
@@ -9,8 +9,15 @@ import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
  *  free hosts it takes three holds before an hour stops being offered, which is why
  *  a hold cannot be used to close a team's calendar.
  *
- *  DELETE releases one, for a person who changes their mind. Both are best effort:
- *  a failed hold never blocks the booking, it only removes the courtesy. */
+ *  A `token` in the body moves the hold that already exists rather than placing a
+ *  second one. Changing your mind used to be a DELETE and a POST, which left a
+ *  window holding nothing between them and cost two requests against the limit
+ *  below; a refresh mid-form stacked a hold each time. One statement now, and the
+ *  same token comes back.
+ *
+ *  DELETE still releases one outright, for somebody who closes the page. Both are
+ *  best effort: a failed hold never blocks the booking, it only removes the
+ *  courtesy. */
 
 export const dynamic = 'force-dynamic'
 
@@ -51,7 +58,8 @@ export const POST = async (
     )
   }
 
-  const held = await placeHold(summary.accountId, summary.bookingPageId, slot)
+  const token = typeof body.token === 'string' ? body.token : null
+  const held = await renewHold(summary.accountId, summary.bookingPageId, slot, token)
   return NextResponse.json(
     { token: held.token, expiresAt: held.expiresAt.toISOString(), minutes: HOLD_MINUTES },
     { headers: CORS_HEADERS },

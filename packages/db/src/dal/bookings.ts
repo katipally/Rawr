@@ -587,13 +587,17 @@ export const placeHold = async (
   return { token, expiresAt }
 }
 
-/** The hold for a page that has no script: one token, carried in the URL, moved
- *  from slot to slot as the person changes their mind and extended each time the
- *  page re-renders while they fill the questions in.
+/** One token, moved from slot to slot as the person changes their mind, rather
+ *  than a release and a fresh insert per change.
  *
- *  Without this the hosted page — the one in every email signature — held nothing
- *  at all, and only the Webflow embed ever reserved a slot. Reusing the token
- *  rather than inserting per render is what stops a refresh stacking holds. */
+ *  Reusing the token is what stops a refresh stacking holds, and what closes the
+ *  window where somebody who had just clicked a different time held nothing at
+ *  all. A move consumes no capacity that the previous hold was not already
+ *  consuming, so it costs the visitor one request instead of two.
+ *
+ *  Falls through to placing one when the token names nothing live: it may have
+ *  expired while the questions were being filled in, and the person changing a
+ *  slot is not who should be told about that. */
 export const renewHold = async (
   accountId: string,
   pageId: string,

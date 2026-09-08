@@ -216,26 +216,35 @@ export const BookingWidget = ({
 
   const chooseSlot = useCallback(
     (iso: string) => {
-      if (hold) releaseHold(hold.token)
+      // The token travels with the new time rather than being released first, so
+      // changing your mind moves the hold instead of dropping one and asking for
+      // another. Nothing is held in between, and it is one request rather than
+      // two, which is what the limiter on the other end counts.
+      const moving = hold?.token ?? null
       setSlot(iso)
       setStep('form')
       setErrors({})
       setNotice(null)
-      setHold(null)
       setRemaining(HOLD_MS)
       void fetch(`${endpoint}/hold`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ slot: iso }),
+        body: JSON.stringify({ slot: iso, token: moving }),
       })
         .then((response) => (response.ok ? response.json() : null))
         .then((body: { token?: string; expiresAt?: string } | null) => {
-          if (!body?.token || !body.expiresAt) return
+          // Only cleared on a failure: keeping the old token on screen until the
+          // new one answers is what stops the countdown flashing empty between a
+          // slot and its replacement.
+          if (!body?.token || !body.expiresAt) {
+            setHold(null)
+            return
+          }
           setHold({ token: body.token, expiresAt: new Date(body.expiresAt).getTime() })
         })
-        .catch(() => undefined)
+        .catch(() => setHold(null))
     },
-    [endpoint, hold, releaseHold],
+    [endpoint, hold],
   )
 
   useEffect(() => {
