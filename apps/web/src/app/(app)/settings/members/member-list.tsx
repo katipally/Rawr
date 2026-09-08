@@ -5,6 +5,7 @@ import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { invitePath } from '~/lib/links.ts'
 import { HUBS, HUBS_WITHOUT_SCREENS, HUBS_WITH_RECORDS, HUB_HINT, SCOPES, SCOPE_LABEL, type Hub, type Scope } from '~/lib/hubs.ts'
 
 type HubScopes = Partial<Record<Hub, Scope>>
@@ -248,7 +249,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                         onSelect: () =>
                           run(async () => {
                             const { token } = await api.account.members.resend.mutate({ invitationId: row.id })
-                            setLink(`${window.location.origin}/invite/${token}`)
+                            setLink(`${window.location.origin}${invitePath(token)}`)
                           }, 'A new link is ready.'),
                       },
                       {
@@ -393,7 +394,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                       ...inviting.grants,
                     })
                     setInviting(null)
-                    setLink(`${window.location.origin}/invite/${token}`)
+                    setLink(`${window.location.origin}${invitePath(token)}`)
                   }, 'Invitation ready.')
                 }
               >

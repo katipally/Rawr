@@ -54,9 +54,6 @@ export const appDb = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, 
 
 /** The table owner. Migrations and tenancy DDL only: it bypasses RLS, so nothing
  *  that serves a request may use it. */
-export const ownerClient = () =>
-  postgres(required('DATABASE_URL_OWNER'), { max: 1, onnotice: () => {} })
-
 export const closeAppPool = async () => {
   const open = opened
   opened = null

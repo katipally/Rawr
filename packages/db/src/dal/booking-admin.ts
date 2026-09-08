@@ -33,13 +33,6 @@ const assertOwnScheduleOrAdmin = (ctx: AccountContext, userId: string): void => 
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
-export const toSlug = (value: string): string =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64)
-
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
@@ -138,10 +131,6 @@ export type SaveBookingPage = {
    *  is read on a collective and ignored elsewhere, where each host stands alone. */
   hosts?: { userId: string; weight: number; isRequired?: boolean }[] | undefined
 }
-
-export const DEFAULT_TITLE_TPL = 'Discovery Session with Datasaur <> {{company.name}}'
-export const DEFAULT_DESCRIPTION_TPL =
-  '{{contact.first_name}} {{contact.last_name}} {{contact.email}}\n{{company.name}}'
 
 /** Creates or updates a page and, for a round robin, its host list in the same
  *  transaction. A page that cannot be published is refused here rather than

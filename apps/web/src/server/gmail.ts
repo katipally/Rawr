@@ -30,8 +30,6 @@ export const GMAIL_READ_SCOPES = ['https://www.googleapis.com/auth/gmail.readonl
  *  its owner reconnects and grants it, which is the honest way round. */
 export const GMAIL_SEND_SCOPES = [...GMAIL_READ_SCOPES, 'https://www.googleapis.com/auth/gmail.send']
 
-export const GMAIL_SCOPES = GMAIL_READ_SCOPES
-
 const isDevMailbox = (box: { accessToken: string }): boolean =>
   devGmailEnabled && box.accessToken === DEV_ACCESS_TOKEN
 
@@ -621,5 +619,4 @@ export const gmailFetcherFor = async (
   return fetcher
 }
 
-export const gmailConfigured = googleConfigured || devGmailEnabled
 

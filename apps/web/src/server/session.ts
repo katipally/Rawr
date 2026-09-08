@@ -112,9 +112,6 @@ export const contextFrom = (session: Session): AccountContext => ({
 export const sessionCanEdit = (session: Session, hub: Hub): boolean =>
   session.isSuperAdmin || session.editHubs.includes(hub)
 
-export const sessionCanView = (session: Session, hub: Hub): boolean =>
-  sessionCanEdit(session, hub) || session.viewHubs.includes(hub)
-
 /** Holds the account hub: may act on rows that are somebody else's, and open the
  *  settings that shape the account. */
 export const sessionIsAdmin = (session: Session): boolean => sessionCanEdit(session, 'account')

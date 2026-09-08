@@ -2,14 +2,12 @@ import {
   Ban,
   Bookmark,
   Briefcase,
-  Building2,
   ChartNoAxesColumn,
   ChevronDown,
   ChevronUp,
   Contact,
   Copy,
   Database,
-  Handshake,
   Home,
   Megaphone,
   Pencil,
@@ -19,7 +17,6 @@ import {
   Unlink,
   type LucideIcon,
 } from 'lucide-react'
-import type { ObjectKey } from '@rawr/db'
 
 /** Icons cross the server/client boundary as names: a component reference is not
  *  serialisable, so the layout names the icon and the client resolves it here.
@@ -45,15 +42,6 @@ export const SECTION_ICONS: Record<IconKey, LucideIcon> = {
   data: Database,
   reporting: ChartNoAxesColumn,
 }
-
-export const OBJECT_ICONS: Record<ObjectKey, LucideIcon> = {
-  contact: Contact,
-  company: Building2,
-  deal: Handshake,
-}
-
-export const objectIcon = (object: string): LucideIcon =>
-  OBJECT_ICONS[object as ObjectKey] ?? Contact
 
 
 /** The verbs that act on one row of a list. Named here for the same reason the

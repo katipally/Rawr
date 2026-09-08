@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, } from 'node:crypto'
 
 /** Encryption for the OAuth tokens Rawr holds on a person's behalf.
  *
@@ -36,15 +36,6 @@ const key = (): Buffer => {
   return decoded
 }
 
-export const tokenKeyConfigured = (): boolean => {
-  try {
-    key()
-    return true
-  } catch {
-    return false
-  }
-}
-
 /** `v1.<iv>.<tag>.<ciphertext>`, each part base64url. The version prefix is what
  *  makes rotating the algorithm later a decode branch rather than a migration. */
 export const encryptToken = (plaintext: string): string => {
@@ -76,15 +67,6 @@ export const decryptToken = (value: string): string => {
  *  Used for cancel, reschedule and hold tokens, which are the only credential
  *  their links carry. */
 export const randomToken = (bytes = 32): string => randomBytes(bytes).toString('base64url')
-
-/** Constant time, for comparing a token from a URL against one from the database.
- *  Length is compared first because timingSafeEqual throws on a mismatch, and the
- *  length of a token is not the secret. */
-export const tokensMatch = (a: string, b: string): boolean => {
-  const left = Buffer.from(a)
-  const right = Buffer.from(b)
-  return left.length === right.length && timingSafeEqual(left, right)
-}
 
 /** For a credential that is already 256 bits of randomness. A password needs a
  *  slow hash because it is guessable; a random token is not, and the lookup runs

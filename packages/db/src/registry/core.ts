@@ -131,9 +131,6 @@ export const CORE_OBJECTS: CoreObject[] = [
   },
 ]
 
-export const objectByKey = (key: string): CoreObject | undefined =>
-  CORE_OBJECTS.find((o) => o.key === key)
-
 /** The view tabs every account starts with. 'all' is reserved: it is the address
  *  /objects/:object/views/all/list resolves to and it can never be deleted. */
 export type CoreView = {
