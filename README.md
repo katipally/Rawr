@@ -1,136 +1,269 @@
 # Rawr
 
-Internal HubSpot replacement for Datasaur. The plan lives in `docs/`, which is
-local-only and not in this repo; read `docs/README.md` first if you have it.
-This file is only how to run it.
+Datasaur's own CRM, built to replace HubSpot. One account, one database, and
+every screen HubSpot gives us that we actually use.
 
 ```
- apps/web        Next.js: app surfaces + the public edge
- apps/worker     pg-boss daemon: jobs, dead letters, scheduled work
- packages/db     schema, migrations, the tenant-scoped data access layer
+ apps/web        Next.js: the app, and the public edge strangers reach
+ apps/worker     pg-boss daemon: scheduled jobs, retries, dead letters
+ packages/db     schema, migrations, and the tenant-scoped data access layer
  packages/ui     design tokens and the shared primitives
 ```
+
+Needs Node 24+ and pnpm 11 (`packageManager` pins the version, so `corepack
+enable` is enough) and any Postgres 15+. Nothing in the schema, the policies or
+the data layer is vendor-specific.
 
 ## Setup
 
 ```
  pnpm install
- cp .env.example .env.local     # fill in the database URLs
+ cp .env.example .env.local     # fill in the three database URLs
  pnpm db:migrate                # schema, then row level security on every table
- pnpm db:seed                   # two fixture accounts, ~20 records each, edge cases included
+ pnpm db:seed                   # two fixture accounts, ~20 records each
 ```
 
-Needs Node 24+ and pnpm 11 (`packageManager` pins the exact version, so
-`corepack enable` is enough). Every script reads `.env.local` directly through
-`node --env-file`, so that file has to exist before any `db:` command.
-`.agents/` holds agent skills pinned by `skills-lock.json` and is not committed;
-Claude Code restores it from that lock.
+Every script reads `.env.local` directly through `node --env-file`, so that file
+has to exist before any `db:` command.
 
-Any Postgres 15+ will do; nothing in the schema, the policies or the data access
-layer is vendor-specific. The app connects as `rawr_app`, which owns no tables and
-cannot bypass row level security. `DATABASE_URL_OWNER` is the table owner, used
-only by migrations and the worker's own bookkeeping. `DATABASE_URL_SESSION` must
-not be a transaction pooler: pg-boss and migrations need a session that outlives
-one statement.
+The app connects as `rawr_app`, which owns no tables and cannot bypass row level
+security. `DATABASE_URL_OWNER` is the table owner and is used only by migrations
+and the worker's own bookkeeping. `DATABASE_URL_SESSION` must not be a
+transaction pooler: pg-boss and migrations need a session that outlives one
+statement.
 
 `pnpm db:migrate` runs `packages/db/sql/bootstrap.sql` first, which creates the
 `extensions` schema and the `rawr_app` role if they are absent. Set
-`APP_DB_PASSWORD` on a fresh database to give that role a password. Both
-statements are idempotent, so an existing database is untouched.
+`APP_DB_PASSWORD` on a fresh database to give that role a password. Both are
+idempotent, so an existing database is untouched.
 
 On Supabase, point `DATABASE_URL` at the pooler on `:6543` (transaction mode) and
 the other two at `:5432` (session mode), with the user `rawr_app.PROJECT_REF`.
-Leave `DATABASE_PREPARED` unset there: prepared statements do not survive a
-transaction pooler. Set it to `1` on a direct connection.
+Leave `DATABASE_PREPARED` unset there; set it to `1` on a direct connection.
 
 ## Running
 
 ```
- pnpm dev        the web app on http://localhost:3000
- pnpm worker     the job daemon, needs to be running for index builds
+ pnpm dev        the app on http://localhost:3000
+ pnpm worker     the job daemon — nothing scheduled happens without it
 ```
 
-Sign in with Google. An account holds the Google hosted domain, so a verified
-`@datasaur.ai` address joins the Datasaur account and, while it allows domain
-joins, arrives reading the hubs that account opens by default. A domain no
-account claims opens one, and whoever signs in first becomes its super admin,
-which is how this app starts from an empty database.
+Sign in with Google. A domain no account claims opens one, and whoever signs in
+first becomes its super admin, which is how this starts from an empty database.
+A verified address on a domain an account already claims joins that account.
 
-Access is granted a hub at a time, as HubSpot grants it: contacts, sales,
-marketing, service, reports and account, each at view or edit, with super admin
-above the grid. A super admin sets them under Settings, Users and Teams, invites
-people who are not on the domain, and ends somebody's access. Settings, Your
-account is the person's own screen: timezone, Gmail and Calendar connections,
-agent tokens, and sign out everywhere. A seeded address whose email matches is
-claimed by that sign-in, so `admin@sandbox.test` signing in with Google is the
-seeded admin.
+Without Google credentials, `/sign-in` also offers a development form taking any
+seeded address — `admin@sandbox.test`, `sales@`, `marketing@`, `viewer@`,
+`former@`, `newstarter@`, and `admin@peer.test` for the second account. It
+refuses to render unless `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
 
-Without Google credentials, `/sign-in` also offers a development form that takes
-a seeded address: `admin@sandbox.test`, `sales@`, `marketing@`, `viewer@`, and
-`admin@peer.test` for the second account. The seed builds two accounts, which
-is what the cross-tenant checks need something real to fail against. That form refuses to render unless
-`RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
-
-## Checking it still holds
+## Commands
 
 ```
- pnpm verify              typecheck, then every suite below
- pnpm db:verify           tenancy: RLS forced everywhere, cross-tenant reads and writes refused
- pnpm db:verify:guards    the role matrix and the audit trail, by calling mutations directly
- pnpm db:verify:account   the account layer: scope, seats, invitations, grants, teams, history
- pnpm db:verify:mail      stored bodies, who may read a mailbox, and the shared inbox
- pnpm db:verify:sequences the outreach engine: enrolment, the queue, tracking, and every way one stops
- pnpm db:verify:reporting where a visit is labelled, which way a first touch may move, and that the totals reconcile
- pnpm db:verify:crm       F1: board totals, merge, dedupe, import, search, export
- pnpm db:verify:forms     F3: schema rules, spam scoring, capture, review queue, attribution
+ pnpm dev                     the app, with hot reload
+ pnpm worker                  the job daemon
+ pnpm build                   production build of the app
+ pnpm typecheck               tsc across all four packages
+ pnpm lint                    biome, everything including warnings
+ pnpm lint:ci                 biome, errors only — this is the gate
+ pnpm test                    unit tests; no database needed
+
+ pnpm db:migrate              apply migrations, then re-apply tenancy
+ pnpm db:seed                 rebuild the sandbox and peer fixture accounts
+ pnpm db:generate             drizzle-kit generate — see the warning below
+ pnpm db:reclaim              give disk back after the scale suite
+ pnpm db:probe:large          find oversized stored values
+
+ pnpm verify                  everything below, in order, as a build gate
 ```
 
-`pnpm verify` runs all twelve.
-
-## Connecting an assistant
-
-Rawr is an MCP server at `/api/mcp` and its own OAuth 2.1 authorization server, so a
-client connects by signing in rather than by pasting a token:
+`pnpm verify` runs typecheck, lint, the unit tests, and sixteen suites against
+the real database. Each exits non-zero on failure:
 
 ```
- claude.ai / Desktop   Settings, Connectors, Add custom connector, paste the URL
- Claude Code           claude mcp add --transport http rawr http://localhost:3000/api/mcp
- no browser            Settings, Agent access: a token, sent as a bearer header
+ db:verify:sql            every table, column and rawr.* function named in raw
+                          SQL exists — typecheck cannot see inside a template
+ db:verify                tenancy: RLS forced everywhere, cross-tenant reads
+                          and writes refused, audit_log immutable
+ db:verify:guards         the permission grid and the audit trail, by calling
+                          mutations directly
+ db:verify:account        seats, invitations, grants, teams, scope, history
+ db:verify:crm            board totals, merge, dedupe, import, search, export
+ db:verify:admin          custom fields, pipelines, stages, lifecycle
+ db:verify:objects        objects an admin invents, and their rows
+ db:verify:forms          schema rules, spam scoring, capture, review queue
+ db:verify:booking        availability, holds, double-booking, timezones
+ db:verify:mail           stored bodies, who may read a mailbox, the inbox
+ db:verify:sequences      enrolment, the queue, tracking, every way one stops
+ db:verify:integrations   connection tests, health, idempotency, replay
+ db:verify:mcp            the agent surface, against the real /api/mcp — so
+                          this one needs the app running
+ db:verify:reporting      attribution, first-touch rules, totals reconciling
+ db:verify:activity       page views, sessions, visitor stitching, retention
+ db:verify:notifications  the bell, the drawer, the nightly sweep
 ```
 
-Discovery is at `/.well-known/oauth-protected-resource` and
-`/.well-known/oauth-authorization-server`; consent is `/oauth/authorize`. Every screen has
-a tool, under the signed-in person's role. One of them needs the app up: `verify:mcp` calls the
-real `/api/mcp`. Start it with a small pool, or the suites and the dev server
-together exhaust the connection limit and the failures read as logic errors:
+Because of that one, `pnpm verify` needs the app up. Give it a small pool, or the
+suites and the dev server together exhaust the connection limit and the failures
+read as logic errors:
 
 ```
  DATABASE_POOL_MAX=5 pnpm dev    in one terminal
  pnpm verify                     in another
 ```
 
-All of them run against the real database and exit non-zero on failure, so they
-can gate a build. They run inside the two fixture accounts and leave records,
-timeline rows and settings behind. Nothing reseeds on its own: `pnpm db:seed`
-drops the `sandbox` and `peer` accounts and everything cascading from them, so
-run it deliberately, when the leftovers get in the way and you are willing to
-lose whatever you created by hand. It touches no other account, and refuses
-outright if a fixture slug is seated by somebody who signed in with Google. `/design` renders every primitive in its empty, single-row and
-500-character states; `/design?rows=10000` is the large-result check.
+Not in `pnpm verify`, run on purpose: `pnpm db:verify:scale` builds 100,000
+contacts (`SCALE_CONTACTS` to change it) and measures the queries against them.
+`pnpm db:reclaim` gives the disk back afterwards.
+
+The suites run inside the two fixture accounts and leave records behind. Nothing
+reseeds on its own: `pnpm db:seed` drops `sandbox` and `peer` and everything
+cascading from them, so run it deliberately. It touches no other account, and
+refuses outright if a fixture slug is seated by somebody who signed in with
+Google.
+
+**`pnpm db:generate` is not safe to run.** The drizzle snapshots under
+`migrations/meta/` stop at `0009`; every migration since was written by hand and
+the journal appended by hand. Generating would diff the live schema against a
+fifty-migration-old snapshot and emit a migration recreating half the database.
+Write the SQL and add the journal entry by hand, as every migration since 0010
+has been.
+
+## What each part does
+
+### CRM
+
+- **Records** — Contacts, Companies and Deals, plus any object an admin invents
+  under Settings, Data Model. Each gets a list, a board, a calendar view and a
+  record page, all from the same builders.
+- **Views** — saved filter sets per object, addressable and pinnable. Filters,
+  sort, columns and the page you are on all live in the URL, so any screen can
+  be pasted to somebody else.
+- **Record page** — three columns HubSpot-style: properties, the activity
+  timeline, and associations. Log a call, start a task or compose an email from
+  the quick-action row.
+- **Segments (Lists)** — audiences built from filters, recomputed on write and
+  hourly. Members are stored, so a segment's size is a count rather than a scan.
+- **Tasks** — due dates, owners, and views for today, overdue and upcoming.
+- **Inbox** — the shared view of every connected mailbox, filtered by scope,
+  unread and unreplied.
+- **Duplicates** — candidate pairs by email, domain and name, merged or
+  dismissed one at a time.
+- **Import / Export** — CSV and Excel in, with a mapping step, a dry run and a
+  per-row error file; CSV out, matching exactly the filters on screen.
+
+### Marketing
+
+- **Forms** — a builder, validation rules shared byte-for-byte with the browser,
+  spam scoring, a review queue for anything borderline, and attribution captured
+  on submit. Embedded with one script tag or hosted as a page.
+- **Newsletter** — the audience and the opt-out are Rawr's, the send is Brevo's.
+- **Subscriptions** — named subscription types, opt-in only; an unticked box on
+  one form never cancels a choice made on another.
+
+### Sales
+
+- **Calendar** — the month, showing meetings booked and tasks due.
+- **Meetings Scheduler** — public booking pages, round-robin or one-to-one, with
+  availability rules, buffers, notice, soft holds on a chosen slot, and a hosted
+  page that works inside a Webflow embed.
+- **Availability** — a person's own working hours, and an admin viewing
+  somebody else's.
+- **Templates** — reusable message bodies, beside the sequences that use them.
+- **Sequences** — multi-step outreach sent from a member's own Gmail, with
+  opens, clicks, replies, bounces and unsubscribes tracked, and every rule for
+  when one stops.
+
+### Reporting
+
+Six reports over a date range — pipeline, forms, sequences, email, website and
+attribution — plus dashboards assembled from their cards. The range is in the
+URL, so a report worth looking at is a link.
+
+### Data management
+
+**Data Model** (objects and their fields), **Properties**, **Pipelines** and
+their stages, **Lifecycle**, **Event Management** (tracked sites), and
+**Connected Apps**.
+
+### Settings
+
+```
+ Your preferences   Your account · Agent access
+ Account            Account Defaults · Users · Teams · History
+ Data management    Objects · Properties · Pipelines · Lifecycle ·
+                    Subscriptions · Mailboxes · Calendar connections ·
+                    Tracked sites
+ Tools              Automations · Integrations · Tracking domain · Failed jobs
+```
+
+Access is granted a hub at a time, as HubSpot grants it: contacts, sales,
+marketing, service, reports and account, each at view or edit, with a scope
+saying how much of it a seat reaches — everything, their team's, or their own —
+and super admin above the grid. A hub nobody granted loses its rail icon.
+
+### Connected apps
+
+`/apps` is the one place a provider is connected. Each app has a page of its own
+with Overview, Settings and Insights.
+
+```
+ Brevo             newsletter sending and campaign events
+ Apollo            enrichment, and sequence events read back
+ Lusha · Clay      enrichment
+ Woodpecker        hand a sequence to a campaign
+ HubSpot           read an export
+ Slack             notifications
+ GA4               custom events forwarded, with consent, minus anything
+                   that could name a person
+ Zoom              meeting links on a booking
+ Google Calendar   free-busy and event writing — per person
+ Gmail             mailbox sync and sending — per person
+ Turnstile         form challenge
+ Webflow           native-form webhook
+```
+
+Credentials live in the database, encrypted with `TOKEN_ENCRYPTION_KEY`, never
+in the environment. Every provider has a connection test that calls it for real
+and reports what it said.
+
+### The worker
+
+Nothing on a schedule happens without `pnpm worker`.
+
+```
+ * * * * *      field indexes · visitor stitching · sequence steps ·
+                automation rules · enrichment
+ */5, */10      mailbox bodies · mailbox sync · sequence leases
+ 0 * * * *      segment membership
+ */30, :15/:45  integration health · Apollo read-back
+ 30 3, 0 7      activity roll-up · the notification sweep
+```
+
+A job that fails past its retries lands in `dead_letter`, visible under
+Settings, Failed jobs, and can be replayed.
 
 ## The public edge
 
-F3 adds routes that take no session. The account is resolved from the form id
-or the site key through a security-definer function, never from the request.
+These take no session. The account is resolved from the form id or the site key
+through a security-definer function, never from the request.
 
 ```
- GET  /embed.js               the one file datasaur.ai loads: forms + consent
- GET  /f/:formId/schema       what the embed needs to paint a form
- POST /f/:formId              a submission
- GET  /form/:account/:slug    hosted page, works with JavaScript disabled
- GET  /form/:formId           the same page, addressed the way the embed falls back
- POST /c                      a consent choice
- POST /w/webflow              Webflow native-form webhook, signature required
+ GET  /embed.js                 forms + consent, the one file datasaur.ai loads
+ GET  /booking.js               the booking embed loader
+ GET  /f/:formId/schema         what the embed needs to paint a form
+ POST /f/:formId                a submission
+ POST /f/:formId/upload         a file on a submission
+ GET  /form/:account/:slug      hosted form page
+ GET  /b/:account/:slug         public booking page, also the embed
+ POST /b/:account/:slug/hold    a soft hold on a slot
+ GET  /b/ics/:token.ics         the meeting as a calendar file
+ GET  /b/manage/:purpose/:token cancel or reschedule
+ POST /c                        a consent choice
+ GET  /e                        the analytics collector
+ POST /w/:source                provider webhooks (Webflow signature required)
+ GET  /t/o/:token, /t/c/:token  sequence open pixel and click redirect
+ GET  /u/:token                 unsubscribe
 ```
 
 To try the embed on a page that is not ours, serve any HTML containing:
@@ -141,21 +274,32 @@ To try the embed on a page that is not ours, serve any HTML containing:
          data-rawr-consent defer></script>
 ```
 
-A form can hand each new contact to one person or round-robin them across the
-admin and sales members (whoever owns the fewest contacts takes the next one), and a
-booking hands the contact to its host. Every contact carries Last contacted, Last
-reply, Emails sent and Emails received, derived from Gmail, logged activity and
-Apollo sequences; views sort on them and segments filter on them.
+Brevo does not sign its webhooks, so saving the Brevo integration mints a token
+and the webhook URL carries it as `t=`; posts without it are refused.
 
-Brevo does not sign its webhooks. Saving the Brevo integration mints a token, and
-the webhook URL shown under Settings, Integrations carries it as `t=`; Brevo posts
-without it are refused. The Slack, Apollo, Clay, GA4 and Zoom setup steps are on
-each provider's connect form.
+## Connecting an assistant
 
-In production the app refuses to boot on the development placeholders for
-`AUTH_SECRET`, `RAWR_INTERNAL_SECRET`, `EDGE_IP_SALT`, or an empty
+Rawr is an MCP server at `/api/mcp` and its own OAuth 2.1 authorization server,
+so a client connects by signing in rather than by pasting a token:
+
+```
+ claude.ai / Desktop   Settings, Connectors, Add custom connector, paste the URL
+ Claude Code           claude mcp add --transport http rawr http://localhost:3000/api/mcp
+ no browser            Settings, Agent access: a token, sent as a bearer header
+```
+
+Discovery is at `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`; consent is at `/oauth/authorize`.
+Every tRPC procedure becomes a tool automatically, under the signed-in person's
+own grants, so a screen added to the app is reachable by an assistant the same
+day.
+
+## In production
+
+The app refuses to boot on the development placeholders for `AUTH_SECRET`,
+`RAWR_INTERNAL_SECRET` or `EDGE_IP_SALT`, or on an empty
 `TOKEN_ENCRYPTION_KEY`, and names which.
 
-Turnstile, Slack and the Webflow secret are all optional in development. Without
-Turnstile a submission that scores into the challenge band fails closed to the
+Turnstile, Slack and the Webflow secret are optional in development. Without
+Turnstile a submission scoring into the challenge band fails closed to the
 review queue rather than being accepted or lost.
