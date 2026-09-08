@@ -4,7 +4,7 @@ import { appDb } from '../internal/pool.ts'
 import { ForbiddenError, isAdmin, type Hub, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 
-/** F5 §1. Tokens, and the lookup that turns one into a account context.
+/** F5 §1. Tokens, and the lookup that turns one into an account context.
  *
  *  Everything an agent can do goes through the same data access layer and the same
  *  role checks as the screens. This file adds the credential and nothing else:

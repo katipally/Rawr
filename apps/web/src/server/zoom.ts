@@ -25,7 +25,7 @@ export const zoomReady = async (ctx: AccountContext): Promise<boolean> =>
 
 type CachedToken = { token: string; expiresAt: number }
 
-/** Keyed by account: a shared slot would hand one organisation another's token. */
+/** Keyed by account: a shared slot would hand one account another's token. */
 const cached = new Map<string, CachedToken>()
 
 /** Renewed a minute before the hour so a booking never races the expiry. */

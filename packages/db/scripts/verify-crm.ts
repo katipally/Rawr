@@ -56,7 +56,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER } from './fixture.ts'
 
 /** The F1 definition of done, run against the real database rather than asserted in
- *  a review. Every check maps to a line in features/01-crm.md. */
+ *  a review. */
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 const db = drizzle(owner, { schema: s })

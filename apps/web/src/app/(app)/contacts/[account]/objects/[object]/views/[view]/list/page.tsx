@@ -40,7 +40,7 @@ type Search = {
 }
 
 /** What the screen shows: the columns a person chose in the URL, else the view's
- *  own, else the first few fields so a account that has saved nothing still has
+ *  own, else the first few fields so an account that has saved nothing still has
  *  a table. Unknown keys are dropped rather than throwing, because this comes from
  *  an address somebody can hand-edit. */
 const columnsFrom = (

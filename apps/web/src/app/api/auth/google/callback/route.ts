@@ -109,7 +109,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   await writeSessionCookie(session)
 
   // The calendar half of the same consent. Written after the session because it is
-  // a account-scoped write and the session is what names the account.
+  // an account-scoped write and the session is what names the account.
   //
   // Never fatal: somebody who ticked the sign-in boxes and not the calendar ones is
   // signed in, and their booking pages say what is missing. Refusing the sign-in

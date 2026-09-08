@@ -96,7 +96,7 @@ try {
   section('sites')
 
   const site = await publicSite('sandbox-www')
-  check('the seeded site key resolves a account', site?.accountId === datasaur.accountId)
+  check('the seeded site key resolves an account', site?.accountId === datasaur.accountId)
   check('an unknown site key resolves nothing', (await publicSite('no-such-site')) === null)
   check(
     'and a key long enough to be an attack is refused before it reaches the database',
@@ -136,7 +136,7 @@ try {
   check(
     'turning a site off actually stops collection',
     (await publicSite(`app-${stamp}`)) === null,
-    'the resolver refuses it, so the collector never gets a account',
+    'the resolver refuses it, so the collector never gets an account',
   )
   await setSiteActive(datasaur, created.id, true)
 

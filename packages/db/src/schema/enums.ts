@@ -133,7 +133,7 @@ export const viewKindEnum = pgEnum('rawr_view_kind', [
  *  built, so this column really does hold one of three. */
 export const entityTypeEnum = pgEnum('rawr_entity_type', ['company', 'contact', 'deal'])
 
-/** 01-crm.md A3. Twenty types, reduced from HubSpot's 44-type filter set to what
+/** Twenty types, reduced from HubSpot's 44-type filter set to what
  *  Rawr will actually produce. Grouped in the order the timeline filter shows them. */
 export const activityTypeEnum = pgEnum('rawr_activity_type', [
   'note',

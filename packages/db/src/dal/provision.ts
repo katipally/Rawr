@@ -5,11 +5,11 @@ import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
 import type { Tx } from './index.ts'
 
-/** What a account needs before anybody can use it: the object and field
+/** What an account needs before anybody can use it: the object and field
  *  definitions, the views every deep link falls back to, the lifecycle ladder, the
  *  subscription types and two pipelines.
  *
- *  One function so the seed and the "create a account" button provision the same
+ *  One function so the seed and the "create an account" button provision the same
  *  thing. They used to be the same code copied once, which is how a new account
  *  ends up without the `all` view that every address falls back to. */
 export const provisionAccount = async (tx: Tx, accountId: string): Promise<void> => {

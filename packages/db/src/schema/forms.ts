@@ -60,7 +60,7 @@ export const formSubmission = pgTable(
     /** Reasons behind the score, so a human reviewing a false positive can see
      *  exactly which rule fired rather than guessing at a number. */
     spamReasons: jsonb('spam_reasons').notNull().default([]),
-    /** Hashed with a rotating salt, never stored raw. 02-foundation.md §6. */
+    /** Hashed with a rotating salt, never stored raw. */
     ipHash: text('ip_hash'),
     userAgent: text('user_agent'),
     /** From the Webflow webhook's own submission id. A redelivery is a no-op
@@ -124,7 +124,7 @@ export const consentRecord = pgTable(
     visitorId: text('visitor_id').notNull(),
     /** {necessary: true, analytics: bool, advertisement: bool} — the same three
      *  categories today's HubSpot banner uses, so a stored choice maps across
-     *  without re-prompting. 00-context.md §6. */
+     *  without re-prompting. */
     categories: jsonb('categories').notNull(),
     policyVersion: text('policy_version').notNull(),
     ipHash: text('ip_hash'),

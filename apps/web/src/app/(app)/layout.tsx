@@ -238,7 +238,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         }
       >
         {/* Above the page rather than inside it: what is waiting to be enriched
-            is a account-wide question, and the answer costs credits wherever
+            is an account-wide question, and the answer costs credits wherever
             the person happens to be standing. */}
         <EnrichmentConsent canWrite={canWrite(ctx, 'contact')} />
         {children}

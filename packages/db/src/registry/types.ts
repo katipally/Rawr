@@ -69,7 +69,7 @@ const TEMPORAL: readonly Operator[] = [
 const ENUMERATED: readonly Operator[] = ['is', 'is_not', 'in', 'not_in', 'is_empty', 'is_not_empty']
 
 /** How a value is held, compared and rendered. One row per type, and adding a type
- *  means adding one row here plus its editor. 02-foundation.md section 4. */
+ *  means adding one row here plus its editor. */
 export type TypeMeta = {
   /** The cast applied to a jsonb value so it sorts and compares as itself. Column
    *  storage needs none. The hot index uses the same expression or it is not used. */

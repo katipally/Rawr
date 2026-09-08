@@ -80,7 +80,7 @@ const accessTokenFor = async (
     return accessToken
   } catch (cause) {
     // invalid_grant means the person revoked access or changed their password.
-    // Retrying that forever is the loop 02-foundation.md §8 forbids.
+    // Retrying that forever is the loop a revoked grant must never become.
     const revoked = cause instanceof OAuth2RequestError && cause.code === 'invalid_grant'
     const message = cause instanceof Error ? cause.message : String(cause)
     await recordGrantFailure(ctx, { userId: grant.userId, error: message, revoked })

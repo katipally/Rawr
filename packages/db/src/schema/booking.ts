@@ -271,7 +271,7 @@ export const bookingHold = pgTable(
 )
 
 /** A person's calendar connection. Tokens are encrypted with a key held outside
- *  this database, per 02-foundation.md §8, so a database dump is not a set of live
+ *  this database, so a database dump is not a set of live
  *  Google credentials. */
 export const calendarGrant = pgTable(
   'calendar_grant',

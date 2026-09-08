@@ -113,7 +113,7 @@ type PublicPageRow = {
   host_names: string[] | null
 }
 
-/** The one question the public edge asks before it has a account, through the
+/** The one question the public edge asks before it has an account, through the
  *  same security-definer path a form uses. There is no route from here to a
  *  record. */
 export const publicBookingPage = async (
@@ -149,7 +149,7 @@ export const publicBookingPage = async (
   }
 }
 
-/** Everything about a page, including the templates. Read under a account scope,
+/** Everything about a page, including the templates. Read under an account scope,
  *  so this is the shape the confirmation path and the admin screens use. */
 export type BookingPageConfig = PublicBookingPage & {
   ownerId: string | null

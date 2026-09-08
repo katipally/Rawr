@@ -27,7 +27,7 @@ export type CoreObject = {
 }
 
 /** HubSpot's own vocabulary, kept verbatim so migrated values land as themselves
- *  rather than as "other". 00-context.md. */
+ *  rather than as "other". */
 const LEAD_STATUS = ['New', 'Open', 'In Progress', 'Open Deal', 'Unqualified', 'Attempted to Contact', 'Connected', 'Bad Timing']
 const LEAD_SOURCE = ['Organic Search', 'Paid Search', 'Email Marketing', 'Social Media', 'Referrals', 'Other Campaigns', 'Direct Traffic', 'Offline Sources']
 const MARKETING_STATUS = ['Marketing contact', 'Non-marketing contact']
@@ -198,7 +198,7 @@ export const CORE_VIEWS: Record<ObjectKey, CoreView[]> = {
   ],
 }
 
-/** 00-context.md section 2. Reproduced exactly, probabilities included. */
+/** Datasaur's own enterprise pipeline, reproduced exactly, probabilities included. */
 export const ENTERPRISE_STAGES = [
   { name: 'Meeting Booked', probability: '5' },
   { name: 'Interest (Mtg Occurred)', probability: '10' },

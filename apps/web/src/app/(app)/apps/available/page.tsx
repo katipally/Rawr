@@ -6,7 +6,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTabs } from '../tabs.tsx'
 import { AvailableGrid } from './available-grid.tsx'
 
-/** What this organisation could connect and has not.
+/** What this account could connect and has not.
  *
  *  Not a marketplace: it is the fixed set of providers Rawr has a client for, so
  *  there is nothing to install from a third party. The split exists because "what
@@ -37,7 +37,7 @@ const AvailableAppsPage = async () => {
       <AppsTabs current="available" connectedCount={connectedCount} />
 
       {available.length === 0 ? (
-        <EmptyState title="Everything is connected" description="There is nothing left for this organisation to connect." />
+        <EmptyState title="Everything is connected" description="There is nothing left for this account to connect." />
       ) : (
         <AvailableGrid
           apps={available.map((meta) => ({

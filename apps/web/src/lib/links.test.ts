@@ -45,7 +45,7 @@ test('paths outside the two families name no account', () => {
   }
 })
 
-test('the pattern is anchored, so a account cannot be smuggled in later', () => {
+test('the pattern is anchored, so an account cannot be smuggled in later', () => {
   assert.equal(accountInPath('/settings/contacts/probe/home'), null)
   assert.equal(accountInPath('https://evil.example/contacts/probe/home'), null)
 })

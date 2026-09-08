@@ -210,13 +210,13 @@ try {
   })
 
   await check('a member without the account hub cannot change a credential', async () =>
-    refuses('an ordinary organisation member saving an integration', () =>
+    refuses('an ordinary member saving an integration', () =>
       saveIntegration(accountMember, { kind: 'apollo', secret: 'nope' }),
     ),
   )
 
   console.log('')
-  console.log('-- organisation scope ------------------------------------------')
+  console.log('-- account scope -----------------------------------------------')
 
   await check('rawr_app still holds its grants after the table left apply_tenancy', async () => {
     const [row] = await owner<{ ok: boolean }[]>`
@@ -1144,8 +1144,8 @@ try {
     return skip ?? ''
   })
 
-  await check('a account-wide exclusion is admin only', async () =>
-    refuses('a sales user setting a account exclusion', () =>
+  await check('an account-wide exclusion is admin only', async () =>
+    refuses('a sales user setting an account exclusion', () =>
       addBlocklistEntry(sales, { pattern: 'everyone.example', scope: 'account' }),
     ),
   )
@@ -1485,7 +1485,7 @@ try {
 
   console.log('\n-- enrichment waits for consent -------------------------------')
 
-  // Approving is a account-wide act, so these checks need a account-wide
+  // Approving is an account-wide act, so these checks need an account-wide
   // starting point: whatever an earlier suite or a person left on the queue
   // would otherwise be counted, approved and reported as this section's doing.
   await db.execute(sql`delete from enrichment_request where account_id = ${datasaur!.id}`)
@@ -1548,7 +1548,7 @@ try {
 
   await check('approving releases everything that was waiting, and nothing after it', async () => {
     // Asserted on the rows this suite made rather than on a total: approving is
-    // a account-wide act, and a count is only stable if nothing else in the
+    // an account-wide act, and a count is only stable if nothing else in the
     // account is writing while the check runs.
     const mine = queuedIds.filter((row) => row.entity === 'contact')
     const { approved } = await approveEnrichment(admin)

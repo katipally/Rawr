@@ -138,7 +138,7 @@ const AppPage = async ({
                   <Badge tone="neutral">{meta.appType}</Badge>
                   <p className="pt-1 text-small text-secondary">
                     {meta.appType === 'Shared'
-                      ? 'One connection the whole organisation uses.'
+                      ? 'One connection the whole account uses.'
                       : 'Granted per person, from their own account.'}
                   </p>
                 </>,
@@ -161,7 +161,7 @@ const AppPage = async ({
             <div className="flex flex-col gap-4">
               <p className="text-secondary">
                 What {meta.name} may reach through Rawr. Fixed by what the integration does, so it is
-                the same for every organisation and there is nothing to grant or revoke per app beyond
+                the same for every account and there is nothing to grant or revoke per app beyond
                 connecting it.
               </p>
               {meta.permissions.map((group) => (

@@ -9,7 +9,7 @@ const schema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
   /** Empty means any Google account may sign in, seated by invitation or by an
-   *  organisation whose own domain matches. Set it to lock sign-in to one domain. */
+   *  account whose own domain matches. Set it to lock sign-in to one domain. */
   GOOGLE_HOSTED_DOMAIN: z.string().default(''),
   RAWR_DEV_LOGIN: z.string().optional(),
 
@@ -18,7 +18,7 @@ const schema = z.object({
    *  onto datasaur.ai, so it is never inferred from the request host. */
   PUBLIC_BASE_URL: z.url().optional(),
   /** Rotated by changing this value. IPs are hashed with it and a day stamp and
-   *  are never stored raw. 02-foundation.md §6. */
+   *  are never stored raw. */
   EDGE_IP_SALT: z.string().min(16).default('rawr-development-ip-salt-not-for-production'),
   /** How many proxies we run sit in front of the app, so the client address can be
    *  read from the right end of x-forwarded-for rather than from whatever the
@@ -43,7 +43,7 @@ const schema = z.object({
   /** --- F2 booking ------------------------------------------------------- */
   /** 32 bytes, base64 or hex, from a secrets store. It encrypts the calendar and
    *  mailbox tokens Rawr holds, and must not live in the database it protects
-   *  (02-foundation.md §8, open item 9). */
+   *  (open item 9). */
   TOKEN_ENCRYPTION_KEY: z.string().default(''),
   /** Open item 3 is outstanding, so there is no Google project to read free-busy
    *  from. This lets a host be marked available with Rawr's own bookings as the

@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, type FormField, type FormSettings } from '../dal/form
  *
  *  The third is the gated-asset form the paid hubspotonwebflow.com bridge exists
  *  for. It has to reach Rawr without that bridge, which is the whole reason the
- *  subscription can then be cancelled. 00-context.md §8. */
+ *  subscription can then be cancelled. */
 
 export type SeedForm = {
   name: string

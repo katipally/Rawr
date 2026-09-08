@@ -143,7 +143,7 @@ export const listIntegrations = async (ctx: AccountContext): Promise<Integration
   })
 
 /** What the Connected Apps table needs and the account list does not: who
- *  connected it, when, and when it last did anything. Read in an organisation
+ *  connected it, when, and when it last did anything. Read in an account
  *  transaction because that is the scope the screen is in, and because the
  *  installer's name comes from a join the account policy would not admit. */
 const asDate = (value: string | Date | null): Date | null =>
@@ -309,9 +309,9 @@ export type SaveIntegrationInput = {
   secret?: string | null
 }
 
-/** The credential belongs to the company, so connecting one is an organisation
- *  act and its trail lands in organisation_audit_log. Reading it stays a
- *  account act; that is the second policy on the table. */
+/** The credential belongs to the account, so connecting one needs the account
+ *  hub. Its trail lands in audit_log like every other decision; the separate
+ *  organisation log it used to be written to went with migration 0058. */
 export const saveIntegration = async (
   ctx: AccountContext,
   input: SaveIntegrationInput,
@@ -401,8 +401,8 @@ export const recordHealth = async (
   kind: IntegrationKind,
   outcome: { ok: true } | { ok: false; error: string; disconnected?: boolean },
 ): Promise<void> => {
-  // Through the definer function, not a direct update: the row belongs to the
-  // organisation and account scope may only read it. Row level security is
+  // Through the definer function, not a direct update: a health write is the one
+  // change the app makes to this row without the account hub. Row level security is
   // row-level, so a policy permitting this update would equally permit one that
   // rewrote secret_ref. The function is the narrowing.
   //
@@ -432,7 +432,7 @@ export const disconnectIntegration = async (
       .from(integration)
       .where(eq(integration.kind, kind))
       .limit(1)
-    if (!found) throw new Error(`${kind} is not connected in this organisation.`)
+    if (!found) throw new Error(`${kind} is not connected in this account.`)
 
     await tx.delete(integration).where(eq(integration.id, found.id))
     return {

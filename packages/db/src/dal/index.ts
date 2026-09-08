@@ -40,7 +40,7 @@ const open = async <T>(ctx: AccountContext, fn: (tx: Tx) => Promise<T>): Promise
 
 const assertUsable = (ctx: AccountContext): void => {
   if (!UUID.test(ctx.accountId)) {
-    throw new Error(`Refusing to open a transaction: "${ctx.accountId}" is not a account id.`)
+    throw new Error(`Refusing to open a transaction: "${ctx.accountId}" is not an account id.`)
   }
   if (ctx.actorId !== null && !UUID.test(ctx.actorId)) {
     throw new Error(`Refusing to open a transaction: "${ctx.actorId}" is not a user id.`)

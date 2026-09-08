@@ -43,7 +43,7 @@ export const SequenceList = ({
   const [busy, setBusy] = useState(false)
 
   // Filtered here rather than refetched: the whole list is already on the page,
-  // and a account has tens of sequences, not thousands.
+  // and an account has tens of sequences, not thousands.
   const wanted = needle.trim().toLowerCase()
   const shown = rows.filter(
     (row) =>

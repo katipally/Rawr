@@ -299,7 +299,7 @@ export type BrevoTemplate = { id: number; name: string; subject: string | null; 
 
 /** Brevo's own template gallery, so a compose step picks a design rather than
  *  editing one. `/v3/smtp/templates` is documented as the transactional list; a
- *  campaign's `templateId` says "existing active templates". If a account's
+ *  campaign's `templateId` says "existing active templates". If an account's
  *  campaign designs turn out not to be in this list, the compose step still works
  *  by naming a template id, which is why the id is shown beside every name. */
 export const listBrevoTemplates = async (ctx: AccountContext): Promise<BrevoTemplate[]> => {

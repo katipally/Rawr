@@ -30,7 +30,6 @@ const GROUPS: Record<string, string> = {
   admin: 'Account settings: objects an admin invents, fields, pipelines, stages, lifecycle, subscription types, members, and automation rules with their run log.',
   mcp: 'Agent access tokens.',
   sequences: 'Multi-step outreach sent from a member\'s own Gmail, or handed to a Woodpecker campaign: the sequences, their steps, and who is in them.',
-  org: 'The organisation above this account: its accounts, its people, their seats and the history of those decisions.',
   notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
   teams: 'Named groups inside this account, used to rotate assignment within a team.',
   jobs: 'Failed jobs and dead letters.',

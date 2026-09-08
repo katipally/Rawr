@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import type { ConnectionTest } from './provider.ts'
 
-/** Per organisation: each one builds its own Webflow app, so one shared secret
+/** Per account: each one builds its own Webflow app, so one shared secret
  *  could not verify both. */
 
 export const webflowSecret = async (ctx: AccountContext): Promise<string | null> => {

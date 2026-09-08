@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, } from 'node
 
 /** Encryption for the OAuth tokens Rawr holds on a person's behalf.
  *
- *  02-foundation.md §8: the key lives in a secrets store, never in the database it
+ *  The key lives in a secrets store, never in the database it
  *  protects, so a database dump is not a set of live Google credentials. It is read
  *  from the environment on first use rather than at import, because most of the
  *  application never touches a token and must still boot without the key present.

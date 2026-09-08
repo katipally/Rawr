@@ -202,8 +202,8 @@ try {
   const owners = PEOPLE.filter((p) => p.editHubs.length > 0).map((p) => userId(p.email))
 
   for (const ws of [sandbox, peer]) {
-    // The same provisioning a account created from the organisation screen gets,
-    // so a seeded account and a real one cannot differ.
+    // The same provisioning a real account gets on its first sign-in, so a seeded
+    // account and a real one cannot differ.
     await provisionAccount(db as unknown as Parameters<typeof provisionAccount>[0], ws)
 
     const stages = await db

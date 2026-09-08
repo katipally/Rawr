@@ -7,7 +7,7 @@ import { CALENDAR_SCOPES } from '~/server/calendar.ts'
 import { readSession } from '~/server/session.ts'
 
 /** Calendar consent, asked separately from sign-in and only of the people who host
- *  meetings. 02-foundation.md §8: a person who never hosts is never asked for
+ *  meetings: a person who never hosts is never asked for
  *  access to their calendar.
  *
  *  Incremental authorisation, so agreeing to this does not silently drop the

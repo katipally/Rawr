@@ -46,7 +46,8 @@ export const generateCodeVerifier = (): string => randomBytes(32).toString('base
 /** The error Google's token endpoint returns, in the shape RFC 6749 §5.2 defines.
  *  `code` is what callers branch on: invalid_grant means the person revoked access
  *  or changed their password, and retrying that forever is the loop
- *  02-foundation.md §8 forbids. */
+ *  the token rules forbid: a refresh loop that never gives up hands a revoked
+ *  grant to Google for ever. */
 export class OAuth2RequestError extends Error {
   readonly code: string
   readonly description: string | null

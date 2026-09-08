@@ -73,7 +73,7 @@ const toPublicForm = (row: PublicFormRow): PublicForm => ({
   isActive: row.is_active,
 })
 
-/** The one question the public edge has to ask before it has a account. Goes
+/** The one question the public edge has to ask before it has an account. Goes
  *  through a security-definer function that takes a form id and returns nothing
  *  but that form's public shape, so there is no path from here to a record. */
 export const publicFormById = async (formId: string): Promise<PublicForm | null> => {
@@ -560,7 +560,7 @@ export const latestConsent = async (
  *  security-definer path as a form so the edge never reads the account table
  *  unscoped.
  *
- *  Migration path: a real F4 site key wins, and a account slug is still accepted
+ *  Migration path: a real F4 site key wins, and an account slug is still accepted
  *  for any embed placed before sites existed. Once every embed on datasaur.ai
  *  carries a site key, the slug branch in rawr.account_for_site can go. */
 export const accountIdForSite = async (siteKey: string): Promise<string | null> => {

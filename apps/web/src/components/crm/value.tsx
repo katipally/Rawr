@@ -6,7 +6,7 @@ import type { ReactNode } from 'react'
 
 /** How a stored value is read on screen. One rule per field type, matching the
  *  CSV rule and the editor, so a table cell, a card and a record page can never
- *  disagree about what a value looks like. 02-foundation.md section 4.
+ *  disagree about what a value looks like.
  *
  *  Deliberately free of event handlers: this renders inside server components as
  *  well as client ones, and a handler here would make every one of them a client

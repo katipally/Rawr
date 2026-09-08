@@ -43,8 +43,8 @@ export type IntegrationMeta = {
   kind: IntegrationKind
   name: string
   category: IntegrationCategory
-  /** Shared: one connection the whole organisation uses. Personal: granted per
-   *  person, so the organisation-wide row is folded from everyone's grant. */
+  /** Shared: one connection the whole account uses. Personal: granted per
+   *  person, so the account-wide row is folded from everyone's grant. */
   appType: 'Shared' | 'Personal'
   permissions: PermissionGroup[]
   /** What it does, in the words of the row it satisfies. */
@@ -549,7 +549,7 @@ const stillBlankOnContact = blankIn(ENRICHABLE.contact)
 export const ENRICHERS = ['apollo', 'lusha', 'clay'] as const
 export type Enricher = (typeof ENRICHERS)[number]
 
-/** Which enrichers this organisation can actually call. A provider with no key,
+/** Which enrichers this account can actually call. A provider with no key,
  *  or one whose key was rejected, is left out of the run rather than asked and
  *  reported as a failure on every record. */
 export const connectedEnrichers = async (ctx: AccountContext): Promise<Set<Enricher>> => {

@@ -50,8 +50,7 @@ import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
-/** HubSpot's record anatomy, because familiarity is the point. 00-context.md
- *  sections 3 and 4:
+/** HubSpot's record anatomy, because familiarity is the point:
  *
  *    HEADER   name, key fields, primary actions
  *    LEFT     properties, sectioned, collapsible, inline edit

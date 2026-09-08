@@ -93,7 +93,7 @@ export const GET = async (
       nextAvailable: nextAvailable ? nextAvailable.toISOString() : null,
       timezone,
       name: page.name,
-      organisation: page.accountName,
+      accountName: page.accountName,
       /** Names only, the same ones the hosted page prints above the calendar. */
       hosts: page.hostNames,
       location: page.location,

@@ -1,7 +1,7 @@
 /** What a visitor sees while a public page is being built on the server.
  *
  *  Deliberately not a spinner and not a skeleton of the real layout: the booking
- *  page resolves a account, a page, its hosts and a week of free slots before it
+ *  page resolves an account, a page, its hosts and a week of free slots before it
  *  can draw anything, and a skeleton that guesses at the shape flashes into a
  *  different one. A line that says it is loading is honest and does not move. */
 export const PublicLoading = ({ what }: { what: string }) => (

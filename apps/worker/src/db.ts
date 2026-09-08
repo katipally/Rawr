@@ -28,6 +28,6 @@ export const recordDeadLetter = async (input: {
            ${input.error}, ${input.attempts}::int
     where exists (select 1 from account where id = ${input.accountId}::uuid)`
   if (written.count === 0) {
-    console.error(`[dead-letter] ${input.jobName} failed in a account that no longer exists:`, input.error)
+    console.error(`[dead-letter] ${input.jobName} failed in an account that no longer exists:`, input.error)
   }
 }

@@ -23,7 +23,7 @@ export const CRM_ROOT = 'contacts'
  *  when it names none. Both scoped families put the slug in the same position,
  *  which is what lets one pattern read either.
  *
- *  Read by src/proxy.ts, to notice a link into a account the session is not on,
+ *  Read by src/proxy.ts, to notice a link into an account the session is not on,
  *  and by the Google callback, to land somebody on the account their link asked
  *  for rather than on whichever membership came back first. */
 const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)(?:[/?#]|$)/
@@ -151,7 +151,7 @@ export const pageViewPath = (account: string, id: string): string =>
   `/${CRM_ROOT}/${account}/activity/${id}`
 
 /** Everything under /settings is account configuration rather than a record, so
- *  none of it carries a account in the path: a session is already in exactly one.
+ *  none of it carries an account in the path: a session is already in exactly one.
  *  Kept in one list so the settings sub-navigation and the pages agree. */
 export const sitesPath = (): string => '/settings/sites'
 
@@ -178,8 +178,8 @@ export const subscriptionsPath = (): string => '/settings/subscriptions'
 export const integrationsPath = (kind?: string): string =>
   kind ? appPath(kind, 'settings') : '/settings/integrations'
 
-/** Connected apps sit above a account, because the credential belongs to the
- *  organisation, and outside settings, because they have a frame of their own the
+/** Connected apps sit above an account, because the credential belongs to the
+ *  account, and outside settings, because they have a frame of their own the
  *  way HubSpot's do. */
 export const appsPath = (): string => '/apps'
 export const availableAppsPath = (): string => '/apps/available'

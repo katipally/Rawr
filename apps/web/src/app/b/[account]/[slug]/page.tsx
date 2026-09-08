@@ -71,7 +71,7 @@ const BookingPublicPage = async ({
   if (!summary) notFound()
 
   // The widget needs the questions and the confirmation copy, which the public
-  // resolver deliberately does not return. Reading them takes a account scope,
+  // resolver deliberately does not return. Reading them takes an account scope,
   // and by this point the slug has named one.
   const page = await readBookingPage(publicEdgeContext(summary.accountId), summary.bookingPageId)
   if (!page) notFound()
@@ -155,7 +155,7 @@ const BookingPublicPage = async ({
           account,
           slug,
           name: page.name,
-          organisation: page.accountName,
+          accountName: page.accountName,
           hostNames: page.hostNames,
           durationMinutes: page.durationMinutes,
           location: page.location,

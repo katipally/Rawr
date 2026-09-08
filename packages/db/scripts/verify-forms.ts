@@ -71,7 +71,7 @@ const scoped = <T extends Record<string, unknown>>(
 
 const actorCtx = async (slug: string, email: string, editHubs: string[]): Promise<AccountContext> => {
   const base = await ctxFor(slug, editHubs)
-  // user_account is visible only to a account the person belongs to, so this
+  // user_account is visible only to an account the person belongs to, so this
   // read has to be scoped like any other. Unscoped it returns nothing and every
   // actor silently becomes null.
   const rows = await scoped<{ id: string }>(

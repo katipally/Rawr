@@ -40,7 +40,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   // The account comes from the person's own memberships, never from the form
-  // alone: a account id they are not a member of is refused.
+  // alone: an account id they are not a member of is refused.
   const chosen = params.get('account_id') ?? session.accountId
   const membership = (await memberships(session.userId)).find((m) => m.accountId === chosen)
   if (!membership) {

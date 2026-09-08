@@ -40,7 +40,7 @@ export type BookingWidgetPage = {
   account: string
   slug: string
   name: string
-  organisation: string
+  accountName: string
   hostNames: string[]
   durationMinutes: number
   location: string
@@ -519,7 +519,7 @@ const Head = ({
   return (
     <div className="rawr-b-head">
       <div className="rawr-b-id">
-        <span className="rawr-b-org">{page.organisation}</span>
+        <span className="rawr-b-org">{page.accountName}</span>
         <h1 className="rawr-b-title">{page.name}</h1>
         <p className="rawr-b-meta">
           {page.hostNames.length > 0 ? (

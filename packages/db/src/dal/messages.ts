@@ -306,7 +306,7 @@ export const addBlocklistEntry = async (
       throw new Error('A blocklist entry is one address or one domain, with no spaces.')
     }
     if (input.scope === 'account' && !isAdmin(ctx)) {
-      throw new Error('Only an admin sets a account-wide exclusion. Add it to your own list instead.')
+      throw new Error('Only an admin sets an account-wide exclusion. Add it to your own list instead.')
     }
 
     const [created] = await tx
@@ -342,7 +342,7 @@ export const removeBlocklistEntry = async (ctx: AccountContext, id: string): Pro
       .limit(1)
     if (!found) throw new Error('That exclusion no longer exists.')
     if (found.userId === null && !isAdmin(ctx)) {
-      throw new Error('That is a account exclusion. Only an admin removes one.')
+      throw new Error('That is an account exclusion. Only an admin removes one.')
     }
     if (found.userId !== null && found.userId !== ctx.actorId && !isAdmin(ctx)) {
       throw new Error('That exclusion belongs to somebody else.')

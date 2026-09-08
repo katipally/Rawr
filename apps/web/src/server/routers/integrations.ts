@@ -64,9 +64,8 @@ export const integrationsRouter = router({
     call(() => listWoodpeckerCampaigns(ctx.account)),
   ),
 
-  /** An organisation admin, not a account one: the credential is shared by
-   *  every account in the company, so connecting it is a decision above any of
-   *  them. */
+  /** The account hub, because a credential is the account's rather than any one
+   *  person's: connecting one commits everybody in it. */
   save: adminProcedure
     .input(
       z.object({

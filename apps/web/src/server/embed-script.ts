@@ -75,7 +75,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
   // ------------------------------------------------------------------ consent
 
   // The default state has to be pushed before GTM fires, or it arrives too late
-  // to govern anything. 00-context.md section 6.
+  // to govern anything.
   window.dataLayer = window.dataLayer || [];
   function gtag() { window.dataLayer.push(arguments); }
 

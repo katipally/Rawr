@@ -50,8 +50,7 @@ import { SANDBOX, PEER } from './fixture.ts'
 
 /** The parts of F1 that had no code: the metadata registry's write side, pipeline
  *  and lifecycle administration, subscription types, segments, bulk edit, board
- *  grouping and the searched pickers. Every check maps to a line in
- *  features/01-crm.md or 02-foundation.md §4. */
+ *  grouping and the searched pickers. */
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 const db = drizzle(owner, { schema: s })

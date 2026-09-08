@@ -10,7 +10,7 @@ export const CONSENT_COOKIE = 'rawr_consent'
 /** HubSpot encodes its categories as "1:true" for analytics and "2:true" for
  *  advertisement. A visitor who already chose under HubSpot's banner should not
  *  be asked again on day one of cutover, so their cookie is read once and
- *  translated. 00-context.md §6.
+ *  translated.
  *
  *  Read only. Rawr never writes this format. */
 export const readHubSpotConsent = (

@@ -6,7 +6,7 @@ type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 /** The front door for staff. There is one way in, Google with a verified
  *  @datasaur.ai account, and the page says so plainly: who can enter, what happens
  *  the first time, and who to ask when a role is not enough. No passwords, no
- *  invites, no magic links (01-decisions.md, sign-in). */
+ *  invites, no magic links. */
 const SignIn = async ({ searchParams }: Props) => {
   const { error, next } = await searchParams
   const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''

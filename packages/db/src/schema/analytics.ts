@@ -29,7 +29,7 @@ import { contact } from './records.ts'
  *  sites in one account, which is what open item 18 is deciding between.
  *
  *  The key is unique across every tenant, not per account: the collector has
- *  only this string to resolve a account from, so two tenants sharing one would
+ *  only this string to resolve an account from, so two tenants sharing one would
  *  make that question unanswerable. */
 export const site = pgTable(
   'site',
