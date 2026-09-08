@@ -6,7 +6,7 @@ import { defineJob } from './registry.ts'
 /** F6 §3's read-back on a schedule: sequence steps, replies and failures from
  *  Apollo onto the contact timeline, for every account that has Apollo
  *  connected. The call lives in the app next to the credentials; the worker owns
- *  only the clock. A account that fails is logged and the next one still runs. */
+ *  only the clock. An account that fails is logged and the next one still runs. */
 export const syncApollo = defineJob({
   name: 'apollo.sync',
   schema: z.object({}),
@@ -15,13 +15,9 @@ export const syncApollo = defineJob({
   handle: async () => {
     const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
 
-    // The credential is the organisation's; the events it brings back land on the
-    // timelines of one account, so every account under a connected
-    // organisation is synced rather than only one.
     const rows = await owner`
-      select w.id as account_id
+      select i.account_id
         from integration i
-        join account w on w.organisation_id = i.organisation_id
        where i.kind = 'apollo' and i.secret_ref is not null and i.state <> 'revoked'`
 
     for (const row of rows) {

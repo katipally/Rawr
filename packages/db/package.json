@@ -14,6 +14,7 @@
     "migrate": "node --env-file=../../.env.local scripts/migrate.ts",
     "seed": "node --env-file=../../.env.local scripts/seed.ts",
     "verify": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-tenancy.ts",
+    "verify:sql": "node --env-file=../../.env.local scripts/verify-sql.ts",
     "typecheck": "tsc --noEmit",
     "test": "DATABASE_URL=postgres://unit:test@127.0.0.1:5432/none DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none node --test \"src/**/*.test.ts\"",
     "verify:guards": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-guards.ts",

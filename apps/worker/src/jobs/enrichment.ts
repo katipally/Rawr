@@ -12,7 +12,7 @@ import { defineJob } from './registry.ts'
  *  client and a large batch becomes a steady stream rather than one burst.
  *
  *  Two things are never drained: a row nobody has approved, and a row belonging
- *  to an organisation with no enricher connected. The second waits and runs the
+ *  to an account with no enricher connected. The second waits and runs the
  *  minute a key is pasted, which is the backfill nobody has to ask for. */
 
 /** The most records queued per tick, which is the ceiling on provider spend per
@@ -49,11 +49,10 @@ const dispatch = defineJob({
       with due as (
         select r.account_id, r.entity, r.entity_id
           from enrichment_request r
-          join account w on w.id = r.account_id
          where r.approved_at is not null
            and exists (
                  select 1 from integration i
-                  where i.organisation_id = w.organisation_id
+                  where i.account_id = r.account_id
                     and i.kind in ${owner(ENRICHER_KINDS)}
                     and i.state in ('connected', 'degraded'))
          order by r.approved_at

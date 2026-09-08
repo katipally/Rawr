@@ -4,7 +4,7 @@ import { owner } from '../db.ts'
 import { defineJob } from './registry.ts'
 
 /** F4 §1. Raw page views collapse to one row per contact per day once past the
- *  organisation's window. Aggregate counts stay honest, so nothing is lost. */
+ *  account's window. Aggregate counts stay honest, so nothing is lost. */
 
 const jobContext = (accountId: string): AccountContext => ({
   accountId,
@@ -23,9 +23,7 @@ export const rollUpActivity = defineJob({
   handle: async () => {
     // Per account, so one tenant's backlog cannot stall another's.
     const accounts = await owner<{ id: string; months: number }[]>`
-      select w.id, o.activity_retention_months as months
-        from account w
-        join organisation o on o.id = w.organisation_id`
+      select a.id, a.activity_retention_months as months from account a`
 
     for (const row of accounts) {
       const ctx = jobContext(row.id)
