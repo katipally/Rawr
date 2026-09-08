@@ -1,9 +1,10 @@
 'use client'
 
 import type { GrantSummary } from '@rawr/db'
-import { Button, TextInput, useToast } from '@rawr/ui'
-import Link from 'next/link'
+import { Badge, type BadgeTone, Button, TextInput, useToast } from '@rawr/ui'
+import { Clock, Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { LinkButton } from '~/components/link-button.tsx'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -16,11 +17,11 @@ import { api, errorMessage } from '~/lib/rpc.ts'
  *  the button says Reconnect far more often than it says Connect.
  *  "Degraded" on its own tells nobody anything, so the recorded error is printed. */
 
-const STATES: Record<string, { label: string; className: string }> = {
-  connected: { label: 'Connected', className: 'bg-success-subtle text-success' },
-  degraded: { label: 'Failing', className: 'bg-error-subtle text-error' },
-  revoked: { label: 'Revoked', className: 'bg-error-subtle text-error' },
-  unconfigured: { label: 'Not connected', className: 'bg-disabled text-secondary' },
+const STATES: Record<string, { label: string; tone: BadgeTone }> = {
+  connected: { label: 'Connected', tone: 'ok' },
+  degraded: { label: 'Failing', tone: 'error' },
+  revoked: { label: 'Revoked', tone: 'error' },
+  unconfigured: { label: 'Not connected', tone: 'neutral' },
 }
 
 export const CalendarRow = ({
@@ -69,12 +70,10 @@ export const CalendarRow = ({
     <li className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
-        <span className={`rounded-hs px-1.5 py-0.5 text-xs ${badge?.className ?? ''}`}>
+        <Badge tone={badge?.tone ?? 'neutral'} dot>
           {badge?.label}
-        </span>
-        {grant?.provider === 'dev' ? (
-          <span className="rounded-hs bg-warning-subtle px-1.5 py-0.5 text-xs">development</span>
-        ) : null}
+        </Badge>
+        {grant?.provider === 'dev' ? <Badge tone="warn">development</Badge> : null}
       </div>
 
       <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-secondary">
@@ -119,13 +118,15 @@ export const CalendarRow = ({
             <dd className="inline font-medium text-body">
               {grant?.calendarId ?? '—'}
               {grant && editable ? (
-                <button
+                <Button
                   type="button"
-                  className="ml-2 text-link"
+                  variant="tertiary"
+                  className="ml-1 px-1 py-0"
+                  icon={<Pencil aria-hidden="true" className="size-3.5" />}
                   onClick={() => setEditingCalendar(true)}
                 >
                   Change
-                </button>
+                </Button>
               ) : null}
             </dd>
           )}
@@ -215,9 +216,9 @@ export const CalendarRow = ({
           </Button>
         ) : null}
 
-        <Link href={availabilityHref} className="text-sm text-link">
+        <LinkButton href={availabilityHref} icon={<Clock aria-hidden="true" className="size-4" />}>
           Working hours
-        </Link>
+        </LinkButton>
       </div>
 
       {!isSelf && canConnectGoogle ? (

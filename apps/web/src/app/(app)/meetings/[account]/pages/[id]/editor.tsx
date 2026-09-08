@@ -1,9 +1,11 @@
 'use client'
 
 import type { BookingPageConfig, FormField, PageHostRow } from '@rawr/db'
-import { Button, Field, IconButton, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Field, IconButton, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { availabilityPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { BookingLinkSnippet } from '../snippet.tsx'
 import { QuestionList, type MappingTarget } from './questions.tsx'
@@ -342,9 +344,9 @@ export const PageEditor = ({
                   <li key={row.userId} className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                     {host && host.grantState !== 'connected' ? (
-                      <span className="rounded-hs bg-error-subtle px-1.5 py-0.5 text-xs text-error">
+                      <Badge tone="error" dot>
                         {host.grantState === 'unconfigured' ? 'no calendar' : host.grantState}
-                      </span>
+                      </Badge>
                     ) : (
                       <span className="text-xs text-secondary">{host?.timezone ?? 'no hours set'}</span>
                     )}
@@ -572,7 +574,7 @@ export const PageEditor = ({
 
       <p className="text-xs text-secondary">
         Working hours are per person, not per page. Set yours under{' '}
-        <a href={`/meetings/${account}/availability`}>My hours</a>.
+        <Link href={availabilityPath(account)}>My hours</Link>.
       </p>
     </div>
   )

@@ -1,9 +1,9 @@
 import { Alert, PageHeader } from '@rawr/ui'
+import { MeetingsTabs } from '../tabs.tsx'
 import { listGrants } from '@rawr/db'
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
-import { availabilityPath, bookingPagesPath, calendarPath } from '~/lib/links.ts'
+import { availabilityPath } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { CalendarRow } from './calendar-row.tsx'
@@ -48,20 +48,9 @@ const CalendarsScreen = async ({
         className="mb-4"
         title="Calendar connections"
         lead="Whose free-busy Rawr may read when it offers somebody a time. Signing in with Google connects it, so this is where you come when that did not happen."
-        action={
-          <>
-            <Link href={calendarPath(account)} className="text-sm text-link">
-              Calendar
-            </Link>
-            <Link href={bookingPagesPath(account)} className="text-sm text-link">
-              Meeting links
-            </Link>
-            <Link href={availabilityPath(account)} className="text-sm text-link">
-              My hours
-            </Link>
-          </>
-        }
       />
+
+      <MeetingsTabs account={account} current="calendars" />
 
       {error ? <Alert className="mb-4">{error}</Alert> : null}
 

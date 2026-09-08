@@ -1,8 +1,9 @@
 import { Alert, PageHeader } from '@rawr/ui'
+import { MeetingsTabs } from '../tabs.tsx'
 import { listGrants, pagesHostedBy, readSchedule } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { availabilityPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
+import { availabilityPath, calendarsPath } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { ScheduleEditor } from './schedule-editor.tsx'
@@ -49,17 +50,9 @@ const AvailabilityScreen = async ({
         className="mb-4"
         title={subject === session.userId ? 'My working hours' : `${person?.label ?? 'Working hours'}`}
         lead="The window a meeting may be offered in, before the calendar narrows it further."
-        action={
-          <>
-            <Link href={bookingPagesPath(account)} className="text-sm text-link">
-              Meeting links
-            </Link>
-            <Link href={calendarsPath(account)} className="text-sm text-link">
-              Calendars
-            </Link>
-          </>
-        }
       />
+
+      <MeetingsTabs account={account} current="availability" />
 
       {!grant || grant.state !== 'connected' ? (
         <Alert tone="warning" className="mb-4">

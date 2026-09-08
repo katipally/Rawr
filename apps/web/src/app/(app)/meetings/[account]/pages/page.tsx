@@ -3,11 +3,12 @@ import { EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
-import { bookedPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
+import { calendarsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { zoomReady } from '~/server/zoom.ts'
 import { PagesTable } from './pages-table.tsx'
 import { NewPageButton } from './new-page.tsx'
+import { MeetingsTabs } from '../tabs.tsx'
 
 /** Every booking page in the account, plus this person's own calendar links.
  *  Somebody else's personal link is not listed, because it is theirs. F2 §6. */
@@ -51,21 +52,18 @@ const BookingPagesScreen = async ({
         }
         why="A shared round robin spreads inbound meetings across a team; a personal link is one person's own, for an email signature. A host with no working calendar is treated as unavailable rather than free, which is why the count above is worth chasing."
         action={
-          <span className="flex flex-wrap items-center gap-3">
-            <Link href={bookedPath(account)} className="font-semibold text-link">
-              Booked meetings
-            </Link>
-            {sessionIsReadOnly(session) ? null : (
-              <NewPageButton
-                account={account}
-                canCreateShared={sessionIsAdmin(session)}
-                defaultLocation={zoom ? 'zoom' : googleCalendarConfigured ? 'google_meet' : 'phone'}
-                startOpen={creating === '1'}
-              />
-            )}
-          </span>
+          sessionIsReadOnly(session) ? null : (
+            <NewPageButton
+              account={account}
+              canCreateShared={sessionIsAdmin(session)}
+              defaultLocation={zoom ? 'zoom' : googleCalendarConfigured ? 'google_meet' : 'phone'}
+              startOpen={creating === '1'}
+            />
+          )
         }
       />
+
+      <MeetingsTabs account={account} current="pages" />
 
       {pages.length === 0 ? (
         <EmptyState

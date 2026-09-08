@@ -1,6 +1,7 @@
 import { getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
 import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
 import { availabilityPath, bookedPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
@@ -30,7 +31,7 @@ const BookingPageEditorScreen = async ({
         <EmptyState
           title="That meeting page does not exist"
           description="It may have been deleted, or the link may belong to another account."
-          action={<Link href={bookingPagesPath(account)}>Back to meeting links</Link>}
+          action={<LinkButton variant="primary" href={bookingPagesPath(account)}>Back to meeting links</LinkButton>}
         />
       </div>
     )
@@ -44,7 +45,7 @@ const BookingPageEditorScreen = async ({
         <EmptyState
           title="That is somebody else's personal link"
           description="Personal calendar links are private to the person who owns them. Ask them for the link if you need it."
-          action={<Link href={bookingPagesPath(account)}>Back to meeting links</Link>}
+          action={<LinkButton variant="primary" href={bookingPagesPath(account)}>Back to meeting links</LinkButton>}
         />
       </div>
     )

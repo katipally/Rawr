@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Badge, type BadgeTone, Button, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -13,10 +13,10 @@ import { api, errorMessage } from '~/lib/rpc.ts'
  *  passed in as an ISO string and formatted here rather than on the server, so a
  *  person in Jakarta reading a Los Angeles rep's screen sees their own clock. */
 
-const STATES: Record<string, string> = {
-  confirmed: 'bg-success-subtle text-success',
-  cancelled: 'bg-error-subtle text-error',
-  rescheduled: 'bg-disabled text-secondary',
+const STATES: Record<string, BadgeTone> = {
+  confirmed: 'ok',
+  cancelled: 'error',
+  rescheduled: 'neutral',
 }
 
 export type BookedRowData = {
@@ -116,9 +116,9 @@ export const BookedRow = ({
           {end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
         </span>
         <span className="text-xs text-secondary">{zone}</span>
-        <span className={`rounded-hs px-1.5 py-0.5 text-xs ${STATES[booking.state] ?? ''}`}>
+        <Badge tone={STATES[booking.state] ?? 'neutral'} dot>
           {booking.state}
-        </span>
+        </Badge>
       </div>
 
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">

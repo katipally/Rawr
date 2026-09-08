@@ -1,13 +1,11 @@
 import { listMembers, readAgenda } from '@rawr/db'
 import { PageHeader, Select } from '@rawr/ui'
-import Link from 'next/link'
+import { MeetingsTabs } from '../tabs.tsx'
 import { redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import {
   bookedPath,
-  bookingPagesPath,
   calendarPath,
-  calendarsPath,
   recordPath,
   tasksPath,
 } from '~/lib/links.ts'
@@ -64,20 +62,9 @@ const CalendarScreen = async ({
         title="Calendar"
         lead={`${whose === 'You' ? 'Meetings booked with you and tasks due from you' : `${whose}’s meetings and tasks`}.`}
         why="Meetings come from the scheduling pages and tasks from whatever created them, so this is one month of everything already in Rawr rather than a second place to keep a diary. It is not a Google calendar: which accounts Rawr may read free-busy from is a separate screen."
-        action={
-          <span className="flex flex-wrap items-center gap-3">
-            <Link href={bookedPath(account)} className="text-sm font-semibold text-link">
-              Booked meetings
-            </Link>
-            <Link href={bookingPagesPath(account)} className="text-sm text-link">
-              Meeting links
-            </Link>
-            <Link href={calendarsPath(account)} className="text-sm text-link">
-              Calendar connections
-            </Link>
-          </span>
-        }
       />
+
+      <MeetingsTabs account={account} current="calendar" />
 
       {sessionIsAdmin(session) && members.length > 1 ? (
         <form method="get" className="flex flex-wrap items-center gap-2">
