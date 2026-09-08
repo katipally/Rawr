@@ -1,7 +1,7 @@
 import { listCollectorNotices, listSites } from '@rawr/db'
 import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { SiteList } from './site-list.tsx'
 
@@ -14,11 +14,11 @@ const SitesPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  if (session.role !== 'admin') {
+  if (!sessionIsAdmin(session)) {
     return (
       <EmptyState
         title="Tracked sites are admin only"
-        description={`Ask an admin in ${session.workspaceName}. A site key lets a host write into this workspace, so adding one is an admin act.`}
+        description={`Ask an admin in ${session.accountName}. A site key lets a host write into this account, so adding one is an admin act.`}
       />
     )
   }

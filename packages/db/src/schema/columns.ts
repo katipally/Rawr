@@ -24,7 +24,7 @@ export const pk = () =>
 
 /** Present on every tenant table. Its presence is what makes the tenancy migration
  *  find the table, so it is never optional and never renamed. */
-export const workspaceId = () => uuid('workspace_id').notNull()
+export const accountId = () => uuid('account_id').notNull()
 
 export const createdAt = () => timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 

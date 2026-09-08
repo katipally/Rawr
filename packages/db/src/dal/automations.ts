@@ -1,9 +1,9 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { automation, automationRun } from '../schema/automation.ts'
 import type { ObjectKey } from '../registry/core.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { mutate, withAccount } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor } from './registry.ts'
 
@@ -88,7 +88,7 @@ export type AutomationRow = {
 
 /** Which object a trigger can watch. `stage_changed` is deals only because only a
  *  deal has a pipeline; `form_submitted` is contacts only because a form fill
- *  produces a person. `record_created` is null for "any object in this workspace",
+ *  produces a person. `record_created` is null for "any object in this account",
  *  which is the only honest answer once an admin can invent one. */
 export const OBJECTS_FOR_TRIGGER: Record<AutomationTrigger, ObjectKey[] | null> = {
   record_created: null,
@@ -154,8 +154,8 @@ const shape = (row: Record<string, unknown>): AutomationRow => ({
   createdAt: new Date(String(row.createdAt)),
 })
 
-export const listAutomations = async (ctx: WorkspaceContext): Promise<AutomationRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listAutomations = async (ctx: AccountContext): Promise<AutomationRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.select(SELECT).from(automation).orderBy(desc(automation.createdAt))
     // One grouped read for every rule's counters rather than one per rule.
     const counts = await tx.execute<{ automation_id: string; n: number; last_at: Date }>(
@@ -168,8 +168,8 @@ export const listAutomations = async (ctx: WorkspaceContext): Promise<Automation
     )
   })
 
-export const readAutomation = async (ctx: WorkspaceContext, id: string): Promise<AutomationRow | null> =>
-  withWorkspace(ctx, async (tx) => {
+export const readAutomation = async (ctx: AccountContext, id: string): Promise<AutomationRow | null> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.select(SELECT).from(automation).where(eq(automation.id, id)).limit(1)
     return row ? shape(row) : null
   })
@@ -186,7 +186,7 @@ export type SaveAutomationInput = {
 }
 
 export const saveAutomation = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: SaveAutomationInput,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'automation', async (tx) => {
@@ -243,7 +243,7 @@ export const saveAutomation = async (
 
     const [created] = await tx
       .insert(automation)
-      .values({ workspaceId: ctx.workspaceId, createdBy: ctx.actorId, ...values })
+      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, ...values })
       .returning({ id: automation.id })
     if (!created) throw new Error('The automation could not be created.')
     return {
@@ -253,7 +253,7 @@ export const saveAutomation = async (
   })
 
 export const setAutomationActive = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   isActive: boolean,
 ): Promise<void> =>
@@ -271,7 +271,7 @@ export const setAutomationActive = async (
     }
   })
 
-export const removeAutomation = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const removeAutomation = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'automation', async (tx) => {
     const [before] = await tx.select(SELECT).from(automation).where(eq(automation.id, id)).limit(1)
     if (!before) throw new Error('That automation no longer exists.')
@@ -284,11 +284,11 @@ export const removeAutomation = async (ctx: WorkspaceContext, id: string): Promi
 
 /** Every active rule armed for this event. The one query the runner makes. */
 export const armedFor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   trigger: AutomationTrigger,
   objectKey: string,
 ): Promise<AutomationRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select(SELECT)
       .from(automation)
@@ -302,13 +302,13 @@ export const armedFor = async (
  *  to hold: an action earlier in the same run may already have changed it, and a
  *  condition judged against a stale copy is a condition that lies. */
 export const conditionsHold = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   entityId: string,
   conditions: FilterGroup[],
 ): Promise<boolean> => {
   if (conditions.length === 0 || conditions.every((group) => group.conditions.length === 0)) return true
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const where = compileFilters(object, conditions, scopeFor(null))
@@ -323,16 +323,16 @@ export const conditionsHold = async (
   })
 }
 
-/** The slug this workspace lives under, for the link an action puts in Slack.
+/** The slug this account lives under, for the link an action puts in Slack.
  *
  *  Everywhere else it arrives from the session or the public page's own URL. A
  *  resumed run has neither: it is picked up by the worker days after whoever
  *  triggered it went home. Row level security makes the `limit 1` exact, because
- *  a scoped transaction can see exactly one workspace row. */
-export const workspaceSlugFor = async (ctx: WorkspaceContext): Promise<string> =>
-  withWorkspace(ctx, async (tx) => {
-    const [row] = await tx.execute<{ slug: string }>(sql`select slug from workspace limit 1`)
-    if (!row) throw new Error('That workspace no longer exists.')
+ *  a scoped transaction can see exactly one account row. */
+export const accountSlugFor = async (ctx: AccountContext): Promise<string> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{ slug: string }>(sql`select slug from account limit 1`)
+    if (!row) throw new Error('That account no longer exists.')
     return String(row.slug)
   })
 
@@ -355,14 +355,14 @@ export type AutomationRunRow = {
 /** Opens the run. One row per firing, written before the first step so that a
  *  process dying mid-run leaves evidence rather than silence. */
 export const openAutomationRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { automationId: string; entityType: string; entityId: string },
 ): Promise<string> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx
       .insert(automationRun)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         automationId: input.automationId,
         entityType: input.entityType,
         entityId: input.entityId,
@@ -376,11 +376,11 @@ export const openAutomationRun = async (
 
 /** Parks a run at a step, to be picked up by the dispatcher. */
 export const parkAutomationRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   runId: string,
   input: { stepIndex: number; resumeAt: Date; trail: string[] },
 ): Promise<void> => {
-  await withWorkspace(ctx, (tx) =>
+  await withAccount(ctx, (tx) =>
     tx
       .update(automationRun)
       .set({
@@ -397,11 +397,11 @@ export const parkAutomationRun = async (
 /** Closes the run. `resumeAt` is cleared, which is what takes it out of the
  *  dispatcher's partial index: a finished run costs the queue nothing. */
 export const finishAutomationRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   runId: string,
   input: { state: Exclude<AutomationRunState, 'waiting'>; stepIndex: number; trail: string[]; detail?: string | null },
 ): Promise<void> => {
-  await withWorkspace(ctx, (tx) =>
+  await withAccount(ctx, (tx) =>
     tx
       .update(automationRun)
       .set({
@@ -425,11 +425,11 @@ export const finishAutomationRun = async (
  *  run because that is the same condition this statement already tests. A sweep
  *  would be a second job to say what `lease_until < now()` says here. */
 export const claimAutomationRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   runId: string,
   leaseMinutes = 5,
 ): Promise<{ automationId: string; entityType: string; entityId: string; stepIndex: number; trail: string[] } | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{
       automation_id: string
       entity_type: string
@@ -457,10 +457,10 @@ export const claimAutomationRun = async (
 
 
 export const listAutomationRuns = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   filter: { automationId?: string } = {},
 ): Promise<AutomationRunRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<
       Omit<AutomationRunRow, 'stepIndex' | 'resumeAt' | 'at'> & {
         automation_name: string
@@ -494,7 +494,3 @@ export const listAutomationRuns = async (
       at: when(row.at) ?? new Date(),
     }))
   })
-
-/** Gated the same way the rules themselves are: a rule that writes to records is
- *  an admin's to make. */
-export const assertMayAutomate = (ctx: WorkspaceContext): void => assertCanWrite(ctx, 'automation')

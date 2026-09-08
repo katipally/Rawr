@@ -11,7 +11,8 @@ export type PropertyListProps = {
   object: string
   rows: AdminField[]
   deleted: AdminField[]
-  role: string
+  hub: string
+  canWrite: boolean
 }
 
 /** Field types that need a list of choices, and the types a person actually reaches
@@ -37,7 +38,7 @@ const keyFrom = (label: string): string =>
     .replace(/^([0-9])/, 'f_$1')
     .slice(0, 59)
 
-export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps) => {
+export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyListProps) => {
   const router = useRouter()
   const toast = useToast()
 
@@ -54,6 +55,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
   const [type, setType] = useState<FieldType>('text')
   const [options, setOptions] = useState('')
   const [helpText, setHelpText] = useState('')
+  const [groupName, setGroupName] = useState('')
   const [isRequired, setIsRequired] = useState(false)
   const [trackChanges, setTrackChanges] = useState(false)
 
@@ -70,6 +72,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
     setType('text')
     setOptions('')
     setHelpText('')
+    setGroupName('')
     setIsRequired(false)
     setTrackChanges(false)
   }
@@ -105,6 +108,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
           type,
           ...(NEEDS_OPTIONS.has(type) ? { options: optionList() } : {}),
           helpText: helpText || null,
+          groupName: groupName || null,
           isRequired,
           trackChanges,
         }),
@@ -126,6 +130,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
           label,
           ...(NEEDS_OPTIONS.has(field.type) ? { options: optionList() } : {}),
           helpText: helpText || null,
+          groupName: groupName || null,
           isRequired,
           trackChanges,
         }),
@@ -139,6 +144,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
     setLabel(field.label)
     setOptions(field.options.join('\n'))
     setHelpText(field.helpText ?? '')
+    setGroupName(field.groupName ?? '')
     setIsRequired(field.isRequired)
     setTrackChanges(field.trackChanges)
   }
@@ -165,6 +171,11 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
     )
   }
 
+  /** Every mutation on this screen is `field_def`, which dal/context.ts gives to
+   *  the account hub alone. Rendering the controls for anybody else is four
+   *  buttons that can only ever answer with a red toast. */
+  const canEdit = canWrite
+
   const groups = [...new Set(rows.map((field) => field.groupName).filter((name): name is string => Boolean(name)))].sort()
   const needle = query.trim().toLowerCase()
   const visible = rows.filter(
@@ -182,15 +193,20 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        {role !== 'admin' ? (
-          <p className="text-secondary">Your role ({role}) can read the fields and cannot change them.</p>
+        {!canWrite ? (
+          <p className="text-secondary">You need {hub} access to change the fields.</p>
         ) : (
         <Button variant="primary" onClick={() => { reset(); setCreating(true) }}>
           Create property
         </Button>
         )}
 
-        <div className="flex flex-wrap items-end gap-2">
+          <datalist id="property-groups">
+          {groups.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+      <div className="flex flex-wrap items-end gap-2">
           <Field id="property-search" label="Find">
             <TextInput
               id="property-search"
@@ -252,6 +268,8 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {!canEdit ? null : (
+                <>
               {filtered ? null : (
                 <>
                   <IconButton
@@ -299,6 +317,8 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                   onClick={() => void openRemove(field)}
                 />
               ) : null}
+                </>
+              )}
             </div>
           </li>
         ))}
@@ -324,6 +344,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                   <code className="text-small text-secondary">{field.key}</code>
                 </span>
                 <span className="flex shrink-0 items-center gap-0.5">
+                  {canEdit ? (
                   <IconButton
                     label={`Restore ${field.label}`}
                     icon={<ACTION_ICONS.restore size={16} />}
@@ -332,7 +353,8 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
                       void run(() => api.admin.fields.restore.mutate({ id: field.id }), 'Restored.')
                     }
                   />
-                  {role === 'admin' ? (
+                  ) : null}
+                  {canEdit ? (
                     <IconButton
                       label={`Purge ${field.label} from every record`}
                       tone="destructive"
@@ -402,6 +424,19 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
             <TextInput id="prop-help" value={helpText} onChange={(event) => setHelpText(event.target.value)} />
           </Field>
 
+          {/* A free text box with the groups already in use offered beside it: a
+              group is created by naming one, the way HubSpot's is, and the
+              filter above only ever showed groups nothing could write. */}
+          <Field id="prop-group" label="Group" hint="Optional. Properties with the same group are shown together.">
+            <TextInput
+              id="prop-group"
+              list="property-groups"
+              value={groupName}
+              placeholder="Contact information"
+              onChange={(event) => setGroupName(event.target.value)}
+            />
+          </Field>
+
           <Toggles
             isRequired={isRequired}
             trackChanges={trackChanges}
@@ -444,6 +479,16 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
 
           <Field id="edit-help" label="Help text">
             <TextInput id="edit-help" value={helpText} onChange={(event) => setHelpText(event.target.value)} />
+          </Field>
+
+          <Field id="edit-group" label="Group" hint="Optional. Properties with the same group are shown together.">
+            <TextInput
+              id="edit-group"
+              list="property-groups"
+              value={groupName}
+              placeholder="Contact information"
+              onChange={(event) => setGroupName(event.target.value)}
+            />
           </Field>
 
           <Toggles
@@ -504,7 +549,7 @@ export const PropertyList = ({ object, rows, deleted, role }: PropertyListProps)
       <Modal open={purging !== null} size="sm" title={`Purge ${purging?.label ?? ''}`} onClose={() => setPurging(null)}>
         <div className="flex flex-col gap-3">
           <Alert>
-            This strips <code>{purging?.key}</code> out of every record in the workspace and removes
+            This strips <code>{purging?.key}</code> out of every record in the account and removes
             the definition. It cannot be undone and there is no copy anywhere else.
           </Alert>
           <div className="flex flex-wrap gap-2">

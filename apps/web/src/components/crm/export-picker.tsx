@@ -8,11 +8,19 @@ export type ExportObject = {
   key: string
   label: string
   fields: { key: string; label: string }[]
-  views: { slug: string; name: string; columns: string[] }[]
+  views: {
+    slug: string
+    name: string
+    columns: string[]
+    /** Serialised the way the CSV route parses them, so this component never
+     *  has to know what a filter is. */
+    filters: string
+    sort: string | null
+  }[]
 }
 
 export type ExportPickerProps = {
-  workspace: string
+  account: string
   objects: ExportObject[]
 }
 
@@ -24,7 +32,7 @@ const ALL_FIELDS = ''
 /** Picks what a CSV holds. The download itself is a plain link so the browser
  *  owns it: the file keeps arriving after this tab is closed, and a slow export
  *  never blocks the page it started from. */
-export const ExportPicker = ({ workspace, objects }: ExportPickerProps) => {
+export const ExportPicker = ({ account, objects }: ExportPickerProps) => {
   const [objectKey, setObjectKey] = useState(objects[0]?.key ?? '')
   const object = objects.find((candidate) => candidate.key === objectKey) ?? objects[0]
   const [viewSlug, setViewSlug] = useState(ALL_FIELDS)
@@ -60,9 +68,13 @@ export const ExportPicker = ({ workspace, objects }: ExportPickerProps) => {
   }
 
   const view = object.views.find((candidate) => candidate.slug === viewSlug)
-  const href = exportCsvPath(workspace, {
+  const href = exportCsvPath(account, {
     object: object.key,
     columns: columns.join(','),
+    // A view exports what it shows. Without these the header's promise of "its
+    // filters, its columns, its order" was one third true.
+    ...(view && view.filters !== '[]' ? { filters: view.filters } : {}),
+    ...(view?.sort ? { sort: view.sort } : {}),
   })
 
   return (
@@ -88,8 +100,8 @@ export const ExportPicker = ({ workspace, objects }: ExportPickerProps) => {
             label="Columns from"
             hint={
               view
-                ? 'The view’s columns. Its filters are not applied here: export a filtered view from its own Export CSV button.'
-                : 'Every field this object has.'
+                ? 'The view’s columns, its filters and its order.'
+                : 'Every field this object has, and every row.'
             }
           >
             <Select
@@ -120,6 +132,7 @@ export const ExportPicker = ({ workspace, objects }: ExportPickerProps) => {
               {columns.length === 0
                 ? 'Pick at least one column.'
                 : `${columns.length} column${columns.length === 1 ? '' : 's'}`}
+              {view && view.filters !== '[]' ? ', filtered as the view is' : ''}
             </span>
           </div>
         </div>

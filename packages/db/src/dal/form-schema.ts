@@ -10,10 +10,14 @@ export const FORM_FIELD_TYPES = [
   'phone',
   'url',
   'select',
+  'radio',
   'multi_select',
   'boolean',
+  'consent',
   'number',
   'date',
+  'file',
+  'heading',
   'hidden',
 ] as const
 
@@ -23,6 +27,15 @@ const FORM_FIELD_TYPE_SET = new Set<string>(FORM_FIELD_TYPES)
 
 export const isFormFieldType = (value: string): value is FormFieldType =>
   FORM_FIELD_TYPE_SET.has(value)
+
+/** Types that offer a fixed list, so a schema without options is unanswerable. */
+export const CHOICE_TYPES = new Set<FormFieldType>(['select', 'radio', 'multi_select'])
+
+/** Types that ask nothing. A heading is page furniture: it never posts a value,
+ *  never validates, and never maps to a record field. Kept in the field list
+ *  rather than in settings so it can be ordered and stepped like everything
+ *  else a marketer drags around. */
+export const DISPLAY_TYPES = new Set<FormFieldType>(['heading'])
 
 /** One level of conditional visibility. Nesting is explicitly out of scope: it
  *  turns a form builder into a rules engine and nobody asked for one. */
@@ -57,6 +70,54 @@ export type FormField = {
   defaultValue?: string | undefined
 }
 
+/** The custom properties the embed stylesheet reads. A form's look is these and
+ *  nothing else, which is what lets a marketer re-theme a form without a deploy
+ *  and without a stylesheet of overrides fighting ours. */
+export const FORM_THEME_TOKENS = [
+  'font',
+  'text',
+  'muted',
+  'border',
+  'focus',
+  'cta',
+  'cta-text',
+  'error',
+  'radius',
+  'gap',
+  'field-bg',
+  'field-border-width',
+] as const
+
+export type FormThemeToken = (typeof FORM_THEME_TOKENS)[number]
+
+/** A named starting point plus whatever the marketer changed on top of it. */
+export type FormTheme = {
+  preset: string
+  tokens: Partial<Record<FormThemeToken, string>>
+}
+
+/** A token value ends up inside a CSS declaration, so it must not be able to
+ *  close one. Anything that could start a new rule, call a URL or open a comment
+ *  is dropped rather than escaped: the values here are colours and lengths, and
+ *  none of them need those characters. */
+const CLEAN_TOKEN = /^[a-zA-Z0-9#%(),.\s_+/-]{1,80}$/
+const isCleanToken = (value: string): boolean =>
+  CLEAN_TOKEN.test(value) && !/url\(|@import|expression/i.test(value)
+
+export const readTheme = (raw: unknown): FormTheme => {
+  const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const given = (t.tokens && typeof t.tokens === 'object' ? t.tokens : {}) as Record<string, unknown>
+  const tokens: Partial<Record<FormThemeToken, string>> = {}
+  for (const name of FORM_THEME_TOKENS) {
+    const value = given[name]
+    if (typeof value === 'string' && isCleanToken(value)) tokens[name] = value
+  }
+  return {
+    preset: typeof t.preset === 'string' && /^[a-z-]{1,32}$/.test(t.preset) ? t.preset : 'neutral',
+    tokens,
+  }
+}
+
 export type FormSettings = {
   submitLabel: string
   successMode: 'message' | 'redirect'
@@ -67,6 +128,9 @@ export type FormSettings = {
   subscriptionOptIns?: string[] | undefined
   /** Step labels, used for the progress indicator. One entry per step. */
   steps?: string[] | undefined
+  /** How the rendered form looks. Stored as a choice, not as CSS: the values
+   *  live with the stylesheet that reads them. */
+  theme?: FormTheme | undefined
   /** Who a new lead belongs to. 'user' names one person; 'round_robin' shares
    *  them across the pool, or across every admin and sales member when the pool
    *  is empty. A contact that already has an owner keeps them. */
@@ -93,6 +157,7 @@ export const DEFAULT_SETTINGS: FormSettings = {
   slackChannel: null,
   lifecycleStageOnSubmit: null,
   subscriptionOptIns: [],
+  theme: { preset: 'neutral', tokens: {} },
   assignOwner: { mode: 'none', userId: null, pool: [] },
 }
 
@@ -200,38 +265,72 @@ export const readSettings = (raw: unknown): FormSettings => {
     steps: Array.isArray(s.steps)
       ? s.steps.filter((v): v is string => typeof v === 'string')
       : undefined,
+    theme: readTheme(s.theme),
     assignOwner: readAssignOwner(s.assignOwner),
   }
 }
 
-/** Refuses a schema a person could build but the submit path could not honour.
- *  Called on save, so a broken form never reaches the public edge. */
-export const assertSchemaIsUsable = (fields: FormField[]): void => {
-  if (fields.length === 0) throw new FormSchemaError('A form needs at least one field.')
+/** The address a form is served at: /form/<account>/<slug>. */
+export const FORM_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
 
+export const toFormSlug = (value: string): string =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+
+/** Every reason this form cannot be saved, in the order a person fixes them.
+ *  Empty means saveable.
+ *
+ *  Returned as a list rather than thrown one at a time so the builder can say
+ *  all of it before the click. Creating a form used to be four blind saves:
+ *  each rule only spoke once the one before it was satisfied. */
+export const formBlockers = (input: {
+  name: string
+  slug: string
+  fields: FormField[]
+}): string[] => {
+  const blockers: string[] = []
+  if (!input.name.trim()) blockers.push('A form needs a name.')
+  if (!FORM_SLUG.test(input.slug)) {
+    blockers.push(
+      input.slug
+        ? `"${input.slug}" is not a usable address. Use lowercase letters, numbers and hyphens.`
+        : 'A form needs an address. It is the last part of the link people open.',
+    )
+  }
+  return [...blockers, ...schemaBlockers(input.fields)]
+}
+
+/** The schema half of the same list: what the submit path could not honour. */
+export const schemaBlockers = (fields: FormField[]): string[] => {
+  if (fields.length === 0) return ['A form needs at least one field.']
+
+  const blockers: string[] = []
   const seen = new Set<string>()
   for (const field of fields) {
     if (!KEY_PATTERN.test(field.key)) {
-      throw new FormSchemaError(
+      blockers.push(
         `"${field.key}" is not a usable field key. Use lowercase letters, numbers and underscores, starting with a letter.`,
       )
     }
     if (FORM_RESERVED_KEYS.has(field.key)) {
-      throw new FormSchemaError(`"${field.key}" is reserved by the submit path. Pick another key.`)
+      blockers.push(`"${field.key}" is reserved by the submit path. Pick another key.`)
     }
     if (seen.has(field.key)) {
-      throw new FormSchemaError(`Two fields both use the key "${field.key}". Keys must be unique.`)
+      blockers.push(`Two fields both use the key "${field.key}". Keys must be unique.`)
     }
     seen.add(field.key)
 
-    if ((field.type === 'select' || field.type === 'multi_select') && !field.options?.length) {
-      throw new FormSchemaError(`"${field.label}" is a choice field with no options to choose from.`)
+    if (CHOICE_TYPES.has(field.type) && !field.options?.length) {
+      blockers.push(`"${field.label}" is a choice field with no options to choose from.`)
     }
     if (field.validation?.regex) {
       try {
         new RegExp(field.validation.regex)
       } catch {
-        throw new FormSchemaError(`"${field.label}" has a validation pattern Postgres cannot read.`)
+        blockers.push(`"${field.label}" has a validation pattern Postgres cannot read.`)
       }
     }
   }
@@ -240,22 +339,30 @@ export const assertSchemaIsUsable = (fields: FormField[]): void => {
     const condition = field.visibleIf
     if (!condition) continue
     if (!seen.has(condition.field)) {
-      throw new FormSchemaError(
+      blockers.push(
         `"${field.label}" is shown based on "${condition.field}", which is not a field on this form.`,
       )
     }
     if (condition.field === field.key) {
-      throw new FormSchemaError(`"${field.label}" cannot be shown based on its own answer.`)
+      blockers.push(`"${field.label}" cannot be shown based on its own answer.`)
     }
   }
 
   /** Without an email there is nothing to dedupe a contact on, so every submission
    *  would create a new person. F1 A4 makes lower(email) the contact key. */
   if (!fields.some((f) => f.type === 'email')) {
-    throw new FormSchemaError(
+    blockers.push(
       'A form needs an email field. Without one, every submission creates a new contact instead of updating one.',
     )
   }
+  return blockers
+}
+
+/** Refuses a schema a person could build but the submit path could not honour.
+ *  Called on save, so a broken form never reaches the public edge. */
+export const assertSchemaIsUsable = (fields: FormField[]): void => {
+  const [first] = schemaBlockers(fields)
+  if (first) throw new FormSchemaError(first)
 }
 
 /** Whether a field should be asked, given the answers so far. The server re-runs

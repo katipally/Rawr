@@ -1,4 +1,4 @@
-import { evaluateAllSegments, type WorkspaceContext } from '@rawr/db'
+import { evaluateAllSegments, type AccountContext } from '@rawr/db'
 import { z } from 'zod'
 import { owner } from '../db.ts'
 import { defineJob } from './registry.ts'
@@ -15,11 +15,13 @@ import { defineJob } from './registry.ts'
  *  its own and does not take the others with it, which is why the layer reports per
  *  segment rather than throwing. Those failures are dead-lettered by name so an
  *  admin can see which query broke. */
-const jobContext = (workspaceId: string): WorkspaceContext => ({
-  workspaceId,
+const jobContext = (accountId: string): AccountContext => ({
+  accountId,
   actorId: null,
   actorKind: 'job',
-  role: 'marketing',
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: ['contacts', 'marketing'],
 })
 
 export const evaluateSegments = defineJob({
@@ -28,12 +30,12 @@ export const evaluateSegments = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async () => {
-    // Per workspace, so one tenant's slow query cannot stall another's. The only
+    // Per account, so one tenant's slow query cannot stall another's. The only
     // query here that crosses tenants, and it reads nothing but ids.
-    const workspaces = await owner`select id from workspace`
+    const accounts = await owner`select id from account`
     const broken: string[] = []
 
-    for (const row of workspaces) {
+    for (const row of accounts) {
       const results = await evaluateAllSegments(jobContext(row.id))
       for (const result of results) {
         if (result.error !== null) {

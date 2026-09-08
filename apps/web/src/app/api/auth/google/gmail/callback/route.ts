@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { mailboxesPath } from '~/lib/links.ts'
-import { googleClient } from '~/server/auth/google.ts'
+import { GOOGLE_GMAIL_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
 import { grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -41,7 +41,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   if (state !== expectedState) return back('That attempt did not match this browser. Start again.')
 
   try {
-    const tokens = await googleClient().validateAuthorizationCode(code, codeVerifier)
+    const tokens = await googleClient(GOOGLE_GMAIL_CALLBACK_PATH).validateAuthorizationCode(code, codeVerifier)
     if (!tokens.hasRefreshToken()) {
       return back(
         'Google did not return a refresh token, so the back-fill would stop within the hour. Remove Rawr from your Google account permissions and connect again.',

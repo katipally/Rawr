@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type RegistryObject } from './registry.ts'
 
 export type SearchHit = {
@@ -37,7 +37,7 @@ const PER_OBJECT = 8
  *  getting one each. Their vector is written on the write path rather than
  *  generated, because which field names a custom record is a registry answer. */
 export const searchAll = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   query: string,
   limitPerObject = PER_OBJECT,
 ): Promise<SearchResults> => {
@@ -46,7 +46,7 @@ export const searchAll = async (
   const limit = Math.min(Math.max(limitPerObject, 1), 25)
   const prefix = `${trimmed}%`
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const rows = await tx.execute<{ object_key: string; id: string; label: string | null; detail: string | null; rank: number }>(sql`
       (select 'contact'::text as object_key, id,
@@ -140,14 +140,14 @@ export type RecordOption = { id: string; label: string; detail: string | null }
  *  screenful. An empty query returns the most recent, because that is what somebody
  *  who has just created a record is looking for. */
 export const recordOptions = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { object: string; query?: string; limit?: number; excludeId?: string | null },
 ): Promise<RecordOption[]> => {
   const limit = Math.min(Math.max(input.limit ?? 20, 1), 50)
   const trimmed = (input.query ?? '').trim()
   const exclude = input.excludeId ?? null
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.object)
     const { label, detail, match } = shapeOf(object)

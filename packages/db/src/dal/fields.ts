@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
 import { mutate } from './index.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 
 /** Validated once, here, and never anywhere else. Everything that reaches DDL comes
  *  from a key that passed this. */
@@ -42,7 +42,7 @@ export type PromotedField = {
  *  index itself is built by a job, because CREATE INDEX CONCURRENTLY cannot run
  *  inside a request or inside a transaction. */
 export const promoteFieldToHot = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   fieldId: string,
 ): Promise<PromotedField> =>
   mutate(ctx, 'field_def', async (tx) => {
@@ -61,7 +61,7 @@ export const promoteFieldToHot = async (
       .limit(1)
 
     if (!found) {
-      throw new Error('That field does not exist in this workspace, or it has been deleted.')
+      throw new Error('That field does not exist in this account, or it has been deleted.')
     }
     if (found.storage !== 'jsonb') {
       throw new Error(
@@ -80,7 +80,7 @@ export const promoteFieldToHot = async (
     const [created] = await tx
       .insert(fieldIndex)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         fieldId,
         pgIndexName,
         state: 'pending',

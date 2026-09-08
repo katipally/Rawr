@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { ObjectKey } from '../registry/core.ts'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
 
 /** F5 §3. Turning "MGG production opportunity" into one record, or refusing to.
@@ -111,14 +111,14 @@ const TRIGRAM: Record<ObjectKey, (needle: string) => SQL> = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const resolveRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   query: string,
 ): Promise<Resolution> => {
   const needle = query.trim()
   if (!needle) return { kind: 'none', suggestions: [] }
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const object = objectOrThrow(await getRegistryIn(tx), objectKey)
     const base = object.isCustom ? customQuery(object, needle) : QUERIES[objectKey as ObjectKey](needle)
     const exactly = object.isCustom ? customExact(object, needle) : EXACT[objectKey as ObjectKey](needle)

@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import {
   enrollmentStateEnum,
   sendStateEnum,
@@ -18,7 +18,7 @@ import {
   sequenceStateEnum,
   stepKindEnum,
 } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 import { mailbox, message, messageThread } from './messaging.ts'
 import { contact, task } from './records.ts'
 
@@ -53,7 +53,7 @@ export const sequence = pgTable(
   'sequence',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
     state: sequenceStateEnum('state').notNull().default('draft'),
@@ -64,14 +64,14 @@ export const sequence = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('sequence_workspace_name_key').on(t.workspaceId, t.name)],
+  (t) => [uniqueIndex('sequence_account_name_key').on(t.accountId, t.name)],
 )
 
 export const sequenceStep = pgTable(
   'sequence_step',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     sequenceId: uuid('sequence_id')
       .notNull()
       .references(() => sequence.id, { onDelete: 'cascade' }),
@@ -82,19 +82,24 @@ export const sequenceStep = pgTable(
     delayDays: integer('delay_days').notNull().default(0),
     delayHours: integer('delay_hours').notNull().default(0),
     subject: text('subject'),
+    /** A second subject to test against the first. Null means no test, which is
+     *  what every step is until somebody types one. Only the subject: two whole
+     *  bodies doubles what a reader must hold in their head to know what a
+     *  sequence says. */
+    subjectB: text('subject_b'),
     bodyHtml: text('body_html'),
     bodyText: text('body_text'),
     taskTitle: text('task_title'),
     taskBody: text('task_body'),
   },
-  (t) => [index('sequence_step_order_idx').on(t.workspaceId, t.sequenceId, t.position)],
+  (t) => [index('sequence_step_order_idx').on(t.accountId, t.sequenceId, t.position)],
 )
 
 export const sequenceEnrollment = pgTable(
   'sequence_enrollment',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     sequenceId: uuid('sequence_id')
       .notNull()
       .references(() => sequence.id, { onDelete: 'cascade' }),
@@ -127,10 +132,10 @@ export const sequenceEnrollment = pgTable(
     // The scheduler's index. Partial, so it is the size of the queue rather than
     // of every enrollment that ever ran.
     index('sequence_enrollment_due_idx')
-      .on(t.workspaceId, t.nextRunAt)
+      .on(t.accountId, t.nextRunAt)
       .where(sql`state = 'active'`),
-    index('sequence_enrollment_contact_idx').on(t.workspaceId, t.contactId),
-    index('sequence_enrollment_sequence_idx').on(t.workspaceId, t.sequenceId, t.state),
+    index('sequence_enrollment_contact_idx').on(t.accountId, t.contactId),
+    index('sequence_enrollment_sequence_idx').on(t.accountId, t.sequenceId, t.state),
   ],
 )
 
@@ -138,7 +143,7 @@ export const sequenceSend = pgTable(
   'sequence_send',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     enrollmentId: uuid('enrollment_id')
       .notNull()
       .references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
@@ -154,6 +159,9 @@ export const sequenceSend = pgTable(
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
     state: sendStateEnum('state').notNull().default('sent'),
     error: text('error'),
+    /** Which subject went out, when the step was testing two. Stored rather than
+     *  recomputed, so a step edited later cannot rewrite what was sent. */
+    variant: text('variant'),
     openCount: integer('open_count').notNull().default(0),
     clickCount: integer('click_count').notNull().default(0),
     firstOpenedAt: timestamp('first_opened_at', { withTimezone: true }),
@@ -161,9 +169,9 @@ export const sequenceSend = pgTable(
   },
   (t) => [
     // What the daily cap counts, per mailbox per day.
-    index('sequence_send_mailbox_idx').on(t.workspaceId, t.mailboxId, t.sentAt),
-    index('sequence_send_enrollment_idx').on(t.workspaceId, t.enrollmentId),
-    index('sequence_send_internet_id_idx').on(t.workspaceId, t.internetMessageId),
+    index('sequence_send_mailbox_idx').on(t.accountId, t.mailboxId, t.sentAt),
+    index('sequence_send_enrollment_idx').on(t.accountId, t.enrollmentId),
+    index('sequence_send_internet_id_idx').on(t.accountId, t.internetMessageId),
   ],
 )
 
@@ -174,7 +182,7 @@ export const sequenceLink = pgTable(
   'sequence_link',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     sendId: uuid('send_id')
       .notNull()
       .references(() => sequenceSend.id, { onDelete: 'cascade' }),
@@ -182,14 +190,14 @@ export const sequenceLink = pgTable(
     url: text('url').notNull(),
     clickCount: integer('click_count').notNull().default(0),
   },
-  (t) => [index('sequence_link_send_idx').on(t.workspaceId, t.sendId)],
+  (t) => [index('sequence_link_send_idx').on(t.accountId, t.sendId)],
 )
 
 export const sequenceEvent = pgTable(
   'sequence_event',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     enrollmentId: uuid('enrollment_id')
       .notNull()
       .references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
@@ -198,5 +206,31 @@ export const sequenceEvent = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
     detail: jsonb('detail'),
   },
-  (t) => [index('sequence_event_enrollment_idx').on(t.workspaceId, t.enrollmentId, t.at)],
+  (t) => [index('sequence_event_enrollment_idx').on(t.accountId, t.enrollmentId, t.at)],
+)
+
+/** A reusable email. Not a sequence step: this is what somebody drops into one,
+ *  or into a one-off reply, so the same twelve sentences are not retyped slightly
+ *  differently by four people.
+ *
+ *  The body is Markdown, the characters the writer typed. The HTML a recipient
+ *  gets is rendered from it at send time, which is why the preview in the app and
+ *  the mail on the wire cannot drift apart. */
+export const emailTemplate = pgTable(
+  'email_template',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    subject: text('subject').notNull().default(''),
+    bodyText: text('body_text').notNull().default(''),
+    createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // Two templates called "Intro" is how somebody picks the wrong one.
+    uniqueIndex('email_template_name_key').on(t.accountId, sql`lower(${t.name})`),
+    index('email_template_recent_idx').on(t.accountId, t.updatedAt),
+  ],
 )

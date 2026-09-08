@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import type { Tx } from './index.ts'
 
 /** The four email engagement numbers on a contact, recomputed from what is
@@ -14,7 +14,7 @@ import type { Tx } from './index.ts'
  *    emails received  inbound Gmail messages
  *
  *  One statement per call, however many contacts: O(messages of those contacts). */
-export const refreshEmailEngagement = async (tx: Tx, _ctx: WorkspaceContext, contactIds: string[]): Promise<void> => {
+export const refreshEmailEngagement = async (tx: Tx, _ctx: AccountContext, contactIds: string[]): Promise<void> => {
   const ids = [...new Set(contactIds)].filter(Boolean)
   if (ids.length === 0) return
   await tx.execute(sql`

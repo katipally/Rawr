@@ -59,6 +59,14 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'original_source', label: 'Original source', type: 'json', columnName: 'original_source', position: 10 },
       { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 11 },
       { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 12 },
+      // What HubSpot's enrichment fills on a company; Apollo, Lusha and Clay
+      // answer the same questions. Migration 0054 adds them to existing accounts.
+      { key: 'description', label: 'Description', type: 'long_text', columnName: 'description', position: 13 },
+      { key: 'linkedin_url', label: 'LinkedIn company page', type: 'linkedin', columnName: 'linkedin_url', position: 14 },
+      { key: 'state', label: 'State/Region', type: 'text', columnName: 'state', position: 15 },
+      { key: 'postal_code', label: 'Postal code', type: 'text', columnName: 'postal_code', position: 16 },
+      { key: 'founded_year', label: 'Year founded', type: 'text', columnName: 'founded_year', position: 17 },
+      { key: 'funding_raised', label: 'Total money raised', type: 'text', columnName: 'funding_raised', position: 18 },
     ],
   },
   {
@@ -88,6 +96,10 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'last_replied_at', label: 'Last reply', type: 'datetime', columnName: 'last_replied_at', position: 16 },
       { key: 'emails_sent', label: 'Emails sent', type: 'number', columnName: 'emails_sent', position: 17 },
       { key: 'emails_received', label: 'Emails received', type: 'number', columnName: 'emails_received', position: 18 },
+      { key: 'city', label: 'City', type: 'text', columnName: 'city', position: 19 },
+      { key: 'country', label: 'Country/Region', type: 'text', columnName: 'country', position: 20 },
+      { key: 'seniority', label: 'Seniority', type: 'text', columnName: 'seniority', position: 21 },
+      { key: 'department', label: 'Department', type: 'text', columnName: 'department', position: 22 },
     ],
   },
   {
@@ -122,7 +134,7 @@ export const CORE_OBJECTS: CoreObject[] = [
 export const objectByKey = (key: string): CoreObject | undefined =>
   CORE_OBJECTS.find((o) => o.key === key)
 
-/** The view tabs every workspace starts with. 'all' is reserved: it is the address
+/** The view tabs every account starts with. 'all' is reserved: it is the address
  *  /objects/:object/views/all/list resolves to and it can never be deleted. */
 export type CoreView = {
   slug: string

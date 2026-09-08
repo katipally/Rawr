@@ -1,11 +1,20 @@
 import { pgEnum } from 'drizzle-orm/pg-core'
 
-export const roleEnum = pgEnum('rawr_role', ['admin', 'sales', 'marketing', 'viewer'])
-
-/** An organisation owns workspaces. Two roles only: somebody who can create a
- *  workspace, seat people and end their access, and somebody who is simply in the
- *  organisation. What they may do inside a given workspace is still `rawr_role`. */
-export const orgRoleEnum = pgEnum('rawr_org_role', ['org_admin', 'member'])
+/** What HubSpot grants a user, one hub at a time. A membership carries the hubs it
+ *  may read and the hubs it may write, so "reads the reports, edits nothing" is a
+ *  set of grants rather than a role nobody can extend.
+ *
+ *  `service` has no screens in Rawr yet. It is here because the members screen
+ *  mirrors HubSpot's grid, and a hub missing from the grid reads as a hub the
+ *  company does not have rather than one this app has not built. */
+export const hubEnum = pgEnum('rawr_hub', [
+  'contacts',
+  'sales',
+  'marketing',
+  'service',
+  'reports',
+  'account',
+])
 
 /** `invited` is a seat held for an address that has not signed in yet;
  *  `deactivated` keeps the row so the audit trail still names a person, while
@@ -192,7 +201,14 @@ export const spamStateEnum = pgEnum('rawr_spam_state', [
 /** F2 §1. A round robin page fans across hosts; a one-on-one page is one person's
  *  own link. The distinction drives assignment and who may edit the page, so it is
  *  a column rather than "has exactly one host". */
-export const bookingKindEnum = pgEnum('rawr_booking_kind', ['one_on_one', 'round_robin'])
+/** 'collective' is every listed host at once: a panel, or an AE with an SE. It
+ *  intersects availability where round robin unions it, so adding a fourth host
+ *  makes a page harder to book rather than easier. */
+export const bookingKindEnum = pgEnum('rawr_booking_kind', [
+  'one_on_one',
+  'round_robin',
+  'collective',
+])
 
 export const bookingLocationEnum = pgEnum('rawr_booking_location', [
   'zoom',
@@ -266,4 +282,16 @@ export const automationStateEnum = pgEnum('rawr_automation_state', [
   'done',
   'skipped',
   'failed',
+])
+
+/** What a notification is about. Named rather than free text so a drawer can
+ *  group and an icon can be chosen without matching on a title. */
+export const notificationKindEnum = pgEnum('rawr_notification_kind', [
+  'task_overdue',
+  'form_submission',
+  'form_quarantined',
+  'deal_stage_change',
+  'dead_letter',
+  'integration_error',
+  'mailbox_revoked',
 ])

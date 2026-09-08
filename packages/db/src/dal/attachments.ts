@@ -1,10 +1,10 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { randomToken } from '../internal/crypto.ts'
 import { attachment } from '../schema/records.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import type { EntityType } from './activity.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { mutate, withAccount } from './index.ts'
 
 /** Files on records. The rows only: where the bytes go is the app's business,
  *  because it is the half that talks to a storage service over HTTP and this
@@ -32,7 +32,7 @@ export type AttachmentRow = {
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 /** A filename is user text that becomes part of a path and a Content-Disposition
- *  header. Slashes would climb out of the workspace's prefix, and control
+ *  header. Slashes would climb out of the account's prefix, and control
  *  characters would split the header, so neither survives. The name shown on the
  *  record is the original; this is only what goes in the key. */
 const slug = (filename: string): string =>
@@ -44,7 +44,7 @@ const slug = (filename: string): string =>
 
 /** Where the bytes go.
  *
- *  The workspace is the first segment, so one tenant's files are never under
+ *  The account is the first segment, so one tenant's files are never under
  *  another's prefix even if a bucket is ever shared or a policy misconfigured —
  *  belt and braces beside the row level security on the row.
  *
@@ -52,15 +52,15 @@ const slug = (filename: string): string =>
  *  same deal get two files rather than one overwriting the other, and so a key
  *  cannot be guessed from a record id somebody already knows. */
 export const storageKeyFor = (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { entityType: EntityType; entityId: string; filename: string },
-): string => `${ctx.workspaceId}/${input.entityType}/${input.entityId}/${randomToken(9)}/${slug(input.filename)}`
+): string => `${ctx.accountId}/${input.entityType}/${input.entityId}/${randomToken(9)}/${slug(input.filename)}`
 
 export const listAttachments = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { entityType: EntityType; entityId: string },
 ): Promise<AttachmentRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select()
       .from(attachment)
@@ -81,7 +81,7 @@ export const listAttachments = async (
 
 /** Refuses before anything is uploaded, so a person is told the file is too big
  *  while they are still looking at the dialog rather than after the wait. */
-export const assertCanAttach = (ctx: WorkspaceContext, bytes: number): void => {
+export const assertCanAttach = (ctx: AccountContext, bytes: number): void => {
   assertCanWrite(ctx, 'attachment')
   if (!Number.isFinite(bytes) || bytes <= 0) throw new Error('That file is empty.')
   if (bytes > MAX_ATTACHMENT_BYTES) {
@@ -96,7 +96,7 @@ export const assertCanAttach = (ctx: WorkspaceContext, bytes: number): void => {
 
 /** Written after the bytes have landed, never before. */
 export const recordAttachment = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     entityType: EntityType
     entityId: string
@@ -111,7 +111,7 @@ export const recordAttachment = async (
     const [created] = await tx
       .insert(attachment)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         entityType: input.entityType,
         entityId: input.entityId,
         storageKey: input.storageKey,
@@ -137,7 +137,7 @@ export const recordAttachment = async (
 /** Returns the key so the caller can delete the bytes too. The row goes first:
  *  a row pointing at nothing is a broken link on a record, and bytes with no row
  *  are invisible and cost pennies. Of the two ways to fail, this is the better. */
-export const removeAttachment = async (ctx: WorkspaceContext, id: string): Promise<{ storageKey: string }> =>
+export const removeAttachment = async (ctx: AccountContext, id: string): Promise<{ storageKey: string }> =>
   mutate(ctx, 'attachment', async (tx) => {
     const [before] = await tx.select().from(attachment).where(eq(attachment.id, id)).limit(1)
     if (!before) throw new Error('That file is already gone.')
@@ -149,9 +149,9 @@ export const removeAttachment = async (ctx: WorkspaceContext, id: string): Promi
   })
 
 /** One row, for the read path: a signed link is issued for a key, and the key has
- *  to be shown to belong to this workspace before one is. */
-export const readAttachment = async (ctx: WorkspaceContext, id: string): Promise<AttachmentRow | null> =>
-  withWorkspace(ctx, async (tx) => {
+ *  to be shown to belong to this account before one is. */
+export const readAttachment = async (ctx: AccountContext, id: string): Promise<AttachmentRow | null> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.select().from(attachment).where(eq(attachment.id, id)).limit(1)
     return row
       ? {

@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
 import { attributionReport, clampRange, pipelineReport, websiteReport, MAX_DAYS } from '../src/dal/reporting.ts'
 import { backfillVisitor } from '../src/dal/stitch.ts'
 import { collect, publicSite } from '../src/dal/collect.ts'
@@ -50,25 +50,40 @@ const stamp = Math.random().toString(36).slice(2, 8)
 const DAY = 86_400_000
 
 try {
-  const [datasaur] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
-    .select({ id: s.userAccount.id, role: s.membership.role })
+    .select({
+      id: s.userAccount.id,
+      email: s.userAccount.email,
+      isSuperAdmin: s.membership.isSuperAdmin,
+      viewHubs: s.membership.viewHubs,
+      editHubs: s.membership.editHubs,
+    })
     .from(s.membership)
     .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
-    .where(eq(s.membership.workspaceId, datasaur.id))
+    .where(eq(s.membership.accountId, datasaur.id))
 
-  const ctxFor = (role: Role): WorkspaceContext => {
-    const member = members.find((m) => m.role === role)
-    if (!member) throw new Error(`no seeded ${role}`)
-    return { workspaceId: datasaur.id, actorId: member.id, actorKind: 'user', role }
+  /** The seeded seats are named for the access they carry, so the suite asks for
+   *  one by name and gets whatever grants the seed gave it. */
+  const ctxFor = (seat: string): AccountContext => {
+    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    if (!member) throw new Error(`no seeded ${seat}`)
+    return {
+      accountId: datasaur.id,
+      actorId: member.id,
+      actorKind: 'user',
+      isSuperAdmin: member.isSuperAdmin,
+      viewHubs: member.viewHubs,
+      editHubs: member.editHubs,
+    }
   }
 
   const admin = ctxFor('admin')
   const viewer = ctxFor('viewer')
-  const probeCtx: WorkspaceContext = { workspaceId: probe.id, actorId: null, actorKind: 'user', role: 'admin' }
+  const probeCtx: AccountContext = { accountId: probe.id, actorId: null, actorKind: 'user', isSuperAdmin: true, viewHubs: [], editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] }
   const wide = clampRange({ from: new Date(Date.now() - 300 * DAY), to: new Date(Date.now() + DAY) })
 
   console.log('-- the range -----------------------------------------------------')
@@ -111,7 +126,7 @@ try {
 
     const [session] = await db.execute<{ channel: string | null }>(
       sql`select channel from visitor_session
-           where workspace_id = ${datasaur.id} and visitor_id = ${visitorId}
+           where account_id = ${datasaur.id} and visitor_id = ${visitorId}
            order by started_at limit 1`,
     )
     expect(session?.channel === 'Paid Search', `stored as ${session?.channel}`)
@@ -135,7 +150,7 @@ try {
 
     const rows = await db.execute<{ channel: string | null }>(
       sql`select channel from visitor_session
-           where workspace_id = ${datasaur.id} and visitor_id = ${visitorId}`,
+           where account_id = ${datasaur.id} and visitor_id = ${visitorId}`,
     )
     expect(rows.length === 1, `${rows.length} sessions, expected one`)
     expect(rows[0]?.channel === 'Paid Search', `relabelled to ${rows[0]?.channel}`)
@@ -166,7 +181,7 @@ try {
 
     await db.execute(sql`
       update visitor set contact_id = ${contactId}
-       where workspace_id = ${datasaur.id} and id = ${visitorId}`)
+       where account_id = ${datasaur.id} and id = ${visitorId}`)
     await backfillVisitor(admin, { visitorId, contactId })
 
     const [row] = await db.execute<{ channel: string; at: string }>(sql`
@@ -222,7 +237,7 @@ try {
     const report = await websiteReport(admin, wide)
     const [counted] = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from visitor_session
-       where workspace_id = ${datasaur.id}
+       where account_id = ${datasaur.id}
          and started_at >= ${wide.from.toISOString()}::timestamptz
          and started_at < ${wide.to.toISOString()}::timestamptz`)
     expect(
@@ -261,7 +276,7 @@ try {
     const created = report.weeks.reduce((total, week) => total + week.created, 0)
     const [counted] = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from deal
-       where workspace_id = ${datasaur.id} and deleted_at is null
+       where account_id = ${datasaur.id} and deleted_at is null
          and created_at >= ${wide.from.toISOString()}::timestamptz
          and created_at < ${wide.to.toISOString()}::timestamptz`)
     expect(created === Number(counted?.n), `${created} in the report, ${counted?.n} in the table`)
@@ -282,7 +297,7 @@ try {
     const mine = report.channels.find((row) => row.channel === 'Paid Search')
     const [counted] = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from visitor_session
-       where workspace_id = ${probe.id} and channel = 'Paid Search'`)
+       where account_id = ${probe.id} and channel = 'Paid Search'`)
     expect(
       (mine?.sessions ?? 0) === Number(counted?.n),
       `probe sees ${mine?.sessions ?? 0}, its own table holds ${counted?.n}`,
@@ -326,7 +341,7 @@ try {
     const listed = await listReportDashboards(ctxFor('marketing'))
     expect(!listed.some((row) => row.id === created.id), 'a private dashboard is in somebody else’s list')
     // An admin can still open one, because an admin can open everything in the
-    // workspace and pretending otherwise would be a lie about the role.
+    // account and pretending otherwise would be a lie about the role.
     expect(Boolean(await readReportDashboard(admin, created.id)), 'an admin could not open it')
     await deleteReportDashboard(viewer, created.id)
     return 'private is about clutter, not about secrecy'

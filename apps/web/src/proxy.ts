@@ -1,8 +1,8 @@
 import { decodeJwt } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 
-/** A CRM or meetings link carries its workspace in the path, so opening someone else's link
- *  while signed in to a different workspace has to switch rather than quietly
+/** A CRM or meetings link carries its account in the path, so opening someone else's link
+ *  while signed in to a different account has to switch rather than quietly
  *  show the wrong tenant's screen or 404.
  *
  *  The claim is only read here, never trusted: this decides whether to bother
@@ -11,7 +11,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // The slug ends at a slash, a query string or a fragment. Without the last two,
 // /contacts/probe?tab=x captured "probe?tab=x" and the switch handler then
-// refused a workspace by that name.
+// refused a account by that name.
 const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
@@ -24,17 +24,17 @@ export const proxy = (request: NextRequest): NextResponse => {
 
   let current: string | undefined
   try {
-    current = decodeJwt<{ workspaceSlug?: string }>(token).workspaceSlug
+    current = decodeJwt<{ accountSlug?: string }>(token).accountSlug
   } catch {
     return NextResponse.next()
   }
 
   if (!current || current === wanted) return NextResponse.next()
 
-  const switchTo = new URL('/api/auth/workspace', request.nextUrl.origin)
+  const switchTo = new URL('/api/auth/account', request.nextUrl.origin)
   switchTo.searchParams.set('to', wanted)
   // The whole original address, so the person lands on the record they were sent,
-  // not on the workspace's front page.
+  // not on the account's front page.
   switchTo.searchParams.set('next', `${request.nextUrl.pathname}${request.nextUrl.search}`)
   return NextResponse.redirect(switchTo)
 }

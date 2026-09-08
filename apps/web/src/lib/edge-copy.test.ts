@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   BOOKING_COPY,
-  bookingHeld,
   bookingNextAvailable,
   countdown,
   formatterSource,
@@ -59,10 +58,6 @@ test('no message shows a status code or blames the visitor', () => {
   )
 })
 
-test('the hold notice names the time remaining', () => {
-  assert.equal(bookingHeld('4:30').includes('4:30'), true)
-})
-
 test('the next-available notice names when', () => {
   assert.equal(bookingNextAvailable('Monday 7 September').includes('Monday 7 September'), true)
 })
@@ -77,7 +72,7 @@ test('the tables are strings only, so they survive being serialised into a scrip
 
 test('the formatters shipped to the browser are the ones that were tested', () => {
   const source = formatterSource()
-  for (const name of ['countdown', 'formRedirecting', 'formStep', 'bookingNextAvailable', 'bookingHeld']) {
+  for (const name of ['formRedirecting', 'formStep']) {
     assert.equal(source.includes('function ' + name), true, `${name} is missing from the inlined source`)
   }
   // Nothing from outside itself, or it throws the moment it runs in the embed.

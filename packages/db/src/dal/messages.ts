@@ -11,19 +11,25 @@ import {
 } from '../schema/messaging.ts'
 import { contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
-import { recordActivity } from './activity.ts'
+import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
 import { detectReply } from './sequences.ts'
-import type { WorkspaceContext } from './context.ts'
+import { isAdmin, type AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { employerDomainFromEmail, isFreeMailDomain, registrableDomain } from './domains.ts'
+import { employerDomainFromEmail, registrableDomain } from './domains.ts'
+import { requestEnrichment } from './enrichment.ts'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
 import { refreshEmailEngagement } from './engagement.ts'
-import { mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { mutate, withAccount, writeAudit, type Tx } from './index.ts'
 
 /** F1 phase B, the storage half. The Gmail calls live in the app; everything that
  *  decides what is kept, who it belongs to and what is refused lives here. */
 
 export type MailboxState = 'connected' | 'backfilling' | 'revoked' | 'error' | 'paused'
+
+/** What `mail.connectDev` stores instead of a Google token. Lives here because
+ *  the stored token is encrypted, so only this layer can tell a stand-in from a
+ *  real grant. */
+export const DEV_ACCESS_TOKEN = 'dev-access'
 
 export type MailboxRow = {
   id: string
@@ -38,6 +44,10 @@ export type MailboxRow = {
   lastError: string | null
   lastErrorAt: Date | null
   threadCount: number
+  /** A stand-in mailbox reads fixtures and sends nowhere. The settings page has
+   *  to say so: a green "Connected" on a mailbox that is not one is how somebody
+   *  spends a week believing their mail is syncing. */
+  standIn: boolean
   visibility: 'team' | 'private'
   /** True once it has been reconnected with the send scope. Until then it reads
    *  and cannot send, whatever a sequence asks of it. */
@@ -46,8 +56,8 @@ export type MailboxRow = {
   minGapSeconds: number
 }
 
-export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listMailboxes = async (ctx: AccountContext): Promise<MailboxRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: mailbox.id,
@@ -60,6 +70,7 @@ export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]
         dailyCap: mailbox.dailyCap,
         minGapSeconds: mailbox.minGapSeconds,
         historyId: mailbox.historyId,
+        accessToken: mailbox.accessToken,
         backfillDone: mailbox.backfillDone,
         backfillCursor: mailbox.backfillCursor,
         lastSyncAt: mailbox.lastSyncAt,
@@ -73,10 +84,14 @@ export const listMailboxes = async (ctx: WorkspaceContext): Promise<MailboxRow[]
     const [counts] = await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from message_thread`,
     )
-    // One number for the workspace: threads are shared across mailboxes by design,
+    // One number for the account: threads are shared across mailboxes by design,
     // so "how many threads has this mailbox contributed" is not a thing worth
     // counting twice.
-    return rows.map((row) => ({ ...row, threadCount: Number(counts?.n ?? 0) }))
+    return rows.map(({ accessToken, ...row }) => ({
+      ...row,
+      threadCount: Number(counts?.n ?? 0),
+      standIn: decryptToken(accessToken) === DEV_ACCESS_TOKEN,
+    }))
   })
 
 export type SaveMailboxInput = {
@@ -93,12 +108,12 @@ export type SaveMailboxInput = {
 /** Connecting twice re-authorises rather than starting a second cursor over the
  *  same messages. The back-fill state is deliberately preserved: reconnecting a
  *  mailbox that had already read four years of history must not read it again. */
-export const saveMailbox = async (ctx: WorkspaceContext, input: SaveMailboxInput): Promise<{ id: string }> =>
+export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput): Promise<{ id: string }> =>
   mutate(ctx, 'mailbox', async (tx) => {
     const [saved] = await tx
       .insert(mailbox)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         userId: input.userId,
         email: input.email.toLowerCase(),
         state: 'backfilling',
@@ -106,11 +121,12 @@ export const saveMailbox = async (ctx: WorkspaceContext, input: SaveMailboxInput
         refreshToken: encryptToken(input.refreshToken),
         accessTokenExpiresAt: input.accessTokenExpiresAt,
         canSend: input.canSend ?? false,
+        visibility: 'team',
         lastError: null,
         lastErrorAt: null,
       })
       .onConflictDoUpdate({
-        target: [mailbox.workspaceId, mailbox.userId],
+        target: [mailbox.accountId, mailbox.userId],
         set: {
           email: input.email.toLowerCase(),
           accessToken: encryptToken(input.accessToken),
@@ -157,10 +173,10 @@ export type MailboxTokens = {
 
 /** Decrypted only here, only for a sync run. */
 export const readMailbox = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
 ): Promise<MailboxTokens | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.select().from(mailbox).where(eq(mailbox.id, mailboxId)).limit(1)
     if (!row) return null
     return {
@@ -179,7 +195,7 @@ export const readMailbox = async (
   })
 
 export const updateMailboxCursor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
   patch: {
     historyId?: string | null
@@ -190,7 +206,7 @@ export const updateMailboxCursor = async (
     accessTokenExpiresAt?: Date | null
   },
 ): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx
       .update(mailbox)
       .set({
@@ -213,12 +229,12 @@ export const updateMailboxCursor = async (
  *  grant does not come back on its own, and hammering Google would be the wrong
  *  answer to somebody having withdrawn consent. B2. */
 export const recordMailboxFailure = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
   error: string,
   revoked: boolean,
 ): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx
       .update(mailbox)
       .set({
@@ -230,7 +246,7 @@ export const recordMailboxFailure = async (
   })
 }
 
-export const disconnectMailbox = async (ctx: WorkspaceContext, mailboxId: string): Promise<void> =>
+export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string): Promise<void> =>
   mutate(ctx, 'mailbox', async (tx) => {
     const [found] = await tx
       .select({ email: mailbox.email, userId: mailbox.userId })
@@ -238,7 +254,7 @@ export const disconnectMailbox = async (ctx: WorkspaceContext, mailboxId: string
       .where(eq(mailbox.id, mailboxId))
       .limit(1)
     if (!found) throw new Error('That mailbox is not connected.')
-    if (ctx.role !== 'admin' && found.userId !== ctx.actorId) {
+    if (!isAdmin(ctx) && found.userId !== ctx.actorId) {
       throw new Error('That is somebody else’s mailbox. Only they, or an admin, can disconnect it.')
     }
 
@@ -262,8 +278,8 @@ export const disconnectMailbox = async (ctx: WorkspaceContext, mailboxId: string
 
 export type BlocklistRow = { id: string; pattern: string; note: string | null; userId: string | null }
 
-export const listBlocklist = async (ctx: WorkspaceContext): Promise<BlocklistRow[]> =>
-  withWorkspace(ctx, (tx) =>
+export const listBlocklist = async (ctx: AccountContext): Promise<BlocklistRow[]> =>
+  withAccount(ctx, (tx) =>
     tx
       .select({
         id: messageBlocklist.id,
@@ -273,7 +289,7 @@ export const listBlocklist = async (ctx: WorkspaceContext): Promise<BlocklistRow
       })
       .from(messageBlocklist)
       .where(
-        ctx.role === 'admin'
+        isAdmin(ctx)
           ? undefined
           : or(isNull(messageBlocklist.userId), eq(messageBlocklist.userId, ctx.actorId ?? '')),
       )
@@ -281,22 +297,22 @@ export const listBlocklist = async (ctx: WorkspaceContext): Promise<BlocklistRow
   )
 
 export const addBlocklistEntry = async (
-  ctx: WorkspaceContext,
-  input: { pattern: string; note?: string | null; scope: 'workspace' | 'mine' },
+  ctx: AccountContext,
+  input: { pattern: string; note?: string | null; scope: 'account' | 'mine' },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'message_blocklist', async (tx) => {
     const pattern = input.pattern.trim().toLowerCase()
     if (!pattern || pattern.includes(' ')) {
       throw new Error('A blocklist entry is one address or one domain, with no spaces.')
     }
-    if (input.scope === 'workspace' && ctx.role !== 'admin') {
-      throw new Error('Only an admin sets a workspace-wide exclusion. Add it to your own list instead.')
+    if (input.scope === 'account' && !isAdmin(ctx)) {
+      throw new Error('Only an admin sets a account-wide exclusion. Add it to your own list instead.')
     }
 
     const [created] = await tx
       .insert(messageBlocklist)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         userId: input.scope === 'mine' ? ctx.actorId : null,
         pattern,
         note: input.note?.trim() || null,
@@ -317,7 +333,7 @@ export const addBlocklistEntry = async (
     }
   })
 
-export const removeBlocklistEntry = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const removeBlocklistEntry = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'message_blocklist', async (tx) => {
     const [found] = await tx
       .select({ pattern: messageBlocklist.pattern, userId: messageBlocklist.userId })
@@ -325,10 +341,10 @@ export const removeBlocklistEntry = async (ctx: WorkspaceContext, id: string): P
       .where(eq(messageBlocklist.id, id))
       .limit(1)
     if (!found) throw new Error('That exclusion no longer exists.')
-    if (found.userId === null && ctx.role !== 'admin') {
-      throw new Error('That is a workspace exclusion. Only an admin removes one.')
+    if (found.userId === null && !isAdmin(ctx)) {
+      throw new Error('That is a account exclusion. Only an admin removes one.')
     }
-    if (found.userId !== null && found.userId !== ctx.actorId && ctx.role !== 'admin') {
+    if (found.userId !== null && found.userId !== ctx.actorId && !isAdmin(ctx)) {
       throw new Error('That exclusion belongs to somebody else.')
     }
 
@@ -388,7 +404,7 @@ const bytes = (value: string): number => new TextEncoder().encode(value).length
  *  sanitised by the caller: nothing here trusts what a stranger sent. */
 export const writeBody = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   messageId: string,
   body: MessageBodyInput,
 ): Promise<void> => {
@@ -404,7 +420,7 @@ export const writeBody = async (
   await tx
     .insert(messageBody)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       messageId,
       textBody: text,
       htmlBody: keptHtml,
@@ -431,8 +447,12 @@ export const writeBody = async (
 }
 
 export type IngestResult =
-  | { stored: true; messageId: string; threadId: string; contactIds: string[]; created: boolean }
+  | { stored: true; messageId: string; threadId: string; contactIds: string[]; created: boolean; activityId: string | null }
   | { stored: false; reason: string }
+
+/** Which sequence a stored copy of a sent step belongs to, so its timeline card
+ *  says so and the send row can be joined to it. Absent for ordinary mail. */
+export type MessageOrigin = { sequenceId: string; sequenceName: string }
 
 const lower = (value: string): string => value.trim().toLowerCase()
 
@@ -442,34 +462,44 @@ const addressesOf = (incoming: IncomingMessage): string[] =>
 /** Blocklisting is applied at ingest, so a blocked thread is never stored, not
  *  stored-and-hidden. B3.
  *
- *  Three rules, all of which mean "this is not CRM correspondence":
+ *  Two rules, both of which mean "this is not CRM correspondence":
  *    - every participant is internal, so it is a colleague-to-colleague thread,
- *    - a participant is at a free or disposable mail provider, which is personal,
- *    - an address or domain is on the workspace list or the owner's own list. */
-/** Which mail domain counts as "us". Read through the workspace's organisation,
- *  which is where the domain lives: a domain identifies the company, and every
- *  workspace it owns shares it. Never per deployment, because the same process
- *  serves several tenants and reading one tenant's domain onto another's mailbox
- *  inverts every internal/external decision below. */
-export const internalDomainOf = async (ctx: WorkspaceContext): Promise<string> =>
-  withWorkspace(ctx, async (tx) => {
+ *    - an address or domain is on the account list or the owner's own list.
+ *
+ *  A free mail provider is deliberately not one of them. Refusing gmail.com threw
+ *  away every founder and sole trader who writes from a personal address, which is
+ *  a large share of real inbound. What it protected against instead lives where it
+ *  belongs: the exclusion list, and the mailbox's own private setting. Creating a
+ *  contact is still refused for those domains, so a stranger never becomes a
+ *  record. */
+/** Which mail domain counts as "us": the one the account is claimed by. Never per
+ *  deployment, because the same process serves several tenants and reading one
+ *  tenant's domain onto another's mailbox inverts every internal/external
+ *  decision below. */
+export const internalDomainOf = async (ctx: AccountContext): Promise<string> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ domain: string }>(
-      sql`select o.google_hosted_domain as domain
-            from workspace w join organisation o on o.id = w.organisation_id
-           limit 1`,
+      sql`select google_hosted_domain as domain from account limit 1`,
     )
-    if (!row) throw new Error('That workspace no longer exists.')
+    if (!row) throw new Error('That account no longer exists.')
     return row.domain
   })
 
 export const shouldSkip = (
   incoming: IncomingMessage,
-  options: { internalDomain: string; blocked: Set<string> },
+  options: { internalDomain: string; blocked: Set<string>; ownerEmail?: string | undefined },
 ): string | null => {
   const addresses = addressesOf(incoming)
   if (addresses.length === 0) return 'The message named nobody.'
 
-  const internal = (address: string) => registrableDomain(address.split('@')[1] ?? '') === options.internalDomain
+  // The person who connected the mailbox is us, whatever their address is at. A
+  // company on plain Gmail rather than Account has no domain of its own, and
+  // reading only the organisation's domain made every one of their threads look
+  // like a stranger's.
+  const owner = options.ownerEmail ? lower(options.ownerEmail) : null
+  const internal = (address: string) =>
+    address === owner || registrableDomain(address.split('@')[1] ?? '') === options.internalDomain
+
   if (addresses.every(internal)) {
     return 'Every participant is internal, so this is a colleague-to-colleague thread.'
   }
@@ -479,15 +509,12 @@ export const shouldSkip = (
     if (options.blocked.has(address) || options.blocked.has(domain)) {
       return `${address} is on the exclusion list.`
     }
-    if (!internal(address) && isFreeMailDomain(domain)) {
-      return `${address} is a personal mail address.`
-    }
   }
   return null
 }
 
-export const blockedPatterns = async (ctx: WorkspaceContext, userId: string): Promise<Set<string>> =>
-  withWorkspace(ctx, async (tx) => {
+export const blockedPatterns = async (ctx: AccountContext, userId: string): Promise<Set<string>> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({ pattern: messageBlocklist.pattern })
       .from(messageBlocklist)
@@ -509,13 +536,20 @@ const isDeliveryReport = (incoming: IncomingMessage): boolean =>
   /^(mailer-daemon|postmaster)@/i.test(incoming.from.trim().toLowerCase())
 
 export const ingestMessage = async (
-  ctx: WorkspaceContext,
-  input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string; blocked: Set<string> },
+  ctx: AccountContext,
+  input: {
+    incoming: IncomingMessage
+    ownerEmail: string
+    mailboxId: string
+    internalDomain: string
+    blocked: Set<string>
+    origin?: MessageOrigin | undefined
+  },
 ): Promise<IngestResult> => {
   assertCanWrite(ctx, 'mailbox')
 
   if (isDeliveryReport(input.incoming)) {
-    await withWorkspace(ctx, (tx) =>
+    await withAccount(ctx, (tx) =>
       detectReply(tx, ctx, {
         messageId: '',
         contactIds: [],
@@ -532,10 +566,11 @@ export const ingestMessage = async (
   const skip = shouldSkip(input.incoming, {
     internalDomain: input.internalDomain,
     blocked: input.blocked,
+    ownerEmail: input.ownerEmail,
   })
   if (skip) return { stored: false, reason: skip }
 
-  return withWorkspace(ctx, async (tx) => storeMessage(tx, ctx, input))
+  return withAccount(ctx, async (tx) => storeMessage(tx, ctx, input))
 }
 
 /** A uuid that can never be a thread id, so the thread arm of the reply match is
@@ -545,15 +580,15 @@ const NO_THREAD = '00000000-0000-0000-0000-000000000000'
 
 const storeMessage = async (
   tx: Tx,
-  ctx: WorkspaceContext,
-  input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string },
+  ctx: AccountContext,
+  input: { incoming: IncomingMessage; ownerEmail: string; mailboxId: string; internalDomain: string; origin?: MessageOrigin | undefined },
 ): Promise<IngestResult> => {
   const { incoming } = input
 
   const [thread] = await tx
     .insert(messageThread)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       provider: 'gmail',
       providerThreadId: incoming.providerThreadId,
       subject: incoming.subject,
@@ -562,7 +597,7 @@ const storeMessage = async (
       messageCount: 0,
     })
     .onConflictDoUpdate({
-      target: [messageThread.workspaceId, messageThread.provider, messageThread.providerThreadId],
+      target: [messageThread.accountId, messageThread.provider, messageThread.providerThreadId],
       set: {
         subject: sql`coalesce(${messageThread.subject}, excluded.subject)`,
         firstAt: sql`least(${messageThread.firstAt}, excluded.first_at)`,
@@ -577,7 +612,7 @@ const storeMessage = async (
   const [stored] = await tx
     .insert(message)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       threadId: thread.id,
       providerMessageId: incoming.providerMessageId,
       direction,
@@ -593,7 +628,7 @@ const storeMessage = async (
       hasAttachments: incoming.hasAttachments,
       mailboxId: input.mailboxId,
     })
-    .onConflictDoNothing({ target: [message.workspaceId, message.providerMessageId] })
+    .onConflictDoNothing({ target: [message.accountId, message.providerMessageId] })
     .returning({ id: message.id })
 
   if (!stored) {
@@ -604,7 +639,7 @@ const storeMessage = async (
       .from(message)
       .where(eq(message.providerMessageId, incoming.providerMessageId))
       .limit(1)
-    return { stored: true, messageId: existing?.id ?? '', threadId: thread.id, contactIds: [], created: false }
+    return { stored: true, messageId: existing?.id ?? '', threadId: thread.id, contactIds: [], created: false, activityId: null }
   }
 
   await tx
@@ -617,7 +652,7 @@ const storeMessage = async (
   if (incoming.attachments && incoming.attachments.length > 0) {
     await tx.insert(messageAttachment).values(
       incoming.attachments.map((attachment) => ({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         messageId: stored.id,
         filename: attachment.filename,
         mimeType: attachment.mimeType,
@@ -645,7 +680,7 @@ const storeMessage = async (
     await tx
       .insert(messageParticipant)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         messageId: stored.id,
         address: entry.address,
         contactId: matched.get(entry.address) ?? null,
@@ -671,19 +706,23 @@ const storeMessage = async (
   }
 
   const contactIds = [...new Set([...matched.values()])]
+  let activityId: string | null = null
   if (contactIds.length > 0) {
     await refreshEmailEngagement(tx, ctx, contactIds)
-    await linkThreadActivity(tx, ctx, {
+    activityId = await linkThreadActivity(tx, ctx, {
       threadId: thread.id,
+      messageId: stored.id,
       subject: incoming.subject,
       snippet: incoming.snippet,
       sentAt: incoming.sentAt,
       direction,
+      counterpart: direction === 'inbound' ? [lower(incoming.from)] : incoming.to.map(lower),
       contactIds,
+      origin: input.origin,
     })
   }
 
-  return { stored: true, messageId: stored.id, threadId: thread.id, contactIds, created: true }
+  return { stored: true, messageId: stored.id, threadId: thread.id, contactIds, created: true, activityId }
 }
 
 /** An address matches a contact on lower(email). No match and the domain is known:
@@ -695,7 +734,7 @@ const storeMessage = async (
  *  to is exactly what a salesperson wants. */
 const matchParticipants = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   addresses: string[],
   internalDomain: string,
 ): Promise<Map<string, string>> => {
@@ -724,12 +763,13 @@ const matchParticipants = async (
     if (!company) continue
 
     const [created] = await tx.execute<{ id: string }>(sql`
-      insert into contact (workspace_id, email, company_id, lead_source)
-      values (${ctx.workspaceId}, ${address}, ${company.id}, 'Offline Sources')
+      insert into contact (account_id, email, company_id, lead_source)
+      values (${ctx.accountId}, ${address}, ${company.id}, 'Offline Sources')
       on conflict do nothing
       returning id`)
     if (created) {
       matched.set(address, created.id)
+      await requestEnrichment(tx, ctx, 'contact', created.id)
       await writeAudit(tx, ctx, {
         entity: 'contact',
         entityId: created.id,
@@ -747,43 +787,34 @@ const matchParticipants = async (
  *  and to any deal the contact is associated with. B3. */
 const linkThreadActivity = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     threadId: string
+    messageId: string
     subject: string | null
     snippet: string | null
     sentAt: Date
     direction: 'inbound' | 'outbound'
+    counterpart: string[]
     contactIds: string[]
+    origin?: MessageOrigin | undefined
   },
-): Promise<void> => {
-  const links: { entityType: 'contact' | 'company' | 'deal'; entityId: string }[] = input.contactIds.map(
-    (id) => ({ entityType: 'contact' as const, entityId: id }),
-  )
-
-  const companies = await tx.execute<{ company_id: string }>(sql`
-    select distinct company_id from contact
-     where id in (${sql.join(input.contactIds.map((id) => sql`${id}`), sql`, `)})
-       and company_id is not null`)
-  for (const row of companies) links.push({ entityType: 'company', entityId: row.company_id })
-
-  const deals = await tx.execute<{ deal_id: string }>(sql`
-    select distinct a.from_id as deal_id from association a
-     where a.from_type = 'deal' and a.to_type = 'contact'
-       and a.to_id in (${sql.join(input.contactIds.map((id) => sql`${id}`), sql`, `)})
-    union
-    select distinct a.to_id from association a
-     where a.to_type = 'deal' and a.from_type = 'contact'
-       and a.from_id in (${sql.join(input.contactIds.map((id) => sql`${id}`), sql`, `)})`)
-  for (const row of deals) links.push({ entityType: 'deal', entityId: row.deal_id })
-
-  await recordActivity(tx, ctx, {
+): Promise<string | null> => {
+  const payload: EmailPayload = {
+    threadId: input.threadId,
+    messageId: input.messageId,
+    direction: input.direction,
+    counterpart: input.counterpart,
+    source: input.origin ? 'sequence' : 'gmail',
+    ...(input.origin ? { sequenceId: input.origin.sequenceId, sequenceName: input.origin.sequenceName } : {}),
+  }
+  return recordActivity(tx, ctx, {
     type: 'email',
     subject: input.subject ?? '(no subject)',
     body: input.snippet,
     occurredAt: input.sentAt,
-    payload: { threadId: input.threadId, direction: input.direction, source: 'gmail' },
-    links,
+    payload,
+    links: await linksForContacts(tx, input.contactIds),
   })
 }
 
@@ -799,11 +830,11 @@ export type ThreadSummary = {
 
 /** The threads one contact appears in, newest first. */
 export const threadsForContact = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
   limit = 20,
 ): Promise<ThreadSummary[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .selectDistinct({
         id: messageThread.id,
@@ -841,28 +872,33 @@ export type BodyState = 'pending' | 'stored' | 'too_large' | 'failed'
 
 /** Who may read a message. Three ways in, and the caller's own identity decides,
  *  never the client:
- *    - the mailbox that read it is gone, so this is workspace history now,
+ *    - the mailbox that read it is gone, so this is account history now,
  *    - the mailbox is shared with the team, which is the default,
- *    - the caller owns that mailbox, or administers the workspace.
+ *    - the caller owns that mailbox, or administers the account.
  *
  *  Written as one predicate rather than three call sites, because a reader that
  *  forgets it is a private mailbox leaked. */
-const readable = (ctx: WorkspaceContext) => sql`(
+const readable = (ctx: AccountContext) => sql`(
   ${message.mailboxId} is null
   or exists (
     select 1 from mailbox mb
      where mb.id = ${message.mailboxId}
        and (mb.visibility = 'team'
             or mb.user_id = ${ctx.actorId}::uuid
-            or ${ctx.role === 'admin'})
+            or ${isAdmin(ctx)})
   )
 )`
 
 export const readThread = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   threadId: string,
-): Promise<{ thread: ThreadSummary; messages: ThreadMessage[] } | null> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<{
+  thread: ThreadSummary
+  /** Everyone on the thread who is a contact, so the header can link them. */
+  contacts: { id: string; name: string; email: string | null }[]
+  messages: ThreadMessage[]
+} | null> =>
+  withAccount(ctx, async (tx) => {
     const [thread] = await tx
       .select({
         id: messageThread.id,
@@ -918,8 +954,29 @@ export const readThread = async (
         ),
       )
 
+    // Which of the addresses on this thread are people in the CRM. The join
+    // table is already written on ingest and already read by the list; the
+    // thread itself was the one place showing raw addresses with nothing behind
+    // them.
+    const people = await tx.execute<{ id: string; name: string; email: string | null }>(sql`
+      select distinct c.id,
+             coalesce(nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), ''), c.email) as name,
+             c.email
+        from message_participant mp
+        join contact c on c.id = mp.contact_id
+       where mp.message_id in (${sql.join(
+         rows.map((row) => sql`${row.id}::uuid`),
+         sql`, `,
+       )})
+         and c.deleted_at is null`)
+
     return {
       thread,
+      contacts: people.map((person) => ({
+        id: person.id,
+        name: person.name,
+        email: person.email,
+      })),
       messages: rows.map((row) => ({
         ...row,
         truncated: row.truncated ?? false,
@@ -932,14 +989,14 @@ export const readThread = async (
 
 /** Marks a thread read up to now, for one person. Separate from `readThread` so a
  *  background refresh does not silently mark somebody's inbox read. */
-export const markThreadRead = async (ctx: WorkspaceContext, threadId: string): Promise<void> => {
+export const markThreadRead = async (ctx: AccountContext, threadId: string): Promise<void> => {
   if (!ctx.actorId) return
   await mutate(ctx, 'message_thread_read', async (tx) => {
     await tx
       .insert(messageThreadRead)
-      .values({ workspaceId: ctx.workspaceId, threadId, userId: ctx.actorId as string, lastReadAt: new Date() })
+      .values({ accountId: ctx.accountId, threadId, userId: ctx.actorId as string, lastReadAt: new Date() })
       .onConflictDoUpdate({
-        target: [messageThreadRead.workspaceId, messageThreadRead.threadId, messageThreadRead.userId],
+        target: [messageThreadRead.accountId, messageThreadRead.threadId, messageThreadRead.userId],
         set: { lastReadAt: new Date() },
       })
     return { result: undefined, audit: { entity: 'message_thread_read', entityId: threadId, action: 'read' } }
@@ -967,9 +1024,9 @@ export type InboxPage = { threads: InboxThread[]; cursor: { lastAt: string; id: 
  *  `message_thread_last_idx`, so page fifty costs what page one costs.
  *
  *  O(page) per call: the filters are all on the thread or on one correlated
- *  exists, never a scan of every message in the workspace. */
+ *  exists, never a scan of every message in the account. */
 export const listInboxThreads = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     scope?: 'mine' | 'all' | undefined
     mailboxId?: string | null | undefined
@@ -980,7 +1037,7 @@ export const listInboxThreads = async (
     cursor?: { lastAt: string; id: string } | null | undefined
   } = {},
 ): Promise<InboxPage> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
     const scope = input.scope ?? 'all'
     const actor = ctx.actorId
@@ -1004,7 +1061,7 @@ export const listInboxThreads = async (
          where m.mailbox_id is null
             or mb.visibility = 'team'
             or mb.user_id = ${actor}::uuid
-            or ${ctx.role === 'admin'}
+            or ${isAdmin(ctx)}
       ),
       newest as (
         select distinct on (v.thread_id)
@@ -1073,8 +1130,8 @@ export type InboxCounts = { all: number; mine: number; unreplied: number; unread
  *  ones in their own mailboxes, the ones whose newest message is inbound, and
  *  the ones they have not opened since the last message. One pass over the
  *  visible threads, O(threads) in one round trip rather than four. */
-export const inboxCounts = async (ctx: WorkspaceContext): Promise<InboxCounts> =>
-  withWorkspace(ctx, async (tx) => {
+export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
+  withAccount(ctx, async (tx) => {
     const actor = ctx.actorId
     const [row] = await tx.execute<{ all: number; mine: number; unreplied: number; unread: number }>(sql`
       with visible as (
@@ -1084,7 +1141,7 @@ export const inboxCounts = async (ctx: WorkspaceContext): Promise<InboxCounts> =
          where m.mailbox_id is null
             or mb.visibility = 'team'
             or mb.user_id = ${actor}::uuid
-            or ${ctx.role === 'admin'}
+            or ${isAdmin(ctx)}
       ),
       newest as (
         select distinct on (v.thread_id) v.thread_id, v.direction
@@ -1106,9 +1163,9 @@ export const inboxCounts = async (ctx: WorkspaceContext): Promise<InboxCounts> =
 /** How many bodies are still to fetch, and for which mailbox. Shown on the
  *  mailboxes screen so a long back-fill is visible rather than mysterious. */
 export const bodyProgress = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
 ): Promise<{ mailboxId: string; pending: number; stored: number }[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ mailbox_id: string; pending: number; stored: number }>(sql`
       select mailbox_id,
              count(*) filter (where body_state = 'pending')::int as pending,
@@ -1127,11 +1184,11 @@ export const bodyProgress = async (
 /** The next messages whose bodies have not been fetched, for one mailbox. The
  *  partial index makes this the size of the backlog, not of the mailbox. */
 export const pendingBodies = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
   limit = 50,
 ): Promise<{ id: string; providerMessageId: string }[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .select({ id: message.id, providerMessageId: message.providerMessageId })
       .from(message)
@@ -1141,7 +1198,7 @@ export const pendingBodies = async (
   )
 
 export const storeBody = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   messageId: string,
   body: MessageBodyInput,
 ): Promise<void> => {
@@ -1153,8 +1210,8 @@ export const storeBody = async (
 
 /** A body that cannot be fetched is marked and left alone, so the queue drains
  *  rather than spinning on the same message for ever. */
-export const failBody = async (ctx: WorkspaceContext, messageId: string, reason: string): Promise<void> =>
-  withWorkspace(ctx, async (tx) => {
+export const failBody = async (ctx: AccountContext, messageId: string, reason: string): Promise<void> =>
+  withAccount(ctx, async (tx) => {
     await tx
       .update(message)
       .set({ bodyState: 'failed', bodyError: reason.slice(0, 500) })
@@ -1162,7 +1219,7 @@ export const failBody = async (ctx: WorkspaceContext, messageId: string, reason:
   })
 
 export const setMailboxVisibility = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { mailboxId: string; visibility: 'team' | 'private' },
 ): Promise<void> =>
   mutate(ctx, 'mailbox', async (tx) => {
@@ -1170,10 +1227,10 @@ export const setMailboxVisibility = async (
       .select({ userId: mailbox.userId, visibility: mailbox.visibility })
       .from(mailbox)
       .where(eq(mailbox.id, input.mailboxId))
-    if (!box) throw new Error('That mailbox is not in this workspace.')
+    if (!box) throw new Error('That mailbox is not in this account.')
     // Finer than the role matrix can say: it is your mailbox, or you administer
-    // the workspace.
-    if (box.userId !== ctx.actorId && ctx.role !== 'admin') {
+    // the account.
+    if (box.userId !== ctx.actorId && !isAdmin(ctx)) {
       throw new Error('That is somebody else\'s mailbox. Only they or an admin can change who reads it.')
     }
     await tx.update(mailbox).set({ visibility: input.visibility }).where(eq(mailbox.id, input.mailboxId))
@@ -1188,3 +1245,69 @@ export const setMailboxVisibility = async (
       },
     }
   })
+
+/** Puts a contact on the mail they were already on.
+ *
+ *  Ingest refuses to invent a contact for every stranger who ever wrote in, which
+ *  is right, and leaves the one address somebody actually wanted sitting in a
+ *  thread as plain text. Once they make that address a contact, this is what
+ *  hangs the existing conversation on the new record, rather than leaving the
+ *  history to start from today.
+ *
+ *  O(messages carrying that address), which is the size of one person's
+ *  correspondence, not of the mailbox. */
+export const attachContactToMail = async (
+  ctx: AccountContext,
+  contactId: string,
+): Promise<{ messages: number; threads: number }> => {
+  assertCanWrite(ctx, 'contact')
+  return withAccount(ctx, async (tx) => {
+    const [person] = await tx
+      .select({ email: contact.email })
+      .from(contact)
+      .where(eq(contact.id, contactId))
+      .limit(1)
+    if (!person?.email) return { messages: 0, threads: 0 }
+    const address = lower(person.email)
+
+    const linked = await tx.execute<{ message_id: string }>(sql`
+      update message_participant p
+         set contact_id = ${contactId}::uuid
+       where p.contact_id is null
+         and p.address = ${address}
+      returning p.message_id`)
+    if (linked.length === 0) return { messages: 0, threads: 0 }
+
+    const ids = [...new Set(linked.map((row) => row.message_id))]
+    const messages = await tx.execute<{
+      id: string
+      thread_id: string
+      subject: string | null
+      snippet: string | null
+      sent_at: Date
+      direction: 'inbound' | 'outbound'
+      from_addr: string | null
+      to_addrs: string[]
+    }>(sql`
+      select m.id, m.thread_id, t.subject, m.snippet, m.sent_at, m.direction, m.from_addr, m.to_addrs
+        from message m join message_thread t on t.id = m.thread_id
+       where m.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
+       order by m.sent_at`)
+
+    for (const row of messages) {
+      await linkThreadActivity(tx, ctx, {
+        threadId: row.thread_id,
+        messageId: row.id,
+        subject: row.subject,
+        snippet: row.snippet,
+        sentAt: row.sent_at instanceof Date ? row.sent_at : new Date(row.sent_at),
+        direction: row.direction,
+        counterpart: row.direction === 'inbound' ? [row.from_addr ?? address] : row.to_addrs,
+        contactIds: [contactId],
+      })
+    }
+
+    await refreshEmailEngagement(tx, ctx, [contactId])
+    return { messages: messages.length, threads: new Set(messages.map((row) => row.thread_id)).size }
+  })
+}

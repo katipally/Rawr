@@ -1,4 +1,4 @@
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { listRecords } from './records.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
 import { formatForCsv } from './values.ts'
@@ -16,7 +16,7 @@ const quoted = (value: string): string =>
  *  order, nothing else. Streamed a page at a time so a 50,000-row export never
  *  holds 50,000 rows in memory. A8. */
 export async function* exportCsv(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { objectKey: string; columns: string[]; filters: FilterGroup[]; sorts: Sort[]; search?: string },
 ): AsyncGenerator<string> {
   const registry = await getRegistry(ctx)

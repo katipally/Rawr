@@ -121,7 +121,7 @@ export const AttachmentsPanel = ({
       {!configured ? (
         <Alert tone="info">
           File storage is not connected, so nothing can be attached yet. An admin sets
-          SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY and creates the bucket.
+          the S3_* variables and creates the bucket.
         </Alert>
       ) : files.length === 0 ? (
         <EmptyState

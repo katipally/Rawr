@@ -1,15 +1,12 @@
-import { isUuid, listPipelines, once, readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
-import { devIntegrationsEnabled, env, slackConfigured } from '~/lib/env.ts'
+import { isUuid, listPipelines, once, readCredentials, recordHealth, type AccountContext } from '@rawr/db'
+import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, providerError, type ConnectionTest } from './provider.ts'
 
 /** F6 §5. Slack, used by F3 for the thing Trevor flagged first: a form fill from a
  *  real prospect lands in the channel, and that stops at cutover.
  *
- *  Credentials come from either the integration row or the environment, in that
- *  order. The environment path is what F3 shipped against while open item 4 was
- *  outstanding; the integration row is what F6 §1 requires of everything. Both work
- *  and the row wins, so moving from one to the other is a paste rather than a
- *  deploy. */
+ *  One field takes either a bot token or an incoming webhook URL, because nobody
+ *  should have to know which kind of Slack app they were handed. */
 
 type SlackConfig = { channel?: string; stageAlerts?: string }
 
@@ -21,18 +18,18 @@ export type SlackCredentials = {
   stagePipelines: string[]
 }
 
-export const slackCredentials = async (ctx: WorkspaceContext): Promise<SlackCredentials | null> => {
+export const slackCredentials = async (ctx: AccountContext): Promise<SlackCredentials | null> => {
   const stored = await readCredentials(ctx, 'slack')
   const config = (stored?.config ?? {}) as SlackConfig
   const secret = stored?.secret ?? null
 
-  // A bot token and a webhook URL are told apart by shape, so one field can accept
-  // either and nobody has to know which kind of Slack app they were given.
-  const isWebhook = secret?.startsWith('https://hooks.slack.com/')
-  const botToken = secret && !isWebhook ? secret : env.SLACK_BOT_TOKEN || null
-  const webhookUrl = isWebhook ? secret : env.SLACK_WEBHOOK_URL || null
+  // Told apart by shape, so one field takes either.
+  const isWebhook = secret?.startsWith('https://hooks.slack.com/') ?? false
+  const botToken = secret && !isWebhook ? secret : null
+  const webhookUrl = isWebhook ? secret : null
 
-  if (!botToken && !webhookUrl) return null
+  // The dev provider posts nothing; it only needs to reach postToSlack's branch.
+  if (!botToken && !webhookUrl && !devIntegrationsEnabled) return null
 
   // A pipeline is named the way a person types it, "Enterprise", and an id is
   // accepted too for anything already stored that way. Resolved here, once per
@@ -52,13 +49,13 @@ export const slackCredentials = async (ctx: WorkspaceContext): Promise<SlackCred
   return {
     botToken,
     webhookUrl,
-    channel: config.channel ?? env.SLACK_DEFAULT_CHANNEL ?? null,
+    channel: config.channel ?? null,
     integrationId: stored?.id ?? null,
     stagePipelines,
   }
 }
 
-export const testSlack = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testSlack = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'slack', { ok: true })
@@ -74,7 +71,7 @@ export const testSlack = async (ctx: WorkspaceContext): Promise<ConnectionTest> 
     }
 
     if (creds.botToken) {
-      // auth.test names the workspace and the bot, which is exactly what somebody
+      // auth.test names the account and the bot, which is exactly what somebody
       // wants to see before trusting that leads will arrive.
       const answer = await json<{ ok?: boolean; team?: string; user?: string; error?: string }>({
         url: 'https://slack.com/api/auth.test',
@@ -86,7 +83,7 @@ export const testSlack = async (ctx: WorkspaceContext): Promise<ConnectionTest> 
       await recordHealth(ctx, 'slack', { ok: true })
       return {
         ok: true,
-        detail: `Connected to ${answer.team ?? 'the workspace'} as ${answer.user ?? 'the Rawr bot'}. Default channel ${creds.channel ?? 'is not set, so each form must name one'}.`,
+        detail: `Connected to ${answer.team ?? 'the account'} as ${answer.user ?? 'the Rawr bot'}. Default channel ${creds.channel ?? 'is not set, so each form must name one'}.`,
       }
     }
 
@@ -119,7 +116,7 @@ export type SlackBody = { channel?: string | undefined; text: string; blocks: un
 /** One post, at most once per key, with the retry and dead-letter behaviour every
  *  other provider gets. */
 export const postToSlack = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { key: string; jobName: string; body: SlackBody; payload: Record<string, unknown> },
 ): Promise<{ posted: boolean; detail: string }> => {
   const creds = await slackCredentials(ctx)
@@ -173,5 +170,3 @@ export const postToSlack = async (
  *  is a channel people mute. */
 export const shouldAnnounceStage = (creds: SlackCredentials | null, pipelineId: string | null): boolean =>
   Boolean(creds && pipelineId && creds.stagePipelines.includes(pipelineId))
-
-export const slackReady = (): boolean => slackConfigured || devIntegrationsEnabled

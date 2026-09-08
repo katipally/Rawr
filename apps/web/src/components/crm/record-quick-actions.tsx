@@ -5,7 +5,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 
 export type RecordQuickActionsProps = {
-  workspace: string
+  account: string
   object: string
   recordId: string
   /** Null when this record has no address to write to, which disables Email and
@@ -21,7 +21,7 @@ export type RecordQuickActionsProps = {
  *  already on this page, so there is one composer, one task form and one compose
  *  dialog, and "log a call on this deal" is a link somebody can be sent. */
 export const RecordQuickActions = ({
-  workspace,
+  account,
   object,
   recordId,
   email,
@@ -32,7 +32,7 @@ export const RecordQuickActions = ({
   if (!canWrite) return null
 
   const go = (params: Parameters<typeof recordPath>[3]) =>
-    navigate(recordPath(workspace, object, recordId, { tab: 'activities', ...params }))
+    navigate(recordPath(account, object, recordId, { tab: 'activities', ...params }))
 
   const actions = [
     { label: 'Note', icon: StickyNote, onClick: () => go({ log: 'note' }) },
@@ -51,12 +51,12 @@ export const RecordQuickActions = ({
           onClick={onClick}
           disabled={disabled}
           title={title ?? label}
-          className="group flex w-10 flex-col items-center gap-1 disabled:cursor-not-allowed disabled:opacity-60"
+          className="group flex min-w-10 flex-col items-center gap-1 px-1 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="grid size-8 place-items-center rounded-pill border border-line-strong bg-surface group-hover:bg-fill group-disabled:group-hover:bg-surface">
             <Icon aria-hidden="true" className="size-4" />
           </span>
-          <span className="w-full truncate text-center text-small">{label}</span>
+          <span className="text-center text-small">{label}</span>
         </button>
       ))}
     </div>

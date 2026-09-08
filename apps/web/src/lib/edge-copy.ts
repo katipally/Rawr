@@ -26,6 +26,10 @@ export const FORM_COPY = {
   retry: 'Try again',
   challenge: 'One quick check before we can send this.',
   required: 'This is required.',
+  uploading: 'Uploading…',
+  /** Only when the endpoint gave no reason of its own. Its reasons are better:
+   *  "larger than 10 MB" is actionable and this is not. */
+  uploadFailed: 'That file could not be uploaded. Pick it again.',
 } as const
 
 export const BOOKING_COPY = {
@@ -38,6 +42,8 @@ export const BOOKING_COPY = {
   booked: 'You are booked.',
   /** Somebody took the slot while this person was filling the form in. */
   slotGone: 'Somebody took that time while you were typing. Here are the times still open.',
+  /** The server refused specific answers. The fields say which; this says where. */
+  invalid: 'Check the highlighted answers.',
   failed: 'That could not be booked. Nothing was lost, so try again.',
   offline: 'You appear to be offline. Your answers are still here; book again once you are back.',
   holdExpired: 'The hold on that time has run out. It may still be free; choose it again to check.',
@@ -70,18 +76,14 @@ export function formRedirecting(seconds: number): string {
   return seconds <= 1 ? 'Taking you there now…' : 'Taking you there in ' + seconds + ' seconds…'
 }
 
-export function formStep(current: number, total: number): string {
-  return 'Step ' + current + ' of ' + total
+export function formStep(current: number, total: number, label?: string): string {
+  var position = 'Step ' + current + ' of ' + total
+  return label ? position + ' · ' + label : position
 }
 
 /** No times this month, but there are some later. */
 export function bookingNextAvailable(when: string): string {
   return 'Nothing open this month. The next free time is ' + when + '.'
-}
-
-/** The courtesy hold, counting down. */
-export function bookingHeld(remaining: string): string {
-  return 'This time is held for you for ' + remaining + '.'
 }
 
 /** Where a meeting happens, in the visitor's words rather than the enum's. Shared
@@ -149,19 +151,10 @@ export function weekInfoFor(tag: string): { firstDay: number; weekdays: string[]
   return { firstDay: firstDay, weekdays: weekdays }
 }
 
-/** The formatter sources, for inlining into the two embed scripts. Taken from the
- *  functions rather than repeated, so the browser runs what the tests ran. */
+/** The formatter sources, for inlining into the form embed. Taken from the
+ *  functions rather than repeated, so the browser runs what the tests ran.
+ *
+ *  Short, because the booking widget is a React component now and imports these
+ *  the ordinary way; only the form embed is still a hand-written script. */
 export const formatterSource = (): string =>
-  [
-    countdown,
-    formRedirecting,
-    formStep,
-    bookingNextAvailable,
-    bookingHeld,
-    bookingHosts,
-    slotBandOf,
-    hourIn,
-    weekInfoFor,
-  ]
-    .map((formatter) => formatter.toString())
-    .join('\n  ')
+  [formRedirecting, formStep].map((formatter) => formatter.toString()).join('\n  ')

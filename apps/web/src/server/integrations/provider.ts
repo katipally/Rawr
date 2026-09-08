@@ -1,4 +1,4 @@
-import { recordDeadLetter, type IntegrationKind, type WorkspaceContext } from '@rawr/db'
+import { recordDeadLetter, type IntegrationKind, type AccountContext } from '@rawr/db'
 
 /** The half of F6 §1 that is about talking to somebody else's server.
  *
@@ -28,7 +28,7 @@ export const providerError = (
 export const isCredentialRejection = (status: number): boolean => status === 401 || status === 403
 
 export type AttemptOptions = {
-  ctx: WorkspaceContext
+  ctx: AccountContext
   kind: IntegrationKind
   jobName: string
   payload: Record<string, unknown>

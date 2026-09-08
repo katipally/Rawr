@@ -1,46 +1,26 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import {
   publicEdgeContext,
   publicFormBySlug,
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { env } from '~/lib/env.ts'
-import { clientIp } from '~/server/edge.ts'
+import { clientIp, rateLimit } from '~/server/edge.ts'
+import { webflowSecret, webflowSignatureMatches } from '~/server/integrations/webflow.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
 
-/** POST /w/webflow — the fallback path of F3 §7.
- *
- *  Where marketing keeps a Webflow-designed native form, this is how it reaches
- *  Rawr without the paid hubspotonwebflow.com bridge. The primary path is
- *  replacing the form with the Rawr embed, which is better because Webflow's
- *  payload has no query string: only referrer and page survive, so attribution
- *  is weaker here. That is the cost of keeping the native form.
- *
- *  Webflow's Data API v2 signs "{x-webflow-timestamp}:{raw body}" with HMAC-SHA256
- *  using the OAuth app's client secret and sends the hex digest in
- *  x-webflow-signature. Webhooks created from a site dashboard or a site API key
- *  carry no signature at all, so this endpoint refuses them: an unsigned webhook
- *  is an open lead-injection endpoint. */
+/** POST /w/webflow — F3 §7's fallback for native Webflow forms. Attribution is
+ *  weaker than the embed's: Webflow sends no query string. An unsigned delivery is
+ *  refused, because an unverified webhook is an open lead-injection endpoint. */
 
 /** Webflow's own guidance. Older than this is a replay, not a delivery. */
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
-/** Webflow retries on a non-2xx, so anything we cannot ever process answers 200
- *  with a reason rather than inviting an infinite retry. Only a genuine "try me
- *  again" answers 5xx. */
+/** 200 with a reason for anything unprocessable: a non-2xx makes Webflow retry. */
 const accepted = (detail: string): NextResponse =>
   NextResponse.json({ ok: true, detail }, { status: 200 })
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
-  if (!env.WEBFLOW_CLIENT_SECRET) {
-    return NextResponse.json(
-      { error: 'Webflow webhooks are not configured. Set WEBFLOW_CLIENT_SECRET.' },
-      { status: 503 },
-    )
-  }
-
   const raw = await request.text()
   const signature = request.headers.get('x-webflow-signature')
   const timestamp = request.headers.get('x-webflow-timestamp')
@@ -57,7 +37,32 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.json({ error: 'That delivery is outside the replay window.' }, { status: 401 })
   }
 
-  if (!signatureMatches(timestamp, raw, signature)) {
+  // Two reads happen before the signature can be checked, so cap unsigned callers.
+  const ip = clientIp(request)
+  if (!rateLimit(`w:webflow:${ip ?? 'unknown'}`, 60, 60).allowed) {
+    return NextResponse.json({ error: 'Too many deliveries.' }, { status: 429 })
+  }
+
+  // Read before the signature: the secret that verifies it belongs to this org.
+  const url = new URL(request.url)
+  const account = url.searchParams.get('account')
+  const slug = url.searchParams.get('form')
+  if (!account || !slug) {
+    return accepted('This webhook URL carries no account and form mapping, so nothing was recorded.')
+  }
+
+  const form = await publicFormBySlug(account, slug)
+  if (!form || !form.isActive) return accepted('That Rawr form is not accepting submissions.')
+
+  const secret = await webflowSecret(publicEdgeContext(form.accountId))
+  if (!secret) {
+    return NextResponse.json(
+      { error: 'Webflow is not connected. Paste the app client secret on Settings, Integrations.' },
+      { status: 503 },
+    )
+  }
+
+  if (!webflowSignatureMatches(secret, timestamp, raw, signature)) {
     return NextResponse.json({ error: 'That signature does not match.' }, { status: 401 })
   }
 
@@ -73,38 +78,21 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   const siteId = data.siteId ?? payload.siteId ?? null
   if (!formName) return accepted('No form name in the payload.')
 
-  // Which Rawr form this is comes from the mapping in the URL of the webhook
-  // itself, so a new Webflow form cannot silently create leads against an
-  // unrelated Rawr form. Workspace and slug both come from the query string that
-  // was configured when the webhook was created.
-  const url = new URL(request.url)
-  const workspace = url.searchParams.get('workspace')
-  const slug = url.searchParams.get('form')
-  if (!workspace || !slug) {
-    return accepted('This webhook URL carries no workspace and form mapping, so nothing was recorded.')
-  }
-
-  const form = await publicFormBySlug(workspace, slug)
-  if (!form || !form.isActive) return accepted('That Rawr form is not accepting submissions.')
-
   const answers = data.data ?? data.formResponse ?? {}
   const body: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(answers)) {
     body[normaliseKey(key)] = Array.isArray(value) ? value.map(String) : String(value ?? '')
   }
 
-  const result = await runSubmission(request, form, body, clientIp(request), {
+  const result = await runSubmission(request, form, body, ip, {
     degradedSignals: true,
-    // Webflow's own submission id, so a redelivery is a no-op rather than a
-    // second lead. Falls back to the site and timestamp when it is absent.
+    // Webflow's own id, so a redelivery is a no-op rather than a second lead.
     idempotencyKey: data.id ?? data._id ?? `${siteId ?? 'webflow'}:${timestamp}`,
     attributionOverride: { pagePath: data.pageId ?? null, referrer: data.siteDomain ?? null },
   })
 
   if (result.errors?.length) {
-    // A native form whose fields do not match the Rawr schema is a configuration
-    // problem, not a transient one. Answering 200 stops the retry loop and the
-    // reason is in the body for whoever set it up.
+    // A schema mismatch is a configuration problem; retrying it forever helps nobody.
     return accepted(
       `Not recorded: ${result.errors.map((e) => e.message).join(' ')}`,
     )
@@ -112,43 +100,28 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
 
   if (result.notify) {
     queueSlackNotification({
-      workspaceId: form.workspaceId,
-      workspaceSlug: form.workspaceSlug,
+      accountId: form.accountId,
+      accountSlug: form.accountSlug,
       formId: form.formId,
       submissionId: result.submissionId,
       ...result.notify,
     })
   }
 
-  // B11. After the outcome is decided, like the Slack post above, and on the
-  // same background handle: a rule that sets a lifecycle stage must never make
-  // a visitor wait, and must never fail their submission.
+  // After the outcome, in the background: a rule must never make a visitor wait.
   if (result.contactId) {
-    reportEvent(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.accountId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,
-      workspaceSlug: form.workspaceSlug,
+      accountSlug: form.accountSlug,
     })
   }
 
   return NextResponse.json({ ok: true, duplicate: result.duplicate ?? false }, { status: 200 })
 }
 
-const signatureMatches = (timestamp: string, raw: string, signature: string): boolean => {
-  const expected = createHmac('sha256', env.WEBFLOW_CLIENT_SECRET)
-    .update(`${timestamp}:${raw}`)
-    .digest('hex')
-  const a = Buffer.from(expected, 'utf8')
-  const b = Buffer.from(signature, 'utf8')
-  // Length has to match before timingSafeEqual, and comparing lengths first is
-  // not a leak: the length of a hex digest is public.
-  return a.length === b.length && timingSafeEqual(a, b)
-}
-
-/** Webflow field names are whatever a designer typed: "Email Address", "First
- *  Name". Rawr keys are lowercase and underscored, so the two are reconciled
- *  here rather than forcing marketing to rename fields in Webflow. */
+/** "Email Address" -> email_address, so nobody renames fields in Webflow. */
 const normaliseKey = (key: string): string =>
   key
     .trim()

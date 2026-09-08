@@ -1,8 +1,8 @@
 import { asc, eq } from 'drizzle-orm'
 import { webhookEndpoint } from '../schema/platform.ts'
 import { randomToken } from '../internal/crypto.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 import { getRegistry } from './registry.ts'
 
 /** Who is subscribed to what happens in Rawr, and the key that proves a delivery
@@ -115,10 +115,10 @@ const checkEvents = (known: readonly string[], events: string[]): string[] => {
   return [...new Set(events)]
 }
 
-/** What this workspace can send, which is the fixed list plus one per object an
+/** What this account can send, which is the fixed list plus one per object an
  *  admin invented. A custom object only has creation to announce: a stage and a
  *  lifecycle are things the core three have and it does not. */
-export const webhookEventsFor = async (ctx: WorkspaceContext): Promise<string[]> => {
+export const webhookEventsFor = async (ctx: AccountContext): Promise<string[]> => {
   const registry = await getRegistry(ctx)
   return [
     ...WEBHOOK_EVENTS,
@@ -126,8 +126,8 @@ export const webhookEventsFor = async (ctx: WorkspaceContext): Promise<string[]>
   ]
 }
 
-export const listWebhookEndpoints = async (ctx: WorkspaceContext): Promise<WebhookEndpointRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listWebhookEndpoints = async (ctx: AccountContext): Promise<WebhookEndpointRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.select(SELECT).from(webhookEndpoint).orderBy(asc(webhookEndpoint.createdAt))
     return rows.map(shape)
   })
@@ -136,10 +136,10 @@ export const listWebhookEndpoints = async (ctx: WorkspaceContext): Promise<Webho
  *  them, so a subscriber piping everything into a warehouse does not have to come
  *  back and edit a list each time an event is added. */
 export const endpointsFor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   event: string,
 ): Promise<{ id: string; url: string; secret: string }[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({ id: webhookEndpoint.id, url: webhookEndpoint.url, secret: webhookEndpoint.secret, events: webhookEndpoint.events })
       .from(webhookEndpoint)
@@ -156,7 +156,7 @@ export type IssuedEndpoint = { id: string; secret: string }
 
 /** The secret comes back exactly once, here, the way an agent token's does. */
 export const createWebhookEndpoint = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { name: string; url: string; events: string[] },
 ): Promise<IssuedEndpoint> =>
   mutate(ctx, 'webhook_endpoint', async (tx) => {
@@ -168,7 +168,7 @@ export const createWebhookEndpoint = async (
 
     const [created] = await tx
       .insert(webhookEndpoint)
-      .values({ workspaceId: ctx.workspaceId, createdBy: ctx.actorId, name, url, secret, events })
+      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, name, url, secret, events })
       .returning({ id: webhookEndpoint.id })
     if (!created) throw new Error('The endpoint could not be created.')
     return {
@@ -180,7 +180,7 @@ export const createWebhookEndpoint = async (
   })
 
 export const updateWebhookEndpoint = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   input: {
     name?: string | undefined
@@ -209,7 +209,7 @@ export const updateWebhookEndpoint = async (
 
 /** A new key, returned once. The old one stops working the moment this commits,
  *  which is the point: a rolled key is only rolled if the old one is dead. */
-export const rollWebhookSecret = async (ctx: WorkspaceContext, id: string): Promise<string> =>
+export const rollWebhookSecret = async (ctx: AccountContext, id: string): Promise<string> =>
   mutate(ctx, 'webhook_endpoint', async (tx) => {
     const [before] = await tx
       .select({ name: webhookEndpoint.name })
@@ -225,7 +225,7 @@ export const rollWebhookSecret = async (ctx: WorkspaceContext, id: string): Prom
     }
   })
 
-export const removeWebhookEndpoint = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const removeWebhookEndpoint = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'webhook_endpoint', async (tx) => {
     const [before] = await tx.select(SELECT).from(webhookEndpoint).where(eq(webhookEndpoint.id, id)).limit(1)
     if (!before) throw new Error('That endpoint no longer exists.')
@@ -243,11 +243,11 @@ export const removeWebhookEndpoint = async (ctx: WorkspaceContext, id: string): 
  *  Not a `mutate`: this is the worker reporting, not a person deciding, and an
  *  audit row per delivery would bury the history somebody actually reads. */
 export const recordDelivery = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   outcome: { ok: true; status: number } | { ok: false; status: number | null; error: string },
 ): Promise<void> => {
-  await withWorkspace(ctx, (tx) =>
+  await withAccount(ctx, (tx) =>
     tx
       .update(webhookEndpoint)
       .set(

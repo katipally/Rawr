@@ -3,7 +3,7 @@
 import { Button, Field, PageHeader, Select, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatDate } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -17,8 +17,8 @@ type Service = {
 }
 
 export type AccountPanelProps = {
-  me: { email: string; displayName: string; avatarUrl: string | null; role: string; userId: string }
-  workspaces: { slug: string; name: string; role: string; joinedAt: string }[]
+  me: { email: string; displayName: string; avatarUrl: string | null; userId: string }
+  accounts: { slug: string; name: string; joinedAt: string }[]
   admins: { name: string; email: string }[]
   timezone: string
   weekly: unknown
@@ -28,13 +28,8 @@ export type AccountPanelProps = {
   links: { agent: string; availability: string }
 }
 
-const ROLE_MEANS: Record<string, string> = {
-  admin: 'Everything, including settings and members.',
-  sales: 'Contacts, companies, deals, tasks and bookings.',
-  marketing: 'Contacts, companies, forms, segments and subscriptions.',
-  viewer: 'Read only. Ask an admin below to raise this.',
-}
-
+/** Node and the browser ship different ICU data, so this list is not the same on
+ *  both sides of a render. Read on the client only, after mount. */
 const zones = (): string[] => {
   try {
     const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf
@@ -89,17 +84,22 @@ const ServiceRow = ({ name, service, what }: { name: string; service: Service; w
   )
 }
 
-export const AccountPanel = ({ me, workspaces, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
+export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
   const router = useRouter()
   const toast = useToast()
   const [timezone, setTimezone] = useState(initialTimezone)
   const [savingZone, setSavingZone] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
-  const allZones = useMemo(() => {
-    const list = zones()
-    return list.includes(timezone) ? list : [timezone, ...list]
-  }, [timezone])
+  // The server renders the saved zone alone and the full list arrives after mount,
+  // because enumerating zones on both sides produced two different lists and React
+  // threw out the whole tree over the mismatch.
+  const [supportedZones, setSupportedZones] = useState<string[]>([])
+  useEffect(() => setSupportedZones(zones()), [])
+  const allZones = useMemo(
+    () => (supportedZones.includes(timezone) ? supportedZones : [timezone, ...supportedZones]),
+    [supportedZones, timezone],
+  )
   const detected = useMemo(() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -124,7 +124,7 @@ export const AccountPanel = ({ me, workspaces, admins, timezone: initialTimezone
   const signOutEverywhere = async () => {
     setSigningOut(true)
     try {
-      await api.account.signOutEverywhere.mutate()
+      await api.session.signOutEverywhere.mutate()
       // This session is one of the ones just revoked; the redirect makes that
       // visible instead of leaving a page that will fail on its next click.
       window.location.assign('/sign-in?error=' + encodeURIComponent('Signed out everywhere. Sign in again to continue.'))
@@ -159,23 +159,23 @@ export const AccountPanel = ({ me, workspaces, admins, timezone: initialTimezone
         </div>
       </Panel>
 
-      <Panel title="Your workspaces and roles">
+      <Panel title="Your account">
         <ul className="flex flex-col divide-y divide-divider">
-          {workspaces.map((w) => (
+          {accounts.map((w) => (
             <li key={w.slug} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">
               <div className="min-w-0">
-                <p className="font-medium">
-                  {w.name} <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small font-normal text-secondary">{w.role}</span>
+                <p className="font-medium">{w.name}</p>
+                <p className="text-small text-secondary">
+                  What you may do here is under Settings, Users &amp; Teams.
                 </p>
-                <p className="text-small text-secondary">{ROLE_MEANS[w.role] ?? ''}</p>
               </div>
               <p className="shrink-0 text-small text-secondary">Joined {formatDate(w.joinedAt)}</p>
             </li>
           ))}
         </ul>
-        {me.role !== 'admin' ? (
+        {admins.length > 0 ? (
           <p className="text-small text-secondary">
-            Roles are set by an admin under Settings, Members.{' '}
+            What you may do is set by a super admin under Settings, Users &amp; Teams.{' '}
             {admins.length > 0 ? (
               <>
                 Ask{' '}

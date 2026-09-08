@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env, googleCalendarConfigured } from '~/lib/env.ts'
 import { calendarsPath } from '~/lib/links.ts'
-import { generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
+import { GOOGLE_CALENDAR_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { CALENDAR_SCOPES } from '~/server/calendar.ts'
 import { readSession } from '~/server/session.ts'
 
@@ -21,7 +21,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(new URL('/sign-in', env.AUTH_URL))
   }
 
-  const back = new URL(calendarsPath(session.workspaceSlug), env.AUTH_URL)
+  const back = new URL(calendarsPath(session.accountSlug), env.AUTH_URL)
 
   if (!googleCalendarConfigured) {
     back.searchParams.set(
@@ -33,7 +33,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
 
   const state = generateState()
   const codeVerifier = generateCodeVerifier()
-  const url = googleClient().createAuthorizationURL(state, codeVerifier, CALENDAR_SCOPES)
+  const url = googleClient(GOOGLE_CALENDAR_CALLBACK_PATH).createAuthorizationURL(state, codeVerifier, CALENDAR_SCOPES)
   url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', 'consent')

@@ -2,9 +2,9 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import { contact } from '../schema/records.ts'
 import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity, type ActivityType } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
-import { withWorkspace, writeAudit } from './index.ts'
+import { withAccount, writeAudit } from './index.ts'
 import { claimInbound } from './integrations.ts'
 
 /** F6 §2 and §3. What a provider tells us happened to an email, turned into a
@@ -73,11 +73,11 @@ const sequenceSentence = (subject: string, detail: Record<string, unknown>): str
 }
 
 const SENTENCE: Record<MarketingEventKind, (subject: string, detail: Record<string, unknown>) => string> = {
-  delivered: (subject) => `${subject} was delivered`,
+  delivered: (subject) => `was sent ${subject}`,
   open: (subject) => `opened ${subject}`,
   click: (subject) => `clicked a link in ${subject}`,
-  bounce: (subject) => `${subject} bounced`,
-  spam: (subject) => `${subject} was marked as spam`,
+  bounce: (subject) => `did not receive ${subject}: it bounced`,
+  spam: (subject) => `marked ${subject} as spam`,
   unsubscribe: () => 'unsubscribed',
   sequence_step: sequenceSentence,
   sequence_reply: (subject) => `replied to ${subject}`,
@@ -86,13 +86,13 @@ const SENTENCE: Record<MarketingEventKind, (subject: string, detail: Record<stri
 export type IngestOutcome = { stored: boolean; matched: boolean; reason: string | null }
 
 export const ingestMarketingEvent = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   event: MarketingEvent,
 ): Promise<IngestOutcome> => {
   const email = event.email.trim().toLowerCase()
   if (!email.includes('@')) return { stored: false, matched: false, reason: 'The event named no address.' }
 
-  const matchedContact = await withWorkspace(ctx, async (tx) => {
+  const matchedContact = await withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({ id: contact.id })
       .from(contact)
@@ -120,7 +120,7 @@ export const ingestMarketingEvent = async (
     }
   }
 
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     const subject = event.subject ?? 'an email'
     await recordActivity(tx, ctx, {
       type: ACTIVITY_TYPE[event.kind],
@@ -147,14 +147,14 @@ export const ingestMarketingEvent = async (
         await tx
           .insert(subscriptionState)
           .values({
-            workspaceId: ctx.workspaceId,
+            accountId: ctx.accountId,
             contactId: matchedContact.id,
             subscriptionTypeId: type.id,
             state: 'unsubscribed',
             source: event.source,
           })
           .onConflictDoUpdate({
-            target: [subscriptionState.workspaceId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
+            target: [subscriptionState.accountId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
             set: { state: 'unsubscribed', changedAt: new Date(), source: event.source },
           })
       }
@@ -174,11 +174,11 @@ export const ingestMarketingEvent = async (
 /** Who may be included in a list push. The one query F6 §2's promise rests on:
  *  nobody whose latest state anywhere is unsubscribed is ever mailed again. */
 export const mailableContacts = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactIds: string[],
 ): Promise<{ id: string; email: string; firstName: string | null; lastName: string | null }[]> => {
   if (contactIds.length === 0) return []
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       email: string
@@ -223,12 +223,12 @@ export type SegmentContact = {
 }
 
 export const readSegmentContactPage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   segmentId: string,
   input: { after?: string | null; limit?: number } = {},
 ): Promise<{ rows: SegmentContact[]; nextCursor: string | null }> => {
   const limit = Math.min(Math.max(input.limit ?? 500, 1), 1000)
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const [found] = await tx.execute<{ object_key: string }>(sql`
       select o.key as object_key
         from segment s join object_def o on o.id = s.object_id
@@ -275,12 +275,12 @@ export const readSegmentContactPage = async (
 /** The provider's own id for this contact, so a sync is incremental rather than a
  *  full re-push and an opt-out reaches the right row at the other end. */
 export const setExternalId = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
   provider: string,
   externalId: string,
 ): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx
       .update(contact)
       .set({
@@ -291,11 +291,11 @@ export const setExternalId = async (
 }
 
 export const externalIdOf = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
   provider: string,
 ): Promise<string | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ external_id: string | null }>(sql`
       select external_ids ->> ${provider} as external_id from contact
        where id = ${contactId} and deleted_at is null limit 1`)
@@ -305,11 +305,11 @@ export const externalIdOf = async (
 /** Contacts a provider knows, oldest-synced first, so a scheduled read-back walks
  *  the whole set over a few passes rather than the same few every time. */
 export const contactsLinkedTo = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   provider: string,
   limit: number,
 ): Promise<{ id: string; email: string; externalId: string }[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ id: string; email: string; external_id: string }>(sql`
       select c.id, c.email, c.external_ids ->> ${provider} as external_id
         from contact c

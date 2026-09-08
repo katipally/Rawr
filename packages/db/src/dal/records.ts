@@ -1,11 +1,13 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { ObjectKey } from '../registry/core.ts'
 import { moveActivityLinks, recordActivity, type EntityType } from './activity.ts'
+import { notify } from './notifications.ts'
 import { moveVisitorHistory } from './stitch.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { companyNameFromDomain, employerDomainFromEmail } from './domains.ts'
-import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { requestEnrichment } from './enrichment.ts'
+import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import {
   compileFilters,
   fieldExpression,
@@ -206,7 +208,7 @@ export type ListPage = {
 
 /** The one read path behind every table, board column, CSV export and MCP list. */
 export const listRecords = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: ListInput,
 ): Promise<ListPage> => {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
@@ -238,7 +240,7 @@ export const listRecords = async (
   // the filter matches rather than how many are left. Its own transaction, so
   // it runs alongside the page instead of ahead of it.
   const counting = input.count
-    ? withWorkspace(ctx, async (tx) =>
+    ? withAccount(ctx, async (tx) =>
         Number(
           (
             await tx.execute<{ n: string }>(sql`
@@ -254,7 +256,7 @@ export const listRecords = async (
 
   const [total, { rows, labels }] = await Promise.all([
     counting,
-    withWorkspace(ctx, async (tx) => {
+    withAccount(ctx, async (tx) => {
       const rows = await tx.execute<RecordValues & { id: string }>(sql`
         select ${sql.join(selected, sql`, `)}
           from ${tableFor(object)}
@@ -331,12 +333,12 @@ export type RecordDetail = {
 }
 
 export const getRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   id: string,
 ): Promise<RecordDetail | null> => {
   if (!isUuid(id)) return null
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const fields = object.fields.map((field) => fieldOrThrow(object, field.key))
@@ -438,7 +440,7 @@ const findDuplicate = async (
  *  gmail.com never becomes a company called Gmail. A4. */
 const autoAssociateCompany = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   email: unknown,
 ): Promise<{ companyId: string; created: boolean } | null> => {
   const domain = employerDomainFromEmail(typeof email === 'string' ? email : null)
@@ -450,8 +452,8 @@ const autoAssociateCompany = async (
   if (existing) return { companyId: existing.id, created: false }
 
   const [created] = await tx.execute<{ id: string }>(sql`
-    insert into company (workspace_id, name, domain)
-    values (${ctx.workspaceId}, ${companyNameFromDomain(domain)}, ${domain})
+    insert into company (account_id, name, domain)
+    values (${ctx.accountId}, ${companyNameFromDomain(domain)}, ${domain})
     on conflict do nothing
     returning id`)
 
@@ -464,6 +466,48 @@ const autoAssociateCompany = async (
   return raced ? { companyId: raced.id, created: false } : null
 }
 
+/** A deal's stage and pipeline are one fact told twice, and the stage is the
+ *  half a person picks. So the pipeline follows the stage: a stage alone sets
+ *  its pipeline, a pipeline alone lands the deal on that pipeline's first stage,
+ *  and the two named together must agree. Neither half is read from the client
+ *  as true, because a stage from another pipeline would vanish from every board. */
+const reconcileDeal = async (
+  tx: Tx,
+  columns: Record<string, unknown>,
+  current: { pipeline_id: string | null; stage_id: string | null } | null,
+): Promise<void> => {
+  const stageId = typeof columns.stage_id === 'string' ? columns.stage_id : null
+  const pipelineId = typeof columns.pipeline_id === 'string' ? columns.pipeline_id : null
+
+  if (stageId) {
+    const [stage] = await tx.execute<{ pipeline_id: string }>(
+      sql`select pipeline_id from pipeline_stage where id = ${stageId} limit 1`,
+    )
+    if (!stage) throw new Error('That deal stage does not exist.')
+    if (pipelineId && pipelineId !== stage.pipeline_id) {
+      throw new Error('That deal stage is not in that pipeline. Pick a stage from the pipeline, or change the pipeline first.')
+    }
+    columns.pipeline_id = stage.pipeline_id
+    return
+  }
+
+  const target = pipelineId ?? current?.pipeline_id ?? null
+  // A new pipeline with no stage named, or a new deal with neither: the first
+  // stage of the pipeline, which is where HubSpot starts a deal too.
+  if (target === (current?.pipeline_id ?? null) && current) return
+  const [first] = await tx.execute<{ id: string; pipeline_id: string }>(target
+    ? sql`select id, pipeline_id from pipeline_stage where pipeline_id = ${target} order by position asc limit 1`
+    : sql`select s.id, s.pipeline_id from pipeline_stage s join pipeline p on p.id = s.pipeline_id order by p.position asc, s.position asc limit 1`)
+  if (!first) throw new Error('That pipeline has no stages. An admin adds them in Settings, under Pipelines.')
+  columns.pipeline_id = first.pipeline_id
+  columns.stage_id = first.id
+}
+
+/** The one key an enricher matches on. A write that sets or changes it is a
+ *  reason to ask again; every other write is not. */
+const matchKeyOf = (objectKey: string, columns: Record<string, unknown>): unknown =>
+  objectKey === 'contact' ? columns.email : objectKey === 'company' ? columns.domain : undefined
+
 export type CreateResult = {
   id: string
   warnings: string[]
@@ -474,16 +518,26 @@ export type CreateResult = {
   displayName: string
 }
 
+/** An import writes tens of thousands of rows in a run, and asking a person to
+ *  approve a queue that size is not a question, it is a wall. So the importer
+ *  turns this off and the records it writes are enriched on a later edit, or one
+ *  at a time from the record itself. Every other path asks. */
+export type WriteOptions = { enrich?: boolean }
+
 export const createRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   values: RecordValues,
+  options: WriteOptions = {},
 ): Promise<CreateResult> => {
   assertCanWrite(ctx, objectKey)
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const prepared = prepare(object, values)
+    // What was reconciled is what was written, so the audit row and the display
+    // name describe the deal as stored rather than the half that was sent.
+    const written = object.key === 'deal' ? await reconcileDeal(tx, prepared.columns, null).then(() => ({ ...values, pipeline_id: prepared.columns.pipeline_id, stage_id: prepared.columns.stage_id })) : values
 
     for (const field of object.fields) {
       if (!field.isRequired) continue
@@ -503,12 +557,13 @@ export const createRecord = async (
       if (linked) {
         prepared.columns.company_id = linked.companyId
         autoCompanyId = linked.companyId
+        if (linked.created && options.enrich !== false) await requestEnrichment(tx, ctx, 'company', linked.companyId)
       }
     }
 
     const columns: Record<string, unknown> = {
       ...prepared.columns,
-      workspace_id: ctx.workspaceId,
+      account_id: ctx.accountId,
       custom: prepared.custom,
       // Which object this row is one of. Only a shared-table row needs it; a
       // core record's table already answers the question.
@@ -532,22 +587,25 @@ export const createRecord = async (
       returning id`)
 
     if (!row) throw new Error(`The ${object.nameSingular.toLowerCase()} could not be created.`)
+    if (options.enrich !== false && (object.key === 'contact' || object.key === 'company') && matchKeyOf(object.key, prepared.columns)) {
+      await requestEnrichment(tx, ctx, object.key, row.id)
+    }
 
-    const name = displayName(object, values)
+    const name = displayName(object, written)
     await writeAudit(tx, ctx, {
       entity: object.key,
       entityId: row.id,
       action: 'create',
       before: null,
-      after: values,
+      after: written,
     })
     await recordActivity(tx, ctx, {
       type: 'field_change',
-      subject: `${name} was created`,
+      subject: `created ${name}`,
       links: linksFor(object.key, row.id, prepared.columns),
     })
 
-    return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, values) }
+    return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, written) }
   })
 }
 
@@ -592,17 +650,18 @@ export type UpdateResult = {
 /** Last write wins, but conditional on updated_at. A stale write is refused with
  *  what changed rather than silently overwriting someone else's edit. */
 export const updateRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   id: string,
   values: RecordValues,
   expectedUpdatedAt?: Date | null,
+  options: WriteOptions = {},
 ): Promise<UpdateResult> => {
   assertCanWrite(ctx, objectKey)
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
-    return updateRecordIn(tx, ctx, object, id, values, expectedUpdatedAt ?? null)
+    return updateRecordIn(tx, ctx, object, id, values, expectedUpdatedAt ?? null, options)
   })
 }
 
@@ -611,11 +670,12 @@ export const updateRecord = async (
  *  activity — to many records without opening a transaction per row. */
 const updateRecordIn = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   object: RegistryObject,
   id: string,
   values: RecordValues,
   expectedUpdatedAt: Date | null,
+  options: WriteOptions = {},
 ): Promise<UpdateResult> => {
   const prepared = prepare(object, values)
   if (Object.keys(prepared.columns).length === 0 && Object.keys(prepared.custom).length === 0) {
@@ -630,6 +690,18 @@ const updateRecordIn = async (
 
   const duplicate = await findDuplicate(tx, object, prepared.columns, id)
   if (duplicate) throw new DuplicateError(duplicate.what, duplicate.id)
+  if (object.key === 'deal') {
+    await reconcileDeal(tx, prepared.columns, {
+      pipeline_id: typeof before.pipeline_id === 'string' ? before.pipeline_id : null,
+      stage_id: typeof before.stage_id === 'string' ? before.stage_id : null,
+    })
+  }
+  // What was reconciled is what was written, so the audit row and the stage
+  // change on the timeline describe the move rather than the half that was sent.
+  const written =
+    object.key === 'deal'
+      ? { ...values, ...Object.fromEntries(['pipeline_id', 'stage_id'].filter((key) => prepared.columns[key] !== undefined).map((key) => [key, prepared.columns[key]])) }
+      : values
 
   const assignments = quotedAssignments(prepared.columns)
   const merged = sql`coalesce("custom", '{}'::jsonb) || ${JSON.stringify(prepared.custom)}::jsonb`
@@ -649,22 +721,26 @@ const updateRecordIn = async (
      returning updated_at`)
 
   if (!row) throw new Error('That record no longer exists.')
+  const key = options.enrich === false ? undefined : matchKeyOf(object.key, prepared.columns)
+  if ((object.key === 'contact' || object.key === 'company') && key && key !== before[object.key === 'contact' ? 'email' : 'domain']) {
+    await requestEnrichment(tx, ctx, object.key, id)
+  }
 
   await writeAudit(tx, ctx, {
     entity: object.key,
     entityId: id,
     action: 'update',
-    before: pick(before, Object.keys(values), object),
-    after: values,
+    before: pick(before, Object.keys(written), object),
+    after: written,
   })
-  const changes = await writeChangeActivities(tx, ctx, object, id, before, values)
+  const changes = await writeChangeActivities(tx, ctx, object, id, before, written)
 
   return {
     updatedAt: asDate(row.updated_at),
     warnings: prepared.warnings,
     stageChange: changes.stageChange,
     lifecycleChanged: changes.lifecycleChanged,
-    displayName: displayName(object, { ...before, ...values }),
+    displayName: displayName(object, { ...before, ...written }),
   }
 }
 
@@ -688,7 +764,7 @@ const BULK_MAX = 500
  *  failure rolls back only that row, and every one still writes its own audit
  *  entry and its own change activity. */
 export const bulkUpdateRecords = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   ids: string[],
   values: RecordValues,
@@ -701,7 +777,7 @@ export const bulkUpdateRecords = async (
   }
   if (Object.keys(values).length === 0) throw new Error('Pick a field to change first.')
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const result: BulkUpdateResult = { updated: 0, failed: [], previous: [] }
@@ -777,7 +853,7 @@ const sameValue = (a: unknown, b: unknown): boolean => {
  *  typing it. Only fields marked track_changes produce a row. A3. */
 const writeChangeActivities = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   object: RegistryObject,
   id: string,
   before: RecordValues,
@@ -819,6 +895,21 @@ const writeChangeActivities = async (
 
     if (type === 'lifecycle_change') lifecycleChanged = true
     if (type === 'stage_change' && activityId) {
+      // The deal's owner, in the same transaction as the move. Not through
+      // stage-alerts.ts: that one is opt-in per pipeline and gated on Slack being
+      // configured, and an in-app notice must not disappear because it is not.
+      const owner = after.owner_id ?? before.owner_id
+      if (typeof owner === 'string') {
+        await notify(tx, ctx, {
+          kind: 'deal_stage_change',
+          dedupeKey: `deal:stage:${activityId}`,
+          title: `${name} moved to ${toLabel || 'no stage'}`,
+          body: `From ${fromLabel || 'no stage'}.`,
+          entity: object.key,
+          entityId: id,
+          to: { userIds: [owner] },
+        })
+      }
       stageChange = {
         activityId,
         dealId: id,
@@ -854,7 +945,7 @@ const labelOf = async (tx: Tx, fieldKey: string, value: unknown): Promise<string
 /** Soft delete. Activity is retained, and the timeline entry keeps reading as the
  *  name the record had, so history is never silently rewritten. */
 export const deleteRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   id: string,
 ): Promise<void> =>
@@ -868,13 +959,20 @@ export const deleteRecord = async (
       sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
     )
 
+    // A question about a record nobody kept is not a question. Left behind it
+    // would inflate the number the consent prompt asks somebody to approve, and
+    // then fail against a record that is gone.
+    await tx.execute(
+      sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${id}`,
+    )
+
     // Views are detached rather than deleted, so aggregate counts stay honest.
     // Erasure is a separate, explicit action. F4's edge case table.
     if (object.key === 'contact') {
       for (const table of ['page_view', 'custom_event', 'visitor'] as const) {
         await tx.execute(sql`
           update ${sql.raw(table)} set contact_id = null
-           where workspace_id = ${ctx.workspaceId} and contact_id = ${id}`)
+           where account_id = ${ctx.accountId} and contact_id = ${id}`)
       }
     }
 
@@ -905,7 +1003,7 @@ export type MergeResult = { id: string; activitiesMoved: number }
  *  tasks. The older created_at wins, because that is when the relationship
  *  actually started. A4. */
 export const mergeRecords = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: MergeInput,
 ): Promise<MergeResult> => {
   assertCanWrite(ctx, input.objectKey)
@@ -913,7 +1011,7 @@ export const mergeRecords = async (
     throw new Error('A record cannot be merged into itself.')
   }
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
     const [survivor, absorbed] = await Promise.all([
@@ -929,6 +1027,9 @@ export const mergeRecords = async (
     // before the survivor tries to claim it.
     await tx.execute(
       sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${input.absorbedId}`,
+    )
+    await tx.execute(
+      sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${input.absorbedId}`,
     )
 
     const chosen: RecordValues = {}
@@ -984,7 +1085,7 @@ export const mergeRecords = async (
     })
     await recordActivity(tx, ctx, {
       type: 'merge',
-      subject: `${absorbedName} was merged into this record`,
+      subject: `merged ${absorbedName} into this record`,
       payload: { absorbedId: input.absorbedId, absorbedName, picks: input.picks },
       links: [{ entityType: coreKey, entityId: input.survivorId }],
     })
@@ -997,20 +1098,20 @@ export const mergeRecords = async (
  *  Each is de-duplicated first for the same reason activity links are. */
 const moveRelated = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: ObjectKey,
   fromId: string,
   toId: string,
 ): Promise<void> => {
   await tx.execute(sql`
     delete from association a
-     where a.workspace_id = ${ctx.workspaceId}
+     where a.account_id = ${ctx.accountId}
        and ((a.from_type = ${objectKey} and a.from_id = ${fromId} and exists (
-              select 1 from association k where k.workspace_id = a.workspace_id
+              select 1 from association k where k.account_id = a.account_id
                 and k.from_type = a.from_type and k.from_id = ${toId}
                 and k.to_type = a.to_type and k.to_id = a.to_id))
          or (a.to_type = ${objectKey} and a.to_id = ${fromId} and exists (
-              select 1 from association k where k.workspace_id = a.workspace_id
+              select 1 from association k where k.account_id = a.account_id
                 and k.to_type = a.to_type and k.to_id = ${toId}
                 and k.from_type = a.from_type and k.from_id = a.from_id)))`)
   await tx.execute(
@@ -1026,9 +1127,9 @@ const moveRelated = async (
   if (objectKey === 'contact') {
     await tx.execute(sql`
       delete from subscription_state s
-       where s.workspace_id = ${ctx.workspaceId} and s.contact_id = ${fromId}
+       where s.account_id = ${ctx.accountId} and s.contact_id = ${fromId}
          and exists (select 1 from subscription_state k
-                      where k.workspace_id = s.workspace_id and k.contact_id = ${toId}
+                      where k.account_id = s.account_id and k.contact_id = ${toId}
                         and k.subscription_type_id = s.subscription_type_id)`)
     await tx.execute(sql`update subscription_state set contact_id = ${toId} where contact_id = ${fromId}`)
   }

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { owner } from '../db.ts'
+import { INTERNAL_SECRET } from '../env.ts'
 import { defineJob } from './registry.ts'
 
 /** F6 §1's health check on a schedule.
@@ -19,25 +20,31 @@ export const checkIntegrations = defineJob({
   retryDelaySeconds: 300,
   handle: async () => {
     const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-    const secret = process.env.RAWR_INTERNAL_SECRET ?? ''
-    if (!secret) {
-      throw new Error(
-        'RAWR_INTERNAL_SECRET is not set, so the worker cannot ask the app to run a health check. Set the same value on both.',
-      )
-    }
 
     // Only integrations somebody has actually configured. Testing an unconfigured
     // one would turn "nobody has set this up" into "this is broken", which is a
     // different and less useful thing to see.
+    // One credential serves the whole organisation now, so it is tested once,
+    // not once per account. The test still runs *inside* a account, because
+    // testConnection takes a account context, so the organisation's oldest one
+    // stands in — any of them reads the same row.
     const rows = await owner`
-      select workspace_id, kind from integration
-       where secret_ref is not null`
+      select i.kind,
+             (select w.id from account w
+               where w.organisation_id = i.organisation_id
+               order by w.created_at, w.id
+               limit 1) as account_id
+        from integration i
+       where i.secret_ref is not null`
 
     for (const row of rows) {
+      // An organisation with a credential and no account has nowhere to run
+      // the test. Nothing to report, rather than a request with a null tenant.
+      if (!row.account_id) continue
       const response = await fetch(`${base}/api/internal/integration-health`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-rawr-internal': secret },
-        body: JSON.stringify({ workspaceId: row.workspace_id, kind: row.kind }),
+        headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
+        body: JSON.stringify({ accountId: row.account_id, kind: row.kind }),
         signal: AbortSignal.timeout(30_000),
       })
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean; detail?: string }

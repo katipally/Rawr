@@ -20,7 +20,7 @@ export const createFieldIndex = defineJob({
   schema: payload,
   retryLimit: 5,
   retryDelaySeconds: 30,
-  handle: async ({ workspaceId, fieldIndexId, objectKey, fieldKey }) => {
+  handle: async ({ accountId, fieldIndexId, objectKey, fieldKey }) => {
     assertUsableFieldKey(fieldKey)
     assertUsableFieldKey(objectKey)
     const indexName = `hot_${objectKey}_${fieldKey}`
@@ -51,12 +51,12 @@ export const createFieldIndex = defineJob({
       const message = cause instanceof Error ? cause.message : String(cause)
       await owner`
         update field_index set state = 'failed', last_error = ${message}
-         where id = ${fieldIndexId} and workspace_id = ${workspaceId}`
+         where id = ${fieldIndexId} and account_id = ${accountId}`
       throw cause
     }
 
     await owner`
       update field_index set state = 'ready', last_error = null
-       where id = ${fieldIndexId} and workspace_id = ${workspaceId}`
+       where id = ${fieldIndexId} and account_id = ${accountId}`
   },
 })

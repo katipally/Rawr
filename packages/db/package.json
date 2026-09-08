@@ -24,14 +24,15 @@
     "verify:activity": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-activity.ts",
     "verify:admin": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-admin.ts",
     "verify:integrations": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-integrations.ts",
-    "verify:org": "node --env-file=../../.env.local scripts/verify-org.ts",
+    "verify:account": "node --env-file=../../.env.local scripts/verify-account.ts",
     "verify:mail": "node --env-file=../../.env.local scripts/verify-mail.ts",
     "verify:sequences": "node --env-file=../../.env.local scripts/verify-sequences.ts",
     "verify:reporting": "node --env-file=../../.env.local scripts/verify-reporting.ts",
     "verify:scale": "DATABASE_POOL_MAX=8 node --env-file=../../.env.local scripts/verify-scale.ts",
     "reclaim": "node --env-file=../../.env.local scripts/reclaim.mjs",
     "probe:large": "node --env-file=../../.env.local scripts/probe-large-values.mjs",
-    "verify:objects": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-objects.ts"
+    "verify:objects": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-objects.ts",
+    "verify:notifications": "DATABASE_POOL_MAX=2 node --env-file=../../.env.local scripts/verify-notifications.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

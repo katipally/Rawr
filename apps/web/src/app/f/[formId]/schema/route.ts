@@ -1,11 +1,12 @@
 import { publicFormById } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
+import { themeCss } from '~/lib/embed-themes.ts'
 import { CORS_HEADERS, rateLimit, clientIp } from '~/server/edge.ts'
 
 /** GET /f/:formId/schema — what the embed needs to paint the form.
  *
  *  Returns the questions and nothing else. No submissions, no counts, no
- *  workspace name, no settings a visitor has no business seeing: the success
+ *  account name, no settings a visitor has no business seeing: the success
  *  message is the only one, because the browser has to render it. */
 
 export const OPTIONS = (): NextResponse =>
@@ -40,6 +41,10 @@ export const GET = async (
         submitLabel: form.settings.submitLabel,
         steps: form.settings.steps ?? null,
       },
+      // Resolved here rather than shipped as a preset name, so the embed carries
+      // no table of looks and a preset the marketer has changed since renders as
+      // what they actually chose.
+      theme: themeCss(form.settings.theme),
     },
     {
       headers: {

@@ -22,7 +22,7 @@ export const PENDING_NOTICE =
   'Your joining link is still being created. It will appear on your calendar invitation shortly.'
 
 export type PendingConference = {
-  workspaceId: string
+  accountId: string
   bookingId: string
   /** The strings already rendered for the event, reused verbatim so a retry cannot
    *  produce a Zoom meeting titled differently from its own calendar entry. */
@@ -47,7 +47,7 @@ export const queueConferenceBackfill = (pending: PendingConference): void => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const chase = async (pending: PendingConference): Promise<void> => {
-  const ctx = publicEdgeContext(pending.workspaceId)
+  const ctx = publicEdgeContext(pending.accountId)
   let lastError = pending.reason
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
@@ -61,7 +61,7 @@ const chase = async (pending: PendingConference): Promise<void> => {
     if (!booking || booking.state !== 'confirmed' || booking.conferenceUrl) return
     if (booking.startsAt.getTime() < Date.now()) return
 
-    const outcome = await createZoomMeeting({
+    const outcome = await createZoomMeeting(ctx, {
       hostEmail: booking.hostEmail,
       topic: pending.topic,
       agenda: pending.agenda,
@@ -113,7 +113,7 @@ const announce = async (
 
   const when = booking.startsAt.toISOString().replace('T', ' ').slice(0, 16)
   queueHostAlert({
-    workspaceId: pending.workspaceId,
+    accountId: pending.accountId,
     jobName: 'slack.booking-no-conference',
     // Keyed on the booking: one meeting without a link, one alert, however many
     // times the chase gives up.
@@ -123,7 +123,7 @@ const announce = async (
       `*No Zoom link on a confirmed meeting.* ${booking.hostName} with ${booking.attendeeName}, ${when} UTC.`,
       `Zoom said: ${reason}`,
       'Add a link to the calendar event by hand, or replay this once Zoom is back.',
-      `<${publicBaseUrl}${bookedPath(booking.workspaceSlug)}|Open the booked list>`,
+      `<${publicBaseUrl}${bookedPath(booking.accountSlug)}|Open the booked list>`,
     ].join('\n'),
   })
   await record(pending, reason, ATTEMPTS)
@@ -131,7 +131,7 @@ const announce = async (
 
 const record = async (pending: PendingConference, error: string, attempts: number): Promise<void> => {
   try {
-    await recordDeadLetter(publicEdgeContext(pending.workspaceId), {
+    await recordDeadLetter(publicEdgeContext(pending.accountId), {
       jobName: 'zoom.backfill',
       payload: { bookingId: pending.bookingId, topic: pending.topic },
       error,

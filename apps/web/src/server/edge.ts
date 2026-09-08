@@ -1,6 +1,6 @@
 import { hashIp } from '@rawr/db'
 import type { NextRequest } from 'next/server'
-import { env, turnstileConfigured } from '~/lib/env.ts'
+import { env } from '~/lib/env.ts'
 
 /** Everything the public edge needs from a request, read in one place so no route
  *  reaches into headers on its own and gets the precedence wrong. */
@@ -142,39 +142,6 @@ export const checkSubmitLimits = (formId: string, ip: string | null): RateLimit 
   const perHour = rateLimit(`f:${formId}:${who}:h`, 30, 3600)
   if (!perHour.allowed) return perHour
   return rateLimit(`f:${formId}:all`, 600, 60)
-}
-
-// ---------------------------------------------------------------------------
-// Turnstile
-// ---------------------------------------------------------------------------
-
-const SITEVERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
-
-/** Server side only: the secret never reaches the browser, or the check is
- *  theatre. Returns 'unavailable' rather than throwing, because an unreachable
- *  Cloudflare must quarantine the lead, not lose it. */
-export const verifyTurnstile = async (
-  token: unknown,
-  ip: string | null,
-): Promise<'passed' | 'failed' | 'unavailable'> => {
-  if (!turnstileConfigured) return 'unavailable'
-  if (typeof token !== 'string' || token === '') return 'failed'
-
-  const body = new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token })
-  if (ip) body.set('remoteip', ip)
-
-  try {
-    const response = await fetch(SITEVERIFY, {
-      method: 'POST',
-      body,
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!response.ok) return 'unavailable'
-    const result = (await response.json()) as { success?: boolean }
-    return result.success === true ? 'passed' : 'failed'
-  } catch {
-    return 'unavailable'
-  }
 }
 
 // ---------------------------------------------------------------------------

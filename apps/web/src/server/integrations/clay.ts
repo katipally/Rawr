@@ -1,4 +1,4 @@
-import { applyEnrichment, readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
+import { applyEnrichment, readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
 
@@ -23,7 +23,7 @@ export const clayDegraded = (config: ClayConfig): string | null =>
     ? 'This Clay account is on Launch, where webhook and HTTP API sync do not exist. Enrichment through Clay is a CSV round trip until the tier changes.'
     : null
 
-const credentials = async (ctx: WorkspaceContext) => {
+const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'clay')
   if (!found?.secret) {
     throw new Error('Clay is not connected. Add an API key in Settings, under Integrations.')
@@ -31,7 +31,7 @@ const credentials = async (ctx: WorkspaceContext) => {
   return { ...found, config: found.config as ClayConfig }
 }
 
-export const testClay = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testClay = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'clay', { ok: true })
@@ -82,7 +82,7 @@ export type ClayOutcome = {
  *  is never asked to re-answer a question Apollo already answered: F6 §4's
  *  "first non-empty by configured order wins". */
 export const enrichWithClay = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { companyId: string; domain: string; missing: string[] },
 ): Promise<ClayOutcome> => {
   if (input.missing.length === 0) {
@@ -146,7 +146,7 @@ export const enrichWithClay = async (
 
 /** Clay's answer, arriving as a webhook against the company Rawr told it about. */
 export const handleClayWebhook = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   body: unknown,
 ): Promise<{ handled: boolean; detail: string }> => {
   const payload = body as { rawr_company_id?: string; fields?: Record<string, unknown> }
@@ -173,6 +173,13 @@ const devValue = (key: string, domain: string): unknown => {
   if (key === 'annual_revenue') return 12_000_000
   if (key === 'city') return 'Berlin'
   if (key === 'country') return 'Germany'
+  if (key === 'state') return 'Berlin'
+  if (key === 'postal_code') return '10115'
+  if (key === 'description') return `${domain.split('.')[0]} sells software.`
+  if (key === 'linkedin_url') return `https://www.linkedin.com/company/${domain.split('.')[0]}`
+  if (key === 'founded_year') return '2012'
+  if (key === 'funding_raised') return '$9M'
+  if (key === 'phone') return '+49 30 555 0100'
   if (key === 'name') return domain.split('.')[0]
   return undefined
 }

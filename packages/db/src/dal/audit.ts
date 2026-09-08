@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import { isAdmin, type AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 
-/** The workspace's own history: who changed what, and when. Append-only by grant,
+/** The account's own history: who changed what, and when. Append-only by grant,
  *  so this is a reader and there is deliberately no writer here; `mutate` is the
  *  only thing that writes an audit row.
  *
@@ -25,7 +25,7 @@ export type AuditRow = {
 export type AuditPage = { rows: AuditRow[]; cursor: { at: string; id: string } | null }
 
 export const listAudit = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     entity?: string | null | undefined
     actorId?: string | null | undefined
@@ -35,9 +35,9 @@ export const listAudit = async (
     cursor?: { at: string; id: string } | null | undefined
   } = {},
 ): Promise<AuditPage> =>
-  withWorkspace(ctx, async (tx) => {
-    if (ctx.role !== 'admin') {
-      throw new Error('Only an admin can read the workspace history.')
+  withAccount(ctx, async (tx) => {
+    if (!isAdmin(ctx)) {
+      throw new Error('Only an admin can read the account history.')
     }
     const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
     const rows = await tx.execute<{
@@ -89,8 +89,8 @@ export const listAudit = async (
 
 /** Which entities actually appear, so the filter offers real values rather than a
  *  hardcoded list that drifts from the role matrix. */
-export const auditEntities = async (ctx: WorkspaceContext): Promise<string[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const auditEntities = async (ctx: AccountContext): Promise<string[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ entity: string }>(
       sql`select distinct entity from audit_log order by entity`,
     )

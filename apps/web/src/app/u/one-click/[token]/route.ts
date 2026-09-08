@@ -1,4 +1,4 @@
-import { enrollmentWorkspaceForToken, publicEdgeContext, unsubscribeByToken } from '@rawr/db'
+import { enrollmentAccountForToken, publicEdgeContext, unsubscribeByToken } from '@rawr/db'
 import { NextResponse } from 'next/server'
 
 /** RFC 8058 one-click. Gmail and Outlook POST here when somebody presses the
@@ -17,9 +17,9 @@ export const POST = async (
   { params }: { params: Promise<{ token: string }> },
 ): Promise<NextResponse> => {
   const { token } = await params
-  const workspaceId = await enrollmentWorkspaceForToken(token)
-  if (workspaceId) {
-    await unsubscribeByToken({ ...publicEdgeContext(workspaceId), actorKind: 'public' }, token).catch(() => {})
+  const accountId = await enrollmentAccountForToken(token)
+  if (accountId) {
+    await unsubscribeByToken({ ...publicEdgeContext(accountId), actorKind: 'public' }, token).catch(() => {})
   }
   return new NextResponse(null, { status: 200 })
 }

@@ -5,13 +5,15 @@ import { automationJobs, dispatchAutomations } from './jobs/automations.ts'
 import { checkIntegrations } from './jobs/check-integrations.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
+import { dispatchEnrichment, enrichmentJobs } from './jobs/enrichment.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
+import { notificationSweep } from './jobs/notification-sweep.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
 import { syncApollo } from './jobs/sync-apollo.ts'
 import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchSequences, sequenceJobs, sweepSequenceLeases } from './jobs/sequences.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
-import { workspaceIdOf, type Job } from './jobs/registry.ts'
+import { accountIdOf, type Job } from './jobs/registry.ts'
 
 const JOBS: Job[] = [
   createFieldIndex,
@@ -19,10 +21,12 @@ const JOBS: Job[] = [
   dispatchStitches,
   stitchVisitor,
   rollUpActivity,
+  notificationSweep,
   evaluateSegments,
   ...mailJobs,
   ...sequenceJobs,
   ...automationJobs,
+  ...enrichmentJobs,
   checkIntegrations,
   syncApollo,
 ]
@@ -50,7 +54,7 @@ for (const job of JOBS) {
         // A malformed payload will never succeed, so it goes straight to the dead
         // letter table instead of burning every retry first.
         await recordDeadLetter({
-          workspaceId: workspaceIdOf(message.data),
+          accountId: accountIdOf(message.data),
           jobName: job.name,
           payload: message.data,
           error: `Payload rejected: ${parsed.error}`,
@@ -64,7 +68,7 @@ for (const job of JOBS) {
       } catch (cause) {
         if (message.retryCount >= job.retryLimit) {
           await recordDeadLetter({
-            workspaceId: workspaceIdOf(parsed.value),
+            accountId: accountIdOf(parsed.value),
             jobName: job.name,
             payload: message.data,
             error: cause instanceof Error ? cause.message : String(cause),
@@ -88,6 +92,11 @@ await boss.schedule(dispatchStitches.name, '* * * * *', {})
 // Nightly. Retention is measured in months, so the hour it runs does not matter;
 // that it runs off the request path does.
 await boss.schedule(rollUpActivity.name, '30 3 * * *', {})
+// Early morning, once. The only notice with no event behind it is "this task is
+// overdue" — a task does not become overdue, it stops not being — and telling
+// somebody at seven is telling them before they start rather than during.
+// The same pass is what bounds the table.
+await boss.schedule(notificationSweep.name, '0 7 * * *', {})
 // Hourly, which is the bound on how stale a segment's membership can be. A2 asks
 // for "on write and on a schedule"; a write recomputes the one segment somebody is
 // looking at, and this covers everything else.
@@ -111,6 +120,9 @@ await boss.schedule(dispatchAutomations.name, '* * * * *', {})
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})
+// Every minute, which is the bound on how long a new contact reads as
+// unenriched. Sixty records a tick is the ceiling on provider credits a minute.
+await boss.schedule(dispatchEnrichment.name, '* * * * *', {})
 // F6 §3. Sequence steps, replies and failures read back from Apollo every half
 // hour, offset from the health check so the two do not queue behind each other.
 await boss.schedule(syncApollo.name, '15,45 * * * *', {})

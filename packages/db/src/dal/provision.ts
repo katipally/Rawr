@@ -5,30 +5,30 @@ import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
 import type { Tx } from './index.ts'
 
-/** What a workspace needs before anybody can use it: the object and field
+/** What a account needs before anybody can use it: the object and field
  *  definitions, the views every deep link falls back to, the lifecycle ladder, the
  *  subscription types and two pipelines.
  *
- *  One function so the seed and the "create a workspace" button provision the same
- *  thing. They used to be the same code copied once, which is how a new workspace
+ *  One function so the seed and the "create a account" button provision the same
+ *  thing. They used to be the same code copied once, which is how a new account
  *  ends up without the `all` view that every address falls back to. */
-export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<void> => {
+export const provisionAccount = async (tx: Tx, accountId: string): Promise<void> => {
   await tx
     .insert(lifecycleStage)
-    .values(LIFECYCLE_STAGES.map((name, index) => ({ workspaceId, name, position: index })))
+    .values(LIFECYCLE_STAGES.map((name, index) => ({ accountId, name, position: index })))
 
   await tx.insert(subscriptionType).values([
-    { workspaceId, name: 'Product updates', description: 'Release notes and changelog.' },
-    { workspaceId, name: 'Newsletter', description: 'The monthly newsletter.' },
-    { workspaceId, name: 'One-to-one sales email', description: 'Direct email from a rep.' },
-    { workspaceId, name: 'Internal notifications', isInternal: true },
+    { accountId, name: 'Product updates', description: 'Release notes and changelog.' },
+    { accountId, name: 'Newsletter', description: 'The monthly newsletter.' },
+    { accountId, name: 'One-to-one sales email', description: 'Direct email from a rep.' },
+    { accountId, name: 'Internal notifications', isInternal: true },
   ])
 
   for (const object of CORE_OBJECTS) {
     const [created] = await tx
       .insert(objectDef)
       .values({
-        workspaceId,
+        accountId,
         key: object.key,
         nameSingular: object.nameSingular,
         namePlural: object.namePlural,
@@ -42,7 +42,7 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
       .insert(fieldDef)
       .values(
         object.fields.map((field) => ({
-          workspaceId,
+          accountId,
           objectId: created.id,
           key: field.key,
           label: field.label,
@@ -69,7 +69,7 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
     // created on demand.
     await tx.insert(savedView).values(
       CORE_VIEWS[object.key].map((view) => ({
-        workspaceId,
+        accountId,
         objectId: created.id,
         slug: view.slug,
         name: view.name,
@@ -88,8 +88,8 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
   const pipelines = await tx
     .insert(pipeline)
     .values([
-      { workspaceId, name: 'Enterprise', position: 0 },
-      { workspaceId, name: 'Sales Pipeline', position: 1 },
+      { accountId, name: 'Enterprise', position: 0 },
+      { accountId, name: 'Sales Pipeline', position: 1 },
     ])
     .returning({ id: pipeline.id, name: pipeline.name })
 
@@ -99,7 +99,7 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
 
   await tx.insert(pipelineStage).values([
     ...ENTERPRISE_STAGES.map((stage, index) => ({
-      workspaceId,
+      accountId,
       pipelineId: enterprise.id,
       name: stage.name,
       probability: stage.probability,
@@ -108,7 +108,7 @@ export const provisionWorkspace = async (tx: Tx, workspaceId: string): Promise<v
       isClosedLost: 'isClosedLost' in stage,
     })),
     ...SALES_STAGES.map((stage, index) => ({
-      workspaceId,
+      accountId,
       pipelineId: sales.id,
       name: stage.name,
       probability: stage.probability,

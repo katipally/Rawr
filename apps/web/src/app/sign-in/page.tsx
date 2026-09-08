@@ -1,5 +1,5 @@
 import { Alert } from '@rawr/ui'
-import { devLoginEnabled, env, googleConfigured } from '~/lib/env.ts'
+import { calendarAtSignIn, devLoginEnabled, env, googleConfigured, hostedDomainRequired } from '~/lib/env.ts'
 
 type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 
@@ -10,7 +10,7 @@ type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 const SignIn = async ({ searchParams }: Props) => {
   const { error, next } = await searchParams
   const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''
-  const domain = env.GOOGLE_HOSTED_DOMAIN
+
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 p-6">
@@ -45,15 +45,44 @@ const SignIn = async ({ searchParams }: Props) => {
               Continue with Google
             </a>
             <p className="text-small text-secondary">
-              Any verified <span className="font-medium text-body">@{domain}</span> account works. The
-              first time in you can read everything and change nothing; an admin raises your
+              {hostedDomainRequired ? (
+                <>
+                  Any verified{' '}
+                  <span className="font-medium text-body">@{env.GOOGLE_HOSTED_DOMAIN}</span> account
+                  works.{' '}
+                </>
+              ) : (
+                'Sign in with the address you were invited on. '
+              )}
+              The first time in you can read everything and change nothing; an admin raises your
               role under Settings, Members.
             </p>
+            {calendarAtSignIn ? (
+              /* Google blocks the whole authorisation when a Account admin has
+                 not reviewed the app, and it blocks it over the calendar scopes.
+                 Without a way past that, a policy on Google's side keeps everybody
+                 out of the CRM rather than just leaving calendars unconnected. */
+              <p className="text-small text-secondary">
+                Signing in also connects your calendar, so booking pages work straight away. If
+                Google says an admin has to review this app,{' '}
+                <a
+                  href={
+                    after
+                      ? `/api/auth/google?calendar=0&next=${encodeURIComponent(after)}`
+                      : '/api/auth/google?calendar=0'
+                  }
+                  className="font-medium text-link"
+                >
+                  sign in without the calendar
+                </a>{' '}
+                and connect it later from Meetings, Calendars.
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="text-secondary">
-            Google sign-in is not configured yet. It needs a client ID and secret from an internal
-            consent screen on the {domain} organisation.
+            Google sign-in is not configured yet. It needs a client ID and secret from a Google
+            Cloud OAuth client.
           </p>
         )}
       </div>
@@ -66,7 +95,7 @@ const SignIn = async ({ searchParams }: Props) => {
               Development sign-in
             </label>
             <p className="text-small text-secondary">
-              Seeded addresses only: admin@, sales@, marketing@ or viewer@{domain}. Not available in
+              Seeded addresses only: admin@, sales@, marketing@ or viewer@datasaur.ai. Not available in
               production.
             </p>
           </div>
@@ -80,15 +109,15 @@ const SignIn = async ({ searchParams }: Props) => {
             required
             autoComplete="off"
             suppressHydrationWarning
-            placeholder={`admin@${domain}`}
+            placeholder="admin@datasaur.ai"
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           />
           <input
-            name="workspace"
+            name="account"
             type="text"
-            aria-label="Workspace slug, optional"
+            aria-label="Account slug, optional"
             suppressHydrationWarning
-            placeholder="workspace slug (optional)"
+            placeholder="account slug (optional)"
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           />
           <button
@@ -100,10 +129,17 @@ const SignIn = async ({ searchParams }: Props) => {
         </form>
       ) : null}
 
-      <p className="text-small text-secondary">
-        Trouble signing in? Your account has to be in the {domain} Google Workspace. Personal
-        Gmail addresses are refused.
-      </p>
+      {hostedDomainRequired ? (
+        <p className="text-small text-secondary">
+          Trouble signing in? Your account has to be in the {env.GOOGLE_HOSTED_DOMAIN} Google
+          Account. Personal Gmail addresses are refused.
+        </p>
+      ) : (
+        <p className="text-small text-secondary">
+          Trouble signing in? Any Google account is accepted, but it needs a seat: either an
+          invitation sent to that address, or an organisation that claims its domain.
+        </p>
+      )}
     </main>
   )
 }

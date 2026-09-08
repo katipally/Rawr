@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -22,6 +22,7 @@ export const TaskForm = ({ assignees, entity, autoFocus, onCreated, className }:
   const toast = useToast()
   const titleField = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [assigneeId, setAssigneeId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -35,11 +36,13 @@ export const TaskForm = ({ assignees, entity, autoFocus, onCreated, className }:
     try {
       await api.crm.tasks.create.mutate({
         title,
+        body: body.trim() || null,
         dueDate: dueDate || null,
         assigneeId: assigneeId || null,
         entity: entity ?? null,
       })
       setTitle('')
+      setBody('')
       setDueDate('')
       toast('success', 'Task created.')
       router.refresh()
@@ -90,6 +93,16 @@ export const TaskForm = ({ assignees, entity, autoFocus, onCreated, className }:
       <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
         Add task
       </Button>
+      {/* Full width under the row: automations and sequences already write a
+          body, and until now a task that had one showed only its title. */}
+      <TextArea
+        value={body}
+        rows={2}
+        aria-label="Details"
+        placeholder="Details (optional)"
+        onChange={(event) => setBody(event.target.value)}
+        className="w-full"
+      />
     </form>
   )
 }

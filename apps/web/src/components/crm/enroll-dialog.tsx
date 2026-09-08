@@ -15,11 +15,15 @@ type Outcome = { contactId: string; enrolled: boolean; reason?: string }
  *  contacted. */
 export const EnrollDialog = ({
   contactIds,
+  companyId,
   contactLabel,
   onClose,
   onEnrolled,
 }: {
-  contactIds: string[]
+  contactIds?: string[] | undefined
+  /** Everyone at this company, resolved on the server. One or the other, never
+   *  both: which people are meant is not something to guess at. */
+  companyId?: string | undefined
   /** What to call them in the copy: one name, or "12 contacts". */
   contactLabel: string
   onClose: () => void
@@ -105,7 +109,11 @@ export const EnrollDialog = ({
                 if (!sequenceId || !mailboxId) return
                 setBusy(true)
                 void api.sequences.enroll
-                  .mutate({ sequenceId, contactIds, mailboxId })
+                  .mutate(
+                    companyId
+                      ? { sequenceId, companyId, mailboxId }
+                      : { sequenceId, contactIds: contactIds ?? [], mailboxId },
+                  )
                   .then((result) => {
                     setOutcomes(result)
                     onEnrolled?.()

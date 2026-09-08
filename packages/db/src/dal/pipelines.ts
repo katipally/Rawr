@@ -1,10 +1,10 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { deal, lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
 import { recordActivity } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 
-/** Pipelines, their stages, and the lifecycle stage list. All three are workspace
+/** Pipelines, their stages, and the lifecycle stage list. All three are account
  *  configuration that F1 assumed would be editable and that nothing could edit.
  *
  *  The rule that shapes this file is the one from F1's edge-case table: a stage
@@ -30,8 +30,8 @@ export type PipelineRow = {
   dealCount: number
 }
 
-export const listPipelines = async (ctx: WorkspaceContext): Promise<PipelineRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listPipelines = async (ctx: AccountContext): Promise<PipelineRow[]> =>
+  withAccount(ctx, async (tx) => {
     const [pipelines, stages, counts] = await Promise.all([
       tx
         .select({ id: pipeline.id, name: pipeline.name, position: pipeline.position })
@@ -84,7 +84,7 @@ const nextPosition = async (tx: Tx, table: 'pipeline' | 'pipeline_stage' | 'life
   return Number(row?.next ?? 0)
 }
 
-export const createPipeline = async (ctx: WorkspaceContext, name: string): Promise<{ id: string }> =>
+export const createPipeline = async (ctx: AccountContext, name: string): Promise<{ id: string }> =>
   mutate(ctx, 'pipeline', async (tx) => {
     const clean = name.trim()
     if (!clean) throw new Error('A pipeline needs a name.')
@@ -92,7 +92,7 @@ export const createPipeline = async (ctx: WorkspaceContext, name: string): Promi
     const [created] = await tx
       .insert(pipeline)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         name: clean,
         position: await nextPosition(tx, 'pipeline', 'true'),
       })
@@ -105,7 +105,7 @@ export const createPipeline = async (ctx: WorkspaceContext, name: string): Promi
     }
   })
 
-export const renamePipeline = async (ctx: WorkspaceContext, id: string, name: string): Promise<void> =>
+export const renamePipeline = async (ctx: AccountContext, id: string, name: string): Promise<void> =>
   mutate(ctx, 'pipeline', async (tx) => {
     const clean = name.trim()
     if (!clean) throw new Error('A pipeline needs a name.')
@@ -122,7 +122,7 @@ export const renamePipeline = async (ctx: WorkspaceContext, id: string, name: st
 /** A pipeline with deals in it is not deletable at all: there is no "move these
  *  somewhere else" that makes sense across pipelines, because the stages differ.
  *  Emptying it first is the honest path and the message says so. */
-export const deletePipeline = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deletePipeline = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'pipeline', async (tx) => {
     const [found] = await tx.select({ name: pipeline.name }).from(pipeline).where(eq(pipeline.id, id)).limit(1)
     if (!found) throw new Error('That pipeline no longer exists.')
@@ -139,7 +139,7 @@ export const deletePipeline = async (ctx: WorkspaceContext, id: string): Promise
     const [{ total = 0 } = { total: 0 }] = await tx.execute<{ total: number }>(
       sql`select count(*)::int as total from pipeline`,
     )
-    if (Number(total) <= 1) throw new Error('A workspace needs at least one pipeline.')
+    if (Number(total) <= 1) throw new Error('A account needs at least one pipeline.')
 
     await tx.delete(pipelineStage).where(eq(pipelineStage.pipelineId, id))
     await tx.delete(pipeline).where(eq(pipeline.id, id))
@@ -166,7 +166,7 @@ const validProbability = (value: number | null | undefined): string | null => {
   return String(Math.round(value))
 }
 
-export const createStage = async (ctx: WorkspaceContext, input: StageInput): Promise<{ id: string }> =>
+export const createStage = async (ctx: AccountContext, input: StageInput): Promise<{ id: string }> =>
   mutate(ctx, 'pipeline_stage', async (tx) => {
     const clean = input.name.trim()
     if (!clean) throw new Error('A stage needs a name.')
@@ -179,7 +179,7 @@ export const createStage = async (ctx: WorkspaceContext, input: StageInput): Pro
     const [created] = await tx
       .insert(pipelineStage)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         pipelineId: input.pipelineId,
         name: clean,
         probability: validProbability(input.probability),
@@ -197,7 +197,7 @@ export const createStage = async (ctx: WorkspaceContext, input: StageInput): Pro
   })
 
 export const updateStage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { id: string; name?: string; probability?: number | null; isClosedWon?: boolean; isClosedLost?: boolean },
 ): Promise<void> =>
   mutate(ctx, 'pipeline_stage', async (tx) => {
@@ -239,7 +239,7 @@ export const updateStage = async (
   })
 
 export const reorderStages = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pipelineId: string,
   orderedIds: string[],
 ): Promise<void> =>
@@ -271,7 +271,7 @@ export type StageDeleteResult = { moved: number }
  *  every deal that moves writes a stage_change so the record reads as a move rather
  *  than as history that quietly changed. */
 export const deleteStage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   stageId: string,
   destinationStageId: string | null,
 ): Promise<StageDeleteResult> =>
@@ -337,8 +337,8 @@ export const deleteStage = async (
 
 export type LifecycleRow = { id: string; name: string; position: number; usedBy: number }
 
-export const listLifecycleStages = async (ctx: WorkspaceContext): Promise<LifecycleRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listLifecycleStages = async (ctx: AccountContext): Promise<LifecycleRow[]> =>
+  withAccount(ctx, async (tx) => {
     const [rows, counts] = await Promise.all([
       tx
         .select({ id: lifecycleStage.id, name: lifecycleStage.name, position: lifecycleStage.position })
@@ -357,7 +357,7 @@ export const listLifecycleStages = async (ctx: WorkspaceContext): Promise<Lifecy
     return rows.map((row) => ({ ...row, usedBy: used.get(row.id) ?? 0 }))
   })
 
-export const createLifecycleStage = async (ctx: WorkspaceContext, name: string): Promise<{ id: string }> =>
+export const createLifecycleStage = async (ctx: AccountContext, name: string): Promise<{ id: string }> =>
   mutate(ctx, 'lifecycle_stage', async (tx) => {
     const clean = name.trim()
     if (!clean) throw new Error('A lifecycle stage needs a name.')
@@ -365,7 +365,7 @@ export const createLifecycleStage = async (ctx: WorkspaceContext, name: string):
     const [created] = await tx
       .insert(lifecycleStage)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         name: clean,
         position: await nextPosition(tx, 'lifecycle_stage', 'true'),
       })
@@ -378,7 +378,7 @@ export const createLifecycleStage = async (ctx: WorkspaceContext, name: string):
     }
   })
 
-export const renameLifecycleStage = async (ctx: WorkspaceContext, id: string, name: string): Promise<void> =>
+export const renameLifecycleStage = async (ctx: AccountContext, id: string, name: string): Promise<void> =>
   mutate(ctx, 'lifecycle_stage', async (tx) => {
     const clean = name.trim()
     if (!clean) throw new Error('A lifecycle stage needs a name.')
@@ -398,12 +398,12 @@ export const renameLifecycleStage = async (ctx: WorkspaceContext, id: string, na
 
 /** Order carries meaning here: the list is ordered because a lifecycle runs in one
  *  direction, and moving backwards is a thing worth seeing on a timeline. A2. */
-export const reorderLifecycleStages = async (ctx: WorkspaceContext, orderedIds: string[]): Promise<void> =>
+export const reorderLifecycleStages = async (ctx: AccountContext, orderedIds: string[]): Promise<void> =>
   mutate(ctx, 'lifecycle_stage', async (tx) => {
     const rows = await tx.select({ id: lifecycleStage.id }).from(lifecycleStage)
     const known = new Set(rows.map((row) => row.id))
     if (orderedIds.some((id) => !known.has(id))) {
-      throw new Error('One of those lifecycle stages is not in this workspace.')
+      throw new Error('One of those lifecycle stages is not in this account.')
     }
     const rest = rows.map((row) => row.id).filter((id) => !orderedIds.includes(id))
 
@@ -414,7 +414,7 @@ export const reorderLifecycleStages = async (ctx: WorkspaceContext, orderedIds: 
 
     return {
       result: undefined,
-      audit: { entity: 'lifecycle_stage', entityId: ctx.workspaceId, action: 'reorder', before: null, after: { order: orderedIds } },
+      audit: { entity: 'lifecycle_stage', entityId: ctx.accountId, action: 'reorder', before: null, after: { order: orderedIds } },
     }
   })
 
@@ -422,7 +422,7 @@ export const reorderLifecycleStages = async (ctx: WorkspaceContext, orderedIds: 
  *  had one" and is a different thing. So the same rule as a pipeline stage: name
  *  where they go, or empty it first. */
 export const deleteLifecycleStage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   destinationId: string | null,
 ): Promise<{ moved: number }> =>

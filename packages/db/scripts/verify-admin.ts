@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
 import {
   createField,
   deleteField,
@@ -88,31 +88,48 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 const stamp = Math.random().toString(36).slice(2, 8)
 
 try {
-  const [datasaur] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
-    .select({ id: s.userAccount.id, role: s.membership.role })
+    .select({
+      id: s.userAccount.id,
+      email: s.userAccount.email,
+      isSuperAdmin: s.membership.isSuperAdmin,
+      viewHubs: s.membership.viewHubs,
+      editHubs: s.membership.editHubs,
+    })
     .from(s.membership)
     .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
-    .where(eq(s.membership.workspaceId, datasaur.id))
+    .where(eq(s.membership.accountId, datasaur.id))
 
-  const ctxFor = (role: Role): WorkspaceContext => {
-    const member = members.find((m) => m.role === role)
-    if (!member) throw new Error(`no seeded ${role}`)
-    return { workspaceId: datasaur.id, actorId: member.id, actorKind: 'user', role }
+  /** The seeded seats are named for the access they carry, so the suite asks for
+   *  one by name and gets whatever grants the seed gave it. */
+  const ctxFor = (seat: string): AccountContext => {
+    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    if (!member) throw new Error(`no seeded ${seat}`)
+    return {
+      accountId: datasaur.id,
+      actorId: member.id,
+      actorKind: 'user',
+      isSuperAdmin: member.isSuperAdmin,
+      viewHubs: member.viewHubs,
+      editHubs: member.editHubs,
+    }
   }
 
   const admin = ctxFor('admin')
   const sales = ctxFor('sales')
   const marketing = ctxFor('marketing')
   const viewer = ctxFor('viewer')
-  const probeCtx: WorkspaceContext = {
-    workspaceId: probe.id,
+  const probeCtx: AccountContext = {
+    accountId: probe.id,
     actorId: null,
     actorKind: 'user',
-    role: 'admin',
+    isSuperAdmin: true,
+    viewHubs: [],
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
   }
 
   console.log('-- the registry has a write side -------------------------------')
@@ -242,7 +259,7 @@ try {
     await reorderFields(admin, 'company', flipped)
     const after = await listFields(admin, 'company')
     expect(after[0]!.id === before[1]!.id, 'the order did not change')
-    // Put it back so the seeded workspace reads the way it started.
+    // Put it back so the seeded account reads the way it started.
     await reorderFields(admin, 'company', before.map((field) => field.id))
     return 'position drives the record page and the picker'
   })
@@ -456,7 +473,7 @@ try {
       select count(distinct l.entity_id)::int as n
         from activity a
         join activity_link l on l.activity_id = a.id
-       where a.workspace_id = ${datasaur.id}
+       where a.account_id = ${datasaur.id}
          and a.type = 'segment_change'
          and a.subject = ${`entered Verify partners ${stamp}`}`)
     expect(
@@ -555,12 +572,14 @@ try {
     return `${result.updated} written, ${result.failed.length} named back with a reason`
   })
 
-  await check('a viewer cannot bulk edit', async () => {
+  await check('a read-only seat cannot bulk edit', async () => {
     const deals = await recordOptions(viewer, { object: 'deal', limit: 1 })
-    const message = await refuses('a viewer bulk editing', () =>
+    const message = await refuses('a read-only seat bulk editing', () =>
       bulkUpdateRecords(viewer, 'deal', [deals[0]!.id], { deal_type: 'Renewal' }),
     )
-    expect(message.includes('viewer'), message)
+    // The refusal names the hub that was missing, so the person reading it knows
+    // what to ask for rather than which role they are not.
+    expect(message.includes('sales'), message)
     return message
   })
 

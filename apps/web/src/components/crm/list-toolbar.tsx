@@ -3,8 +3,7 @@
 import { Badge, Button, Checkbox, DropdownMenu, IconButton, Modal, TextInput, cn, useToast } from '@rawr/ui'
 import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, Settings, SlidersHorizontal, Search, X } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useSearchParams } from 'next/navigation'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -12,7 +11,7 @@ import { FilterBuilder, type FilterField, type Group } from './filter-builder.ts
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 
 export type ListToolbarProps = {
-  workspace: string
+  account: string
   object: string
   objectLabel: string
   view: string
@@ -25,6 +24,10 @@ export type ListToolbarProps = {
   filterFields: FilterField[]
   createFields: CreateField[]
   canWrite: boolean
+  /** Deep links: ?new=1 opens the create dialog, ?view=new the save-view one.
+   *  Read from the address on the server so the dialog is there on first paint. */
+  openCreate?: boolean
+  openView?: boolean
   /** The view's own name, so "update this view" can save without renaming it. */
   viewLabel: string
   /** Every field the object has, for the column chooser. Ordered as the registry
@@ -39,7 +42,7 @@ const pill =
   'inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 text-small font-light text-body hover:bg-fill'
 
 export const ListToolbar = ({
-  workspace,
+  account,
   object,
   objectLabel,
   view,
@@ -52,6 +55,8 @@ export const ListToolbar = ({
   filterFields,
   createFields,
   canWrite,
+  openCreate = false,
+  openView = false,
   viewLabel,
   allColumns,
   trailing,
@@ -60,22 +65,19 @@ export const ListToolbar = ({
   const toast = useToast()
   const [search, setSearch] = useState(params.q ?? '')
   const [showFilters, setShowFilters] = useState(false)
-  const [showSave, setShowSave] = useState(false)
-  const [showCreate, setShowCreate] = useState(false)
-  // The + in the top bar links here with ?new=1 rather than carrying its own copy
-  // of the create form, so there is one create dialog per object and it always
-  // knows the object's real fields.
-  const query = useSearchParams()
-  const askedToCreate = query.get('new') === '1'
-  // "Add view" on the tab bar links here rather than carrying a second copy of
-  // this dialog, the same way the + in the top bar links here to create a record.
-  const askedForView = query.get('view') === 'new'
-  useEffect(() => {
-    if (askedToCreate && canWrite) setShowCreate(true)
-  }, [askedToCreate, canWrite])
-  useEffect(() => {
-    if (askedForView && canWrite) setShowSave(true)
-  }, [askedForView, canWrite])
+  // The + in the top bar links here with ?new=1, and "Add view" on the tab bar
+  // with ?view=new, rather than either carrying its own copy of a dialog: there
+  // is one create form per object and it always knows the object's real fields.
+  //
+  // Read on the server and passed in, not from useSearchParams in an effect. A
+  // deep link has to open the dialog on the first paint; an effect opens it only
+  // once React has hydrated, which on a slow page is late enough to look broken
+  // and is a race against anything that remounts the toolbar in between.
+  const askedToCreate = openCreate && canWrite
+  const askedForView = openView && canWrite
+  const [showSave, setShowSave] = useState(askedForView)
+  const [showCreate, setShowCreate] = useState(askedToCreate)
+
   const [showColumns, setShowColumns] = useState(false)
   const [draftColumns, setDraftColumns] = useState(columns)
   const [viewName, setViewName] = useState('')
@@ -85,7 +87,7 @@ export const ListToolbar = ({
   const goTo = (next: ListParams) => {
     const merged: ListParams = { ...params, ...next }
     delete merged.cursor
-    navigate(objectView(workspace, object, view, kind, merged))
+    navigate(objectView(account, object, view, kind, merged))
   }
 
   const activeConditions = filters.reduce((sum, group) => sum + group.conditions.length, 0)
@@ -114,10 +116,10 @@ export const ListToolbar = ({
         toast('success', `Saved to “${saved.name}”.`)
         // The view now holds these columns, so the ad-hoc set in the URL would
         // only shadow what was just saved.
-        navigate(objectView(workspace, object, saved.slug, kind, { ...params, cols: undefined }))
+        navigate(objectView(account, object, saved.slug, kind, { ...params, cols: undefined }))
       } else {
         toast('success', `Saved as “${saved.name}”. Its address is /views/${saved.slug}/${kind}.`)
-        navigate(objectView(workspace, object, saved.slug, kind, { q: params.q }))
+        navigate(objectView(account, object, saved.slug, kind, { q: params.q }))
       }
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -129,7 +131,7 @@ export const ListToolbar = ({
   const closeSave = () => {
     setShowSave(false)
     // Drop ?view=new so a refresh, or a step back, does not reopen it.
-    if (askedForView) navigate(objectView(workspace, object, view, kind, params))
+    if (askedForView) navigate(objectView(account, object, view, kind, params))
   }
 
   const labelOf = (key: string): string =>
@@ -199,6 +201,7 @@ export const ListToolbar = ({
           {activeConditions > 0 ? <Badge tone="neutral">{activeConditions}</Badge> : null}
         </button>
 
+        {kind === 'list' ? (
         <DropdownMenu
           label="Sort by"
           align="start"
@@ -229,24 +232,27 @@ export const ListToolbar = ({
             </button>
           )}
         />
+        ) : null}
 
         <span className="ml-auto flex items-center gap-1">
           {trailing}
           {canWrite ? (
             <IconButton
-              label="Save these filters and columns as a view"
+              label={kind === 'list' ? 'Save these filters and columns as a view' : 'Save these filters as a view'}
               icon={<BookmarkPlus className="size-4" />}
               className="border border-line-strong text-body"
               onClick={() => setShowSave(true)}
             />
           ) : null}
-          <IconButton
-            label={`Edit columns (${columns.length} shown)`}
-            icon={<Settings className="size-4" />}
-            className="border border-line-strong text-body"
-            aria-haspopup="dialog"
-            onClick={openColumns}
-          />
+          {kind === 'list' ? (
+            <IconButton
+              label={`Edit columns (${columns.length} shown)`}
+              icon={<Settings className="size-4" />}
+              className="border border-line-strong text-body"
+              aria-haspopup="dialog"
+              onClick={openColumns}
+            />
+          ) : null}
         </span>
       </div>
 
@@ -291,7 +297,7 @@ export const ListToolbar = ({
             />
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
-              Everyone in this workspace can see it
+              Everyone in this account can see it
             </label>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -394,14 +400,14 @@ export const ListToolbar = ({
 
       {showCreate ? (
         <CreateRecordDialog
-          workspace={workspace}
+          account={account}
           object={object}
           objectLabel={objectLabel}
           fields={createFields}
           onClose={() => {
             setShowCreate(false)
             // Drop ?new=1 so a refresh, or a step back, does not reopen it.
-            if (askedToCreate) navigate(objectView(workspace, object, view, kind, params))
+            if (askedToCreate) navigate(objectView(account, object, view, kind, params))
           }}
         />
       ) : null}

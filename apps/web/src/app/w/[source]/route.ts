@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { publicEdgeContext, readCredentials, recordHealth, workspaceIdForSite } from '@rawr/db'
+import { publicEdgeContext, readCredentials, recordHealth, accountIdForSite } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { handleApolloWebhook } from '~/server/integrations/apollo.ts'
 import { handleBrevoWebhook } from '~/server/integrations/brevo.ts'
@@ -51,20 +51,20 @@ export const POST = async (
     return rejected('Too many requests.', 429)
   }
 
-  // The workspace comes from the site key in the query, never from the body: a
+  // The account comes from the site key in the query, never from the body: a
   // caller must not be able to name the tenant it writes into. F0 §2.
   const siteKey = request.nextUrl.searchParams.get('w') ?? ''
-  const workspaceId = siteKey ? await workspaceIdForSite(siteKey) : null
-  if (!workspaceId) {
-    return rejected('That webhook URL is missing the workspace key Rawr issued with it.', 404)
+  const accountId = siteKey ? await accountIdForSite(siteKey) : null
+  if (!accountId) {
+    return rejected('That webhook URL is missing the account key Rawr issued with it.', 404)
   }
 
-  const ctx = publicEdgeContext(workspaceId)
+  const ctx = publicEdgeContext(accountId)
   const raw = await request.text()
 
   const stored = await readCredentials(ctx, source)
   if (!stored?.secret) {
-    return rejected(`${source} is not connected in this workspace, so its webhooks are refused.`, 503)
+    return rejected(`${source} is not connected in this account, so its webhooks are refused.`, 503)
   }
 
   const verified = verify(source, request, raw, stored.secret, stored.config)
@@ -121,7 +121,7 @@ const verify = (
     if (!presented) return { ok: false, detail: 'That request carried no Brevo webhook token.' }
     return signatureMatches(expected, presented)
       ? { ok: true }
-      : { ok: false, detail: 'That Brevo webhook token does not match this workspace’s.' }
+      : { ok: false, detail: 'That Brevo webhook token does not match this account’s.' }
   }
 
   if (source === 'apollo') {
@@ -137,7 +137,7 @@ const verify = (
     const expected = createHmac('sha256', secret).update(`${timestamp}:${raw}`).digest('hex')
     return signatureMatches(expected, presented)
       ? { ok: true }
-      : { ok: false, detail: 'That Apollo signature does not match this workspace’s key.' }
+      : { ok: false, detail: 'That Apollo signature does not match this account’s key.' }
   }
 
   if (source === 'woodpecker') {
@@ -154,7 +154,7 @@ const verify = (
     if (!presented) return { ok: false, detail: 'That request carried no Woodpecker webhook token.' }
     return signatureMatches(expected, presented)
       ? { ok: true }
-      : { ok: false, detail: 'That Woodpecker webhook token does not match this workspace’s.' }
+      : { ok: false, detail: 'That Woodpecker webhook token does not match this account’s.' }
   }
 
   const presented = request.headers.get('x-clay-webhook-auth') ?? ''

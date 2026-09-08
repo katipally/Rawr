@@ -42,46 +42,38 @@ try {
   const [appDbRole] = await app`select current_user as who`
   check(appDbRole?.who === 'rawr_app', 'the application connection is the app role, not the owner')
 
-  // Two probe workspaces, each under its own organisation: the domain lives on
-  // the organisation now, and a workspace cannot exist without one.
+  // Two probe accounts. Each claims its own domain, because the domain is what
+  // identifies an account and no two may share one.
   const stamp = Date.now()
-  const orgA = (await owner`
-    insert into organisation (name, slug, google_hosted_domain)
-    values ('Probe Org A', ${'probe-org-a-' + stamp}, ${'a-' + stamp + '.example'})
-    returning id`)[0]!.id
-  const orgB = (await owner`
-    insert into organisation (name, slug, google_hosted_domain)
-    values ('Probe Org B', ${'probe-org-b-' + stamp}, ${'b-' + stamp + '.example'})
-    returning id`)[0]!.id
   const wsA = (await owner`
-    insert into workspace (organisation_id, name, slug)
-    values (${orgA}, 'Probe A', ${'probe-a-' + stamp})
+    insert into account (name, slug, google_hosted_domain)
+    values ('Probe A', ${'probe-a-' + stamp}, ${'a-' + stamp + '.example'})
     returning id`)[0]!.id
   const wsB = (await owner`
-    insert into workspace (organisation_id, name, slug)
-    values (${orgB}, 'Probe B', ${'probe-b-' + stamp})
+    insert into account (name, slug, google_hosted_domain)
+    values ('Probe B', ${'probe-b-' + stamp}, ${'b-' + stamp + '.example'})
     returning id`)[0]!.id
-  await owner`insert into company (workspace_id, name) values (${wsA}, 'Company in A')`
-  await owner`insert into company (workspace_id, name) values (${wsB}, 'Company in B')`
+  await owner`insert into company (account_id, name) values (${wsA}, 'Company in A')`
+  await owner`insert into company (account_id, name) values (${wsB}, 'Company in B')`
 
   const unscoped = await app`select count(*)::int as n from company`
-  check(unscoped[0]?.n === 0, 'a query with no workspace set returns zero rows')
+  check(unscoped[0]?.n === 0, 'a query with no account set returns zero rows')
 
   const scoped = await app.begin(async (tx) => {
-    await tx`select set_config('rawr.workspace_id', ${wsA}, true)`
+    await tx`select set_config('rawr.account_id', ${wsA}, true)`
     return tx`select name from company order by name`
   })
   check(
     scoped.length === 1 && scoped[0]?.name === 'Company in A',
-    'scoped as workspace A, only workspace A rows are visible',
+    'scoped as account A, only account A rows are visible',
     `saw: ${scoped.map((r) => r.name).join(', ') || 'nothing'}`,
   )
 
   let crossTenantWriteBlocked = false
   try {
     await app.begin(async (tx) => {
-      await tx`select set_config('rawr.workspace_id', ${wsA}, true)`
-      await tx`insert into company (workspace_id, name) values (${wsB}, 'smuggled')`
+      await tx`select set_config('rawr.account_id', ${wsA}, true)`
+      await tx`insert into company (account_id, name) values (${wsB}, 'smuggled')`
     })
   } catch {
     crossTenantWriteBlocked = true
@@ -91,7 +83,7 @@ try {
   let auditImmutable = false
   try {
     await app.begin(async (tx) => {
-      await tx`select set_config('rawr.workspace_id', ${wsA}, true)`
+      await tx`select set_config('rawr.account_id', ${wsA}, true)`
       await tx`update audit_log set action = 'tampered'`
     })
   } catch {
@@ -99,8 +91,8 @@ try {
   }
   check(auditImmutable, 'the app role cannot update audit_log')
 
-  // The organisations cascade to their workspaces, which cascade to the rows.
-  await owner`delete from organisation where id in (${orgA}, ${orgB})`
+  // The accounts cascade to the rows in them.
+  await owner`delete from account where id in (${wsA}, ${wsB})`
 } finally {
   await owner.end()
   await app.end()

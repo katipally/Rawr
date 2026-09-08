@@ -1,11 +1,14 @@
 import {
   acceptSuggestion,
+  approveEnrichment,
   claimForReplay,
+  discardEnrichment,
   createWebhookEndpoint,
   dismissSuggestion,
   disconnectIntegration,
   INTEGRATION_KINDS,
   listSuggestions,
+  pendingEnrichment,
   listUnmatchedEvents,
   listWebhookEndpoints,
   readFieldSources,
@@ -50,7 +53,7 @@ export const integrationsRouter = router({
   /** Readable by anybody signed in, because a degraded integration explains why a
    *  record looks stale and that is not admin-only information. Credentials are
    *  never in this payload. */
-  list: protectedProcedure.query(({ ctx }) => call(() => readIntegrations(ctx.workspace))),
+  list: protectedProcedure.query(({ ctx }) => call(() => readIntegrations(ctx.account))),
 
   catalogue: protectedProcedure.query(() => INTEGRATIONS),
 
@@ -58,9 +61,12 @@ export const integrationsRouter = router({
    *  person writing the sequence needs the list, and a campaign name is not a
    *  credential. */
   woodpeckerCampaigns: protectedProcedure.query(({ ctx }) =>
-    call(() => listWoodpeckerCampaigns(ctx.workspace)),
+    call(() => listWoodpeckerCampaigns(ctx.account)),
   ),
 
+  /** An organisation admin, not a account one: the credential is shared by
+   *  every account in the company, so connecting it is a decision above any of
+   *  them. */
   save: adminProcedure
     .input(
       z.object({
@@ -72,7 +78,7 @@ export const integrationsRouter = router({
     )
     .mutation(({ ctx, input }) =>
       call(() =>
-        saveIntegration(ctx.workspace, {
+        saveIntegration(ctx.account, {
           kind: input.kind,
           ...(input.config !== undefined ? { config: input.config } : {}),
           ...(input.secret !== undefined ? { secret: input.secret } : {}),
@@ -84,19 +90,19 @@ export const integrationsRouter = router({
    *  provider's real answer. */
   test: adminProcedure
     .input(z.object({ kind }))
-    .mutation(({ ctx, input }) => call(() => testConnection(ctx.workspace, input.kind))),
+    .mutation(({ ctx, input }) => call(() => testConnection(ctx.account, input.kind))),
 
   disconnect: adminProcedure
     .input(z.object({ kind }))
-    .mutation(({ ctx, input }) => call(() => disconnectIntegration(ctx.workspace, input.kind))),
+    .mutation(({ ctx, input }) => call(() => disconnectIntegration(ctx.account, input.kind))),
 
   /** A Rawr segment becomes a Brevo list. Nobody who has opted out is included,
    *  and running it twice pushes each contact once. F6 §2. */
   /** B12. Brevo keeps the designer and the sending reputation; Rawr owns the
    *  audience, the opt-out, the schedule and the numbers. */
-  brevoTemplates: protectedProcedure.query(({ ctx }) => call(() => listBrevoTemplates(ctx.workspace))),
+  brevoTemplates: protectedProcedure.query(({ ctx }) => call(() => listBrevoTemplates(ctx.account))),
 
-  brevoCampaigns: protectedProcedure.query(({ ctx }) => call(() => listBrevoCampaigns(ctx.workspace))),
+  brevoCampaigns: protectedProcedure.query(({ ctx }) => call(() => listBrevoCampaigns(ctx.account))),
 
   scheduleCampaign: protectedProcedure
     .input(
@@ -113,7 +119,7 @@ export const integrationsRouter = router({
     )
     .mutation(({ ctx, input }) =>
       call(() =>
-        scheduleBrevoCampaign(ctx.workspace, {
+        scheduleBrevoCampaign(ctx.account, {
           segmentId: input.segmentId,
           listId: input.listId,
           name: input.name,
@@ -128,22 +134,35 @@ export const integrationsRouter = router({
 
   sendCampaign: protectedProcedure
     .input(z.object({ campaignId: z.number().int().positive() }))
-    .mutation(({ ctx, input }) => call(() => sendBrevoCampaign(ctx.workspace, input.campaignId))),
+    .mutation(({ ctx, input }) => call(() => sendBrevoCampaign(ctx.account, input.campaignId))),
 
   pushSegment: protectedProcedure
-    .input(z.object({ segmentId: z.uuid(), listId: z.number().int().min(1) }))
+    // Optional, because the integration carries a configured list id and
+    // pushSegmentToBrevo already falls back to it. Requiring one here made that
+    // fallback unreachable and the field's own hint untrue.
+    .input(z.object({ segmentId: z.uuid(), listId: z.number().int().min(1).nullish() }))
     .mutation(({ ctx, input }) =>
-      call(() => pushSegmentToBrevo(ctx.workspace, { segmentId: input.segmentId, listId: input.listId })),
+      call(() => pushSegmentToBrevo(ctx.account, { segmentId: input.segmentId, listId: input.listId ?? null })),
     ),
 
   enrich: protectedProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => enrichRecord(ctx.workspace, input.contactId))),
+    .mutation(({ ctx, input }) => call(() => enrichRecord(ctx.account, input.contactId))),
+
+  /** Consent, in three calls. Nothing an enricher charges for happens until
+   *  somebody has been shown how many records are waiting and said yes, so an
+   *  import, a form burst or a bad paste cannot spend a plan's credits by
+   *  itself. Approval covers the batch on screen and nothing that arrives after. */
+  pendingEnrichment: protectedProcedure.query(({ ctx }) => call(() => pendingEnrichment(ctx.account))),
+
+  approveEnrichment: protectedProcedure.mutation(({ ctx }) => call(() => approveEnrichment(ctx.account))),
+
+  discardEnrichment: protectedProcedure.mutation(({ ctx }) => call(() => discardEnrichment(ctx.account))),
 
   /** A company by its domain, so one with no contact yet is still enrichable. */
   enrichCompany: protectedProcedure
     .input(z.object({ companyId: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => enrichCompanyRecord(ctx.workspace, input.companyId))),
+    .mutation(({ ctx, input }) => call(() => enrichCompanyRecord(ctx.account, input.companyId))),
 
   /** What Apollo's own sequences did for this contact, read back onto the
    *  timeline. Enrolling happens in Rawr now: mail sent from Apollo does not
@@ -151,20 +170,20 @@ export const integrationsRouter = router({
    *  replies here, which is the whole reason sequences moved in-house. */
   apolloStatus: protectedProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => syncSequenceActivity(ctx.workspace, input.contactId))),
+    .query(({ ctx, input }) => call(() => syncSequenceActivity(ctx.account, input.contactId))),
 
   /** F6 §4. What enrichment was not allowed to write, so a person can decide. */
   suggestions: protectedProcedure
     .input(z.object({ entity: z.string().max(32).optional(), entityId: z.uuid().optional() }).optional())
-    .query(({ ctx, input }) => call(() => listSuggestions(ctx.workspace, input?.entity, input?.entityId))),
+    .query(({ ctx, input }) => call(() => listSuggestions(ctx.account, input?.entity, input?.entityId))),
 
   acceptSuggestion: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => acceptSuggestion(ctx.workspace, input.id))),
+    .mutation(({ ctx, input }) => call(() => acceptSuggestion(ctx.account, input.id))),
 
   dismissSuggestion: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => dismissSuggestion(ctx.workspace, input.id))),
+    .mutation(({ ctx, input }) => call(() => dismissSuggestion(ctx.account, input.id))),
 
   /** Where a value came from, so a record can show that a human typed something
    *  and enrichment is leaving it alone. */
@@ -172,15 +191,15 @@ export const integrationsRouter = router({
     .input(z.object({ entity: z.string().max(32), entityId: z.uuid() }))
     .query(({ ctx, input }) =>
       call(async () => {
-        const map = await readFieldSources(ctx.workspace, input.entity, input.entityId)
+        const map = await readFieldSources(ctx.account, input.entity, input.entityId)
         return Object.fromEntries(map)
       }),
     ),
 
   /** F6 §3. Tracking events for addresses nobody knows, kept rather than dropped. */
-  unmatched: protectedProcedure.query(({ ctx }) => call(() => listUnmatchedEvents(ctx.workspace))),
+  unmatched: protectedProcedure.query(({ ctx }) => call(() => listUnmatchedEvents(ctx.account))),
 
-  rematch: protectedProcedure.mutation(({ ctx }) => call(() => rematchInbound(ctx.workspace))),
+  rematch: protectedProcedure.mutation(({ ctx }) => call(() => rematchInbound(ctx.account))),
 
   apolloLink: protectedProcedure
     .input(z.object({ email: z.email() }))
@@ -194,9 +213,9 @@ export const integrationsRouter = router({
    *  service like any other, with the same health line and the same replay behind
    *  it, and the screen it lives on is the one that already shows those. */
   webhooks: router({
-    list: adminProcedure.query(({ ctx }) => call(() => listWebhookEndpoints(ctx.workspace))),
+    list: adminProcedure.query(({ ctx }) => call(() => listWebhookEndpoints(ctx.account))),
 
-    events: adminProcedure.query(({ ctx }) => call(() => webhookEventsFor(ctx.workspace))),
+    events: adminProcedure.query(({ ctx }) => call(() => webhookEventsFor(ctx.account))),
 
     create: adminProcedure
       .input(
@@ -207,7 +226,7 @@ export const integrationsRouter = router({
         }),
       )
       // The secret comes back exactly once, here, the way an agent token does.
-      .mutation(({ ctx, input }) => call(() => createWebhookEndpoint(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => createWebhookEndpoint(ctx.account, input))),
 
     update: adminProcedure
       .input(
@@ -220,29 +239,29 @@ export const integrationsRouter = router({
         }),
       )
       .mutation(({ ctx, input: { id, ...rest } }) =>
-        call(() => updateWebhookEndpoint(ctx.workspace, id, rest)),
+        call(() => updateWebhookEndpoint(ctx.account, id, rest)),
       ),
 
     rollSecret: adminProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => rollWebhookSecret(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => rollWebhookSecret(ctx.account, input.id))),
 
     remove: adminProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => removeWebhookEndpoint(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => removeWebhookEndpoint(ctx.account, input.id))),
   }),
 
   replay: adminProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) =>
       call(async () => {
-        const claimed = await claimForReplay(ctx.workspace, input.id)
+        const claimed = await claimForReplay(ctx.account, input.id)
         try {
-          return await replayJob(ctx.workspace, claimed)
+          return await replayJob(ctx.account, claimed)
         } catch (cause) {
           // The claim is undone so a replay that never ran does not read as one
           // that already did.
-          await releaseReplay(ctx.workspace, input.id)
+          await releaseReplay(ctx.account, input.id)
           throw cause
         }
       }),

@@ -13,7 +13,7 @@ import type { TaskRow } from './tasks-panel.tsx'
 import { formatDate, isPast } from './value.tsx'
 
 export type TasksTableProps = {
-  workspace: string
+  account: string
   rows: TaskRow[]
   assignees: { id: string; label: string }[]
   canWrite: boolean
@@ -25,7 +25,7 @@ export type TasksTableProps = {
  *  the record the task hangs on one click away, and the count in the footer.
  *  The "Add tasks" button on the header links here with ?new=1, so the create
  *  dialog lives once, next to the table it adds to. */
-export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }: TasksTableProps) => {
+export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: TasksTableProps) => {
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -44,7 +44,7 @@ export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }:
     if (askedToCreate) {
       const next = new URLSearchParams(query)
       next.delete('new')
-      navigate(`${tasksPath(workspace)}${next.size ? `?${next}` : ''}`)
+      navigate(`${tasksPath(account)}${next.size ? `?${next}` : ''}`)
     }
   }
 
@@ -87,7 +87,14 @@ export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }:
       header: 'Title',
       width: 320,
       render: (row) => (
-        <span className={cn('block truncate', row.status === 'done' && 'text-secondary line-through')}>{row.title}</span>
+        <span className="flex min-w-0 flex-col py-1">
+          <span className={cn('block truncate', row.status === 'done' && 'text-secondary line-through')}>
+            {row.title}
+          </span>
+          {/* One line of it. A task written by an automation carries the whole
+              reason in its body, and a table row is not where that is read. */}
+          {row.body ? <span className="block truncate text-small text-secondary">{row.body}</span> : null}
+        </span>
       ),
     },
     {
@@ -96,7 +103,7 @@ export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }:
       width: 220,
       render: (row) =>
         row.entityId && row.entityType ? (
-          <Link href={recordPath(workspace, row.entityType, row.entityId)} className="truncate" onClick={(event) => event.stopPropagation()}>
+          <Link href={recordPath(account, row.entityType, row.entityId)} className="truncate" onClick={(event) => event.stopPropagation()}>
             {row.entityName ?? 'the linked record'}
           </Link>
         ) : (
@@ -144,7 +151,7 @@ export const TasksTable = ({ workspace, rows, assignees, canWrite, emptyTitle }:
         columns={columns}
         rows={rows}
         rowKey={(row) => row.id}
-        caption="Tasks in this workspace"
+        caption="Tasks in this account"
         storageKey="tasks"
         fill
         empty={

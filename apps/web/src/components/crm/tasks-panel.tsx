@@ -13,6 +13,7 @@ import { formatDate, isPast } from './value.tsx'
 export type TaskRow = {
   id: string
   title: string
+  body: string | null
   dueDate: string | null
   status: 'open' | 'done'
   assigneeName: string | null
@@ -23,7 +24,7 @@ export type TaskRow = {
 }
 
 export type TasksPanelProps = {
-  workspace: string
+  account: string
   rows: TaskRow[]
   assignees: { id: string; label: string }[]
   /** Set on a record page, so a new task is filed against that record. */
@@ -37,7 +38,7 @@ export type TasksPanelProps = {
 }
 
 export const TasksPanel = ({
-  workspace,
+  account,
   rows,
   assignees,
   entity,
@@ -117,6 +118,11 @@ export const TasksPanel = ({
                 <span className={cn('block break-words', row.status === 'done' && 'text-secondary line-through')}>
                   {row.title}
                 </span>
+                {row.body ? (
+                  <span className="block whitespace-pre-wrap break-words text-small text-secondary">
+                    {row.body}
+                  </span>
+                ) : null}
                 <span className="block text-small text-secondary">
                   {row.dueDate ? (
                     <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>
@@ -129,7 +135,7 @@ export const TasksPanel = ({
                   {row.entityId && row.entityType && !entity ? (
                     <>
                       {' · '}
-                      <Link href={recordPath(workspace, row.entityType, row.entityId)}>
+                      <Link href={recordPath(account, row.entityType, row.entityId)}>
                         {row.entityName ?? 'the linked record'}
                       </Link>
                     </>

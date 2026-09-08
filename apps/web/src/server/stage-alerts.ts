@@ -1,4 +1,4 @@
-import type { StageChange, WorkspaceContext } from '@rawr/db'
+import type { StageChange, AccountContext } from '@rawr/db'
 import { inBackground } from './background.ts'
 import { queueStageAlert } from './notify.ts'
 import { shouldAnnounceStage, slackCredentials } from './integrations/slack.ts'
@@ -14,8 +14,8 @@ import { shouldAnnounceStage, slackCredentials } from './integrations/slack.ts'
  *  happen, though, so it runs after the response rather than in a promise nobody
  *  is holding. */
 export const announceStageChange = (
-  ctx: WorkspaceContext,
-  workspaceSlug: string,
+  ctx: AccountContext,
+  accountSlug: string,
   change: StageChange | undefined,
   actorName = 'Somebody',
 ): void => {
@@ -28,8 +28,8 @@ export const announceStageChange = (
     const credentials = await slackCredentials(ctx).catch(() => null)
     if (!shouldAnnounceStage(credentials, change.pipelineId)) return
     queueStageAlert({
-      workspaceId: ctx.workspaceId,
-      workspaceSlug,
+      accountId: ctx.accountId,
+      accountSlug,
       dealId: change.dealId,
       dealName: change.dealName,
       from: change.from,

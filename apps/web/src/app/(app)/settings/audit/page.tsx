@@ -1,19 +1,19 @@
-import { auditEntities, listAudit, listMembers, listOrgAudit } from '@rawr/db'
+import { auditEntities, listAudit, listMembers } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
-import { contextFrom, orgContextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { AuditTable } from './audit-table.tsx'
 
 /** Who changed what. Two histories, because there are two scopes: what happened
- *  inside this workspace, and what happened to the company above it. */
+ *  inside this account, and what happened to the company above it. */
 const AuditPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  if (session.role !== 'admin') {
+  if (!sessionIsAdmin(session)) {
     return (
       <EmptyState
         title="Only an admin can read the history"
-        description={`Your role (${session.role}) can use this workspace but not audit it. A history is a security record.`}
+        description={`You need account access, which you do not have. can use this account but not audit it. A history is a security record.`}
       />
     )
   }
@@ -23,7 +23,7 @@ const AuditPage = async () => {
     listAudit(ctx, { limit: 50 }),
     auditEntities(ctx),
     listMembers(ctx),
-    session.orgRole === 'org_admin' ? listOrgAudit(orgContextFrom(session), { limit: 25 }) : Promise.resolve([]),
+    session.isSuperAdmin ? listAudit(contextFrom(session), { limit: 25 }) : Promise.resolve([]),
   ])
 
   return (
@@ -31,7 +31,7 @@ const AuditPage = async () => {
       <PageHeader
         as="h2"
         title="History"
-        lead={`Every change made in ${session.workspaceName}, newest first.`}
+        lead={`Every change made in ${session.accountName}, newest first.`}
         why={
           <p>
             It is append-only: the app cannot rewrite or delete a line here, even with a valid
@@ -45,8 +45,6 @@ const AuditPage = async () => {
         cursor={page.cursor}
         entities={entities}
         people={members.map((member) => ({ userId: member.userId, name: member.name }))}
-        organisation={orgRows.map((row) => ({ ...row, at: row.at.toISOString() }))}
-        organisationName={session.organisationName}
       />
     </div>
   )

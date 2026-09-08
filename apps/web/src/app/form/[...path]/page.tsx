@@ -12,6 +12,7 @@ import { cache } from 'react'
 import { PendingButton } from '~/components/pending-button.tsx'
 import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
+import { presetOf, themeCss } from '~/lib/embed-themes.ts'
 import { submitHostedForm } from './actions.ts'
 
 /** The hosted form page. Two jobs:
@@ -23,7 +24,7 @@ import { submitHostedForm } from './actions.ts'
  *     spam score reflects that rather than blocking a real person.
  *
  *  Addressed two ways, because the two callers know different things:
- *    /form/<workspace>/<slug>   a person following a link a marketer wrote
+ *    /form/<account>/<slug>   a person following a link a marketer wrote
  *    /form/<formId>             the embed's own fallback, which has only an id */
 
 export const dynamic = 'force-dynamic'
@@ -82,8 +83,20 @@ const HostedFormPage = async ({
   // and the font. Only the page's own styles are injected here.
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `${PAGE_STYLES}\n${EMBED_STYLES}` }} />
-      <main data-rawr-form className="rawr-hosted">
+      <style
+        dangerouslySetInnerHTML={{
+          __html:
+            `${PAGE_STYLES}\n${EMBED_STYLES}\n${themeCss(form.settings.theme, '.rawr-hosted')}\n` +
+            // The page behind the form, not the form. A dark-hero theme on a
+            // pale page is a rectangle of white text nobody can read.
+            `body { --rawr-page-bg: ${presetOf(form.settings.theme).canvas}; }`,
+        }}
+      />
+      <main
+        data-rawr-form
+        className="rawr-hosted"
+        data-theme={form.settings.theme?.preset ?? 'neutral'}
+      >
           <h1>{form.name}</h1>
 
           {sent ? (
@@ -141,8 +154,66 @@ const Field = ({
     return <input type="hidden" name={field.key} defaultValue={field.defaultValue ?? ''} />
   }
 
-  const id = `rawr-${field.key}`
+  // Prefixed so a field key can never collide with the embed's own chrome. A
+  // field keyed "consent" used to render as id="rawr-consent", which the consent
+  // banner's own rule then positioned fixed across the bottom of the page.
+  const id = `rawr-f-${field.key}`
   const describedBy = error ? `${id}-error` : field.help ? `${id}-help` : undefined
+
+  if (field.type === 'heading') {
+    return (
+      <div className="rawr-field" data-field={field.key} data-wide>
+        <p className="rawr-heading">{field.label}</p>
+        {field.help ? <small className="rawr-help">{field.help}</small> : null}
+      </div>
+    )
+  }
+
+  // A file field cannot work without script: the upload is a signed PUT the
+  // browser makes. Said plainly rather than rendered as a picker that does
+  // nothing, and the rest of the form still submits without it.
+  if (field.type === 'file') {
+    return (
+      <div className="rawr-field" data-field={field.key} data-wide>
+        <label htmlFor={id}>{field.label}</label>
+        <small className="rawr-help" id={`${id}-help`}>
+          Attaching a file needs JavaScript. Send this form without it and we will ask for the file
+          in our reply.
+        </small>
+      </div>
+    )
+  }
+
+  if (field.type === 'consent') {
+    return (
+      <div className="rawr-field" data-field={field.key} data-wide>
+        <label className="rawr-consent" htmlFor={id}>
+          <input
+            type="checkbox"
+            id={id}
+            name={field.key}
+            value="true"
+            required={field.required}
+            aria-describedby={describedBy}
+          />
+          <span>
+            {field.label}
+            {field.required ? ' *' : ''}
+          </span>
+        </label>
+        {field.help && !error ? (
+          <small className="rawr-help" id={`${id}-help`}>
+            {field.help}
+          </small>
+        ) : null}
+        {error ? (
+          <div className="rawr-error" id={`${id}-error`}>
+            {error}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="rawr-field" data-field={field.key}>
@@ -170,6 +241,22 @@ const Field = ({
             </option>
           ))}
         </select>
+      ) : field.type === 'radio' ? (
+        // biome-ignore lint/a11y/useSemanticElements: see the multi_select note
+        <div className="rawr-choices" role="radiogroup" aria-labelledby={id}>
+          {(field.options ?? []).map((option) => (
+            <label key={option.value}>
+              <input
+                type="radio"
+                name={field.key}
+                value={option.value}
+                required={field.required}
+                defaultChecked={previous === option.value}
+              />{' '}
+              {option.label}
+            </label>
+          ))}
+        </div>
       ) : field.type === 'multi_select' ? (
         // The hosted page ships its own stylesheet, where a <fieldset> would need
         // its own reset to look the same. role="group" plus aria-labelledby names
@@ -234,7 +321,7 @@ const PAGE_STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   body {
     margin: 0;
-    background: #f5f8fa;
+    background: var(--rawr-page-bg, #f5f8fa);
     color: #33475b;
     font-family: 'Lexend Deca', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     font-weight: 300;
@@ -247,9 +334,13 @@ const PAGE_STYLES = `
     padding: clamp(1rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem);
   }
   .rawr-hosted h1 { font-size: 1.25rem; font-weight: 500; margin: 0 0 1.5rem; }
+
+  /* Only where the form has no look of its own. A form themed for a dark hero
+     already says what it wants, and following the reader's system setting on top
+     of that would repaint a chosen design out from under whoever chose it. */
   @media (prefers-color-scheme: dark) {
-    body { background: #1b2738; color: #dfe3eb; }
-    [data-rawr-form] {
+    body:has(.rawr-hosted[data-theme="neutral"]) { background: #1b2738; color: #dfe3eb; }
+    .rawr-hosted[data-theme="neutral"] {
       --rawr-embed-text: #dfe3eb;
       --rawr-embed-muted: #99acc2;
       --rawr-embed-border: #33475b;

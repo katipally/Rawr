@@ -1,14 +1,26 @@
 import postgres from 'postgres'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import { replayDeadLetter } from '../src/dal/jobs.ts'
-import { ForbiddenError, ROLES, type Role, type WorkspaceContext } from '../src/dal/context.ts'
+import { ForbiddenError, type AccountContext, type Hub } from '../src/dal/context.ts'
 import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 
-/** Proves the role matrix and the audit trail by calling the mutation directly,
+/** Proves the hub matrix and the audit trail by calling the mutation directly,
  *  not by checking that a button is hidden. */
+
+/** The shapes of access worth proving, named for the seat the seed gives them.
+ *  `account` is the hub every settings mutation asks for, so the first holds it
+ *  and none of the others do. */
+const SEATS = {
+  admin: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
+  sales: ['contacts', 'sales'],
+  marketing: ['contacts', 'marketing'],
+  viewer: [],
+} as const satisfies Record<string, readonly Hub[]>
+
+type Seat = keyof typeof SEATS
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 
@@ -18,43 +30,45 @@ const check = (ok: boolean, label: string, detail = '') => {
   if (!ok) failures.push(label)
 }
 
-const contextFor = (workspaceId: string, userId: string, role: Role): WorkspaceContext => ({
-  workspaceId,
+const contextFor = (accountId: string, userId: string, seat: Seat): AccountContext => ({
+  accountId,
   actorId: userId,
   actorKind: 'user',
-  role,
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: [...SEATS[seat]],
 })
 
 try {
-  const [ws] = await owner`select id from workspace where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = 'datasaur'`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
-  const workspaceId = ws.id as string
+  const accountId = ws.id as string
 
   const [actor] = await owner`
     select u.id from user_account u
       join membership m on m.user_id = u.id
-     where m.workspace_id = ${workspaceId} limit 1`
+     where m.account_id = ${accountId} limit 1`
   const actorId = actor!.id as string
 
   const [contactObject] = await owner`
-    select id from object_def where workspace_id = ${workspaceId} and key = 'contact'`
+    select id from object_def where account_id = ${accountId} and key = 'contact'`
 
-  // One custom jsonb field per role attempt, so a success does not make the next
+  // One custom jsonb field per seat attempt, so a success does not make the next
   // attempt fail for the wrong reason.
-  const fieldIds: Record<Role, string> = {} as Record<Role, string>
-  for (const role of ROLES) {
+  const fieldIds: Record<Seat, string> = {} as Record<Seat, string>
+  for (const role of Object.keys(SEATS) as Seat[]) {
     const key = `guard_probe_${role}`
-    await owner`delete from field_def where workspace_id = ${workspaceId} and key = ${key}`
+    await owner`delete from field_def where account_id = ${accountId} and key = ${key}`
     const [created] = await owner`
-      insert into field_def (workspace_id, object_id, key, label, type, storage, is_custom, position)
-      values (${workspaceId}, ${contactObject!.id}, ${key}, ${'Guard probe ' + role},
+      insert into field_def (account_id, object_id, key, label, type, storage, is_custom, position)
+      values (${accountId}, ${contactObject!.id}, ${key}, ${'Guard probe ' + role},
               'text', 'jsonb', true, 99)
       returning id`
     fieldIds[role] = created!.id as string
   }
 
-  for (const role of ROLES) {
-    const ctx = contextFor(workspaceId, actorId, role)
+  for (const role of Object.keys(SEATS) as Seat[]) {
+    const ctx = contextFor(accountId, actorId, role)
     let outcome: 'allowed' | 'forbidden' | 'other' = 'other'
     let message = ''
     try {
@@ -70,7 +84,7 @@ try {
     }
 
     if (role === 'admin') {
-      check(outcome === 'allowed', 'admin can promote a field to hot', message)
+      check(outcome === 'allowed', 'the account hub can promote a field to hot', message)
     } else {
       check(
         outcome === 'forbidden',
@@ -83,7 +97,7 @@ try {
   const [audit] = await owner`
     select actor_id, actor_kind, entity, action, before, after
       from audit_log
-     where workspace_id = ${workspaceId} and entity = 'field_def' and action = 'promote_to_hot'
+     where account_id = ${accountId} and entity = 'field_def' and action = 'promote_to_hot'
      order by at desc limit 1`
   check(audit !== undefined, 'the successful promotion wrote an audit_log row')
   check(audit?.actor_id === actorId, 'the audit row is attributed to the real actor')
@@ -111,35 +125,35 @@ try {
   const [fi] = await owner`
     select fi.id from field_index fi where fi.field_id = ${fieldIds.admin}`
   const [letter] = await owner`
-    insert into dead_letter (workspace_id, job_name, payload, error, attempts)
-    values (${workspaceId}, 'field-index.create',
-            ${owner.json({ workspaceId, fieldIndexId: fi!.id, objectKey: 'contact', fieldKey: 'guard_probe_admin' })},
+    insert into dead_letter (account_id, job_name, payload, error, attempts)
+    values (${accountId}, 'field-index.create',
+            ${owner.json({ accountId, fieldIndexId: fi!.id, objectKey: 'contact', fieldKey: 'guard_probe_admin' })},
             'Simulated failure for the guard check.', 5)
     returning id`
 
   let viewerReplay = 'other'
   try {
-    await replayDeadLetter(contextFor(workspaceId, actorId, 'viewer'), letter!.id as string)
+    await replayDeadLetter(contextFor(accountId, actorId, 'viewer'), letter!.id as string)
     viewerReplay = 'allowed'
   } catch (cause) {
     viewerReplay = cause instanceof ForbiddenError ? 'forbidden' : 'other'
   }
-  check(viewerReplay === 'forbidden', 'viewer cannot replay a failed job')
+  check(viewerReplay === 'forbidden', 'a seat without the account hub cannot replay a failed job')
 
-  await replayDeadLetter(contextFor(workspaceId, actorId, 'admin'), letter!.id as string)
+  await replayDeadLetter(contextFor(accountId, actorId, 'admin'), letter!.id as string)
   const [afterReplay] = await owner`
     select dl.replayed_at, fi.state
       from dead_letter dl join field_index fi on fi.id = ${fi!.id}
      where dl.id = ${letter!.id}`
   check(
     afterReplay?.replayed_at !== null && afterReplay?.state === 'pending',
-    'admin replay stamps the dead letter and re-queues the index',
+    'an account-hub replay stamps the dead letter and re-queues the index',
     `state: ${afterReplay?.state}`,
   )
 
   let secondReplay = 'allowed'
   try {
-    await replayDeadLetter(contextFor(workspaceId, actorId, 'admin'), letter!.id as string)
+    await replayDeadLetter(contextFor(accountId, actorId, 'admin'), letter!.id as string)
   } catch {
     secondReplay = 'refused'
   }
@@ -156,11 +170,11 @@ try {
   // not to somebody else's.
   const [other] = await owner`
     select u.id from user_account u join membership m on m.user_id = u.id
-     where m.workspace_id = ${workspaceId} and u.id <> ${actorId} limit 1`
+     where m.account_id = ${accountId} and u.id <> ${actorId} limit 1`
   const otherId = other!.id as string
   const [view] = await owner`
-    insert into saved_view (workspace_id, object_id, name, slug, kind, owner_id, is_shared, filters, sorts, columns, position)
-    values (${workspaceId}, ${contactObject!.id}, 'Guard probe view', 'guard-probe-view', 'table', ${otherId}, true, '[]', '[]', '["first_name"]', 99)
+    insert into saved_view (account_id, object_id, name, slug, kind, owner_id, is_shared, filters, sorts, columns, position)
+    values (${accountId}, ${contactObject!.id}, 'Guard probe view', 'guard-probe-view', 'table', ${otherId}, true, '[]', '[]', '["first_name"]', 99)
     returning id`
   const outcomeOf = async (fn: () => Promise<unknown>): Promise<'allowed' | 'refused'> => {
     try {
@@ -171,41 +185,41 @@ try {
     }
   }
   check(
-    (await outcomeOf(() => deleteView(contextFor(workspaceId, actorId, 'sales'), view!.id as string))) === 'refused',
+    (await outcomeOf(() => deleteView(contextFor(accountId, actorId, 'sales'), view!.id as string))) === 'refused',
     "a sales user cannot delete somebody else's view",
   )
   check(
-    (await outcomeOf(() => deleteView(contextFor(workspaceId, actorId, 'admin'), view!.id as string))) === 'allowed',
+    (await outcomeOf(() => deleteView(contextFor(accountId, actorId, 'admin'), view!.id as string))) === 'allowed',
     'an admin can delete anybody’s view',
   )
 
-  const probeSegment = await saveSegment(contextFor(workspaceId, actorId, 'admin'), {
+  const probeSegment = await saveSegment(contextFor(accountId, actorId, 'admin'), {
     objectKey: 'contact',
     name: 'Guard probe segment',
     filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'is_not_empty' }] }],
   })
   check(
-    (await outcomeOf(() => evaluateSegment(contextFor(workspaceId, actorId, 'viewer'), probeSegment.id))) === 'refused',
+    (await outcomeOf(() => evaluateSegment(contextFor(accountId, actorId, 'viewer'), probeSegment.id))) === 'refused',
     'viewer cannot evaluate a segment',
   )
   check(
-    (await outcomeOf(() => evaluateSegment(contextFor(workspaceId, actorId, 'marketing'), probeSegment.id))) === 'allowed',
+    (await outcomeOf(() => evaluateSegment(contextFor(accountId, actorId, 'marketing'), probeSegment.id))) === 'allowed',
     'marketing can evaluate a segment',
   )
-  await deleteSegment(contextFor(workspaceId, actorId, 'admin'), probeSegment.id)
+  await deleteSegment(contextFor(accountId, actorId, 'admin'), probeSegment.id)
   check(
-    (await outcomeOf(() => rematchInbound(contextFor(workspaceId, actorId, 'sales')))) === 'refused',
+    (await outcomeOf(() => rematchInbound(contextFor(accountId, actorId, 'sales')))) === 'refused',
     'sales cannot rematch inbound provider events',
   )
   check(
-    (await outcomeOf(() => rematchInbound(contextFor(workspaceId, actorId, 'admin')))) === 'allowed',
+    (await outcomeOf(() => rematchInbound(contextFor(accountId, actorId, 'admin')))) === 'allowed',
     'admin can rematch inbound provider events',
   )
 
   // The probes are artefacts of this script, so it takes them with it.
-  await owner`delete from saved_view where workspace_id = ${workspaceId} and slug = 'guard-probe-view'`
-  await owner`delete from dead_letter where workspace_id = ${workspaceId} and error like 'Simulated failure%'`
-  await owner`delete from field_def where workspace_id = ${workspaceId} and key like 'guard_probe_%'`
+  await owner`delete from saved_view where account_id = ${accountId} and slug = 'guard-probe-view'`
+  await owner`delete from dead_letter where account_id = ${accountId} and error like 'Simulated failure%'`
+  await owner`delete from field_def where account_id = ${accountId} and key like 'guard_probe_%'`
   await owner.unsafe('drop index if exists hot_contact_guard_probe_admin')
 } finally {
   // The mutations under test query through the app pool, so this script owns two

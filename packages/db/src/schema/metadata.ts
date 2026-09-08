@@ -9,15 +9,15 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, accountId } from './columns.ts'
 import { fieldStorageEnum, fieldTypeEnum, indexStateEnum } from './enums.ts'
-import { workspace } from './identity.ts'
+import { account } from './identity.ts'
 
 export const objectDef = pgTable(
   'object_def',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     key: text('key').notNull(),
     nameSingular: text('name_singular').notNull(),
     namePlural: text('name_plural').notNull(),
@@ -26,7 +26,7 @@ export const objectDef = pgTable(
     labelFieldId: uuid('label_field_id'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('object_def_key_key').on(t.workspaceId, t.key)],
+  (t) => [uniqueIndex('object_def_key_key').on(t.accountId, t.key)],
 )
 
 /** The single source of truth for list columns, filter operators, sort keys, the
@@ -36,7 +36,7 @@ export const fieldDef = pgTable(
   'field_def',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     objectId: uuid('object_id')
       .notNull()
       .references(() => objectDef.id, { onDelete: 'cascade' }),
@@ -74,8 +74,8 @@ export const fieldDef = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex('field_def_key_key').on(t.workspaceId, t.objectId, t.key),
-    index('field_def_object_idx').on(t.workspaceId, t.objectId, t.position),
+    uniqueIndex('field_def_key_key').on(t.accountId, t.objectId, t.key),
+    index('field_def_object_idx').on(t.accountId, t.objectId, t.position),
   ],
 )
 
@@ -83,7 +83,7 @@ export const fieldIndex = pgTable(
   'field_index',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     fieldId: uuid('field_id')
       .notNull()
       .references(() => fieldDef.id, { onDelete: 'cascade' }),

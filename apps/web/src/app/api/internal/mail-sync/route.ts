@@ -20,17 +20,17 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { workspaceId?: string; mailboxId?: string }
+    | { accountId?: string; mailboxId?: string }
     | null
-  if (!body?.workspaceId || !body?.mailboxId) {
-    return NextResponse.json({ error: 'A workspace and a mailbox are both required.' }, { status: 400 })
+  if (!body?.accountId || !body?.mailboxId) {
+    return NextResponse.json({ error: 'A account and a mailbox are both required.' }, { status: 400 })
   }
 
   try {
     const outcome = await syncMailbox(
       // A job's context: no actor, marketing's ceiling, which is what reading mail
       // onto contacts needs and nothing more.
-      { ...publicEdgeContext(body.workspaceId), actorKind: 'job' },
+      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
       body.mailboxId,
     )
     return NextResponse.json(outcome)

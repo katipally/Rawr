@@ -1,8 +1,10 @@
 import { Alert, PageHeader } from '@rawr/ui'
+import Link from 'next/link'
 import { listSites, listUnmatchedEvents, listWebhookEndpoints, webhookEventsFor } from '@rawr/db'
 import { devIntegrationsEnabled, publicBaseUrl } from '~/lib/env.ts'
+import { appsPath } from '~/lib/links.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { IntegrationPanel } from './integration-panel.tsx'
 import { WebhookPanel } from './webhook-panel.tsx'
 
@@ -25,11 +27,11 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
     listUnmatchedEvents(ctx, 25),
     listSites(ctx),
     // Only an admin may read them, and only an admin can open this page.
-    session.role === 'admin' ? listWebhookEndpoints(ctx) : Promise.resolve([]),
-    session.role === 'admin' ? webhookEventsFor(ctx) : Promise.resolve([]),
+    sessionIsAdmin(session) ? listWebhookEndpoints(ctx) : Promise.resolve([]),
+    sessionIsAdmin(session) ? webhookEventsFor(ctx) : Promise.resolve([]),
   ])
-  // The webhook URL names the workspace through a tracked site's key; the first
-  // active one is the workspace's public identity for that purpose.
+  // The webhook URL names the account through a tracked site's key; the first
+  // active one is the account's public identity for that purpose.
   const siteKey = sites.find((site) => site.isActive)?.siteKey ?? sites[0]?.siteKey ?? null
 
   return (
@@ -46,6 +48,18 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
           </p>
         }
       />
+
+      <Alert>
+        A credential belongs to the organisation and every account in it uses the same one, so
+        connecting or disconnecting is an organisation admin&apos;s decision.{' '}
+        <Link href={appsPath()} className="font-medium text-link">
+          Connected apps
+        </Link>{' '}
+        lists what is connected, who connected it and what each one may reach.
+        {session.isSuperAdmin
+          ? ''
+          : ` You are not a super admin, so the forms below are read-only.`}
+      </Alert>
 
       {devIntegrationsEnabled ? (
         <Alert tone="warning">
@@ -64,8 +78,8 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
         unmatched={unmatched.map((row) => ({ ...row, at: row.at.toISOString() }))}
         webhookBase={publicBaseUrl}
         siteKey={siteKey}
-        canWrite={session.role === 'admin'}
-        role={session.role}
+        canWrite={session.isSuperAdmin}
+        hub="account"
         openKind={rows.find((row) => row.kind === open)?.kind ?? null}
       />
 
@@ -82,7 +96,7 @@ const IntegrationsPage = async ({ searchParams }: Props) => {
           lastErrorAt: row.lastErrorAt?.toISOString() ?? null,
         }))}
         events={webhookEvents}
-        canWrite={session.role === 'admin'}
+        canWrite={sessionIsAdmin(session)}
       />
     </div>
   )

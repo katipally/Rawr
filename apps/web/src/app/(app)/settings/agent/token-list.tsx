@@ -189,7 +189,7 @@ export const TokenList = ({
 
       <section className="flex flex-col gap-2">
         <h2 className="font-medium">
-          {isAdmin ? 'Tokens in this workspace' : 'Your tokens'}{' '}
+          {isAdmin ? 'Tokens in this account' : 'Your tokens'}{' '}
           <span className="text-secondary">
             {live.length} active{dead.length > 0 ? `, ${dead.length} revoked` : ''}
           </span>

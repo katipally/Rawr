@@ -13,7 +13,7 @@ const MAX_CHUNKS = 10_000
 export type MappableField = { key: string; label: string; isRequired: boolean }
 
 export type ImportWizardProps = {
-  workspace: string
+  account: string
   runId: string
   object: ObjectKey
   /** Records fill columns; activities land on the timeline of the record they
@@ -47,7 +47,7 @@ type Preview = {
 }
 
 export const ImportWizard = ({
-  workspace,
+  account,
   runId,
   object,
   kind,
@@ -86,6 +86,9 @@ export const ImportWizard = ({
   )
 
   const finished = state === 'done'
+  /** Over, one way or another. A cancelled or failed run keeps its counts and
+   *  its error list; what it must not keep is a Resume button. */
+  const stoppedForGood = state === 'cancelled' || state === 'failed'
 
   // Two headers on one field is blocked in the mapper, before the dry run.
   const duplicates = Object.entries(mapping).reduce<Record<string, string[]>>((acc, [header, key]) => {
@@ -149,7 +152,7 @@ export const ImportWizard = ({
     }
   }
 
-  if (finished || state === 'running') {
+  if (finished || stoppedForGood || state === 'running') {
     const pct = totalRows === 0 ? 100 : Math.round((progress / totalRows) * 100)
     const accounted = counts.created + counts.updated + counts.skipped + counts.errored
     return (
@@ -210,13 +213,34 @@ export const ImportWizard = ({
           </section>
         ) : null}
 
-        {!finished ? (
+        {stoppedForGood ? (
+          <p className="text-secondary">
+            {state === 'cancelled'
+              ? 'Stopped. Everything imported before it stopped is in the CRM; upload the file again to bring in the rest.'
+              : 'This import could not go on. The reason is in the errors below; fix it and upload the file again.'}
+          </p>
+        ) : null}
+
+        {!finished && !stoppedForGood ? (
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" busy={running} onClick={() => void run()}>
               {running ? 'Importing' : 'Resume the import'}
             </Button>
             {running ? (
-              <Button onClick={() => (stopped.current = true)}>Stop after this chunk</Button>
+              <Button
+                onClick={() => {
+                  // Both halves: stop asking for chunks, and tell the server the
+                  // run is over. Without the second the run stayed 'running'
+                  // for ever and the screen kept implying it was still going.
+                  stopped.current = true
+                  void api.crm.imports.cancel.mutate({ id: runId }).then(
+                    () => router.refresh(),
+                    (cause: unknown) => setError(errorMessage(cause)),
+                  )
+                }}
+              >
+                Stop this import
+              </Button>
             ) : null}
           </div>
         ) : null}
@@ -230,7 +254,7 @@ export const ImportWizard = ({
             {/* Styled as a button rather than wrapping one: a <button> inside an
                 <a> is nested interactive content assistive technology cannot resolve. */}
             <a
-              href={`/contacts/${workspace}/import/${runId}/errors`}
+              href={`/contacts/${account}/import/${runId}/errors`}
               download
               className="inline-flex min-h-9 w-fit items-center justify-center rounded-hs border border-line bg-surface px-3 py-1.5 font-medium text-body no-underline hover:border-line-pressed hover:bg-fill-hover"
             >
@@ -368,6 +392,16 @@ export const ImportWizard = ({
             ))}
           </dl>
 
+          {/* The counts say how many; these say which. A dry run whose only
+              detail is the refusals tells you nothing about the 4,000 rows it
+              is about to write. */}
+          {preview.samples.create.length > 0 ? (
+            <SampleRows title="A few that will be created" rows={preview.samples.create} />
+          ) : null}
+          {preview.samples.update.length > 0 ? (
+            <SampleRows title="A few that will be updated" rows={preview.samples.update} />
+          ) : null}
+
           {preview.samples.error.length > 0 ? (
             <div>
               <p className="font-medium">Rows that will be refused</p>
@@ -386,6 +420,45 @@ export const ImportWizard = ({
           ) : null}
         </section>
       ) : null}
+    </div>
+  )
+}
+
+/** A handful of rows exactly as they will be written. Columns come from the rows
+ *  themselves rather than the mapping, because a value the mapping drops is
+ *  precisely what somebody checking a dry run is looking for. */
+const SampleRows = ({ title, rows }: { title: string; rows: Record<string, string>[] }) => {
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))]
+  return (
+    <div>
+      <p className="font-medium">{title}</p>
+      <div className="mt-1 overflow-x-auto">
+        <table className="w-full min-w-max border-collapse text-small">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column} className="border-b border-divider px-2 py-1 text-left font-medium">
+                  {column}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              // A sample has no id of its own and two identical rows are exactly
+              // what a duplicate-laden file looks like.
+              // biome-ignore lint/suspicious/noArrayIndexKey: see above
+              <tr key={index}>
+                {columns.map((column) => (
+                  <td key={column} className="border-b border-divider px-2 py-1 text-secondary">
+                    {row[column] ?? ''}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

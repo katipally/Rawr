@@ -1,9 +1,9 @@
 import { and, eq, isNull, sql } from 'drizzle-orm'
 import { visitor, visitorAlias } from '../schema/analytics.ts'
 import { sourceFromSession } from './attribution.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { publicEdgeContext } from './forms.ts'
-import { withWorkspace, type Tx } from './index.ts'
+import { withAccount, type Tx } from './index.ts'
 
 /** F4 §3. Identity stitching: the mechanism that makes a brand-new contact arrive
  *  with a month of browsing history already on their timeline.
@@ -26,13 +26,13 @@ export type AliasVia = 'form_submission' | 'booking' | 'product_signin'
  *  worse than a slightly stale attribution. */
 export const aliasVisitor = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { visitorId: string; contactId: string; via: AliasVia },
 ): Promise<void> => {
   await tx
     .insert(visitorAlias)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       visitorId: input.visitorId,
       contactId: input.contactId,
       via: input.via,
@@ -44,9 +44,9 @@ export const aliasVisitor = async (
   // without waiting for the back-fill.
   await tx
     .insert(visitor)
-    .values({ workspaceId: ctx.workspaceId, id: input.visitorId, contactId: input.contactId })
+    .values({ accountId: ctx.accountId, id: input.visitorId, contactId: input.contactId })
     .onConflictDoUpdate({
-      target: [visitor.workspaceId, visitor.id],
+      target: [visitor.accountId, visitor.id],
       set: { contactId: input.contactId },
     })
 }
@@ -65,10 +65,10 @@ export type BackfillResult = { pageViews: number; events: number; done: boolean 
  *  tables, which is well defined; splitting them would leave a window where a page
  *  view is attributed but missing from the timeline. */
 export const backfillVisitor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { visitorId: string; contactId: string },
 ): Promise<BackfillResult> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const pageViews = await claimChunk(tx, ctx, input, 'page_view')
     const events = await claimChunk(tx, ctx, input, 'custom_event')
     const done = pageViews < BACKFILL_CHUNK && events < BACKFILL_CHUNK
@@ -88,7 +88,7 @@ export const backfillVisitor = async (
  *  back-fill twice changes nothing the second time. */
 const moveFirstTouchEarlier = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { visitorId: string; contactId: string },
 ): Promise<void> => {
   const [earliest] = await tx.execute<{
@@ -99,7 +99,7 @@ const moveFirstTouchEarlier = async (
   }>(sql`
     select referrer, utm, entry_path, started_at
       from visitor_session
-     where workspace_id = ${ctx.workspaceId} and visitor_id = ${input.visitorId}
+     where account_id = ${ctx.accountId} and visitor_id = ${input.visitorId}
      order by started_at
      limit 1`)
   if (!earliest) return
@@ -120,7 +120,7 @@ const moveFirstTouchEarlier = async (
        set original_source = ${JSON.stringify(source)}::jsonb,
            updated_at = now()
      where id = ${input.contactId}
-       and workspace_id = ${ctx.workspaceId}
+       and account_id = ${ctx.accountId}
        and (
          original_source is null
          or (original_source #>> '{detail,firstSeenAt}') is null
@@ -130,7 +130,7 @@ const moveFirstTouchEarlier = async (
 
 const claimChunk = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { visitorId: string; contactId: string },
   table: 'page_view' | 'custom_event',
 ): Promise<number> => {
@@ -149,7 +149,7 @@ const claimChunk = async (
   const rows = await tx.execute<{ n: string }>(sql`
     with claimable as (
       select id from ${source}
-       where workspace_id = ${ctx.workspaceId}
+       where account_id = ${ctx.accountId}
          and visitor_id = ${input.visitorId}
          and contact_id is null
        order by at
@@ -162,14 +162,14 @@ const claimChunk = async (
        where t.id = c.id
       returning t.*
     ), logged as (
-      insert into activity (workspace_id, type, subject, occurred_at, actor_kind, source, payload)
-      select ${ctx.workspaceId}, ${activityType}::rawr_activity_type, ${subject}, m.at,
+      insert into activity (account_id, type, subject, occurred_at, actor_kind, source, payload)
+      select ${ctx.accountId}, ${activityType}::rawr_activity_type, ${subject}, m.at,
              'job'::rawr_actor_kind, 'tracking', ${payload}
         from moved m
       returning id, occurred_at
     ), linked as (
-      insert into activity_link (workspace_id, activity_id, entity_type, entity_id, type, occurred_at)
-      select ${ctx.workspaceId}, l.id, 'contact'::text, ${input.contactId},
+      insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
+      select ${ctx.accountId}, l.id, 'contact'::text, ${input.contactId},
              ${activityType}::rawr_activity_type, l.occurred_at
         from logged l
       on conflict do nothing
@@ -187,33 +187,33 @@ const claimChunk = async (
  *  page_view_daily is added in because raw rows past the retention window are gone
  *  and their counts still have to be honest. */
 export const refreshContactActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<void> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     await tx.execute(sql`
       insert into contact_activity
-        (workspace_id, contact_id, site_visits, pages_viewed, first_seen_at, last_seen_at)
-      select ${ctx.workspaceId}, ${contactId},
+        (account_id, contact_id, site_visits, pages_viewed, first_seen_at, last_seen_at)
+      select ${ctx.accountId}, ${contactId},
              coalesce(v.visits, 0),
              coalesce(v.views, 0) + coalesce(d.views, 0),
              least(v.first_at, d.first_day), greatest(v.last_at, d.last_day)
         from (select count(distinct session_id) as visits, count(*) as views,
                      min(at) as first_at, max(at) as last_at
                 from page_view
-               where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}) v
+               where account_id = ${ctx.accountId} and contact_id = ${contactId}) v
         cross join (select coalesce(sum(views), 0) as views,
                            min(day)::timestamptz as first_day, max(day)::timestamptz as last_day
                       from page_view_daily
-                     where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}) d
-      on conflict (workspace_id, contact_id) do update
+                     where account_id = ${ctx.accountId} and contact_id = ${contactId}) d
+      on conflict (account_id, contact_id) do update
          set site_visits = excluded.site_visits,
              pages_viewed = excluded.pages_viewed,
              first_seen_at = excluded.first_seen_at,
              last_seen_at = excluded.last_seen_at`)
   })
 
-/** Every contact in the workspace at once, for the nightly roll-up.
+/** Every contact in the account at once, for the nightly roll-up.
  *
  *  The same arithmetic as above, expressed as two grouped scans and one upsert
  *  instead of one statement per contact. The per-contact form is right when a
@@ -224,31 +224,31 @@ export const refreshContactActivity = async (
  *  A contact whose rows have all gone is zeroed rather than left holding the count
  *  it had before, which is what the per-contact version did by recomputing over an
  *  empty set. */
-export const refreshAllContactActivity = async (ctx: WorkspaceContext): Promise<number> =>
-  withWorkspace(ctx, async (tx) => {
+export const refreshAllContactActivity = async (ctx: AccountContext): Promise<number> =>
+  withAccount(ctx, async (tx) => {
     const written = await tx.execute<{ contact_id: string }>(sql`
       with viewed as (
         select contact_id, count(distinct session_id) as visits, count(*) as views,
                min(at) as first_at, max(at) as last_at
           from page_view
-         where workspace_id = ${ctx.workspaceId} and contact_id is not null
+         where account_id = ${ctx.accountId} and contact_id is not null
          group by contact_id
       ), rolled as (
         select contact_id, sum(views) as views,
                min(day)::timestamptz as first_day, max(day)::timestamptz as last_day
           from page_view_daily
-         where workspace_id = ${ctx.workspaceId}
+         where account_id = ${ctx.accountId}
          group by contact_id
       )
       insert into contact_activity
-        (workspace_id, contact_id, site_visits, pages_viewed, first_seen_at, last_seen_at)
-      select ${ctx.workspaceId}, coalesce(viewed.contact_id, rolled.contact_id),
+        (account_id, contact_id, site_visits, pages_viewed, first_seen_at, last_seen_at)
+      select ${ctx.accountId}, coalesce(viewed.contact_id, rolled.contact_id),
              coalesce(viewed.visits, 0),
              coalesce(viewed.views, 0) + coalesce(rolled.views, 0),
              least(viewed.first_at, rolled.first_day),
              greatest(viewed.last_at, rolled.last_day)
         from viewed full outer join rolled on rolled.contact_id = viewed.contact_id
-      on conflict (workspace_id, contact_id) do update
+      on conflict (account_id, contact_id) do update
          set site_visits = excluded.site_visits,
              pages_viewed = excluded.pages_viewed,
              first_seen_at = excluded.first_seen_at,
@@ -260,24 +260,24 @@ export const refreshAllContactActivity = async (ctx: WorkspaceContext): Promise<
     await tx.execute(sql`
       update contact_activity
          set site_visits = 0, pages_viewed = 0, first_seen_at = null, last_seen_at = null
-       where workspace_id = ${ctx.workspaceId}
+       where account_id = ${ctx.accountId}
          and pages_viewed <> 0
          and contact_id not in (
            select contact_id from page_view
-            where workspace_id = ${ctx.workspaceId} and contact_id is not null
+            where account_id = ${ctx.accountId} and contact_id is not null
            union
-           select contact_id from page_view_daily where workspace_id = ${ctx.workspaceId})`)
+           select contact_id from page_view_daily where account_id = ${ctx.accountId})`)
 
     return written.length
   })
 
 /** Called by the worker once a claimed alias is fully back-filled. */
 export const markAliasResolved = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   aliasId: string,
   error?: string,
 ): Promise<void> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     await tx
       .update(visitorAlias)
       .set(
@@ -290,7 +290,7 @@ export const markAliasResolved = async (
 
 export type PendingAlias = {
   id: string
-  workspaceId: string
+  accountId: string
   visitorId: string
   contactId: string
 }
@@ -300,16 +300,16 @@ export type PendingAlias = {
  *  or a merged contact loses their browsing history. */
 export const moveVisitorHistory = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   from: string,
   to: string,
 ): Promise<void> => {
   await tx.execute(sql`
     delete from visitor_alias a
-     where a.workspace_id = ${ctx.workspaceId}
+     where a.account_id = ${ctx.accountId}
        and a.contact_id = ${from}
        and exists (select 1 from visitor_alias keep
-                    where keep.workspace_id = a.workspace_id
+                    where keep.account_id = a.account_id
                       and keep.visitor_id = a.visitor_id
                       and keep.contact_id = ${to})`)
 
@@ -321,53 +321,28 @@ export const moveVisitorHistory = async (
   for (const table of ['page_view', 'custom_event', 'visitor'] as const) {
     await tx.execute(sql`
       update ${sql.raw(table)} set contact_id = ${to}
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${from}`)
+       where account_id = ${ctx.accountId} and contact_id = ${from}`)
   }
 
   await tx.execute(sql`
-    insert into page_view_daily (workspace_id, contact_id, day, views)
-    select workspace_id, ${to}, day, views
+    insert into page_view_daily (account_id, contact_id, day, views)
+    select account_id, ${to}, day, views
       from page_view_daily
-     where workspace_id = ${ctx.workspaceId} and contact_id = ${from}
-    on conflict (workspace_id, contact_id, day)
+     where account_id = ${ctx.accountId} and contact_id = ${from}
+    on conflict (account_id, contact_id, day)
       do update set views = page_view_daily.views + excluded.views`)
 
   await tx.execute(sql`
     delete from page_view_daily
-     where workspace_id = ${ctx.workspaceId} and contact_id = ${from}`)
+     where account_id = ${ctx.accountId} and contact_id = ${from}`)
 }
-
-/** Every visitor this contact has ever been identified as, newest first. Read by
- *  the export path and by the "seen on N devices" line on the panel. */
-export const visitorsOf = async (
-  ctx: WorkspaceContext,
-  contactId: string,
-): Promise<{ visitorId: string; via: AliasVia; at: Date }[]> =>
-  withWorkspace(ctx, (tx) =>
-    tx
-      .select({ visitorId: visitorAlias.visitorId, via: visitorAlias.via, at: visitorAlias.createdAt })
-      .from(visitorAlias)
-      .where(eq(visitorAlias.contactId, contactId))
-      .orderBy(sql`${visitorAlias.createdAt} desc`),
-  )
 
 /** The public edge identifies people too: a booking creates a contact from a
  *  stranger's visitor id. Same context ceiling as a form fill. */
 export const aliasFromPublicEdge = async (
-  workspaceId: string,
+  accountId: string,
   input: { visitorId: string; contactId: string; via: AliasVia },
 ): Promise<void> => {
-  const ctx = publicEdgeContext(workspaceId)
-  await withWorkspace(ctx, (tx) => aliasVisitor(tx, ctx, input))
+  const ctx = publicEdgeContext(accountId)
+  await withAccount(ctx, (tx) => aliasVisitor(tx, ctx, input))
 }
-
-/** Unresolved aliases carrying a contact that has since been deleted are dead
- *  work. Kept as one query rather than a guard at every call site. */
-export const pendingAliasCount = async (ctx: WorkspaceContext): Promise<number> =>
-  withWorkspace(ctx, async (tx) => {
-    const [row] = await tx
-      .select({ n: sql<number>`count(*)::int` })
-      .from(visitorAlias)
-      .where(and(isNull(visitorAlias.resolvedAt), eq(visitorAlias.workspaceId, ctx.workspaceId)))
-    return row?.n ?? 0
-  })

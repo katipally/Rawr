@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
-import { FieldInput, type EditableField } from './field-input.tsx'
+import { FieldInput, scoped, type EditableField } from './field-input.tsx'
 import { Value } from './value.tsx'
 
 export type PropertySection = { title: string; fieldKeys: string[] }
@@ -153,7 +153,7 @@ export const PropertyPanel = ({
                           <div className="flex flex-col gap-1">
                             <FieldInput
                               id={`edit-${field.key}`}
-                              field={field}
+                              field={scoped(field, local)}
                               value={draft}
                               valueLabel={labels[field.key]}
                               autoFocus

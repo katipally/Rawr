@@ -1,8 +1,8 @@
 import { z } from 'zod'
 
-/** Every payload carries the workspace it belongs to. A job without one fails
+/** Every payload carries the account it belongs to. A job without one fails
  *  loudly rather than running unscoped. */
-export const basePayload = z.object({ workspaceId: z.uuid() })
+export const basePayload = z.object({ accountId: z.uuid() })
 
 export type ParseResult = { ok: true; value: unknown } | { ok: false; error: string }
 
@@ -42,7 +42,7 @@ export const defineJob = <Schema extends z.ZodType>(definition: {
   handle: (value) => definition.handle(value as z.output<Schema>),
 })
 
-export const workspaceIdOf = (value: unknown): string | null => {
-  const candidate = (value as { workspaceId?: unknown } | null)?.workspaceId
+export const accountIdOf = (value: unknown): string | null => {
+  const candidate = (value as { accountId?: unknown } | null)?.accountId
   return typeof candidate === 'string' ? candidate : null
 }

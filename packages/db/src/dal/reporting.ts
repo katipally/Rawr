@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 
 /** B7. Six reports, each one question answered over a date range.
  *
@@ -96,12 +96,12 @@ export type PipelineReport = {
 /** What the pipeline did over the range: how many deals arrived each week, how
  *  many closed either way, where the open ones are sitting, and who holds them.
  *
- *  Amounts are summed in the workspace's own currencies without conversion, so a
+ *  Amounts are summed in the account's own currencies without conversion, so a
  *  mixed-currency pipeline reports one number per currency on the board and one
  *  unconverted total here. Converting at today's rate would make last quarter's
  *  number change every morning. */
-export const pipelineReport = async (ctx: WorkspaceContext, range: Range): Promise<PipelineReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const pipelineReport = async (ctx: AccountContext, range: Range): Promise<PipelineReport> =>
+  withAccount(ctx, async (tx) => {
     const weeks = await tx.execute<{
       week: string
       created: number
@@ -210,8 +210,8 @@ export type FormsReport = {
  *  Held submissions are counted separately rather than excluded: a form whose
  *  numbers dropped because the spam filter tightened looks identical to one nobody
  *  is filling in, unless both lines are on the chart. */
-export const formsReport = async (ctx: WorkspaceContext, range: Range): Promise<FormsReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const formsReport = async (ctx: AccountContext, range: Range): Promise<FormsReport> =>
+  withAccount(ctx, async (tx) => {
     const days = await tx.execute<{ day: string; clean: number; held: number }>(sql`
       with days as (${calendar(range, 'day')})
       select c.bucket as day,
@@ -296,8 +296,8 @@ export type SequencesReport = {
  *  Opens are counted from sends that were opened at least once rather than from
  *  every pixel load, because a mail read four times is one person reading it. The
  *  same send opened by a privacy proxy and by the recipient is still one. */
-export const sequencesReport = async (ctx: WorkspaceContext, range: Range): Promise<SequencesReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const sequencesReport = async (ctx: AccountContext, range: Range): Promise<SequencesReport> =>
+  withAccount(ctx, async (tx) => {
     const sequences = await tx.execute<{
       sequence: string
       sent: number
@@ -362,8 +362,8 @@ export type EmailReport = {
  *  wait for an answer. The lag is a median rather than a mean: one thread that was
  *  answered after a fortnight should not make a team that replies within the hour
  *  look like it replies within a day. */
-export const emailReport = async (ctx: WorkspaceContext, range: Range): Promise<EmailReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const emailReport = async (ctx: AccountContext, range: Range): Promise<EmailReport> =>
+  withAccount(ctx, async (tx) => {
     const mailboxes = await tx.execute<{ mailbox: string | null; sent: number; received: number; threads: number }>(sql`
       select coalesce(b.email, 'A disconnected mailbox') as mailbox,
              count(*) filter (where m.direction = 'outbound')::int as sent,
@@ -425,14 +425,14 @@ export type WebsiteReport = {
  *  name to. The identified share is the number that says whether the tracking is
  *  worth anything: anonymous sessions are a page-view counter, named ones are a
  *  CRM. */
-export const websiteReport = async (ctx: WorkspaceContext, range: Range): Promise<WebsiteReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const websiteReport = async (ctx: AccountContext, range: Range): Promise<WebsiteReport> =>
+  withAccount(ctx, async (tx) => {
     const channels = await tx.execute<{ channel: string | null; sessions: number; identified: number }>(sql`
       select coalesce(s.channel, 'Not attributed') as channel,
              count(*)::int as sessions,
              count(*) filter (where v.contact_id is not null)::int as identified
         from visitor_session s
-        left join visitor v on v.id = s.visitor_id and v.workspace_id = s.workspace_id
+        left join visitor v on v.id = s.visitor_id and v.account_id = s.account_id
        where ${bounds(range, 's.started_at')}
        group by 1
        order by 2 desc
@@ -502,8 +502,8 @@ export type AttributionReport = {
  *  number hides which of the two a channel is good at. A contact whose source was
  *  never captured appears as "Not attributed" rather than being dropped, because a
  *  report that quietly excludes half the contacts is worse than one that admits it. */
-export const attributionReport = async (ctx: WorkspaceContext, range: Range): Promise<AttributionReport> =>
-  withWorkspace(ctx, async (tx) => {
+export const attributionReport = async (ctx: AccountContext, range: Range): Promise<AttributionReport> =>
+  withAccount(ctx, async (tx) => {
     // Last touch falls back to the first: if the only touch anybody recorded is
     // the one that found them, then it is also the most recent one. Without this,
     // every contact who arrived once and never came back reads as unattributed on

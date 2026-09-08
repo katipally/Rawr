@@ -8,7 +8,7 @@ import {
   readSegmentContactPage,
   recordHealth,
   type MarketingEvent,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { createHash } from 'node:crypto'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
@@ -30,7 +30,7 @@ const API = 'https://api.brevo.com/v3'
 
 type BrevoConfig = { listId?: number; segmentId?: string; webhookToken?: string; subscriptionType?: string }
 
-const credentials = async (ctx: WorkspaceContext) => {
+const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'brevo')
   if (!found?.secret) {
     throw new Error('Brevo is not connected. Add an API key in Settings, under Integrations.')
@@ -40,7 +40,7 @@ const credentials = async (ctx: WorkspaceContext) => {
 
 const headers = (key: string) => ({ 'api-key': key })
 
-export const testBrevo = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testBrevo = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'brevo', { ok: true })
@@ -89,14 +89,22 @@ const PUSH_PAGE = 500
  *  difference between a push that finishes inside the request and one that times
  *  out halfway through a list. F6 §1 and §2. */
 export const pushSegmentToBrevo = async (
-  ctx: WorkspaceContext,
-  input: { segmentId: string; listId: number },
+  ctx: AccountContext,
+  input: { segmentId: string; listId?: number | null },
 ): Promise<PushResult> => {
   assertCanWrite(ctx, 'segment')
   const { secret, config, id } = await credentials(ctx).catch((cause) => {
     if (devIntegrationsEnabled) return { secret: null, config: {} as BrevoConfig, id: null }
     throw cause
   })
+  // The list the integration was configured with, unless this push names another.
+  // Resolved once here rather than at the return, where it was only ever cosmetic.
+  const listId = input.listId ?? config.listId ?? null
+  if (listId === null) {
+    throw new Error(
+      'No Brevo list to push into. Give one here, or set a list id on the Brevo integration.',
+    )
+  }
 
   let cursor: string | null = null
   let pushed = 0
@@ -118,7 +126,7 @@ export const pushSegmentToBrevo = async (
     // and the second attempt returns the first one's answer. Per page now, because
     // the whole set is no longer in hand at once. The rows arrive ordered by id,
     // so the same page always hashes the same way.
-    const key = `brevo:list:${input.listId}:${createHash('sha256')
+    const key = `brevo:list:${listId}:${createHash('sha256')
       .update(mailable.map((row) => row.id).join(','))
       .digest('hex')
       .slice(0, 32)}`
@@ -130,7 +138,7 @@ export const pushSegmentToBrevo = async (
           ctx,
           kind: 'brevo',
           jobName: 'brevo.import_contacts',
-          payload: { segmentId: input.segmentId, listId: input.listId, count: mailable.length },
+          payload: { segmentId: input.segmentId, listId, count: mailable.length },
         },
         () =>
           json<{ processId?: number }>({
@@ -138,7 +146,7 @@ export const pushSegmentToBrevo = async (
             method: 'POST',
             headers: headers(secret!),
             body: {
-              listIds: [input.listId],
+              listIds: [listId],
               // The upsert. Without it a second push is an error per existing
               // contact rather than a no-op.
               updateExistingContacts: true,
@@ -164,7 +172,7 @@ export const pushSegmentToBrevo = async (
   } while (cursor)
 
   await recordHealth(ctx, 'brevo', { ok: true })
-  return { pushed, skipped, listId: input.listId ?? config.listId ?? null }
+  return { pushed, skipped, listId }
 }
 
 /** Brevo's webhook shape, narrowed to the events F6 §2 names. Anything else is
@@ -236,7 +244,7 @@ export const parseBrevoEvent = (body: unknown): { ok: true; event: MarketingEven
 }
 
 export const handleBrevoWebhook = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   body: unknown,
 ): Promise<{ handled: boolean; detail: string }> => {
   const parsed = parseBrevoEvent(body)
@@ -256,7 +264,7 @@ export const handleBrevoWebhook = async (
  *  here reaches Brevo's blocklist, so nobody opted out in the CRM is mailed by a
  *  campaign. Fails into the dead letter, never into the person's screen. */
 export const propagateSubscriptionToBrevo = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { contactId: string; typeId: string; state: 'subscribed' | 'unsubscribed' | 'unspecified' },
 ): Promise<void> => {
   if (input.state === 'unspecified' || devIntegrationsEnabled) return
@@ -291,10 +299,10 @@ export type BrevoTemplate = { id: number; name: string; subject: string | null; 
 
 /** Brevo's own template gallery, so a compose step picks a design rather than
  *  editing one. `/v3/smtp/templates` is documented as the transactional list; a
- *  campaign's `templateId` says "existing active templates". If a workspace's
+ *  campaign's `templateId` says "existing active templates". If a account's
  *  campaign designs turn out not to be in this list, the compose step still works
  *  by naming a template id, which is why the id is shown beside every name. */
-export const listBrevoTemplates = async (ctx: WorkspaceContext): Promise<BrevoTemplate[]> => {
+export const listBrevoTemplates = async (ctx: AccountContext): Promise<BrevoTemplate[]> => {
   if (devIntegrationsEnabled) {
     return [{ id: 1, name: 'Development template', subject: 'A newsletter', isActive: true }]
   }
@@ -360,7 +368,7 @@ const statsOf = (global: BrevoStats | undefined): BrevoCampaign['stats'] =>
       }
     : null
 
-export const listBrevoCampaigns = async (ctx: WorkspaceContext): Promise<BrevoCampaign[]> => {
+export const listBrevoCampaigns = async (ctx: AccountContext): Promise<BrevoCampaign[]> => {
   if (devIntegrationsEnabled) return []
   const { secret } = await credentials(ctx)
   const answer = await json<{
@@ -406,7 +414,7 @@ export type ScheduleInput = {
  *  audience. The push is the same idempotent walk `pushSegmentToBrevo` does, so
  *  running this twice does not double the list. */
 export const scheduleBrevoCampaign = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: ScheduleInput,
 ): Promise<{ campaignId: number | null; pushed: number; skipped: number }> => {
   assertCanWrite(ctx, 'segment')
@@ -450,7 +458,7 @@ export const scheduleBrevoCampaign = async (
 /** Send a campaign that is already a draft in Brevo. Separate from creating one
  *  on purpose: "write it" and "send it to eighteen hundred people" are different
  *  decisions and belong behind different buttons. */
-export const sendBrevoCampaign = async (ctx: WorkspaceContext, campaignId: number): Promise<void> => {
+export const sendBrevoCampaign = async (ctx: AccountContext, campaignId: number): Promise<void> => {
   assertCanWrite(ctx, 'segment')
   if (devIntegrationsEnabled) return
   const { secret, id } = await credentials(ctx)

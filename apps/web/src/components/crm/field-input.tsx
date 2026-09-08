@@ -5,7 +5,19 @@ import type { FieldType, ObjectKey } from '@rawr/db'
 import { RecordPicker } from './record-picker.tsx'
 import { RichTextInput } from './rich-text-input.tsx'
 
-export type Choice = { id: string; label: string }
+export type Choice = { id: string; label: string; pipelineId?: string }
+
+/** A deal stage belongs to one pipeline, so the stage list is cut to the
+ *  pipeline the form holds. Every other field is itself. */
+export const scoped = (field: EditableField, values: Record<string, unknown>): EditableField => {
+  if (field.key !== 'stage_id' || !field.choices) return field
+  const pipelineId = typeof values.pipeline_id === 'string' ? values.pipeline_id : null
+  return pipelineId ? { ...field, choices: field.choices.filter((choice) => choice.pipelineId === pipelineId) } : field
+}
+
+/** The first stage of a pipeline, which is where a deal starts in it. */
+export const firstStageOf = (fields: EditableField[], pipelineId: unknown): string | null =>
+  fields.find((field) => field.key === 'stage_id')?.choices?.find((choice) => choice.pipelineId === pipelineId)?.id ?? null
 
 export type EditableField = {
   key: string

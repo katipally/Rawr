@@ -1,15 +1,18 @@
-import { boolean, integer, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { boolean, integer, index, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { fieldSourceEnum, integrationStateEnum } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 
 /** Credentials are never stored here. secretRef points at the secrets store, which
- *  is deliberately not the database it protects. */
+ *  is deliberately not the database it protects.
+ *
+ *  One connection per kind per account: a Slack bot token or a Brevo key is issued
+ *  to the company, and the company is the account. */
 export const integration = pgTable(
   'integration',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     kind: text('kind').notNull(),
     config: jsonb('config').notNull().default({}),
     secretRef: text('secret_ref'),
@@ -17,9 +20,12 @@ export const integration = pgTable(
     lastOkAt: timestamp('last_ok_at', { withTimezone: true }),
     lastError: text('last_error'),
     lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+    /** Who connected it, for the Connected Apps table. Null for anything a job
+     *  connected. */
+    installedBy: uuid('installed_by').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('integration_kind_key').on(t.workspaceId, t.kind)],
+  (t) => [uniqueIndex('integration_kind_key').on(t.accountId, t.kind)],
 )
 
 /** A job that fails without landing a row here is a bug, not an incident. */
@@ -27,7 +33,7 @@ export const deadLetter = pgTable(
   'dead_letter',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     integrationId: uuid('integration_id').references(() => integration.id, {
       onDelete: 'set null',
     }),
@@ -39,7 +45,7 @@ export const deadLetter = pgTable(
     replayedAt: timestamp('replayed_at', { withTimezone: true }),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('dead_letter_open_idx').on(t.workspaceId, t.replayedAt, t.at.desc())],
+  (t) => [index('dead_letter_open_idx').on(t.accountId, t.replayedAt, t.at.desc())],
 )
 
 /** F6 §1. An idempotency key per outbound call, so a retry cannot double-write at
@@ -49,8 +55,8 @@ export const outboundCall = pgTable(
   'outbound_call',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
-    integrationId: uuid('integration_id').references(() => integration.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    integrationId: uuid('integration_id').references(() => integration.id, { onDelete: 'set null' }),
     /** Derived from what is being sent, never random: a retry must produce the
      *  same key or it is not idempotent. */
     idempotencyKey: text('idempotency_key').notNull(),
@@ -58,7 +64,7 @@ export const outboundCall = pgTable(
     response: jsonb('response'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('outbound_call_key').on(t.workspaceId, t.idempotencyKey)],
+  (t) => [uniqueIndex('outbound_call_key').on(t.accountId, t.idempotencyKey)],
 )
 
 /** F6 §1. Inbound webhooks, deduplicated on the provider's own event id. A webhook
@@ -67,7 +73,7 @@ export const inboundEvent = pgTable(
   'inbound_event',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     source: text('source').notNull(),
     providerEventId: text('provider_event_id').notNull(),
     kind: text('kind').notNull(),
@@ -79,8 +85,8 @@ export const inboundEvent = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('inbound_event_key').on(t.workspaceId, t.source, t.providerEventId),
-    index('inbound_event_unmatched_idx').on(t.workspaceId, t.matched, t.at.desc()),
+    uniqueIndex('inbound_event_key').on(t.accountId, t.source, t.providerEventId),
+    index('inbound_event_unmatched_idx').on(t.accountId, t.matched, t.at.desc()),
   ],
 )
 
@@ -91,7 +97,7 @@ export const fieldSource = pgTable(
   'field_source',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     entity: text('entity').notNull(),
     entityId: uuid('entity_id').notNull(),
     fieldKey: text('field_key').notNull(),
@@ -100,7 +106,7 @@ export const fieldSource = pgTable(
     provider: text('provider'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('field_source_key').on(t.workspaceId, t.entity, t.entityId, t.fieldKey)],
+  (t) => [uniqueIndex('field_source_key').on(t.accountId, t.entity, t.entityId, t.fieldKey)],
 )
 
 /** F6 §4. What enrichment suggested but was not allowed to write, so a human can
@@ -109,7 +115,7 @@ export const enrichmentSuggestion = pgTable(
   'enrichment_suggestion',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     entity: text('entity').notNull(),
     entityId: uuid('entity_id').notNull(),
     fieldKey: text('field_key').notNull(),
@@ -119,8 +125,31 @@ export const enrichmentSuggestion = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('enrichment_suggestion_key').on(t.workspaceId, t.entity, t.entityId, t.fieldKey),
-    index('enrichment_suggestion_entity_idx').on(t.workspaceId, t.entity, t.entityId),
+    uniqueIndex('enrichment_suggestion_key').on(t.accountId, t.entity, t.entityId, t.fieldKey),
+    index('enrichment_suggestion_entity_idx').on(t.accountId, t.entity, t.entityId),
+  ],
+)
+
+/** A record that has just gained a match key, waiting for the worker to ask the
+ *  app to enrich it. One row per record, deleted as it is claimed, so the table
+ *  holds only what has not run yet. Written by the data layer on every path that
+ *  gives a contact an email or a company a domain, and drained only once somebody
+ *  has approved the batch: credits are spent on purpose or not at all. */
+export const enrichmentRequest = pgTable(
+  'enrichment_request',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    entity: text('entity').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Null until a person has seen how many records are waiting and accepted
+     *  the credit cost. The dispatcher only ever sees approved rows. */
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.entity, t.entityId] }),
+    index('enrichment_request_approved_idx').on(t.approvedAt),
+    index('enrichment_request_waiting_idx').on(t.accountId, t.requestedAt),
   ],
 )
 
@@ -137,7 +166,7 @@ export const webhookEndpoint = pgTable(
   'webhook_endpoint',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     /** https only, checked in the layer. A signature proves who sent a payload,
      *  not that nobody else read it. */
@@ -158,5 +187,5 @@ export const webhookEndpoint = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('webhook_endpoint_live_idx').on(t.workspaceId, t.isActive)],
+  (t) => [index('webhook_endpoint_live_idx').on(t.accountId, t.isActive)],
 )

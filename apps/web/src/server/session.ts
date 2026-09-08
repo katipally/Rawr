@@ -1,9 +1,4 @@
-import {
-  membershipsForUser,
-  type Membership,
-  type OrganisationContext,
-  type WorkspaceContext,
-} from '@rawr/db'
+import { membershipsForUser, type AccountContext, type Hub, type Membership } from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
@@ -24,15 +19,13 @@ export type Session = {
   email: string
   displayName: string
   avatarUrl: string | null
-  workspaceId: string
-  workspaceSlug: string
-  workspaceName: string
-  organisationId: string
-  organisationSlug: string
-  organisationName: string
-  orgRole: Membership['orgRole']
+  accountId: string
+  accountSlug: string
+  accountName: string
   hostedDomain: string
-  role: Membership['role']
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
 }
 
 export const sessionFromMembership = (m: Membership): Session => ({
@@ -40,15 +33,13 @@ export const sessionFromMembership = (m: Membership): Session => ({
   email: m.email,
   displayName: m.displayName,
   avatarUrl: m.avatarUrl,
-  workspaceId: m.workspaceId,
-  workspaceSlug: m.workspaceSlug,
-  workspaceName: m.workspaceName,
-  organisationId: m.organisationId,
-  organisationSlug: m.organisationSlug,
-  organisationName: m.organisationName,
-  orgRole: m.orgRole,
+  accountId: m.accountId,
+  accountSlug: m.accountSlug,
+  accountName: m.accountName,
   hostedDomain: m.hostedDomain,
-  role: m.role,
+  isSuperAdmin: m.isSuperAdmin,
+  viewHubs: m.viewHubs,
+  editHubs: m.editHubs,
 })
 
 export const writeSessionCookie = async (session: Session): Promise<void> => {
@@ -75,13 +66,13 @@ export const clearSessionCookie = async (): Promise<void> => {
 }
 
 /** The cookie is a claim, not proof. Every read re-checks that the membership still
- *  exists and re-reads the role from the database, so a revoked person loses access
- *  on their next request rather than when their token expires.
+ *  exists and re-reads the grants from the database, so a revoked person loses
+ *  access on their next request rather than when their token expires.
  *
  *  Deduplicated per request, not cached across them: the layout and the page both
  *  ask, and several pages ask again inside a helper, so one screen was paying for
  *  the same membership query three or four times over. `cache` is scoped to a
- *  single render, so a revoked role still takes effect on the very next request. */
+ *  single render, so a revoked grant still takes effect on the very next request. */
 export const readSession = cache(async (): Promise<Session | null> => {
   const jar = await cookies()
   const token = jar.get(COOKIE)?.value
@@ -95,7 +86,7 @@ export const readSession = cache(async (): Promise<Session | null> => {
     return null
   }
 
-  const current = (await memberships(claims.userId)).find((m) => m.workspaceId === claims.workspaceId)
+  const current = (await memberships(claims.userId)).find((m) => m.accountId === claims.accountId)
   if (!current) return null
   // "Sign out everywhere" moves the watermark; a cookie minted before it is dead
   // even though its signature still checks out.
@@ -107,19 +98,27 @@ export const readSession = cache(async (): Promise<Session | null> => {
   return sessionFromMembership(current)
 })
 
-export const contextFrom = (session: Session): WorkspaceContext => ({
-  workspaceId: session.workspaceId,
+export const contextFrom = (session: Session): AccountContext => ({
+  accountId: session.accountId,
   actorId: session.userId,
   actorKind: 'user',
-  role: session.role,
+  isSuperAdmin: session.isSuperAdmin,
+  viewHubs: session.viewHubs,
+  editHubs: session.editHubs,
 })
 
-/** The second scope, for the handful of screens that sit above a workspace. Kept
- *  separate from `contextFrom` on purpose: a call that means to act on the company
- *  must say so, and cannot get there by holding a workspace context. */
-export const orgContextFrom = (session: Session): OrganisationContext => ({
-  organisationId: session.organisationId,
-  actorId: session.userId,
-  actorKind: 'user',
-  orgRole: session.orgRole,
-})
+/** The same two questions the data access layer asks, for screens deciding what to
+ *  render. Never the only gate: every write is checked again in the layer. */
+export const sessionCanEdit = (session: Session, hub: Hub): boolean =>
+  session.isSuperAdmin || session.editHubs.includes(hub)
+
+export const sessionCanView = (session: Session, hub: Hub): boolean =>
+  sessionCanEdit(session, hub) || session.viewHubs.includes(hub)
+
+/** Holds the account hub: may act on rows that are somebody else's, and open the
+ *  settings that shape the account. */
+export const sessionIsAdmin = (session: Session): boolean => sessionCanEdit(session, 'account')
+
+/** Writes nothing anywhere. What used to be the viewer role. */
+export const sessionIsReadOnly = (session: Session): boolean =>
+  !session.isSuperAdmin && session.editHubs.length === 0

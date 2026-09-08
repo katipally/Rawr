@@ -1,10 +1,10 @@
 import { and, asc, eq, gt, isNotNull, lt, sql } from 'drizzle-orm'
 import { task } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
-import { recordActivity, type EntityRef } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
+import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
+import { isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
 // The two modules import each other for exactly that pair of calls; Node resolves
 // the cycle because neither reads the other at module scope.
@@ -60,8 +60,8 @@ export type TaskFilter = {
   entity?: EntityRef | undefined
 }
 
-export const listTasks = async (ctx: WorkspaceContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
-  withWorkspace(ctx, (tx) =>
+export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
+  withAccount(ctx, (tx) =>
     tx
       .select(SELECT)
       .from(task)
@@ -94,7 +94,7 @@ export type NewTask = {
   entity?: EntityRef | null | undefined
 }
 
-export const createTask = async (ctx: WorkspaceContext, input: NewTask): Promise<{ id: string }> =>
+export const createTask = async (ctx: AccountContext, input: NewTask): Promise<{ id: string }> =>
   mutate(ctx, 'task', async (tx) => {
     const title = input.title.trim()
     if (!title) throw new Error('A task needs a title.')
@@ -102,7 +102,7 @@ export const createTask = async (ctx: WorkspaceContext, input: NewTask): Promise
     const [row] = await tx
       .insert(task)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         title,
         body: input.body ?? null,
         dueDate: input.dueDate ?? null,
@@ -131,7 +131,7 @@ export const createTask = async (ctx: WorkspaceContext, input: NewTask): Promise
   })
 
 export const setTaskStatus = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   status: 'open' | 'done',
 ): Promise<void> =>
@@ -169,7 +169,7 @@ export type LoggableType = (typeof LOGGABLE_TYPES)[number]
  *  `occurredAt` is separate from now because a call is logged after it happened,
  *  and the timeline sorts on when it happened. */
 export const logByHand = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { type: LoggableType; body: string; entity: EntityRef; occurredAt?: Date },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'activity', async (tx) => {
@@ -180,7 +180,12 @@ export const logByHand = async (
       type: input.type,
       body,
       occurredAt: input.occurredAt ?? new Date(),
-      links: [input.entity],
+      // A call with a contact is a call with their company, the same way a synced
+      // email is. Logged on anything else, it hangs on that one record.
+      links:
+        input.entity.entityType === 'contact'
+          ? await linksForContacts(tx, [input.entity.entityId])
+          : [input.entity],
     })
     if (!id) throw new Error('That could not be attached to the record.')
     if (input.entity.entityType === 'contact') await refreshEmailEngagement(tx, ctx, [input.entity.entityId])
@@ -193,21 +198,23 @@ export const logByHand = async (
 
 /** A hand-logged entry belongs to the person who wrote it. They, or an admin, may
  *  correct or remove it; everything the system wrote stays as it happened. */
-const ownLoggedEntry = async (tx: Tx, ctx: WorkspaceContext, id: string) => {
-  const [row] = await tx.execute<{ id: string; type: string; body: string | null; actor_id: string | null }>(
-    sql`select id, type, body, actor_id from activity where id = ${id} limit 1`,
+const ownLoggedEntry = async (tx: Tx, ctx: AccountContext, id: string) => {
+  const [row] = await tx.execute<{ id: string; type: string; body: string | null; actor_id: string | null; synced: boolean }>(
+    sql`select id, type, body, actor_id, (payload ? 'threadId') as synced from activity where id = ${id} limit 1`,
   )
   if (!row) throw new Error('That entry is no longer on the timeline.')
-  if (!(LOGGABLE_TYPES as readonly string[]).includes(row.type)) {
+  // An email with a thread behind it was read from a mailbox or sent by a
+  // sequence: a record of what went over the wire, not something anybody typed.
+  if (!(LOGGABLE_TYPES as readonly string[]).includes(row.type) || row.synced) {
     throw new Error('Only notes, calls, meetings and emails logged by hand can be changed.')
   }
-  if (row.actor_id !== ctx.actorId && ctx.role !== 'admin') {
+  if (row.actor_id !== ctx.actorId && !isAdmin(ctx)) {
     throw new Error('Only the person who wrote this, or an admin, can change it.')
   }
   return row
 }
 
-export const editLoggedEntry = async (ctx: WorkspaceContext, input: { id: string; body: string }): Promise<void> =>
+export const editLoggedEntry = async (ctx: AccountContext, input: { id: string; body: string }): Promise<void> =>
   mutate(ctx, 'activity', async (tx) => {
     const body = input.body.trim()
     if (!body) throw new Error('An entry cannot be emptied. Delete it instead.')
@@ -219,7 +226,7 @@ export const editLoggedEntry = async (ctx: WorkspaceContext, input: { id: string
     }
   })
 
-export const deleteLoggedEntry = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteLoggedEntry = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'activity', async (tx) => {
     const before = await ownLoggedEntry(tx, ctx, id)
     const contacts = await tx.execute<{ entity_id: string }>(
@@ -234,7 +241,7 @@ export const deleteLoggedEntry = async (ctx: WorkspaceContext, id: string): Prom
     }
   })
 
-export const deleteTask = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteTask = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'task', async (tx) => {
     const [row] = await tx.select({ title: task.title }).from(task).where(eq(task.id, id))
     if (!row) throw new Error('That task has already been deleted.')
@@ -247,10 +254,10 @@ export const deleteTask = async (ctx: WorkspaceContext, id: string): Promise<voi
 
 /** The Monday list: deals whose next step date has passed. Not an error state, it
  *  is the signal Trevor chases. A9. */
-export const overdueNextSteps = async (ctx: WorkspaceContext): Promise<
+export const overdueNextSteps = async (ctx: AccountContext): Promise<
   { id: string; name: string | null; nextStep: string | null; nextStepDate: string; ownerName: string | null; stageName: string | null }[]
 > =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx.execute(sql`
       select d.id, d.name, d.next_step as "nextStep", d.next_step_date::text as "nextStepDate",
              u.name as "ownerName", s.name as "stageName"

@@ -9,7 +9,7 @@ import { recordPath } from '~/lib/links.ts'
 import { formatDateTime } from './value.tsx'
 
 export type WebsiteActivityProps = {
-  workspace: string
+  account: string
   contactId: string
   contactName: string
   siteVisits: number
@@ -29,7 +29,7 @@ export type WebsiteActivityProps = {
  *  obligation visible, and both are refused in the data access layer for anybody
  *  but an admin regardless of whether they are on screen. */
 export const WebsiteActivity = ({
-  workspace,
+  account,
   contactId,
   contactName,
   siteVisits,
@@ -110,7 +110,7 @@ export const WebsiteActivity = ({
           <p className="px-6 pb-2">
             <Link
               className="text-link"
-              href={recordPath(workspace, 'contact', contactId, { type: 'page_view' })}
+              href={recordPath(account, 'contact', contactId, { type: 'page_view' })}
             >
               See every page view on the timeline
             </Link>

@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { recordActivity, type EntityRef, type EntityType } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type Registry, type RegistryObject } from './registry.ts'
 
 export type AssociatedRecord = {
@@ -90,11 +90,11 @@ const fetchByIds = async (tx: Tx, object: RegistryObject, ids: string[]): Promis
  *  A search narrows what comes back; the totals do not move, because the count on
  *  a card says how many are linked, not how many matched what was typed. */
 export const readAssociations = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entity: EntityRef,
   options: { q?: string | undefined; sort?: AssociationSort | undefined } = {},
 ): Promise<AssociationRail> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const { entityType, entityId } = entity
     const self = objectOrThrow(registry, entityType)
@@ -244,7 +244,7 @@ export const orderedPair = (a: EntityRef, b: EntityRef): [EntityRef, EntityRef] 
   a.entityType < b.entityType || (a.entityType === b.entityType && a.entityId < b.entityId) ? [a, b] : [b, a]
 
 export const associate = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   a: EntityRef,
   b: EntityRef,
   label?: string | null,
@@ -254,21 +254,21 @@ export const associate = async (
       throw new Error('A record cannot be associated with itself.')
     }
     // Both keys resolved before anything is written: the column is text now, and
-    // the registry is what says a key names an object in this workspace.
+    // the registry is what says a key names an object in this account.
     const registry = await getRegistryIn(tx)
     objectOrThrow(registry, a.entityType)
     objectOrThrow(registry, b.entityType)
 
     const [from, to] = orderedPair(a, b)
     await tx.execute(sql`
-      insert into association (workspace_id, from_type, from_id, to_type, to_id, label)
-      values (${ctx.workspaceId}, ${from.entityType}, ${from.entityId}, ${to.entityType}, ${to.entityId}, ${label ?? null})
-      on conflict (workspace_id, from_type, from_id, to_type, to_id) do update set label = excluded.label`)
+      insert into association (account_id, from_type, from_id, to_type, to_id, label)
+      values (${ctx.accountId}, ${from.entityType}, ${from.entityId}, ${to.entityType}, ${to.entityId}, ${label ?? null})
+      on conflict (account_id, from_type, from_id, to_type, to_id) do update set label = excluded.label`)
 
     const [fromName, toName] = await Promise.all([nameOf(tx, registry, from), nameOf(tx, registry, to)])
     await recordActivity(tx, ctx, {
       type: 'association_change',
-      subject: `${fromName} was associated with ${toName}`,
+      subject: `linked ${fromName} to ${toName}`,
       payload: { from, to, label: label ?? null },
       links: [from, to],
     })
@@ -279,7 +279,7 @@ export const associate = async (
     }
   })
 
-export const dissociate = async (ctx: WorkspaceContext, a: EntityRef, b: EntityRef): Promise<void> =>
+export const dissociate = async (ctx: AccountContext, a: EntityRef, b: EntityRef): Promise<void> =>
   mutate(ctx, 'association', async (tx) => {
     const [from, to] = orderedPair(a, b)
     const removed = await tx.execute(sql`
@@ -294,7 +294,7 @@ export const dissociate = async (ctx: WorkspaceContext, a: EntityRef, b: EntityR
     const [fromName, toName] = await Promise.all([nameOf(tx, registry, from), nameOf(tx, registry, to)])
     await recordActivity(tx, ctx, {
       type: 'association_change',
-      subject: `${fromName} was unlinked from ${toName}`,
+      subject: `unlinked ${fromName} from ${toName}`,
       payload: { from, to },
       links: [from, to],
     })

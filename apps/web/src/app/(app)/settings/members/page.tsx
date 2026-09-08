@@ -1,40 +1,34 @@
 import { PageHeader } from '@rawr/ui'
-import { listInvitations, listMembers, listOrgMembers, listOrgWorkspaces } from '@rawr/db'
-import { contextFrom, orgContextFrom, readSession } from '~/server/session.ts'
+import { listInvitations, listMembers } from '@rawr/db'
+import { contextFrom, readSession } from '~/server/session.ts'
 import { MemberList } from './member-list.tsx'
 
-/** Who is in the company, and what each of them may do in each workspace. Four
- *  fixed roles per workspace, Google as the only identity.
+/** Who is in the account and what each of them holds. Hubs, at view or edit, the
+ *  way HubSpot's permission grid grants them, with super admin above the grid.
  *
- *  Organisation-wide rather than per workspace, because ending somebody's access
- *  is a company decision and doing it one workspace at a time is how a leaver
- *  keeps a login nobody remembers. */
+ *  Ending somebody's access happens here and only here: one account means one
+ *  place to do it, and no leaver keeps a login nobody remembers. */
 const MembersPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  const org = orgContextFrom(session)
-  const isOrgAdmin = session.orgRole === 'org_admin'
-  const [people, seatsHere, workspaces, invitations] = await Promise.all([
-    listOrgMembers(org),
-    listMembers(contextFrom(session)),
-    listOrgWorkspaces(org),
-    isOrgAdmin ? listInvitations(org) : Promise.resolve([]),
+  const ctx = contextFrom(session)
+  const [people, invitations] = await Promise.all([
+    listMembers(ctx),
+    session.isSuperAdmin ? listInvitations(ctx) : Promise.resolve([]),
   ])
-
-  const roleHere = new Map(seatsHere.map((row) => [row.userId, row.role]))
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         as="h2"
-        title="Members"
-        lead={`Everyone in ${session.organisationName}.`}
+        title="Users & Teams"
+        lead={`Everyone in ${session.accountName}.`}
         why={
           <p>
-            Anyone with a verified {session.hostedDomain} Google account joins as a viewer the first
-            time they sign in. Invite somebody to seat them with a role before that; deactivating
-            ends their access to every workspace at once.
+            Anyone with a verified {session.hostedDomain} Google account joins the first time they
+            sign in, reading the hubs this account opens by default. Invite somebody to seat them
+            with the hubs you choose; deactivating ends their access at once.
           </p>
         }
       />
@@ -42,22 +36,15 @@ const MembersPage = async () => {
       <MemberList
         rows={people.map((person) => ({
           ...person,
-          roleHere: roleHere.get(person.userId) ?? null,
           joinedAt: person.joinedAt.toISOString(),
-          deactivatedAt: person.deactivatedAt?.toISOString() ?? null,
         }))}
         invitations={invitations.map((row) => ({
           ...row,
           expiresAt: row.expiresAt.toISOString(),
           createdAt: row.createdAt.toISOString(),
         }))}
-        workspaces={workspaces.map((row) => ({ id: row.id, name: row.name }))}
-        workspaceId={session.workspaceId}
-        workspaceName={session.workspaceName}
         selfId={session.userId}
-        canSetRole={session.role === 'admin'}
-        isOrgAdmin={isOrgAdmin}
-        role={session.role}
+        isSuperAdmin={session.isSuperAdmin}
       />
     </div>
   )

@@ -10,7 +10,7 @@ import {
   recordHealth,
   setExternalId,
   type MarketingEvent,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
@@ -28,7 +28,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.apollo.io/api/v1'
 
-const credentials = async (ctx: WorkspaceContext) => {
+const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'apollo')
   if (!found?.secret) {
     throw new Error('Apollo is not connected. Add an API key in Settings, under Integrations.')
@@ -38,7 +38,7 @@ const credentials = async (ctx: WorkspaceContext) => {
 
 const headers = (key: string) => ({ 'x-api-key': key })
 
-export const testApollo = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testApollo = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'apollo', { ok: true })
@@ -70,6 +70,10 @@ export type ApolloPerson = {
   last_name?: string | null
   title?: string | null
   linkedin_url?: string | null
+  city?: string | null
+  country?: string | null
+  seniority?: string | null
+  departments?: string[] | null
   organization?: {
     name?: string | null
     website_url?: string | null
@@ -77,7 +81,15 @@ export type ApolloPerson = {
     estimated_num_employees?: number | null
     annual_revenue?: number | null
     city?: string | null
+    state?: string | null
+    postal_code?: string | null
     country?: string | null
+    short_description?: string | null
+    linkedin_url?: string | null
+    founded_year?: number | null
+    total_funding?: number | null
+    phone?: string | null
+    primary_phone?: { number?: string | null } | null
   } | null
 }
 
@@ -89,17 +101,31 @@ export const contactFieldsFrom = (person: ApolloPerson): Record<string, unknown>
   last_name: person.last_name ?? undefined,
   title: person.title ?? undefined,
   linkedin_url: person.linkedin_url ?? undefined,
+  city: person.city ?? undefined,
+  country: person.country ?? undefined,
+  seniority: person.seniority ?? undefined,
+  department: person.departments?.[0] ?? undefined,
 })
 
-export const companyFieldsFrom = (person: ApolloPerson): Record<string, unknown> => ({
-  name: person.organization?.name ?? undefined,
-  domain: person.organization?.website_url ?? undefined,
-  industry: person.organization?.industry ?? undefined,
-  employee_count: person.organization?.estimated_num_employees ?? undefined,
-  annual_revenue: person.organization?.annual_revenue ?? undefined,
-  city: person.organization?.city ?? undefined,
-  country: person.organization?.country ?? undefined,
-})
+export const companyFieldsFrom = (person: ApolloPerson): Record<string, unknown> => {
+  const org = person.organization
+  return {
+    name: org?.name ?? undefined,
+    domain: org?.website_url ?? undefined,
+    industry: org?.industry ?? undefined,
+    employee_count: org?.estimated_num_employees ?? undefined,
+    annual_revenue: org?.annual_revenue ?? undefined,
+    city: org?.city ?? undefined,
+    state: org?.state ?? undefined,
+    postal_code: org?.postal_code ?? undefined,
+    country: org?.country ?? undefined,
+    description: org?.short_description ?? undefined,
+    linkedin_url: org?.linkedin_url ?? undefined,
+    founded_year: org?.founded_year === null || org?.founded_year === undefined ? undefined : String(org.founded_year),
+    funding_raised: org?.total_funding === null || org?.total_funding === undefined ? undefined : String(org.total_funding),
+    phone: org?.primary_phone?.number ?? org?.phone ?? undefined,
+  }
+}
 
 export type EnrichOutcome = {
   provider: 'apollo'
@@ -114,7 +140,7 @@ export type EnrichOutcome = {
  *  A miss is a real answer: fields stay blank, the record says so, and it is not
  *  retried on a loop. Blank is correct; invented data is not. F6 §4. */
 export const enrichContact = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { contactId: string; email: string; companyId: string | null },
 ): Promise<EnrichOutcome> => {
   const person = devIntegrationsEnabled
@@ -199,7 +225,7 @@ const EVENT_MAP: Record<string, MarketingEvent['kind']> = {
 }
 
 export const handleApolloWebhook = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   body: unknown,
 ): Promise<{ handled: boolean; detail: string }> => {
   const event = body as ApolloWebhook
@@ -232,7 +258,7 @@ export type ApolloOrganization = NonNullable<ApolloPerson['organization']>
 /** A company with no contact yet is still enrichable: Apollo matches it on its
  *  domain. Same field list, same provenance rules. F6 §4. */
 export const enrichCompany = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { companyId: string; domain: string },
 ): Promise<EnrichOutcome> => {
   const organization = devIntegrationsEnabled
@@ -285,7 +311,7 @@ export const enrichCompany = async (
 export type ApolloSequence = { id: string; name: string; active: boolean }
 export type ApolloEmailAccount = { id: string; email: string; active: boolean }
 
-export const listSequences = async (ctx: WorkspaceContext): Promise<ApolloSequence[]> => {
+export const listSequences = async (ctx: AccountContext): Promise<ApolloSequence[]> => {
   if (devIntegrationsEnabled) return DEV_SEQUENCES
   const { secret } = await credentials(ctx)
   const answer = await json<{ emailer_campaigns?: { id: string; name: string; active?: boolean; archived?: boolean }[] }>({
@@ -299,7 +325,7 @@ export const listSequences = async (ctx: WorkspaceContext): Promise<ApolloSequen
     .map((row) => ({ id: row.id, name: row.name, active: row.active !== false }))
 }
 
-export const listEmailAccounts = async (ctx: WorkspaceContext): Promise<ApolloEmailAccount[]> => {
+export const listEmailAccounts = async (ctx: AccountContext): Promise<ApolloEmailAccount[]> => {
   if (devIntegrationsEnabled) return DEV_ACCOUNTS
   const { secret } = await credentials(ctx)
   const answer = await json<{ email_accounts?: { id: string; email: string; active?: boolean }[] }>({
@@ -312,7 +338,7 @@ export const listEmailAccounts = async (ctx: WorkspaceContext): Promise<ApolloEm
 /** Apollo's own id for a Rawr contact, creating the Apollo contact when it has
  *  none. Deduplicated on their side by email, and remembered here so the next
  *  call is a lookup, not a create. */
-const apolloContactId = async (ctx: WorkspaceContext, contactId: string): Promise<{ id: string; email: string }> => {
+const apolloContactId = async (ctx: AccountContext, contactId: string): Promise<{ id: string; email: string }> => {
   const record = await getRecord(ctx, 'contact', contactId)
   const email = typeof record?.values.email === 'string' ? record.values.email : ''
   if (!record || !email) throw new Error('Apollo matches on email, and this contact has none.')
@@ -381,7 +407,7 @@ const ACTIVITY_KIND: Record<string, MarketingEvent['kind']> = {
 /** The read-back F6 §3 promises: where each sequence got to, and every event on
  *  the way, written once each onto the contact timeline. */
 export const syncSequenceActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<{ statuses: SequenceStatus[]; recorded: number }> => {
   const apollo = await apolloContactId(ctx, contactId)
@@ -510,9 +536,9 @@ type RawEvent = {
 }
 
 /** The scheduled pass: every contact Apollo knows, a page at a time. Each contact
- *  is its own call so one failure is one failure, not a stalled workspace. */
+ *  is its own call so one failure is one failure, not a stalled account. */
 export const syncLinkedContacts = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   limit = 100,
 ): Promise<{ contacts: number; recorded: number; failed: string[] }> => {
   const linked = await contactsLinkedTo(ctx, 'apollo', limit)
@@ -564,6 +590,10 @@ const devPerson = (email: string): ApolloPerson | null => {
     last_name: 'Match',
     title: 'Head of Data',
     linkedin_url: `https://www.linkedin.com/in/${email.split('@')[0]}`,
+    city: 'Oakland',
+    country: 'United States',
+    seniority: 'director',
+    departments: ['engineering'],
     organization: {
       name: domain.split('.')[0] ?? domain,
       website_url: domain,
@@ -571,7 +601,14 @@ const devPerson = (email: string): ApolloPerson | null => {
       estimated_num_employees: 240,
       annual_revenue: 18_000_000,
       city: 'San Francisco',
+      state: 'California',
+      postal_code: '94105',
       country: 'United States',
+      short_description: `${domain.split('.')[0]} builds software.`,
+      linkedin_url: `https://www.linkedin.com/company/${domain.split('.')[0]}`,
+      founded_year: 2015,
+      total_funding: 42_000_000,
+      primary_phone: { number: '+1 415 555 0100' },
     },
   }
 }

@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { and, eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
 import { ForbiddenError } from '../src/dal/context.ts'
 import {
   ConflictError,
@@ -98,29 +98,46 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 }
 
 try {
-  const [datasaur] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
-    .select({ id: s.userAccount.id, email: s.userAccount.email, role: s.membership.role })
+    .select({
+      id: s.userAccount.id,
+      email: s.userAccount.email,
+      isSuperAdmin: s.membership.isSuperAdmin,
+      viewHubs: s.membership.viewHubs,
+      editHubs: s.membership.editHubs,
+    })
     .from(s.membership)
     .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
-    .where(eq(s.membership.workspaceId, datasaur.id))
+    .where(eq(s.membership.accountId, datasaur.id))
 
-  const ctxFor = (role: Role): WorkspaceContext => {
-    const member = members.find((m) => m.role === role)
-    if (!member) throw new Error(`no seeded ${role}`)
-    return { workspaceId: datasaur.id, actorId: member.id, actorKind: 'user', role }
+  /** The seeded seats are named for the access they carry, so the suite asks for
+   *  one by name and gets whatever grants the seed gave it. */
+  const ctxFor = (seat: string): AccountContext => {
+    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    if (!member) throw new Error(`no seeded ${seat}`)
+    return {
+      accountId: datasaur.id,
+      actorId: member.id,
+      actorKind: 'user',
+      isSuperAdmin: member.isSuperAdmin,
+      viewHubs: member.viewHubs,
+      editHubs: member.editHubs,
+    }
   }
   const admin = ctxFor('admin')
   const sales = ctxFor('sales')
   const viewer = ctxFor('viewer')
-  const probeCtx: WorkspaceContext = {
-    workspaceId: probe.id,
+  const probeCtx: AccountContext = {
+    accountId: probe.id,
     actorId: null,
     actorKind: 'user',
-    role: 'admin',
+    isSuperAdmin: true,
+    viewHubs: [],
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
   }
 
   console.log('\n-- registry and views ------------------------------------------------')
@@ -180,7 +197,7 @@ try {
     const [company] = await db
       .select({ id: s.company.id, domain: s.company.domain })
       .from(s.company)
-      .where(and(eq(s.company.workspaceId, datasaur.id), eq(s.company.domain, 'partner1.example')))
+      .where(and(eq(s.company.accountId, datasaur.id), eq(s.company.domain, 'partner1.example')))
     expect(!!company, 'the seeded partner1.example company is missing')
 
     const created = await createRecord(sales, 'contact', {
@@ -198,7 +215,7 @@ try {
     const before = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(s.company)
-      .where(eq(s.company.workspaceId, datasaur.id))
+      .where(eq(s.company.accountId, datasaur.id))
 
     const created = await createRecord(sales, 'contact', {
       first_name: 'Free',
@@ -211,7 +228,7 @@ try {
     const after = await db
       .select({ n: sql<number>`count(*)::int` })
       .from(s.company)
-      .where(eq(s.company.workspaceId, datasaur.id))
+      .where(eq(s.company.accountId, datasaur.id))
     expect(before[0]!.n === after[0]!.n, `company count went ${before[0]!.n} -> ${after[0]!.n}`)
     await deleteRecord(admin, 'contact', created.id)
     return 'no company created, contact left unlinked'
@@ -257,7 +274,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.workspaceId, datasaur.id))
+      .where(eq(s.deal.accountId, datasaur.id))
       .limit(1)
     const before = await getRecord(sales, 'deal', deal!.id)
     await updateRecord(sales, 'deal', deal!.id, { next_step: 'Someone else got there first' })
@@ -299,7 +316,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id, stageId: s.deal.stageId, pipelineId: s.deal.pipelineId })
       .from(s.deal)
-      .where(eq(s.deal.workspaceId, datasaur.id))
+      .where(eq(s.deal.accountId, datasaur.id))
       .limit(1)
     const stages = await db
       .select({ id: s.pipelineStage.id, name: s.pipelineStage.name })
@@ -320,11 +337,71 @@ try {
     return subject
   })
 
+  console.log('\n-- pipeline and stage agree ------------------------------------------')
+
+  const pipelines = await db
+    .select({ id: s.pipeline.id, name: s.pipeline.name })
+    .from(s.pipeline)
+    .where(eq(s.pipeline.accountId, datasaur.id))
+    .orderBy(s.pipeline.position)
+  const stagesOf = async (pipelineId: string) =>
+    db.select({ id: s.pipelineStage.id, pipelineId: s.pipelineStage.pipelineId }).from(s.pipelineStage).where(eq(s.pipelineStage.pipelineId, pipelineId)).orderBy(s.pipelineStage.position)
+  const [enterprise, salesPipeline] = pipelines
+  const enterpriseStages = await stagesOf(enterprise!.id)
+  const salesStages = await stagesOf(salesPipeline!.id)
+
+  await check('a deal created with only a pipeline lands on its first stage', async () => {
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: salesPipeline!.id })
+    const record = await getRecord(sales, 'deal', created.id)
+    expect(record?.values.stage_id === salesStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
+    await db.delete(s.deal).where(eq(s.deal.id, created.id))
+    return `first stage of ${salesPipeline!.name}`
+  })
+
+  await check('a deal created with neither lands on the first pipeline', async () => {
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe' })
+    const record = await getRecord(sales, 'deal', created.id)
+    expect(record?.values.pipeline_id === enterprise!.id && record?.values.stage_id === enterpriseStages[0]!.id, 'it did not')
+    await db.delete(s.deal).where(eq(s.deal.id, created.id))
+    return enterprise!.name
+  })
+
+  await check('a stage from another pipeline is refused when the pipeline is named', async () => {
+    const said = await refuses('a cross-pipeline pair', () =>
+      createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: enterprise!.id, stage_id: salesStages[0]!.id }),
+    )
+    expect(said.includes('not in that pipeline'), said)
+    return said
+  })
+
+  await check('a stage alone carries its pipeline with it', async () => {
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: salesStages[1]!.id })
+    let record = await getRecord(sales, 'deal', created.id)
+    expect(record?.values.pipeline_id === salesPipeline!.id, 'create did not follow the stage')
+    await updateRecord(sales, 'deal', created.id, { stage_id: enterpriseStages[2]!.id })
+    record = await getRecord(sales, 'deal', created.id)
+    expect(record?.values.pipeline_id === enterprise!.id, 'update did not follow the stage')
+    await db.delete(s.deal).where(eq(s.deal.id, created.id))
+    return 'pipeline follows the stage on create and on update'
+  })
+
+  await check('changing the pipeline resets the stage to its first', async () => {
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: enterpriseStages[3]!.id })
+    await updateRecord(sales, 'deal', created.id, { pipeline_id: salesPipeline!.id })
+    const record = await getRecord(sales, 'deal', created.id)
+    expect(record?.values.stage_id === salesStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
+    // The stage moved, so the timeline says so: nothing is silently reshuffled.
+    const page = await readTimeline(sales, { entity: { entityType: 'deal', entityId: created.id }, types: ['stage_change'], limit: 1 })
+    expect(page.rows.length === 1, 'no stage_change entry')
+    await db.delete(s.deal).where(eq(s.deal.id, created.id))
+    return 'and the move is on the timeline'
+  })
+
   await check('a lifecycle change writes an event, and changing it back writes another', async () => {
     const stages = await db
       .select({ id: s.lifecycleStage.id, name: s.lifecycleStage.name })
       .from(s.lifecycleStage)
-      .where(eq(s.lifecycleStage.workspaceId, datasaur.id))
+      .where(eq(s.lifecycleStage.accountId, datasaur.id))
       .orderBy(s.lifecycleStage.position)
     const created = await createRecord(sales, 'contact', {
       first_name: 'Cycle',
@@ -350,7 +427,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.workspaceId, datasaur.id))
+      .where(eq(s.deal.accountId, datasaur.id))
       .orderBy(s.deal.createdAt)
       .limit(1)
 
@@ -380,7 +457,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.workspaceId, datasaur.id))
+      .where(eq(s.deal.accountId, datasaur.id))
       .orderBy(s.deal.createdAt)
       .limit(1)
     const entity = { entityType: 'deal' as const, entityId: deal!.id }
@@ -423,7 +500,7 @@ try {
 
     const orphans = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from activity_link
-       where workspace_id = ${datasaur.id} and entity_type = 'contact' and entity_id = ${absorb.id}`)
+       where account_id = ${datasaur.id} and entity_type = 'contact' and entity_id = ${absorb.id}`)
     expect(Number(orphans[0]!.n) === 0, `${orphans[0]!.n} links left on the absorbed record`)
 
     const survivor = await getRecord(sales, 'contact', keep.id)
@@ -440,14 +517,14 @@ try {
     const [pipeline] = await db
       .select({ id: s.pipeline.id })
       .from(s.pipeline)
-      .where(and(eq(s.pipeline.workspaceId, datasaur.id), eq(s.pipeline.name, 'Enterprise')))
+      .where(and(eq(s.pipeline.accountId, datasaur.id), eq(s.pipeline.name, 'Enterprise')))
     const board = await readBoard(sales, { pipelineId: pipeline!.id })
     expect(board.columns.length === 9, `saw ${board.columns.length} columns`)
 
     const counted = board.columns.reduce((sum, column) => sum + column.count, 0)
     const stored = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from deal
-       where workspace_id = ${datasaur.id} and pipeline_id = ${pipeline!.id} and deleted_at is null`)
+       where account_id = ${datasaur.id} and pipeline_id = ${pipeline!.id} and deleted_at is null`)
     expect(counted === Number(stored[0]!.n), `columns counted ${counted}, table holds ${stored[0]!.n}`)
 
     const mixed = board.columns.find((column) => column.totals.length > 1)
@@ -589,10 +666,10 @@ try {
 
     const stored = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from contact
-       where workspace_id = ${datasaur.id} and email like ${`imported.${stamp}.%`} and deleted_at is null`)
+       where account_id = ${datasaur.id} and email like ${`imported.${stamp}.%`} and deleted_at is null`)
     expect(Number(stored[0]!.n) === 20, `${stored[0]!.n} contacts exist, expected 20`)
 
-    await db.execute(sql`delete from contact where workspace_id = ${datasaur.id} and email like ${`imported.${stamp}.%`}`)
+    await db.execute(sql`delete from contact where account_id = ${datasaur.id} and email like ${`imported.${stamp}.%`}`)
     return '20 created, then 20 updated, 20 rows total'
   })
 
@@ -662,7 +739,7 @@ try {
     } catch (cause) {
       expect(cause instanceof ForbiddenError, `threw ${String(cause)}`)
     }
-    return (await import('../src/dal/context.ts')).canWrite('sales', 'deal') ? 'marketing refused, sales allowed' : 'sales was also refused'
+    return (await import('../src/dal/context.ts')).canWrite(sales, 'deal') ? 'marketing refused, sales allowed' : 'sales was also refused'
   })
 
   await check('a viewer can still read the pipeline', async () => {
@@ -676,7 +753,7 @@ try {
     // Compared by id, not by email: both tenants are seeded from the same
     // template, so matching on an address would flag the probe's own row.
     const datasaurIds = new Set(
-      (await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.workspaceId, datasaur.id))).map(
+      (await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.accountId, datasaur.id))).map(
         (row) => row.id,
       ),
     )
@@ -687,7 +764,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.workspaceId, datasaur.id))
+      .where(eq(s.deal.accountId, datasaur.id))
       .limit(1)
     const stolen = await getRecord(probeCtx, 'deal', deal!.id)
     expect(stolen === null, 'a Datasaur deal was readable by id from the probe tenant')
@@ -788,7 +865,7 @@ try {
     const [company] = await db
       .select({ id: s.company.id })
       .from(s.company)
-      .where(eq(s.company.workspaceId, datasaur.id))
+      .where(eq(s.company.accountId, datasaur.id))
       .limit(1)
     const contactsIn = (rail: Awaited<ReturnType<typeof readAssociations>>) =>
       groupFor(rail, 'contact') ?? { records: [], total: 0 }
@@ -870,7 +947,7 @@ try {
   await check('two spellings of one address are proposed as one person', async () => {
     const domain = `dupe-${stamp}.example.test`
     await db.execute(sql`
-      insert into contact (workspace_id, email, first_name, last_name)
+      insert into contact (account_id, email, first_name, last_name)
       values (${datasaur!.id}, ${'j.smith+news@' + domain}, 'J', 'Smith'),
              (${datasaur!.id}, ${'jsmith@' + domain}, 'J', 'Smith'),
              (${datasaur!.id}, ${'someone.else@' + domain}, 'Someone', 'Else')`)
@@ -1037,25 +1114,25 @@ try {
   const [anyDeal] = await db
     .select({ id: s.deal.id })
     .from(s.deal)
-    .where(eq(s.deal.workspaceId, datasaur.id))
+    .where(eq(s.deal.accountId, datasaur.id))
     .limit(1)
   const dealId = anyDeal!.id
 
-  await check('a key puts every file under its own workspace', async () => {
+  await check('a key puts every file under its own account', async () => {
     const key = storageKeyFor(admin, { entityType: 'deal', entityId: dealId, filename: 'Order form.pdf' })
     // Belt and braces beside the row level security: even a misconfigured bucket
     // policy cannot put one tenant's file under another's prefix.
     expect(key.startsWith(`${datasaur!.id}/deal/${dealId}/`), key)
     // The name is slugged, so nothing user-typed becomes a path segment.
     expect(key.endsWith('/Order-form.pdf'), key)
-    return 'workspace first, then a random segment, then a safe name'
+    return 'account first, then a random segment, then a safe name'
   })
 
   await check('a filename cannot climb out of its prefix', async () => {
     for (const nasty of ['../../etc/passwd', 'a/b/c.txt', '....//x.pdf']) {
       const key = storageKeyFor(admin, { entityType: 'deal', entityId: dealId, filename: nasty })
       expect(key.startsWith(`${datasaur!.id}/deal/${dealId}/`), key)
-      // Five segments exactly: workspace, type, id, random, name. A slash that
+      // Five segments exactly: account, type, id, random, name. A slash that
       // survived the slug would make a sixth.
       expect(key.split('/').length === 5, key)
     }
@@ -1207,7 +1284,7 @@ try {
     // what a rule that no longer exists did is a log nobody can act on. What
     // stays is the tasks it created and the timeline entries it wrote.
     const [tasks] = await db.execute<{ n: number }>(
-      sql`select count(*)::int as n from task where workspace_id = ${datasaur!.id}`,
+      sql`select count(*)::int as n from task where account_id = ${datasaur!.id}`,
     )
     expect(Number(tasks?.n) >= 0, 'tasks were taken with it')
     return 'the rule stops; the work it did stays'

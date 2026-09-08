@@ -2,8 +2,8 @@ import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { TYPE_META, type FieldType, type Operator } from '../registry/types.ts'
 import type { ObjectKey } from '../registry/core.ts'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace, type Tx } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount, type Tx } from './index.ts'
 import { assertUsableFieldKey } from './fields.ts'
 
 export const OBJECT_KEYS = ['contact', 'company', 'deal'] as const
@@ -80,14 +80,14 @@ export type Registry = {
 export const isCoreObject = (object: RegistryObject): object is RegistryObject & { key: ObjectKey } =>
   !object.isCustom
 
-/** Per workspace, short lived. The registry changes only when an admin edits a
+/** Per account, short lived. The registry changes only when an admin edits a
  *  field, which is rare, but a stale cache would show the wrong columns, so the
  *  entry is dropped on any field write rather than left to expire. */
 const cache = new Map<string, { at: number; registry: Registry }>()
 const TTL_MS = 30_000
 
-export const forgetRegistry = (workspaceId: string): void => {
-  cache.delete(workspaceId)
+export const forgetRegistry = (accountId: string): void => {
+  cache.delete(accountId)
 }
 
 const load = async (tx: Tx): Promise<Registry> => {
@@ -194,28 +194,28 @@ const load = async (tx: Tx): Promise<Registry> => {
   return { objects: list, byKey: new Map(list.map((o) => [o.key, o])) }
 }
 
-export const getRegistry = async (ctx: WorkspaceContext): Promise<Registry> => {
-  const hit = cache.get(ctx.workspaceId)
+export const getRegistry = async (ctx: AccountContext): Promise<Registry> => {
+  const hit = cache.get(ctx.accountId)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.registry
-  const registry = await withWorkspace(ctx, load)
-  cache.set(ctx.workspaceId, { at: Date.now(), registry })
+  const registry = await withAccount(ctx, load)
+  cache.set(ctx.accountId, { at: Date.now(), registry })
   return registry
 }
 
 /** Reads the registry inside a transaction the caller already opened, so a write
- *  path does not need a second round trip or a second workspace context. */
+ *  path does not need a second round trip or a second account context. */
 export const getRegistryIn = async (tx: Tx): Promise<Registry> => load(tx)
 
 export class UnknownFieldError extends Error {
   constructor(objectKey: string, fieldKey: string) {
-    super(`${objectKey} has no field called "${fieldKey}" in this workspace.`)
+    super(`${objectKey} has no field called "${fieldKey}" in this account.`)
     this.name = 'UnknownFieldError'
   }
 }
 
 export const objectOrThrow = (registry: Registry, key: string): RegistryObject => {
   const object = registry.byKey.get(key)
-  if (!object) throw new Error(`"${key}" is not an object in this workspace.`)
+  if (!object) throw new Error(`"${key}" is not an object in this account.`)
   return object
 }
 

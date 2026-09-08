@@ -1,4 +1,4 @@
-import { linkWorkspaceForToken, publicEdgeContext, recordClick } from '@rawr/db'
+import { linkAccountForToken, publicEdgeContext, recordClick } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 
@@ -16,15 +16,15 @@ export const GET = async (
   { params }: { params: Promise<{ token: string }> },
 ): Promise<NextResponse> => {
   const { token } = await params
-  const workspaceId = await linkWorkspaceForToken(token)
-  if (!workspaceId) {
+  const accountId = await linkAccountForToken(token)
+  if (!accountId) {
     // An unknown token goes to the app's front door rather than nowhere: the
     // person clicked something in a real mail and deserves a page.
     return NextResponse.redirect(new URL('/', env.AUTH_URL))
   }
 
   const url = await recordClick(
-    { ...publicEdgeContext(workspaceId), actorKind: 'public' },
+    { ...publicEdgeContext(accountId), actorKind: 'public' },
     token,
     { userAgent: request.headers.get('user-agent') },
   )

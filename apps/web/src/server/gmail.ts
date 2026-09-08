@@ -1,5 +1,6 @@
 import {
   blockedPatterns,
+  isAdmin,
   failBody,
   ingestMessage,
   internalDomainOf,
@@ -8,12 +9,13 @@ import {
   recordMailboxFailure,
   storeBody,
   updateMailboxCursor,
+  DEV_ACCESS_TOKEN,
   type IncomingAttachment,
   type IncomingMessage,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
-import { googleClient } from './auth/google.ts'
+import { googleRefresher } from './auth/google.ts'
 
 /** Reading is what every mailbox is connected for. Nothing about the CRM needs
  *  more than this, and every extra scope widens the blast radius of a leaked
@@ -29,6 +31,9 @@ export const GMAIL_READ_SCOPES = ['https://www.googleapis.com/auth/gmail.readonl
 export const GMAIL_SEND_SCOPES = [...GMAIL_READ_SCOPES, 'https://www.googleapis.com/auth/gmail.send']
 
 export const GMAIL_SCOPES = GMAIL_READ_SCOPES
+
+const isDevMailbox = (box: { accessToken: string }): boolean =>
+  devGmailEnabled && box.accessToken === DEV_ACCESS_TOKEN
 
 /** Whether what Google actually granted includes sending. Read from the token's
  *  own scope list rather than from what was asked for, because a person can
@@ -70,7 +75,7 @@ type Fetcher = (
  *  new one back so the caller can store it. An access token lasts an hour, and a
  *  back-fill can easily run longer than that. */
 const authorised = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
   tokens: { accessToken: string; refreshToken: string; accessTokenExpiresAt: Date | null },
 ): Promise<{ fetcher: Fetcher; accessToken: string }> => {
@@ -79,7 +84,7 @@ const authorised = async (
 
   if (expiring && googleConfigured) {
     try {
-      const refreshed = await googleClient().refreshAccessToken(tokens.refreshToken)
+      const refreshed = await googleRefresher().refreshAccessToken(tokens.refreshToken)
       accessToken = refreshed.accessToken()
       await updateMailboxCursor(ctx, mailboxId, {
         accessToken,
@@ -299,14 +304,14 @@ export type SyncOutcome = {
  *
  *  Back-fill is oldest-first with the page token persisted, so an interrupted run
  *  resumes rather than restarting, and provider_message_id being unique per
- *  workspace means a re-read writes nothing twice. B2. */
+ *  account means a re-read writes nothing twice. B2. */
 export const syncMailbox = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
 ): Promise<SyncOutcome> => {
   const box = await readMailbox(ctx, mailboxId)
   if (!box) throw new Error('That mailbox is not connected.')
-  if (ctx.actorKind === 'user' && ctx.role !== 'admin' && box.userId !== ctx.actorId) {
+  if (ctx.actorKind === 'user' && !isAdmin(ctx) && box.userId !== ctx.actorId) {
     throw new Error('That is somebody else’s mailbox. Only they, or an admin, can run its sync.')
   }
   if (box.state === 'revoked') {
@@ -320,7 +325,7 @@ export const syncMailbox = async (
   const internalDomain = await internalDomainOf(ctx)
 
   try {
-    const { fetcher } = devGmailEnabled
+    const { fetcher } = isDevMailbox(box)
       ? { fetcher: devFetcher(box.email, internalDomain) }
       : await authorised(ctx, mailboxId, box)
 
@@ -346,7 +351,7 @@ type Options = { internalDomain: string; blocked: Set<string> }
 type Tally = { stored: number; alreadyHad: number; skipped: number }
 
 const store = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   box: { id: string; email: string },
   incoming: IncomingMessage,
   options: Options,
@@ -365,7 +370,7 @@ const store = async (
 }
 
 const backfill = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   box: { id: string; email: string; backfillCursor: string | null },
   fetcher: Fetcher,
   options: Options,
@@ -411,7 +416,7 @@ const currentHistoryId = async (fetcher: Fetcher): Promise<string | null> => {
 }
 
 const incremental = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   box: { id: string; email: string; historyId: string | null },
   fetcher: Fetcher,
   options: Options,
@@ -478,7 +483,7 @@ const incremental = async (
  *  A message whose mailbox can no longer fetch it is marked failed with the reason
  *  rather than retried for ever: the queue has to drain. */
 export const hydrateMailboxBodies = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
   limit = 50,
 ): Promise<{ stored: number; failed: number; remaining: boolean }> => {
@@ -495,7 +500,7 @@ export const hydrateMailboxBodies = async (
     return { stored: 0, failed: pending.length, remaining: true }
   }
 
-  const { fetcher } = devGmailEnabled
+  const { fetcher } = isDevMailbox(box)
     ? { fetcher: devFetcher(box.email, await internalDomainOf(ctx)) }
     : await authorised(ctx, box.id, box)
 
@@ -603,7 +608,7 @@ const devMessage = (
 /** A fetcher bound to one mailbox, for anything outside this module that needs to
  *  talk to Gmail as that person: the sequence sender, and one-off replies. */
 export const gmailFetcherFor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   mailboxId: string,
 ): Promise<(path: string, params?: Record<string, string>, send?: { method: 'POST'; body: string }) => Promise<unknown>> => {
   const box = await readMailbox(ctx, mailboxId)
@@ -611,7 +616,7 @@ export const gmailFetcherFor = async (
   if (box.state === 'revoked') {
     throw new RevokedError('Access to this mailbox has been withdrawn in the Google account.')
   }
-  if (devGmailEnabled) return devFetcher(box.email, await internalDomainOf(ctx))
+  if (isDevMailbox(box)) return devFetcher(box.email, await internalDomainOf(ctx))
   const { fetcher } = await authorised(ctx, box.id, box)
   return fetcher
 }

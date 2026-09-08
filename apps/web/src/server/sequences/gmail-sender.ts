@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { trackingBase, type ClaimedRun, type WorkspaceContext } from '@rawr/db'
-import { devGmailEnabled, env } from '~/lib/env.ts'
+import { trackingBase, type ClaimedRun, type AccountContext } from '@rawr/db'
+import { env } from '~/lib/env.ts'
 import { gmailFetcherFor } from '../gmail.ts'
 import { buildMessage } from './mime.ts'
 import type { OutgoingStep, Sender, SentMessage } from './sender.ts'
@@ -12,7 +12,7 @@ import type { OutgoingStep, Sender, SentMessage } from './sender.ts'
  *  read back by the same sync, and stops the moment a reply arrives through it. */
 export const gmailSender: Sender = {
   name: 'gmail',
-  send: async (ctx: WorkspaceContext, run: ClaimedRun, step: OutgoingStep): Promise<SentMessage> => {
+  send: async (ctx: AccountContext, run: ClaimedRun, step: OutgoingStep): Promise<SentMessage> => {
     const sendToken = randomUUID().replaceAll('-', '')
     const base = trackingBase(run, env.AUTH_URL)
 
@@ -55,7 +55,11 @@ export const gmailSender: Sender = {
 /** Whether sending is possible at all right now, so the runner can say why rather
  *  than failing at the last moment. */
 export const canSendFrom = (run: ClaimedRun): string | null => {
-  if (!run.mailboxCanSend && !devGmailEnabled) {
+  // No exception for the development switch. The stand-in mailbox is stored with
+  // sending already granted, so the only mailbox the old exception let through
+  // was a real one connected read-only, which then failed at Google instead of
+  // here where somebody could read the reason.
+  if (!run.mailboxCanSend) {
     return `${run.mailboxEmail} was connected for reading only. Reconnect it and allow sending.`
   }
   return null

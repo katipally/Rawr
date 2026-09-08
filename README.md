@@ -15,9 +15,9 @@ This file is only how to run it.
 
 ```
  pnpm install
- cp .env.example .env.local     # fill in the Supabase pooler URLs
+ cp .env.example .env.local     # fill in the database URLs
  pnpm db:migrate                # schema, then row level security on every table
- pnpm db:seed                   # two workspaces, ~20 records each, edge cases included
+ pnpm db:seed                   # two accounts, ~20 records each, edge cases included
 ```
 
 Needs Node 24+ and pnpm 11 (`packageManager` pins the exact version, so
@@ -26,12 +26,22 @@ Needs Node 24+ and pnpm 11 (`packageManager` pins the exact version, so
 `.agents/` holds agent skills pinned by `skills-lock.json` and is not committed;
 Claude Code restores it from that lock.
 
-Both database URLs point at the same Supabase project through different ports:
-`:6543` transaction mode for app queries (`prepare: false` is required there), and
-`:5432` session mode for migrations and the worker, which hold long-lived
-connections. The app connects as `rawr_app`, which owns no tables and cannot
-bypass row level security. `DATABASE_URL_OWNER` is the table owner and is used
-only by migrations and the worker's own bookkeeping.
+Any Postgres 15+ will do; nothing in the schema, the policies or the data access
+layer is vendor-specific. The app connects as `rawr_app`, which owns no tables and
+cannot bypass row level security. `DATABASE_URL_OWNER` is the table owner, used
+only by migrations and the worker's own bookkeeping. `DATABASE_URL_SESSION` must
+not be a transaction pooler: pg-boss and migrations need a session that outlives
+one statement.
+
+`pnpm db:migrate` runs `packages/db/sql/bootstrap.sql` first, which creates the
+`extensions` schema and the `rawr_app` role if they are absent. Set
+`APP_DB_PASSWORD` on a fresh database to give that role a password. Both
+statements are idempotent, so an existing database is untouched.
+
+On Supabase, point `DATABASE_URL` at the pooler on `:6543` (transaction mode) and
+the other two at `:5432` (session mode), with the user `rawr_app.PROJECT_REF`.
+Leave `DATABASE_PREPARED` unset there: prepared statements do not survive a
+transaction pooler. Set it to `1` on a direct connection.
 
 ## Running
 
@@ -40,20 +50,25 @@ only by migrations and the worker's own bookkeeping.
  pnpm worker     the job daemon, needs to be running for index builds
 ```
 
-Sign in with Google: an organisation owns its workspaces and holds the Google
-hosted domain, so any verified `@datasaur.ai` account joins the Datasaur
-organisation and, while it allows domain joins, every workspace in it as a
-viewer. An admin raises the role under Settings, Members; an organisation admin
-invites people who are not on the domain, ends somebody's access everywhere at
-once, and creates workspaces under Settings, Organisation. Settings, Your account is the person's own screen: roles,
-timezone, Gmail and Calendar connections, agent tokens, and sign out everywhere. A seeded address whose email matches is claimed by that
-sign-in, so `admin@datasaur.ai` signing in with Google is the seeded admin.
+Sign in with Google. An account holds the Google hosted domain, so a verified
+`@datasaur.ai` address joins the Datasaur account and, while it allows domain
+joins, arrives reading the hubs that account opens by default. A domain no
+account claims opens one, and whoever signs in first becomes its super admin,
+which is how this app starts from an empty database.
+
+Access is granted a hub at a time, as HubSpot grants it: contacts, sales,
+marketing, service, reports and account, each at view or edit, with super admin
+above the grid. A super admin sets them under Settings, Users and Teams, invites
+people who are not on the domain, and ends somebody's access. Settings, Your
+account is the person's own screen: timezone, Gmail and Calendar connections,
+agent tokens, and sign out everywhere. A seeded address whose email matches is
+claimed by that sign-in, so `admin@datasaur.ai` signing in with Google is the
+seeded admin.
 
 Without Google credentials, `/sign-in` also offers a development form that takes
 a seeded address: `admin@datasaur.ai`, `sales@`, `marketing@`, `viewer@`, and
-`admin@probe.example` for the second organisation. The seed builds two
-organisations, and Datasaur owns two workspaces so the switcher has something to
-switch between. That form refuses to render unless
+`admin@probe.example` for the second account. The seed builds two accounts, which
+is what the cross-tenant checks need something real to fail against. That form refuses to render unless
 `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
 
 ## Checking it still holds
@@ -62,7 +77,7 @@ switch between. That form refuses to render unless
  pnpm verify              typecheck, then every suite below
  pnpm db:verify           tenancy: RLS forced everywhere, cross-tenant reads and writes refused
  pnpm db:verify:guards    the role matrix and the audit trail, by calling mutations directly
- pnpm db:verify:org       the organisation layer: scope, seats, invitations, teams, history
+ pnpm db:verify:account   the account layer: scope, seats, invitations, grants, teams, history
  pnpm db:verify:mail      stored bodies, who may read a mailbox, and the shared inbox
  pnpm db:verify:sequences the outreach engine: enrolment, the queue, tracking, and every way one stops
  pnpm db:verify:reporting where a visit is labelled, which way a first touch may move, and that the totals reconcile
@@ -87,7 +102,7 @@ Discovery is at `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-authorization-server`; consent is `/oauth/authorize`. Every screen has
 a tool, under the signed-in person's role. One of them needs the app up: `verify:mcp` calls the
 real `/api/mcp`. Start it with a small pool, or the suites and the dev server
-together exhaust the Supabase pooler and the failures read as logic errors:
+together exhaust the connection limit and the failures read as logic errors:
 
 ```
  DATABASE_POOL_MAX=5 pnpm dev    in one terminal
@@ -95,22 +110,23 @@ together exhaust the Supabase pooler and the failures read as logic errors:
 ```
 
 All of them run against the real database and exit non-zero on failure, so they
-can gate a build. They run inside the two seeded workspaces and leave records,
-timeline rows and settings behind, so `pnpm verify` ends by reseeding: after a
-full run the development data is fresh again. Running one suite on its own does
-not reseed; run `pnpm db:seed` when the leftovers get in the way. `/design` renders every primitive in its empty, single-row and
+can gate a build. They run inside the two seeded accounts and leave records,
+timeline rows and settings behind. Nothing reseeds on its own: `pnpm db:seed`
+drops the `datasaur` and `probe` accounts and everything cascading from
+them, so run it deliberately, when the leftovers get in the way and you are
+willing to lose whatever you created by hand. `/design` renders every primitive in its empty, single-row and
 500-character states; `/design?rows=10000` is the large-result check.
 
 ## The public edge
 
-F3 adds routes that take no session. The workspace is resolved from the form id
+F3 adds routes that take no session. The account is resolved from the form id
 or the site key through a security-definer function, never from the request.
 
 ```
  GET  /embed.js               the one file datasaur.ai loads: forms + consent
  GET  /f/:formId/schema       what the embed needs to paint a form
  POST /f/:formId              a submission
- GET  /form/:workspace/:slug  hosted page, works with JavaScript disabled
+ GET  /form/:account/:slug    hosted page, works with JavaScript disabled
  GET  /form/:formId           the same page, addressed the way the embed falls back
  POST /c                      a consent choice
  POST /w/webflow              Webflow native-form webhook, signature required

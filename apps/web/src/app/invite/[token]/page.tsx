@@ -7,7 +7,7 @@ import { memberships, readSession, sessionFromMembership, writeSessionCookie } f
 /** The page an invitation link opens. It says who is inviting whom, and nothing
  *  about anybody else: an invitation link ends up in mail, and mail gets forwarded.
  *
- *  Somebody already signed in accepts here and is moved into the workspace they
+ *  Somebody already signed in accepts here and is moved into the account they
  *  were seated in. Somebody signed out follows a link that parks the token in an
  *  httpOnly cookie and sends them to sign in; the callback redeems it and checks
  *  that the address they signed in with is the one that was invited. */
@@ -31,7 +31,7 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
       <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
         <EmptyState
           title="That invitation has expired"
-          description={`Invitations to ${offer.organisationName} last two weeks. Ask for a new link and it will work straight away.`}
+          description={`Invitations to ${offer.accountName} last two weeks. Ask for a new link and it will work straight away.`}
         />
       </main>
     )
@@ -43,8 +43,8 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
     // Already signed in: redeem it now and land them where the seat is. The
     // function refuses a token whose address is not theirs, so this is safe to
     // run for anybody who happens to open the link.
-    const organisationId = await acceptInvitation(token, session.userId)
-    if (!organisationId) {
+    const joined = await acceptInvitation(token, session.userId)
+    if (!joined) {
       return (
         <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
           <EmptyState
@@ -62,7 +62,7 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
       )
     }
     const mine = await memberships(session.userId)
-    const seated = mine.find((row) => row.organisationId === organisationId) ?? mine[0]
+    const seated = mine.find((row) => row.accountId === joined) ?? mine[0]
     if (seated) await writeSessionCookie(sessionFromMembership(seated))
     redirect('/')
   }
@@ -71,12 +71,12 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
     <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
       <h1 className="text-lg font-medium text-cta">Rawr</h1>
       <div className="rounded-panel border border-line bg-surface p-4">
-        <h2 className="text-base font-medium">You have been invited to {offer.organisationName}</h2>
+        <h2 className="text-base font-medium">You have been invited to {offer.accountName}</h2>
         <p className="mt-1 text-secondary">
           The invitation is for <strong className="text-body">{offer.email}</strong>
-          {offer.workspaceName ? (
+          {offer.accountName ? (
             <>
-              , with a seat in <strong className="text-body">{offer.workspaceName}</strong>
+              , with a seat in <strong className="text-body">{offer.accountName}</strong>
             </>
           ) : null}
           . Sign in with that Google account to accept it.

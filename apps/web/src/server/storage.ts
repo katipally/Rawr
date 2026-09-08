@@ -1,90 +1,78 @@
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '~/lib/env.ts'
 
-/** Object storage, over Supabase Storage's HTTP API.
- *
- *  No client library: three endpoints are needed and each is one fetch, so a
- *  dependency here would be more surface than the thing it wraps.
+/** Object storage over the S3 protocol, so the host is an endpoint rather than a
+ *  rewrite: Supabase, R2, MinIO, S3 and B2 all speak it.
  *
  *  Nothing about a file passes through this app. The browser is handed a signed
- *  URL and uploads straight to storage, and reads are signed links that expire.
- *  A forty megabyte PDF never occupies a request worker, and the bucket is never
- *  public — which it would have to be if links did not expire. */
+ *  URL and uploads straight to storage, and reads are links that expire, so a
+ *  forty megabyte PDF never occupies a request worker and the bucket is never
+ *  public. */
 
-export const storageConfigured = Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY)
+export const storageConfigured = Boolean(
+  env.S3_ENDPOINT && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY && env.S3_BUCKET,
+)
 
-/** The one message anybody sees when it is not set up, naming what to set. */
 export const NOT_CONFIGURED =
-  'File storage is not connected. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, and create the bucket named in SUPABASE_STORAGE_BUCKET.'
+  'File storage is not connected. Set S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY and S3_BUCKET, and create the bucket.'
 
-const base = (): string => `${env.SUPABASE_URL.replace(/\/$/, '')}/storage/v1`
+let opened: S3Client | null = null
 
-/** The service key, which bypasses storage policies. It never leaves the server:
- *  what reaches the browser is a token scoped to one path and one operation. */
-const headers = (): Record<string, string> => ({
-  authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
-  apikey: env.SUPABASE_SERVICE_ROLE_KEY,
-})
-
-const call = async (path: string, init: RequestInit): Promise<unknown> => {
+/** Path style, because every S3 host but AWS itself addresses buckets that way,
+ *  and a virtual-host URL against MinIO or Supabase resolves to nothing. */
+const client = (): S3Client => {
   if (!storageConfigured) throw new Error(NOT_CONFIGURED)
-  const response = await fetch(`${base()}${path}`, {
-    ...init,
-    headers: { ...headers(), ...(init.headers ?? {}) },
-    signal: AbortSignal.timeout(20_000),
+  opened ??= new S3Client({
+    endpoint: env.S3_ENDPOINT,
+    region: env.S3_REGION,
+    forcePathStyle: true,
+    // The presigner signs a command with no body, so the SDK would put a CRC32 of
+    // zero bytes in the URL and storage would reject the browser's real upload.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY,
+    },
   })
-  const body = await response.text()
-  if (!response.ok) {
-    // Storage answers JSON with a message; a proxy in front of it may not, so
-    // the raw body is the fallback rather than a generic failure.
-    let detail = body.slice(0, 300)
-    try {
-      const parsed = JSON.parse(body) as { message?: string; error?: string }
-      detail = parsed.message ?? parsed.error ?? detail
-    } catch {
-      // Not JSON. The text is what we have.
-    }
-    throw new Error(`Storage answered ${response.status}: ${detail}`)
-  }
-  return body ? JSON.parse(body) : null
+  return opened
 }
 
-/** A one-shot URL the browser PUTs the file to. Scoped to this exact key, so a
- *  token handed out for one record cannot be used to write over another. */
+/** A one-shot URL the browser PUTs to, scoped to this exact key, so a token for
+ *  one record cannot write over another. Content type is left unsigned so the
+ *  browser may send its own; storage keeps whatever arrives. */
 export const signedUpload = async (key: string): Promise<{ url: string }> => {
-  const bucket = env.SUPABASE_STORAGE_BUCKET
-  const result = (await call(`/object/upload/sign/${bucket}/${encodeKey(key)}`, {
-    method: 'POST',
-  })) as { url?: string }
-  if (!result?.url) throw new Error('Storage did not return an upload URL.')
-  return { url: `${base()}${result.url}` }
+  const url = await getSignedUrl(
+    client(),
+    new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key }),
+    { expiresIn: 300 },
+  )
+  return { url }
 }
 
-/** A link that stops working. Short, because it is handed out on a page load and
- *  a long-lived one is a public file with extra steps. */
+/** A link that stops working. Short, because a long-lived one is a public file
+ *  with extra steps. */
 export const signedDownload = async (
   key: string,
   seconds = 120,
   filename?: string,
-): Promise<string> => {
-  const bucket = env.SUPABASE_STORAGE_BUCKET
-  const result = (await call(`/object/sign/${bucket}/${encodeKey(key)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ expiresIn: seconds }),
-  })) as { signedURL?: string }
-  if (!result?.signedURL) throw new Error('Storage did not return a link.')
-  const url = new URL(`${base()}${result.signedURL}`)
-  // Asks the browser to save it under the name somebody uploaded rather than the
-  // random segment in the key.
-  if (filename) url.searchParams.set('download', filename)
-  return url.toString()
-}
+): Promise<string> =>
+  getSignedUrl(
+    client(),
+    new GetObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      // Saves under the name somebody uploaded rather than the random key segment.
+      ...(filename ? { ResponseContentDisposition: contentDisposition(filename) } : {}),
+    }),
+    { expiresIn: seconds },
+  )
 
 export const removeObject = async (key: string): Promise<void> => {
-  const bucket = env.SUPABASE_STORAGE_BUCKET
-  await call(`/object/${bucket}/${encodeKey(key)}`, { method: 'DELETE' })
+  await client().send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
 }
 
-/** Each segment escaped, the separators left alone: the key is a path, and
- *  encoding its slashes would make it one long filename. */
-const encodeKey = (key: string): string => key.split('/').map(encodeURIComponent).join('/')
+/** RFC 5987, so a name with a quote, a comma or an accent cannot break out of the
+ *  header or arrive mangled. */
+const contentDisposition = (filename: string): string =>
+  `attachment; filename="${filename.replaceAll(/["\\\r\n]/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`

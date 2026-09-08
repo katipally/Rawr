@@ -1,6 +1,6 @@
 import { listCustomObjects } from '@rawr/db'
 import { PageHeader } from '@rawr/ui'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { ObjectList } from './object-list.tsx'
 
 /** Objects an admin invents, beside the three Rawr is built on. */
@@ -49,8 +49,8 @@ const ObjectsPage = async () => {
           fieldCount: row.fieldCount,
           recordCount: row.recordCount,
         }))}
-        workspace={session.workspaceSlug}
-        canWrite={session.role === 'admin'}
+        account={session.accountSlug}
+        canWrite={sessionIsAdmin(session)}
       />
     </div>
   )

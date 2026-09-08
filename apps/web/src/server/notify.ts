@@ -1,7 +1,7 @@
-import { publicEdgeContext, recordDeadLetter, type Attribution, type WorkspaceContext } from '@rawr/db'
+import { publicEdgeContext, recordDeadLetter, type Attribution, type AccountContext } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { inBackground } from './background.ts'
-import { postToSlack, slackReady, type SlackBody } from './integrations/slack.ts'
+import { postToSlack, type SlackBody } from './integrations/slack.ts'
 
 /** Replaces what HubSpot posts to #sales-leads-2026 today. Trevor flagged this
  *  loss first: a form fill from a real prospect lands in Slack, and that stops at
@@ -13,11 +13,11 @@ import { postToSlack, slackReady, type SlackBody } from './integrations/slack.ts
  *  fail the capture. F3 §6, F6 §5. */
 
 export type SlackNotification = {
-  workspaceId: string
-  /** Carried so the Slack deep link opens the record in the right workspace.
+  accountId: string
+  /** Carried so the Slack deep link opens the record in the right account.
    *  A CRM link addresses its tenant in the path, and a link that cannot is a
    *  link nobody can follow. */
-  workspaceSlug: string
+  accountSlug: string
   formId: string
   submissionId: string
   formName: string
@@ -38,7 +38,7 @@ export const queueSlackNotification = (notification: SlackNotification): void =>
 }
 
 const deliver = async (notification: SlackNotification): Promise<void> => {
-  const ctx = publicEdgeContext(notification.workspaceId)
+  const ctx = publicEdgeContext(notification.accountId)
   const body = message(notification)
   // Keyed on the submission, so a retry, a replay, or both announce the lead once.
   const key = `slack:submission:${notification.submissionId}`
@@ -66,16 +66,12 @@ type Outbound = {
 /** The one path everything Slack-shaped goes through. Retry, backoff, jitter and
  *  the dead letter all live in the integration layer; what is here is the decision
  *  to swallow rather than throw, because every caller is fire-and-forget. */
-const send = async (ctx: WorkspaceContext, outbound: Outbound): Promise<void> => {
-  if (!slackReady()) {
-    await deadLetter(ctx, outbound, 'Slack is not configured. Add a bot token or a webhook URL in Settings, under Integrations (open item 4).')
-    return
-  }
+const send = async (ctx: AccountContext, outbound: Outbound): Promise<void> => {
   try {
     await postToSlack(ctx, outbound)
   } catch (cause) {
-    // postToSlack dead-letters through the provider layer on the way out, but a
-    // configuration failure never reaches that path, so this catches the rest.
+    // postToSlack dead-letters through the provider layer on the way out, but an
+    // unconnected Slack throws before reaching it, so this catches the rest.
     await deadLetter(ctx, outbound, cause instanceof Error ? cause.message : String(cause))
   }
 }
@@ -83,7 +79,7 @@ const send = async (ctx: WorkspaceContext, outbound: Outbound): Promise<void> =>
 /** One meeting that has no conference link, addressed to the people who can do
  *  something about it. F2 §4 step 5: the booking stands, the host is told. */
 export const queueHostAlert = (alert: {
-  workspaceId: string
+  accountId: string
   jobName: string
   idempotencyKey: string
   payload: Record<string, unknown>
@@ -96,7 +92,7 @@ export const queueHostAlert = (alert: {
     blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
   }
   inBackground(alert.idempotencyKey, () =>
-    send(publicEdgeContext(alert.workspaceId), {
+    send(publicEdgeContext(alert.accountId), {
       key: alert.idempotencyKey,
       jobName: alert.jobName,
       body,
@@ -105,7 +101,7 @@ export const queueHostAlert = (alert: {
   )
 }
 
-const deadLetter = async (ctx: WorkspaceContext, outbound: Outbound, error: string): Promise<void> => {
+const deadLetter = async (ctx: AccountContext, outbound: Outbound, error: string): Promise<void> => {
   try {
     await recordDeadLetter(ctx, {
       jobName: outbound.jobName,
@@ -133,7 +129,7 @@ const message = (notification: SlackNotification): SlackBody => {
   const name = [answer('first_name', 'firstname'), answer('last_name', 'lastname')]
     .filter((part) => part !== '—')
     .join(' ')
-  const link = `${publicBaseUrl}/contacts/${notification.workspaceSlug}/record/contact/${notification.contactId}`
+  const link = `${publicBaseUrl}/contacts/${notification.accountSlug}/record/contact/${notification.contactId}`
 
   const lines = [
     `*${notification.formName}*`,
@@ -153,8 +149,8 @@ const message = (notification: SlackNotification): SlackBody => {
 
 /** F6 §5's second use: a deal moving stage, opt-in per pipeline. */
 export const queueStageAlert = (alert: {
-  workspaceId: string
-  workspaceSlug: string
+  accountId: string
+  accountSlug: string
   dealId: string
   dealName: string
   from: string
@@ -162,10 +158,10 @@ export const queueStageAlert = (alert: {
   actor: string
   activityId: string
 }): void => {
-  const link = `${publicBaseUrl}/contacts/${alert.workspaceSlug}/record/deal/${alert.dealId}`
+  const link = `${publicBaseUrl}/contacts/${alert.accountSlug}/record/deal/${alert.dealId}`
   const text = `${alert.actor} moved ${alert.dealName} from ${alert.from} to ${alert.to}`
   queueHostAlert({
-    workspaceId: alert.workspaceId,
+    accountId: alert.accountId,
     jobName: 'slack.stage-change',
     // Keyed on the activity: one move, one announcement, however many retries.
     idempotencyKey: `slack:stage:${alert.activityId}`,

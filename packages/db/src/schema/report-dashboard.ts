@@ -1,6 +1,6 @@
 import { boolean, index, jsonb, pgTable, text, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
-import { userAccount, workspace } from './identity.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
+import { userAccount, account } from './identity.ts'
 
 /** B11. Reports somebody assembled, rather than the six Rawr ships.
  *
@@ -18,7 +18,7 @@ export const reportDashboard = pgTable(
   'report_dashboard',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     /** Whoever made it. A dashboard outlives the person who leaves, so this is
      *  set null rather than cascade, and a shared one keeps working. */
@@ -34,5 +34,5 @@ export const reportDashboard = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('report_dashboard_owner_idx').on(t.workspaceId, t.ownerId)],
+  (t) => [index('report_dashboard_owner_idx').on(t.accountId, t.ownerId)],
 )

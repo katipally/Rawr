@@ -8,7 +8,7 @@ import { defineJob } from './registry.ts'
  *  owner connection, and there is exactly one mechanism rather than a write plus a
  *  send that can disagree.
  *
- *  It carries no workspace id because it is the one job that scans across tenants,
+ *  It carries no account id because it is the one job that scans across tenants,
  *  and it only ever reads ids. */
 export const dispatchFieldIndexes = defineJob({
   name: 'field-index.dispatch',
@@ -33,9 +33,9 @@ export const dispatchFieldIndexes = defineJob({
            set state = 'building', last_error = null
           from claimable c
          where fi.id = c.id
-        returning fi.id, fi.workspace_id, fi.field_id
+        returning fi.id, fi.account_id, fi.field_id
       )
-      select claimed.id, claimed.workspace_id,
+      select claimed.id, claimed.account_id,
              f.key as field_key, o.key as object_key
         from claimed
         join field_def f on f.id = claimed.field_id
@@ -46,7 +46,7 @@ export const dispatchFieldIndexes = defineJob({
 
     for (const row of claimed) {
       await boss().send('field-index.create', {
-        workspaceId: row.workspace_id,
+        accountId: row.account_id,
         fieldIndexId: row.id,
         objectKey: row.object_key,
         fieldKey: row.field_key,

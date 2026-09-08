@@ -77,7 +77,7 @@ export type ToolDefinition = {
 const DEFAULT_ROWS = 25
 const MAX_ROWS = 100
 
-/** Every object the workspace has, so a model is offered the ones an admin
+/** Every object the account has, so a model is offered the ones an admin
  *  invented alongside the three the system is built on. Built per request from the
  *  registry rather than written out, which is why it is a function. */
 const objectArg = (registry: Registry) => ({
@@ -119,7 +119,7 @@ const searchRecords: ToolDefinition = {
   title: 'Search records',
   writes: false,
   description: ({ registry }) =>
-    `Find records by name, email or domain across every object in this workspace (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}). Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. Omit \`object\` to search everything.`,
+    `Find records by name, email or domain across every object in this account (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}). Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. Omit \`object\` to search everything.`,
   inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
@@ -165,7 +165,7 @@ const getRecordTool: ToolDefinition = {
   writes: false,
   description: ({ registry }) =>
     [
-      'Read one record in full, by id or by name, of any object in this workspace. Every field the registry knows about, with relations shown as their readable label.',
+      'Read one record in full, by id or by name, of any object in this account. Every field the registry knows about, with relations shown as their readable label.',
       '',
       'Fields:',
       fieldCatalogue(registry),
@@ -358,7 +358,7 @@ const listTasksTool: ToolDefinition = {
   inputSchema: () => ({
     type: 'object',
     properties: {
-      assignee: { type: 'string', description: 'A person\'s name. Omit for your own; "anyone" for the whole workspace.' },
+      assignee: { type: 'string', description: 'A person\'s name. Omit for your own; "anyone" for the whole account.' },
       overdue_only: { type: 'boolean', description: 'Only tasks past their due date.' },
       include_done: { type: 'boolean', description: 'Include finished tasks. Off by default.' },
       limit: limit(MAX_ROWS),
@@ -374,7 +374,7 @@ const listTasksTool: ToolDefinition = {
       ) ?? lookups.users.find((user) => user.label.toLowerCase().includes(wanted.toLowerCase()))
       if (!match) {
         return {
-          text: `Nobody here is called "${wanted}". The workspace has: ${lookups.users.map((u) => u.label).join(', ')}.`,
+          text: `Nobody here is called "${wanted}". The account has: ${lookups.users.map((u) => u.label).join(', ')}.`,
           isError: true,
         }
       }
@@ -426,7 +426,7 @@ const updateRecordTool: ToolDefinition = {
   writes: true,
   description: ({ registry }) =>
     [
-      'Change fields on one record, of any object in this workspace. Dates may be written the way a person says them ("October 15th", "next Friday") and are resolved in your timezone; the response states the ISO date that was actually set.',
+      'Change fields on one record, of any object in this account. Dates may be written the way a person says them ("October 15th", "next Friday") and are resolved in your timezone; the response states the ISO date that was actually set.',
       'Stages, owners and companies may be named rather than given as ids. A name that matches more than one record changes nothing and comes back with the candidates.',
       '',
       'Fields, with their types and allowed values:',
@@ -490,7 +490,7 @@ const createRecordTool: ToolDefinition = {
   writes: true,
   description: ({ registry }) =>
     [
-      'Create a record of any object in this workspace. A contact created with a work email is associated to its company automatically by the same domain rules the forms use.',
+      'Create a record of any object in this account. A contact created with a work email is associated to its company automatically by the same domain rules the forms use.',
       '',
       'Fields:',
       fieldCatalogue(registry),
@@ -614,7 +614,7 @@ const createTaskTool: ToolDefinition = {
         context.lookups.users.find((user) => user.label.toLowerCase().includes(wanted))
       if (!match) {
         return {
-          text: `Nobody here is called "${args.assignee}". The workspace has: ${context.lookups.users.map((u) => u.label).join(', ')}.`,
+          text: `Nobody here is called "${args.assignee}". The account has: ${context.lookups.users.map((u) => u.label).join(', ')}.`,
           isError: true,
         }
       }

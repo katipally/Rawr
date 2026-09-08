@@ -8,7 +8,8 @@ import {
 } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { AutomationList } from './automation-list.tsx'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { toFilterFields } from '~/server/crm.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
 /** B11. When this happens, do that.
  *
@@ -18,11 +19,11 @@ const AutomationsPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  if (session.role !== 'admin') {
+  if (!sessionIsAdmin(session)) {
     return (
       <EmptyState
         title="Automations are admin only"
-        description={`Your role (${session.role}) can change records one at a time. A rule changes every record that matches it.`}
+        description={`You need account access, which you do not have. can change records one at a time. A rule changes every record that matches it.`}
       />
     )
   }
@@ -37,7 +38,7 @@ const AutomationsPage = async () => {
     getRegistry(ctx),
   ])
 
-  // Every object in the workspace, not the three written out: "a record is
+  // Every object in the account, not the three written out: "a record is
   // created" happens to an object an admin invented exactly as it does to a
   // contact.
   const objects = registry.objects.map((object) => ({ key: object.key, label: object.nameSingular }))
@@ -46,6 +47,11 @@ const AutomationsPage = async () => {
       object.key,
       fields.filter((field) => field.objectKey === object.key).map((field) => field.key),
     ]),
+  )
+  // The same shape segments use, because the conditions are the same filter
+  // language against the same object, and the page's own copy says so.
+  const filterFieldsByObject = Object.fromEntries(
+    registry.objects.map((object) => [object.key, toFilterFields(object)]),
   )
 
   return (
@@ -92,7 +98,7 @@ const AutomationsPage = async () => {
                 }
               : step.kind === 'delay'
                 ? { kind: 'delay' as const, minutes: step.minutes }
-                : { kind: 'guard' as const },
+                : { kind: 'guard' as const, conditions: step.conditions },
           ),
           createdAt: row.createdAt.toISOString(),
           lastRunAt: row.lastRunAt?.toISOString() ?? null,
@@ -106,6 +112,7 @@ const AutomationsPage = async () => {
         stages={stages.map((stage) => stage.name)}
         objects={objects}
         fieldsByObject={fieldsByObject}
+        filterFieldsByObject={filterFieldsByObject}
       />
     </div>
   )

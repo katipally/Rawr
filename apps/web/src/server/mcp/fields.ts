@@ -3,7 +3,7 @@ import {
   resolveRecord,
   type Registry,
   type RegistryObject,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import type { Lookups } from '~/server/crm.ts'
 import { resolveDate } from './dates.ts'
@@ -38,7 +38,7 @@ export class FieldError extends Error {
 const MAX_FIELDS = 60
 
 export const prepareFields = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   object: RegistryObject,
   lookups: Lookups,
   input: Record<string, unknown>,
@@ -165,7 +165,7 @@ const choiceRefusal = (
  *  resolve by name; a company is a record like any other and goes through the same
  *  resolver as a deal reference, ambiguity and all. */
 const relationValue = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   key: string,
   lookups: Lookups,
   wanted: string,

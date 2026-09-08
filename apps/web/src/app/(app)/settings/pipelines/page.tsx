@@ -1,6 +1,6 @@
 import { PageHeader } from '@rawr/ui'
 import { listPipelines } from '@rawr/db'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { PipelineEditor } from './pipeline-editor.tsx'
 
 /** F1's edge case, made real: "a stage is deleted while deals sit in it → blocked,
@@ -29,8 +29,8 @@ const PipelinesPage = async () => {
 
       <PipelineEditor
         pipelines={pipelines}
-        canWrite={session.role === 'admin'}
-        role={session.role}
+        canWrite={sessionIsAdmin(session)}
+        hub="account"
       />
     </div>
   )

@@ -10,10 +10,10 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 export type PipelineEditorProps = {
   pipelines: PipelineRow[]
   canWrite: boolean
-  role: string
+  hub: string
 }
 
-export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProps) => {
+export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -25,6 +25,7 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
   const [editing, setEditing] = useState<StageRow | null>(null)
   const [removing, setRemoving] = useState<{ stage: StageRow; pipeline: PipelineRow } | null>(null)
   const [renaming, setRenaming] = useState<PipelineRow | null>(null)
+  const [deleting, setDeleting] = useState<PipelineRow | null>(null)
   const [destination, setDestination] = useState('')
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -62,8 +63,8 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
     return (
       <div className="flex flex-col gap-3">
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can read this and cannot change it. Pipelines decide what every deal
-          in the workspace means, so only an admin edits them.
+          You need {hub} access to change this. Pipelines decide what every deal
+          in the account means, so only an admin edits them.
         </p>
         {pipelines.map((pipeline) => (
           <ReadOnlyPipeline key={pipeline.id} pipeline={pipeline} />
@@ -114,13 +115,7 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
               >
                 Rename
               </Button>
-              <Button
-                variant="destructive"
-                busy={busy}
-                onClick={() =>
-                  void run(() => api.admin.pipelines.remove.mutate({ id: pipeline.id }), 'Pipeline deleted.')
-                }
-              >
+              <Button variant="destructive" busy={busy} onClick={() => setDeleting(pipeline)}>
                 Delete
               </Button>
             </span>
@@ -298,6 +293,40 @@ export const PipelineEditor = ({ pipelines, canWrite, role }: PipelineEditorProp
                 Delete stage
               </Button>
               <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={deleting !== null}
+        size="sm"
+        title={`Delete ${deleting?.name ?? ''}`}
+        onClose={() => setDeleting(null)}
+      >
+        {deleting ? (
+          <div className="flex flex-col gap-3">
+            <p>
+              The pipeline and its {deleting.stages.length} stage
+              {deleting.stages.length === 1 ? '' : 's'} go. A pipeline with deals in it is refused,
+              so nothing is lost either way — but a board somebody had open stops existing.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="destructive"
+                busy={busy}
+                onClick={() =>
+                  void run(
+                    () => api.admin.pipelines.remove.mutate({ id: deleting.id }),
+                    'Pipeline deleted.',
+                  ).then((ok) => ok && setDeleting(null))
+                }
+              >
+                Delete pipeline
+              </Button>
+              <Button variant="tertiary" onClick={() => setDeleting(null)}>
                 Cancel
               </Button>
             </div>

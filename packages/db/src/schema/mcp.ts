@@ -1,8 +1,8 @@
 import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, accountId } from './columns.ts'
 import { userAccount } from './identity.ts'
 
-/** F5 §1. One token is one person's agent access to one workspace.
+/** F5 §1. One token is one person's agent access to one account.
  *
  *  Only the hash is stored. The plaintext is shown once at creation and is
  *  unrecoverable afterwards, so a database dump is not a set of live credentials
@@ -15,7 +15,7 @@ export const mcpToken = pgTable(
   'mcp_token',
   {
     id: pk(),
-    workspaceId: workspaceId(),
+    accountId: accountId(),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -40,13 +40,13 @@ export const mcpToken = pgTable(
   (t) => [
     uniqueIndex('mcp_token_hash_key').on(t.tokenHash),
     uniqueIndex('mcp_token_refresh_key').on(t.refreshHash),
-    index('mcp_token_user_idx').on(t.workspaceId, t.userId, t.createdAt.desc()),
+    index('mcp_token_user_idx').on(t.accountId, t.userId, t.createdAt.desc()),
   ],
 )
 
 /** An OAuth client: registered dynamically (RFC 7591) or resolved from a Client
  *  ID Metadata Document and cached under its URL. Not tenant data, so no
- *  workspace column and no row level security: a client is a public name and a
+ *  account column and no row level security: a client is a public name and a
  *  list of places it may be sent back to. */
 export const mcpClient = pgTable('mcp_client', {
   id: text('id').primaryKey(),
@@ -64,7 +64,7 @@ export const mcpOauthCode = pgTable(
   'mcp_oauth_code',
   {
     id: pk(),
-    workspaceId: workspaceId(),
+    accountId: accountId(),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -86,13 +86,13 @@ export const mcpOauthCode = pgTable(
  *  of a write is kept under the caller's own key and replayed verbatim, so the
  *  retry answers with the record it already created rather than making another.
  *
- *  Scoped to the token as well as the workspace: two people using the same
+ *  Scoped to the token as well as the account: two people using the same
  *  obvious key ("update-1") are doing different things. */
 export const mcpCall = pgTable(
   'mcp_call',
   {
     id: pk(),
-    workspaceId: workspaceId(),
+    accountId: accountId(),
     tokenId: uuid('token_id')
       .notNull()
       .references(() => mcpToken.id, { onDelete: 'cascade' }),
@@ -102,7 +102,7 @@ export const mcpCall = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex('mcp_call_key_key').on(t.workspaceId, t.tokenId, t.idempotencyKey),
+    uniqueIndex('mcp_call_key_key').on(t.accountId, t.tokenId, t.idempotencyKey),
     index('mcp_call_age_idx').on(t.createdAt),
   ],
 )

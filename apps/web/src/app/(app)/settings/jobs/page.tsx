@@ -1,17 +1,17 @@
 import { listDeadLetters } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { DeadLetterTable } from './table.tsx'
 
 const JobsPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  if (session.role !== 'admin') {
+  if (!sessionIsAdmin(session)) {
     return (
       <EmptyState
-        title="Workspace settings are admin only"
-        description={`Your role (${session.role}) cannot open this page. Ask an admin in ${session.workspaceName} if you need access.`}
+        title="Account settings are admin only"
+        description={`You need account access, which you do not have. cannot open this page. Ask an admin in ${session.accountName} if you need access.`}
       />
     )
   }

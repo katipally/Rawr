@@ -19,6 +19,7 @@ export type MailboxSummary = {
   lastError: string | null
   lastErrorAt: string | null
   threadCount: number
+  standIn: boolean
   visibility: 'team' | 'private'
   canSend: boolean
   dailyCap: number
@@ -31,7 +32,7 @@ export type MailboxListProps = {
   rows: MailboxSummary[]
   blocklist: BlocklistRow[]
   currentUserId: string
-  role: string
+  isAdmin: boolean
   internalDomain: string
   googleReady: boolean
   devReady: boolean
@@ -40,6 +41,15 @@ export type MailboxListProps = {
 /** What each state means to a person, rather than what it means to the sync. A
  *  revoked mailbox is the one that needs a sentence: it looks like a failure and
  *  is actually somebody withdrawing consent, which is their right and not a bug. */
+/** The stand-in says so wherever a real mailbox would say "Connected". Its state
+ *  column is genuinely `connected`, so without this the page reports a working
+ *  sync over five fixtures. */
+const STAND_IN_COPY = {
+  label: 'Development mailbox',
+  tone: 'warn' as const,
+  hint: 'A stand-in: it reads five fixtures and sends nowhere. Disconnect it and connect with Google to sync real mail.',
+}
+
 const STATE_COPY: Record<MailboxState, { label: string; tone: 'ok' | 'warn' | 'error'; hint: string }> = {
   connected: { label: 'Connected', tone: 'ok', hint: 'New mail appears on the right records within the hour.' },
   backfilling: {
@@ -60,7 +70,7 @@ export const MailboxList = ({
   rows,
   blocklist,
   currentUserId,
-  role,
+  isAdmin,
   internalDomain,
   googleReady,
   devReady,
@@ -69,7 +79,7 @@ export const MailboxList = ({
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [pattern, setPattern] = useState('')
-  const [scope, setScope] = useState<'workspace' | 'mine'>('mine')
+  const [scope, setScope] = useState<'account' | 'mine'>('mine')
 
   const mine = rows.find((row) => row.userId === currentUserId)
 
@@ -129,7 +139,7 @@ export const MailboxList = ({
         ) : (
           <ul className="flex flex-col rounded-panel border border-line bg-surface">
             {rows.map((row) => {
-              const copy = STATE_COPY[row.state]
+              const copy = row.standIn ? STAND_IN_COPY : STATE_COPY[row.state]
               const isMine = row.userId === currentUserId
               return (
                 <li key={row.id} className="flex flex-col gap-1 border-b border-divider px-3 py-2 last:border-0">
@@ -180,7 +190,7 @@ export const MailboxList = ({
                       ) : null}
                     </div>
 
-                    {isMine || role === 'admin' ? (
+                    {isMine || isAdmin ? (
                       <div className="flex shrink-0 flex-col items-end gap-2">
                         <Switch
                           label="Shared with the team"
@@ -248,8 +258,9 @@ export const MailboxList = ({
           <h3 className="text-base font-semibold">Never read these</h3>
           <p className="text-secondary">
             An address or a domain. Applied before anything is stored, so a match is never in the
-            database at all. Threads where everybody is at {internalDomain}, and anything from a
-            personal mail provider, are already excluded without being listed here.
+            database at all. Threads where everybody is at {internalDomain} are already excluded
+            without being listed here. Somebody writing from a personal address is a lead, not an
+            exclusion, so put them here if you would rather they never arrived.
           </p>
         </div>
 
@@ -272,9 +283,9 @@ export const MailboxList = ({
             />
           </Field>
           <Field id="block-scope" label="Applies to">
-            <Select id="block-scope" value={scope} onChange={(event) => setScope(event.target.value as 'workspace' | 'mine')}>
+            <Select id="block-scope" value={scope} onChange={(event) => setScope(event.target.value as 'account' | 'mine')}>
               <option value="mine">Just my mailbox</option>
-              <option value="workspace">Everybody</option>
+              <option value="account">Everybody</option>
             </Select>
           </Field>
           <Button variant="primary" busy={busy} disabled={pattern.trim().length < 3}>

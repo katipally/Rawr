@@ -10,6 +10,7 @@ import {
   computeSlots,
   confirmBooking,
   DEFAULT_WEEKLY,
+  readWeekly,
   HOLD_MINUTES,
   dayKey,
   isKnownTimezone,
@@ -31,15 +32,14 @@ import {
   setPageActive,
   SlotGoneError,
   subtractIntervals,
-  withWorkspace,
+  withAccount,
   zonedTimeToUtc,
   type BookingPageConfig,
   type Candidate,
   type HostAvailability,
   type Interval,
   type Provisioner,
-  type Role,
-  type WorkspaceContext,
+  type AccountContext,
 } from '../src/index.ts'
 
 /** F2's definition of done, run against the real database, exiting non-zero on
@@ -72,22 +72,22 @@ const check = (what: string, condition: boolean, detail?: string) => {
 const section = (title: string) =>
   console.log(`\n-- ${title} ${'-'.repeat(Math.max(0, 60 - title.length))}`)
 
-const ctxFor = async (slug: string, role: Role = 'admin'): Promise<WorkspaceContext> => {
+const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']): Promise<AccountContext> => {
   const rows = await appDb.execute<{ id: string }>(
-    sql`select id from rawr.workspace_for_site(${slug})`,
+    sql`select id from rawr.account_for_site(${slug})`,
   )
   const id = rows[0]?.id
-  if (!id) throw new Error(`workspace ${slug} is not seeded. Run pnpm db:seed.`)
-  return { workspaceId: id, actorId: null, actorKind: 'user', role }
+  if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
+  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   query: ReturnType<typeof sql>,
-): Promise<T[]> => withWorkspace(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
+): Promise<T[]> => withAccount(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
 
-const actorCtx = async (slug: string, email: string, role: Role): Promise<WorkspaceContext> => {
-  const base = await ctxFor(slug, role)
+const actorCtx = async (slug: string, email: string, editHubs: string[]): Promise<AccountContext> => {
+  const base = await ctxFor(slug, editHubs)
   const rows = await scoped<{ id: string }>(
     base,
     sql`select id from user_account where email = ${email} limit 1`,
@@ -130,6 +130,13 @@ const fakeProvisioner: Provisioner = async (request) => {
     calendarId: 'primary',
     conferenceUrl: 'https://example.test/join',
     conferenceRef: 'zoom-1',
+    // The same meeting on everybody else's calendar, as the real provisioner
+    // writes it. Without these a cancellation would have nothing to withdraw.
+    alsoWritten: request.alsoOn.map((member) => ({
+      userId: member.userId,
+      calendarEventId: `evt-${request.startsAt.getTime()}-${member.userId.slice(0, 8)}`,
+      calendarId: 'primary',
+    })),
     warnings: [],
   }
 }
@@ -153,6 +160,7 @@ const hostFixture = (over: Partial<HostAvailability> = {}): HostAvailability => 
   name: over.name ?? 'Host',
   email: over.email ?? 'host@datasaur.ai',
   weight: over.weight ?? 1,
+  isRequired: over.isRequired ?? true,
   lastAssignedAt: over.lastAssignedAt ?? null,
   timezone: over.timezone ?? 'America/Los_Angeles',
   weekly: over.weekly ?? DEFAULT_WEEKLY,
@@ -166,6 +174,7 @@ const hostFixture = (over: Partial<HostAvailability> = {}): HostAvailability => 
 })
 
 const PAGE_SHAPE = {
+  kind: 'round_robin' as const,
   durationMinutes: 30,
   bufferBeforeMinutes: 0,
   bufferAfterMinutes: 0,
@@ -181,8 +190,8 @@ const PAGE_SHAPE = {
 const TEST_DOMAINS = ['acme-booking.test', 'race-booking.test']
 const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this']
 
-const cleanUp = async (ctx: WorkspaceContext): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+const cleanUp = async (ctx: AccountContext): Promise<void> => {
+  await withAccount(ctx, async (tx) => {
     const like = sql.join(
       TEST_DOMAINS.map((domain) => sql`b.attendee_email like ${'%@' + domain}`),
       sql` or `,
@@ -408,6 +417,34 @@ try {
   )
 
   // -----------------------------------------------------------------------
+  section('a host who has never opened the working-hours screen')
+
+  // readSchedule shows nine to five for somebody with no availability row, so the
+  // engine has to agree. It used to read nothing and hold every slot back, which
+  // showed hours on the screen and an empty calendar in public.
+  const neverSet = hostFixture({ userId: '00000000-0000-0000-0000-000000000011', name: 'New' })
+  const asRead = readWeekly(null)
+  check(
+    'a missing schedule is not an empty one',
+    Object.keys(asRead).length === 0 && Object.keys(DEFAULT_WEEKLY).length > 0,
+    'readWeekly(null) is empty; DEFAULT_WEEKLY is not',
+  )
+  const newHostOffer = computeOffer({
+    page: PAGE_SHAPE,
+    hosts: [neverSet],
+    externalBusy: new Map([[neverSet.userId, []]]),
+    holds: new Map(),
+    from: monday.from,
+    to: monday.to,
+    now: new Date('2026-09-01T00:00:00Z'),
+  })
+  check(
+    'so a host on the default schedule is bookable rather than silently unavailable',
+    newHostOffer.slots.length === 16 && newHostOffer.problems.length === 0,
+    `${newHostOffer.slots.length} slots, no problems reported`,
+  )
+
+  // -----------------------------------------------------------------------
   section('a host without a working calendar is unavailable, never free')
 
   const readable = hostFixture({ userId: '00000000-0000-0000-0000-00000000000a', name: 'Readable' })
@@ -492,6 +529,102 @@ try {
     'once every host is held the slot stops being offered',
     bothHeld.slots.length === 15,
     'nine o’clock is gone',
+  )
+
+  section('collective')
+
+  const alice = hostFixture({ userId: '00000000-0000-0000-0000-00000000000d', name: 'Alice' })
+  const bob = hostFixture({ userId: '00000000-0000-0000-0000-00000000000e', name: 'Bob' })
+  const optional = hostFixture({
+    userId: '00000000-0000-0000-0000-00000000000f',
+    name: 'Optional',
+    isRequired: false,
+  })
+  const COLLECTIVE = { ...PAGE_SHAPE, kind: 'collective' as const }
+  const bobIsOut = [
+    {
+      start: new Date('2026-09-07T16:00:00Z'),
+      end: new Date('2026-09-07T17:00:00Z'),
+    },
+  ]
+
+  const both = computeOffer({
+    page: COLLECTIVE,
+    hosts: [alice, bob],
+    externalBusy: new Map([
+      [alice.userId, []],
+      [bob.userId, bobIsOut],
+    ]),
+    holds: new Map(),
+    from: monday.from,
+    to: monday.to,
+    now: new Date('2026-09-01T00:00:00Z'),
+  })
+  check(
+    'a collective offers only the times every required host is free',
+    both.slots.length === 14 && both.slots.every((slot) => slot.hostUserIds.length === 2),
+    'the hour Bob is out is not offered, and every offered slot has both of them',
+  )
+  check(
+    'adding a host to a collective narrows the page rather than widening it',
+    both.slots.length < twoFree.slots.length,
+    `${both.slots.length} against ${twoFree.slots.length} for the same two hosts on a round robin`,
+  )
+
+  const withOptional = computeOffer({
+    page: COLLECTIVE,
+    hosts: [alice, optional],
+    externalBusy: new Map([
+      [alice.userId, []],
+      [optional.userId, bobIsOut],
+    ]),
+    holds: new Map(),
+    from: monday.from,
+    to: monday.to,
+    now: new Date('2026-09-01T00:00:00Z'),
+  })
+  check(
+    'an optional host never holds the calendar back',
+    withOptional.slots.length === 16,
+    'every slot still offered when only the optional host is busy',
+  )
+  check(
+    'an optional host rides along wherever they are free',
+    withOptional.slots.filter((slot) => slot.hostUserIds.length === 2).length === 14,
+    'invited on the fourteen slots they can make, absent from the two they cannot',
+  )
+
+  const collectiveHeld = computeOffer({
+    page: COLLECTIVE,
+    hosts: [alice, bob],
+    externalBusy: new Map([
+      [alice.userId, []],
+      [bob.userId, []],
+    ]),
+    holds: new Map([[new Date('2026-09-07T16:00:00Z').getTime(), 1]]),
+    from: monday.from,
+    to: monday.to,
+    now: new Date('2026-09-01T00:00:00Z'),
+  })
+  check(
+    'one hold closes a collective slot, because there is one meeting to take',
+    collectiveHeld.slots.length === 15,
+    'nine o’clock is held',
+  )
+
+  const noRequired = computeOffer({
+    page: COLLECTIVE,
+    hosts: [optional],
+    externalBusy: new Map([[optional.userId, []]]),
+    holds: new Map(),
+    from: monday.from,
+    to: monday.to,
+    now: new Date('2026-09-01T00:00:00Z'),
+  })
+  check(
+    'a collective with nobody required offers nothing and says why',
+    noRequired.slots.length === 0 && noRequired.problems.length === 1,
+    noRequired.problems.join(' | '),
   )
 
   const noHosts = computeOffer({
@@ -856,6 +989,105 @@ try {
   )
 
   // -----------------------------------------------------------------------
+  section('a collective, against the real database')
+
+  const panel = await bySlug(datasaur, 'solution-review')
+  const panelHosts = await readPageHosts(datasaur, panel.bookingPageId, {
+    from: new Date('2026-09-01T00:00:00Z'),
+    to: new Date('2026-12-01T00:00:00Z'),
+  })
+  check(
+    'the seeded collective has two required hosts and one optional',
+    panelHosts.filter((host) => host.isRequired).length === 2 && panelHosts.length === 3,
+    panelHosts.map((host) => `${host.name}${host.isRequired ? '' : ' (optional)'}`).join(', '),
+  )
+
+  const panelSlot = new Date('2026-10-06T17:00:00.000Z')
+  const panelResult = await confirmBooking(
+    datasaur,
+    {
+      page: panel,
+      startsAt: panelSlot,
+      body: { name: 'Ada Okonkwo', email: 'ada@northwind-booking.test' },
+      attendeeTimezone: 'Europe/London',
+      attribution: {},
+    },
+    panelHosts,
+    fakeProvisioner,
+  )
+  check('a collective books', !!panelResult.bookingId, panelResult.hostName)
+
+  const seats = await scoped<{ user_id: string; is_organiser: boolean }>(
+    datasaur,
+    sql`select user_id, is_organiser from booking_participant where booking_id = ${panelResult.bookingId}`,
+  )
+  check(
+    'every host free for the slot is committed, not only the organiser',
+    seats.length === panelHosts.length,
+    `${seats.length} seats for ${panelHosts.length} hosts`,
+  )
+  check(
+    'exactly one of them is the organiser, and it is the one on the booking',
+    seats.filter((seat) => seat.is_organiser).length === 1 &&
+      seats.find((seat) => seat.is_organiser)?.user_id === panelResult.hostUserId,
+    panelResult.hostName,
+  )
+
+  // The point of the participant table: a panellist who did not organise this
+  // meeting is still unbookable at that instant, from any other page.
+  const alsoOn = seats.find((seat) => !seat.is_organiser)
+  const otherPageHosts = await readPageHosts(datasaur, page.bookingPageId, {
+    from: panelSlot,
+    to: new Date(panelSlot.getTime() + 3_600_000),
+  })
+  const clash = otherPageHosts.find((host) => host.userId === alsoOn?.user_id)
+  check(
+    'a panellist who did not organise the meeting still reads as busy elsewhere',
+    !!clash &&
+      clash.rawrBusy.some((interval) => interval.start.getTime() === panelSlot.getTime()),
+    `${clash?.name ?? '(not on the other page)'} is committed at that hour`,
+  )
+
+  let secondRefused = false
+  try {
+    await confirmBooking(
+      datasaur,
+      {
+        page,
+        startsAt: panelSlot,
+        body: { name: 'Someone Else', email: 'someone@acme-booking.test' },
+        attendeeTimezone: 'UTC',
+        attribution: {},
+      },
+      clash ? [clash] : [],
+      fakeProvisioner,
+    )
+  } catch (cause) {
+    secondRefused = cause instanceof SlotGoneError
+  }
+  check(
+    'and cannot be booked over from another page',
+    secondRefused,
+    'the slot is reported as gone rather than double booked',
+  )
+
+  const panelCancelled = await cancelBooking(datasaur, panelResult.bookingId, { by: 'host' })
+  check(
+    'cancelling a collective hands back the invitations written for the others',
+    panelCancelled.releasedEvents.length === panelHosts.length - 1,
+    `${panelCancelled.releasedEvents.length} to withdraw`,
+  )
+  const seatsAfter = await scoped<{ n: string }>(
+    datasaur,
+    sql`select count(*) as n from booking_participant where booking_id = ${panelResult.bookingId}`,
+  )
+  check(
+    'and frees the time for every one of them',
+    Number(seatsAfter[0]?.n ?? 0) === 0,
+    'no seats left',
+  )
+
+  // -----------------------------------------------------------------------
   section('the same person booking twice')
 
   const returning = await confirmBooking(
@@ -954,7 +1186,7 @@ try {
   section('holds')
 
   const holdSlot = new Date('2026-09-17T17:00:00.000Z')
-  const held = await placeHold(datasaur.workspaceId, page.bookingPageId, holdSlot)
+  const held = await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)
   const holds = await readHolds(datasaur, page.bookingPageId, {
     from: new Date('2026-09-17T00:00:00Z'),
     to: new Date('2026-09-18T00:00:00Z'),
@@ -969,7 +1201,7 @@ try {
 
   // Aged deliberately rather than waited out: the widget shows the countdown
   // reaching zero, and what has to be true then is that the slot is offered again.
-  await withWorkspace(datasaur, (tx) =>
+  await withAccount(datasaur, (tx) =>
     tx.execute(sql`
       update booking_hold set expires_at = now() - interval '1 minute'
        where token = ${held.token}`),
@@ -983,8 +1215,8 @@ try {
     afterExpiry.get(holdSlot.getTime()) === undefined,
   )
 
-  const released = await placeHold(datasaur.workspaceId, page.bookingPageId, holdSlot)
-  await releaseHold(datasaur.workspaceId, released.token)
+  const released = await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)
+  await releaseHold(datasaur.accountId, released.token)
   const afterRelease = await readHolds(datasaur, page.bookingPageId, {
     from: new Date('2026-09-17T00:00:00Z'),
     to: new Date('2026-09-18T00:00:00Z'),
@@ -1000,8 +1232,8 @@ try {
   const emptyPage = await saveBookingPage(datasaur, {
     slug: 'nobody-home',
     name: 'Nobody home',
-    kind: 'round_robin',
     ...PAGE_SHAPE,
+    kind: 'round_robin',
     location: 'zoom',
     titleTpl: 'Meeting',
     descriptionTpl: '',
@@ -1021,8 +1253,8 @@ try {
     saveBookingPage(datasaur, {
       slug: 'Not A Slug',
       name: 'Bad',
-      kind: 'round_robin',
       ...PAGE_SHAPE,
+      kind: 'round_robin',
       location: 'zoom',
       titleTpl: 'x',
       descriptionTpl: '',
@@ -1038,8 +1270,8 @@ try {
     saveBookingPage(datasaur, {
       slug: 'phone-page',
       name: 'Phone',
-      kind: 'round_robin',
       ...PAGE_SHAPE,
+      kind: 'round_robin',
       location: 'phone',
       titleTpl: 'x',
       descriptionTpl: '',
@@ -1065,7 +1297,7 @@ try {
   // -----------------------------------------------------------------------
   section('roles')
 
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', 'viewer')
+  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
   check(
     'a viewer can read the booked list',
     (await listBookings(viewer, { when: 'upcoming' })).rows.length >= 0,
@@ -1081,15 +1313,15 @@ try {
     await refusesAsync(() => saveSchedule(viewer, { userId: viewer.actorId!, timezone: 'UTC', weekly: {} })),
   )
 
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
   check(
     'sales cannot create a shared round robin',
     await refusesAsync(() =>
       saveBookingPage(sales, {
         slug: 'sales-made-this',
         name: 'Nope',
-        kind: 'round_robin',
         ...PAGE_SHAPE,
+        kind: 'round_robin',
         location: 'zoom',
         titleTpl: 'x',
         descriptionTpl: '',
@@ -1099,14 +1331,14 @@ try {
         hosts: [],
       }),
     ),
-    'a shared page belongs to the workspace',
+    'a shared page belongs to the account',
   )
 
   const ownLink = await saveBookingPage(sales, {
     slug: 'trevor-personal',
     name: 'Time with Trevor',
-    kind: 'one_on_one',
     ...PAGE_SHAPE,
+    kind: 'one_on_one',
     location: 'zoom',
     titleTpl: '{{host.name}} <> {{company.name}}',
     descriptionTpl: '',
@@ -1124,7 +1356,7 @@ try {
   })
   check('with themselves as the only host', ownHosts.length === 1 && ownHosts[0]?.userId === sales.actorId)
 
-  const marketing = await actorCtx('datasaur', 'marketing@datasaur.ai', 'marketing')
+  const marketing = await actorCtx('datasaur', 'marketing@datasaur.ai', ['contacts', 'marketing'])
   check(
     'somebody else cannot change that personal link',
     await refusesAsync(() => setPageActive(marketing, ownLink, true)),
@@ -1278,7 +1510,7 @@ try {
   process.exit(failures === 0 ? 0 : 1)
 }
 
-async function bySlug(ctx: WorkspaceContext, slug: string): Promise<BookingPageConfig> {
+async function bySlug(ctx: AccountContext, slug: string): Promise<BookingPageConfig> {
   const rows = await scoped<{ id: string }>(ctx, sql`select id from booking_page where slug = ${slug}`)
   const id = rows[0]?.id
   if (!id) throw new Error(`booking page ${slug} is not seeded. Run pnpm db:seed.`)

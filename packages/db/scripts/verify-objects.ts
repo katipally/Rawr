@@ -9,7 +9,7 @@ import { createField } from '../src/dal/admin-fields.ts'
 import { createRecord, getRecord, listRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import type { WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { eq } from 'drizzle-orm'
@@ -17,10 +17,10 @@ import * as s from '../src/schema/index.ts'
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 const db = drizzle(owner, { schema: s })
-const [ws] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur')).limit(1)
+const [ws] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur')).limit(1)
 const [me] = await db.select().from(s.userAccount).limit(1)
 
-const ctx: WorkspaceContext = { workspaceId: ws!.id, actorId: me!.id, actorKind: 'user', role: 'admin' }
+const ctx: AccountContext = { accountId: ws!.id, actorId: me!.id, actorKind: 'user', isSuperAdmin: true, viewHubs: [], editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] }
 let failures = 0
 const check = async (what: string, fn: () => Promise<string>) => {
   try { console.log(`PASS  ${what}  ${await fn()}`) }
@@ -38,7 +38,7 @@ try {
     objectId = made.id
     key = made.key
     expect(key === 'project', key)
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     const registry = await getRegistry(ctx)
     const object = registry.byKey.get('project')
     expect(Boolean(object), 'it is not in the registry')
@@ -62,7 +62,7 @@ try {
   await check('fields can be added to it', async () => {
     await createField(ctx, { objectKey: key, key: 'status', label: 'Status', type: 'select', options: ['Planned', 'Running', 'Done'] })
     await createField(ctx, { objectKey: key, key: 'starts_on', label: 'Starts on', type: 'date' })
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     const object = (await getRegistry(ctx)).byKey.get(key)!
     expect(object.fields.length === 3, `${object.fields.length} fields`)
     // Every one is jsonb: a column would be a column on every custom object.
@@ -94,7 +94,7 @@ try {
 
   await check('a second object does not see the first one’s records', async () => {
     const other = await createCustomObject(ctx, { nameSingular: 'Vendor', namePlural: 'Vendors' })
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     await createRecord(ctx, other.key, { name: 'Acme Supplies' })
     const projects = await listRecords(ctx, { object: key, limit: 50 })
     const vendors = await listRecords(ctx, { object: other.key, limit: 50 })
@@ -161,7 +161,7 @@ try {
   })
 
   await check('it associates with a contact, and the rail names both sides', async () => {
-    const [someone] = await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.workspaceId, ws!.id)).limit(1)
+    const [someone] = await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.accountId, ws!.id)).limit(1)
     await associate(ctx, { entityType: key, entityId: recordId }, { entityType: 'contact', entityId: someone!.id })
 
     const fromProject = groupFor(await readAssociations(ctx, { entityType: key, entityId: recordId }), 'contact')
@@ -236,7 +236,7 @@ try {
     )
     expect(Number(notes) === 0, `${notes} orphaned activities survived`)
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     expect(!(await getRegistry(ctx)).byKey.has(key), 'it is still in the registry')
     return 'gone, with its links, the way dropping a table would have taken them'
   })
@@ -259,7 +259,7 @@ try {
   if (failures > 0) process.exitCode = 1
 } finally {
   // Leave nothing behind, whatever happened above.
-  await db.execute(`delete from object_def where is_custom = true and workspace_id = '${ws!.id}'` as never)
+  await db.execute(`delete from object_def where is_custom = true and account_id = '${ws!.id}'` as never)
   await closeAppPool()
   await owner.end()
 }

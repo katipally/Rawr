@@ -3,7 +3,6 @@ import {
   publicFormById,
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { env } from '~/lib/env.ts'
 import {
   checkSubmitLimits,
   clientIp,
@@ -17,7 +16,7 @@ import { reportEvent } from '~/server/automations.ts'
 
 /** POST /f/:formId — the capture path, F3 §4.
  *
- *  The workspace is resolved from the form id and from nothing the caller sent.
+ *  The account is resolved from the form id and from nothing the caller sent.
  *  This endpoint creates a lead and returns no record data, so there is nothing
  *  to enumerate here even with a valid form id. */
 
@@ -60,22 +59,22 @@ export const POST = async (
     return json({ error: 'That submission could not be read.' }, 400)
   }
 
-  const result = await runSubmission(request, form, body, ip)
+  const result = await runSubmission(request, form, body, ip, { canChallenge: true })
 
   if (result.errors?.length) return json({ ok: false, errors: result.errors }, 422)
 
   if (result.challengeRequired) {
     // 200, not a 4xx: the caller is being asked for one more step, and an error
     // status reads as "your input was wrong" in every embed and every log.
-    return json({ ok: false, challenge: { provider: 'turnstile', siteKey: env.TURNSTILE_SITE_KEY } }, 200)
+    return json({ ok: false, challenge: { provider: 'turnstile', siteKey: result.challengeSiteKey } }, 200)
   }
 
   if (result.notify) {
     // After the outcome is decided, never before. A Slack outage must not fail a
     // lead capture. §4 steps 8 to 10.
     queueSlackNotification({
-      workspaceId: form.workspaceId,
-      workspaceSlug: form.workspaceSlug,
+      accountId: form.accountId,
+      accountSlug: form.accountSlug,
       formId: form.formId,
       submissionId: result.submissionId,
       ...result.notify,
@@ -86,11 +85,11 @@ export const POST = async (
   // same background handle: a rule that sets a lifecycle stage must never make
   // a visitor wait, and must never fail their submission.
   if (result.contactId) {
-    reportEvent(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.accountId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,
-      workspaceSlug: form.workspaceSlug,
+      accountSlug: form.accountSlug,
     })
   }
 

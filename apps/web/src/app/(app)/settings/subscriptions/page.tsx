@@ -1,6 +1,6 @@
 import { PageHeader } from '@rawr/ui'
 import { listSubscriptionTypes } from '@rawr/db'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { SubscriptionTypes } from './subscription-types.tsx'
 
 /** A2 and D15. The types themselves; the per-contact state lives on the record.
@@ -29,8 +29,8 @@ const SubscriptionsPage = async () => {
 
       <SubscriptionTypes
         rows={types}
-        canWrite={session.role === 'admin' || session.role === 'marketing'}
-        role={session.role}
+        canWrite={sessionCanEdit(session, 'marketing')}
+        hub="marketing"
       />
     </div>
   )

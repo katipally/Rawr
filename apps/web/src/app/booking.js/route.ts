@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
-import { BOOKING_STYLES } from '~/lib/booking-styles.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { buildBookingScript } from '~/server/booking-script.ts'
+import { buildBookingEmbed } from '~/server/booking-embed.ts'
 
 /** GET /booking.js — the one file a Webflow page loads to render the widget.
  *
@@ -10,7 +9,7 @@ import { buildBookingScript } from '~/server/booking-script.ts'
  *  measurable. */
 
 export const GET = (): NextResponse => {
-  const script = buildBookingScript({ baseUrl: publicBaseUrl, styles: BOOKING_STYLES })
+  const script = buildBookingEmbed({ baseUrl: publicBaseUrl })
 
   return new NextResponse(script, {
     headers: {

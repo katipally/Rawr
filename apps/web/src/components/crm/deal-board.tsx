@@ -45,7 +45,7 @@ export type BoardColumn = {
 const DRAG_TYPE = 'application/x-rawr-deal'
 
 export type DealBoardProps = {
-  workspace: string
+  account: string
   columns: BoardColumn[]
   /** Which field a column stands for. A drop writes that field, so a board grouped
    *  by deal type moves the deal's type rather than its stage. */
@@ -79,7 +79,7 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
   />
 )
 
-export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoardProps) => {
+export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardProps) => {
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -115,18 +115,18 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
     {
       key: 'open',
       items: [
-        { key: 'open', label: 'Open deal', href: recordPath(workspace, 'deal', card.id) },
+        { key: 'open', label: 'Open deal', href: recordPath(account, 'deal', card.id) },
         {
           key: 'note',
           label: 'Add a note',
           onSelect: () =>
-            navigate(recordPath(workspace, 'deal', card.id, { tab: 'activities', log: 'note' })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note' })),
         },
         {
           key: 'task',
           label: 'Create a task',
           onSelect: () =>
-            navigate(recordPath(workspace, 'deal', card.id, { tab: 'activities', task: 'new' })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new' })),
         },
       ],
     },
@@ -234,7 +234,7 @@ export const DealBoard = ({ workspace, columns, groupByKey, canWrite }: DealBoar
                     >
                       <div className="flex items-start gap-1">
                         <Link
-                          href={recordPath(workspace, 'deal', card.id)}
+                          href={recordPath(account, 'deal', card.id)}
                           title={card.displayName}
                           className="line-clamp-2 min-w-0 flex-1 break-words text-body"
                         >

@@ -9,7 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, accountId } from './columns.ts'
 import {
   bodyStateEnum,
   mailboxStateEnum,
@@ -17,7 +17,7 @@ import {
   messageDirectionEnum,
   messageRoleEnum,
 } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 import { contact } from './records.ts'
 
 /** Gmail. Read for history, and, once a mailbox is reconnected with the send
@@ -33,7 +33,7 @@ export const mailbox = pgTable(
   'mailbox',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -66,10 +66,10 @@ export const mailbox = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    // One mailbox per person per workspace. Connecting twice re-authorises rather
+    // One mailbox per person per account. Connecting twice re-authorises rather
     // than producing a second cursor over the same messages.
-    uniqueIndex('mailbox_user_key').on(t.workspaceId, t.userId),
-    index('mailbox_state_idx').on(t.workspaceId, t.state),
+    uniqueIndex('mailbox_user_key').on(t.accountId, t.userId),
+    index('mailbox_state_idx').on(t.accountId, t.state),
   ],
 )
 
@@ -77,7 +77,7 @@ export const messageThread = pgTable(
   'message_thread',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull().default('gmail'),
     providerThreadId: text('provider_thread_id').notNull(),
     subject: text('subject'),
@@ -87,10 +87,10 @@ export const messageThread = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    // One thread per provider thread per workspace, whichever mailbox saw it. Two
+    // One thread per provider thread per account, whichever mailbox saw it. Two
     // colleagues on the same thread store it once. B's edge-case table.
-    uniqueIndex('message_thread_provider_key').on(t.workspaceId, t.provider, t.providerThreadId),
-    index('message_thread_last_idx').on(t.workspaceId, t.lastAt),
+    uniqueIndex('message_thread_provider_key').on(t.accountId, t.provider, t.providerThreadId),
+    index('message_thread_last_idx').on(t.accountId, t.lastAt),
   ],
 )
 
@@ -98,7 +98,7 @@ export const message = pgTable(
   'message',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     threadId: uuid('thread_id')
       .notNull()
       .references(() => messageThread.id, { onDelete: 'cascade' }),
@@ -126,9 +126,9 @@ export const message = pgTable(
   },
   (t) => [
     // What makes the back-fill resumable with no duplicates. B2.
-    uniqueIndex('message_provider_key').on(t.workspaceId, t.providerMessageId),
-    index('message_thread_idx').on(t.workspaceId, t.threadId, t.sentAt),
-    index('message_internet_id_idx').on(t.workspaceId, t.internetMessageId),
+    uniqueIndex('message_provider_key').on(t.accountId, t.providerMessageId),
+    index('message_thread_idx').on(t.accountId, t.threadId, t.sentAt),
+    index('message_internet_id_idx').on(t.accountId, t.internetMessageId),
   ],
 )
 
@@ -138,7 +138,7 @@ export const message = pgTable(
  *  the same storage with an honest name and a narrow parent. */
 export const messageBody = pgTable('message_body', {
   id: pk(),
-  workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+  accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
   messageId: uuid('message_id')
     .notNull()
     .unique()
@@ -159,7 +159,7 @@ export const messageAttachment = pgTable(
   'message_attachment',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     messageId: uuid('message_id')
       .notNull()
       .references(() => message.id, { onDelete: 'cascade' }),
@@ -170,7 +170,7 @@ export const messageAttachment = pgTable(
     /** An inline image referenced by the HTML rather than a real attachment. */
     inline: boolean('inline').notNull().default(false),
   },
-  (t) => [index('message_attachment_message_idx').on(t.workspaceId, t.messageId)],
+  (t) => [index('message_attachment_message_idx').on(t.accountId, t.messageId)],
 )
 
 /** How far each person has read each thread. Per person, because "unread" is not
@@ -179,7 +179,7 @@ export const messageThreadRead = pgTable(
   'message_thread_read',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     threadId: uuid('thread_id')
       .notNull()
       .references(() => messageThread.id, { onDelete: 'cascade' }),
@@ -188,14 +188,14 @@ export const messageThreadRead = pgTable(
       .references(() => userAccount.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('message_thread_read_key').on(t.workspaceId, t.threadId, t.userId)],
+  (t) => [uniqueIndex('message_thread_read_key').on(t.accountId, t.threadId, t.userId)],
 )
 
 export const messageParticipant = pgTable(
   'message_participant',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     messageId: uuid('message_id')
       .notNull()
       .references(() => message.id, { onDelete: 'cascade' }),
@@ -204,8 +204,8 @@ export const messageParticipant = pgTable(
     role: messageRoleEnum('role').notNull(),
   },
   (t) => [
-    uniqueIndex('message_participant_key').on(t.workspaceId, t.messageId, t.address, t.role),
-    index('message_participant_contact_idx').on(t.workspaceId, t.contactId),
+    uniqueIndex('message_participant_key').on(t.accountId, t.messageId, t.address, t.role),
+    index('message_participant_contact_idx').on(t.accountId, t.contactId),
   ],
 )
 
@@ -215,8 +215,8 @@ export const messageBlocklist = pgTable(
   'message_blocklist',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
-    /** Null means the whole workspace. Set means one person's own exclusions,
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    /** Null means the whole account. Set means one person's own exclusions,
      *  which they control themselves. */
     userId: uuid('user_id').references(() => userAccount.id, { onDelete: 'cascade' }),
     /** An address, or a domain with no local part. Stored lowercase. */
@@ -224,5 +224,5 @@ export const messageBlocklist = pgTable(
     note: text('note'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('message_blocklist_key').on(t.workspaceId, t.userId, t.pattern)],
+  (t) => [uniqueIndex('message_blocklist_key').on(t.accountId, t.userId, t.pattern)],
 )

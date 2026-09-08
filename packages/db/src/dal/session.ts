@@ -1,64 +1,58 @@
 import { sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
-import type { Role } from './context.ts'
+import type { Hub } from './context.ts'
 
 export type Membership = {
-  workspaceId: string
-  workspaceSlug: string
-  workspaceName: string
-  organisationId: string
-  organisationSlug: string
-  organisationName: string
-  orgRole: 'org_admin' | 'member'
+  accountId: string
+  accountSlug: string
+  accountName: string
   hostedDomain: string
   userId: string
   email: string
   displayName: string
   avatarUrl: string | null
-  role: Role
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
   joinedAt: Date
   /** Sessions issued before this are dead. Null means nobody has signed out everywhere. */
   sessionsValidAfter: Date | null
 }
 
 type MembershipRow = {
-  workspace_id: string
-  workspace_slug: string
-  workspace_name: string
-  organisation_id: string
-  organisation_slug: string
-  organisation_name: string
-  org_role: 'org_admin' | 'member'
+  account_id: string
+  account_slug: string
+  account_name: string
   hosted_domain: string
   user_id: string
   email: string
   display_name: string
   avatar_url: string | null
-  role: Role
+  is_super_admin: boolean
+  view_hubs: Hub[]
+  edit_hubs: Hub[]
   joined_at: Date | string
   sessions_valid_after: Date | string | null
 }
 
 const toMembership = (r: MembershipRow): Membership => ({
-  workspaceId: r.workspace_id,
-  workspaceSlug: r.workspace_slug,
-  workspaceName: r.workspace_name,
-  organisationId: r.organisation_id,
-  organisationSlug: r.organisation_slug,
-  organisationName: r.organisation_name,
-  orgRole: r.org_role,
+  accountId: r.account_id,
+  accountSlug: r.account_slug,
+  accountName: r.account_name,
   hostedDomain: r.hosted_domain,
   userId: r.user_id,
   email: r.email,
   displayName: r.display_name,
   avatarUrl: r.avatar_url,
-  role: r.role,
+  isSuperAdmin: r.is_super_admin,
+  viewHubs: r.view_hubs ?? [],
+  editHubs: r.edit_hubs ?? [],
   joinedAt: new Date(r.joined_at),
   sessionsValidAfter: r.sessions_valid_after ? new Date(r.sessions_valid_after) : null,
 })
 
-/** The one question row level security cannot answer: which workspaces does this
- *  person belong to, asked before any workspace is chosen. It runs through a
+/** The one question row level security cannot answer: which accounts does this
+ *  person belong to, asked before any account is chosen. It runs through a
  *  security-definer function that takes a user id and nothing else, so it cannot
  *  be turned into a cross-tenant read of anything but memberships. */
 export const membershipsForUser = async (userId: string): Promise<Membership[]> => {
@@ -79,13 +73,16 @@ export type GoogleSignIn = {
   email: string
   name: string
   picture: string | null
-  hostedDomain: string
+  /** Null for a consumer address. It claims no domain, so that person is seated by
+   *  invitation rather than by opening or joining an account. */
+  hostedDomain: string | null
 }
 
-/** Links or creates the account, puts it in the organisation that owns its hosted
- *  domain, and seats it as a viewer in that organisation's workspaces when the
- *  organisation allows domain joins. Returns the user id; the memberships are read
- *  separately so sign-in and every later request go through the same function. */
+/** Links or creates the person, then settles what account they land in: a domain
+ *  no account claims opens one with them as its super admin, a domain some account
+ *  claims joins it on that account's terms, and a personal address joins nothing
+ *  until it is invited. Returns the user id; the memberships are read separately so
+ *  sign-in and every later request go through the same function. */
 export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> => {
   const [row] = await appDb.execute<{ id: string }>(
     sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}) as id`,

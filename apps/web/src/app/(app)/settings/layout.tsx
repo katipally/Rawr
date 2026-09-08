@@ -5,6 +5,7 @@ import {
   accountPath,
   agentAccessPath,
   auditPath,
+  calendarsPath,
   automationsPath,
   failedJobsPath,
   integrationsPath,
@@ -12,14 +13,14 @@ import {
   mailboxesPath,
   membersPath,
   objectsPath,
-  organisationPath,
+  defaultsPath,
   pipelinesPath,
   propertiesPath,
   sitesPath,
   subscriptionsPath,
   teamsPath,
   trackingPath,
-  workspaceHome,
+  accountHome,
 } from '~/lib/links.ts'
 
 /** One place that knows what settings there are. Each page used to link to two or
@@ -31,7 +32,7 @@ import {
  *
  *  Names only. What each page is for is the sentence under its own title, where
  *  it is read once by whoever opened it, rather than sixteen times in the rail. */
-const GROUPS: SettingsGroup[] = [
+const groupsFor = (account: string): SettingsGroup[] => [
   {
     label: 'Your preferences',
     sections: [
@@ -42,8 +43,8 @@ const GROUPS: SettingsGroup[] = [
   {
     label: 'Account management',
     sections: [
-      { href: organisationPath(), label: 'Organisation' },
-      { href: membersPath(), label: 'Members' },
+      { href: defaultsPath(), label: 'Account Defaults' },
+      { href: membersPath(), label: 'Users & Teams' },
       { href: teamsPath(), label: 'Teams' },
       { href: auditPath(), label: 'History' },
     ],
@@ -57,6 +58,9 @@ const GROUPS: SettingsGroup[] = [
       { href: lifecyclePath(), label: 'Lifecycle' },
       { href: subscriptionsPath(), label: 'Subscriptions' },
       { href: mailboxesPath(), label: 'Mailboxes' },
+      // Which Google accounts Rawr may read free-busy from. It sat in the Sales
+      // rail under "Calendar", where people opened it looking for a month.
+      { href: calendarsPath(account), label: 'Calendar connections' },
       { href: sitesPath(), label: 'Tracked sites' },
     ],
   },
@@ -79,7 +83,10 @@ const SettingsLayout = async ({ children }: { children: ReactNode }) => {
   // long settings page moves, which is the whole reason to have a rail.
   <div className="grid min-h-full bg-surface lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] lg:overflow-hidden">
     <div className="z-10 bg-surface shadow-panel lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
-      <SettingsNav groups={GROUPS} backHref={session ? workspaceHome(session.workspaceSlug) : '/'} />
+      <SettingsNav
+        groups={groupsFor(session?.accountSlug ?? '')}
+        backHref={session ? accountHome(session.accountSlug) : '/'}
+      />
     </div>
     <div className="min-w-0 p-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       {children}

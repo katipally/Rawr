@@ -8,7 +8,9 @@ const schema = z.object({
   AUTH_URL: z.url(),
   GOOGLE_CLIENT_ID: z.string().default(''),
   GOOGLE_CLIENT_SECRET: z.string().default(''),
-  GOOGLE_HOSTED_DOMAIN: z.string().min(1),
+  /** Empty means any Google account may sign in, seated by invitation or by an
+   *  organisation whose own domain matches. Set it to lock sign-in to one domain. */
+  GOOGLE_HOSTED_DOMAIN: z.string().default(''),
   RAWR_DEV_LOGIN: z.string().optional(),
 
   /** Where the public edge is reachable from the outside. The embed script and
@@ -24,43 +26,35 @@ const schema = z.object({
    *  shape. This has to match the deployment or the per-IP rate limits are either
    *  spoofable or shared by everybody. */
   TRUSTED_PROXY_HOPS: z.coerce.number().int().min(1).max(8).default(1),
-  TURNSTILE_SITE_KEY: z.string().default(''),
-  TURNSTILE_SECRET: z.string().default(''),
-  /** Open item 4. A bot token is the full app; a webhook URL is the fallback that
-   *  keeps the notification and loses the health check. */
-  SLACK_BOT_TOKEN: z.string().default(''),
-  SLACK_WEBHOOK_URL: z.string().default(''),
-  SLACK_DEFAULT_CHANNEL: z.string().default('#sales-leads-2026'),
-  /** Open item 8's other half: the OAuth app client secret Webflow signs with. */
-  WEBFLOW_CLIENT_SECRET: z.string().default(''),
   /** Bumping this re-prompts everyone whose stored choice predates the change. */
   CONSENT_POLICY_VERSION: z.string().default('2026-08-24'),
 
-  /** Object storage for files on records. Supabase Storage, on the project the
-   *  database already lives in, so there is no second vendor and no second
-   *  credential to rotate. Absent means the feature says it is not connected
-   *  rather than half-working, the same way an unconfigured provider does. */
-  SUPABASE_URL: z.string().default(''),
-  /** The service key. Never reaches the browser: what does is a token scoped to
-   *  one path and one operation, minted per upload and per read. */
-  SUPABASE_SERVICE_ROLE_KEY: z.string().default(''),
-  SUPABASE_STORAGE_BUCKET: z.string().default('attachments'),
+  /** Object storage over the S3 protocol. Absent means the Files panel says it is
+   *  not connected rather than half-working. */
+  S3_ENDPOINT: z.string().default(''),
+  S3_ACCESS_KEY_ID: z.string().default(''),
+  /** Never reaches the browser: what does is a URL signed for one key and one
+   *  operation, minted per upload and per read. */
+  S3_SECRET_ACCESS_KEY: z.string().default(''),
+  S3_BUCKET: z.string().default(''),
+  /** Required by the protocol even where the host ignores it. */
+  S3_REGION: z.string().default('us-east-1'),
 
   /** --- F2 booking ------------------------------------------------------- */
   /** 32 bytes, base64 or hex, from a secrets store. It encrypts the calendar and
    *  mailbox tokens Rawr holds, and must not live in the database it protects
    *  (02-foundation.md §8, open item 9). */
   TOKEN_ENCRYPTION_KEY: z.string().default(''),
-  /** Open item 5. A server-to-server OAuth app: one credential for the account,
-   *  no per-user consent. Without it, booking falls back to Google Meet. */
-  ZOOM_ACCOUNT_ID: z.string().default(''),
-  ZOOM_CLIENT_ID: z.string().default(''),
-  ZOOM_CLIENT_SECRET: z.string().default(''),
   /** Open item 3 is outstanding, so there is no Google project to read free-busy
    *  from. This lets a host be marked available with Rawr's own bookings as the
    *  only source of busy time, which is what makes the engine exercisable end to
    *  end today. It refuses to be reachable in production. */
   RAWR_DEV_CALENDAR: z.string().optional(),
+  /** Whether signing in also asks for the calendar. On by default, because a host
+   *  who has to find a second screen is a host whose booking page silently offers
+   *  nothing. Set to 0 where a Google Account blocks the calendar scopes: without
+   *  it, a policy on Google's side stops people signing in to the CRM at all. */
+  RAWR_CALENDAR_AT_SIGNIN: z.string().optional(),
   RAWR_DEV_GMAIL: z.string().optional(),
   RAWR_DEV_INTEGRATIONS: z.string().optional(),
   /** Shared with the worker so it can ask the app to run a mailbox pass. */
@@ -96,26 +90,27 @@ export const assertProductionSecrets = (): void => {
 
 export const googleConfigured = env.GOOGLE_CLIENT_ID !== '' && env.GOOGLE_CLIENT_SECRET !== ''
 
+/** A deployment that serves one company locks sign-in to its domain; one that does
+ *  not leaves this empty and seats people by invitation. */
+export const hostedDomainRequired = env.GOOGLE_HOSTED_DOMAIN !== ''
+
 /** Dev sign-in exists so the role matrix and the isolation tests can be exercised
  *  before Google Cloud access lands. It refuses to be reachable in production even
  *  if the variable is set. */
 export const devLoginEnabled = env.RAWR_DEV_LOGIN === '1' && env.NODE_ENV !== 'production'
-
-export const turnstileConfigured = env.TURNSTILE_SITE_KEY !== '' && env.TURNSTILE_SECRET !== ''
-
-export const slackConfigured = env.SLACK_BOT_TOKEN !== '' || env.SLACK_WEBHOOK_URL !== ''
 
 /** Free-busy and event writing both need a Google project. Until open item 3
  *  lands this is false and every host falls back to the dev provider or to being
  *  unavailable, which is the safe direction. */
 export const googleCalendarConfigured = googleConfigured && env.TOKEN_ENCRYPTION_KEY !== ''
 
-export const zoomConfigured =
-  env.ZOOM_ACCOUNT_ID !== '' && env.ZOOM_CLIENT_ID !== '' && env.ZOOM_CLIENT_SECRET !== ''
-
 /** Never in production: a booking confirmed against a calendar nobody checked is
  *  worse than no booking. */
 export const devCalendarEnabled = env.RAWR_DEV_CALENDAR === '1' && env.NODE_ENV !== 'production'
+
+/** Opt out, not opt in: the bundled consent is the behaviour worth having, and
+ *  this exists for the one deployment where Google refuses it. */
+export const calendarAtSignIn = env.RAWR_CALENDAR_AT_SIGNIN !== '0'
 
 /** F1 phase B. A stand-in Gmail so the sync, the matching and the blocklist are
  *  exercisable before the Google consent screen exists (open item 3). */

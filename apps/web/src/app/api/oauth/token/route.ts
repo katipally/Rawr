@@ -51,7 +51,7 @@ export const POST = async (request: NextRequest): Promise<Response> => {
     if (asked && asked !== ours) return oauthError('invalid_target', `Tokens here are for ${ours}.`)
 
     const issued = await issueOauthToken({
-      workspaceId: redeemed.workspaceId,
+      accountId: redeemed.accountId,
       userId: redeemed.userId,
       clientId,
       clientName: client.name,

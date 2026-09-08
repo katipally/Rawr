@@ -1,27 +1,51 @@
 import {
   assertCanWrite,
+  clearEnrichmentRequest,
   getRecord,
   listIntegrations,
   type IntegrationKind,
   type IntegrationRow,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
+import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { enrichCompany, enrichContact, testApollo } from './apollo.ts'
 import { testBrevo } from './brevo.ts'
 import { enrichWithClay, testClay } from './clay.ts'
 import { testGa4 } from './ga4.ts'
 import { enrichCompanyWithLusha, enrichContactWithLusha, testLusha } from './lusha.ts'
 import { testSlack } from './slack.ts'
+import { testTurnstile } from './turnstile.ts'
+import { testWebflow } from './webflow.ts'
 import { testWoodpecker } from './woodpecker.ts'
+import { testZoom } from '../zoom.ts'
 import type { ConnectionTest } from './provider.ts'
 
 /** One registry of what an integration is, so the settings page, the health check
  *  and the connection test all read the same list rather than three hardcoded
  *  ones. F6 §1. */
 
+/** Static: what an integration can touch is a fact about it, not a setting. */
+export type PermissionGroup = { group: string; lines: string[] }
+
+/** Not a database enum: adding a category means adding a provider. */
+export type IntegrationCategory =
+  | 'Enrichment'
+  | 'Email'
+  | 'Calendar'
+  | 'Analytics'
+  | 'Messaging'
+  | 'Migration'
+  | 'Security'
+  | 'Website'
+
 export type IntegrationMeta = {
   kind: IntegrationKind
   name: string
+  category: IntegrationCategory
+  /** Shared: one connection the whole organisation uses. Private: granted per
+   *  person, so the organisation-wide row only records that it exists. */
+  appType: 'Shared' | 'Private'
+  permissions: PermissionGroup[]
   /** What it does, in the words of the row it satisfies. */
   purpose: string
   /** What breaks when it is down, from each provider's failure-mode paragraph. */
@@ -39,6 +63,30 @@ export type IntegrationMeta = {
 export const INTEGRATIONS: IntegrationMeta[] = [
   {
     kind: 'brevo',
+    category: 'Email',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Read your contacts",
+        lines: [
+          "View contacts in a segment and whether they may be mailed.",
+          "View the subscription type a contact has opted out of.",
+        ],
+      },
+      {
+        group: "Send on your behalf",
+        lines: [
+          "Push a segment into a Brevo list and keep it upserted.",
+          "Create and schedule a campaign against that list.",
+        ],
+      },
+      {
+        group: "Write back to the timeline",
+        lines: [
+          "Record deliveries, opens, clicks, bounces and unsubscribes as activity.",
+        ],
+      },
+    ],
     name: 'Brevo',
     purpose: 'The newsletter. Rawr owns the audience and the opt-out; Brevo owns the editor and the send.',
     failureMode:
@@ -62,6 +110,25 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'apollo',
+    category: 'Enrichment',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Manage and view your CRM data",
+        lines: [
+          "View properties and other details about contacts.",
+          "Create, delete, or make changes to contacts.",
+          "View properties and other details about companies.",
+          "Create, delete, or make changes to companies.",
+        ],
+      },
+      {
+        group: "Create timeline events",
+        lines: [
+          "Record opens, clicks and replies from anything Apollo is sending.",
+        ],
+      },
+    ],
     name: 'Apollo',
     purpose:
       'Person and company enrichment, and the events from sequences that are run in Apollo itself. Rawr runs its own sequences from a connected Gmail now, so nothing is enrolled through Apollo from here; what still comes back is enrichment, and the opens, clicks and replies of anything Apollo is sending, read onto the timeline.',
@@ -78,6 +145,17 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'clay',
+    category: 'Enrichment',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Manage and view your CRM data",
+        lines: [
+          "View a company's domain.",
+          "Create, delete, or make changes to companies.",
+        ],
+      },
+    ],
     name: 'Clay',
     purpose: 'The second enricher: a company’s domain is pushed into a Clay table, and whatever Apollo left blank comes back by webhook.',
     failureMode:
@@ -97,6 +175,18 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'lusha',
+    category: 'Enrichment',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Manage and view your CRM data",
+        lines: [
+          "View a contact's email address and a company's domain.",
+          "Create, delete, or make changes to contacts.",
+          "Create, delete, or make changes to companies.",
+        ],
+      },
+    ],
     name: 'Lusha',
     purpose:
       'The second enricher, between Apollo and Clay. Direct dials and work addresses, matched on an email address or a company domain.',
@@ -113,6 +203,28 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'woodpecker',
+    category: 'Email',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Read your contacts",
+        lines: [
+          "View the address, name and company of anybody being enrolled.",
+        ],
+      },
+      {
+        group: "Send on your behalf",
+        lines: [
+          "Hand a prospect to a campaign, which then owns the steps and the sending.",
+        ],
+      },
+      {
+        group: "Create timeline events",
+        lines: [
+          "Record sends, opens, clicks, replies, bounces and opt-outs as activity.",
+        ],
+      },
+    ],
     name: 'Woodpecker',
     purpose:
       'Volume sending, for runs a single Gmail account cannot carry. A Woodpecker sequence names a campaign; Rawr hands the prospect over once and Woodpecker owns the steps, the delays and the sending accounts.',
@@ -135,6 +247,16 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'hubspot',
+    category: 'Migration',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Files",
+        lines: [
+          "Read an export you upload here. Nothing is sent to HubSpot and no key of theirs is stored.",
+        ],
+      },
+    ],
     name: 'HubSpot',
     purpose:
       'Reading the old portal one last time. Its exports are imported here, contacts and companies and deals, then the notes and logged emails onto the timelines they belong to.',
@@ -151,6 +273,23 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'slack',
+    category: 'Messaging',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Post messages",
+        lines: [
+          "Post a form fill to the channel a form names, or to the default one.",
+          "Post a deal stage change for the pipelines you name.",
+        ],
+      },
+      {
+        group: "Read channels",
+        lines: [
+          "List channels, so a channel can be picked by name rather than by id.",
+        ],
+      },
+    ],
     name: 'Slack',
     purpose: 'Form-fill notifications to #sales-leads-2026, and deal stage-change alerts.',
     failureMode: 'Dead-letter, red health, and leads keep saving. A Slack outage never loses a lead.',
@@ -162,12 +301,22 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     rows: ['Custom Lead Forms'],
     setup: [
       'Quickest: in Slack open the channel, then its settings, Integrations, Add an app, Incoming WebHooks; copy the webhook URL and paste it as the secret.',
-      'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the workspace and paste the xoxb bot token instead (open item 4).',
+      'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the account and paste the xoxb bot token instead (open item 4).',
       'Invite the bot to #sales-leads-2026, or whichever channel you name as the default.',
     ],
   },
   {
     kind: 'ga4',
+    category: 'Analytics',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Send aggregate events",
+        lines: [
+          "Forward an event name and its counts. Never a visitor id, a contact id or an address.",
+        ],
+      },
+    ],
     name: 'Google Analytics 4',
     purpose:
       'Aggregate reporting only. Never a visitor id, a contact id or an address: sending those would violate its terms.',
@@ -184,6 +333,16 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'zoom',
+    category: 'Calendar',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: "Create meetings",
+        lines: [
+          "Create a meeting and return its joining link when a booking is confirmed.",
+        ],
+      },
+    ],
     name: 'Zoom',
     purpose: 'The joining link on a booked meeting.',
     failureMode:
@@ -201,6 +360,22 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   },
   {
     kind: 'google_calendar',
+    category: 'Calendar',
+    appType: 'Private',
+    permissions: [
+      {
+        group: "Read free-busy",
+        lines: [
+          "See when each host is busy, so a time is only offered when they are free.",
+        ],
+      },
+      {
+        group: "Write events",
+        lines: [
+          "Create, move and cancel the event a booking makes on that host's calendar.",
+        ],
+      },
+    ],
     name: 'Google Calendar',
     purpose: 'Free-busy for every host, and the event a booking creates.',
     failureMode:
@@ -213,6 +388,61 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       'The Google project behind it is open item 3; until then the development calendar stands in.',
     ],
   },
+  {
+    kind: 'turnstile',
+    category: 'Security',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: 'Check a challenge',
+        lines: [
+          'Ask Cloudflare whether one widget answer is genuine, with the visitor\u2019s IP.',
+          'Nothing about the submission itself is sent, and no answer is stored at Cloudflare.',
+        ],
+      },
+    ],
+    name: 'Cloudflare Turnstile',
+    purpose: 'The challenge a form submission gets when its spam score lands in the middle band.',
+    failureMode:
+      'An unreachable Cloudflare quarantines the lead for review rather than losing it. With nothing connected, every mid-band submission is quarantined, which is the safe direction and a queue somebody has to work.',
+    secretLabel: 'Secret key',
+    configFields: [
+      {
+        key: 'siteKey',
+        label: 'Site key',
+        hint: 'Public by design: it is rendered into the visitor\u2019s browser. From the same widget as the secret.',
+      },
+    ],
+    rows: ['Custom Lead Forms'],
+    setup: [
+      'At dash.cloudflare.com, Turnstile, Add widget. Name it Rawr and list every host your forms are embedded on.',
+      'Copy the Site Key into the field below and the Secret Key into the secret.',
+    ],
+  },
+  {
+    kind: 'webflow',
+    category: 'Website',
+    appType: 'Shared',
+    permissions: [
+      {
+        group: 'Verify a webhook',
+        lines: [
+          'Check that a native-form delivery was signed by your Webflow app before it becomes a lead.',
+        ],
+      },
+    ],
+    name: 'Webflow',
+    purpose: 'Native Webflow forms reaching Rawr without the paid bridge, F3 \u00a77.',
+    failureMode:
+      'An unsigned or wrongly signed delivery is refused, because an unverified webhook is an open lead-injection endpoint. Replacing the native form with the Rawr embed is the better path: Webflow sends no query string, so attribution is weaker here.',
+    secretLabel: 'OAuth app client secret',
+    configFields: [],
+    rows: ['Custom Lead Forms'],
+    setup: [
+      'At webflow.com/dashboard/account/apps build an app, then create the form_submission webhook through its Data API so deliveries are signed. A webhook made from the site dashboard carries no signature and is refused.',
+      'Point it at /w/webflow?account=<account slug>&form=<form slug>, and paste the app\u2019s client secret below.',
+    ],
+  },
 ]
 
 export const metaFor = (kind: IntegrationKind): IntegrationMeta => {
@@ -223,7 +453,7 @@ export const metaFor = (kind: IntegrationKind): IntegrationMeta => {
 
 export type IntegrationView = IntegrationRow & { meta: IntegrationMeta }
 
-export const readIntegrations = async (ctx: WorkspaceContext): Promise<IntegrationView[]> => {
+export const readIntegrations = async (ctx: AccountContext): Promise<IntegrationView[]> => {
   const rows = await listIntegrations(ctx)
   return rows.map((row) => ({ ...row, meta: metaFor(row.kind) }))
 }
@@ -232,7 +462,7 @@ export const readIntegrations = async (ctx: WorkspaceContext): Promise<Integrati
  *  the user runs it on save, it calls the provider, and it reports the real
  *  response rather than a generic success. */
 export const testConnection = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   kind: IntegrationKind,
 ): Promise<ConnectionTest> => {
   if (kind === 'brevo') return testBrevo(ctx)
@@ -249,17 +479,13 @@ export const testConnection = async (
         'HubSpot is read from its own exports rather than over an API, so there is no connection to test. Start an import from Data management, Import.',
     }
   }
-  if (kind === 'zoom') {
-    return {
-      ok: false,
-      detail:
-        'Zoom is configured from the environment on this deployment, and its health shows on a booking that needed a link. Open item 5.',
-    }
-  }
+  if (kind === 'zoom') return testZoom(ctx)
+  if (kind === 'turnstile') return testTurnstile(ctx)
+  if (kind === 'webflow') return testWebflow(ctx)
   return {
     ok: false,
     detail:
-      'Google Calendar is granted per person rather than per workspace. Connect yours from Meetings, under Calendars.',
+      'Google Calendar is granted per person rather than per account. Connect yours from Meetings, under Calendars.',
   }
 }
 
@@ -269,38 +495,43 @@ export type EnrichmentRun = {
   suggested: string[]
 }
 
-/** The fields an enricher is allowed to answer. Anything outside these two lists
- *  is either a human's decision or a relation, and neither belongs to a provider. */
-const COMPANY_BLANKABLE = ['industry', 'employee_count', 'annual_revenue', 'city', 'country']
-const CONTACT_BLANKABLE = ['first_name', 'last_name', 'title', 'linkedin_url', 'phone']
+/** The fields an enricher is allowed to answer, and what the record page names
+ *  as still blank. Anything outside these two lists is either a human's decision
+ *  or a relation, and neither belongs to a provider. */
+export const ENRICHABLE: Record<'contact' | 'company', string[]> = {
+  company: ['industry', 'employee_count', 'annual_revenue', 'city', 'state', 'postal_code', 'country', 'phone', 'description', 'linkedin_url', 'founded_year', 'funding_raised'],
+  contact: ['first_name', 'last_name', 'title', 'linkedin_url', 'phone', 'city', 'country', 'seniority', 'department'],
+}
 
 const blankIn = (keys: string[]) => (values: Record<string, unknown>): string[] =>
   keys.filter((key) => values[key] === null || values[key] === undefined || values[key] === '')
 
-const stillBlank = blankIn(COMPANY_BLANKABLE)
-const stillBlankOnContact = blankIn(CONTACT_BLANKABLE)
+const stillBlank = blankIn(ENRICHABLE.company)
+const stillBlankOnContact = blankIn(ENRICHABLE.contact)
 
-/** A company on its own: Apollo by domain, then Clay for what is still blank. */
-export const enrichCompanyRecord = async (ctx: WorkspaceContext, companyId: string): Promise<EnrichmentRun> => {
-  assertCanWrite(ctx, 'company')
-  const company = await getRecord(ctx, 'company', companyId)
-  if (!company) throw new Error('That company no longer exists.')
-  const domain = typeof company.values.domain === 'string' ? company.values.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : ''
-  if (!domain) {
-    return { detail: 'That company has no domain, which is the only thing an enricher can match a company on.', written: [], suggested: [] }
-  }
+export const ENRICHERS = ['apollo', 'lusha', 'clay'] as const
+export type Enricher = (typeof ENRICHERS)[number]
 
-  const apollo = await enrichCompany(ctx, { companyId, domain })
-  const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
-  await fillWithLushaCompany(ctx, run, companyId, domain)
-  const after = await getRecord(ctx, 'company', companyId)
-  await fillWithClay(ctx, run, companyId, domain, stillBlank(after?.values ?? {}))
-  return run
+/** Which enrichers this organisation can actually call. A provider with no key,
+ *  or one whose key was rejected, is left out of the run rather than asked and
+ *  reported as a failure on every record. */
+export const connectedEnrichers = async (ctx: AccountContext): Promise<Set<Enricher>> => {
+  const rows = await listIntegrations(ctx)
+  return new Set(
+    ENRICHERS.filter((kind) => {
+      const row = rows.find((entry) => entry.kind === kind)
+      if (!row) return false
+      // The development providers answer from fixtures and hold no key, so the
+      // key is what says a provider is callable everywhere else.
+      if (!row.hasSecret && !devIntegrationsEnabled) return false
+      return row.state === 'connected' || row.state === 'degraded'
+    }),
+  )
 }
 
-/** Every provider after the first is asked only about what is still empty, and
- *  each one's failure is its own: a Lusha outage must not stop Clay from
- *  answering, so the call is caught here rather than thrown out of the run. */
+/** Every provider is asked only about what is still empty, and each one's
+ *  failure is its own: a Lusha outage must not stop Clay from answering, so the
+ *  call is caught here rather than thrown out of the run. */
 const absorb = async (
   run: EnrichmentRun,
   provider: string,
@@ -311,45 +542,64 @@ const absorb = async (
     written: [] as string[],
     suggested: [] as string[],
   }))
-  run.detail = `${run.detail} ${outcome.detail}`
+  run.detail = `${run.detail} ${outcome.detail}`.trim()
   run.written.push(...outcome.written)
   run.suggested.push(...outcome.suggested)
 }
 
-const fillWithLushaCompany = async (
-  ctx: WorkspaceContext,
-  run: EnrichmentRun,
-  companyId: string,
-  domain: string,
-): Promise<void> => {
+const NONE: EnrichmentRun = {
+  detail: 'No enricher is connected. Add Apollo, Lusha or Clay in Settings, under Integrations.',
+  written: [],
+  suggested: [],
+}
+
+/** A company on its own: Apollo by domain, then Lusha, then Clay, each for what
+ *  is still blank. F6 §4's configured order, in one place. */
+export const enrichCompanyRecord = async (ctx: AccountContext, companyId: string): Promise<EnrichmentRun> => {
+  assertCanWrite(ctx, 'company')
   const company = await getRecord(ctx, 'company', companyId)
-  const missing = stillBlank(company?.values ?? {})
-  if (missing.length === 0) return
-  await absorb(run, 'Lusha', () => enrichCompanyWithLusha(ctx, { companyId, domain, missing }))
+  // Deleted between the dispatch that claimed it and this run. There is nothing
+  // to enrich and nothing to retry, so take it off the queue and say so.
+  if (!company) {
+    await clearEnrichmentRequest(ctx, 'company', companyId)
+    return { detail: 'That company was deleted before it could be enriched.', written: [], suggested: [] }
+  }
+  const domain = typeof company.values.domain === 'string' ? company.values.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : ''
+  if (!domain) {
+    return { detail: 'That company has no domain, which is the only thing an enricher can match a company on.', written: [], suggested: [] }
+  }
+  const connected = await connectedEnrichers(ctx)
+  if (connected.size === 0) return NONE
+
+  // Off the queue however it ran: this call is the consent for this record.
+  await clearEnrichmentRequest(ctx, 'company', companyId)
+
+  const run: EnrichmentRun = { detail: '', written: [], suggested: [] }
+  if (connected.has('apollo')) await absorb(run, 'Apollo', () => enrichCompany(ctx, { companyId, domain }))
+  if (connected.has('lusha')) {
+    const missing = stillBlank((await getRecord(ctx, 'company', companyId))?.values ?? {})
+    if (missing.length > 0) await absorb(run, 'Lusha', () => enrichCompanyWithLusha(ctx, { companyId, domain, missing }))
+  }
+  if (connected.has('clay')) {
+    const missing = stillBlank((await getRecord(ctx, 'company', companyId))?.values ?? {})
+    if (missing.length > 0) await absorb(run, 'Clay', () => enrichWithClay(ctx, { companyId, domain, missing }))
+  }
+  return run
 }
 
-const fillWithClay = async (
-  ctx: WorkspaceContext,
-  run: EnrichmentRun,
-  companyId: string,
-  domain: string,
-  missing: string[],
-): Promise<void> => {
-  if (missing.length === 0) return
-  await absorb(run, 'Clay', () => enrichWithClay(ctx, { companyId, domain, missing }))
-}
-
-/** F6 §4's configured order, in one place: Apollo first for the person and the
- *  company, Clay second for whatever is still blank on the company. Neither
- *  overwrites a value a human entered; that rule lives in the enrichment layer and
- *  is not restated here. */
+/** A person, and their company where one is linked. Neither overwrites a value
+ *  a human entered; that rule lives in the enrichment layer and is not restated
+ *  here. */
 export const enrichRecord = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<EnrichmentRun> => {
   assertCanWrite(ctx, 'contact')
   const record = await getRecord(ctx, 'contact', contactId)
-  if (!record) throw new Error('That contact no longer exists.')
+  if (!record) {
+    await clearEnrichmentRequest(ctx, 'contact', contactId)
+    return { detail: 'That contact was deleted before it could be enriched.', written: [], suggested: [] }
+  }
 
   const email = typeof record.values.email === 'string' ? record.values.email : ''
   if (!email) {
@@ -359,27 +609,29 @@ export const enrichRecord = async (
       suggested: [],
     }
   }
+  const connected = await connectedEnrichers(ctx)
+  if (connected.size === 0) return NONE
   const companyId = typeof record.values.company_id === 'string' ? record.values.company_id : null
 
-  const apollo = await enrichContact(ctx, { contactId, email, companyId })
-  const run: EnrichmentRun = { detail: apollo.detail, written: [...apollo.written], suggested: [...apollo.suggested] }
+  await clearEnrichmentRequest(ctx, 'contact', contactId)
 
-  const afterApollo = await getRecord(ctx, 'contact', contactId)
-  const companyBefore = companyId ? await getRecord(ctx, 'company', companyId) : null
-  const missing = [
-    ...stillBlankOnContact(afterApollo?.values ?? {}),
-    ...(companyBefore ? stillBlank(companyBefore.values) : []),
-  ]
-  if (missing.length > 0) {
-    await absorb(run, 'Lusha', () => enrichContactWithLusha(ctx, { contactId, email, companyId, missing }))
+  const run: EnrichmentRun = { detail: '', written: [], suggested: [] }
+  if (connected.has('apollo')) await absorb(run, 'Apollo', () => enrichContact(ctx, { contactId, email, companyId }))
+
+  if (connected.has('lusha')) {
+    const [contact, company] = await Promise.all([
+      getRecord(ctx, 'contact', contactId),
+      companyId ? getRecord(ctx, 'company', companyId) : Promise.resolve(null),
+    ])
+    const missing = [...stillBlankOnContact(contact?.values ?? {}), ...(company ? stillBlank(company.values) : [])]
+    if (missing.length > 0) await absorb(run, 'Lusha', () => enrichContactWithLusha(ctx, { contactId, email, companyId, missing }))
   }
 
-  if (companyId) {
+  if (connected.has('clay') && companyId) {
     const company = await getRecord(ctx, 'company', companyId)
     const domain = typeof company?.values.domain === 'string' ? company.values.domain : ''
-    // Only what is still blank. Asking Clay to re-answer something Apollo or Lusha
-    // answered is what "first non-empty by configured order wins" rules out.
-    if (domain) await fillWithClay(ctx, run, companyId, domain, stillBlank(company?.values ?? {}))
+    const missing = stillBlank(company?.values ?? {})
+    if (domain && missing.length > 0) await absorb(run, 'Clay', () => enrichWithClay(ctx, { companyId, domain, missing }))
   }
 
   return run

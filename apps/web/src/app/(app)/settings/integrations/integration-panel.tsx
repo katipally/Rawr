@@ -33,7 +33,7 @@ export type IntegrationPanelProps = {
   /** Null until a tracked site exists; the webhook URL cannot be built without one. */
   siteKey: string | null
   canWrite: boolean
-  role: string
+  hub: string
   /** A provider to land on with its form open, from a "connect" link elsewhere. */
   openKind: IntegrationKind | null
 }
@@ -55,7 +55,7 @@ const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 'error'
 }
 
 /** Providers that send Rawr webhooks. The URL is generated rather than documented
- *  because it carries the workspace key, which a person cannot be expected to
+ *  because it carries the account key, which a person cannot be expected to
  *  assemble by hand. */
 const WEBHOOK_SOURCES = new Set<IntegrationKind>(['brevo', 'apollo', 'clay', 'woodpecker'])
 
@@ -69,7 +69,7 @@ export const IntegrationPanel = ({
   webhookBase,
   siteKey,
   canWrite,
-  role,
+  hub,
   openKind,
 }: IntegrationPanelProps) => {
   const router = useRouter()
@@ -148,7 +148,7 @@ export const IntegrationPanel = ({
     <div className="flex flex-col gap-4">
       {!canWrite ? (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can see the health of every integration and cannot change credentials.
+          You need {hub} access to change credentials.
         </p>
       ) : null}
 
@@ -287,7 +287,7 @@ export const IntegrationPanel = ({
                     </Field>
                   ) : (
                     <p className="text-secondary">
-                      This one has no workspace-level credential. {row.meta.failureMode}
+                      This one has no account-level credential. {row.meta.failureMode}
                     </p>
                   )}
 
@@ -310,7 +310,7 @@ export const IntegrationPanel = ({
                       <Field
                         id={`webhook-${row.kind}`}
                         label="Webhook URL to paste at the provider"
-                        hint="Carries the workspace key. Requests without a valid signature are refused and counted against this integration's health."
+                        hint="Carries the account key. Requests without a valid signature are refused and counted against this integration's health."
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <TextInput
@@ -335,7 +335,7 @@ export const IntegrationPanel = ({
                       </Field>
                     ) : (
                       <Alert tone="warning">
-                        The webhook URL needs a tracked site to name this workspace.{' '}
+                        The webhook URL needs a tracked site to name this account.{' '}
                         <Link href={sitesPath()}>Add one under Tracked sites</Link>, then come back.
                       </Alert>
                     )

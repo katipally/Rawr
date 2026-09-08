@@ -12,7 +12,20 @@ import { env, googleConfigured } from '~/lib/env.ts'
  *  The surface below is deliberately the one the call sites already used, so the
  *  four routes and the two token refreshers did not have to change with it. */
 
+/** Where Google sends the browser back, per flow.
+ *
+ *  Three different routes, so three different redirect URIs. Google checks the one
+ *  in the token exchange against the one in the authorisation request and against
+ *  the list registered on the OAuth client, so a flow that asks with one and
+ *  exchanges with another is refused -- and a flow that asks with somebody else's
+ *  lands on somebody else's route, which is what used to happen here: calendar and
+ *  Gmail consent both came back to the sign-in callback, where the state cookie
+ *  they set is not the one that is read, so the grant was never stored. Every one
+ *  of these has to be registered as an authorised redirect URI on the Google
+ *  client, or consent fails with redirect_uri_mismatch. */
 export const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback'
+export const GOOGLE_CALENDAR_CALLBACK_PATH = '/api/auth/google/calendar/callback'
+export const GOOGLE_GMAIL_CALLBACK_PATH = '/api/auth/google/gmail/callback'
 
 const AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
@@ -183,17 +196,39 @@ export class GoogleOAuth {
 const challengeFor = (verifier: string): string =>
   createHash('sha256').update(verifier).digest('base64url')
 
-export const googleClient = (): GoogleOAuth => {
+const configured = (): void => {
   if (!googleConfigured) {
     throw new Error(
       'Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or use the dev sign-in while open item 3 is outstanding.',
     )
   }
+}
+
+/** The client for one flow, which has to name its own callback path.
+ *
+ *  Required rather than defaulted, and that is the whole point: it used to default
+ *  to the sign-in path, so calendar and Gmail consent silently asked Google to
+ *  redirect to the sign-in route, which reads a different state cookie and threw
+ *  the grant away. A default is exactly what let two flows forget. Now a new flow
+ *  cannot compile without saying where it comes back to.
+ *
+ *  Both routes in a flow must pass the same path: Google checks the redirect_uri in
+ *  the token exchange against the one in the authorisation request. */
+export const googleClient = (callbackPath: string): GoogleOAuth => {
+  configured()
   return new GoogleOAuth(
     env.GOOGLE_CLIENT_ID,
     env.GOOGLE_CLIENT_SECRET,
-    new URL(GOOGLE_CALLBACK_PATH, env.AUTH_URL).toString(),
+    new URL(callbackPath, env.AUTH_URL).toString(),
   )
+}
+
+/** For the refresh grant only, which sends no redirect_uri at all. Its own function
+ *  rather than a client built with an arbitrary path, so a reader does not have to
+ *  work out which callback a token refresh supposedly belongs to. */
+export const googleRefresher = (): GoogleOAuth => {
+  configured()
+  return new GoogleOAuth(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, '')
 }
 
 /** The claims out of an id token, without verifying its signature.

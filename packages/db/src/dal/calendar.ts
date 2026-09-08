@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import type { ObjectKey } from '../registry/core.ts'
@@ -56,7 +56,7 @@ const MAX_ENTRIES = 500
 const monthStart = (day: string): string => `${day.slice(0, 7)}-01`
 
 export const readCalendar = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     object: string
     /** Any day in the month to show. */
@@ -66,7 +66,7 @@ export const readCalendar = async (
     search?: string
   },
 ): Promise<CalendarMonth> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const registry = await getRegistry(ctx)
     const object = objectOrThrow(registry, input.object)
 
@@ -117,6 +117,101 @@ export const readCalendar = async (
         displayName: displayName(object, row),
         day: String(row.calendar_day).slice(0, 10),
         time: (row.calendar_time as string | null) ?? null,
+      })),
+    }
+  })
+
+// ---------------------------------------------------------------------------
+// The agenda: what one person has on
+// ---------------------------------------------------------------------------
+
+export type AgendaEntry = CalendarEntry & {
+  kind: 'meeting' | 'task'
+  /** The meeting's booking id or the task's id: what the day's chip addresses. */
+  refId: string
+  /** A task's record, when it hangs on one, so the chip can open the person
+   *  rather than a list. */
+  entityType: string | null
+  entityId: string | null
+}
+
+export type Agenda = {
+  month: string
+  entries: AgendaEntry[]
+  truncated: boolean
+}
+
+/** What a person has on this month: the meetings booked with them and the tasks
+ *  due from them. Named agenda rather than schedule because `booking-admin`'s
+ *  schedule is a person's working hours, which is a different thing entirely.
+ *
+ *  Not `readCalendar`, and deliberately: that one lays one registry object out on
+ *  one of its date fields. Neither a booking nor a task is a registry object, and
+ *  a month that shows meetings but not what is due is not the screen anybody
+ *  opens a CRM on a Monday to look at.
+ *
+ *  Two indexed range scans and a merge, bounded by the month. O(k) in what the
+ *  month holds, not in the account. */
+export const readAgenda = async (
+  ctx: AccountContext,
+  input: { month: string; userId?: string | null },
+): Promise<Agenda> =>
+  withAccount(ctx, async (tx) => {
+    const start = monthStart(input.month)
+    const who = input.userId ?? null
+
+    const rows = await tx.execute<{
+      kind: 'meeting' | 'task'
+      ref_id: string
+      name: string
+      calendar_day: string
+      calendar_time: string | null
+      entity_type: string | null
+      entity_id: string | null
+    }>(sql`
+      select 'meeting' as kind, b.id as ref_id,
+             p.name || ' · ' || b.attendee_name as name,
+             (b.starts_at at time zone 'UTC')::date::text as calendar_day,
+             to_char(b.starts_at at time zone 'UTC', 'HH24:MI') as calendar_time,
+             case when b.contact_id is null then null else 'contact' end as entity_type,
+             b.contact_id::text as entity_id
+        from booking b
+        join booking_page p on p.id = b.booking_page_id
+       where b.state = 'confirmed'
+         and b.starts_at >= ${start}::date
+         and b.starts_at < (${start}::date + interval '1 month')
+         and (${who}::uuid is null or b.host_user_id = ${who}::uuid)
+
+      union all
+
+      select 'task' as kind, t.id as ref_id,
+             t.title as name,
+             t.due_date::text as calendar_day,
+             null::text as calendar_time,
+             t.entity_type, t.entity_id::text
+        from task t
+       where t.due_date is not null
+         and t.status = 'open'
+         and t.due_date >= ${start}::date
+         and t.due_date < (${start}::date + interval '1 month')
+         and (${who}::uuid is null or t.assignee_id = ${who}::uuid)
+
+       order by calendar_day, calendar_time nulls first
+       limit ${MAX_ENTRIES + 1}`)
+
+    const truncated = rows.length > MAX_ENTRIES
+    return {
+      month: start,
+      truncated,
+      entries: rows.slice(0, MAX_ENTRIES).map((row) => ({
+        id: `${row.kind}:${row.ref_id}`,
+        refId: row.ref_id,
+        kind: row.kind,
+        displayName: row.name,
+        day: row.calendar_day,
+        time: row.calendar_time,
+        entityType: row.entity_type,
+        entityId: row.entity_id,
       })),
     }
   })

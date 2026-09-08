@@ -12,6 +12,7 @@ import {
   readSchedule,
   saveBookingPage,
   saveGrant,
+  setGrantCalendar,
   saveOverride,
   saveSchedule,
   setPageActive,
@@ -51,15 +52,15 @@ const weeklySchema = z.partialRecord(
 )
 
 export const bookingRouter = router({
-  pages: protectedProcedure.query(({ ctx }) => call(() => listBookingPages(ctx.workspace))),
+  pages: protectedProcedure.query(({ ctx }) => call(() => listBookingPages(ctx.account))),
 
   page: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .query(({ ctx, input }) => call(() => readBookingPage(ctx.workspace, input.id))),
+    .query(({ ctx, input }) => call(() => readBookingPage(ctx.account, input.id))),
 
   hosts: protectedProcedure
     .input(z.object({ pageId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => readPageHostList(ctx.workspace, input.pageId))),
+    .query(({ ctx, input }) => call(() => readPageHostList(ctx.account, input.pageId))),
 
   savePage: protectedProcedure
     .input(
@@ -67,7 +68,7 @@ export const bookingRouter = router({
         id: z.uuid().nullish(),
         slug: z.string().min(1).max(64),
         name: z.string().min(1).max(200),
-        kind: z.enum(['one_on_one', 'round_robin']),
+        kind: z.enum(['one_on_one', 'round_robin', 'collective']),
         ownerId: z.uuid().nullish(),
         durationMinutes: z.number().int().min(5).max(1440),
         bufferBeforeMinutes: z.number().int().min(0).max(480),
@@ -84,15 +85,23 @@ export const bookingRouter = router({
         isActive: z.boolean(),
         redirectUrl: z.string().max(2000).nullish(),
         confirmationCopy: z.string().max(2000).nullish(),
-        hosts: z.array(z.object({ userId: z.uuid(), weight: z.number().int().min(1).max(100) })).optional(),
+        hosts: z
+          .array(
+            z.object({
+              userId: z.uuid(),
+              weight: z.number().int().min(1).max(100),
+              isRequired: z.boolean().default(true),
+            }),
+          )
+          .optional(),
       }),
     )
-    .mutation(({ ctx, input }) => call(() => saveBookingPage(ctx.workspace, input))),
+    .mutation(({ ctx, input }) => call(() => saveBookingPage(ctx.account, input))),
 
   setPageActive: protectedProcedure
     .input(z.object({ id: z.uuid(), isActive: z.boolean() }))
     .mutation(({ ctx, input }) =>
-      call(() => setPageActive(ctx.workspace, input.id, input.isActive)),
+      call(() => setPageActive(ctx.account, input.id, input.isActive)),
     ),
 
   booked: protectedProcedure
@@ -106,7 +115,7 @@ export const bookingRouter = router({
         cursor: z.object({ startsAt: z.coerce.date(), id: z.uuid() }).nullish(),
       }),
     )
-    .query(({ ctx, input }) => call(() => listBookings(ctx.workspace, input))),
+    .query(({ ctx, input }) => call(() => listBookings(ctx.account, input))),
 
   /** Cancelling from inside the CRM. The provider side is the same code the
    *  attendee's own cancel link runs, so the two cannot drift. */
@@ -114,7 +123,7 @@ export const bookingRouter = router({
     .input(z.object({ id: z.uuid(), reason: z.string().max(500).nullish() }))
     .mutation(({ ctx, input }) =>
       call(async () => {
-        const booking = await readBooking(ctx.workspace, input.id)
+        const booking = await readBooking(ctx.account, input.id)
         if (!booking) throw new TRPCError({ code: 'NOT_FOUND', message: 'That meeting no longer exists.' })
         return cancelWithProviders(booking, { reason: input.reason ?? null, by: 'host' })
       }),
@@ -124,7 +133,7 @@ export const bookingRouter = router({
     .input(z.object({ id: z.uuid(), startsAt: z.coerce.date() }))
     .mutation(({ ctx, input }) =>
       call(async () => {
-        const booking = await readBooking(ctx.workspace, input.id)
+        const booking = await readBooking(ctx.account, input.id)
         if (!booking) throw new TRPCError({ code: 'NOT_FOUND', message: 'That meeting no longer exists.' })
         const outcome = await rescheduleWithProviders({ booking, startsAt: input.startsAt })
         if (!outcome.ok) throw new TRPCError({ code: 'CONFLICT', message: outcome.message })
@@ -135,7 +144,7 @@ export const bookingRouter = router({
   schedule: protectedProcedure
     .input(z.object({ userId: z.uuid().nullish() }))
     .query(({ ctx, input }) =>
-      call(() => readSchedule(ctx.workspace, input.userId ?? ctx.session.userId)),
+      call(() => readSchedule(ctx.account, input.userId ?? ctx.session.userId)),
     ),
 
   saveSchedule: protectedProcedure
@@ -148,7 +157,7 @@ export const bookingRouter = router({
     )
     .mutation(({ ctx, input }) =>
       call(() =>
-        saveSchedule(ctx.workspace, {
+        saveSchedule(ctx.account, {
           userId: input.userId ?? ctx.session.userId,
           timezone: input.timezone,
           weekly: input.weekly,
@@ -168,7 +177,7 @@ export const bookingRouter = router({
     )
     .mutation(({ ctx, input }) =>
       call(() =>
-        saveOverride(ctx.workspace, { ...input, userId: input.userId ?? ctx.session.userId }),
+        saveOverride(ctx.account, { ...input, userId: input.userId ?? ctx.session.userId }),
       ),
     ),
 
@@ -176,14 +185,14 @@ export const bookingRouter = router({
     .input(z.object({ userId: z.uuid().nullish(), day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }))
     .mutation(({ ctx, input }) =>
       call(() =>
-        clearOverride(ctx.workspace, { userId: input.userId ?? ctx.session.userId, day: input.day }),
+        clearOverride(ctx.account, { userId: input.userId ?? ctx.session.userId, day: input.day }),
       ),
     ),
 
-  grants: protectedProcedure.query(({ ctx }) => call(() => listGrants(ctx.workspace))),
+  grants: protectedProcedure.query(({ ctx }) => call(() => listGrants(ctx.account))),
 
   myPages: protectedProcedure.query(({ ctx }) =>
-    call(() => pagesHostedBy(ctx.workspace, ctx.session.userId)),
+    call(() => pagesHostedBy(ctx.account, ctx.session.userId)),
   ),
 
   /** Open item 3 is outstanding, so there is no Google project to consent against.
@@ -202,7 +211,7 @@ export const bookingRouter = router({
               'The development calendar provider is not available here. Connect Google Calendar instead (open item 3).',
           })
         }
-        await saveGrant(ctx.workspace, {
+        await saveGrant(ctx.account, {
           userId: input.userId ?? ctx.session.userId,
           provider: 'dev',
           calendarId: 'primary',
@@ -211,9 +220,22 @@ export const bookingRouter = router({
       }),
     ),
 
+  /** Which calendar the invitation is written to. Google hands a person several
+   *  and "primary" is only right until somebody keeps their meetings elsewhere. */
+  setCalendar: protectedProcedure
+    .input(z.object({ userId: z.uuid().nullish(), calendarId: z.string().trim().min(1).max(320) }))
+    .mutation(({ ctx, input }) =>
+      call(() =>
+        setGrantCalendar(ctx.account, {
+          userId: input.userId ?? ctx.session.userId,
+          calendarId: input.calendarId,
+        }),
+      ),
+    ),
+
   disconnectCalendar: protectedProcedure
     .input(z.object({ userId: z.uuid().nullish() }))
     .mutation(({ ctx, input }) =>
-      call(() => disconnectGrant(ctx.workspace, input.userId ?? ctx.session.userId)),
+      call(() => disconnectGrant(ctx.account, input.userId ?? ctx.session.userId)),
     ),
 })

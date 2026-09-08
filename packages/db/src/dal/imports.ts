@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import { importRun } from '../schema/imports.ts'
 import { activity, activityLink } from '../schema/records.ts'
 import {
@@ -15,14 +15,22 @@ import {
   SUBMISSION_IMPORT,
 } from '../registry/hubspot.ts'
 import type { ObjectKey } from '../registry/core.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { isUuid, mutate, withWorkspace } from './index.ts'
+import { isUuid, mutate, withAccount } from './index.ts'
+import { linksForContacts } from './activity.ts'
 import { createField, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
 import { assertCore, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { coerce, ValueError } from './values.ts'
+
+/** An import does not queue its rows for enrichment. A file of ninety thousand
+ *  contacts would ask somebody to approve ninety thousand lookups in one modal,
+ *  which is not a decision anybody can make; and the rows it writes are usually
+ *  already enriched at the other end. Editing one afterwards asks as normal, and
+ *  the button on a record still enriches that one. */
+const NO_ENRICH = { enrich: false } as const
 
 export type ImportRow = Record<string, string>
 /** csv header -> field key, or null for a column the person chose to ignore. */
@@ -204,7 +212,7 @@ const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
  *  Returns null for a company that does not exist yet when creating is off: the
  *  preview promises nothing has been written, so it reports the row without the
  *  company and the real run creates it. */
-const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) => {
+const relationResolver = (ctx: AccountContext, options: { create: boolean }) => {
   const remembered = new Map<string, string | null>()
   /** Every owner name in the file that matches nobody here, once each. A portal
    *  carries the names of people who never got a Rawr account, and at eighty-eight
@@ -219,12 +227,12 @@ const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) =
     const cacheKey = `${field.key}\u0000${needle.toLowerCase()}`
     let id = remembered.get(cacheKey)
     if (id === undefined) {
-      const [found] = await withWorkspace(ctx, (tx) => tx.execute<{ id: string }>(lookup.find(needle)))
+      const [found] = await withAccount(ctx, (tx) => tx.execute<{ id: string }>(lookup.find(needle)))
       id = found?.id ?? null
       if (id === null && field.key === 'company_id') {
         if (!options.create) return null
         try {
-          const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle })
+          const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle }, NO_ENRICH)
           id = created.id
         } catch (cause) {
           if (!(cause instanceof DuplicateError)) throw cause
@@ -242,7 +250,7 @@ const relationResolver = (ctx: WorkspaceContext, options: { create: boolean }) =
         unmatchedOwners.add(needle)
         return null
       }
-      throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this workspace.`)
+      throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this account.`)
     }
     return id
   }
@@ -297,7 +305,7 @@ export const planRow = async (
 }
 
 const dedupeLookup = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   object: RegistryObject,
   values: Record<string, unknown>,
 ): Promise<string | null> => {
@@ -305,7 +313,7 @@ const dedupeLookup = async (
   const value = key ? values[key] : null
   if (!key || typeof value !== 'string' || !value) return null
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const [found] = await tx.execute<{ id: string }>(
       key === 'email'
         ? sql`select id from contact where lower(email) = lower(${value}) and deleted_at is null limit 1`
@@ -316,7 +324,7 @@ const dedupeLookup = async (
 }
 
 /** Every kind but `records` is mapped against a fixed shape rather than the
- *  workspace's registry: nothing on those rows becomes a column on a record, they
+ *  account's registry: nothing on those rows becomes a column on a record, they
  *  say which record something belongs to and what it was. */
 /** Exported because the mapper screen needs the same answer this file does. It
  *  used to ask the registry for whatever `object_type` said, which for a shape
@@ -333,7 +341,7 @@ export const importShapeFor = (kind: ImportKind): RegistryObject | null =>
   })[kind as string] ?? null
 
 const objectFor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   kind: ImportKind,
   objectKey: string,
 ): Promise<RegistryObject> =>
@@ -387,7 +395,7 @@ const ACTIVITY_KIND: Record<string, 'note' | 'email' | 'call' | 'meeting'> = {
 /** Where an imported note or logged email attaches. Memoised per run for the same
  *  reason the relation resolver is: a file of 40,000 notes about 300 people costs
  *  300 lookups. */
-const recordResolver = (ctx: WorkspaceContext) => {
+const recordResolver = (ctx: AccountContext) => {
   const remembered = new Map<string, { type: 'contact' | 'company'; id: string } | null>()
   return async (values: Record<string, unknown>) => {
     const email = typeof values.contact_email === 'string' ? values.contact_email.toLowerCase() : ''
@@ -396,7 +404,7 @@ const recordResolver = (ctx: WorkspaceContext) => {
     const found = remembered.get(cacheKey)
     if (found !== undefined) return found
 
-    const resolved = await withWorkspace(ctx, async (tx) => {
+    const resolved = await withAccount(ctx, async (tx) => {
       if (email) {
         const [contact] = await tx.execute<{ id: string }>(
           sql`select id from contact where lower(email) = ${email} and deleted_at is null limit 1`,
@@ -431,7 +439,7 @@ const PREVIEW_ROWS = 500
  *  Checking every row against the database before the run would double the work of
  *  the import for a number the person is about to confirm anyway. */
 export const dryRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { objectKey: string; mapping: Mapping; rows: ImportRow[]; kind?: ImportKind; source?: string | null },
 ): Promise<DryRun> => {
   const kind = input.kind ?? 'records'
@@ -496,7 +504,7 @@ export const dryRun = async (
         if (result.samples.error.length < SAMPLE_SIZE) {
           result.samples.error.push({
             row: index + 2,
-            reason: 'No contact or company in this workspace matches that address, so there is nothing to put this on.',
+            reason: 'No contact or company in this account matches that address, so there is nothing to put this on.',
             values: row,
           })
         }
@@ -521,7 +529,7 @@ export const dryRun = async (
 }
 
 export const createImportRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     objectKey: string
     filename: string
@@ -553,7 +561,7 @@ export const createImportRun = async (
     const [row] = await tx
       .insert(importRun)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         // Importing into a custom object comes with the import surface itself,
         // in a later pass; object_type is an enum of the core three.
         objectType: kind === 'activities' ? 'contact' : assertCore(object, 'be imported into'),
@@ -590,7 +598,7 @@ export const createImportRun = async (
   })
 
 export const setImportMapping = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   mapping: Mapping,
 ): Promise<void> =>
@@ -619,7 +627,7 @@ export const setImportMapping = async (
  *  happened. The unique import key is what makes a second run of the same export
  *  a no-op. */
 const writeImportedActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   findRecord: ReturnType<typeof recordResolver>,
   source: string | null,
   values: Record<string, unknown>,
@@ -631,33 +639,43 @@ const writeImportedActivity = async (
   const type = ACTIVITY_KIND[String(values.activity_type ?? 'note')] ?? 'note'
   const key = importKeyOf(source, values)
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     // Written as SQL rather than through the query builder because the unique
     // index is partial, and Postgres only infers a partial index for ON CONFLICT
     // when the same predicate is repeated here. The index stays partial so it
     // covers imported rows rather than every activity ever written.
     const [row] = await tx.execute<{ id: string }>(sql`
-      insert into activity (workspace_id, type, subject, body, occurred_at, actor_id, actor_kind, source, import_key)
-      values (${ctx.workspaceId}::uuid, ${type}::rawr_activity_type,
+      insert into activity (account_id, type, subject, body, occurred_at, actor_id, actor_kind, source, import_key)
+      values (${ctx.accountId}::uuid, ${type}::rawr_activity_type,
               ${typeof values.subject === 'string' ? values.subject : null},
               ${typeof values.body === 'string' ? values.body : null},
               ${occurredAt.toISOString()}::timestamptz,
               ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind,
               ${source ?? 'import'}, ${key})
-      on conflict (workspace_id, import_key) where import_key is not null do nothing
+      on conflict (account_id, import_key) where import_key is not null do nothing
       returning id`)
     if (!row) return 'already'
 
+    // An email with a contact is an email with their company and their deals, the
+    // same way a synced one is. Imported history that only reached the contact
+    // left every company timeline empty for the years before Rawr existed.
+    const links =
+      target.type === 'contact'
+        ? await linksForContacts(tx, [target.id])
+        : [{ entityType: target.type, entityId: target.id }]
+
     await tx
       .insert(activityLink)
-      .values({
-        workspaceId: ctx.workspaceId,
-        activityId: row.id,
-        entityType: target.type,
-        entityId: target.id,
-        type,
-        occurredAt,
-      })
+      .values(
+        links.map((link) => ({
+          accountId: ctx.accountId,
+          activityId: row.id,
+          entityType: link.entityType,
+          entityId: link.entityId,
+          type,
+          occurredAt,
+        })),
+      )
       .onConflictDoNothing()
     return 'created'
   })
@@ -674,7 +692,7 @@ type RowOutcome = 'created' | 'updated' | 'skipped' | { error: string }
  *  forty thousand rows about three hundred things costing three hundred queries
  *  and costing forty thousand. */
 type ShapeDeps = {
-  ctx: WorkspaceContext
+  ctx: AccountContext
   source: string | null
   /** The preview resolves exactly as the run does and writes nothing, so it
    *  cannot promise one thing and the run do another. */
@@ -700,7 +718,7 @@ const lookupOnce = async (
   const remembered = deps.cache.get(cacheKey)
   if (remembered !== undefined) return remembered
 
-  const [row] = await withWorkspace(deps.ctx, (tx) => tx.execute<{ id: string }>(find))
+  const [row] = await withAccount(deps.ctx, (tx) => tx.execute<{ id: string }>(find))
   let id = row?.id ?? null
   if (id === null && make && !deps.dry) id = await make()
   // A dry run remembers nothing it did not find, because the real run will create
@@ -751,7 +769,7 @@ const writeProperty = async (deps: ShapeDeps, values: Record<string, unknown>): 
   const helpText = textOf(values, 'help_text') || null
   const groupName = textOf(values, 'group_name') || null
 
-  const [existing] = await withWorkspace(deps.ctx, (tx) =>
+  const [existing] = await withAccount(deps.ctx, (tx) =>
     tx.execute<{ id: string; deleted_at: Date | null; is_custom: boolean }>(sql`
       select f.id, f.deleted_at, f.is_custom
         from field_def f join object_def o on o.id = f.object_id
@@ -848,12 +866,12 @@ const writeAssociation = async (deps: ShapeDeps, values: Record<string, unknown>
   let written = 0
   for (const target of targets) {
     const [from, to] = orderedPair({ entityType: 'deal', entityId: dealId }, target)
-    const inserted = await withWorkspace(deps.ctx, (tx) =>
+    const inserted = await withAccount(deps.ctx, (tx) =>
       tx.execute<{ to_id: string }>(sql`
-        insert into association (workspace_id, from_type, from_id, to_type, to_id, label)
-        values (${deps.ctx.workspaceId}, ${from.entityType}, ${from.entityId},
+        insert into association (account_id, from_type, from_id, to_type, to_id, label)
+        values (${deps.ctx.accountId}, ${from.entityType}, ${from.entityId},
                 ${to.entityType}, ${to.entityId}, ${label})
-        on conflict (workspace_id, from_type, from_id, to_type, to_id) do nothing
+        on conflict (account_id, from_type, from_id, to_type, to_id) do nothing
         returning to_id`),
     )
     written += inserted.length
@@ -885,10 +903,10 @@ const writeListMember = async (deps: ShapeDeps, values: Record<string, unknown>)
     listName,
     sql`select id from segment where lower(name) = lower(${listName}) limit 1`,
     async () => {
-      const [row] = await withWorkspace(deps.ctx, (tx) =>
+      const [row] = await withAccount(deps.ctx, (tx) =>
         tx.execute<{ id: string }>(sql`
-          insert into segment (workspace_id, name, description, object_id, query, is_static)
-          select ${deps.ctx.workspaceId}, ${listName},
+          insert into segment (account_id, name, description, object_id, query, is_static)
+          select ${deps.ctx.accountId}, ${listName},
                  ${'Imported list. Its members are the ones the file named, not a query.'},
                  o.id, '[]'::jsonb, true
             from object_def o where o.key = 'contact'
@@ -901,10 +919,10 @@ const writeListMember = async (deps: ShapeDeps, values: Record<string, unknown>)
   if (deps.dry) return 'created'
   if (!segmentId) return { error: `The list "${listName}" could not be created.` }
 
-  const written = await withWorkspace(deps.ctx, (tx) =>
+  const written = await withAccount(deps.ctx, (tx) =>
     tx.execute<{ id: string }>(sql`
-      insert into segment_membership (workspace_id, segment_id, entity_id)
-      select ${deps.ctx.workspaceId}, ${segmentId}, ${contactId}
+      insert into segment_membership (account_id, segment_id, entity_id)
+      select ${deps.ctx.accountId}, ${segmentId}, ${contactId}
        where not exists (
          select 1 from segment_membership m
           where m.segment_id = ${segmentId} and m.entity_id = ${contactId} and m.exited_at is null)
@@ -928,10 +946,10 @@ const writeSubmission = async (deps: ShapeDeps, values: Record<string, unknown>)
     sql`select id from form where lower(name) = lower(${formName}) limit 1`,
     async () => {
       const stem = keyFromLabel(formName).replace(/_/g, '-') || 'imported'
-      const [row] = await withWorkspace(deps.ctx, (tx) =>
+      const [row] = await withAccount(deps.ctx, (tx) =>
         tx.execute<{ id: string }>(sql`
-          insert into form (workspace_id, name, slug, schema, settings, is_active)
-          values (${deps.ctx.workspaceId}, ${formName},
+          insert into form (account_id, name, slug, schema, settings, is_active)
+          values (${deps.ctx.accountId}, ${formName},
                   ${stem} || '-' || substr(md5(random()::text), 1, 4),
                   '[]'::jsonb,
                   ${JSON.stringify({ importedFrom: deps.source ?? 'import' })}::jsonb, false)
@@ -967,15 +985,15 @@ const writeSubmission = async (deps: ShapeDeps, values: Record<string, unknown>)
     body,
   })
 
-  const written = await withWorkspace(deps.ctx, (tx) =>
+  const written = await withAccount(deps.ctx, (tx) =>
     tx.execute<{ id: string }>(sql`
       insert into form_submission
-             (workspace_id, form_id, values, attribution, contact_id, at, idempotency_key, spam_state)
-      values (${deps.ctx.workspaceId}, ${formId},
+             (account_id, form_id, values, attribution, contact_id, at, idempotency_key, spam_state)
+      values (${deps.ctx.accountId}, ${formId},
               ${JSON.stringify(body ? { imported: body } : {})}::jsonb,
               ${JSON.stringify(pageUrl ? { landing_page: pageUrl } : {})}::jsonb,
               ${contactId}, ${at.toISOString()}::timestamptz, ${key}, 'clean')
-      on conflict (workspace_id, idempotency_key) where idempotency_key is not null do nothing
+      on conflict (account_id, idempotency_key) where idempotency_key is not null do nothing
       returning id`),
   )
   return written.length > 0 ? 'created' : 'skipped'
@@ -1001,12 +1019,12 @@ const CHUNK = 200
  *  continues from processed_rows instead of restarting, and re-running the same
  *  file updates rather than duplicating because the dedupe key drives it. A8. */
 export const runImportChunk = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
 ): Promise<{ done: boolean; processed: number; total: number }> => {
   assertCanWrite(ctx, 'contact')
 
-  const [run] = await withWorkspace(ctx, (tx) =>
+  const [run] = await withAccount(ctx, (tx) =>
     tx
       .select({
         objectType: importRun.objectType,
@@ -1030,7 +1048,10 @@ export const runImportChunk = async (
   }
 
   const kind = run.importKind
-  const object = await objectFor(ctx, kind, run.objectType)
+  const object = await objectFor(ctx, kind, run.objectType).catch(async (cause: unknown) => {
+    await failImportRun(ctx, id, cause)
+    throw cause
+  })
   const mapping = run.mapping as Mapping
   const rows = (run.rows as ImportRow[] | null) ?? []
   const slice = rows.slice(run.processedRows, run.processedRows + CHUNK)
@@ -1075,7 +1096,7 @@ export const runImportChunk = async (
       else {
         errors.push({
           row: rowNumber,
-          reason: 'No contact or company in this workspace matches that address, so there is nothing to put this on.',
+          reason: 'No contact or company in this account matches that address, so there is nothing to put this on.',
           values: row,
         })
       }
@@ -1085,10 +1106,10 @@ export const runImportChunk = async (
     try {
       const existing = await dedupeLookup(ctx, object, planned.values)
       if (existing) {
-        await updateRecord(ctx, object.key, existing, planned.values)
+        await updateRecord(ctx, object.key, existing, planned.values, null, NO_ENRICH)
         updated += 1
       } else {
-        await createRecord(ctx, object.key, planned.values)
+        await createRecord(ctx, object.key, planned.values, NO_ENRICH)
         created += 1
       }
     } catch (cause) {
@@ -1096,7 +1117,7 @@ export const runImportChunk = async (
         // Lost a race with another row in the same file. The row it collided with
         // holds the value, so this one is an update.
         try {
-          await updateRecord(ctx, object.key, cause.existingId, planned.values)
+          await updateRecord(ctx, object.key, cause.existingId, planned.values, null, NO_ENRICH)
           updated += 1
           continue
         } catch (retry) {
@@ -1117,7 +1138,8 @@ export const runImportChunk = async (
   const done = processed >= rows.length
   const previousErrors = (run.errors as RowError[] | null) ?? []
 
-  await withWorkspace(ctx, (tx) =>
+  try {
+  await withAccount(ctx, (tx) =>
     tx
       .update(importRun)
       .set({
@@ -1138,16 +1160,56 @@ export const runImportChunk = async (
       })
       .where(eq(importRun.id, id)),
   )
+  } catch (cause) {
+    await failImportRun(ctx, id, cause)
+    throw cause
+  }
 
   return { done, processed, total: rows.length }
 }
 
+/** A run that cannot go on. Written so the screen can say so and stop implying
+ *  the file is still being read; the rows are dropped because a failed run is not
+ *  resumed. */
+const failImportRun = async (ctx: AccountContext, id: string, cause: unknown): Promise<void> => {
+  const reason = cause instanceof Error ? cause.message : String(cause)
+  await withAccount(ctx, (tx) =>
+    tx
+      .update(importRun)
+      .set({
+        state: 'failed',
+        errors: sql`coalesce(${importRun.errors}, '[]'::jsonb) || ${JSON.stringify([{ row: 0, reason, values: {} }])}::jsonb`,
+        finishedAt: new Date(),
+        rows: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(importRun.id, id)),
+  ).catch(() => {
+    // The run is already unrecoverable; failing to record why must not replace
+    // the original error with a second one.
+  })
+}
+
+/** Stopping a run for real, rather than the browser deciding to stop asking for
+ *  chunks. The next chunk request returns immediately, because the guard at the
+ *  top of runImportChunk already treats 'cancelled' as finished. */
+export const cancelImportRun = async (ctx: AccountContext, id: string): Promise<void> => {
+  assertCanWrite(ctx, 'contact')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  await withAccount(ctx, (tx) =>
+    tx
+      .update(importRun)
+      .set({ state: 'cancelled', finishedAt: new Date(), rows: null, updatedAt: new Date() })
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running']))),
+  )
+}
+
 export const readImportRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
 ): Promise<ImportSummary | null> => {
   if (!isUuid(id)) return null
-  const [row] = await withWorkspace(ctx, (tx) =>
+  const [row] = await withAccount(ctx, (tx) =>
     tx
       .select({
         id: importRun.id,
@@ -1182,8 +1244,8 @@ export const readImportRun = async (
   } as ImportSummary
 }
 
-export const listImportRuns = async (ctx: WorkspaceContext): Promise<ImportSummary[]> => {
-  const rows = await withWorkspace(ctx, (tx) =>
+export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary[]> => {
+  const rows = await withAccount(ctx, (tx) =>
     tx
       .select({
         id: importRun.id,

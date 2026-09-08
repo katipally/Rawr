@@ -1,6 +1,6 @@
 'use client'
 
-import { IconButton, TextArea } from '@rawr/ui'
+import { IconButton, TextArea, cn } from '@rawr/ui'
 import { Bold, Eye, Italic, Link2, List, ListOrdered, Pencil } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { Markdown } from './markdown.tsx'
@@ -31,12 +31,17 @@ export const RichTextInput = ({
   value,
   onChange,
   autoFocus,
+  disabled,
+  className,
 }: {
   id: string
   label: string
   value: string
   onChange: (value: string) => void
   autoFocus?: boolean
+  disabled?: boolean
+  /** Height, mostly: a note is a few lines, an email is a screen. */
+  className?: string
 }) => {
   const area = useRef<HTMLTextAreaElement>(null)
   const [previewing, setPreviewing] = useState(false)
@@ -76,19 +81,19 @@ export const RichTextInput = ({
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <div className="flex flex-wrap items-center gap-0.5">
-        <IconButton label="Bold" icon={<Bold size={16} />} disabled={previewing} onClick={() => wrap(MARKS.bold)} />
-        <IconButton label="Italic" icon={<Italic size={16} />} disabled={previewing} onClick={() => wrap(MARKS.italic)} />
-        <IconButton label="Link" icon={<Link2 size={16} />} disabled={previewing} onClick={() => wrap(MARKS.link)} />
+        <IconButton label="Bold" icon={<Bold size={16} />} disabled={previewing || disabled} onClick={() => wrap(MARKS.bold)} />
+        <IconButton label="Italic" icon={<Italic size={16} />} disabled={previewing || disabled} onClick={() => wrap(MARKS.italic)} />
+        <IconButton label="Link" icon={<Link2 size={16} />} disabled={previewing || disabled} onClick={() => wrap(MARKS.link)} />
         <IconButton
           label="Bulleted list"
           icon={<List size={16} />}
-          disabled={previewing}
+          disabled={previewing || disabled}
           onClick={() => prefix(() => '- ')}
         />
         <IconButton
           label="Numbered list"
           icon={<ListOrdered size={16} />}
-          disabled={previewing}
+          disabled={previewing || disabled}
           onClick={() => prefix((index) => `${index + 1}. `)}
         />
         <span className="ml-auto">
@@ -104,7 +109,7 @@ export const RichTextInput = ({
       {previewing ? (
         // Min-height matching the textarea, so pressing preview does not make the
         // form jump under the pointer that pressed it.
-        <div className="min-h-24 rounded-hs border border-line bg-fill p-3">
+        <div className={cn('rounded-hs border border-line bg-fill p-3', className ?? 'min-h-24')}>
           {value.trim() ? (
             <Markdown source={value} />
           ) : (
@@ -117,7 +122,8 @@ export const RichTextInput = ({
           ref={area}
           aria-label={label}
           autoFocus={autoFocus}
-          className="min-h-24"
+          disabled={disabled}
+          className={className ?? 'min-h-24'}
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />

@@ -3,7 +3,7 @@ import {
   listWebhookEndpoints,
   promoteFieldToHot,
   type Replayable,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { syncMailbox } from '../gmail.ts'
 import { enrichRecord, enrichCompanyRecord } from './index.ts'
@@ -26,7 +26,7 @@ import { deliverWebhook, WEBHOOK_JOB } from '../webhooks.ts'
 export type ReplayOutcome = { replayed: true; detail: string }
 
 export const replayJob = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   claimed: Replayable,
 ): Promise<ReplayOutcome> => {
   const payload = (claimed.payload ?? {}) as Record<string, unknown>
@@ -68,7 +68,7 @@ export const replayJob = async (
       if (!job) throw new Error(`${endpoint.name} no longer subscribes to ${event}.`)
 
       await deliverWebhook({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         endpointId,
         url: job.url,
         secret: job.secret,
@@ -88,16 +88,20 @@ export const replayJob = async (
     }
 
     case 'apollo.enrich':
+    case 'apollo.enrich_company':
     case 'clay.enqueue':
-    case 'lusha.enrich': {
+    case 'lusha.enrich':
+    case 'enrichment.run': {
       // Enriching again is safe however many times it runs: a provider is only
       // asked about fields that are still empty, and nothing overwrites a human.
-      const contactId = typeof payload.contactId === 'string' ? payload.contactId : null
+      const contactId =
+        typeof payload.contactId === 'string' ? payload.contactId : payload.entity === 'contact' && typeof payload.entityId === 'string' ? payload.entityId : null
       if (contactId) {
         const result = await enrichRecord(ctx, contactId)
         return { replayed: true, detail: result.detail }
       }
-      const companyId = typeof payload.companyId === 'string' ? payload.companyId : null
+      const companyId =
+        typeof payload.companyId === 'string' ? payload.companyId : payload.entity === 'company' && typeof payload.entityId === 'string' ? payload.entityId : null
       if (companyId) {
         const result = await enrichCompanyRecord(ctx, companyId)
         return { replayed: true, detail: result.detail }

@@ -38,7 +38,7 @@ export type AssociationCard = {
 const SEARCHABLE_FROM = 5
 
 export type AssociationRailProps = {
-  workspace: string
+  account: string
   object: string
   recordId: string
   cards: AssociationCard[]
@@ -56,7 +56,7 @@ export type AssociationRailProps = {
 }
 
 export const AssociationRail = ({
-  workspace,
+  account,
   object,
   recordId,
   cards,
@@ -69,6 +69,7 @@ export const AssociationRail = ({
   const toast = useToast()
   const [adding, setAdding] = useState<string | null>(null)
   const [choice, setChoice] = useState<PickedRecord | null>(null)
+  const [linkLabel, setLinkLabel] = useState('')
   const [creating, setCreating] = useState<AssociationCard | null>(null)
   const [busy, setBusy] = useState(false)
   // Per card, because a person searching a company's contacts is not searching
@@ -83,6 +84,7 @@ export const AssociationRail = ({
       toast('success', done)
       setAdding(null)
       setChoice(null)
+      setLinkLabel('')
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -195,6 +197,16 @@ export const AssociationRail = ({
                   value={choice}
                   onChange={setChoice}
                 />
+                {/* What the link is, in the words of whoever made it. The column
+                    and the badge on the row have been there since B8; nothing
+                    ever wrote one. */}
+                <TextInput
+                  aria-label="What this link is, optional"
+                  placeholder="Decision maker, Referred by…"
+                  value={linkLabel}
+                  maxLength={60}
+                  onChange={(event) => setLinkLabel(event.target.value)}
+                />
                 <div className="flex flex-wrap gap-2">
                   <Button
                     variant="primary"
@@ -212,7 +224,7 @@ export const AssociationRail = ({
                           api.crm.associations.add.mutate({
                             a: { entityType: object, entityId: recordId },
                             b: { entityType: card.objectKey, entityId: picked.id },
-                            label: null,
+                            label: linkLabel.trim() || null,
                           }),
                         'Linked.',
                       )
@@ -220,7 +232,13 @@ export const AssociationRail = ({
                   >
                     Link
                   </Button>
-                  <Button variant="tertiary" onClick={() => setAdding(null)}>
+                  <Button
+                    variant="tertiary"
+                    onClick={() => {
+                      setAdding(null)
+                      setLinkLabel('')
+                    }}
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -250,7 +268,7 @@ export const AssociationRail = ({
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <Link
-                          href={recordPath(workspace, row.objectKey, row.id)}
+                          href={recordPath(account, row.objectKey, row.id)}
                           title={row.displayName}
                           className="line-clamp-2 break-words"
                         >
@@ -291,17 +309,14 @@ export const AssociationRail = ({
             {rows.length > 0 ? (
               <p className="px-6 pb-6">
                 <Link
-                  // The list filtered to this record where a field carries the
-                  // link (a contact's or a deal's company), else the whole list.
-                  href={objectView(workspace, card.objectKey, 'all', 'list', {
-                    filters:
-                      object === 'company' && (card.objectKey === 'contact' || card.objectKey === 'deal')
-                        ? encodeFilters([{ conjunction: 'and', conditions: [{ field: 'company_id', operator: 'is', value: recordId }] }])
-                        : undefined,
+                  href={objectView(account, card.objectKey, 'all', 'list', {
+                    filters: filterFor(object, recordId, card.objectKey),
                   })}
                   className="inline-flex items-center gap-1"
                 >
-                  View all associated {card.namePlural}
+                  {filterFor(object, recordId, card.objectKey)
+                    ? `View all associated ${card.namePlural}`
+                    : `View all ${card.namePlural}`}
                   <ExternalLink aria-hidden="true" className="size-3" />
                 </Link>
                 {rows.length < card.total ? <span className="ml-2 text-small text-secondary">Showing {rows.length} of {card.total}.</span> : null}
@@ -313,7 +328,7 @@ export const AssociationRail = ({
 
       {creating && createFields[creating.objectKey] ? (
         <CreateRecordDialog
-          workspace={workspace}
+          account={account}
           object={creating.objectKey}
           objectLabel={creating.nameSingular}
           fields={createFields[creating.objectKey] ?? []}
@@ -338,3 +353,19 @@ export const AssociationRail = ({
     </div>
   )
 }
+
+/** A company's contacts and deals point at it with a column, so the list can open
+ *  filtered to exactly them. Every other pair is joined only by association rows,
+ *  and `id` is not a field the filter language has, so there is nothing to filter
+ *  on. The link then opens the plain list and says so, rather than promising
+ *  "associated" and showing everything.
+ *
+ *  Wording, not a filter, because the alternative — putting every linked id in the
+ *  query string — is a URL that grows with the data and breaks at some customer's
+ *  proxy rather than in a test. */
+const filterFor = (object: string, recordId: string, objectKey: string): string | undefined =>
+  object === 'company' && (objectKey === 'contact' || objectKey === 'deal')
+    ? encodeFilters([
+        { conjunction: 'and', conditions: [{ field: 'company_id', operator: 'is', value: recordId }] },
+      ])
+    : undefined

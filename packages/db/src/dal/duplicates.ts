@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { withWorkspace } from './index.ts'
+import { withAccount } from './index.ts'
 
 /** B11. The queue that feeds the merge dialog.
  *
@@ -189,7 +189,7 @@ const REASON: Record<DuplicateRule, (because: string) => string> = {
  *  and it lists two records side by side with the reason they might be the same
  *  person. A viewer has no use for it and no business seeing it framed that way. */
 export const findDuplicates = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: 'contact' | 'company',
   options: { limit?: number } = {},
 ): Promise<DuplicatePair[]> => {
@@ -197,7 +197,7 @@ export const findDuplicates = async (
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
   const rules = objectKey === 'contact' ? CONTACT_RULES : COMPANY_RULES
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const seen = new Set<string>()
     const out: DuplicatePair[] = []
 

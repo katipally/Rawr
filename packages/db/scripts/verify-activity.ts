@@ -23,9 +23,8 @@ import {
   setSiteActive,
   timelineCounts,
   websiteActivity,
-  withWorkspace,
-  type Role,
-  type WorkspaceContext,
+  withAccount,
+  type AccountContext,
 } from '../src/index.ts'
 
 /** F4's definition of done, run against the real database, exiting non-zero on
@@ -53,19 +52,19 @@ const check = (what: string, condition: boolean, detail?: string) => {
 const section = (title: string) =>
   console.log(`\n-- ${title} ${'-'.repeat(Math.max(0, 60 - title.length))}`)
 
-const ctxFor = async (slug: string, role: Role = 'admin'): Promise<WorkspaceContext> => {
+const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']): Promise<AccountContext> => {
   const rows = await appDb.execute<{ id: string }>(
-    sql`select id from rawr.workspace_for_site(${slug})`,
+    sql`select id from rawr.account_for_site(${slug})`,
   )
   const id = rows[0]?.id
-  if (!id) throw new Error(`workspace ${slug} is not seeded. Run pnpm db:seed.`)
-  return { workspaceId: id, actorId: null, actorKind: 'user', role }
+  if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
+  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   query: ReturnType<typeof sql>,
-): Promise<T[]> => withWorkspace(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
+): Promise<T[]> => withAccount(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
 
 const CHROME =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36'
@@ -76,11 +75,11 @@ const vid = (label: string): string => `v${stamp}${label}`.padEnd(20, '0').slice
 
 const minutesAgo = (n: number): Date => new Date(Date.now() - n * 60_000)
 
-const newContact = async (ctx: WorkspaceContext, email: string): Promise<string> => {
+const newContact = async (ctx: AccountContext, email: string): Promise<string> => {
   const rows = await scoped<{ id: string }>(
     ctx,
-    sql`insert into contact (workspace_id, first_name, last_name, email)
-        values (${ctx.workspaceId}, 'Activity', ${email}, ${`${email}@example.com`})
+    sql`insert into contact (account_id, first_name, last_name, email)
+        values (${ctx.accountId}, 'Activity', ${email}, ${`${email}@example.com`})
         returning id`,
   )
   const id = rows[0]?.id
@@ -96,7 +95,7 @@ try {
   section('sites')
 
   const site = await publicSite('datasaur-www')
-  check('the seeded site key resolves a workspace', site?.workspaceId === datasaur.workspaceId)
+  check('the seeded site key resolves a account', site?.accountId === datasaur.accountId)
   check('an unknown site key resolves nothing', (await publicSite('no-such-site')) === null)
   check(
     'and a key long enough to be an attack is refused before it reaches the database',
@@ -109,7 +108,7 @@ try {
     host: 'app.datasaur.ai',
     siteKey: `app-${stamp}`,
   })
-  check('two sites can share one workspace', created.id.length === 36, 'open item 18 either way')
+  check('two sites can share one account', created.id.length === 36, 'open item 18 either way')
 
   check(
     'a site key already held by another tenant is refused with a real message',
@@ -136,12 +135,12 @@ try {
   check(
     'turning a site off actually stops collection',
     (await publicSite(`app-${stamp}`)) === null,
-    'the resolver refuses it, so the collector never gets a workspace',
+    'the resolver refuses it, so the collector never gets a account',
   )
   await setSiteActive(datasaur, created.id, true)
 
   const sites = await listSites(datasaur)
-  check('the admin list shows this workspace only', sites.every((row) => row.siteKey !== 'probe-www'))
+  check('the admin list shows this account only', sites.every((row) => row.siteKey !== 'probe-www'))
 
   // -------------------------------------------------------------------------
   section('what the collector refuses')
@@ -278,8 +277,8 @@ try {
   // and the test does not spend two minutes on round trips to prove it.
   await scoped(
     datasaur,
-    sql`insert into event_name_day (workspace_id, day, name)
-        select ${datasaur.workspaceId}, current_date, 'fill_' || ${stamp} || '_' || g
+    sql`insert into event_name_day (account_id, day, name)
+        select ${datasaur.accountId}, current_date, 'fill_' || ${stamp} || '_' || g
           from generate_series(1, ${EVENT_NAME_CAP}) g
         on conflict do nothing`,
   )
@@ -310,7 +309,7 @@ try {
   const empty = await websiteActivity(datasaur, person)
   check('a brand new contact starts with nothing', empty.pagesViewed === 0 && empty.siteVisits === 0)
 
-  await aliasFromPublicEdge(datasaur.workspaceId, {
+  await aliasFromPublicEdge(datasaur.accountId, {
     visitorId: anon,
     contactId: person,
     via: 'form_submission',
@@ -398,7 +397,7 @@ try {
     title: 'Blog',
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
   })
-  await aliasFromPublicEdge(datasaur.workspaceId, {
+  await aliasFromPublicEdge(datasaur.accountId, {
     visitorId: phone,
     contactId: person,
     via: 'booking',
@@ -416,7 +415,7 @@ try {
   section('a shared browser')
 
   const other = await newContact(datasaur, `shared-${stamp}`)
-  await aliasFromPublicEdge(datasaur.workspaceId, {
+  await aliasFromPublicEdge(datasaur.accountId, {
     visitorId: anon,
     contactId: other,
     via: 'form_submission',
@@ -449,7 +448,7 @@ try {
     path: '/careers',
     userAgent: CHROME,
   })
-  await aliasFromPublicEdge(datasaur.workspaceId, {
+  await aliasFromPublicEdge(datasaur.accountId, {
     visitorId: absorbedVid,
     contactId: absorbed,
     via: 'form_submission',
@@ -497,7 +496,7 @@ try {
   )
   check('and the visitor identities that pointed at them', noVisitor[0]?.n === '0')
 
-  const salesCtx = await ctxFor('datasaur', 'sales')
+  const salesCtx = await ctxFor('datasaur', ['contacts', 'sales'])
   check(
     'erasure is refused to anybody but an admin',
     await refusesAsync(() => eraseContactActivity(salesCtx, survivor)),
@@ -523,7 +522,7 @@ try {
     userAgent: CHROME,
   })
   const oldPerson = await newContact(datasaur, `old-${stamp}`)
-  await aliasFromPublicEdge(datasaur.workspaceId, {
+  await aliasFromPublicEdge(datasaur.accountId, {
     visitorId: oldVid,
     contactId: oldPerson,
     via: 'form_submission',
@@ -577,7 +576,7 @@ try {
   )
   check(
     'and a site key belonging to one tenant resolves only that tenant',
-    (await publicSite('probe-www'))?.workspaceId === probe.workspaceId,
+    (await publicSite('probe-www'))?.accountId === probe.accountId,
   )
 
   // -------------------------------------------------------------------------

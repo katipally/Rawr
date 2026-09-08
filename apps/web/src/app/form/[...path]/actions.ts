@@ -71,8 +71,8 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
 
   if (result.notify) {
     queueSlackNotification({
-      workspaceId: form.workspaceId,
-      workspaceSlug: form.workspaceSlug,
+      accountId: form.accountId,
+      accountSlug: form.accountSlug,
       formId: form.formId,
       submissionId: result.submissionId,
       ...result.notify,
@@ -83,11 +83,11 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
   // same background handle: a rule that sets a lifecycle stage must never make
   // a visitor wait, and must never fail their submission.
   if (result.contactId) {
-    reportEvent(publicEdgeContext(form.workspaceId), {
+    reportEvent(publicEdgeContext(form.accountId), {
       trigger: 'form_submitted',
       objectKey: 'contact',
       entityId: result.contactId,
-      workspaceSlug: form.workspaceSlug,
+      accountSlug: form.accountSlug,
     })
   }
 

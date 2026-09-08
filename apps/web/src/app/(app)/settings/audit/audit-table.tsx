@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge, Button, Card, Combobox, EmptyState, Spinner, useToast } from '@rawr/ui'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Row = {
@@ -12,6 +12,7 @@ type Row = {
   entity: string
   entityId: string | null
   action: string
+  before: unknown
   after: unknown
 }
 
@@ -27,25 +28,46 @@ const KIND_TONE: Record<string, 'neutral' | 'accent' | 'info' | 'warn'> = {
   public: 'warn',
 }
 
+/** English past tense, by rule. The action column holds a verb stem and new ones
+ *  are added all over the DAL without touching this file, so a lookup table would
+ *  be stale the week after it was written; these are the stems the rule gets
+ *  wrong. */
+const IRREGULAR: Record<string, string> = {
+  send: 'sent',
+  resend: 'resent',
+  read: 'read',
+  set: 'set',
+  submit: 'submitted',
+  status: 'changed the status of',
+}
+
+const pastTense = (verb: string): string =>
+  IRREGULAR[verb] ??
+  (verb.endsWith('e') ? `${verb}d` : /[aeiou]l$/.test(verb) ? `${verb}led` : `${verb}ed`)
+
 /** A sentence rather than a row of columns: "who did what to which thing" reads
- *  faster than four cells the eye has to reassemble. */
-const sentence = (row: Row): string =>
-  `${row.actorName ?? 'Somebody'} ${row.action.replaceAll('_', ' ')} a ${row.entity.replaceAll('_', ' ')}`
+ *  faster than four cells the eye has to reassemble.
+ *
+ *  Only the first word of an action is the verb, so `save_steps` is "saved steps
+ *  on", and the article follows the thing rather than always being "a", which
+ *  turned every integration into "a integration". */
+const sentence = (row: Pick<Row, 'actorName' | 'action' | 'entity'>): string => {
+  const [verb = '', ...rest] = row.action.split('_')
+  const thing = row.entity.replaceAll('_', ' ')
+  const did = rest.length > 0 ? `${pastTense(verb)} ${rest.join(' ')} on` : pastTense(verb)
+  return `${row.actorName ?? 'Somebody'} ${did} ${/^[aeiou]/i.test(thing) ? 'an' : 'a'} ${thing}`
+}
 
 export const AuditTable = ({
   initial,
   cursor: initialCursor,
   entities,
   people,
-  organisation,
-  organisationName,
 }: {
   initial: Row[]
   cursor: Cursor
   entities: string[]
   people: { userId: string; name: string }[]
-  organisation: OrgRow[]
-  organisationName: string
 }) => {
   const toast = useToast()
   const [rows, setRows] = useState(initial)
@@ -107,14 +129,17 @@ export const AuditTable = ({
         <Card flush>
           <ul className="divide-y divide-divider">
             {rows.map((row) => (
-              <li key={row.id} className="flex flex-wrap items-baseline gap-2 px-4 py-2">
-                <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
-                  {new Date(row.at).toLocaleString()}
-                </time>
-                <span className="min-w-0 flex-1">{sentence(row)}</span>
-                {row.actorKind === 'user' ? null : (
-                  <Badge tone={KIND_TONE[row.actorKind] ?? 'neutral'}>{row.actorKind}</Badge>
-                )}
+              <li key={row.id} className="px-4 py-2">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
+                    {new Date(row.at).toLocaleString()}
+                  </time>
+                  <span className="min-w-0 flex-1">{sentence(row)}</span>
+                  {row.actorKind === 'user' ? null : (
+                    <Badge tone={KIND_TONE[row.actorKind] ?? 'neutral'}>{row.actorKind}</Badge>
+                  )}
+                </div>
+                <Diff before={row.before} after={row.after} />
               </li>
             ))}
           </ul>
@@ -132,23 +157,49 @@ export const AuditTable = ({
         {busy && !cursor ? <Spinner label="Loading history" /> : null}
       </div>
 
-      {organisation.length > 0 ? (
-        <Card title={`${organisationName}, above this workspace`} flush>
-          <ul className="divide-y divide-divider">
-            {organisation.map((row) => (
-              <li key={row.id} className="flex flex-wrap items-baseline gap-2 px-4 py-2">
-                <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
-                  {new Date(row.at).toLocaleString()}
-                </time>
-                <span className="min-w-0 flex-1">
-                  {row.actorName ?? 'Somebody'} {row.action.replaceAll('_', ' ')} a{' '}
-                  {row.entity.replaceAll('_', ' ')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-    </div>
+          </div>
+  )
+}
+
+const show = (value: unknown): string => {
+  if (value === null || value === undefined || value === '') return '—'
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
+
+/** What actually changed, field by field.
+ *
+ *  The sentence says a deal was updated; this says the stage went from
+ *  Qualified to Closed won, which is the thing anybody reading a history came
+ *  for. Only the keys that differ, because a record with forty fields and one
+ *  edit should read as one line. Both sides are already stored on the row. */
+const Diff = ({ before, after }: { before: unknown; after: unknown }) => {
+  const from = asRecord(before)
+  const to = asRecord(after)
+  const keys = [...new Set([...Object.keys(from), ...Object.keys(to)])].filter(
+    (key) => show(from[key]) !== show(to[key]),
+  )
+  if (keys.length === 0) return null
+
+  return (
+    <details className="mt-1">
+      <summary className="cursor-pointer text-small text-secondary">
+        {keys.length === 1 ? '1 field changed' : `${keys.length} fields changed`}
+      </summary>
+      <dl className="mt-1 grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
+        {keys.map((key) => (
+          <Fragment key={key}>
+            <dt className="truncate text-secondary">{key.replaceAll('_', ' ')}</dt>
+            <dd className="min-w-0 break-words">
+              <span className="text-secondary line-through">{show(from[key])}</span>
+              <span aria-hidden="true"> → </span>
+              <span>{show(to[key])}</span>
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+    </details>
   )
 }

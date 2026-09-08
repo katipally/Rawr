@@ -1,128 +1,149 @@
-export const ROLES = ['admin', 'sales', 'marketing', 'viewer'] as const
-export type Role = (typeof ROLES)[number]
+export const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
+export type Hub = (typeof HUBS)[number]
 
 export type ActorKind = 'user' | 'mcp' | 'job' | 'integration' | 'public'
 
 /** Everything the data access layer needs to answer "who is asking, on behalf of
- *  which workspace". A request without one of these never reaches the database. */
-export type WorkspaceContext = {
-  workspaceId: string
+ *  which account". A request without one of these never reaches the database.
+ *
+ *  Permissions are the hubs the caller holds, as HubSpot grants them, rather than
+ *  one role off a fixed list. `editHubs` does not repeat itself into `viewHubs`;
+ *  `canView` unions the two so a grant is only ever written once. */
+export type AccountContext = {
+  accountId: string
   actorId: string | null
   actorKind: ActorKind
-  role: Role
+  isSuperAdmin: boolean
+  viewHubs: readonly Hub[]
+  editHubs: readonly Hub[]
 }
 
 export class ForbiddenError extends Error {
   // Plain fields rather than constructor parameter properties: Node's type
   // stripping runs the scripts in this package with no transform step.
-  readonly role: Role
+  readonly hub: Hub | null
   readonly action: string
 
-  constructor(role: Role, action: string) {
-    super(`Your role (${role}) cannot ${action}.`)
+  constructor(hub: Hub | null, action: string) {
+    super(hub ? `You need ${hub} access to ${action}.` : `You cannot ${action}.`)
     this.name = 'ForbiddenError'
-    this.role = role
+    this.hub = hub
     this.action = action
   }
 }
 
-/** Object-level, four fixed roles, D5. Enforced here rather than by hiding
- *  buttons, so calling a mutation directly is refused the same way. */
-const WRITE_ROLES: Record<string, readonly Role[]> = {
-  company: ['admin', 'sales', 'marketing'],
-  contact: ['admin', 'sales', 'marketing'],
-  deal: ['admin', 'sales'],
-  activity: ['admin', 'sales', 'marketing'],
-  task: ['admin', 'sales', 'marketing'],
-  association: ['admin', 'sales', 'marketing'],
-  pipeline: ['admin'],
-  pipeline_stage: ['admin'],
-  lifecycle_stage: ['admin'],
-  subscription_type: ['admin', 'marketing'],
-  subscription_state: ['admin', 'marketing'],
-  segment: ['admin', 'marketing'],
-  saved_view: ['admin', 'sales', 'marketing'],
-  /** B11. Anybody who can read the reports can arrange them, including a viewer:
-   *  a dashboard adds no figure the six reports do not already show that role,
-   *  and the person who most wants their own four numbers on one screen is
-   *  usually the one who only reads. */
-  report_dashboard: ['admin', 'sales', 'marketing', 'viewer'],
-  import_run: ['admin', 'sales', 'marketing'],
-  object_def: ['admin'],
-  field_def: ['admin'],
-  integration: ['admin'],
-  /** B11. A rule that writes to every record matching a filter is not a thing to
-   *  hand to whoever can write one record. Admins only, both to write the rule
-   *  and to read the log of what it did. */
-  automation: ['admin'],
-  /** A file on a record is content about that record, so whoever may write the
-   *  record may file something against it. A viewer reads it and cannot. */
-  attachment: ['admin', 'sales', 'marketing'],
-  /** F6. A dead letter is replayed by whoever can see it, which is an admin. */
-  dead_letter: ['admin'],
-  /** An endpoint is a standing copy of everything that happens in this workspace,
-   *  sent somewhere Rawr does not control. That is an admin decision however
+export const canView = (ctx: AccountContext, hub: Hub): boolean =>
+  ctx.isSuperAdmin || ctx.viewHubs.includes(hub) || ctx.editHubs.includes(hub)
+
+export const canEdit = (ctx: AccountContext, hub: Hub): boolean =>
+  ctx.isSuperAdmin || ctx.editHubs.includes(hub)
+
+/** May act on rows that are somebody else's: another person's booking page, their
+ *  mailbox, their agent token, their dashboard. Holding the account hub is what
+ *  says so, and a super admin holds everything. */
+export const isAdmin = (ctx: AccountContext): boolean => canEdit(ctx, 'account')
+
+/** Object level, D5. Enforced here rather than by hiding buttons, so calling a
+ *  mutation directly is refused the same way. */
+const WRITE_HUB: Record<string, Hub> = {
+  company: 'contacts',
+  contact: 'contacts',
+  deal: 'sales',
+  activity: 'contacts',
+  task: 'contacts',
+  association: 'contacts',
+  attachment: 'contacts',
+  saved_view: 'contacts',
+  import_run: 'contacts',
+  pipeline: 'account',
+  pipeline_stage: 'account',
+  lifecycle_stage: 'account',
+  subscription_type: 'marketing',
+  subscription_state: 'marketing',
+  segment: 'marketing',
+  report_dashboard: 'reports',
+  object_def: 'account',
+  field_def: 'account',
+  integration: 'account',
+  /** A rule that writes to every record matching a filter is not a thing to hand
+   *  to whoever can write one record. */
+  automation: 'account',
+  /** F6. A dead letter is replayed by whoever can see it. */
+  dead_letter: 'account',
+  /** An endpoint is a standing copy of everything that happens in this account,
+   *  sent somewhere Rawr does not control. That is an account decision however
    *  ordinary the row looks, and the same one as connecting an integration. */
-  webhook_endpoint: ['admin'],
-  form: ['admin', 'marketing'],
-  /** Reviewing the spam queue is sales work as much as marketing work: the lead
-   *  being held is somebody's prospect. */
-  form_submission: ['admin', 'sales', 'marketing'],
-  consent_record: ['admin', 'marketing'],
+  webhook_endpoint: 'account',
+  form: 'marketing',
+  form_submission: 'marketing',
+  consent_record: 'marketing',
   /** F2. A booking is created by a stranger on the public edge, which acts with
-   *  marketing's ceiling, so the same three roles that can capture a lead can
-   *  create one. */
-  booking: ['admin', 'sales', 'marketing'],
-  /** Anyone but a viewer may own a personal calendar link. Whether a given page is
-   *  theirs to change is finer than an object-level role can say, so a round robin
-   *  page and somebody else's personal link are refused inside the layer. F2 §6. */
-  booking_page: ['admin', 'sales', 'marketing'],
-  booking_host: ['admin'],
-  availability: ['admin', 'sales', 'marketing'],
-  availability_override: ['admin', 'sales', 'marketing'],
-  calendar_grant: ['admin', 'sales', 'marketing'],
-  membership: ['admin'],
-  /** A team is workspace configuration: who is on it decides where a round-robin
-   *  lead lands, so changing it is an admin act. */
-  team: ['admin'],
-  team_member: ['admin'],
-  /** Issued from the organisation screen, which checks the organisation role of
-   *  its own; this entry only stops a workspace-scoped caller writing one. */
-  invitation: ['admin'],
-  /** F1 phase B. Anybody but a viewer may connect their own mailbox; whether a
-   *  given mailbox is theirs to disconnect is finer than an object-level role can
-   *  say, so that is checked inside the layer. */
-  mailbox: ['admin', 'sales', 'marketing'],
-  /** A personal exclusion is the person's own; a workspace-wide one is an admin
-   *  act, refused inside the layer rather than here. B3. */
-  message_blocklist: ['admin', 'sales', 'marketing'],
-  /** How far somebody has read a thread is their own business, and a viewer reads
-   *  threads, so a viewer marks them read. */
-  message_thread_read: ['admin', 'sales', 'marketing', 'viewer'],
-  /** Outreach is sales and marketing work. Pausing or removing somebody else's
-   *  enrollment is finer than a role can say and is checked inside the layer. */
-  sequence: ['admin', 'sales', 'marketing'],
-  sequence_step: ['admin', 'sales', 'marketing'],
-  sequence_enrollment: ['admin', 'sales', 'marketing'],
-  /** F5 §1. Anybody may hold agent access to what they can already reach. A token
-   *  carries no role of its own, so a viewer's token reads and cannot write, and
-   *  revoking somebody else's is refused inside the layer rather than here. */
-  mcp_token: ['admin', 'sales', 'marketing', 'viewer'],
-  /** An approval on the OAuth consent screen, by the same people who may hold a
-   *  token, because it is the same access issued a different way. */
-  mcp_oauth_code: ['admin', 'sales', 'marketing', 'viewer'],
-  /** F4. A site key is what lets a host write into this workspace, so creating one
-   *  is an admin act however harmless the row looks. */
-  site: ['admin'],
+   *  marketing's ceiling. */
+  booking: 'sales',
+  /** Whether a given page is theirs to change is finer than an object-level grant
+   *  can say, so a round robin page and somebody else's personal link are refused
+   *  inside the layer. F2 §6. */
+  booking_page: 'sales',
+  booking_host: 'account',
+  availability: 'sales',
+  availability_override: 'sales',
+  calendar_grant: 'sales',
+  /** Seating somebody and ending their access are super admin acts, refused by
+   *  `assertSuperAdmin` inside the layer; this entry is the floor under it. */
+  membership: 'account',
+  /** A team decides where a round-robin lead lands. */
+  team: 'account',
+  team_member: 'account',
+  invitation: 'account',
+  sequence: 'sales',
+  sequence_step: 'sales',
+  sequence_enrollment: 'sales',
+  /** A template is words to reuse, not a rule that acts on anybody. */
+  email_template: 'sales',
+  /** F4. A site key is what lets a host write into this account, so creating one
+   *  is an account act however harmless the row looks. */
+  site: 'account',
   /** Erasing a person's browsing history is irreversible and is answered to a
-   *  regulator, not to a sales target. Admin only, deliberately narrower than the
-   *  three roles that can delete a contact. */
-  erasure: ['admin'],
+   *  regulator, not to a sales target. Deliberately narrower than the grant that
+   *  can delete a contact. */
+  erasure: 'account',
 }
 
-export const canWrite = (role: Role, entity: string): boolean =>
-  (WRITE_ROLES[entity] ?? ['admin']).includes(role)
+/** A write that is really a reader's own bookkeeping: arranging the numbers you
+ *  are allowed to look at. Holding the hub at view level is enough. */
+const VIEW_IS_ENOUGH = new Set(['report_dashboard'])
 
-export const assertCanWrite = (ctx: WorkspaceContext, entity: string): void => {
-  if (!canWrite(ctx.role, entity)) throw new ForbiddenError(ctx.role, `change ${entity} records`)
+/** Things that are the member's own rather than a hub's, so holding a hub is the
+ *  wrong question to ask about them. Every one is guarded by an ownership check
+ *  inside the layer, which is finer than an object-level grant can be:
+ *
+ *  - a token can only ever reach what its holder can reach, and revoking
+ *    somebody else's is refused there (F5 §1);
+ *  - a mailbox is connected, shared and disconnected by the person whose mailbox
+ *    it is (F1 phase B), and an account-wide blocklist entry is refused there (B3);
+ *  - how far somebody has read a thread is nobody else's business. */
+const ANY_MEMBER = new Set([
+  'mcp_token',
+  'mcp_oauth_code',
+  'mailbox',
+  'message_blocklist',
+  'message_thread_read',
+])
+
+export const canWrite = (ctx: AccountContext, entity: string): boolean => {
+  if (ANY_MEMBER.has(entity)) return true
+  const hub = WRITE_HUB[entity] ?? 'account'
+  return VIEW_IS_ENOUGH.has(entity) ? canView(ctx, hub) : canEdit(ctx, hub)
+}
+
+export const assertCanWrite = (ctx: AccountContext, entity: string): void => {
+  if (!canWrite(ctx, entity)) {
+    throw new ForbiddenError(WRITE_HUB[entity] ?? 'account', `change ${entity} records`)
+  }
+}
+
+/** Seating somebody, ending their access, and anything else that changes who can
+ *  reach this account. Above the hubs, never granted by one. */
+export const assertSuperAdmin = (ctx: AccountContext, action: string): void => {
+  if (!ctx.isSuperAdmin) throw new ForbiddenError(null, action)
 }

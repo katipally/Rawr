@@ -1,6 +1,4 @@
 import Link from 'next/link'
-import type { ObjectKey } from '@rawr/db'
-import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
 
 /** A month of records, laid on the days a date field puts them.
  *
@@ -10,7 +8,15 @@ import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
  *  which is the bug the report axes had. Nothing in this file constructs a Date
  *  from a stored day. */
 
-export type CalendarEntryView = { id: string; displayName: string; day: string; time: string | null }
+export type CalendarEntryView = {
+  id: string
+  displayName: string
+  day: string
+  time: string | null
+  /** Where the square's chip goes. Built by the caller, because a month of deals
+   *  and a month of meetings and tasks address entirely different things. */
+  href: string
+}
 
 /** Monday-first, matching the ISO weeks the reports already use. */
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -62,27 +68,23 @@ const shift = (month: string, by: 1 | -1): string => {
 const PER_DAY = 3
 
 export const CalendarGrid = ({
-  workspace,
-  object,
-  view,
   month,
   today,
   entries,
   truncated,
   fieldLabel,
-  params,
+  monthHref,
 }: {
-  workspace: string
-  object: string
-  view: string
   month: string
   /** The reader's own today, passed in rather than computed, so the highlight is
    *  their day and not the server's. */
   today: string
   entries: CalendarEntryView[]
   truncated: boolean
+  /** What put the entries on their days, said under the month name. */
   fieldLabel: string
-  params: ListParams
+  /** Where Earlier and Later go. */
+  monthHref: (month: string) => string
 }) => {
   const { year, month: index } = partsOf(month)
   const total = daysIn(year, index)
@@ -95,17 +97,15 @@ export const CalendarGrid = ({
     else byDay.set(entry.day, [entry])
   }
 
-  const link = (to: string) => objectView(workspace, object, view, 'calendar', { ...params, month: to })
-
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Link href={link(shift(month, -1))} className="rounded-hs border border-line px-2 py-1 no-underline">
+          <Link href={monthHref(shift(month, -1))} className="rounded-hs border border-line px-2 py-1 no-underline">
             ← Earlier
           </Link>
           <h2 className="font-medium">{monthLabel(month)}</h2>
-          <Link href={link(shift(month, 1))} className="rounded-hs border border-line px-2 py-1 no-underline">
+          <Link href={monthHref(shift(month, 1))} className="rounded-hs border border-line px-2 py-1 no-underline">
             Later →
           </Link>
         </div>
@@ -155,7 +155,7 @@ export const CalendarGrid = ({
                 {on.slice(0, PER_DAY).map((entry) => (
                   <Link
                     key={entry.id}
-                    href={recordPath(workspace, object, entry.id)}
+                    href={entry.href}
                     title={entry.displayName}
                     className="truncate rounded-hs bg-accent-subtle px-1.5 py-0.5 text-small text-link no-underline"
                   >

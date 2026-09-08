@@ -17,7 +17,7 @@ import { CORS_HEADERS } from '~/server/edge.ts'
  *  an entry somebody added earlier rather than leaving a meeting nobody is coming to.
  *
  *  Static segment before the dynamic one, so /b/ics/:token never collides with
- *  /b/:workspace/:slug. */
+ *  /b/:account/:slug. */
 
 export const dynamic = 'force-dynamic'
 

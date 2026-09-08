@@ -3,14 +3,15 @@ import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type AttributionInput } from './attribution.ts'
-import { assertCanWrite, type WorkspaceContext } from './context.ts'
+import { assertCanWrite, type AccountContext } from './context.ts'
 import { readSchema, type FormField } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
-import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { mapAnswersToColumns, upsertCapturedPerson } from './people.ts'
 import { aliasVisitor } from './stitch.ts'
 import {
+  DEFAULT_WEEKLY,
   computeSlots,
   dayKey,
   readRanges,
@@ -57,16 +58,16 @@ export const bookingFields = (questions: FormField[]): FormField[] => [
 // Pages
 // ---------------------------------------------------------------------------
 
-export type BookingKind = 'one_on_one' | 'round_robin'
+export type BookingKind = 'one_on_one' | 'round_robin' | 'collective'
 export type BookingLocation = 'zoom' | 'google_meet' | 'phone' | 'custom'
 export type BookingState = 'confirmed' | 'cancelled' | 'rescheduled'
 
 /** What a visitor is allowed to know about a page. Deliberately without the
  *  templates: an event title is internal and can name a deal. */
 export type PublicBookingPage = {
-  workspaceId: string
-  workspaceSlug: string
-  workspaceName: string
+  accountId: string
+  accountSlug: string
+  accountName: string
   bookingPageId: string
   slug: string
   name: string
@@ -90,9 +91,9 @@ export type PublicBookingPage = {
 }
 
 type PublicPageRow = {
-  workspace_id: string
-  workspace_slug: string
-  workspace_name: string
+  account_id: string
+  account_slug: string
+  account_name: string
   booking_page_id: string
   slug: string
   name: string
@@ -112,22 +113,22 @@ type PublicPageRow = {
   host_names: string[] | null
 }
 
-/** The one question the public edge asks before it has a workspace, through the
+/** The one question the public edge asks before it has a account, through the
  *  same security-definer path a form uses. There is no route from here to a
  *  record. */
 export const publicBookingPage = async (
-  workspaceSlug: string,
+  accountSlug: string,
   slug: string,
 ): Promise<PublicBookingPage | null> => {
   const rows = await appDb.execute<PublicPageRow>(
-    sql`select * from rawr.public_booking_page(${workspaceSlug}, ${slug})`,
+    sql`select * from rawr.public_booking_page(${accountSlug}, ${slug})`,
   )
   const row = rows[0]
   if (!row) return null
   return {
-    workspaceId: row.workspace_id,
-    workspaceSlug: row.workspace_slug,
-    workspaceName: row.workspace_name,
+    accountId: row.account_id,
+    accountSlug: row.account_slug,
+    accountName: row.account_name,
     bookingPageId: row.booking_page_id,
     slug: row.slug,
     name: row.name,
@@ -148,7 +149,7 @@ export const publicBookingPage = async (
   }
 }
 
-/** Everything about a page, including the templates. Read under a workspace scope,
+/** Everything about a page, including the templates. Read under a account scope,
  *  so this is the shape the confirmation path and the admin screens use. */
 export type BookingPageConfig = PublicBookingPage & {
   ownerId: string | null
@@ -158,7 +159,7 @@ export type BookingPageConfig = PublicBookingPage & {
 }
 
 const PAGE_COLUMNS = sql`
-  p.workspace_id, w.slug as workspace_slug, w.name as workspace_name, p.id as booking_page_id,
+  p.account_id, w.slug as account_slug, w.name as account_name, p.id as booking_page_id,
   p.slug, p.name, p.kind, p.owner_id, p.duration_minutes, p.buffer_before_minutes,
   p.buffer_after_minutes, p.min_notice_minutes, p.max_horizon_days, p.granularity_minutes,
   p.location, p.location_detail, p.title_tpl, p.description_tpl, p.company_fallback,
@@ -178,9 +179,9 @@ type ConfigRow = PublicPageRow & {
 }
 
 const toConfig = (row: ConfigRow): BookingPageConfig => ({
-  workspaceId: row.workspace_id,
-  workspaceSlug: row.workspace_slug,
-  workspaceName: row.workspace_name,
+  accountId: row.account_id,
+  accountSlug: row.account_slug,
+  accountName: row.account_name,
   bookingPageId: row.booking_page_id,
   slug: row.slug,
   name: row.name,
@@ -207,16 +208,16 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
 const readConfig = async (tx: Tx, pageId: string): Promise<BookingPageConfig | null> => {
   const [row] = await tx.execute<ConfigRow>(sql`
     select ${PAGE_COLUMNS} from booking_page p
-      join workspace w on w.id = p.workspace_id
+      join account w on w.id = p.account_id
      where p.id = ${pageId} limit 1`)
   return row ? toConfig(row) : null
 }
 
 export const readBookingPage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
 ): Promise<BookingPageConfig | null> =>
-  isUuid(pageId) ? withWorkspace(ctx, (tx) => readConfig(tx, pageId)) : null
+  isUuid(pageId) ? withAccount(ctx, (tx) => readConfig(tx, pageId)) : null
 
 // ---------------------------------------------------------------------------
 // Hosts and availability
@@ -227,6 +228,9 @@ export type HostAvailability = {
   name: string
   email: string
   weight: number
+  /** Collective only: whether this host has to be free for a time to be offered.
+   *  Always true on the other kinds, where each host stands alone. */
+  isRequired: boolean
   lastAssignedAt: Date | null
   timezone: string
   weekly: WeeklyRules
@@ -249,6 +253,7 @@ type HostRow = {
   name: string
   email: string
   weight: number
+  is_required: boolean
   last_assigned_at: Date | string | null
   timezone: string | null
   weekly: unknown
@@ -279,13 +284,13 @@ const asDate = (value: Date | string | null): Date | null =>
 /** Everything the availability computation needs about the people on a page, in
  *  four queries rather than four per host. */
 export const readPageHosts = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
   window: { from: Date; to: Date },
 ): Promise<HostAvailability[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const hosts = await tx.execute<HostRow>(sql`
-      select h.user_id, u.name, u.email, h.weight, h.last_assigned_at,
+      select h.user_id, u.name, u.email, h.weight, h.is_required, h.last_assigned_at,
              a.timezone, a.weekly,
              g.provider, g.calendar_id, g.state as grant_state, g.last_error
         from booking_host h
@@ -305,10 +310,13 @@ export const readPageHosts = async (
          where user_id in (${idList(ids)})
            and day between ${dayKey(window.from, 'UTC')}::date - 1
                        and ${dayKey(window.to, 'UTC')}::date + 1`),
-      tx.execute<{ host_user_id: string; starts_at: Date | string; ends_at: Date | string }>(sql`
-        select host_user_id, starts_at, ends_at
-          from booking
-         where host_user_id in (${idList(ids)}) and state = 'confirmed'
+      // booking_participant rather than booking: on a collective page most people
+      // in the room did not organise the meeting, and a commitment is a commitment.
+      // Rows exist only while the booking is confirmed, so no state test is needed.
+      tx.execute<{ user_id: string; starts_at: Date | string; ends_at: Date | string }>(sql`
+        select user_id, starts_at, ends_at
+          from booking_participant
+         where user_id in (${idList(ids)})
            and starts_at < ${ts(window.to)} and ends_at > ${ts(window.from)}`),
       tx.execute<{ host_user_id: string; n: string }>(sql`
         select host_user_id, count(*) as n
@@ -331,9 +339,9 @@ export const readPageHosts = async (
 
     const busyByUser = new Map<string, Interval[]>()
     for (const row of busy) {
-      const list = busyByUser.get(row.host_user_id) ?? []
+      const list = busyByUser.get(row.user_id) ?? []
       list.push({ start: new Date(row.starts_at), end: new Date(row.ends_at) })
-      busyByUser.set(row.host_user_id, list)
+      busyByUser.set(row.user_id, list)
     }
 
     const countByUser = new Map(counts.map((row) => [row.host_user_id, Number(row.n)]))
@@ -343,9 +351,14 @@ export const readPageHosts = async (
       name: host.name,
       email: host.email,
       weight: host.weight,
+      isRequired: host.is_required,
       lastAssignedAt: asDate(host.last_assigned_at),
       timezone: host.timezone ?? 'America/Los_Angeles',
-      weekly: readWeekly(host.weekly),
+      // The same fallback the working-hours screen shows. Without it that screen
+      // displayed nine to five for somebody with no row, while the engine read
+      // nothing and held every slot back: hours on screen, an empty calendar in
+      // public, and no way to tell from either which one was lying.
+      weekly: host.weekly === null ? DEFAULT_WEEKLY : readWeekly(host.weekly),
       overrides: overridesByUser.get(host.user_id) ?? new Map(),
       provider: host.provider ?? 'google',
       calendarId: host.calendar_id ?? 'primary',
@@ -369,7 +382,7 @@ const grantProblem = (host: HostRow): string | null => {
   if (host.grant_state === 'degraded') {
     return `${host.name}'s calendar is failing: ${host.last_error ?? 'no reason recorded'}`
   }
-  if (Object.keys(readWeekly(host.weekly)).length === 0) {
+  if (host.weekly !== null && Object.keys(readWeekly(host.weekly)).length === 0) {
     return `${host.name} has no working hours set, so there is nothing to offer.`
   }
   return null
@@ -391,6 +404,7 @@ export type Offer = {
 export type OfferInput = {
   page: Pick<
     BookingPageConfig,
+    | 'kind'
     | 'durationMinutes'
     | 'bufferBeforeMinutes'
     | 'bufferAfterMinutes'
@@ -412,12 +426,28 @@ export type OfferInput = {
 /** Which instants are offerable, and by whom.
  *
  *  Per host: their own windows minus their own commitments, computed in their own
- *  timezone. Then the union across hosts, because a round robin offers a slot if
- *  anybody can take it. A hold reserves capacity rather than the slot itself, so on
- *  a page with three free hosts it takes three holds to close an hour. */
+ *  timezone. Then across hosts, and this is where the kinds part company.
+ *
+ *  A round robin takes the union: the slot is offered if anybody can take it, and a
+ *  hold reserves capacity rather than the slot, so on a page with three free hosts
+ *  it takes three holds to close an hour.
+ *
+ *  A collective takes the intersection of the required hosts: the meeting is the
+ *  whole panel, so a time with one of them missing is not that meeting. There is
+ *  one meeting to take, so one hold closes it. Optional hosts ride along wherever
+ *  they are free and never hold the calendar back. */
 export const computeOffer = (input: OfferInput): Offer => {
   const byInstant = new Map<number, string[]>()
   const problems: string[] = []
+  const collective = input.page.kind === 'collective'
+  const required = collective ? input.hosts.filter((host) => host.isRequired) : []
+
+  if (collective && required.length === 0) {
+    return {
+      slots: [],
+      problems: ['This page needs at least one required host before it can offer a time.'],
+    }
+  }
 
   for (const host of input.hosts) {
     if (host.unavailableReason) {
@@ -459,7 +489,14 @@ export const computeOffer = (input: OfferInput): Offer => {
   const slots: OfferedSlot[] = []
   for (const [at, hostUserIds] of byInstant) {
     const held = input.holds.get(at) ?? 0
-    if (hostUserIds.length <= held) continue
+    if (collective) {
+      const present = new Set(hostUserIds)
+      if (!required.every((host) => present.has(host.userId))) continue
+      // One meeting, so one hold closes it.
+      if (held > 0) continue
+    } else if (hostUserIds.length <= held) {
+      continue
+    }
     slots.push({ startsAt: new Date(at), hostUserIds })
   }
   slots.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
@@ -518,11 +555,11 @@ export const assignHost = (candidates: Candidate[], seed: string): string | null
 export const HOLD_MINUTES = 5
 
 export const readHolds = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
   window: { from: Date; to: Date },
 ): Promise<Map<number, number>> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ starts_at: Date | string; n: string }>(sql`
       select starts_at, count(*) as n from booking_hold
        where booking_page_id = ${pageId} and expires_at > now()
@@ -532,26 +569,53 @@ export const readHolds = async (
   })
 
 export const placeHold = async (
-  workspaceId: string,
+  accountId: string,
   pageId: string,
   startsAt: Date,
 ): Promise<{ token: string; expiresAt: Date }> => {
-  const ctx = publicEdgeContext(workspaceId)
+  const ctx = publicEdgeContext(accountId)
   const token = randomToken(18)
   const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000)
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     // Expired holds are cleared on the way past rather than by a job: the only
     // query that cares is this one, and it is the only writer.
     await tx.execute(sql`delete from booking_hold where expires_at < now() - interval '1 hour'`)
     await tx.execute(sql`
-      insert into booking_hold (workspace_id, booking_page_id, starts_at, token, expires_at)
-      values (${workspaceId}, ${pageId}, ${ts(startsAt)}, ${token}, ${ts(expiresAt)})`)
+      insert into booking_hold (account_id, booking_page_id, starts_at, token, expires_at)
+      values (${accountId}, ${pageId}, ${ts(startsAt)}, ${token}, ${ts(expiresAt)})`)
   })
   return { token, expiresAt }
 }
 
-export const releaseHold = async (workspaceId: string, token: string): Promise<void> => {
-  await withWorkspace(publicEdgeContext(workspaceId), (tx) =>
+/** The hold for a page that has no script: one token, carried in the URL, moved
+ *  from slot to slot as the person changes their mind and extended each time the
+ *  page re-renders while they fill the questions in.
+ *
+ *  Without this the hosted page — the one in every email signature — held nothing
+ *  at all, and only the Webflow embed ever reserved a slot. Reusing the token
+ *  rather than inserting per render is what stops a refresh stacking holds. */
+export const renewHold = async (
+  accountId: string,
+  pageId: string,
+  startsAt: Date,
+  token: string | null,
+): Promise<{ token: string; expiresAt: Date }> => {
+  if (token) {
+    const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000)
+    const moved = await withAccount(publicEdgeContext(accountId), (tx) =>
+      tx.execute(sql`
+        update booking_hold
+           set starts_at = ${ts(startsAt)}, expires_at = ${ts(expiresAt)}
+         where token = ${token} and booking_page_id = ${pageId} and expires_at > now()
+        returning token`),
+    )
+    if (moved.length > 0) return { token, expiresAt }
+  }
+  return placeHold(accountId, pageId, startsAt)
+}
+
+export const releaseHold = async (accountId: string, token: string): Promise<void> => {
+  await withAccount(publicEdgeContext(accountId), (tx) =>
     tx.execute(sql`delete from booking_hold where token = ${token}`),
   )
 }
@@ -577,13 +641,28 @@ export type Provisioned = {
   calendarId: string | null
   conferenceUrl: string | null
   conferenceRef: string | null
+  /** One per host in `alsoOn`, in any order. Their invitations, so a cancellation
+   *  can withdraw each rather than orphaning it. */
+  alsoWritten?: { userId: string; calendarEventId: string | null; calendarId: string | null }[]
   /** Non-fatal. A Zoom outage lands here; the meeting still happens. F2 §4. */
   warnings: string[]
 }
 
+/** One person the meeting commits, as the provisioner needs them. */
+export type ProvisionHost = {
+  userId: string
+  name: string
+  email: string
+  calendarId: string
+  provider: 'google' | 'dev'
+}
+
 export type ProvisionRequest = {
   page: BookingPageConfig
-  host: { userId: string; name: string; email: string; calendarId: string; provider: 'google' | 'dev' }
+  /** The organiser: whose conference it is, and whose event carries the booking. */
+  host: ProvisionHost
+  /** Everybody else the meeting commits, on a collective page. Empty otherwise. */
+  alsoOn: ProvisionHost[]
   startsAt: Date
   endsAt: Date
   attendee: Attendee
@@ -618,6 +697,15 @@ export type ConfirmInput = {
   visitorId?: string | null | undefined
 }
 
+/** A calendar entry that belongs to nobody now: written for a booking that has
+ *  since been cancelled or moved. Returned rather than deleted here, because
+ *  withdrawing it is a call to Google and nothing in this layer talks to Google. */
+export type OrphanedEvent = {
+  userId: string
+  calendarEventId: string
+  calendarId: string
+}
+
 export type ConfirmResult = {
   bookingId: string
   hostUserId: string
@@ -630,8 +718,33 @@ export type ConfirmResult = {
   conferenceUrl: string | null
   cancelToken: string
   rescheduleToken: string
+  /** The invitations the booking this one replaced had written for its other
+   *  participants. The organiser's own event is patched or replaced by the caller;
+   *  these have to be withdrawn. */
+  releasedEvents: OrphanedEvent[]
   warnings: string[]
   errors?: FieldError[] | undefined
+}
+
+/** Frees everything a booking committed, and hands back the invitations that now
+ *  belong to nobody. Deleting the rows is what makes the time bookable again. */
+const releaseParticipants = async (tx: Tx, bookingId: string): Promise<OrphanedEvent[]> => {
+  const rows = await tx.execute<{
+    user_id: string
+    calendar_event_id: string | null
+    calendar_id: string | null
+    is_organiser: boolean
+  }>(sql`
+    delete from booking_participant where booking_id = ${bookingId}
+    returning user_id, calendar_event_id, calendar_id, is_organiser`)
+
+  return rows
+    .filter((row) => !row.is_organiser && row.calendar_event_id && row.calendar_id)
+    .map((row) => ({
+      userId: row.user_id,
+      calendarEventId: row.calendar_event_id as string,
+      calendarId: row.calendar_id as string,
+    }))
 }
 
 /** F2 §4, steps 2 to 7, in one transaction.
@@ -646,7 +759,7 @@ export type ConfirmResult = {
  *  with caches bypassed. This function re-checks Rawr's own bookings and takes an
  *  advisory lock on the slot, but it cannot know what Google said a moment ago. */
 export const confirmBooking = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: ConfirmInput,
   hosts: HostAvailability[],
   provision: Provisioner,
@@ -670,7 +783,7 @@ export const confirmBooking = async (
   const endsAt = new Date(input.startsAt.getTime() + input.page.durationMinutes * 60_000)
   const attribution = readAttribution(input.attribution)
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     // Serialises every attempt on this page and this instant, so two visitors
     // racing for the last slot are resolved rather than both being told yes. The
     // partial unique index on (host, starts_at) is the backstop underneath it.
@@ -681,19 +794,41 @@ export const confirmBooking = async (
     const candidateIds = hosts.map((host) => host.userId)
     if (candidateIds.length === 0) throw new SlotGoneError()
 
+    // The meeting being moved releases its own commitments first, so a reschedule
+    // is never blocked by the booking it is replacing. Inside the transaction, so
+    // a failed insert puts them back.
+    const releasedEvents = input.rescheduleOf
+      ? await releaseParticipants(tx, input.rescheduleOf)
+      : []
+    if (input.rescheduleOf) {
+      await tx.execute(sql`
+        update booking set state = 'rescheduled', updated_at = now()
+         where id = ${input.rescheduleOf} and state = 'confirmed'`)
+    }
+
     // Rawr's own commitments, re-read now rather than trusted from the page load.
     // Overlap, not equality: a sixty minute meeting at ten blocks a slot at half past.
-    const taken = await tx.execute<{ host_user_id: string }>(sql`
-      select host_user_id from booking
-       where state = 'confirmed' and host_user_id in (${idList(candidateIds)})
+    const taken = await tx.execute<{ user_id: string }>(sql`
+      select user_id from booking_participant
+       where user_id in (${idList(candidateIds)})
          and starts_at < ${ts(endsAt)} and ends_at > ${ts(input.startsAt)}`)
-    const busy = new Set(taken.map((row) => row.host_user_id))
+    const busy = new Set(taken.map((row) => row.user_id))
 
     const free = hosts.filter((host) => !busy.has(host.userId))
     if (free.length === 0) throw new SlotGoneError()
 
+    const collective = input.page.kind === 'collective'
+    const required = hosts.filter((host) => host.isRequired)
+    // A panel with somebody missing is not the meeting that was asked for, so it
+    // is refused as a slot that has gone rather than quietly booked short.
+    if (collective && (required.length === 0 || required.some((host) => busy.has(host.userId)))) {
+      throw new SlotGoneError()
+    }
+
+    // Who takes it. On a collective the organiser rotates through the required
+    // hosts by the same share rule, so ownership of the lead is still shared out.
     const chosenId = assignHost(
-      free.map((host) => ({
+      (collective ? required : free).map((host) => ({
         userId: host.userId,
         weight: host.weight,
         lastAssignedAt: host.lastAssignedAt,
@@ -703,6 +838,10 @@ export const confirmBooking = async (
     )
     const host = free.find((candidate) => candidate.userId === chosenId)
     if (!host) throw new SlotGoneError()
+
+    // Everybody the meeting commits: the whole free party on a collective page,
+    // the assigned host alone on the others.
+    const party = collective ? free : [host]
 
     const [first = '', ...rest] = name.split(/\s+/).filter(Boolean)
     const mapped = mapAnswersToColumns(fields, answers)
@@ -737,6 +876,15 @@ export const confirmBooking = async (
         calendarId: host.calendarId,
         provider: host.provider,
       },
+      alsoOn: party
+        .filter((member) => member.userId !== host.userId)
+        .map((member) => ({
+          userId: member.userId,
+          name: member.name,
+          email: member.email,
+          calendarId: member.calendarId,
+          provider: member.provider,
+        })),
       startsAt: input.startsAt,
       endsAt,
       attendee: { name, email, timezone: input.attendeeTimezone },
@@ -747,11 +895,11 @@ export const confirmBooking = async (
     })
 
     const [row] = await tx.execute<{ id: string }>(sql`
-      insert into booking (workspace_id, booking_page_id, host_user_id, contact_id, company_id,
+      insert into booking (account_id, booking_page_id, host_user_id, contact_id, company_id,
                            starts_at, ends_at, attendee_timezone, attendee_name, attendee_email,
                            answers, conference_url, conference_ref, calendar_event_id, calendar_id,
                            state, reschedule_of, cancel_token, reschedule_token)
-      values (${ctx.workspaceId}, ${input.page.bookingPageId}, ${host.userId},
+      values (${ctx.accountId}, ${input.page.bookingPageId}, ${host.userId},
               ${linked.contactId}, ${linked.companyId}, ${ts(input.startsAt)}, ${ts(endsAt)},
               ${input.attendeeTimezone}, ${name || email}, ${email},
               ${JSON.stringify(answers)}::jsonb, ${provisioned.conferenceUrl},
@@ -766,18 +914,33 @@ export const confirmBooking = async (
     // and is caught anyway rather than trusted.
     if (!row) throw new SlotGoneError()
 
+    // One row per person in the room, including the organiser. This is what makes
+    // a double booking unreachable for a host who did not organise the meeting,
+    // and the same unique index refuses it if two collectives race.
+    const written = new Map(
+      (provisioned.alsoWritten ?? []).map((event) => [event.userId, event]),
+    )
+    for (const member of party) {
+      const own = member.userId === host.userId
+      const event = own
+        ? { calendarEventId: provisioned.calendarEventId, calendarId: provisioned.calendarId }
+        : (written.get(member.userId) ?? { calendarEventId: null, calendarId: null })
+      const [seat] = await tx.execute<{ user_id: string }>(sql`
+        insert into booking_participant (account_id, booking_id, user_id, starts_at, ends_at,
+                                         calendar_event_id, calendar_id, is_organiser)
+        values (${ctx.accountId}, ${row.id}, ${member.userId}, ${ts(input.startsAt)},
+                ${ts(endsAt)}, ${event.calendarEventId}, ${event.calendarId}, ${own})
+        on conflict do nothing
+        returning user_id`)
+      if (!seat) throw new SlotGoneError()
+    }
+
     await tx.execute(sql`
       update booking_host set last_assigned_at = now()
        where booking_page_id = ${input.page.bookingPageId} and user_id = ${host.userId}`)
 
     if (input.holdToken) {
       await tx.execute(sql`delete from booking_hold where token = ${input.holdToken}`)
-    }
-
-    if (input.rescheduleOf) {
-      await tx.execute(sql`
-        update booking set state = 'rescheduled', updated_at = now()
-         where id = ${input.rescheduleOf} and state = 'confirmed'`)
     }
 
     if (input.visitorId && linked.contactId) {
@@ -826,6 +989,7 @@ export const confirmBooking = async (
     return {
       bookingId: row.id,
       hostUserId: host.userId,
+      releasedEvents,
       hostName: host.name,
       hostEmail: host.email,
       startsAt: input.startsAt,
@@ -843,6 +1007,7 @@ export const confirmBooking = async (
 const emptyResult = (input: ConfirmInput): ConfirmResult => ({
   bookingId: '',
   hostUserId: '',
+  releasedEvents: [],
   hostName: '',
   hostEmail: '',
   startsAt: input.startsAt,
@@ -878,11 +1043,11 @@ const resolveCompanyName = async (
 
 export type BookingRecord = {
   id: string
-  workspaceId: string
+  accountId: string
   bookingPageId: string
   pageName: string
   pageSlug: string
-  workspaceSlug: string
+  accountSlug: string
   hostUserId: string
   hostName: string
   hostEmail: string
@@ -906,11 +1071,11 @@ export type BookingRecord = {
 
 type BookingRow = {
   id: string
-  workspace_id: string
+  account_id: string
   booking_page_id: string
   page_name: string
   page_slug: string
-  workspace_slug: string
+  account_slug: string
   host_user_id: string
   host_name: string
   host_email: string
@@ -933,8 +1098,8 @@ type BookingRow = {
 }
 
 const BOOKING_COLUMNS = sql`
-  b.id, b.workspace_id, b.booking_page_id, p.name as page_name, p.slug as page_slug,
-  w.slug as workspace_slug, b.host_user_id, u.name as host_name, u.email as host_email,
+  b.id, b.account_id, b.booking_page_id, p.name as page_name, p.slug as page_slug,
+  w.slug as account_slug, b.host_user_id, u.name as host_name, u.email as host_email,
   b.contact_id, b.company_id, b.starts_at, b.ends_at, b.attendee_name, b.attendee_email,
   b.attendee_timezone, b.answers, b.conference_url, b.conference_ref, b.calendar_event_id,
   b.calendar_id, b.state, b.cancel_token, b.reschedule_token, b.cancel_reason`
@@ -942,16 +1107,16 @@ const BOOKING_COLUMNS = sql`
 const BOOKING_JOINS = sql`
   from booking b
   join booking_page p on p.id = b.booking_page_id
-  join workspace w on w.id = b.workspace_id
+  join account w on w.id = b.account_id
   join user_account u on u.id = b.host_user_id`
 
 const toBooking = (row: BookingRow): BookingRecord => ({
   id: row.id,
-  workspaceId: row.workspace_id,
+  accountId: row.account_id,
   bookingPageId: row.booking_page_id,
   pageName: row.page_name,
   pageSlug: row.page_slug,
-  workspaceSlug: row.workspace_slug,
+  accountSlug: row.account_slug,
   hostUserId: row.host_user_id,
   hostName: row.host_name,
   hostEmail: row.host_email,
@@ -974,10 +1139,10 @@ const toBooking = (row: BookingRow): BookingRecord => ({
 })
 
 export const readBooking = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
 ): Promise<BookingRecord | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<BookingRow>(
       sql`select ${BOOKING_COLUMNS} ${BOOKING_JOINS} where b.id = ${id} limit 1`,
     )
@@ -989,7 +1154,7 @@ export const readBooking = async (
  *  standing, so a retry that overlaps a cancellation or a reschedule writes
  *  nothing and says so. */
 export const attachConference = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   conference: { url: string; ref: string | null },
 ): Promise<boolean> =>
@@ -1020,31 +1185,38 @@ export const bookingForToken = async (
   token: string,
 ): Promise<BookingRecord | null> => {
   if (!token || token.length < 20) return null
-  const rows = await appDb.execute<{ workspace_id: string; booking_id: string }>(
+  const rows = await appDb.execute<{ account_id: string; booking_id: string }>(
     sql`select * from rawr.booking_for_token(${purpose}, ${token})`,
   )
   const found = rows[0]
   if (!found) return null
-  return readBooking(publicEdgeContext(found.workspace_id), found.booking_id)
+  return readBooking(publicEdgeContext(found.account_id), found.booking_id)
 }
 
 // ---------------------------------------------------------------------------
 // Cancelling
 // ---------------------------------------------------------------------------
 
-export type Withdrawn = { alreadyDone: boolean; booking: BookingRecord }
+export type Withdrawn = {
+  alreadyDone: boolean
+  booking: BookingRecord
+  /** The invitations written for everybody who was not the organiser. Withdrawing
+   *  them is the caller's job, for the same reason the organiser's own event is. */
+  releasedEvents: OrphanedEvent[]
+}
 
 /** Idempotent by design: clicking cancel twice cancels once and reports the same
  *  thing both times, because a person who is not sure it worked will click again.
  *  Removing the calendar event is the caller's job and is also idempotent. */
 export const cancelBooking = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   input: { reason?: string | null; by: 'attendee' | 'host' } = { by: 'host' },
 ): Promise<Withdrawn> => {
   const existing = await readBooking(ctx, id)
   if (!existing) throw new Error('That booking no longer exists.')
-  if (existing.state !== 'confirmed') return { alreadyDone: true, booking: existing }
+  if (existing.state !== 'confirmed')
+    return { alreadyDone: true, booking: existing, releasedEvents: [] }
 
   return mutate<Withdrawn>(ctx, 'booking', async (tx) => {
     const updated = await tx.execute<{ id: string }>(sql`
@@ -1056,10 +1228,17 @@ export const cancelBooking = async (
     // Lost the race with another click. The first one did the work.
     if (updated.length === 0) {
       return {
-        result: { alreadyDone: true, booking: { ...existing, state: 'cancelled' as BookingState } },
+        result: {
+          alreadyDone: true,
+          booking: { ...existing, state: 'cancelled' as BookingState },
+          releasedEvents: [],
+        },
         audit: { entity: 'booking', entityId: id, action: 'cancel', after: { noop: true } },
       }
     }
+
+    // What actually frees the time again, for everybody the meeting committed.
+    const releasedEvents = await releaseParticipants(tx, id)
 
     await recordActivity(tx, ctx, {
       type: 'booking',
@@ -1085,6 +1264,7 @@ export const cancelBooking = async (
       result: {
         alreadyDone: false,
         booking: { ...existing, state: 'cancelled' as BookingState },
+        releasedEvents,
       },
       audit: {
         entity: 'booking',
@@ -1118,7 +1298,7 @@ export type BookingListRow = {
  *  on (starts_at, id) so a page with four thousand past bookings opens as fast as
  *  one with three. */
 export const listBookings = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     pageId?: string | null | undefined
     hostUserId?: string | null | undefined
@@ -1131,7 +1311,7 @@ export const listBookings = async (
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
   const past = input.when === 'past'
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       page_name: string

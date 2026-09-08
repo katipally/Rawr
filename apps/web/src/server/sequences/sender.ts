@@ -1,4 +1,4 @@
-import type { ClaimedRun, WorkspaceContext } from '@rawr/db'
+import type { ClaimedRun, AccountContext } from '@rawr/db'
 
 /** What it takes to put one step on the wire.
  *
@@ -27,5 +27,5 @@ export type SentMessage = {
 
 export type Sender = {
   name: 'gmail'
-  send: (ctx: WorkspaceContext, run: ClaimedRun, step: OutgoingStep) => Promise<SentMessage>
+  send: (ctx: AccountContext, run: ClaimedRun, step: OutgoingStep) => Promise<SentMessage>
 }

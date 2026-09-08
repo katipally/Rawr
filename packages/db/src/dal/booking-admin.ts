@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
-import { assertCanWrite, ForbiddenError, type WorkspaceContext } from './context.ts'
+import { assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
 import { assertSchemaIsUsable } from './form-schema.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 import {
   readQuestions,
   type BookingKind,
@@ -14,21 +14,21 @@ import { DEFAULT_WEEKLY, isKnownTimezone, readRanges, readWeekly, type TimeRange
 /** The admin half of F2: pages, who hosts them, working hours, and the calendar
  *  connections everything else depends on.
  *
- *  One rule runs through all of it. A round robin page belongs to the workspace and
+ *  One rule runs through all of it. A round robin page belongs to the account and
  *  is an admin's to shape; a one-on-one page is somebody's own link and is theirs,
  *  with no admin rights required. F2 §6. That is finer than the four object-level
  *  roles can express, so it is checked here, in the layer, and not by hiding a
  *  button. */
 
-const assertOwnPageOrAdmin = (ctx: WorkspaceContext, ownerId: string | null): void => {
-  if (ctx.role === 'admin') return
+const assertOwnPageOrAdmin = (ctx: AccountContext, ownerId: string | null): void => {
+  if (isAdmin(ctx)) return
   if (ownerId && ownerId === ctx.actorId) return
-  throw new ForbiddenError(ctx.role, 'change a shared booking page')
+  throw new ForbiddenError('account', 'change a shared booking page')
 }
 
-const assertOwnScheduleOrAdmin = (ctx: WorkspaceContext, userId: string): void => {
-  if (ctx.role === 'admin' || ctx.actorId === userId) return
-  throw new ForbiddenError(ctx.role, "change another person's availability")
+const assertOwnScheduleOrAdmin = (ctx: AccountContext, userId: string): void => {
+  if (isAdmin(ctx) || ctx.actorId === userId) return
+  throw new ForbiddenError('account', "change another person's availability")
 }
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
@@ -63,8 +63,8 @@ export type BookingPageSummary = {
 
 /** Shared pages, plus the person's own links. Somebody else's personal link is not
  *  listed, because it is theirs. */
-export const listBookingPages = async (ctx: WorkspaceContext): Promise<BookingPageSummary[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listBookingPages = async (ctx: AccountContext): Promise<BookingPageSummary[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       slug: string
@@ -91,7 +91,7 @@ export const listBookingPages = async (ctx: WorkspaceContext): Promise<BookingPa
         left join booking_host h on h.booking_page_id = p.id
         left join calendar_grant g on g.user_id = h.user_id
         left join booking b on b.booking_page_id = p.id
-       where p.kind = 'round_robin' or p.owner_id = ${ctx.actorId}
+       where p.kind <> 'one_on_one' or p.owner_id = ${ctx.actorId}
        group by p.id, o.name
        order by p.kind, p.name`)
 
@@ -134,8 +134,9 @@ export type SaveBookingPage = {
   isActive: boolean
   redirectUrl?: string | null | undefined
   confirmationCopy?: string | null | undefined
-  /** Round robin only. Left undefined the host list is untouched. */
-  hosts?: { userId: string; weight: number }[] | undefined
+  /** Shared pages only. Left undefined the host list is untouched. `isRequired`
+   *  is read on a collective and ignored elsewhere, where each host stands alone. */
+  hosts?: { userId: string; weight: number; isRequired?: boolean }[] | undefined
 }
 
 export const DEFAULT_TITLE_TPL = 'Discovery Session with Datasaur <> {{company.name}}'
@@ -146,7 +147,7 @@ export const DEFAULT_DESCRIPTION_TPL =
  *  transaction. A page that cannot be published is refused here rather than
  *  discovered by a visitor looking at an empty calendar. */
 export const saveBookingPage = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: SaveBookingPage,
 ): Promise<string> => {
   assertCanWrite(ctx, 'booking_page')
@@ -175,7 +176,7 @@ export const saveBookingPage = async (
 
   const ownerId =
     input.kind === 'one_on_one'
-      ? ctx.role === 'admin'
+      ? isAdmin(ctx)
         ? (input.ownerId ?? ctx.actorId)
         : ctx.actorId
       : null
@@ -183,8 +184,14 @@ export const saveBookingPage = async (
   if (input.kind === 'one_on_one' && !ownerId) {
     throw new Error('A personal booking link needs an owner, and this request has no signed-in user.')
   }
-  if (input.kind === 'round_robin' && ctx.role !== 'admin') {
-    throw new ForbiddenError(ctx.role, 'create or change a shared round robin page')
+  if (input.kind !== 'one_on_one' && !isAdmin(ctx)) {
+    throw new ForbiddenError('account', 'create or change a shared booking page')
+  }
+  // A collective is the intersection of its required hosts, so with none of them
+  // it offers nothing at all. Refused here rather than discovered by a visitor
+  // looking at an empty calendar.
+  if (input.kind === 'collective' && input.hosts && !input.hosts.some((host) => host.isRequired !== false)) {
+    throw new Error('A collective page needs at least one required host.')
   }
 
   return mutate(ctx, 'booking_page', async (tx) => {
@@ -194,9 +201,13 @@ export const saveBookingPage = async (
       assertOwnPageOrAdmin(ctx, before.owner_id)
       // Changing a personal link into a shared one, or the reverse, would move it
       // between two different permission models with live bookings attached.
-      if (before.kind !== input.kind) {
+      // Personal and shared are two different permission models with live
+      // bookings attached, so that boundary is not crossed. Round robin and
+      // collective are both shared and differ only in how availability is
+      // combined, so switching between them is an ordinary edit.
+      if ((before.kind === 'one_on_one') !== (input.kind === 'one_on_one')) {
         throw new Error(
-          'A personal link and a shared round robin are different kinds of page. Create the other kind rather than converting this one.',
+          'A personal link and a shared page are different kinds of page. Create the other kind rather than converting this one.',
         )
       }
     }
@@ -212,12 +223,12 @@ export const saveBookingPage = async (
 
     const [row] = await tx.execute<{ id: string }>(sql`
       insert into booking_page (
-        id, workspace_id, slug, name, kind, owner_id, duration_minutes,
+        id, account_id, slug, name, kind, owner_id, duration_minutes,
         buffer_before_minutes, buffer_after_minutes, min_notice_minutes, max_horizon_days,
         granularity_minutes, location, location_detail, title_tpl, description_tpl,
         company_fallback, questions, is_active, redirect_url, confirmation_copy)
       values (
-        ${input.id ?? sql`gen_random_uuid()`}, ${ctx.workspaceId}, ${input.slug}, ${input.name.trim()},
+        ${input.id ?? sql`gen_random_uuid()`}, ${ctx.accountId}, ${input.slug}, ${input.name.trim()},
         ${input.kind}, ${ownerId}, ${input.durationMinutes}, ${input.bufferBeforeMinutes},
         ${input.bufferAfterMinutes}, ${input.minNoticeMinutes}, ${input.maxHorizonDays},
         ${input.granularityMinutes}, ${input.location}, ${input.locationDetail ?? null},
@@ -272,14 +283,14 @@ const readPageForAudit = async (
  *  point at them and the round robin's trailing window still counts them. */
 const replaceHosts = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
-  hosts: { userId: string; weight: number }[],
+  hosts: { userId: string; weight: number; isRequired?: boolean }[],
 ): Promise<void> => {
   const wanted = hosts.filter((host) => host.userId)
   const ids = wanted.map((host) => host.userId)
 
-  // A host has to be a member of this workspace. Row level security makes the
+  // A host has to be a member of this account. Row level security makes the
   // membership table tenant-scoped, so an id from another tenant simply is not here.
   const members = ids.length
     ? await tx.execute<{ user_id: string }>(
@@ -290,7 +301,7 @@ const replaceHosts = async (
   const allowed = new Set(members.map((row) => row.user_id))
   const missing = ids.filter((id) => !allowed.has(id))
   if (missing.length > 0) {
-    throw new Error('One of the hosts is not a member of this workspace.')
+    throw new Error('One of the hosts is not a member of this account.')
   }
 
   await tx.execute(sql`
@@ -300,11 +311,12 @@ const replaceHosts = async (
 
   for (const host of wanted) {
     const weight = Math.min(Math.max(Math.trunc(host.weight) || 1, 1), 100)
+    const isRequired = host.isRequired !== false
     await tx.execute(sql`
-      insert into booking_host (workspace_id, booking_page_id, user_id, weight, is_active)
-      values (${ctx.workspaceId}, ${pageId}, ${host.userId}, ${weight}, true)
-      on conflict (workspace_id, booking_page_id, user_id)
-        do update set weight = excluded.weight, is_active = true`)
+      insert into booking_host (account_id, booking_page_id, user_id, weight, is_required, is_active)
+      values (${ctx.accountId}, ${pageId}, ${host.userId}, ${weight}, ${isRequired}, true)
+      on conflict (account_id, booking_page_id, user_id)
+        do update set weight = excluded.weight, is_required = excluded.is_required, is_active = true`)
   }
 }
 
@@ -313,6 +325,7 @@ export type PageHostRow = {
   name: string
   email: string
   weight: number
+  isRequired: boolean
   isActive: boolean
   grantState: string
   grantError: string | null
@@ -320,21 +333,22 @@ export type PageHostRow = {
 }
 
 export const readPageHostList = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
 ): Promise<PageHostRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       user_id: string
       name: string
       email: string
       weight: number
+      is_required: boolean
       is_active: boolean
       grant_state: string | null
       last_error: string | null
       timezone: string | null
     }>(sql`
-      select h.user_id, u.name, u.email, h.weight, h.is_active,
+      select h.user_id, u.name, u.email, h.weight, h.is_required, h.is_active,
              g.state as grant_state, g.last_error, a.timezone
         from booking_host h
         join user_account u on u.id = h.user_id
@@ -348,6 +362,7 @@ export const readPageHostList = async (
       name: row.name,
       email: row.email,
       weight: row.weight,
+      isRequired: row.is_required,
       isActive: row.is_active,
       grantState: row.grant_state ?? 'unconfigured',
       grantError: row.last_error,
@@ -356,7 +371,7 @@ export const readPageHostList = async (
   })
 
 export const setPageActive = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   pageId: string,
   isActive: boolean,
 ): Promise<void> => {
@@ -402,8 +417,8 @@ export type Schedule = {
   overrides: { day: string; isUnavailable: boolean; blocks: TimeRange[]; note: string | null }[]
 }
 
-export const readSchedule = async (ctx: WorkspaceContext, userId: string): Promise<Schedule> =>
-  withWorkspace(ctx, async (tx) => {
+export const readSchedule = async (ctx: AccountContext, userId: string): Promise<Schedule> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ timezone: string; weekly: unknown }>(
       sql`select timezone, weekly from availability where user_id = ${userId} limit 1`,
     )
@@ -433,7 +448,7 @@ export const readSchedule = async (ctx: WorkspaceContext, userId: string): Promi
   })
 
 export const saveSchedule = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { userId: string; timezone: string; weekly: unknown },
 ): Promise<void> => {
   assertCanWrite(ctx, 'availability')
@@ -456,9 +471,9 @@ export const saveSchedule = async (
       sql`select timezone, weekly from availability where user_id = ${input.userId} limit 1`,
     )
     await tx.execute(sql`
-      insert into availability (workspace_id, user_id, timezone, weekly)
-      values (${ctx.workspaceId}, ${input.userId}, ${input.timezone}, ${JSON.stringify(weekly)}::jsonb)
-      on conflict (workspace_id, user_id)
+      insert into availability (account_id, user_id, timezone, weekly)
+      values (${ctx.accountId}, ${input.userId}, ${input.timezone}, ${JSON.stringify(weekly)}::jsonb)
+      on conflict (account_id, user_id)
         do update set timezone = excluded.timezone, weekly = excluded.weekly, updated_at = now()`)
 
     return {
@@ -475,7 +490,7 @@ export const saveSchedule = async (
 }
 
 export const saveOverride = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     userId: string
     day: string
@@ -496,10 +511,10 @@ export const saveOverride = async (
 
   await mutate(ctx, 'availability', async (tx) => {
     await tx.execute(sql`
-      insert into availability_override (workspace_id, user_id, day, is_unavailable, blocks, note)
-      values (${ctx.workspaceId}, ${input.userId}, ${input.day}::date, ${input.isUnavailable},
+      insert into availability_override (account_id, user_id, day, is_unavailable, blocks, note)
+      values (${ctx.accountId}, ${input.userId}, ${input.day}::date, ${input.isUnavailable},
               ${JSON.stringify(blocks)}::jsonb, ${input.note ?? null})
-      on conflict (workspace_id, user_id, day)
+      on conflict (account_id, user_id, day)
         do update set is_unavailable = excluded.is_unavailable, blocks = excluded.blocks,
                       note = excluded.note`)
     return {
@@ -517,7 +532,7 @@ export const saveOverride = async (
 }
 
 export const clearOverride = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { userId: string; day: string },
 ): Promise<void> => {
   assertCanWrite(ctx, 'availability')
@@ -555,8 +570,8 @@ export type GrantSummary = {
   hasRefreshToken: boolean
 }
 
-export const listGrants = async (ctx: WorkspaceContext): Promise<GrantSummary[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listGrants = async (ctx: AccountContext): Promise<GrantSummary[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       user_id: string
       name: string
@@ -604,10 +619,10 @@ export type StoredGrant = {
 /** Tokens come back decrypted, so this is the only function in the codebase that
  *  returns a live credential and it is called only by the provider client. */
 export const readGrant = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   userId: string,
 ): Promise<StoredGrant | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{
       provider: 'google' | 'dev'
       calendar_id: string
@@ -640,7 +655,7 @@ export const readGrant = async (
  *  arrives: Google returns it on the first consent and not on later refreshes, so
  *  blindly writing null would break the connection on its first renewal. */
 export const saveGrant = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     userId: string
     provider: 'google' | 'dev'
@@ -654,17 +669,22 @@ export const saveGrant = async (
   assertCanWrite(ctx, 'calendar_grant')
   assertOwnScheduleOrAdmin(ctx, input.userId)
 
+  // A raw template goes through postgres.js `unsafe`, which infers no types, so a
+  // Date reaches the driver unserialised and the whole insert fails.
+  const expiresAt = input.accessTokenExpiresAt?.toISOString() ?? null
+
   await mutate(ctx, 'calendar_grant', async (tx) => {
     await tx.execute(sql`
-      insert into calendar_grant (workspace_id, user_id, provider, calendar_id, state,
+      insert into calendar_grant (account_id, user_id, provider, calendar_id, state,
                                   access_token_enc, refresh_token_enc, access_token_expires_at,
                                   scope, last_ok_at)
-      values (${ctx.workspaceId}, ${input.userId}, ${input.provider},
+      values (${ctx.accountId}, ${input.userId}, ${input.provider},
               ${input.calendarId ?? 'primary'}, 'connected',
               ${input.accessToken ? encryptToken(input.accessToken) : null},
               ${input.refreshToken ? encryptToken(input.refreshToken) : null},
-              ${input.accessTokenExpiresAt ?? null}, ${input.scope ?? null}, now())
-      on conflict (workspace_id, user_id, provider) do update set
+              ${expiresAt}::timestamptz, ${input.scope ?? null}, now())
+      on conflict (account_id, user_id) do update set
+        provider = excluded.provider,
         calendar_id = coalesce(${input.calendarId ?? null}, calendar_grant.calendar_id),
         state = 'connected',
         access_token_enc = excluded.access_token_enc,
@@ -687,14 +707,47 @@ export const saveGrant = async (
   })
 }
 
+/** Which calendar the invitations land in. Separate from `saveGrant` because that
+ *  one writes the tokens too: calling it to change only the destination would
+ *  blank a live access token and take the connection down. */
+export const setGrantCalendar = async (
+  ctx: AccountContext,
+  input: { userId: string; calendarId: string },
+): Promise<void> => {
+  assertCanWrite(ctx, 'calendar_grant')
+  assertOwnScheduleOrAdmin(ctx, input.userId)
+
+  await mutate(ctx, 'calendar_grant', async (tx) => {
+    const [before] = await tx.execute<{ calendar_id: string }>(
+      sql`select calendar_id from calendar_grant where user_id = ${input.userId} limit 1`,
+    )
+    if (!before) throw new Error('There is no calendar connected for that person.')
+
+    await tx.execute(sql`
+      update calendar_grant set calendar_id = ${input.calendarId}, updated_at = now()
+       where user_id = ${input.userId}`)
+
+    return {
+      result: undefined,
+      audit: {
+        entity: 'calendar_grant',
+        entityId: input.userId,
+        action: 'update',
+        before: { calendarId: before.calendar_id },
+        after: { calendarId: input.calendarId },
+      },
+    }
+  })
+}
+
 /** Called by the provider client when Google refuses. 'revoked' is terminal until
  *  the person reconnects; 'degraded' is a transient failure worth surfacing. Either
  *  way the host stops being offered rather than being treated as free. */
 export const recordGrantFailure = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { userId: string; error: string; revoked: boolean },
 ): Promise<void> => {
-  await withWorkspace(ctx, (tx) =>
+  await withAccount(ctx, (tx) =>
     tx.execute(sql`
       update calendar_grant
          set state = ${input.revoked ? 'revoked' : 'degraded'},
@@ -703,7 +756,7 @@ export const recordGrantFailure = async (
   )
 }
 
-export const disconnectGrant = async (ctx: WorkspaceContext, userId: string): Promise<void> => {
+export const disconnectGrant = async (ctx: AccountContext, userId: string): Promise<void> => {
   assertCanWrite(ctx, 'calendar_grant')
   assertOwnScheduleOrAdmin(ctx, userId)
   await mutate(ctx, 'calendar_grant', async (tx) => {
@@ -721,10 +774,10 @@ export const disconnectGrant = async (ctx: WorkspaceContext, userId: string): Pr
 
 /** Every page a person hosts, for their own profile screen. */
 export const pagesHostedBy = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   userId: string,
 ): Promise<{ id: string; slug: string; name: string; kind: BookingKind; isActive: boolean }[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       slug: string

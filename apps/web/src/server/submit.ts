@@ -1,13 +1,14 @@
 import {
   ATTRIBUTION_FIELDS,
+  publicEdgeContext,
   submitForm,
   type PublicForm,
   type SubmitInput,
   type SubmitResult,
 } from '@rawr/db'
 import type { NextRequest } from 'next/server'
-import { turnstileConfigured } from '~/lib/env.ts'
-import { ipHashOf, verifyTurnstile } from './edge.ts'
+import { ipHashOf } from './edge.ts'
+import { turnstileCredentials, verifyTurnstile } from './integrations/turnstile.ts'
 
 /** One capture path, shared by the JSON endpoint, the no-JS hosted page and the
  *  Webflow webhook, so the three cannot drift on scoring, attribution or the
@@ -15,6 +16,12 @@ import { ipHashOf, verifyTurnstile } from './edge.ts'
 
 export type SubmitOptions = {
   degradedSignals?: boolean
+  /** Whether this caller can actually put a challenge in front of somebody. Only
+   *  the embed endpoint can: it answers `challengeRequired` to a script that
+   *  renders the widget and posts again. The hosted no-JS page and the Webflow
+   *  webhook have nowhere to show one, so for them a challenge means the
+   *  submission is discarded while the visitor is told it was sent. */
+  canChallenge?: boolean
   idempotencyKey?: string | null
   /** Only the webhook has these; a browser sends them in the body. */
   attributionOverride?: { referrer?: string | null; pagePath?: string | null }
@@ -73,27 +80,35 @@ const inputFor = (
   idempotencyKey: options.idempotencyKey ?? null,
 })
 
+/** The site key rides back so the widget's endpoint does not re-read it. */
+export type RunResult = SubmitResult & { challengeSiteKey: string | null }
+
 export const runSubmission = async (
   request: NextRequest,
   form: PublicForm,
   body: Record<string, unknown>,
   ip: string | null,
   options: SubmitOptions = {},
-): Promise<SubmitResult> => {
+): Promise<RunResult> => {
   const first = await submitForm(inputFor(request, form, body, options, 'not-required'))
-  if (!first.challengeRequired) return first
+  if (!first.challengeRequired) return { ...first, challengeSiteKey: null }
 
-  // Scored into the challenge band, and nothing was written. Settle it here if we
-  // can, rather than making the person do a second round trip.
-  if (!turnstileConfigured) {
-    // Nothing to attempt. Fail closed to quarantine: reviewable, not accepted,
-    // not lost. This is also the state until open item 4's infrastructure lands.
-    return submitForm(inputFor(request, form, body, options, 'unavailable'))
-  }
+  // Scored into the challenge band, and nothing was written. Settle it here.
+  const creds = await turnstileCredentials(publicEdgeContext(form.accountId))
+  const settle = async (outcome: 'failed' | 'passed' | 'unavailable'): Promise<RunResult> => ({
+    ...(await submitForm(inputFor(request, form, body, options, outcome))),
+    challengeSiteKey: null,
+  })
+
+  // Fail closed to quarantine: reviewable, not accepted, not lost.
+  if (!creds) return settle('unavailable')
 
   const token = body['cf-turnstile-response']
-  if (typeof token !== 'string' || token === '') return first
+  if (typeof token !== 'string' || token === '') {
+    // A caller with nowhere to show a widget must not get an id-less "success".
+    if (!options.canChallenge) return settle('unavailable')
+    return { ...first, challengeSiteKey: creds.siteKey }
+  }
 
-  const outcome = await verifyTurnstile(token, ip)
-  return submitForm(inputFor(request, form, body, options, outcome))
+  return settle(await verifyTurnstile(creds, token, ip))
 }

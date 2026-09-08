@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
-import { withWorkspace } from '../src/dal/index.ts'
+import type { AccountContext } from '../src/dal/context.ts'
+import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { ingestMessage, saveMailbox, type IncomingMessage } from '../src/dal/messages.ts'
 import { createRecord } from '../src/dal/records.ts'
@@ -48,22 +48,24 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 const stamp = Date.now()
 
 try {
-  const [ws] = await owner`select id from workspace where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = 'datasaur'`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
-  const workspaceId = ws.id as string
+  const accountId = ws.id as string
 
   const [salesUser] = await owner`select id, email from user_account where email = 'sales@datasaur.ai'`
   const [adminUser] = await owner`select id from user_account where email = 'admin@datasaur.ai'`
 
-  const ctxFor = (userId: string, role: Role): WorkspaceContext => ({
-    workspaceId,
+  const ctxFor = (userId: string, editHubs: string[]): AccountContext => ({
+    accountId,
     actorId: userId,
     actorKind: 'user',
-    role,
+    isSuperAdmin: editHubs.includes('account'),
+    viewHubs: [],
+    editHubs: editHubs as AccountContext['editHubs'],
   })
-  const sales = ctxFor(salesUser!.id as string, 'sales')
-  const admin = ctxFor(adminUser!.id as string, 'admin')
-  const viewer = ctxFor(salesUser!.id as string, 'viewer')
+  const sales = ctxFor(salesUser!.id as string, ['contacts', 'sales'])
+  const admin = ctxFor(adminUser!.id as string, ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  const viewer = ctxFor(salesUser!.id as string, [])
 
   const box = await saveMailbox(sales, {
     userId: salesUser!.id as string,
@@ -77,9 +79,9 @@ try {
   // A second mailbox that was connected for reading only, to prove enrolling from
   // it is refused. Idempotent, so a failed earlier run does not block this one.
   const [readOnlyBox] = await owner`
-    insert into mailbox (workspace_id, user_id, email, access_token, refresh_token, can_send)
-    values (${workspaceId}, ${adminUser!.id}, ${`readonly-${stamp}@datasaur.ai`}, 'x', 'y', false)
-    on conflict (workspace_id, user_id) do update set can_send = false, email = excluded.email
+    insert into mailbox (account_id, user_id, email, access_token, refresh_token, can_send)
+    values (${accountId}, ${adminUser!.id}, ${`readonly-${stamp}@datasaur.ai`}, 'x', 'y', false)
+    on conflict (account_id, user_id) do update set can_send = false, email = excluded.email
     returning id`
 
   console.log('-- writing one ---------------------------------------------------')
@@ -92,9 +94,11 @@ try {
   })
   check(created.id.length > 0, 'a sequence is created')
 
+  // The refusal names the hub that was missing, so the person reading it knows
+  // what to ask for rather than which role they are not.
   check(
-    (await refused(() => saveSequence(viewer, { name: `Refused ${stamp}` })))?.includes('cannot change') === true,
-    'a viewer cannot write one',
+    (await refused(() => saveSequence(viewer, { name: `Refused ${stamp}` })))?.includes('sales') === true,
+    'a read-only seat cannot write one',
   )
 
   const noSteps = await refused(() => setSequenceState(sales, { id: created.id, state: 'active' }))
@@ -352,7 +356,7 @@ try {
   check(afterOptOut?.state === 'unsubscribed', 'the enrollment reads as unsubscribed', afterOptOut?.state ?? '')
 
   // Opting out on the record stops the outreach too.
-  const [type] = await owner`select id from subscription_type where workspace_id = ${workspaceId} limit 1`
+  const [type] = await owner`select id from subscription_type where account_id = ${accountId} limit 1`
   await saveSequence(sales, {
     id: created.id,
     name: `Verify sequence ${stamp}`,
@@ -394,12 +398,12 @@ try {
   check(listed?.stats.unsubscribed === 2, 'and opt-outs', String(listed?.stats.unsubscribed))
 
   // Everything this script made goes with it.
-  await withWorkspace(admin, async (tx) => {
+  await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from sequence where id = ${created.id}::uuid`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`%-${stamp}`}`
   await owner`delete from mailbox where id in (${box.id}, ${readOnlyBox!.id})`
-  await owner`delete from contact where workspace_id = ${workspaceId} and (email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or (first_name = 'No' and last_name = 'Address'))`
+  await owner`delete from contact where account_id = ${accountId} and (email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or (first_name = 'No' and last_name = 'Address'))`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
 }

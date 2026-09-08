@@ -12,7 +12,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import {
   bookingKindEnum,
   bookingLocationEnum,
@@ -20,7 +20,7 @@ import {
   calendarProviderEnum,
   integrationStateEnum,
 } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 import { company, contact } from './records.ts'
 
 /** F2. Every instant here is timestamptz and every human-facing time is a rule in
@@ -31,8 +31,8 @@ export const bookingPage = pgTable(
   'booking_page',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
-    /** The public address is /b/:workspace/:slug, so the slug is what goes in an
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    /** The public address is /b/:account/:slug, so the slug is what goes in an
      *  email signature and a Webflow embed, never the uuid. */
     slug: text('slug').notNull(),
     name: text('name').notNull(),
@@ -69,15 +69,15 @@ export const bookingPage = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex('booking_page_slug_key').on(t.workspaceId, t.slug),
-    index('booking_page_owner_idx').on(t.workspaceId, t.ownerId),
+    uniqueIndex('booking_page_slug_key').on(t.accountId, t.slug),
+    index('booking_page_owner_idx').on(t.accountId, t.ownerId),
   ],
 )
 
 export const bookingHost = pgTable(
   'booking_host',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     bookingPageId: uuid('booking_page_id')
       .notNull()
       .references(() => bookingPage.id, { onDelete: 'cascade' }),
@@ -87,6 +87,11 @@ export const bookingHost = pgTable(
     /** Relative share of the round robin. Weight 2 takes twice the meetings of
      *  weight 1 over a window, which is how a team lead takes fewer. */
     weight: integer('weight').notNull().default(1),
+    /** Collective only. A required host has to be free for a time to be offered at
+     *  all; an optional one is invited when they happen to be free and never holds
+     *  the calendar back. Ignored by the other kinds, where every host is a
+     *  candidate on their own. */
+    isRequired: boolean('is_required').notNull().default(true),
     /** Tie-break only. The share itself is counted from real bookings, so a
      *  counter drifting out of step cannot skew the distribution. F2 §3. */
     lastAssignedAt: timestamp('last_assigned_at', { withTimezone: true }),
@@ -94,8 +99,8 @@ export const bookingHost = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.bookingPageId, t.userId] }),
-    index('booking_host_user_idx').on(t.workspaceId, t.userId),
+    primaryKey({ columns: [t.accountId, t.bookingPageId, t.userId] }),
+    index('booking_host_user_idx').on(t.accountId, t.userId),
   ],
 )
 
@@ -106,7 +111,7 @@ export const availability = pgTable(
   'availability',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -119,13 +124,13 @@ export const availability = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('availability_user_key').on(t.workspaceId, t.userId)],
+  (t) => [uniqueIndex('availability_user_key').on(t.accountId, t.userId)],
 )
 
 export const availabilityOverride = pgTable(
   'availability_override',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -138,14 +143,14 @@ export const availabilityOverride = pgTable(
     note: text('note'),
     createdAt: createdAt(),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.userId, t.day] })],
+  (t) => [primaryKey({ columns: [t.accountId, t.userId, t.day] })],
 )
 
 export const booking = pgTable(
   'booking',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     bookingPageId: uuid('booking_page_id')
       .notNull()
       .references(() => bookingPage.id, { onDelete: 'restrict' }),
@@ -188,13 +193,58 @@ export const booking = pgTable(
      *  start at the same instant. Deliberately per host, not per page, because a
      *  round robin is meant to offer one slot to several hosts. */
     uniqueIndex('booking_host_slot_key')
-      .on(t.workspaceId, t.hostUserId, t.startsAt)
+      .on(t.accountId, t.hostUserId, t.startsAt)
       .where(sql`state = 'confirmed'`),
-    index('booking_host_window_idx').on(t.workspaceId, t.hostUserId, t.startsAt),
-    index('booking_page_idx').on(t.workspaceId, t.bookingPageId, t.startsAt),
-    index('booking_contact_idx').on(t.workspaceId, t.contactId),
+    index('booking_host_window_idx').on(t.accountId, t.hostUserId, t.startsAt),
+    index('booking_page_idx').on(t.accountId, t.bookingPageId, t.startsAt),
+    index('booking_contact_idx').on(t.accountId, t.contactId),
     uniqueIndex('booking_cancel_token_key').on(t.cancelToken),
     uniqueIndex('booking_reschedule_token_key').on(t.rescheduleToken),
+  ],
+)
+
+/** Who a meeting actually commits, one row per person.
+ *
+ *  `booking.host_user_id` is the organiser: whose Zoom it is, who owns the lead,
+ *  whose name the confirmation says. On a collective page the meeting commits
+ *  several people, and every one of them has to be unbookable at that instant by
+ *  anything else.
+ *
+ *  So this table, not a second booking row per host: one meeting stays one row in
+ *  `booking`, one entry in the timeline and one contact, while the unique index
+ *  below is the invariant that makes a double booking unreachable for every
+ *  participant rather than only the organiser.
+ *
+ *  Rows exist only while the booking is confirmed. Cancelling or rescheduling
+ *  deletes them, which is what frees the time again and why the index needs no
+ *  partial clause. Written for every kind, so there is one answer to "is this
+ *  person committed then" rather than two. */
+export const bookingParticipant = pgTable(
+  'booking_participant',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    bookingId: uuid('booking_id')
+      .notNull()
+      .references(() => booking.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id, { onDelete: 'cascade' }),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull(),
+    endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
+    /** The organiser's event is the one on `booking`; this is everybody else's, so
+     *  a cancellation can withdraw each invitation rather than orphaning it. */
+    calendarEventId: text('calendar_event_id'),
+    calendarId: text('calendar_id'),
+    /** True for the row that mirrors `booking.host_user_id`. */
+    isOrganiser: boolean('is_organiser').notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.bookingId, t.userId] }),
+    /** The invariant, for everyone in the room. */
+    uniqueIndex('booking_participant_slot_key').on(t.accountId, t.userId, t.startsAt),
+    /** The overlap read: one person's commitments in a window. */
+    index('booking_participant_window_idx').on(t.accountId, t.userId, t.startsAt, t.endsAt),
   ],
 )
 
@@ -205,7 +255,7 @@ export const bookingHold = pgTable(
   'booking_hold',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     bookingPageId: uuid('booking_page_id')
       .notNull()
       .references(() => bookingPage.id, { onDelete: 'cascade' }),
@@ -216,7 +266,7 @@ export const bookingHold = pgTable(
   },
   (t) => [
     uniqueIndex('booking_hold_token_key').on(t.token),
-    index('booking_hold_slot_idx').on(t.workspaceId, t.bookingPageId, t.startsAt, t.expiresAt),
+    index('booking_hold_slot_idx').on(t.accountId, t.bookingPageId, t.startsAt, t.expiresAt),
   ],
 )
 
@@ -227,7 +277,7 @@ export const calendarGrant = pgTable(
   'calendar_grant',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
@@ -246,5 +296,8 @@ export const calendarGrant = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('calendar_grant_user_key').on(t.workspaceId, t.userId, t.provider)],
+  /** One connection per person, not one per provider. Two would let free-busy be
+   *  read through the development provider while a real Google calendar sat next
+   *  to it, which reports no commitments and so offers times somebody is busy. */
+  (t) => [uniqueIndex('calendar_grant_user_key').on(t.accountId, t.userId)],
 )

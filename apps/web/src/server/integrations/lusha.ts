@@ -1,4 +1,4 @@
-import { applyEnrichment, readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
+import { applyEnrichment, readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
 
@@ -15,7 +15,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.lusha.com/v3'
 
-const credentials = async (ctx: WorkspaceContext) => {
+const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'lusha')
   if (!found?.secret) {
     throw new Error('Lusha is not connected. Add an API key in Settings, under Integrations.')
@@ -25,7 +25,7 @@ const credentials = async (ctx: WorkspaceContext) => {
 
 const headers = (key: string) => ({ api_key: key })
 
-export const testLusha = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testLusha = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'lusha', { ok: true })
@@ -78,11 +78,16 @@ const miss = (detail: string): LushaOutcome => ({
 /** Lusha returns a contact under `data`, and its company nested or alongside
  *  depending on which call answered. Read defensively: a field that is not where
  *  it was expected is a blank, never a crash, and never a guess. */
+type LushaPlace = { city?: string | null; state?: string | null; country?: string | null; zip?: string | null }
+
 type LushaContact = {
   firstName?: string | null
   lastName?: string | null
   jobTitle?: string | null
   linkedinUrl?: string | null
+  seniority?: string | null
+  department?: string | null
+  location?: LushaPlace | null
   emailAddresses?: { email?: string | null }[] | null
   phoneNumbers?: { number?: string | null }[] | null
   company?: LushaCompany | null
@@ -93,11 +98,16 @@ type LushaCompany = {
   domain?: string | null
   website?: string | null
   industry?: string | null
+  description?: string | null
+  linkedinUrl?: string | null
+  founded?: number | string | null
+  funding?: number | string | null
+  phone?: string | null
   employees?: number | null
   size?: number | string | null
   revenue?: number | string | null
-  location?: { city?: string | null; country?: string | null } | null
-  locations?: { city?: string | null; country?: string | null }[] | null
+  location?: LushaPlace | null
+  locations?: LushaPlace[] | null
 }
 
 const firstOf = <T>(list: T[] | null | undefined): T | undefined => (list ?? [])[0]
@@ -119,6 +129,10 @@ export const contactFieldsFrom = (person: LushaContact): Record<string, unknown>
   title: person.jobTitle ?? undefined,
   linkedin_url: person.linkedinUrl ?? undefined,
   phone: firstOf(person.phoneNumbers)?.number ?? undefined,
+  city: person.location?.city ?? undefined,
+  country: person.location?.country ?? undefined,
+  seniority: person.seniority ?? undefined,
+  department: person.department ?? undefined,
 })
 
 export const companyFieldsFrom = (company: LushaCompany | null | undefined): Record<string, unknown> => {
@@ -131,7 +145,14 @@ export const companyFieldsFrom = (company: LushaCompany | null | undefined): Rec
     employee_count: numeric(company.employees ?? company.size),
     annual_revenue: numeric(company.revenue),
     city: where?.city ?? undefined,
+    state: where?.state ?? undefined,
+    postal_code: where?.zip ?? undefined,
     country: where?.country ?? undefined,
+    description: company.description ?? undefined,
+    linkedin_url: company.linkedinUrl ?? undefined,
+    founded_year: company.founded === null || company.founded === undefined ? undefined : String(company.founded),
+    funding_raised: company.funding === null || company.funding === undefined ? undefined : String(company.funding),
+    phone: company.phone ?? undefined,
   }
 }
 
@@ -155,7 +176,7 @@ const devContact: LushaContact = {
 
 /** One person, by email, and their company where Lusha knows one. */
 export const enrichContactWithLusha = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { contactId: string; email: string; companyId: string | null; missing: string[] },
 ): Promise<LushaOutcome> => {
   if (input.missing.length === 0) return miss('Nothing was left for Lusha to fill.')
@@ -213,7 +234,7 @@ export const enrichContactWithLusha = async (
 
 /** A company on its own, by domain. */
 export const enrichCompanyWithLusha = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { companyId: string; domain: string; missing: string[] },
 ): Promise<LushaOutcome> => {
   if (input.missing.length === 0) return miss('Nothing was left for Lusha to fill.')

@@ -11,6 +11,8 @@
     "test": "DATABASE_URL=postgres://unit:test@127.0.0.1:5432/none DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none AUTH_SECRET=unit-test-secret-at-least-32-chars AUTH_URL=http://localhost:3000 GOOGLE_HOSTED_DOMAIN=example.test node --import ./scripts/test-hooks.mjs --test \"src/**/*.test.ts\""
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0",
+    "@aws-sdk/s3-request-presigner": "^3.1127.0",
     "@rawr/db": "workspace:*",
     "@rawr/ui": "workspace:*",
     "@trpc/client": "catalog:",

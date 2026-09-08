@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
 import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
-import { provisionWorkspace } from '../src/dal/provision.ts'
+import { provisionAccount } from '../src/dal/provision.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
 
@@ -11,7 +11,7 @@ import * as s from '../src/schema/index.ts'
  *  500-character name, missing owner, missing company, zero amount. Production-scale
  *  load testing lives in feature 07 with the importer that needs it. D9.
  *
- *  Two workspaces, always. The second one exists so the cross-tenant test has
+ *  Two accounts, always. The second one exists so the cross-tenant test has
  *  something real to fail against. */
 
 const url = process.env.DATABASE_URL_OWNER
@@ -20,27 +20,49 @@ if (!url) throw new Error('DATABASE_URL_OWNER is not set.')
 const client = postgres(url, { max: 1, onnotice: () => {} })
 const db = drizzle(client, { schema: s })
 
-/** Two organisations, and Datasaur owns two workspaces: one company with more
- *  than one place to keep records is the case the org layer exists for, so the
- *  seed has to contain it or nothing exercises it. */
-const ORGANISATIONS = [
+/** Two accounts, which is HubSpot's answer for two companies that share nothing:
+ *  separate portals. The second exists so the cross-tenant tests have something
+ *  real to fail against. */
+const ACCOUNTS = [
   { name: 'Datasaur', slug: 'datasaur', domain: 'datasaur.ai', seatLimit: 25 },
-  { name: 'Probe', slug: 'probe', domain: 'probe.example', seatLimit: null },
+  { name: 'Probe Tenant', slug: 'probe', domain: 'probe.example', seatLimit: null },
 ] as const
 
-const WORKSPACES = [
-  { name: 'Datasaur', slug: 'datasaur', org: 'datasaur' },
-  { name: 'Datasaur EMEA', slug: 'datasaur-emea', org: 'datasaur' },
-  { name: 'Probe Tenant', slug: 'probe', org: 'probe' },
-] as const
-
-/** One account per role, named for the role. A real person signs in with Google,
- *  lands as a viewer, and is raised from Settings, so nobody's name is seeded. */
+/** One seat per shape of access, named for the shape. A real person signs in with
+ *  Google, lands reading whatever the account opens by default, and is raised from
+ *  Settings, so nobody's name is seeded.
+ *
+ *  The names are the old role names on purpose: the dev sign-in form takes an
+ *  address, and `sales@` is still the seat that can work deals. */
 const PEOPLE = [
-  { email: 'admin@datasaur.ai', name: 'Admin', role: 'admin' as const },
-  { email: 'sales@datasaur.ai', name: 'Sales', role: 'sales' as const },
-  { email: 'marketing@datasaur.ai', name: 'Marketing', role: 'marketing' as const },
-  { email: 'viewer@datasaur.ai', name: 'Viewer', role: 'viewer' as const },
+  {
+    email: 'admin@datasaur.ai',
+    name: 'Admin',
+    isSuperAdmin: true,
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const,
+    viewHubs: [] as const,
+  },
+  {
+    email: 'sales@datasaur.ai',
+    name: 'Sales',
+    isSuperAdmin: false,
+    editHubs: ['contacts', 'sales'] as const,
+    viewHubs: ['reports'] as const,
+  },
+  {
+    email: 'marketing@datasaur.ai',
+    name: 'Marketing',
+    isSuperAdmin: false,
+    editHubs: ['contacts', 'marketing'] as const,
+    viewHubs: ['reports'] as const,
+  },
+  {
+    email: 'viewer@datasaur.ai',
+    name: 'Viewer',
+    isSuperAdmin: false,
+    editHubs: [] as const,
+    viewHubs: ['contacts', 'sales', 'marketing', 'reports'] as const,
+  },
 ]
 
 const INDUSTRIES = ['Software', 'Financial Services', 'Healthcare', 'Government', 'Education']
@@ -60,46 +82,34 @@ const SEED_SOURCES = [
 const dayAgo = (n: number) => new Date(Date.UTC(2026, 7, 23) - n * 86_400_000)
 
 try {
-  // Idempotent: the whole organisation goes, cascades take its workspaces and
-  // every record in them.
-  const existingOrgs = await db
-    .select({ id: s.organisation.id })
-    .from(s.organisation)
-    .where(inArray(s.organisation.slug, ORGANISATIONS.map((o) => o.slug)))
-  if (existingOrgs.length) {
-    await db.delete(s.organisation).where(inArray(s.organisation.id, existingOrgs.map((o) => o.id)))
+  // Idempotent: the whole account goes, cascades take every record in it.
+  const existing = await db
+    .select({ id: s.account.id })
+    .from(s.account)
+    .where(inArray(s.account.slug, ACCOUNTS.map((a) => a.slug)))
+  if (existing.length) {
+    await db.delete(s.account).where(inArray(s.account.id, existing.map((a) => a.id)))
   }
 
-  const organisations = await db
-    .insert(s.organisation)
+  const accounts = await db
+    .insert(s.account)
     .values(
-      ORGANISATIONS.map((o) => ({
-        name: o.name,
-        slug: o.slug,
-        googleHostedDomain: o.domain,
-        seatLimit: o.seatLimit,
+      ACCOUNTS.map((a) => ({
+        name: a.name,
+        slug: a.slug,
+        googleHostedDomain: a.domain,
+        seatLimit: a.seatLimit,
+        defaultViewHubs: ['contacts', 'sales', 'marketing', 'reports'] as ('contacts' | 'sales' | 'marketing' | 'reports')[],
       })),
     )
-    .returning({ id: s.organisation.id, slug: s.organisation.slug })
-
-  const orgId = (slug: string) => {
-    const found = organisations.find((o) => o.slug === slug)
-    if (!found) throw new Error(`organisation ${slug} was not created`)
-    return found.id
-  }
-
-  const workspaces = await db
-    .insert(s.workspace)
-    .values(WORKSPACES.map((w) => ({ name: w.name, slug: w.slug, organisationId: orgId(w.org) })))
-    .returning({ id: s.workspace.id, slug: s.workspace.slug })
+    .returning({ id: s.account.id, slug: s.account.slug })
 
   const wsId = (slug: string) => {
-    const found = workspaces.find((w) => w.slug === slug)
-    if (!found) throw new Error(`workspace ${slug} was not created`)
+    const found = accounts.find((a) => a.slug === slug)
+    if (!found) throw new Error(`account ${slug} was not created`)
     return found.id
   }
   const datasaur = wsId('datasaur')
-  const emea = wsId('datasaur-emea')
   const probe = wsId('probe')
 
   const users = await db
@@ -121,41 +131,37 @@ try {
   }
 
   await db.insert(s.membership).values([
-    ...PEOPLE.map((p) => ({ workspaceId: datasaur, userId: userId(p.email), role: p.role })),
-    // The second Datasaur workspace has its own smaller seating, which is what
-    // makes "which workspace am I in" a real question in the switcher.
-    { workspaceId: emea, userId: userId('admin@datasaur.ai'), role: 'admin' as const },
-    { workspaceId: emea, userId: userId('sales@datasaur.ai'), role: 'sales' as const },
-    { workspaceId: probe, userId: userId('admin@probe.example'), role: 'admin' as const },
-    { workspaceId: datasaur, userId: userId('former@datasaur.ai'), role: 'sales' as const },
-  ])
-
-  await db.insert(s.organisationMembership).values([
-    { organisationId: orgId('datasaur'), userId: userId('admin@datasaur.ai'), role: 'org_admin' as const },
-    ...PEOPLE.filter((p) => p.role !== 'admin').map((p) => ({
-      organisationId: orgId('datasaur'),
+    ...PEOPLE.map((p) => ({
+      accountId: datasaur,
       userId: userId(p.email),
-      role: 'member' as const,
+      isSuperAdmin: p.isSuperAdmin,
+      editHubs: [...p.editHubs],
+      viewHubs: [...p.viewHubs],
     })),
     {
-      organisationId: orgId('datasaur'),
+      accountId: probe,
+      userId: userId('admin@probe.example'),
+      isSuperAdmin: true,
+      editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
+    },
+    // Somebody whose access was ended. The row stays so the audit trail still
+    // names them, and their membership stops answering.
+    {
+      accountId: datasaur,
       userId: userId('former@datasaur.ai'),
-      role: 'member' as const,
+      editHubs: ['contacts', 'sales'],
       state: 'deactivated' as const,
       deactivatedAt: dayAgo(3),
       deactivatedBy: userId('admin@datasaur.ai'),
     },
-    { organisationId: orgId('probe'), userId: userId('admin@probe.example'), role: 'org_admin' as const },
   ])
 
   // One seat offered and not yet claimed, so the pending tab is never empty in
   // development. The hash is of a token nobody holds; the link cannot be used.
   await db.insert(s.invitation).values({
-    organisationId: orgId('datasaur'),
-    workspaceId: datasaur,
+    accountId: datasaur,
     email: 'newstarter@datasaur.ai',
-    workspaceRole: 'sales' as const,
-    orgRole: 'member' as const,
+    editHubs: ['contacts', 'sales'],
     tokenHash: 'seed-invitation-hash-not-a-usable-token',
     invitedBy: userId('admin@datasaur.ai'),
     expiresAt: new Date(Date.UTC(2026, 8, 30)),
@@ -163,32 +169,32 @@ try {
 
   const [salesTeam] = await db
     .insert(s.team)
-    .values({ workspaceId: datasaur, name: 'Sales EMEA', description: 'Works European inbound.' })
+    .values({ accountId: datasaur, name: 'Sales EMEA', description: 'Works European inbound.' })
     .returning({ id: s.team.id })
   if (!salesTeam) throw new Error('the team was not created')
   await db.insert(s.teamMember).values([
-    { workspaceId: datasaur, teamId: salesTeam.id, userId: userId('sales@datasaur.ai'), isLead: true },
-    { workspaceId: datasaur, teamId: salesTeam.id, userId: userId('marketing@datasaur.ai') },
+    { accountId: datasaur, teamId: salesTeam.id, userId: userId('sales@datasaur.ai'), isLead: true },
+    { accountId: datasaur, teamId: salesTeam.id, userId: userId('marketing@datasaur.ai') },
   ])
 
-  const owners = PEOPLE.filter((p) => p.role !== 'viewer').map((p) => userId(p.email))
+  const owners = PEOPLE.filter((p) => p.editHubs.length > 0).map((p) => userId(p.email))
 
-  for (const ws of [datasaur, emea, probe]) {
-    // The same provisioning a workspace created from the organisation screen gets,
-    // so a seeded workspace and a real one cannot differ.
-    await provisionWorkspace(db as unknown as Parameters<typeof provisionWorkspace>[0], ws)
+  for (const ws of [datasaur, probe]) {
+    // The same provisioning a account created from the organisation screen gets,
+    // so a seeded account and a real one cannot differ.
+    await provisionAccount(db as unknown as Parameters<typeof provisionAccount>[0], ws)
 
     const stages = await db
       .select({ id: s.lifecycleStage.id, name: s.lifecycleStage.name })
       .from(s.lifecycleStage)
-      .where(eq(s.lifecycleStage.workspaceId, ws))
+      .where(eq(s.lifecycleStage.accountId, ws))
       .orderBy(s.lifecycleStage.position)
 
     const enterpriseStages = await db
       .select({ id: s.pipelineStage.id, name: s.pipelineStage.name, pipelineId: s.pipelineStage.pipelineId })
       .from(s.pipelineStage)
       .innerJoin(s.pipeline, eq(s.pipeline.id, s.pipelineStage.pipelineId))
-      .where(and(eq(s.pipelineStage.workspaceId, ws), eq(s.pipeline.name, 'Enterprise')))
+      .where(and(eq(s.pipelineStage.accountId, ws), eq(s.pipeline.name, 'Enterprise')))
       .orderBy(s.pipelineStage.position)
     const enterpriseId = enterpriseStages[0]?.pipelineId
     if (!enterpriseId) throw new Error('the Enterprise pipeline was not provisioned')
@@ -202,7 +208,7 @@ try {
       .insert(s.company)
       .values(
         Array.from({ length: scale }, (_, i) => ({
-          workspaceId: ws,
+          accountId: ws,
           // Row 4 has no name at all: HubSpot holds many blank company names and
           // every surface has to survive them.
           name: i === 4 ? null : i === 7 ? LONG_NAME : `${INDUSTRIES[i % 5]} Partner ${i + 1}`,
@@ -222,7 +228,7 @@ try {
 
     await db.insert(s.contact).values(
       Array.from({ length: scale }, (_, i) => ({
-        workspaceId: ws,
+        accountId: ws,
         firstName: i === 2 ? null : `Contact${i + 1}`,
         lastName: i === 2 ? null : `Surname${i + 1}`,
         // Row 3 is on a free provider, so A4's rule has a case in the seed data.
@@ -248,13 +254,13 @@ try {
     const contacts = await db
       .select({ id: s.contact.id })
       .from(s.contact)
-      .where(eq(s.contact.workspaceId, ws))
+      .where(eq(s.contact.accountId, ws))
 
     const deals = await db
       .insert(s.deal)
       .values(
         Array.from({ length: scale }, (_, i) => ({
-          workspaceId: ws,
+          accountId: ws,
           name: i === 6 ? null : `${INDUSTRIES[i % 5]} rollout ${i + 1}`,
           pipelineId: enterpriseId,
           stageId: enterpriseStages[i % enterpriseStages.length]!.id,
@@ -283,7 +289,7 @@ try {
     await db.insert(s.association).values(
       deals.flatMap((deal, i) => {
         const contact = contacts[i % Math.max(contacts.length, 1)]
-        return contact ? [{ workspaceId: ws, fromType: 'contact' as const, fromId: contact.id, toType: 'deal' as const, toId: deal.id, label: 'Decision maker' }] : []
+        return contact ? [{ accountId: ws, fromType: 'contact' as const, fromId: contact.id, toType: 'deal' as const, toId: deal.id, label: 'Decision maker' }] : []
       }),
     )
 
@@ -292,7 +298,7 @@ try {
     const busy = deals[0]
     if (busy) {
       const entries = Array.from({ length: 120 }, (_, i) => ({
-        workspaceId: ws,
+        accountId: ws,
         type: (['note', 'call', 'email', 'meeting', 'stage_change'] as const)[i % 5]!,
         subject: `Touchpoint ${i + 1} on ${busy.name ?? 'the deal'}`,
         body: i % 5 === 0 ? 'Talked through the trial plan and the security review.' : null,
@@ -304,7 +310,7 @@ try {
       const written = await db.insert(s.activity).values(entries).returning({ id: s.activity.id })
       await db.insert(s.activityLink).values(
         written.map((row, i) => ({
-          workspaceId: ws,
+          accountId: ws,
           activityId: row.id,
           entityType: 'deal' as const,
           entityId: busy.id,
@@ -316,7 +322,7 @@ try {
 
     await db.insert(s.task).values(
       deals.slice(0, Math.min(4, deals.length)).map((deal, i) => ({
-        workspaceId: ws,
+        accountId: ws,
         title: `Chase ${deal.name ?? 'the unnamed deal'}`,
         dueDate: dayAgo(i === 0 ? 3 : -(i + 1)).toISOString().slice(0, 10),
         assigneeId: owners[i % owners.length] ?? null,
@@ -331,22 +337,22 @@ try {
     const subTypes = await db
       .select({ id: s.subscriptionType.id, name: s.subscriptionType.name })
       .from(s.subscriptionType)
-      .where(eq(s.subscriptionType.workspaceId, ws))
+      .where(eq(s.subscriptionType.accountId, ws))
     const newsletter = subTypes.find((t) => t.name === 'Newsletter')
     if (newsletter && contacts.length > 1) {
       await db.insert(s.subscriptionState).values([
-        { workspaceId: ws, contactId: contacts[0]!.id, subscriptionTypeId: newsletter.id, state: 'subscribed' as const, source: 'seed' },
-        { workspaceId: ws, contactId: contacts[1]!.id, subscriptionTypeId: newsletter.id, state: 'unsubscribed' as const, source: 'seed' },
+        { accountId: ws, contactId: contacts[0]!.id, subscriptionTypeId: newsletter.id, state: 'subscribed' as const, source: 'seed' },
+        { accountId: ws, contactId: contacts[1]!.id, subscriptionTypeId: newsletter.id, state: 'unsubscribed' as const, source: 'seed' },
       ])
     }
   }
 
-  // F3. Every workspace gets the same starting forms, including the probe tenant,
+  // F3. Every account gets the same starting forms, including the probe tenant,
   // so the cross-tenant test has a form on both sides to prove isolation with.
-  for (const ws of [datasaur, emea, probe]) {
+  for (const ws of [datasaur, probe]) {
     await db.insert(s.form).values(
       SEED_FORMS.map((form) => ({
-        workspaceId: ws,
+        accountId: ws,
         name: form.name,
         slug: form.slug,
         schema: form.fields,
@@ -359,8 +365,8 @@ try {
   // F4. One site per tenant. Nothing is collected until one exists, so the
   // collector tests and the local embed both need this row to be here.
   await db.insert(s.site).values([
-    { workspaceId: datasaur, name: 'Marketing site', host: 'datasaur.ai', siteKey: 'datasaur-www' },
-    { workspaceId: probe, name: 'Probe site', host: 'probe.example', siteKey: 'probe-www' },
+    { accountId: datasaur, name: 'Marketing site', host: 'datasaur.ai', siteKey: 'datasaur-www' },
+    { accountId: probe, name: 'Probe site', host: 'probe.example', siteKey: 'probe-www' },
   ])
 
   // F4 and B7. Traffic, so the website and attribution reports have something to
@@ -371,11 +377,11 @@ try {
     const [site] = await db
       .select({ id: s.site.id })
       .from(s.site)
-      .where(eq(s.site.workspaceId, datasaur))
+      .where(eq(s.site.accountId, datasaur))
     const seen = await db
       .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
       .from(s.contact)
-      .where(eq(s.contact.workspaceId, datasaur))
+      .where(eq(s.contact.accountId, datasaur))
 
     const PATHS = ['/', '/pricing', '/blog', '/product/data-studio', '/contact']
     const DEVICES = ['desktop', 'mobile', 'tablet']
@@ -403,7 +409,7 @@ try {
     // however many aliases point at it.
     await db.insert(s.visitor).values(
       sessions.map((session) => ({
-        workspaceId: datasaur,
+        accountId: datasaur,
         id: session.visitorId,
         contactId: session.contact?.id ?? null,
         firstReferrer: session.referrer,
@@ -418,7 +424,7 @@ try {
       .insert(s.visitorSession)
       .values(
         sessions.map((session) => ({
-          workspaceId: datasaur,
+          accountId: datasaur,
           visitorId: session.visitorId,
           siteId: site?.id ?? null,
           startedAt: session.startedAt,
@@ -439,7 +445,7 @@ try {
     await db.insert(s.pageView).values(
       sessions.flatMap((session) =>
         Array.from({ length: session.pages }, (_, page) => ({
-          workspaceId: datasaur,
+          accountId: datasaur,
           visitorId: session.visitorId,
           contactId: session.contact?.id ?? null,
           sessionId: idOf.get(session.visitorId) ?? null,
@@ -462,7 +468,7 @@ try {
         .insert(s.visitorAlias)
         .values(
           identified.map((session) => ({
-            workspaceId: datasaur,
+            accountId: datasaur,
             visitorId: session.visitorId,
             contactId: session.contact!.id,
             via: 'form_submission' as const,
@@ -478,14 +484,14 @@ try {
     const forms = await db
       .select({ id: s.form.id, slug: s.form.slug })
       .from(s.form)
-      .where(eq(s.form.workspaceId, datasaur))
+      .where(eq(s.form.accountId, datasaur))
     if (forms.length > 0) {
       await db.insert(s.formSubmission).values(
         identified.slice(0, 14).map((session, i) => {
           const held = i === 3 || i === 9
           const form = forms[i % forms.length]!
           return {
-            workspaceId: datasaur,
+            accountId: datasaur,
             formId: form.id,
             values: {
               email: session.contact!.email ?? `seed${i}@partner${i}.example`,
@@ -523,15 +529,15 @@ try {
   // only shows up across timezones has to be visible in the seed.
   const BOOKING_ZONES = ['America/Los_Angeles', 'Asia/Jakarta', 'Europe/Berlin']
 
-  for (const ws of [datasaur, emea, probe]) {
+  for (const ws of [datasaur, probe]) {
     const staff =
       ws === datasaur
-        ? PEOPLE.filter((p) => p.role !== 'viewer').map((p) => userId(p.email))
+        ? PEOPLE.filter((p) => p.editHubs.length > 0).map((p) => userId(p.email))
         : [userId('admin@probe.example')]
 
     await db.insert(s.availability).values(
       staff.map((id, i) => ({
-        workspaceId: ws,
+        accountId: ws,
         userId: id,
         timezone: BOOKING_ZONES[i % BOOKING_ZONES.length]!,
         weekly: {
@@ -549,7 +555,7 @@ try {
     // outstanding, and the web layer refuses it outside development.
     await db.insert(s.calendarGrant).values(
       staff.map((id) => ({
-        workspaceId: ws,
+        accountId: ws,
         userId: id,
         provider: 'dev' as const,
         calendarId: 'primary',
@@ -561,7 +567,7 @@ try {
     const [roundRobin] = await db
       .insert(s.bookingPage)
       .values({
-        workspaceId: ws,
+        accountId: ws,
         slug: 'sales-team',
         name: 'Talk to sales',
         kind: 'round_robin',
@@ -596,7 +602,7 @@ try {
 
     await db.insert(s.bookingHost).values(
       staff.map((id, i) => ({
-        workspaceId: ws,
+        accountId: ws,
         bookingPageId: roundRobin.id,
         userId: id,
         // Uneven on purpose: an even split hides a weighting bug.
@@ -604,11 +610,51 @@ try {
       })),
     )
 
+    // F2. A collective, so the intersection path has something real to exercise:
+    // two people who both have to be free, and one who is invited when they are.
+    const [panel] = await db
+      .insert(s.bookingPage)
+      .values({
+        accountId: ws,
+        slug: 'solution-review',
+        name: 'Solution review',
+        kind: 'collective',
+        durationMinutes: 60,
+        bufferAfterMinutes: 15,
+        minNoticeMinutes: 1440,
+        maxHorizonDays: 45,
+        granularityMinutes: 60,
+        location: 'google_meet',
+        titleTpl: 'Solution review · Datasaur <> {{company.name}}',
+        descriptionTpl: '{{contact.full_name}} · {{contact.email}}\n{{company.name}}',
+        companyFallback: 'a new team',
+        questions: [],
+        isActive: true,
+      })
+      .returning({ id: s.bookingPage.id })
+
+    if (!panel) throw new Error('booking_page solution-review was not created')
+
+    await db.insert(s.bookingHost).values(
+      staff.map((id, i) => ({
+        accountId: ws,
+        bookingPageId: panel.id,
+        userId: id,
+        weight: 1,
+        // The Jakarta and Berlin hours overlap for three hours a day and the Los
+        // Angeles ones overlap with neither, so requiring the first two leaves a
+        // page that can actually be booked and makes the third genuinely optional.
+        // A collective whose required hosts never overlap offers nothing, which is
+        // correct and useless to look at.
+        isRequired: i > 0,
+      })),
+    )
+
     const owner = staff[0]!
     const [personal] = await db
       .insert(s.bookingPage)
       .values({
-        workspaceId: ws,
+        accountId: ws,
         slug: 'one-on-one',
         name: 'Book time with me',
         kind: 'one_on_one',
@@ -628,7 +674,7 @@ try {
     if (!personal) throw new Error('booking_page one-on-one was not created')
     await db
       .insert(s.bookingHost)
-      .values({ workspaceId: ws, bookingPageId: personal.id, userId: owner, weight: 1 })
+      .values({ accountId: ws, bookingPageId: personal.id, userId: owner, weight: 1 })
 
     // F2. Meetings on the books, two ahead and two behind, so the booked list is
     // not an empty screen on a seeded database and the upcoming and past tabs
@@ -637,7 +683,7 @@ try {
       const booked = await db
         .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
         .from(s.contact)
-        .where(eq(s.contact.workspaceId, ws))
+        .where(eq(s.contact.accountId, ws))
         .limit(4)
       await db.insert(s.booking).values(
         booked.map((contact, i) => {
@@ -650,7 +696,7 @@ try {
           day.setUTCHours(15, 30, 0, 0)
           const startsAt = new Date(day.getTime() + (i < 2 ? 3 + i * 4 : -(4 + i * 3)) * 86_400_000)
           return {
-            workspaceId: ws,
+            accountId: ws,
             bookingPageId: i % 2 === 0 ? roundRobin.id : personal.id,
             hostUserId: staff[i % staff.length]!,
             contactId: contact.id,
@@ -693,6 +739,7 @@ try {
     union all select 'booking', count(*)::int from booking
     union all select 'booking_host', count(*)::int from booking_host
     union all select 'availability', count(*)::int from availability
+    union all select 'integration', count(*)::int from integration
     order by t`
   console.log('seeded:')
   for (const row of counts) console.log(`  ${row.t}: ${row.n}`)

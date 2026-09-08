@@ -2,8 +2,8 @@ import { and, asc, desc, eq, inArray, or, isNull, sql } from 'drizzle-orm'
 import { fieldDef } from '../schema/metadata.ts'
 import { savedView } from '../schema/marketing.ts'
 import { CORE_VIEWS, type ObjectKey } from '../registry/core.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { isAdmin, type AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 import { parseFilters, parseSorts, type FilterGroup, type Sort } from './query.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
 
@@ -26,7 +26,7 @@ export type ViewDefinition = {
 }
 
 /** Reserved: /objects/:object/views/all/list must always resolve, even in a
- *  workspace where every saved view has been deleted. */
+ *  account where every saved view has been deleted. */
 export const DEFAULT_VIEW_SLUG = 'all'
 
 const fallbackView = (objectKey: string, slug: string): ViewDefinition => {
@@ -81,13 +81,13 @@ const toDefinition = (row: {
 
 /** The view tabs a person can see: the shared ones plus their own. */
 export const listViews = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
 ): Promise<ViewDefinition[]> => {
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, objectKey)
 
-  const rows = await withWorkspace(ctx, (tx) =>
+  const rows = await withAccount(ctx, (tx) =>
     tx
       .select({
         id: savedView.id,
@@ -123,7 +123,7 @@ export const listViews = async (
 /** Resolves the slug in the URL. An unknown slug falls back to the default rather
  *  than 404ing, because a stale bookmark should still show the person their data. */
 export const resolveView = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   slug: string,
 ): Promise<{ view: ViewDefinition; matched: boolean }> => {
@@ -155,7 +155,7 @@ export type SaveViewInput = {
 }
 
 export const saveView = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: SaveViewInput,
 ): Promise<ViewDefinition> =>
   mutate(ctx, 'saved_view', async (tx) => {
@@ -168,7 +168,7 @@ export const saveView = async (
 
     const base = slugify(input.name)
     const values = {
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       objectId: object.id,
       name: input.name.trim(),
       kind: input.kind,
@@ -216,19 +216,19 @@ export const saveView = async (
     }
   })
 
-/** A view nobody owns is the workspace's, and anybody may rearrange it. A view
+/** A view nobody owns is the account's, and anybody may rearrange it. A view
  *  somebody made is theirs, and only they or an admin may change it. */
 const assertMine = (
   row: { ownerId: string | null },
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   verb: string,
 ): void => {
-  if (row.ownerId !== null && row.ownerId !== ctx.actorId && ctx.role !== 'admin') {
+  if (row.ownerId !== null && row.ownerId !== ctx.actorId && !isAdmin(ctx)) {
     throw new Error(`That view belongs to somebody else. Only they, or an admin, can ${verb} it.`)
   }
 }
 
-export const deleteView = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteView = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'saved_view', async (tx) => {
     const [row] = await tx
       .select({ slug: savedView.slug, name: savedView.name, ownerId: savedView.ownerId })
@@ -249,7 +249,7 @@ export const deleteView = async (ctx: WorkspaceContext, id: string): Promise<voi
 /** Copy a view, filters and columns and all, as a starting point for a variation.
  *  The copy is always personal: duplicating somebody's shared view to tweak it
  *  should not put the tweak in front of the whole team. */
-export const duplicateView = async (ctx: WorkspaceContext, id: string): Promise<ViewDefinition> =>
+export const duplicateView = async (ctx: AccountContext, id: string): Promise<ViewDefinition> =>
   mutate(ctx, 'saved_view', async (tx) => {
     const [row] = await tx.select().from(savedView).where(eq(savedView.id, id))
     if (!row) throw new Error('That view no longer exists.')
@@ -269,7 +269,7 @@ export const duplicateView = async (ctx: WorkspaceContext, id: string): Promise<
     for (let n = 2; taken.has(slug); n += 1) slug = `${base}-${n}`
 
     const values = {
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       objectId: row.objectId,
       name: `${row.name} copy`,
       kind: row.kind,
@@ -306,7 +306,7 @@ export const duplicateView = async (ctx: WorkspaceContext, id: string): Promise<
  *  rename that broke every link into the view would be worse than a slug that
  *  reads a little stale. */
 export const renameView = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   name: string,
 ): Promise<ViewDefinition> =>
@@ -333,7 +333,7 @@ export const renameView = async (
 
 /** Whether a view takes a tab above the list. */
 export const setViewPinned = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   pinned: boolean,
 ): Promise<void> =>
@@ -360,7 +360,7 @@ export const setViewPinned = async (
  *  Ids the caller cannot see, or that belong to another object, are refused
  *  rather than silently skipped: a partial reorder is a scrambled tab bar. */
 export const reorderViews = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   ids: string[],
 ): Promise<void> =>

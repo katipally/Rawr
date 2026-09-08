@@ -1,4 +1,4 @@
-import { enrollmentWorkspaceForToken, publicEdgeContext, unsubscribeTarget, withWorkspace } from '@rawr/db'
+import { enrollmentAccountForToken, publicEdgeContext, unsubscribeTarget, withAccount } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import { unsubscribeAction } from './actions.ts'
 
@@ -18,9 +18,9 @@ const UnsubscribePage = async ({
   const { token } = await params
   const { done } = await searchParams
 
-  const workspaceId = await enrollmentWorkspaceForToken(token)
-  const target = workspaceId
-    ? await withWorkspace({ ...publicEdgeContext(workspaceId), actorKind: 'public' }, (tx) =>
+  const accountId = await enrollmentAccountForToken(token)
+  const target = accountId
+    ? await withAccount({ ...publicEdgeContext(accountId), actorKind: 'public' }, (tx) =>
         unsubscribeTarget(tx, token),
       )
     : null

@@ -1,10 +1,11 @@
 import {
+  isAdmin,
   ingestMessage,
   internalDomainOf,
   isUuid,
   readMailbox,
   readThread,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { gmailFetcherFor } from '../gmail.ts'
 import { buildMessage } from './mime.ts'
@@ -30,10 +31,10 @@ export type ComposeInput = {
 
 export type ComposeResult = { messageId: string | null; threadId: string | null }
 
-export const compose = async (ctx: WorkspaceContext, input: ComposeInput): Promise<ComposeResult> => {
+export const compose = async (ctx: AccountContext, input: ComposeInput): Promise<ComposeResult> => {
   const box = await readMailbox(ctx, input.mailboxId)
   if (!box) throw new Error('That mailbox is not connected.')
-  if (box.userId !== ctx.actorId && ctx.role !== 'admin') {
+  if (box.userId !== ctx.actorId && !isAdmin(ctx)) {
     throw new Error('That is somebody else’s mailbox. You can only send from your own.')
   }
   if (box.state === 'revoked') {
@@ -114,12 +115,12 @@ export const compose = async (ctx: WorkspaceContext, input: ComposeInput): Promi
 
 /** The threading headers of the newest message in a conversation. */
 const threadHeaders = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   threadId: string,
 ): Promise<{ internetMessageId: string | null; references: string[]; providerThreadId: string | null }[]> => {
-  const { withWorkspace } = await import('@rawr/db')
+  const { withAccount } = await import('@rawr/db')
   const { sql } = await import('drizzle-orm')
-  return withWorkspace(ctx, (tx) =>
+  return withAccount(ctx, (tx) =>
     tx.execute<{ internetMessageId: string | null; references: string[]; providerThreadId: string | null }>(sql`
       select m.internet_message_id as "internetMessageId",
              m.references as "references",

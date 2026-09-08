@@ -22,9 +22,8 @@ import {
   sourceFrom,
   submitForm,
   validateAnswers,
-  withWorkspace,
-  type Role,
-  type WorkspaceContext,
+  withAccount,
+  type AccountContext,
 } from '../src/index.ts'
 
 /** F3's definition of done, run against the real database, exiting non-zero on
@@ -51,27 +50,27 @@ const check = (what: string, condition: boolean, detail?: string) => {
 
 const section = (title: string) => console.log(`\n-- ${title} ${'-'.repeat(Math.max(0, 60 - title.length))}`)
 
-const ctxFor = async (slug: string, role: Role = 'admin'): Promise<WorkspaceContext> => {
+const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']): Promise<AccountContext> => {
   const rows = await appDb.execute<{ id: string }>(
-    sql`select id from rawr.workspace_for_site(${slug})`,
+    sql`select id from rawr.account_for_site(${slug})`,
   )
   const id = rows[0]?.id
-  if (!id) throw new Error(`workspace ${slug} is not seeded. Run pnpm db:seed.`)
-  return { workspaceId: id, actorId: null, actorKind: 'user', role }
+  if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
+  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 /** Reads go through the tenant-scoped path, exactly as the app does. An unscoped
  *  appDb.execute here would return zero rows under forced row level security and
  *  make every assertion look like a product failure rather than a harness one. */
 const scoped = <T extends Record<string, unknown>>(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   query: ReturnType<typeof sql>,
 ): Promise<T[]> =>
-  withWorkspace(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
+  withAccount(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
 
-const actorCtx = async (slug: string, email: string, role: Role): Promise<WorkspaceContext> => {
-  const base = await ctxFor(slug, role)
-  // user_account is visible only to a workspace the person belongs to, so this
+const actorCtx = async (slug: string, email: string, editHubs: string[]): Promise<AccountContext> => {
+  const base = await ctxFor(slug, editHubs)
+  // user_account is visible only to a account the person belongs to, so this
   // read has to be scoped like any other. Unscoped it returns nothing and every
   // actor silently becomes null.
   const rows = await scoped<{ id: string }>(
@@ -93,14 +92,14 @@ try {
   section('form schema rules')
 
   const contactUs = await publicFormBySlug('datasaur', 'contact-us')
-  check('the seeded production forms resolve by workspace and slug', !!contactUs,
+  check('the seeded production forms resolve by account and slug', !!contactUs,
     contactUs ? `${contactUs.name}, ${contactUs.fields.length} fields` : 'contact-us not found')
   if (!contactUs) throw new Error('cannot continue without the contact-us form')
 
   const byId = await publicFormById(contactUs.formId)
-  check('the same form resolves by id, and carries its workspace slug',
-    byId?.formId === contactUs.formId && byId?.workspaceSlug === 'datasaur',
-    `workspaceSlug: ${byId?.workspaceSlug}`)
+  check('the same form resolves by id, and carries its account slug',
+    byId?.formId === contactUs.formId && byId?.accountSlug === 'datasaur',
+    `accountSlug: ${byId?.accountSlug}`)
 
   check('a form with no email field is refused, because nothing could dedupe a contact',
     refuses(() => assertSchemaIsUsable([
@@ -348,7 +347,7 @@ try {
     queue.some((row) => row.id === quarantined.submissionId && row.spamReasons.length > 0),
     queue.find((r) => r.id === quarantined.submissionId)?.spamReasons[0]?.detail)
 
-  const reviewer = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin')
+  const reviewer = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
   const released = await releaseSubmission(reviewer, quarantined.submissionId)
   check('releasing it creates the contact', !!released.contactId, released.contactId?.slice(0, 8))
 
@@ -375,7 +374,7 @@ try {
   // ---------------------------------------------------------------- roles
   section('roles and tenancy')
 
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', 'viewer')
+  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
   check('a viewer can read the queue', (await listSubmissions(viewer, { state: 'clean' })).length >= 0,
     'read allowed')
   check('a viewer cannot release a held lead',
@@ -386,16 +385,19 @@ try {
       fields: [{ key: 'email', type: 'email', label: 'Email', required: true }],
     })), 'refused')
 
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
   check('sales can act on the review queue but cannot rebuild a form',
     await refusesAsync(() => saveForm(sales, {
       name: 'Nope', slug: 'nope-2', isActive: true, settings: contactUs.settings,
       fields: [{ key: 'email', type: 'email', label: 'Email', required: true }],
     })), 'form editing is admin and marketing only')
 
-  const edge = publicEdgeContext(datasaur.workspaceId)
-  check('the public edge acts with marketing’s ceiling, not an admin’s',
-    edge.role === 'marketing' && edge.actorKind === 'public', `${edge.actorKind} / ${edge.role}`)
+  const edge = publicEdgeContext(datasaur.accountId)
+  check(
+    'the public edge acts with marketing’s ceiling, not an admin’s',
+    edge.editHubs.includes('marketing') && !edge.editHubs.includes('account') && edge.actorKind === 'public',
+    `${edge.actorKind} / ${edge.editHubs.join()}`,
+  )
 
   const probeForms = await listForms(probe)
   const datasaurForms = await listForms(datasaur)

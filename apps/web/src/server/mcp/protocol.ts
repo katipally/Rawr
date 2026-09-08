@@ -152,7 +152,7 @@ export const handle = async (
             },
           })),
           ttlMs: TOOLS_TTL_MS,
-          // The catalogue carries this workspace's own custom fields, so it is
+          // The catalogue carries this account's own custom fields, so it is
           // private to the caller and must not be cached where another can read it.
           cacheScope: 'private',
         }),

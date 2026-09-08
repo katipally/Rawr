@@ -16,10 +16,10 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 export const analyticsRouter = router({
   websiteActivity: protectedProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => websiteActivity(ctx.workspace, input.contactId))),
+    .query(({ ctx, input }) => call(() => websiteActivity(ctx.account, input.contactId))),
 
   sites: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listSites(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listSites(ctx.account))),
 
     create: adminProcedure
       .input(
@@ -29,25 +29,25 @@ export const analyticsRouter = router({
           siteKey: z.string().trim().min(3).max(61),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => createSite(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => createSite(ctx.account, input))),
 
     setActive: adminProcedure
       .input(z.object({ id: z.uuid(), isActive: z.boolean() }))
       .mutation(({ ctx, input }) =>
-        call(() => setSiteActive(ctx.workspace, input.id, input.isActive)),
+        call(() => setSiteActive(ctx.account, input.id, input.isActive)),
       ),
   }),
 
-  notices: adminProcedure.query(({ ctx }) => call(() => listCollectorNotices(ctx.workspace))),
+  notices: adminProcedure.query(({ ctx }) => call(() => listCollectorNotices(ctx.account))),
 
   /** One export path per contact, covering page views, events, submissions and
    *  consent records. Built in this feature because this is the feature that
    *  creates the obligation. */
   exportContact: adminProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => exportContactActivity(ctx.workspace, input.contactId))),
+    .mutation(({ ctx, input }) => call(() => exportContactActivity(ctx.account, input.contactId))),
 
   eraseContact: adminProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => eraseContactActivity(ctx.workspace, input.contactId))),
+    .mutation(({ ctx, input }) => call(() => eraseContactActivity(ctx.account, input.contactId))),
 })

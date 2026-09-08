@@ -14,26 +14,26 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, searchVector, tsvector, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, searchVector, tsvector, updatedAt, accountId } from './columns.ts'
 import { activityTypeEnum, actorKindEnum, taskStatusEnum } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 
 export const lifecycleStage = pgTable(
   'lifecycle_stage',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     position: integer('position').notNull().default(0),
   },
-  (t) => [uniqueIndex('lifecycle_stage_name_key').on(t.workspaceId, t.name)],
+  (t) => [uniqueIndex('lifecycle_stage_name_key').on(t.accountId, t.name)],
 )
 
 export const company = pgTable(
   'company',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name'),
     domain: text('domain'),
     industry: text('industry'),
@@ -42,6 +42,14 @@ export const company = pgTable(
     phone: text('phone'),
     employeeCount: integer('employee_count'),
     annualRevenue: numeric('annual_revenue', { precision: 18, scale: 2 }),
+    description: text('description'),
+    linkedinUrl: text('linkedin_url'),
+    state: text('state'),
+    postalCode: text('postal_code'),
+    /** Text, the way HubSpot types both: a provider answers "$10M" or a range
+     *  as often as a number, and parsing that into a decimal invents precision. */
+    foundedYear: text('founded_year'),
+    fundingRaised: text('funding_raised'),
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     lifecycleStageId: uuid('lifecycle_stage_id').references(() => lifecycleStage.id, {
       onDelete: 'set null',
@@ -65,13 +73,13 @@ export const company = pgTable(
     /** Dedupe enforced by the index, not by check-then-insert, so two concurrent
      *  imports cannot both win. Partial, so soft-deleted rows free their domain. */
     uniqueIndex('company_domain_key')
-      .on(t.workspaceId, t.domain)
+      .on(t.accountId, t.domain)
       .where(sql`domain is not null and deleted_at is null`),
     index('company_search_idx').using('gin', t.search),
     index('company_custom_idx').using('gin', t.custom),
-    index('company_owner_idx').on(t.workspaceId, t.ownerId),
-    index('company_domain_idx').on(t.workspaceId, t.domain),
-    index('company_created_idx').on(t.workspaceId, t.createdAt.desc(), t.id.desc()),
+    index('company_owner_idx').on(t.accountId, t.ownerId),
+    index('company_domain_idx').on(t.accountId, t.domain),
+    index('company_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
   ],
 )
 
@@ -79,13 +87,17 @@ export const contact = pgTable(
   'contact',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     firstName: text('first_name'),
     lastName: text('last_name'),
     email: text('email'),
     phone: text('phone'),
     title: text('title'),
     linkedinUrl: text('linkedin_url'),
+    city: text('city'),
+    country: text('country'),
+    seniority: text('seniority'),
+    department: text('department'),
     companyId: uuid('company_id').references(() => company.id, { onDelete: 'set null' }),
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     lifecycleStageId: uuid('lifecycle_stage_id').references(() => lifecycleStage.id, {
@@ -114,13 +126,13 @@ export const contact = pgTable(
   },
   (t) => [
     uniqueIndex('contact_email_key')
-      .on(t.workspaceId, sql`lower(${t.email})`)
+      .on(t.accountId, sql`lower(${t.email})`)
       .where(sql`email is not null and deleted_at is null`),
     index('contact_search_idx').using('gin', t.search),
     index('contact_custom_idx').using('gin', t.custom),
-    index('contact_company_idx').on(t.workspaceId, t.companyId),
-    index('contact_owner_idx').on(t.workspaceId, t.ownerId),
-    index('contact_created_idx').on(t.workspaceId, t.createdAt.desc(), t.id.desc()),
+    index('contact_company_idx').on(t.accountId, t.companyId),
+    index('contact_owner_idx').on(t.accountId, t.ownerId),
+    index('contact_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
   ],
 )
 
@@ -128,18 +140,18 @@ export const pipeline = pgTable(
   'pipeline',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     position: integer('position').notNull().default(0),
   },
-  (t) => [uniqueIndex('pipeline_name_key').on(t.workspaceId, t.name)],
+  (t) => [uniqueIndex('pipeline_name_key').on(t.accountId, t.name)],
 )
 
 export const pipelineStage = pgTable(
   'pipeline_stage',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     pipelineId: uuid('pipeline_id')
       .notNull()
       .references(() => pipeline.id, { onDelete: 'cascade' }),
@@ -149,14 +161,14 @@ export const pipelineStage = pgTable(
     isClosedWon: boolean('is_closed_won').notNull().default(false),
     isClosedLost: boolean('is_closed_lost').notNull().default(false),
   },
-  (t) => [index('pipeline_stage_pipeline_idx').on(t.workspaceId, t.pipelineId, t.position)],
+  (t) => [index('pipeline_stage_pipeline_idx').on(t.accountId, t.pipelineId, t.position)],
 )
 
 export const deal = pgTable(
   'deal',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name'),
     pipelineId: uuid('pipeline_id')
       .notNull()
@@ -183,9 +195,9 @@ export const deal = pgTable(
   (t) => [
     index('deal_search_idx').using('gin', t.search),
     index('deal_custom_idx').using('gin', t.custom),
-    index('deal_stage_idx').on(t.workspaceId, t.stageId, t.closeDate),
-    index('deal_owner_idx').on(t.workspaceId, t.ownerId),
-    index('deal_created_idx').on(t.workspaceId, t.createdAt.desc(), t.id.desc()),
+    index('deal_stage_idx').on(t.accountId, t.stageId, t.closeDate),
+    index('deal_owner_idx').on(t.accountId, t.ownerId),
+    index('deal_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
   ],
 )
 
@@ -193,7 +205,7 @@ export const deal = pgTable(
 export const association = pgTable(
   'association',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     fromType: text('from_type').notNull(),
     fromId: uuid('from_id').notNull(),
     toType: text('to_type').notNull(),
@@ -202,8 +214,8 @@ export const association = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.fromType, t.fromId, t.toType, t.toId] }),
-    index('association_reverse_idx').on(t.workspaceId, t.toType, t.toId),
+    primaryKey({ columns: [t.accountId, t.fromType, t.fromId, t.toType, t.toId] }),
+    index('association_reverse_idx').on(t.accountId, t.toType, t.toId),
   ],
 )
 
@@ -211,7 +223,7 @@ export const activity = pgTable(
   'activity',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     type: activityTypeEnum('type').notNull(),
     subject: text('subject'),
     body: text('body'),
@@ -219,7 +231,7 @@ export const activity = pgTable(
     actorId: uuid('actor_id'),
     actorKind: actorKindEnum('actor_kind').notNull(),
     source: text('source'),
-    /** What this row was in the file it was imported from. Unique per workspace, so
+    /** What this row was in the file it was imported from. Unique per account, so
      *  re-importing the same HubSpot export leaves the timeline as it was rather
      *  than writing every note a second time. Null for anything Rawr wrote itself. */
     importKey: text('import_key'),
@@ -227,8 +239,8 @@ export const activity = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    index('activity_occurred_idx').on(t.workspaceId, t.occurredAt.desc(), t.id.desc()),
-    uniqueIndex('activity_import_key_idx').on(t.workspaceId, t.importKey).where(sql`import_key is not null`),
+    index('activity_occurred_idx').on(t.accountId, t.occurredAt.desc(), t.id.desc()),
+    uniqueIndex('activity_import_key_idx').on(t.accountId, t.importKey).where(sql`import_key is not null`),
   ],
 )
 
@@ -237,7 +249,7 @@ export const activity = pgTable(
 export const activityLink = pgTable(
   'activity_link',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     activityId: uuid('activity_id')
       .notNull()
       .references(() => activity.id, { onDelete: 'cascade' }),
@@ -250,19 +262,19 @@ export const activityLink = pgTable(
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.activityId, t.entityType, t.entityId] }),
+    primaryKey({ columns: [t.accountId, t.activityId, t.entityType, t.entityId] }),
     /** The foreign key's own index. Every other index here leads with
-     *  workspace_id, which serves the timeline read and cannot serve the cascade
+     *  account_id, which serves the timeline read and cannot serve the cascade
      *  from activity: without this, deleting one activity scans the whole table. */
     index('activity_link_activity_idx').on(t.activityId),
     index('activity_link_timeline_idx').on(
-      t.workspaceId,
+      t.accountId,
       t.entityType,
       t.entityId,
       t.occurredAt.desc(),
       t.activityId.desc(),
     ),
-    index('activity_link_type_idx').on(t.workspaceId, t.entityType, t.entityId, t.type),
+    index('activity_link_type_idx').on(t.accountId, t.entityType, t.entityId, t.type),
   ],
 )
 
@@ -272,7 +284,7 @@ export const task = pgTable(
   'task',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     body: text('body'),
     dueDate: date('due_date'),
@@ -286,9 +298,9 @@ export const task = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    index('task_queue_idx').on(t.workspaceId, t.status, t.dueDate, t.id),
-    index('task_assignee_idx').on(t.workspaceId, t.assigneeId, t.status, t.dueDate),
-    index('task_entity_idx').on(t.workspaceId, t.entityType, t.entityId),
+    index('task_queue_idx').on(t.accountId, t.status, t.dueDate, t.id),
+    index('task_assignee_idx').on(t.accountId, t.assigneeId, t.status, t.dueDate),
+    index('task_entity_idx').on(t.accountId, t.entityType, t.entityId),
   ],
 )
 
@@ -304,12 +316,12 @@ export const attachment = pgTable(
   'attachment',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     /** An object key. Not a foreign key: the type decides which table it points
      *  at, and no constraint spans them. The shape activityLink already uses. */
     entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
-    /** The path inside the bucket, carrying the workspace, so one tenant's prefix
+    /** The path inside the bucket, carrying the account, so one tenant's prefix
      *  is never another's even if a bucket is ever shared or misconfigured. */
     storageKey: text('storage_key').notNull(),
     filename: text('filename').notNull(),
@@ -319,10 +331,10 @@ export const attachment = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('attachment_entity_idx').on(t.workspaceId, t.entityType, t.entityId, t.at.desc()),
+    index('attachment_entity_idx').on(t.accountId, t.entityType, t.entityId, t.at.desc()),
     /** An upload retried writes the same key, and without this the record would
      *  show the same file twice. */
-    uniqueIndex('attachment_storage_key').on(t.workspaceId, t.storageKey),
+    uniqueIndex('attachment_storage_key').on(t.accountId, t.storageKey),
   ],
 )
 
@@ -339,7 +351,7 @@ export const customRecord = pgTable(
   'custom_record',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     /** Deleting the object takes its records, the way dropping a table would. */
     objectId: uuid('object_id').notNull(),
     /** Every value, including the one that names the record. */
@@ -352,5 +364,5 @@ export const customRecord = pgTable(
     updatedAt: updatedAt(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (t) => [index('custom_record_object_idx').on(t.workspaceId, t.objectId, t.createdAt.desc())],
+  (t) => [index('custom_record_object_idx').on(t.accountId, t.objectId, t.createdAt.desc())],
 )

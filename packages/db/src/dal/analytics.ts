@@ -9,8 +9,8 @@ import {
   visitorSession,
 } from '../schema/analytics.ts'
 import { consentRecord } from '../schema/forms.ts'
-import { assertCanWrite, type WorkspaceContext } from './context.ts'
-import { isUuid, mutate, withWorkspace } from './index.ts'
+import { assertCanWrite, type AccountContext } from './context.ts'
+import { isUuid, mutate, withAccount } from './index.ts'
 import { refreshAllContactActivity, refreshContactActivity } from './stitch.ts'
 
 /** F4 §4. The read side: the three numbers on a contact record, the detail behind
@@ -28,10 +28,10 @@ export type WebsiteActivity = {
  *  than counted. A contact with 20,000 page views opens as fast as one with three
  *  because this is a primary-key lookup either way. */
 export const websiteActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<WebsiteActivity> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({
         siteVisits: contactActivity.siteVisits,
@@ -45,7 +45,7 @@ export const websiteActivity = async (
 
     const [devices] = await tx.execute<{ n: string }>(sql`
       select count(*)::text as n from visitor_alias
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}`)
 
     return {
       siteVisits: row?.siteVisits ?? 0,
@@ -85,11 +85,11 @@ export type PageViewDetail = {
 /** One page view, with the visit it belonged to. Addressed by its own id so the
  *  screen pastes into Slack like every other surface. */
 export const readPageView = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
 ): Promise<PageViewDetail | null> => {
   if (!isUuid(id)) return null
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{
       id: string
       contact_id: string | null
@@ -139,12 +139,68 @@ export const readPageView = async (
   })
 }
 
+export type CustomEventDetail = {
+  id: string
+  name: string
+  properties: Record<string, unknown>
+  contactId: string | null
+  contactName: string | null
+  siteName: string | null
+  at: Date
+  session: PageViewDetail['session']
+}
+
+/** One tracked event, with the visit it was fired in.
+ *
+ *  Same address space as a page view, because both are "something the person did
+ *  on the site" and the timeline links them the same way. The properties are the
+ *  point: an event called `trial_started` says nothing without the plan on it. */
+export const readCustomEvent = async (
+  ctx: AccountContext,
+  id: string,
+): Promise<CustomEventDetail | null> => {
+  if (!isUuid(id)) return null
+  return withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{
+      id: string
+      name: string
+      properties: Record<string, unknown>
+      contact_id: string | null
+      contact_name: string | null
+      site_name: string | null
+      at: Date
+      session_id: string | null
+    }>(sql`
+      select e.id, e.name, e.properties, e.contact_id, e.at, e.session_id,
+             s.name as site_name,
+             nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), '')
+               as contact_name
+        from custom_event e
+        left join site s on s.id = e.site_id
+        left join contact c on c.id = e.contact_id
+       where e.id = ${id}`)
+
+    if (!row) return null
+
+    return {
+      id: row.id,
+      name: row.name,
+      properties: row.properties ?? {},
+      contactId: row.contact_id,
+      contactName: row.contact_name,
+      siteName: row.site_name,
+      at: new Date(row.at),
+      session: row.session_id ? await readSession(tx, row.session_id) : null,
+    }
+  })
+}
+
 /** Capped, because a bot that got past the filter or a single-page app that got
  *  past the debounce would otherwise render a session of ten thousand rows. */
 const SESSION_VIEW_CAP = 200
 
 const readSession = async (
-  tx: Parameters<Parameters<typeof withWorkspace>[1]>[0],
+  tx: Parameters<Parameters<typeof withAccount>[1]>[0],
   sessionId: string,
 ): Promise<PageViewDetail['session']> => {
   const [row] = await tx
@@ -184,8 +240,8 @@ export type SiteRow = {
   lastEventAt: Date | null
 }
 
-export const listSites = async (ctx: WorkspaceContext): Promise<SiteRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listSites = async (ctx: AccountContext): Promise<SiteRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -199,7 +255,7 @@ export const listSites = async (ctx: WorkspaceContext): Promise<SiteRow[]> =>
              count(p.id) as page_views, max(p.at) as last_at
         from site s
         left join page_view p on p.site_id = s.id
-       where s.workspace_id = ${ctx.workspaceId}
+       where s.account_id = ${ctx.accountId}
        group by s.id
        order by s.name`)
 
@@ -226,7 +282,7 @@ const violates = (cause: unknown, constraint: string): boolean => {
 }
 
 export const createSite = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { name: string; host: string; siteKey: string },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'site', async (tx) => {
@@ -240,14 +296,14 @@ export const createSite = async (
     if (!host.includes('.')) throw new Error('A site needs a host, such as datasaur.ai.')
 
     // The unique index is across every tenant, and row level security means a key
-    // held by another workspace is invisible to a check-then-insert here. The
+    // held by another account is invisible to a check-then-insert here. The
     // index is therefore the only honest test, and its violation is translated
     // into a message that says the key is taken without saying by whom.
     let row: { id: string } | undefined
     try {
       ;[row] = await tx
         .insert(site)
-        .values({ workspaceId: ctx.workspaceId, name: input.name.trim(), host, siteKey })
+        .values({ accountId: ctx.accountId, name: input.name.trim(), host, siteKey })
         .returning({ id: site.id })
     } catch (cause) {
       if (violates(cause, 'site_key_unique')) {
@@ -264,7 +320,7 @@ export const createSite = async (
   })
 
 export const setSiteActive = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   isActive: boolean,
 ): Promise<void> =>
@@ -298,9 +354,9 @@ export type CollectorNoticeRow = {
 /** Surfaced beside the failed jobs, because both answer the same question: what
  *  is quietly not working. A PII rejection is a bug in the product that fired it. */
 export const listCollectorNotices = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
 ): Promise<CollectorNoticeRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         kind: collectorNotice.kind,
@@ -338,13 +394,13 @@ export type ActivityExport = {
  *  Uncapped on purpose: a data-subject request that silently returns the first
  *  thousand rows is not an answer to it. */
 export const exportContactActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<ActivityExport> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const visitors = await tx.execute<{ visitor_id: string; via: string; at: Date }>(sql`
       select visitor_id, via::text, created_at as at from visitor_alias
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}
        order by created_at`)
 
     const views = await tx
@@ -369,15 +425,15 @@ export const exportContactActivity = async (
       select c.categories, c.policy_version, c.at
         from consent_record c
         join visitor_alias a on a.visitor_id = c.visitor_id
-                            and a.workspace_id = c.workspace_id
-       where c.workspace_id = ${ctx.workspaceId} and a.contact_id = ${contactId}
+                            and a.account_id = c.account_id
+       where c.account_id = ${ctx.accountId} and a.contact_id = ${contactId}
        order by c.at`)
 
     const submissions = await tx.execute<{ form_name: string; values: unknown; at: Date }>(sql`
       select f.name as form_name, s.values, s.at
         from form_submission s
         join form f on f.id = s.form_id
-       where s.workspace_id = ${ctx.workspaceId} and s.contact_id = ${contactId}
+       where s.account_id = ${ctx.accountId} and s.contact_id = ${contactId}
        order by s.at`)
 
     return {
@@ -406,22 +462,22 @@ export type EraseResult = { pageViews: number; events: number; visitors: number 
  *  counts stay honest; this is what an erasure request asks for instead, and it
  *  removes the rows and the visitor identities that point at them. */
 export const eraseContactActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<EraseResult> => {
   assertCanWrite(ctx, 'erasure')
   return mutate(ctx, 'erasure', async (tx) => {
     const ids = await tx.execute<{ visitor_id: string }>(sql`
       select visitor_id from visitor_alias
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}`)
     const visitorIds = ids.map((row) => row.visitor_id)
 
     const views = await tx.execute<{ id: string }>(sql`
       delete from page_view
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId} returning id`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId} returning id`)
     const events = await tx.execute<{ id: string }>(sql`
       delete from custom_event
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId} returning id`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId} returning id`)
 
     // The timeline entries those rows produced go with them, or the record would
     // still read "viewed Data Studio" with nothing behind it.
@@ -429,19 +485,19 @@ export const eraseContactActivity = async (
       delete from activity a
        using activity_link l
        where l.activity_id = a.id
-         and a.workspace_id = ${ctx.workspaceId}
+         and a.account_id = ${ctx.accountId}
          and l.entity_type = 'contact' and l.entity_id = ${contactId}
          and a.type in ('page_view', 'custom_event')`)
 
     await tx.execute(sql`
       delete from page_view_daily
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}`)
     await tx.execute(sql`
       delete from contact_activity
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}`)
     await tx.execute(sql`
       delete from visitor_alias
-       where workspace_id = ${ctx.workspaceId} and contact_id = ${contactId}`)
+       where account_id = ${ctx.accountId} and contact_id = ${contactId}`)
 
     if (visitorIds.length > 0) {
       // inArray, not `= any($1::text[])`: an array bound through the query builder
@@ -472,24 +528,24 @@ export const eraseContactActivity = async (
 
 /** Raw rows past the retention window collapse to one row per contact per day.
  *  Configurable, because it is a data-protection decision, not a technical one.
- *  Runs per workspace so one tenant's backlog cannot stall another's. */
+ *  Runs per account so one tenant's backlog cannot stall another's. */
 export const rollUpExpired = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   months: number,
 ): Promise<{ rolled: number }> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const cutoff = sql`now() - make_interval(months => ${months})`
     const rolled = await tx.execute<{ id: string }>(sql`
       with expired as (
         delete from page_view
-         where workspace_id = ${ctx.workspaceId} and at < ${cutoff}
+         where account_id = ${ctx.accountId} and at < ${cutoff}
         returning contact_id, at, id
       ), kept as (
-        insert into page_view_daily (workspace_id, contact_id, day, views)
-        select ${ctx.workspaceId}, contact_id, at::date, count(*)
+        insert into page_view_daily (account_id, contact_id, day, views)
+        select ${ctx.accountId}, contact_id, at::date, count(*)
           from expired where contact_id is not null
          group by contact_id, at::date
-        on conflict (workspace_id, contact_id, day)
+        on conflict (account_id, contact_id, day)
           do update set views = page_view_daily.views + excluded.views
         returning contact_id
       )
@@ -497,23 +553,12 @@ export const rollUpExpired = async (
 
     await tx.execute(sql`
       delete from custom_event
-       where workspace_id = ${ctx.workspaceId} and at < ${cutoff}`)
+       where account_id = ${ctx.accountId} and at < ${cutoff}`)
     await tx.execute(sql`
       delete from visitor_session
-       where workspace_id = ${ctx.workspaceId} and ended_at < ${cutoff}`)
+       where account_id = ${ctx.accountId} and ended_at < ${cutoff}`)
 
     return { rolled: rolled.length }
   })
 
 export { refreshAllContactActivity, refreshContactActivity }
-
-/** Contacts whose counters need recomputing after a roll-up moved rows out from
- *  under them. One query rather than a counter the roll-up tries to keep in step. */
-export const contactsWithActivity = async (ctx: WorkspaceContext): Promise<string[]> =>
-  withWorkspace(ctx, async (tx) => {
-    const rows = await tx
-      .select({ contactId: contactActivity.contactId })
-      .from(contactActivity)
-      .where(and(eq(contactActivity.workspaceId, ctx.workspaceId)))
-    return rows.map((row) => row.contactId)
-  })

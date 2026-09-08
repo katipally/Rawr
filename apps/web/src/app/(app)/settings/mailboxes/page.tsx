@@ -1,7 +1,7 @@
 import { Alert, PageHeader } from '@rawr/ui'
 import { bodyProgress, internalDomainOf, listBlocklist, listMailboxes } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { MailboxList } from './mailbox-list.tsx'
 
 /** The continuity requirement: a successor opens a contact and sees the whole
@@ -61,7 +61,7 @@ const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?:
         }))}
         blocklist={blocklist}
         currentUserId={session.userId}
-        role={session.role}
+        isAdmin={sessionIsAdmin(session)}
         internalDomain={internalDomain}
         googleReady={googleConfigured}
         devReady={devGmailEnabled}

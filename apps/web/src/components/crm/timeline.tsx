@@ -1,13 +1,14 @@
 'use client'
 
 import { Alert, Button, DropdownMenu, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import type { EmailPayload, EmailStats } from '@rawr/db'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { pageViewPath } from '~/lib/links.ts'
+import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ACTIVITY_LABELS as TYPE_LABELS, formatDateTime } from './value.tsx'
+import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime } from './value.tsx'
 
 const monthOf = (iso: string): string =>
   new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
@@ -21,9 +22,11 @@ export type TimelineEntry = {
   actorId: string | null
   actorName: string | null
   actorKind: string
-  /** What the entry was written from. Only F4's two types read it, to address the
-   *  page view or event behind them. */
+  /** What the entry was written from: the page view or event behind a tracked
+   *  row, the thread and direction behind an email. */
   payload?: unknown
+  /** Opens, clicks and replies under an outbound email, read live. */
+  stats?: EmailStats | undefined
 }
 
 export type TimelineGroup = { label: string; types: string[] }
@@ -31,7 +34,7 @@ export type TimelineGroup = { label: string; types: string[] }
 export type TimelineProps = {
   /** An object key, core or invented. */
   object: string
-  workspace: string
+  account: string
   /** Whose record this is. Tracking entries are attributed to the person, the way
    *  HubSpot reads "Muhammad Owais viewed Data Studio", because "public viewed" or
    *  "job viewed" describes the mechanism rather than what happened. */
@@ -44,7 +47,7 @@ export type TimelineProps = {
   canWrite: boolean
   /** Who is looking. Their own hand-logged entries can be corrected or removed; an
    *  admin can do that to anyone's. Nothing the system wrote can be touched. */
-  viewer: { userId: string; role: string }
+  viewer: { userId: string; isAdmin: boolean }
   /** Which composer the quick-action row above asked for, from the address. The
    *  composer lives here, so the row asks rather than carrying a second copy. */
   openKind?: 'note' | 'call' | 'meeting' | 'email' | undefined
@@ -70,28 +73,57 @@ const SUBTABS: { label: string; types: string[] }[] = [
   { label: 'All activities', types: [] },
   { label: 'Notes', types: ['note'] },
   { label: 'Emails', types: ['email', 'marketing_email'] },
+  { label: 'Sequences', types: ['sequence_activity'] },
   { label: 'Calls', types: ['call'] },
   { label: 'Tasks', types: ['task'] },
   { label: 'Meetings', types: ['meeting', 'booking'] },
 ]
 
+/** An email written by the mail sync or a sequence send, as opposed to one a
+ *  person logged by hand, which has no thread to open. */
+const emailOf = (entry: TimelineEntry): EmailPayload | null => {
+  if (entry.type !== 'email') return null
+  const payload = entry.payload as Partial<EmailPayload> | null
+  return payload?.threadId && payload.direction ? (payload as EmailPayload) : null
+}
+
+/** HubSpot's heading: "Email sent to Gde <gde@staffinc.co>", and the sequence
+ *  named when one sent it, so a rep can tell outreach from correspondence. */
+const emailWho = (entry: TimelineEntry, mail: EmailPayload): string => {
+  const other = mail.counterpart?.join(', ') ?? ''
+  const by = entry.actorName && mail.direction === 'outbound' && mail.source !== 'sequence' ? ` by ${entry.actorName}` : ''
+  return `${mail.direction === 'outbound' ? 'sent to' : 'received from'} ${other}${mail.sequenceName ? ` · ${mail.sequenceName}` : ''}${by}`
+}
+
+const EmailStatsLine = ({ stats }: { stats: EmailStats }) => (
+  <p className="mt-1 flex flex-wrap items-center gap-x-3 text-small text-secondary">
+    <span className="inline-flex items-center gap-1">
+      <span
+        aria-hidden="true"
+        className={cn('inline-block size-2 rounded-full', stats.bounced ? 'bg-error' : 'bg-success')}
+      />
+      {stats.bounced ? 'Bounced' : 'Delivered'}
+    </span>
+    {stats.opens !== null ? <span>Opens: {stats.opens}</span> : null}
+    {stats.clicks !== null ? <span>Clicks: {stats.clicks}</span> : null}
+    <span>Replies: {stats.replies}</span>
+  </p>
+)
+
 const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((type) => b.includes(type))
 
-/** The two types whose actor is the person the record is about, not a user, a job
- *  or "public". F4 §4. */
-const TRACKED = new Set(['page_view', 'custom_event'])
-
-/** A page view on the timeline addresses the row behind it, so "viewed Data
- *  Studio" opens the full URL, the referrer and the rest of that visit. F4 §4. */
-const pageViewIdOf = (entry: TimelineEntry): string | null => {
-  if (entry.type !== 'page_view') return null
-  const id = (entry.payload as { pageViewId?: unknown } | null)?.pageViewId
+/** A tracked row on the timeline addresses the row behind it, so "viewed Data
+ *  Studio" opens the full URL, the referrer and the rest of that visit, and
+ *  "fired trial_started" opens what was sent with it. F4 §4. */
+const activityIdOf = (entry: TimelineEntry): string | null => {
+  const payload = entry.payload as { pageViewId?: unknown; eventId?: unknown } | null
+  const id = entry.type === 'page_view' ? payload?.pageViewId : entry.type === 'custom_event' ? payload?.eventId : null
   return typeof id === 'string' ? id : null
 }
 
 export const Timeline = ({
   object,
-  workspace,
+  account,
   recordName,
   recordId,
   initial,
@@ -182,6 +214,7 @@ export const Timeline = ({
         actorName: row.actorName,
         actorKind: row.actorKind,
         payload: row.payload,
+        stats: row.stats,
       }))
       setRows((current) => (append ? [...current, ...mapped] : mapped))
       setCursor(
@@ -243,10 +276,13 @@ export const Timeline = ({
     }
   }
 
+  // A synced or sent email is a record of what went over the wire, not a note
+  // somebody typed, so it is never edited here.
   const canTouch = (entry: TimelineEntry) =>
     canWrite &&
+    !emailOf(entry) &&
     LOGGABLE.some((loggable) => loggable.type === entry.type) &&
-    (entry.actorId === viewer.userId || viewer.role === 'admin')
+    (entry.actorId === viewer.userId || viewer.isAdmin)
 
   const saveEdit = async () => {
     if (!editing) return
@@ -437,6 +473,8 @@ export const Timeline = ({
             const month = monthOf(entry.occurredAt)
             const heads = index === 0 || monthOf(shown[index - 1]!.occurredAt) !== month
             const folded = collapsed.has(entry.id)
+            const mail = emailOf(entry)
+            const who = activityActor(entry.type, { ...entry, recordName })
             const fold = () =>
               setCollapsed((current) => {
                 const next = new Set(current)
@@ -460,21 +498,15 @@ export const Timeline = ({
                   ) : (
                     <ChevronDown aria-hidden="true" className="size-4" />
                   )}
-                  {TYPE_LABELS[entry.type] ?? entry.type}
+                  {mail?.source === 'sequence' ? 'Sequence email' : (TYPE_LABELS[entry.type] ?? entry.type)}
                 </button>
-                <span className="min-w-0 break-words font-medium">
-                  {TRACKED.has(entry.type)
-                    ? `${recordName} `
-                    : entry.actorName
-                      ? `${entry.actorName} `
-                      : entry.actorKind !== 'user'
-                        ? `${entry.actorKind} `
-                        : ''}
-                  {pageViewIdOf(entry) ? (
-                    <Link className="text-link" href={pageViewPath(workspace, pageViewIdOf(entry) as string)}>
+                <span className={cn('min-w-0 break-words', mail ? 'text-secondary' : 'font-medium')}>
+                  {mail ? emailWho(entry, mail) : who ? `${who} ` : ''}
+                  {!mail && activityIdOf(entry) ? (
+                    <Link className="text-link" href={pageViewPath(account, activityIdOf(entry) as string)}>
                       {entry.subject ?? ''}
                     </Link>
-                  ) : (
+                  ) : mail ? null : (
                     (entry.subject ?? '')
                   )}
                 </span>
@@ -501,6 +533,14 @@ export const Timeline = ({
                       Cancel
                     </Button>
                   </div>
+                </div>
+              ) : mail ? (
+                <div className="mt-1 flex flex-col">
+                  <Link className="break-words font-medium text-link" href={threadPath(account, mail.threadId)}>
+                    {entry.subject ?? '(no subject)'}
+                  </Link>
+                  {entry.body ? <p className="mt-1 break-words text-secondary">{entry.body}</p> : null}
+                  {entry.stats ? <EmailStatsLine stats={entry.stats} /> : null}
                 </div>
               ) : entry.body ? (
                 <p className="mt-1 break-words whitespace-pre-wrap">{entry.body}</p>

@@ -10,9 +10,9 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, accountId } from './columns.ts'
 import { subscriptionStateEnum, viewKindEnum } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 import { objectDef, fieldDef } from './metadata.ts'
 import { contact } from './records.ts'
 
@@ -20,12 +20,12 @@ export const subscriptionType = pgTable(
   'subscription_type',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
     isInternal: boolean('is_internal').notNull().default(false),
   },
-  (t) => [uniqueIndex('subscription_type_name_key').on(t.workspaceId, t.name)],
+  (t) => [uniqueIndex('subscription_type_name_key').on(t.accountId, t.name)],
 )
 
 /** 'unspecified' is a real state that must display as itself, not as a default of
@@ -33,7 +33,7 @@ export const subscriptionType = pgTable(
 export const subscriptionState = pgTable(
   'subscription_state',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contact.id, { onDelete: 'cascade' }),
@@ -44,14 +44,14 @@ export const subscriptionState = pgTable(
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
     source: text('source'),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.contactId, t.subscriptionTypeId] })],
+  (t) => [primaryKey({ columns: [t.accountId, t.contactId, t.subscriptionTypeId] })],
 )
 
 export const segment = pgTable(
   'segment',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     description: text('description'),
     objectId: uuid('object_id')
@@ -67,7 +67,7 @@ export const segment = pgTable(
     lastEvaluatedAt: timestamp('last_evaluated_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('segment_name_key').on(t.workspaceId, t.name)],
+  (t) => [uniqueIndex('segment_name_key').on(t.accountId, t.name)],
 )
 
 /** Entry and exit are kept, not overwritten, because both are timeline events. */
@@ -75,7 +75,7 @@ export const segmentMembership = pgTable(
   'segment_membership',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     segmentId: uuid('segment_id')
       .notNull()
       .references(() => segment.id, { onDelete: 'cascade' }),
@@ -84,8 +84,8 @@ export const segmentMembership = pgTable(
     exitedAt: timestamp('exited_at', { withTimezone: true }),
   },
   (t) => [
-    index('segment_membership_segment_idx').on(t.workspaceId, t.segmentId, t.entityId),
-    index('segment_membership_entity_idx').on(t.workspaceId, t.entityId),
+    index('segment_membership_segment_idx').on(t.accountId, t.segmentId, t.entityId),
+    index('segment_membership_entity_idx').on(t.accountId, t.entityId),
   ],
 )
 
@@ -93,12 +93,12 @@ export const savedView = pgTable(
   'saved_view',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     objectId: uuid('object_id')
       .notNull()
       .references(() => objectDef.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
-    /** The URL segment. /contacts/:workspace/objects/:object/views/:slug/list is
+    /** The URL segment. /contacts/:account/objects/:object/views/:slug/list is
      *  the shareable address of a view, so the slug is the identity, not the uuid. */
     slug: text('slug').notNull(),
     kind: viewKindEnum('kind').notNull().default('table'),
@@ -118,7 +118,7 @@ export const savedView = pgTable(
     createdAt: createdAt(),
   },
   (t) => [
-    index('saved_view_object_idx').on(t.workspaceId, t.objectId, t.pinned.desc(), t.position),
-    uniqueIndex('saved_view_slug_key').on(t.workspaceId, t.objectId, t.slug),
+    index('saved_view_object_idx').on(t.accountId, t.objectId, t.pinned.desc(), t.position),
+    uniqueIndex('saved_view_slug_key').on(t.accountId, t.objectId, t.slug),
   ],
 )

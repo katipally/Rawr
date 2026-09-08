@@ -3,7 +3,7 @@ import {
   readCredentials,
   recordHealth,
   type MarketingEventKind,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
@@ -23,7 +23,7 @@ const API = 'https://api.woodpecker.co/rest/v1'
 
 type WoodpeckerConfig = { campaignId?: number; webhookToken?: string }
 
-const credentials = async (ctx: WorkspaceContext) => {
+const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'woodpecker')
   if (!found?.secret) {
     throw new Error('Woodpecker is not connected. Add an API key in Settings, under Integrations.')
@@ -48,7 +48,7 @@ const DEV_CAMPAIGNS: WoodpeckerCampaign[] = [
 
 /** The campaigns a sequence can point at. Woodpecker answers 204 with no body when
  *  the account has none, which is an empty list rather than a failure. */
-export const listWoodpeckerCampaigns = async (ctx: WorkspaceContext): Promise<WoodpeckerCampaign[]> => {
+export const listWoodpeckerCampaigns = async (ctx: AccountContext): Promise<WoodpeckerCampaign[]> => {
   if (devIntegrationsEnabled) return DEV_CAMPAIGNS
   const { secret } = await credentials(ctx)
   const rows = await attempt(
@@ -68,7 +68,7 @@ export const listWoodpeckerCampaigns = async (ctx: WorkspaceContext): Promise<Wo
   }))
 }
 
-export const testWoodpecker = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testWoodpecker = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'woodpecker', { ok: true })
@@ -108,7 +108,7 @@ export type HandOver = {
  *  refusal is deliberately not overridden with `force`: the point of the status is
  *  that Rawr should not be able to mail somebody who asked it to stop. */
 export const addProspect = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: HandOver,
 ): Promise<{ handed: boolean; detail: string }> => {
   if (devIntegrationsEnabled) {
@@ -179,7 +179,7 @@ const EVENT_MAP: Record<string, MarketingEventKind> = {
 const OPT_OUT_TYPES = ['One-to-one sales email']
 
 export const handleWoodpeckerWebhook = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   body: unknown,
 ): Promise<{ handled: boolean; detail: string }> => {
   const events: WoodpeckerEvent[] = Array.isArray(body) ? body : [body as WoodpeckerEvent]

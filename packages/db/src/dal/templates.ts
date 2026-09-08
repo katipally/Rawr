@@ -34,31 +34,6 @@ export const renderTemplate = (template: string, values: TemplateValues): string
   return tidy(filled)
 }
 
-/** Which variables a template asks for, so the page editor can show a person what
- *  they typed against what a page can actually supply. */
-export const templateVariables = (template: string): string[] => {
-  const found = new Set<string>()
-  for (const match of template.matchAll(PLACEHOLDER)) {
-    const key = match[1]
-    if (key) found.add(key.toLowerCase())
-  }
-  return [...found]
-}
-
-/** Every variable a booking template may use. Anything outside this list resolves
- *  to nothing, which is why the editor lists them. */
-export const BOOKING_TEMPLATE_KEYS = [
-  'contact.first_name',
-  'contact.last_name',
-  'contact.full_name',
-  'contact.email',
-  'company.name',
-  'host.name',
-  'host.email',
-  'page.name',
-  'meeting.duration',
-] as const
-
 export type BookingTemplateInput = {
   attendeeName: string
   attendeeEmail: string

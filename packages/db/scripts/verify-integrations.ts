@@ -2,7 +2,8 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
+import { withAccount } from '../src/dal/index.ts'
 import {
   claimForReplay,
   claimInbound,
@@ -25,7 +26,7 @@ import {
   rollWebhookSecret,
   updateWebhookEndpoint,
 } from '../src/dal/webhooks.ts'
-import { acceptSuggestion, applyEnrichment, markSource } from '../src/dal/enrichment.ts'
+import { acceptSuggestion, applyEnrichment, approveEnrichment, discardEnrichment, enrichmentQueued, markSource, pendingEnrichment } from '../src/dal/enrichment.ts'
 import { listSuggestions, readFieldSources } from '../src/dal/integrations.ts'
 import {
   ingestMarketingEvent,
@@ -49,7 +50,7 @@ import {
   type IncomingMessage,
   internalDomainOf,
 } from '../src/dal/messages.ts'
-import { createRecord, getRecord } from '../src/dal/records.ts'
+import { createRecord, deleteRecord, getRecord, updateRecord } from '../src/dal/records.ts'
 import { createImportRun, readImportRun, runImportChunk, setImportMapping } from '../src/dal/imports.ts'
 import { readTimeline } from '../src/dal/activity.ts'
 import { listFields } from '../src/dal/admin-fields.ts'
@@ -98,27 +99,55 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 const stamp = Math.random().toString(36).slice(2, 8)
 
 try {
-  const [datasaur] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'datasaur'))
-  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  const [datasaur] = await db.select().from(s.account).where(eq(s.account.slug, 'datasaur'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
   if (!datasaur || !probe) throw new Error('Run pnpm db:seed first.')
 
   const members = await db
-    .select({ id: s.userAccount.id, email: s.userAccount.email, role: s.membership.role })
+    .select({
+      id: s.userAccount.id,
+      email: s.userAccount.email,
+      isSuperAdmin: s.membership.isSuperAdmin,
+      viewHubs: s.membership.viewHubs,
+      editHubs: s.membership.editHubs,
+    })
     .from(s.membership)
     .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
-    .where(eq(s.membership.workspaceId, datasaur.id))
+    .where(eq(s.membership.accountId, datasaur.id))
 
-  const ctxFor = (role: Role): WorkspaceContext => {
-    const member = members.find((m) => m.role === role)
-    if (!member) throw new Error(`no seeded ${role}`)
-    return { workspaceId: datasaur.id, actorId: member.id, actorKind: 'user', role }
+  /** The seeded seats are named for the access they carry, so the suite asks for
+   *  one by name and gets whatever grants the seed gave it. */
+  const ctxFor = (seat: string): AccountContext => {
+    const member = members.find((m) => m.email === `${seat}@datasaur.ai`)
+    if (!member) throw new Error(`no seeded ${seat}`)
+    return {
+      accountId: datasaur.id,
+      actorId: member.id,
+      actorKind: 'user',
+      isSuperAdmin: member.isSuperAdmin,
+      viewHubs: member.viewHubs,
+      editHubs: member.editHubs,
+    }
   }
 
   const admin = ctxFor('admin')
   const sales = ctxFor('sales')
   const viewer = ctxFor('viewer')
-  const probeCtx: WorkspaceContext = { workspaceId: probe.id, actorId: null, actorKind: 'user', role: 'admin' }
-  const salesUser = members.find((m) => m.role === 'sales')!
+  const probeCtx: AccountContext = {
+    accountId: probe.id,
+    actorId: null,
+    actorKind: 'user',
+    isSuperAdmin: true,
+    viewHubs: [],
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
+  }
+
+  // A credential belongs to the account, so connecting one needs the account hub
+  // and every save and disconnect below runs in the account scope.
+  const orgAdmin = admin
+  const orgMember = sales
+  const salesUser = members.find((m) => m.email === 'sales@datasaur.ai')!
+  const probeOrg = probeCtx
 
   console.log('-- the framework -----------------------------------------------')
 
@@ -134,14 +163,14 @@ try {
   })
 
   await check('a credential is stored encrypted and never returned in the list', async () => {
-    await saveIntegration(admin, { kind: 'brevo', config: { listId: 42 }, secret: `verify-${stamp}` })
+    await saveIntegration(orgAdmin, { kind: 'brevo', config: { listId: 42 }, secret: `verify-${stamp}` })
     const rows = await listIntegrations(admin)
     const brevo = rows.find((row) => row.kind === 'brevo')
     expect(brevo?.hasSecret === true, 'the secret was not stored')
     expect(!JSON.stringify(brevo).includes(stamp), 'the secret leaked into the list payload')
 
     const [raw] = await db.execute<{ secret_ref: string }>(
-      sql`select secret_ref from integration where workspace_id = ${datasaur.id} and kind = 'brevo'`,
+      sql`select secret_ref from integration where account_id = ${datasaur.id} and kind = 'brevo'`,
     )
     expect(!raw!.secret_ref.includes(stamp), 'the secret is in the database in plain text')
     return 'the column holds ciphertext, the list holds a boolean'
@@ -155,7 +184,7 @@ try {
   })
 
   await check('saving a config change keeps the stored key', async () => {
-    await saveIntegration(admin, { kind: 'brevo', config: { listId: 43 } })
+    await saveIntegration(orgAdmin, { kind: 'brevo', config: { listId: 43 } })
     const creds = await readCredentials(admin, 'brevo')
     expect(creds?.secret === `verify-${stamp}`, 'the key was lost when only the config changed')
     expect(creds?.config.listId === 43, 'the config did not change')
@@ -180,11 +209,107 @@ try {
     return 'connected, with a last-succeeded time'
   })
 
-  await check('a viewer cannot change a credential', async () =>
-    refuses('a viewer saving an integration', () =>
-      saveIntegration(viewer, { kind: 'apollo', secret: 'nope' }),
+  await check('a member without the account hub cannot change a credential', async () =>
+    refuses('an ordinary organisation member saving an integration', () =>
+      saveIntegration(orgMember, { kind: 'apollo', secret: 'nope' }),
     ),
   )
+
+  console.log('')
+  console.log('-- organisation scope ------------------------------------------')
+
+  await check('rawr_app still holds its grants after the table left apply_tenancy', async () => {
+    const [row] = await owner<{ ok: boolean }[]>`
+      select has_table_privilege('rawr_app', 'public.integration', 'SELECT')
+         and has_table_privilege('rawr_app', 'public.integration', 'INSERT')
+         and has_table_privilege('rawr_app', 'public.integration', 'UPDATE')
+         and has_table_privilege('rawr_app', 'public.integration', 'DELETE') as ok`
+    expect(row?.ok === true, 'the app role lost a grant when account_id was dropped')
+    return 'select, insert, update, delete'
+  })
+
+  await check('row level security is enabled and forced, under the ordinary tenant policy', async () => {
+    const [flags] = await owner<{ enabled: boolean; forced: boolean }[]>`
+      select relrowsecurity as enabled, relforcerowsecurity as forced
+        from pg_class where oid = 'public.integration'::regclass`
+    expect(flags?.enabled === true && flags?.forced === true, 'row level security is not forced')
+    const policies = await owner<{ polname: string }[]>`
+      select polname from pg_policy where polrelid = 'public.integration'::regclass`
+    const names = policies.map((row) => row.polname)
+    // A credential used to hang off the organisation and needed a policy pair to
+    // let a workspace read what it could not write. With one tenant it is an
+    // ordinary account row under the same policy as every other table.
+    expect(names.includes('rawr_tenant'), 'the tenant policy is missing')
+    expect(names.length === 1, `integration carries ${names.length} policies: ${names.join(', ')}`)
+    return names.join(', ')
+  })
+
+  await check('a credential is stored once for the account', async () => {
+    await saveIntegration(orgAdmin, { kind: 'lusha', secret: `shared-${stamp}` })
+    const here = await readCredentials(admin, 'lusha')
+    expect(here !== null, 'the credential was not readable')
+    expect(here!.secret === `shared-${stamp}`, 'the secret did not round-trip')
+    return `read ${here!.id}`
+  })
+
+  await check('another account still sees nothing', async () => {
+    expect((await readCredentials(probeCtx, 'lusha')) === null, 'a credential leaked across accounts')
+    expect((await listIntegrations(probeCtx)).every((row) => row.state === 'not_configured'),
+      'another account can see a configured integration')
+    return 'no leak'
+  })
+
+  await check('the tenancy policy is what guards a credential', async () => {
+    // Raw SQL as the app role inside a pinned account: the DAL is not the
+    // boundary under test here, the policy is.
+    await withAccount(admin, async (tx) => {
+      const read = await tx.execute<{ n: number }>(
+        sql`select count(*)::int as n from integration where kind = 'lusha'`,
+      )
+      expect(Number(read[0]?.n ?? 0) === 1, 'the account cannot read its own credential')
+    })
+
+    // The other account is pinned, so its policy should match no row of ours.
+    await withAccount(probeCtx, async (tx) => {
+      const seen = await tx.execute<{ n: number }>(
+        sql`select count(*)::int as n from integration where secret_ref is not null`,
+      )
+      expect(Number(seen[0]?.n ?? 0) === 0, 'another account can read a stored credential')
+
+      const stolen = await tx.execute(
+        sql`update integration set secret_ref = 'stolen' where kind = 'lusha' returning id`,
+      )
+      expect(stolen.length === 0, 'another account rewrote a credential')
+    })
+    return 'the owning account reads and writes, another account sees nothing'
+  })
+
+  await check('the connection is recorded in the account audit log', async () => {
+    const [row] = await owner<{ n: number }[]>`
+      select count(*)::int as n from audit_log
+       where entity = 'integration' and action = 'save' and account_id = ${datasaur.id}`
+    expect(Number(row?.n ?? 0) > 0, 'connecting an integration was not audited')
+    return `${row?.n} entries`
+  })
+
+  await check('no duplicate kind in any account', async () => {
+    const [row] = await owner<{ n: number }[]>`
+      select count(*)::int as n from (
+        select account_id, kind from integration group by 1, 2 having count(*) > 1
+      ) duplicates`
+    expect(Number(row?.n ?? 0) === 0, `${row?.n} account/kind pairs have more than one row`)
+    return 'one row per account and kind'
+  })
+
+  await check('health can still be recorded from an account transaction', async () => {
+    await recordHealth(admin, 'lusha', { ok: false, error: `probe-${stamp}` })
+    const seen = (await listIntegrations(admin)).find((row) => row.kind === 'lusha')
+    expect(seen?.lastError === `probe-${stamp}`, `the account sees ${seen?.lastError}`)
+    await recordHealth(admin, 'lusha', { ok: true })
+    return 'written and read back in the account'
+  })
+
+  await disconnectIntegration(orgAdmin, 'lusha')
 
   console.log('')
   console.log('-- idempotency and deduplication -------------------------------')
@@ -338,7 +463,7 @@ try {
     // a push and the seed has nowhere near enough contacts to cross it on its own.
     const marker = `bulkpush-${stamp}`
     await db.execute(sql`
-      insert into contact (workspace_id, email, first_name, last_name)
+      insert into contact (account_id, email, first_name, last_name)
       select ${datasaur.id}, ${marker} || n::text || '@example.test', 'Bulk', n::text
         from generate_series(1, 210) as n`)
 
@@ -368,20 +493,20 @@ try {
   await check('and leaves out an opt-out without dropping it from the count', async () => {
     const [row] = await db.execute<{ id: string }>(
       sql`select id from contact
-           where workspace_id = ${datasaur.id} and email like ${'bulkpush-' + stamp + '%'}
+           where account_id = ${datasaur.id} and email like ${'bulkpush-' + stamp + '%'}
            order by id limit 1`,
     )
     expect(Boolean(row), 'the bulk contacts are gone')
     const [type] = await db.execute<{ id: string }>(
       sql`select id from subscription_type
-           where workspace_id = ${datasaur.id} and is_internal = false
+           where account_id = ${datasaur.id} and is_internal = false
            order by name limit 1`,
     )
-    expect(Boolean(type), 'the workspace has no external subscription type')
+    expect(Boolean(type), 'the account has no external subscription type')
     await db.execute(sql`
-      insert into subscription_state (workspace_id, contact_id, subscription_type_id, state)
+      insert into subscription_state (account_id, contact_id, subscription_type_id, state)
       values (${datasaur.id}, ${row!.id}, ${type!.id}, 'unsubscribed')
-      on conflict (workspace_id, contact_id, subscription_type_id)
+      on conflict (account_id, contact_id, subscription_type_id)
         do update set state = 'unsubscribed'`)
 
     const page = await readSegmentContactPage(admin, bulkSegmentId, { limit: 5 })
@@ -404,18 +529,18 @@ try {
   console.log('-- woodpecker, whose events are its own ------------------------')
 
   await check('saving Woodpecker mints a webhook token, and keeps it', async () => {
-    await saveIntegration(admin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
+    await saveIntegration(orgAdmin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
     const [first] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
-           where workspace_id = ${datasaur.id} and kind = 'woodpecker'`,
+           where account_id = ${datasaur.id} and kind = 'woodpecker'`,
     )
     expect(typeof first?.token === 'string' && first.token.length >= 24, 'no token was minted')
 
     // A second save must not roll it: the URL is already pasted at Woodpecker.
-    await saveIntegration(admin, { kind: 'woodpecker', config: { campaignId: 102 } })
+    await saveIntegration(orgAdmin, { kind: 'woodpecker', config: { campaignId: 102 } })
     const [second] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
-           where workspace_id = ${datasaur.id} and kind = 'woodpecker'`,
+           where account_id = ${datasaur.id} and kind = 'woodpecker'`,
     )
     expect(second?.token === first?.token, 'the token changed on a second save')
     return 'minted once, kept across saves'
@@ -470,7 +595,7 @@ try {
 
     const [counted] = await db.execute<{ n: number }>(
       sql`select count(*)::int as n from activity
-           where workspace_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
+           where account_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
     )
     expect(Number(counted?.n) === 2, `${counted?.n} activities written`)
     return 'two engagements, matched on the address in the file'
@@ -496,7 +621,7 @@ try {
 
     const [counted] = await db.execute<{ n: number }>(
       sql`select count(*)::int as n from activity
-           where workspace_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
+           where account_id = ${datasaur.id} and import_key like ${`hubspot:hs-${stamp}-%`}`,
     )
     expect(Number(counted?.n) === 2, `${counted?.n} activities after the second run`)
     return 'the import key is the file\u2019s own, so a re-run is a no-op'
@@ -520,7 +645,7 @@ try {
 
     const [counted] = await db.execute<{ n: number }>(
       sql`select count(*)::int as n from activity
-           where workspace_id = ${datasaur.id} and import_key = ${`hubspot:hs-${stamp}-3`}`,
+           where account_id = ${datasaur.id} and import_key = ${`hubspot:hs-${stamp}-3`}`,
     )
     expect(Number(counted?.n) === 0, 'a contact was invented for an unmatched note')
     return 'no contact is created to hold an orphaned note'
@@ -587,11 +712,11 @@ try {
       values: { phone: '+1 555 0000' },
     })
     // Mark the title as human, the way a form or an inline edit does.
-    const [{ id: workspaceId } = { id: '' }] = [{ id: datasaur.id }]
+    const [{ id: accountId } = { id: '' }] = [{ id: datasaur.id }]
     await db.execute(sql`
-      insert into field_source (workspace_id, entity, entity_id, field_key, source)
-      values (${workspaceId}, 'contact', ${enrichContactId}, 'title', 'human')
-      on conflict (workspace_id, entity, entity_id, field_key)
+      insert into field_source (account_id, entity, entity_id, field_key, source)
+      values (${accountId}, 'contact', ${enrichContactId}, 'title', 'human')
+      on conflict (account_id, entity, entity_id, field_key)
       do update set source = 'human', provider = null`)
 
     const result = await applyEnrichment(admin, {
@@ -742,9 +867,9 @@ try {
     const [seededPipeline] = await db.execute<{ pipeline_id: string; stage_id: string }>(sql`
       select p.id as pipeline_id, s.id as stage_id
         from pipeline p join pipeline_stage s on s.pipeline_id = p.id
-       where p.workspace_id = ${datasaur.id}
+       where p.account_id = ${datasaur.id}
        order by p.name, s.position limit 1`)
-    expect(Boolean(seededPipeline), 'the workspace has no pipeline to put a deal in')
+    expect(Boolean(seededPipeline), 'the account has no pipeline to put a deal in')
     const deal = await createRecord(admin, 'deal', {
       name: `Verify assoc deal ${stamp}`,
       pipeline_id: seededPipeline!.pipeline_id,
@@ -759,7 +884,7 @@ try {
 
     const [link] = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from association
-       where workspace_id = ${datasaur.id}
+       where account_id = ${datasaur.id}
          and ((from_id = ${deal.id} and to_id = ${contact.id})
            or (from_id = ${contact.id} and to_id = ${deal.id}))`)
     expect(Number(link?.n) === 1, `${link?.n} association rows`)
@@ -833,7 +958,7 @@ try {
     const [row] = await db.execute<{ is_active: boolean; n: number }>(sql`
       select f.is_active, count(s.id)::int as n
         from form f left join form_submission s on s.form_id = f.id
-       where f.workspace_id = ${datasaur.id} and f.name = ${`Verify form ${stamp}`}
+       where f.account_id = ${datasaur.id} and f.name = ${`Verify form ${stamp}`}
        group by f.is_active`)
     expect(Boolean(row), 'no form was created to hold the history')
     expect(row!.is_active === false, 'the shell form is live, and it has no fields')
@@ -941,13 +1066,13 @@ try {
     ...over,
   })
 
-  await check('which domain counts as internal is per workspace', async () => {
+  await check('which domain counts as internal is per account', async () => {
     const mine = await internalDomainOf(sales)
     const theirs = await internalDomainOf(probeCtx)
-    expect(mine === 'datasaur.ai', `this workspace was told its domain is ${mine}`)
-    expect(theirs === 'probe.example', `the other workspace was told its domain is ${theirs}`)
-    expect(mine !== theirs, 'both workspaces were handed the same domain')
-    // Read through the workspace's organisation, never from a process-wide
+    expect(mine === 'datasaur.ai', `this account was told its domain is ${mine}`)
+    expect(theirs === 'probe.example', `the other account was told its domain is ${theirs}`)
+    expect(mine !== theirs, 'both accounts were handed the same domain')
+    // Read through the account's organisation, never from a process-wide
     // setting: one process serves every tenant, and the wrong domain inverts
     // every internal/external decision the ingest makes.
     return `${mine} for one, ${theirs} for the other`
@@ -980,13 +1105,25 @@ try {
     return skip ?? ''
   })
 
-  await check('nor one with a personal mail address on it', async () => {
+  await check('but a lead writing from a personal address is', async () => {
     const skip = shouldSkip(incoming({ from: 'someone@gmail.com' }), {
       internalDomain,
       blocked: new Set(),
     })
-    expect(Boolean(skip), 'private mail would have landed in the CRM')
-    return skip ?? ''
+    expect(!skip, 'a real lead at a free mail provider was thrown away')
+    return 'gmail.com is a lead, not a reason to refuse'
+  })
+
+  await check('and the person who connected the mailbox counts as internal', async () => {
+    // A company on plain Gmail has no domain of its own; reading only the
+    // organisation's domain made every one of their own threads look external.
+    const skip = shouldSkip(incoming({ from: 'founder@gmail.com', to: ['also-us@gmail.com'] }), {
+      internalDomain,
+      blocked: new Set(),
+      ownerEmail: 'founder@gmail.com',
+    })
+    expect(!skip, 'a thread the owner is on was refused')
+    return 'the owner is us, whatever their address is at'
   })
 
   await check('an exclusion is applied at ingest, not at display', async () => {
@@ -1007,9 +1144,9 @@ try {
     return skip ?? ''
   })
 
-  await check('a workspace-wide exclusion is admin only', async () =>
-    refuses('a sales user setting a workspace exclusion', () =>
-      addBlocklistEntry(sales, { pattern: 'everyone.example', scope: 'workspace' }),
+  await check('a account-wide exclusion is admin only', async () =>
+    refuses('a sales user setting a account exclusion', () =>
+      addBlocklistEntry(sales, { pattern: 'everyone.example', scope: 'account' }),
     ),
   )
 
@@ -1076,7 +1213,7 @@ try {
       sql`select count(*)::int as n from message_thread where provider_thread_id = ${`t-${stamp}`}`,
     )
     expect(Number(before[0]?.n) === Number(after[0]?.n), 'a second mailbox created a second thread')
-    return 'one message_thread per provider thread per workspace'
+    return 'one message_thread per provider thread per account'
   })
 
   await check('direction is inferred from who sent it', async () => {
@@ -1331,7 +1468,7 @@ try {
     return 'a subscriber that quietly stopped receiving is visible'
   })
 
-  await check('only an admin may subscribe anything to this workspace', async () => {
+  await check('only an admin may subscribe anything to this account', async () => {
     const said = await refuses('marketing adding an endpoint', () =>
       createWebhookEndpoint(ctxFor('marketing'), { name: 'Nope', url: 'https://example.com/h', events: [] }),
     )
@@ -1346,8 +1483,123 @@ try {
 
   await removeWebhookEndpoint(admin, endpointId)
 
-  // Leave the workspace as it was found: the seeded Brevo row was created here.
-  await disconnectIntegration(admin, 'brevo')
+  console.log('\n-- enrichment waits for consent -------------------------------')
+
+  // Approving is a account-wide act, so these checks need a account-wide
+  // starting point: whatever an earlier suite or a person left on the queue
+  // would otherwise be counted, approved and reported as this section's doing.
+  await db.execute(sql`delete from enrichment_request where account_id = ${datasaur!.id}`)
+
+  const queuedIds: { entity: 'contact' | 'company'; id: string }[] = []
+
+  await check('a contact created with an email waits, and its new company with it', async () => {
+    const created = await createRecord(admin, 'contact', { email: `queue-${Date.now()}@queue-probe.example`, first_name: 'Queue' })
+    queuedIds.push({ entity: 'contact', id: created.id })
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === 'waiting', 'the contact was not queued')
+    expect(typeof created.autoCompanyId === 'string', 'no company was filed from the domain')
+    queuedIds.push({ entity: 'company', id: created.autoCompanyId! })
+    expect((await enrichmentQueued(admin, 'company', created.autoCompanyId!)) === 'waiting', 'the company was not queued')
+    return 'both rows wait for a person'
+  })
+
+  await check('a contact without an email is not queued until it gets one', async () => {
+    const created = await createRecord(admin, 'contact', { first_name: 'Keyless' })
+    queuedIds.push({ entity: 'contact', id: created.id })
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === null, 'queued with nothing to match on')
+    await updateRecord(admin, 'contact', created.id, { email: `later-${Date.now()}@queue-probe.example` })
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === 'waiting', 'gaining an email did not queue it')
+    return 'the email is the trigger'
+  })
+
+  await check('an import queues nothing, however many rows it writes', async () => {
+    const created = await createRecord(admin, 'contact', { email: `import-${Date.now()}@queue-probe.example` }, { enrich: false })
+    queuedIds.push({ entity: 'contact', id: created.id })
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === null, 'an imported row asked for enrichment')
+    return 'a 90,000-row file is not a 90,000-record question'
+  })
+
+  await check('asking twice is one request, and another tenant sees none of them', async () => {
+    const first = queuedIds[0]!
+    await updateRecord(admin, 'contact', first.id, { email: `again-${Date.now()}@queue-probe.example` })
+    const [row] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from enrichment_request where entity = 'contact' and entity_id = ${first.id}`,
+    )
+    expect(Number(row?.n) === 1, `saw ${String(row?.n)} rows`)
+    expect((await enrichmentQueued(probeCtx, 'contact', first.id)) === null, 'a request leaked across tenants')
+    return 'one row per record'
+  })
+
+  await check('nothing is approved until somebody says so', async () => {
+    const waiting = await pendingEnrichment(admin)
+    expect(waiting.total >= 3, `only ${waiting.total} waiting`)
+    const [row] = await db.execute<{ n: number }>(
+      sql`select count(*)::int as n from enrichment_request where account_id = ${datasaur!.id} and approved_at is not null`,
+    )
+    expect(Number(row?.n) === 0, `${String(row?.n)} rows were approved without being asked`)
+    return `${waiting.contacts} contacts and ${waiting.companies} companies waiting, none released`
+  })
+
+  await check('a viewer cannot approve, and cannot discard either', async () => {
+    const said = await refuses('a viewer approving', () => approveEnrichment(viewer))
+    const alsoSaid = await refuses('a viewer discarding', () => discardEnrichment(viewer))
+    expect(said.length > 0 && alsoSaid.length > 0, 'a viewer got through')
+    return said
+  })
+
+  await check('approving releases everything that was waiting, and nothing after it', async () => {
+    // Asserted on the rows this suite made rather than on a total: approving is
+    // a account-wide act, and a count is only stable if nothing else in the
+    // account is writing while the check runs.
+    const mine = queuedIds.filter((row) => row.entity === 'contact')
+    const { approved } = await approveEnrichment(admin)
+    expect(approved > 0, 'nothing was approved')
+    for (const row of mine) {
+      const state = await enrichmentQueued(admin, row.entity, row.id)
+      expect(state === null || state === 'approved', `${row.id} is still ${String(state)}`)
+    }
+
+    // A record queued after the click is a new question, not covered by it.
+    const later = await createRecord(admin, 'contact', { email: `after-${Date.now()}@queue-probe.example` })
+    queuedIds.push({ entity: 'contact', id: later.id })
+    expect((await enrichmentQueued(admin, 'contact', later.id)) === 'waiting', 'a later record rode on an earlier yes')
+    return `${approved} released; consent did not carry forward`
+  })
+
+  await check('discarding drops what is waiting and leaves the records alone', async () => {
+    const last = queuedIds[queuedIds.length - 1]!
+    const { discarded } = await discardEnrichment(admin)
+    expect(discarded > 0, 'nothing was discarded')
+    expect((await enrichmentQueued(admin, last.entity, last.id)) === null, 'the request survived the discard')
+    expect((await getRecord(admin, 'contact', last.id)) !== null, 'the record went with the request')
+    return 'the question goes, the record stays'
+  })
+
+  await check('deleting a record takes its pending question with it', async () => {
+    const created = await createRecord(admin, 'contact', { email: `doomed-${Date.now()}@queue-probe.example` })
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === 'waiting', 'it never queued')
+    await deleteRecord(admin, 'contact', created.id)
+    expect((await enrichmentQueued(admin, 'contact', created.id)) === null, 'a deleted record is still on the queue')
+    return 'no request outlives its record'
+  })
+
+  await check('a record erased behind the layer is not counted or claimed', async () => {
+    const created = await createRecord(admin, 'contact', { email: `ghost-${Date.now()}@queue-probe.example` })
+    const before = (await pendingEnrichment(admin)).total
+    // Straight to the table, the way erasure and a hand-run delete reach it.
+    await db.execute(sql`update contact set deleted_at = now() where id = ${created.id}`)
+    const after = (await pendingEnrichment(admin)).total
+    expect(after === before - 1, `count went ${before} to ${after}`)
+    await db.execute(sql`delete from enrichment_request where entity_id = ${created.id}`)
+    return 'the prompt never over-reports what it is asking about'
+  })
+
+  for (const { entity, id } of queuedIds) {
+    await db.execute(sql`delete from enrichment_request where entity = ${entity} and entity_id = ${id}`)
+    await db.execute(sql`update ${sql.raw(entity)} set deleted_at = now() where id = ${id}`)
+  }
+
+  // Leave the account as it was found: the seeded Brevo row was created here.
+  await disconnectIntegration(orgAdmin, 'brevo')
 
   console.log('')
   if (failures > 0) {

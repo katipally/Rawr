@@ -1,6 +1,9 @@
 import {
   enroll,
   enrollmentsForContact,
+  listEmailTemplates,
+  saveEmailTemplate,
+  deleteEmailTemplate,
   listEnrollments,
   listSequences,
   pauseEnrollment,
@@ -45,11 +48,11 @@ const settings = z
   .partial()
 
 export const sequencesRouter = router({
-  list: protectedProcedure.query(({ ctx }) => call(() => listSequences(ctx.workspace))),
+  list: protectedProcedure.query(({ ctx }) => call(() => listSequences(ctx.account))),
 
   get: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .query(({ ctx, input }) => call(() => readSequence(ctx.workspace, input.id))),
+    .query(({ ctx, input }) => call(() => readSequence(ctx.account, input.id))),
 
   save: protectedProcedure
     .input(
@@ -61,11 +64,11 @@ export const sequencesRouter = router({
         settings: settings.optional(),
       }),
     )
-    .mutation(({ ctx, input }) => call(() => saveSequence(ctx.workspace, input))),
+    .mutation(({ ctx, input }) => call(() => saveSequence(ctx.account, input))),
 
   setState: protectedProcedure
     .input(z.object({ id: z.uuid(), state: z.enum(['draft', 'active', 'paused', 'archived']) }))
-    .mutation(({ ctx, input }) => call(() => setSequenceState(ctx.workspace, input))),
+    .mutation(({ ctx, input }) => call(() => setSequenceState(ctx.account, input))),
 
   saveSteps: protectedProcedure
     .input(
@@ -88,19 +91,28 @@ export const sequencesRouter = router({
           .max(50),
       }),
     )
-    .mutation(({ ctx, input }) => call(() => saveSteps(ctx.workspace, input))),
+    .mutation(({ ctx, input }) => call(() => saveSteps(ctx.account, input))),
 
   /** Returns one outcome per contact, so a partial success says which ones and
    *  why rather than reporting a number nobody can act on. */
+  /** Named contacts, or everyone at a company. One of the two, never both: a
+   *  list and a company are different intentions and a caller sending both means
+   *  something nobody can guess. */
   enroll: protectedProcedure
     .input(
-      z.object({
-        sequenceId: z.uuid(),
-        contactIds: z.array(z.uuid()).min(1).max(500),
-        mailboxId: z.uuid(),
-      }),
+      z
+        .object({
+          sequenceId: z.uuid(),
+          contactIds: z.array(z.uuid()).min(1).max(500).optional(),
+          companyId: z.uuid().nullish(),
+          mailboxId: z.uuid(),
+        })
+        .refine(
+          (value) => Boolean(value.contactIds) !== Boolean(value.companyId),
+          'Name the contacts, or name the company, not both.',
+        ),
     )
-    .mutation(({ ctx, input }) => call(() => enroll(ctx.workspace, input))),
+    .mutation(({ ctx, input }) => call(() => enroll(ctx.account, input))),
 
   enrollments: router({
     list: protectedProcedure
@@ -114,29 +126,48 @@ export const sequencesRouter = router({
           limit: z.number().int().min(1).max(500).optional(),
         }),
       )
-      .query(({ ctx, input }) => call(() => listEnrollments(ctx.workspace, input))),
+      .query(({ ctx, input }) => call(() => listEnrollments(ctx.account, input))),
 
     forContact: protectedProcedure
       .input(z.object({ contactId: z.uuid() }))
-      .query(({ ctx, input }) => call(() => enrollmentsForContact(ctx.workspace, input.contactId))),
+      .query(({ ctx, input }) => call(() => enrollmentsForContact(ctx.account, input.contactId))),
 
     pause: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => pauseEnrollment(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => pauseEnrollment(ctx.account, input.id))),
 
     resume: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => resumeEnrollment(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => resumeEnrollment(ctx.account, input.id))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => removeEnrollment(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => removeEnrollment(ctx.account, input.id))),
+  }),
+
+  templates: router({
+    list: protectedProcedure.query(({ ctx }) => call(() => listEmailTemplates(ctx.account))),
+
+    save: protectedProcedure
+      .input(
+        z.object({
+          id: z.uuid().nullish(),
+          name: z.string().trim().min(1).max(120),
+          subject: z.string().max(300),
+          bodyText: z.string().max(50_000),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => saveEmailTemplate(ctx.account, input))),
+
+    remove: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => deleteEmailTemplate(ctx.account, input.id))),
   }),
 
   tracking: router({
-    get: protectedProcedure.query(({ ctx }) => call(() => readTrackingDomain(ctx.workspace))),
+    get: protectedProcedure.query(({ ctx }) => call(() => readTrackingDomain(ctx.account))),
     set: adminProcedure
       .input(z.object({ domain: z.string().trim().max(200).nullable() }))
-      .mutation(({ ctx, input }) => call(() => setTrackingDomain(ctx.workspace, input.domain))),
+      .mutation(({ ctx, input }) => call(() => setTrackingDomain(ctx.account, input.domain))),
   }),
 })

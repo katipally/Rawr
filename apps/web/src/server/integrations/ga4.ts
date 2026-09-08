@@ -1,4 +1,4 @@
-import { readCredentials, recordHealth, type WorkspaceContext } from '@rawr/db'
+import { readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { json, type ConnectionTest } from './provider.ts'
 
@@ -55,7 +55,7 @@ export const stripPersonal = (
   return { clean, refused }
 }
 
-export const testGa4 = async (ctx: WorkspaceContext): Promise<ConnectionTest> => {
+export const testGa4 = async (ctx: AccountContext): Promise<ConnectionTest> => {
   try {
     const found = await readCredentials(ctx, 'ga4')
     const config = (found?.config ?? {}) as Ga4Config
@@ -110,7 +110,7 @@ export type ForwardOutcome = { sent: boolean; reason: string | null; refused: st
  *  forwarding that fails is dropped after retries and counted, never queued
  *  indefinitely. Aggregate analytics is not worth unbounded storage. */
 export const forwardToGa4 = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: ForwardInput,
 ): Promise<ForwardOutcome> => {
   if (!input.analyticsConsent) {

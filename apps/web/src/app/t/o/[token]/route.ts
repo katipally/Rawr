@@ -1,4 +1,4 @@
-import { isBot, publicEdgeContext, recordOpen, sendWorkspaceForToken } from '@rawr/db'
+import { isBot, publicEdgeContext, recordOpen, sendAccountForToken } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { inBackground } from '~/server/background.ts'
 import { clientIp, rateLimit } from '~/server/edge.ts'
@@ -46,9 +46,9 @@ export const GET = async (
   if (!rateLimit(`open:${clientIp(request) ?? 'unknown'}`, 120, 60).allowed) return image()
 
   inBackground('sequence open', async () => {
-    const workspaceId = await sendWorkspaceForToken(token)
-    if (!workspaceId) return
-    await recordOpen({ ...publicEdgeContext(workspaceId), actorKind: 'public' }, token, { userAgent: agent })
+    const accountId = await sendAccountForToken(token)
+    if (!accountId) return
+    await recordOpen({ ...publicEdgeContext(accountId), actorKind: 'public' }, token, { userAgent: agent })
   })
 
   return image()

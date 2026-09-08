@@ -8,6 +8,7 @@ import {
   CircleHelp,
   Contact,
   Handshake,
+  LayoutGrid,
   ListChecks,
   LogOut,
   PanelLeft,
@@ -19,11 +20,12 @@ import {
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Avatar, cn, DropdownMenu, IconButton, Spinner, type MenuGroup } from '@rawr/ui'
+import { cn, DropdownMenu, IconButton, Spinner, type MenuGroup } from '@rawr/ui'
 import { SECTION_ICONS, type IconKey } from './icons.ts'
 import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
 import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
+import { appsPath, availableAppsPath } from '~/lib/links.ts'
 
 export type NavItem = {
   href: string
@@ -47,19 +49,20 @@ export type NavSection = {
   groups?: NavGroup[]
 }
 
-export type WorkspaceOption = { slug: string; name: string; organisation?: string }
+export type AccountOption = { slug: string; name: string; organisation?: string }
 
 export type CreateOption = { key: string; label: string; href: string }
 
 export type AppShellProps = {
-  workspaceName: string
-  workspaceSlug: string
-  /** Every workspace this person belongs to. One entry means no switcher. */
-  workspaces: WorkspaceOption[]
+  accountName: string
+  /** The signed-in person's picture, when the identity provider gave us one. */
+  avatarUrl?: string | null | undefined
+  accountSlug: string
+  /** Every account this person belongs to. One entry means no switcher. */
+  accounts: AccountOption[]
   email: string
-  role: string
-  /** Built by the layout from the session's workspace, because every CRM address
-   *  carries its workspace and a hardcoded list could not. */
+  /** Built by the layout from the session's account, because every CRM address
+   *  carries its account and a hardcoded list could not. */
   nav: NavSection[]
   /** What the + button offers. Addresses, so the menu needs no client data. */
   create: CreateOption[]
@@ -122,11 +125,12 @@ export const AppShell = (props: AppShellProps) => (
 )
 
 const Shell = ({
-  workspaceName,
-  workspaceSlug,
-  workspaces,
+  accountName,
+  avatarUrl,
+  accountSlug,
+  accounts,
   email,
-  role,
+
   nav,
   create,
   settingsHref,
@@ -327,26 +331,26 @@ const Shell = ({
   const switchTo = (slug: string) => {
     // The switch handler re-reads the membership before it changes anything, so
     // the selection is a request, never proof.
-    const target = new URL('/api/auth/workspace', window.location.origin)
+    const target = new URL('/api/auth/account', window.location.origin)
     target.searchParams.set('to', slug)
     window.location.assign(target.toString())
   }
 
-  /** Workspaces grouped by the organisation that owns them, so a person on two
+  /** Accounts grouped by the organisation that owns them, so a person on two
    *  organisations sees which is which rather than one flat list of names. */
-  const workspaceGroups: MenuGroup[] = (() => {
-    const byOrg = new Map<string, WorkspaceOption[]>()
-    for (const option of workspaces) {
+  const accountGroups: MenuGroup[] = (() => {
+    const byOrg = new Map<string, AccountOption[]>()
+    for (const option of accounts) {
       const key = option.organisation ?? ''
       byOrg.set(key, [...(byOrg.get(key) ?? []), option])
     }
     return [...byOrg.entries()].map(([organisation, options]) => ({
-      key: organisation || 'workspaces',
-      label: organisation || 'Workspaces',
+      key: organisation || 'accounts',
+      label: organisation || 'Accounts',
       items: options.map((option) => ({
         key: option.slug,
         label: option.name,
-        checked: option.slug === workspaceSlug,
+        checked: option.slug === accountSlug,
         onSelect: () => switchTo(option.slug),
       })),
     }))
@@ -354,11 +358,11 @@ const Shell = ({
 
   const accountMenu: MenuGroup[] = [
     { key: 'you', items: [{ key: 'account', label: 'Your account', href: accountHref, icon: <UserRound className="size-4" /> }] },
-    ...(workspaces.length > 1 ? workspaceGroups : []),
+    ...(accounts.length > 1 ? accountGroups : []),
   ]
 
   /** The phone sheet: same sections, inline lists, no hover. Ends with who is
-   *  signed in and, for members of more than one workspace, the switcher the
+   *  signed in and, for members of more than one account, the switcher the
    *  top bar has no room for at this width. */
   const sheet = (
     <nav aria-label="Sections" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2">
@@ -455,6 +459,29 @@ const Shell = ({
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* HubSpot's marketplace icon, minus the marketplace: what this company
+              has connected, and what it could. */}
+          <DropdownMenu
+            label="Apps"
+            groups={[
+              {
+                key: 'apps',
+                items: [
+                  { key: 'connected', label: 'Connected apps', href: appsPath() },
+                  { key: 'available', label: 'Available apps', href: availableAppsPath() },
+                ],
+              },
+            ]}
+            trigger={(props) => (
+              <IconButton
+                {...props}
+                label="Apps"
+                icon={<LayoutGrid className="size-4" />}
+                className={cn(topbarIcon, here.startsWith('/apps') && 'bg-nav-active')}
+              />
+            )}
+          />
+
           <DropdownMenu
             label="Help"
             groups={[
@@ -476,10 +503,10 @@ const Shell = ({
             onClick={() => window.location.assign(settingsHref)}
           />
 
-          <NotificationBell workspaceSlug={workspaceSlug} />
+          <NotificationBell accountSlug={accountSlug} />
 
           <DropdownMenu
-            label={`${email}, ${role}`}
+            label={email}
             groups={[
               ...accountMenu,
               {
@@ -501,10 +528,25 @@ const Shell = ({
               },
             ]}
             trigger={(props) => (
-              <button {...props} type="button" className={cn('flex h-8 items-center gap-2 rounded-pill pr-2 pl-2', topbarIcon)}>
-                <Avatar name={email} size="sm" />
-                <span className="hidden min-w-0 max-w-40 truncate lg:inline">{workspaceName}</span>
-                <ChevronDown aria-hidden="true" className="hidden size-3 lg:block" />
+              // Just the person, the way HubSpot's top bar ends. Which account
+              // you are in is the ticked row inside the menu; the name used to
+              // sit out here and cost a third of the bar on a laptop.
+              <button
+                {...props}
+                type="button"
+                aria-label={email}
+                title={`${email} · ${accountName}`}
+                className={cn('grid size-8 shrink-0 place-items-center rounded-full', topbarIcon)}
+              >
+                {avatarUrl ? (
+                  // Not next/image: this is whatever host the identity provider
+                  // serves from, and a remote loader for one 24px square is not
+                  // worth the configuration.
+                  // biome-ignore lint/performance/noImgElement: see above
+                  <img src={avatarUrl} alt="" width={24} height={24} className="size-6 rounded-full object-cover" />
+                ) : (
+                  <Building2 aria-hidden="true" className="size-4" />
+                )}
               </button>
             )}
           />
@@ -556,17 +598,17 @@ const Shell = ({
               {sheet}
               <div className="flex flex-col gap-2 border-t border-nav-active px-4 py-3 text-small text-nav-muted">
                 <Link href={accountHref} className="truncate text-nav-muted no-underline hover:text-nav-text" title={email}>
-                  {email} · {role}
+                  {email}
                 </Link>
-                {workspaces.length > 1 ? (
+                {accounts.length > 1 ? (
                   <label className="flex items-center">
-                    <span className="sr-only">Workspace</span>
+                    <span className="sr-only">Account</span>
                     <select
-                      value={workspaceSlug}
+                      value={accountSlug}
                       onChange={(event) => switchTo(event.target.value)}
                       className="max-w-full min-h-8 truncate rounded-pill border border-nav-line bg-nav pl-3 pr-7 text-small text-nav-text"
                     >
-                      {workspaces.map((option) => (
+                      {accounts.map((option) => (
                         <option key={option.slug} value={option.slug}>
                           {option.name}
                         </option>
@@ -574,7 +616,7 @@ const Shell = ({
                     </select>
                   </label>
                 ) : (
-                  <span className="truncate">{workspaceName}</span>
+                  <span className="truncate">{accountName}</span>
                 )}
               </div>
             </div>
@@ -591,7 +633,7 @@ const Shell = ({
             This is the one scrolling box on the page. */}
         <main
           aria-busy={pendingHref ? 'true' : undefined}
-          className={cn('relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-canvas', !onCanvas && 'p-2 sm:p-4')}
+          className={cn('relative flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden rounded-tl-panel bg-canvas', !onCanvas && 'p-2 sm:p-4')}
         >
           {/* The card is the frame and the scroller both: bounded to the window
               so it never grows past its own border, and scrolled inside so tall

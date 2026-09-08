@@ -8,8 +8,9 @@ import {
   outboundCall,
 } from '../schema/platform.ts'
 import { decryptToken, encryptToken, randomToken } from '../internal/crypto.ts'
-import { assertCanWrite, type WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { assertCanWrite, type AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
+import { resolveNotifications } from './notifications.ts'
 
 /** F6 §1, built once and used by every integration without exception.
  *
@@ -31,6 +32,8 @@ export type IntegrationKind =
   | 'lusha'
   | 'woodpecker'
   | 'hubspot'
+  | 'turnstile'
+  | 'webflow'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
   'brevo',
@@ -43,6 +46,8 @@ export const INTEGRATION_KINDS: IntegrationKind[] = [
   'lusha',
   'woodpecker',
   'hubspot',
+  'turnstile',
+  'webflow',
 ]
 
 /** F6 §1's four states. The stored column predates the doc's wording, so the two
@@ -69,11 +74,21 @@ export type IntegrationRow = {
  *  enough that a silently dead webhook is visible the next day. */
 const STALE_MS = 36 * 60 * 60 * 1000
 
+/** The only kind that works on configuration alone: a measurement id is not a
+ *  secret and there is nothing else to store. Every other provider needs a
+ *  credential before it can do anything. */
+const KEYLESS_KINDS = new Set<IntegrationKind>(['ga4'])
+
 const healthOf = (row: {
+  kind: IntegrationKind
+  hasSecret: boolean
   state: string
   lastOkAt: Date | null
   lastError: string | null
 }): HealthState => {
+  // Nothing was ever connected, whatever a stale last_ok_at or a seeded row
+  // claims. Reporting otherwise puts "Connected" next to a Connect button.
+  if (!row.hasSecret && !KEYLESS_KINDS.has(row.kind)) return 'not_configured'
   if (row.state === 'unconfigured') return 'not_configured'
   if (row.state === 'revoked') return 'disconnected'
   if (row.lastError) return 'degraded'
@@ -81,8 +96,8 @@ const healthOf = (row: {
   return Date.now() - row.lastOkAt.getTime() > STALE_MS ? 'degraded' : 'connected'
 }
 
-export const listIntegrations = async (ctx: WorkspaceContext): Promise<IntegrationRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listIntegrations = async (ctx: AccountContext): Promise<IntegrationRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.select().from(integration)
     const failures = await tx.execute<{ integration_id: string | null; n: number }>(
       sql`select integration_id, count(*)::int as n from dead_letter
@@ -112,11 +127,102 @@ export const listIntegrations = async (ctx: WorkspaceContext): Promise<Integrati
         kind,
         config: (found.config ?? {}) as Record<string, unknown>,
         hasSecret: found.secretRef !== null,
-        state: healthOf(found),
+        state: healthOf({ ...found, kind, hasSecret: found.secretRef !== null }),
         lastOkAt: found.lastOkAt,
         lastError: found.lastError,
         lastErrorAt: found.lastErrorAt,
         deadLetters: byIntegration.get(found.id) ?? 0,
+      }
+    })
+  })
+
+/** What the Connected Apps table needs and the account list does not: who
+ *  connected it, when, and when it last did anything. Read in an organisation
+ *  transaction because that is the scope the screen is in, and because the
+ *  installer's name comes from a join the account policy would not admit. */
+const asDate = (value: string | Date | null): Date | null =>
+  value === null ? null : value instanceof Date ? value : new Date(value)
+
+export type OrgIntegrationRow = IntegrationRow & {
+  installedAt: Date | null
+  installedByName: string | null
+  lastActivityAt: Date | null
+}
+
+export const listIntegrationsForOrg = async (
+  ctx: AccountContext,
+): Promise<OrgIntegrationRow[]> =>
+  withAccount(ctx, async (tx) => {
+    const rows = await tx.execute<{
+      id: string
+      kind: string
+      config: Record<string, unknown> | null
+      secret_ref: string | null
+      state: StoredState
+      last_ok_at: string | Date | null
+      last_error: string | null
+      last_error_at: string | Date | null
+      created_at: string | Date
+      installed_by_name: string | null
+      dead_letters: number
+    }>(sql`
+      select i.id, i.kind, i.config, i.secret_ref, i.state,
+             i.last_ok_at, i.last_error, i.last_error_at, i.created_at,
+             u.name as installed_by_name,
+             (select count(*)::int from dead_letter d
+               where d.integration_id = i.id and d.replayed_at is null) as dead_letters
+        from integration i
+        left join user_account u on u.id = i.installed_by
+       where i.account_id = ${ctx.accountId}`)
+
+    const byKind = new Map(rows.map((row) => [row.kind, row]))
+    // Every known kind, connected or not: the Available list is the complement of
+    // this one, and neither can be built from a table that only holds what exists.
+    return INTEGRATION_KINDS.map((kind) => {
+      const found = byKind.get(kind)
+      if (!found) {
+        return {
+          id: null,
+          kind,
+          config: {},
+          hasSecret: false,
+          state: 'not_configured' as const,
+          lastOkAt: null,
+          lastError: null,
+          lastErrorAt: null,
+          deadLetters: 0,
+          installedAt: null,
+          installedByName: null,
+          lastActivityAt: null,
+        }
+      }
+      // tx.execute hands back what the driver parsed, and a timestamptz arrives
+      // as a string rather than the Date the typed select would have built.
+      // healthOf calls getTime() on it, so the coercion is not cosmetic.
+      const lastOkAt = asDate(found.last_ok_at)
+      const lastErrorAt = asDate(found.last_error_at)
+      return {
+        id: found.id,
+        kind,
+        config: found.config ?? {},
+        hasSecret: found.secret_ref !== null,
+        state: healthOf({
+          kind,
+          hasSecret: found.secret_ref !== null,
+          state: found.state,
+          lastOkAt,
+          lastError: found.last_error,
+        }),
+        lastOkAt,
+        lastError: found.last_error,
+        lastErrorAt,
+        deadLetters: Number(found.dead_letters ?? 0),
+        installedAt: asDate(found.created_at),
+        installedByName: found.installed_by_name,
+        // Whichever happened last. Computed rather than stored: two columns
+        // already say it and a third would be one more thing to keep in step.
+        lastActivityAt:
+          lastOkAt && lastErrorAt ? (lastOkAt > lastErrorAt ? lastOkAt : lastErrorAt) : (lastOkAt ?? lastErrorAt),
       }
     })
   })
@@ -129,8 +235,11 @@ export type SaveIntegrationInput = {
   secret?: string | null
 }
 
+/** The credential belongs to the company, so connecting one is an organisation
+ *  act and its trail lands in organisation_audit_log. Reading it stays a
+ *  account act; that is the second policy on the table. */
 export const saveIntegration = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: SaveIntegrationInput,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'integration', async (tx) => {
@@ -160,7 +269,7 @@ export const saveIntegration = async (
     const [saved] = await tx
       .insert(integration)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         kind: input.kind,
         config: config ?? {},
         secretRef: secretRef ?? null,
@@ -168,9 +277,10 @@ export const saveIntegration = async (
         state: 'connected',
         lastError: null,
         lastErrorAt: null,
+        installedBy: ctx.actorId,
       })
       .onConflictDoUpdate({
-        target: [integration.workspaceId, integration.kind],
+        target: [integration.accountId, integration.kind],
         set: {
           ...(config !== undefined ? { config } : {}),
           ...(secretRef !== undefined ? { secretRef } : {}),
@@ -199,10 +309,10 @@ export type Credentials = { id: string; config: Record<string, unknown>; secret:
 
 /** Decrypted only here, only for a call that is about to be made. */
 export const readCredentials = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   kind: IntegrationKind,
 ): Promise<Credentials | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.select().from(integration).where(eq(integration.kind, kind)).limit(1)
     if (!row) return null
     return {
@@ -213,41 +323,42 @@ export const readCredentials = async (
   })
 
 export const recordHealth = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   kind: IntegrationKind,
   outcome: { ok: true } | { ok: false; error: string; disconnected?: boolean },
 ): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
-    await tx
-      .update(integration)
-      .set(
-        outcome.ok
-          ? { lastOkAt: new Date(), lastError: null, lastErrorAt: null, state: 'connected' }
-          : {
-              lastError: outcome.error.slice(0, 2000),
-              lastErrorAt: new Date(),
-              // A rejected credential is not a blip. Retrying it would burn every
-              // attempt against a decision made at the provider. F6's edge cases.
-              state: (outcome.disconnected ? 'revoked' : 'degraded') satisfies StoredState,
-            },
-      )
-      .where(eq(integration.kind, kind))
+  // Through the definer function, not a direct update: the row belongs to the
+  // organisation and account scope may only read it. Row level security is
+  // row-level, so a policy permitting this update would equally permit one that
+  // rewrote secret_ref. The function is the narrowing.
+  //
+  // A rejected credential is not a blip: it becomes 'revoked' rather than
+  // 'degraded', so retries stop burning attempts against a decision already made
+  // at the provider. F6's edge cases.
+  await withAccount(ctx, async (tx) => {
+    await tx.execute(sql`
+      select rawr.record_integration_health(
+        ${kind},
+        ${outcome.ok},
+        ${outcome.ok ? null : outcome.error.slice(0, 2000)},
+        ${outcome.ok ? false : (outcome.disconnected ?? false)}
+      )`)
   })
 }
 
 export const disconnectIntegration = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   kind: IntegrationKind,
 ): Promise<void> =>
   mutate(ctx, 'integration', async (tx) => {
-    // The row's own id, not the kind: audit_log.entity_id is a uuid column, and
-    // writing a name into it fails at the database rather than at the call.
+    // The row's own id, not the kind: the audit log's entity_id is a uuid column,
+    // and writing a name into it fails at the database rather than at the call.
     const [found] = await tx
       .select({ id: integration.id })
       .from(integration)
       .where(eq(integration.kind, kind))
       .limit(1)
-    if (!found) throw new Error(`${kind} is not connected in this workspace.`)
+    if (!found) throw new Error(`${kind} is not connected in this organisation.`)
 
     await tx.delete(integration).where(eq(integration.id, found.id))
     return {
@@ -271,11 +382,11 @@ export type CallOutcome<T> = { fresh: boolean; response: T }
  *  open across an HTTP request would pin a connection for as long as the provider
  *  takes to answer. */
 export const once = async <T>(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { key: string; operation: string; integrationId?: string | null },
   run: () => Promise<T>,
 ): Promise<CallOutcome<T>> => {
-  const existing = await withWorkspace(ctx, async (tx) => {
+  const existing = await withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({ response: outboundCall.response })
       .from(outboundCall)
@@ -287,11 +398,11 @@ export const once = async <T>(
 
   const response = await run()
 
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx
       .insert(outboundCall)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         integrationId: input.integrationId ?? null,
         idempotencyKey: input.key,
         operation: input.operation,
@@ -306,7 +417,7 @@ export const once = async <T>(
 /** Inbound deduplication, the mirror of `once`. Returns false when this event has
  *  already been handled, so a provider that delivers twice is processed once. */
 export const claimInbound = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     source: string
     providerEventId: string
@@ -315,11 +426,11 @@ export const claimInbound = async (
     contactId?: string | null
   },
 ): Promise<boolean> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [claimed] = await tx
       .insert(inboundEvent)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         source: input.source,
         providerEventId: input.providerEventId,
         kind: input.kind,
@@ -344,10 +455,10 @@ export type UnmatchedEvent = {
  *  surfaced here rather than dropped, because "nobody opened it" and "we could not
  *  tell who opened it" are different answers. */
 export const listUnmatchedEvents = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   limit = 50,
 ): Promise<UnmatchedEvent[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .select({
         id: inboundEvent.id,
@@ -365,9 +476,9 @@ export const listUnmatchedEvents = async (
 /** Re-runs the match for events that arrived before the contact existed. Somebody
  *  who fills in a form after an email was tracked should still get that open on
  *  their timeline. */
-export const rematchInbound = async (ctx: WorkspaceContext): Promise<{ matched: number }> => {
+export const rematchInbound = async (ctx: AccountContext): Promise<{ matched: number }> => {
   assertCanWrite(ctx, 'integration')
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ id: string }>(sql`
       update inbound_event e
          set contact_id = c.id, matched = true
@@ -386,13 +497,13 @@ export type FieldSourceKind = 'human' | 'import' | 'enrichment' | 'form' | 'book
 
 export const recordFieldSource = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { entity: string; entityId: string; fieldKey: string; source: FieldSourceKind; provider?: string | null },
 ): Promise<void> => {
   await tx
     .insert(fieldSource)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       entity: input.entity,
       entityId: input.entityId,
       fieldKey: input.fieldKey,
@@ -400,17 +511,17 @@ export const recordFieldSource = async (
       provider: input.provider ?? null,
     })
     .onConflictDoUpdate({
-      target: [fieldSource.workspaceId, fieldSource.entity, fieldSource.entityId, fieldSource.fieldKey],
+      target: [fieldSource.accountId, fieldSource.entity, fieldSource.entityId, fieldSource.fieldKey],
       set: { source: input.source, provider: input.provider ?? null, at: new Date() },
     })
 }
 
 export const readFieldSources = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entity: string,
   entityId: string,
 ): Promise<Map<string, { source: FieldSourceKind; provider: string | null }>> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({ fieldKey: fieldSource.fieldKey, source: fieldSource.source, provider: fieldSource.provider })
       .from(fieldSource)
@@ -430,11 +541,11 @@ export type SuggestionRow = {
 }
 
 export const listSuggestions = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entity?: string,
   entityId?: string,
 ): Promise<SuggestionRow[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .select()
       .from(enrichmentSuggestion)
@@ -447,10 +558,10 @@ export const listSuggestions = async (
       .limit(200),
   )
 
-export const dismissSuggestion = async (ctx: WorkspaceContext, id: string): Promise<void> => {
+export const dismissSuggestion = async (ctx: AccountContext, id: string): Promise<void> => {
   // Dismissing is a decision about the record, so it takes the record's write role.
   assertCanWrite(ctx, 'contact')
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx.delete(enrichmentSuggestion).where(eq(enrichmentSuggestion.id, id))
   })
 }
@@ -464,10 +575,13 @@ export const dismissSuggestion = async (ctx: WorkspaceContext, id: string): Prom
  *  Job families that cannot be replayed by re-enqueueing say so by name rather than
  *  pretending, because a button that quietly does nothing is worse than one that
  *  explains itself. */
-export type Replayable = { jobName: string; payload: unknown; workspaceId: string }
+export type Replayable = { jobName: string; payload: unknown; accountId: string }
 
-export const claimForReplay = async (ctx: WorkspaceContext, id: string): Promise<Replayable> =>
+export const claimForReplay = async (ctx: AccountContext, id: string): Promise<Replayable> =>
   mutate(ctx, 'dead_letter', async (tx) => {
+    // Somebody is dealing with the queue. The day's notice stops being unread
+    // rather than sitting there until the retention sweep takes it.
+    await resolveNotifications(tx, ctx, 'dead_letter:')
     const [row] = await tx
       .select({ jobName: deadLetter.jobName, payload: deadLetter.payload })
       .from(deadLetter)
@@ -478,7 +592,7 @@ export const claimForReplay = async (ctx: WorkspaceContext, id: string): Promise
     await tx.update(deadLetter).set({ replayedAt: new Date() }).where(eq(deadLetter.id, id))
 
     return {
-      result: { jobName: row.jobName, payload: row.payload, workspaceId: ctx.workspaceId },
+      result: { jobName: row.jobName, payload: row.payload, accountId: ctx.accountId },
       audit: {
         entity: 'dead_letter',
         entityId: id,
@@ -491,8 +605,8 @@ export const claimForReplay = async (ctx: WorkspaceContext, id: string): Promise
 
 /** Undoes the claim when the enqueue itself failed, so a replay that never reached
  *  the queue does not read as one that was already done. */
-export const releaseReplay = async (ctx: WorkspaceContext, id: string): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+export const releaseReplay = async (ctx: AccountContext, id: string): Promise<void> => {
+  await withAccount(ctx, async (tx) => {
     await tx.update(deadLetter).set({ replayedAt: null }).where(eq(deadLetter.id, id))
   })
 }

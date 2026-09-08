@@ -14,11 +14,12 @@ import {
   type HostAvailability,
   type Interval,
   type OfferedSlot,
+  type OrphanedEvent,
   type ProvisionRequest,
   type Provisioned,
   bookingTemplateValues,
   renderTemplate,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import {
   busyForHosts,
@@ -66,7 +67,7 @@ export const loadOffer = async (
   page: BookingPageConfig,
   window: OfferWindow,
 ): Promise<PublicOffer> => {
-  const ctx = publicEdgeContext(page.workspaceId)
+  const ctx = publicEdgeContext(page.accountId)
   const now = window.now ?? new Date()
 
   // A day either side, because a slot at the edge of the requested range needs the
@@ -100,14 +101,21 @@ export const loadOffer = async (
     now,
   })
 
+  // Nothing readable is not one situation but two, and they call for opposite
+  // things from the visitor. A host who has never connected a calendar is a page
+  // that is not ready: telling somebody to try again in a minute sends them back
+  // to the same empty calendar all afternoon. A free-busy call that failed really
+  // may work in a minute. §Edge cases, free-busy call fails.
+  const everyHostIsKnownUnusable = hosts.every((host) => host.unavailableReason !== null)
+
   return {
     slots: offer.slots,
-    // Every host unreadable is a different situation from every host busy, and a
-    // visitor deserves to be told which. §Edge cases, free-busy call fails.
     unavailable:
-      busy.size === 0
-        ? 'Availability could not be loaded just now. Please try again in a minute, or use the contact form.'
-        : null,
+      busy.size > 0
+        ? null
+        : everyHostIsKnownUnusable
+          ? 'This page is not ready to take bookings yet. Please use the contact form, or try the link again later.'
+          : 'Availability could not be loaded just now. Please try again in a minute, or use the contact form.',
     problems: [...offer.problems, ...problems],
   }
 }
@@ -172,7 +180,7 @@ export type BookOutcome =
  *  confirm a slot the host filled five minutes ago. */
 export const book = async (input: BookInput): Promise<BookOutcome> => {
   const { page } = input
-  const ctx = publicEdgeContext(page.workspaceId)
+  const ctx = publicEdgeContext(page.accountId)
 
   if (!page.isActive && !input.rescheduleOf) {
     return {
@@ -241,7 +249,7 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
     if (pending.link) {
       queueConferenceBackfill({
         ...pending.link,
-        workspaceId: page.workspaceId,
+        accountId: page.accountId,
         bookingId: result.bookingId,
       })
     }
@@ -257,7 +265,7 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
 /** What the provisioner could not finish, read after the booking commits. The
  *  backfill needs the strings the event was written with, and only the
  *  provisioner has them. */
-type PendingLink = Omit<PendingConference, 'workspaceId' | 'bookingId'>
+type PendingLink = Omit<PendingConference, 'accountId' | 'bookingId'>
 
 const overlapsAny = (intervals: Interval[], start: Date, end: Date): boolean =>
   intervals.some(
@@ -272,7 +280,7 @@ const overlapsAny = (intervals: Interval[], start: Date, end: Date): boolean =>
  *  trade; the link is null, the host is told, and the event says the link is
  *  coming. */
 const provisioner =
-  (ctx: WorkspaceContext, moving: BookingRecord | null, pending: { link: PendingLink | null }) =>
+  (ctx: AccountContext, moving: BookingRecord | null, pending: { link: PendingLink | null }) =>
   async (request: ProvisionRequest): Promise<Provisioned> => {
     const warnings: string[] = []
     const values = bookingTemplateValues({
@@ -306,7 +314,7 @@ const provisioner =
           : null
 
       const moved = reusable
-        ? await updateZoomMeeting(reusable, {
+        ? await updateZoomMeeting(ctx, reusable, {
             startsAt: request.startsAt,
             durationMinutes: request.page.durationMinutes,
             timezone: request.attendee.timezone,
@@ -317,7 +325,7 @@ const provisioner =
         conferenceUrl = moving?.conferenceUrl ?? null
         conferenceRef = reusable
       } else {
-        const outcome = await createZoomMeeting({
+        const outcome = await createZoomMeeting(ctx, {
           hostEmail: request.host.email,
           topic: summary,
           agenda,
@@ -330,7 +338,7 @@ const provisioner =
           conferenceRef = outcome.meeting.meetingId
           // Only once there is a replacement: a meeting at the wrong time is worse
           // than no meeting, but not worse than losing the link entirely.
-          if (reusable) await deleteZoomMeeting(reusable)
+          if (reusable) await deleteZoomMeeting(ctx, reusable)
         } else {
           zoomFailure = moved ? `${moved.reason} ${outcome.reason}` : outcome.reason
           warnings.push(PENDING_NOTICE)
@@ -383,6 +391,12 @@ const provisioner =
         calendarId: moving.calendarId,
         conferenceUrl: conferenceUrl ?? moving.conferenceUrl,
         conferenceRef: conferenceRef ?? moving.conferenceRef,
+        alsoWritten: await inviteTheRest(ctx, request, {
+          summary,
+          description,
+          location: joining,
+          warnings,
+        }),
         warnings,
       }
     }
@@ -404,9 +418,64 @@ const provisioner =
       calendarId: event.calendarId,
       conferenceUrl: conferenceUrl ?? event.conferenceUrl,
       conferenceRef,
+      alsoWritten: await inviteTheRest(ctx, request, {
+        summary,
+        description: [description, `Join: ${conferenceUrl ?? event.conferenceUrl ?? ''}`.trim()]
+          .filter(Boolean)
+          .join('\n\n'),
+        location: joining,
+        warnings,
+      }),
       warnings,
     }
   }
+
+/** The rest of a collective's calendar entries.
+ *
+ *  The organiser's event is written above and is the one that carries the booking;
+ *  these are the same meeting on everybody else's calendar, so they carry the same
+ *  joining link and no second conference is created.
+ *
+ *  Unlike the organiser's, a failure here does not throw. The meeting exists, the
+ *  time is committed for that person in Rawr either way, and losing the whole
+ *  booking because one panellist's calendar was briefly unreadable is the wrong
+ *  trade. The host is told instead. */
+const inviteTheRest = async (
+  ctx: AccountContext,
+  request: ProvisionRequest,
+  event: { summary: string; description: string; location: string | null; warnings: string[] },
+): Promise<{ userId: string; calendarEventId: string | null; calendarId: string | null }[]> => {
+  if (request.alsoOn.length === 0) return []
+
+  return Promise.all(
+    request.alsoOn.map(async (member) => {
+      try {
+        const written = await createCalendarEvent(ctx, {
+          userId: member.userId,
+          summary: event.summary,
+          description: event.description,
+          startsAt: request.startsAt,
+          endsAt: request.endsAt,
+          timezone: request.attendee.timezone,
+          attendee: { name: request.attendee.name, email: request.attendee.email },
+          // One conference for the meeting, created on the organiser's calendar.
+          requestConference: false,
+          location: event.location,
+        })
+        return {
+          userId: member.userId,
+          calendarEventId: written.eventId,
+          calendarId: written.calendarId,
+        }
+      } catch {
+        event.warnings.push(
+          `${member.name} is on this meeting in Rawr, but their calendar could not be written to. Invite them by hand.`,
+        )
+        return { userId: member.userId, calendarEventId: null, calendarId: null }
+      }
+    }),
+  )
+}
 
 /** The extra questions, on the event, so the host reads them without opening the
  *  CRM. Labels rather than keys, because `what_are_you_evaluating` is not a
@@ -432,7 +501,7 @@ export const cancelWithProviders = async (
   booking: BookingRecord,
   input: { reason?: string | null; by: 'attendee' | 'host' },
 ): Promise<{ alreadyDone: boolean }> => {
-  const ctx = publicEdgeContext(booking.workspaceId)
+  const ctx = publicEdgeContext(booking.accountId)
   const result = await cancelBooking(ctx, booking.id, input)
   if (result.alreadyDone) return { alreadyDone: true }
 
@@ -446,8 +515,24 @@ export const cancelWithProviders = async (
       // problem the host can delete; refusing the cancellation is not.
     })
   }
-  if (booking.conferenceRef) await deleteZoomMeeting(booking.conferenceRef)
+  await withdraw(ctx, result.releasedEvents)
+  if (booking.conferenceRef) await deleteZoomMeeting(ctx, booking.conferenceRef)
   return { alreadyDone: false }
+}
+
+/** Calendar entries that belong to nobody now. Best effort and never fatal: the
+ *  booking is already cancelled or moved, and a stale entry is a visible problem
+ *  somebody can delete, where refusing the cancellation is not. */
+const withdraw = async (ctx: AccountContext, events: OrphanedEvent[]): Promise<void> => {
+  await Promise.all(
+    events.map((event) =>
+      deleteCalendarEvent(ctx, {
+        userId: event.userId,
+        calendarId: event.calendarId,
+        eventId: event.calendarEventId,
+      }).catch(() => undefined),
+    ),
+  )
 }
 
 export type RescheduleInput = {
@@ -473,7 +558,7 @@ export const rescheduleWithProviders = async (input: RescheduleInput): Promise<B
     }
   }
 
-  const ctx = publicEdgeContext(booking.workspaceId)
+  const ctx = publicEdgeContext(booking.accountId)
   const page = await readBookingPage(ctx, booking.bookingPageId)
   if (!page) {
     return { ok: false, kind: 'closed', message: 'The page this meeting was booked on no longer exists.' }
@@ -496,10 +581,16 @@ export const rescheduleWithProviders = async (input: RescheduleInput): Promise<B
 
   if (!outcome.ok) return outcome
 
-  // The new booking is committed. If it landed on a different host, the old
-  // calendar event and Zoom meeting belong to nobody now, so they go. Done after
-  // the commit deliberately: deleting first and then failing to insert would lose
-  // a meeting that still exists in the CRM.
+  // The new booking is committed. Everything the old one had written that the new
+  // one did not reuse belongs to nobody now, so it goes. Done after the commit
+  // deliberately: deleting first and then failing to insert would lose a meeting
+  // that still exists in the CRM.
+  //
+  // The other participants' entries go unconditionally: the new booking wrote its
+  // own, even when the panel is identical, because only the organiser's event can
+  // be patched in place.
+  await withdraw(ctx, outcome.booking.releasedEvents)
+
   if (outcome.booking.hostUserId !== booking.hostUserId) {
     if (booking.calendarEventId && booking.calendarId) {
       await deleteCalendarEvent(ctx, {
@@ -508,7 +599,7 @@ export const rescheduleWithProviders = async (input: RescheduleInput): Promise<B
         eventId: booking.calendarEventId,
       }).catch(() => {})
     }
-    if (booking.conferenceRef) await deleteZoomMeeting(booking.conferenceRef)
+    if (booking.conferenceRef) await deleteZoomMeeting(ctx, booking.conferenceRef)
   }
 
   return outcome

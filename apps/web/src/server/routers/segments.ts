@@ -29,7 +29,7 @@ const filterGroup = z.object({
 export const segmentsRouter = router({
   list: protectedProcedure
     .input(z.object({ object: objectKey.optional() }).optional())
-    .query(({ ctx, input }) => call(() => listSegments(ctx.workspace, input?.object))),
+    .query(({ ctx, input }) => call(() => listSegments(ctx.account, input?.object))),
 
   save: protectedProcedure
     .input(
@@ -43,7 +43,7 @@ export const segmentsRouter = router({
     )
     .mutation(({ ctx, input }) =>
       call(() =>
-        saveSegment(ctx.workspace, {
+        saveSegment(ctx.account, {
           id: input.id ?? null,
           objectKey: input.object,
           name: input.name,
@@ -55,30 +55,30 @@ export const segmentsRouter = router({
 
   remove: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => deleteSegment(ctx.workspace, input.id))),
+    .mutation(({ ctx, input }) => call(() => deleteSegment(ctx.account, input.id))),
 
   /** Recompute one now. The scheduled pass covers the rest; this is for somebody
    *  who has just changed the query and wants to see the effect. */
   evaluate: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => evaluateSegment(ctx.workspace, input.id))),
+    .mutation(({ ctx, input }) => call(() => evaluateSegment(ctx.account, input.id))),
 
-  evaluateAll: protectedProcedure.mutation(({ ctx }) => call(() => evaluateAllSegments(ctx.workspace))),
+  evaluateAll: protectedProcedure.mutation(({ ctx }) => call(() => evaluateAllSegments(ctx.account))),
 
   members: protectedProcedure
     .input(z.object({ id: z.uuid(), limit: z.number().int().min(1).max(200).optional() }))
-    .query(({ ctx, input }) => call(() => readSegmentMembers(ctx.workspace, input.id, input.limit ?? 50))),
+    .query(({ ctx, input }) => call(() => readSegmentMembers(ctx.account, input.id, input.limit ?? 50))),
 
   /** What the builder shows before anything is saved: the count and a handful of
    *  the records, so nobody saves a segment they have not seen. */
   preview: protectedProcedure
     .input(z.object({ object: objectKey, filters: z.array(filterGroup).max(5) }))
     .query(({ ctx, input }) =>
-      call(() => previewSegment(ctx.workspace, { objectKey: input.object, filters: input.filters as never })),
+      call(() => previewSegment(ctx.account, { objectKey: input.object, filters: input.filters as never })),
     ),
 
   /** The segments one record is in, past spells included. */
   forRecord: protectedProcedure
     .input(z.object({ entityId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => readMemberships(ctx.workspace, input.entityId))),
+    .query(({ ctx, input }) => call(() => readMemberships(ctx.account, input.entityId))),
 })

@@ -37,6 +37,36 @@ const OPERATOR_LABELS: Record<string, string> = {
 }
 
 const NULLARY = new Set(['is_empty', 'is_not_empty'])
+/** Operators whose value is a list rather than a scalar. The compiler has always
+ *  read these as arrays (dal/query.ts, LIST_OPERATORS); the builder only ever
+ *  produced one value, so "is between" reached Postgres missing its upper bound
+ *  and threw, and "is any of" could only ever name one option. */
+const RANGE = 'between'
+const MULTI = new Set(['in', 'not_in'])
+
+/** A condition's value as the list the compiler expects, whatever shape it is in
+ *  now: a saved view predates this and holds a scalar. */
+const asList = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map((entry) => (entry === null || entry === undefined ? '' : String(entry)))
+  if (value === null || value === undefined || value === '') return []
+  return [String(value)]
+}
+
+/** What an operator's value starts as when the operator changes, so a range is
+ *  never half a range and a list is never a bare string. */
+const emptyValueFor = (operator: string): unknown =>
+  operator === RANGE ? ['', ''] : MULTI.has(operator) ? [] : ''
+
+/** Complete means every part is filled: both ends of a range, at least one
+ *  member of a list. `String([ '', '' ])` is "," which is not empty, so the old
+ *  check would have waved a half-finished range through. */
+const isComplete = (condition: Condition): boolean => {
+  if (NULLARY.has(condition.operator)) return true
+  const values = asList(condition.value)
+  if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '')
+  if (MULTI.has(condition.operator)) return values.length > 0 && values.every((entry) => entry !== '')
+  return values.length > 0 && values[0] !== ''
+}
 
 const inputTypeFor = (type: string): string => {
   if (type === 'date') return 'date'
@@ -49,7 +79,112 @@ export type FilterBuilderProps = {
   fields: FilterField[]
   value: Group[]
   onApply: (groups: Group[]) => void
-  onClose: () => void
+  /** Omitted where the builder is part of a form rather than a popover: there is
+   *  nothing to close, and a Close button that does nothing is worse than none. */
+  onClose?: () => void
+}
+
+/** The right-hand side of one condition. Three shapes rather than one, because
+ *  three is what the operators actually mean: a range needs both ends, a list
+ *  needs however many the person picks, and everything else is a single value. */
+const ValueControl = ({
+  field,
+  condition,
+  onChange,
+}: {
+  field: FilterField | undefined
+  condition: Condition
+  onChange: (value: unknown) => void
+}) => {
+  const values = asList(condition.value)
+  const inputType = inputTypeFor(field?.type ?? 'text')
+
+  if (condition.operator === RANGE) {
+    const [from = '', to = ''] = values
+    return (
+      <div className="flex w-auto min-w-40 flex-1 items-center gap-2">
+        <TextInput
+          aria-label="From"
+          type={inputType}
+          value={from}
+          onChange={(event) => onChange([event.target.value, to])}
+          className="min-w-0 flex-1"
+        />
+        <span className="shrink-0 text-secondary">and</span>
+        <TextInput
+          aria-label="To"
+          type={inputType}
+          value={to}
+          onChange={(event) => onChange([from, event.target.value])}
+          className="min-w-0 flex-1"
+        />
+      </div>
+    )
+  }
+
+  if (MULTI.has(condition.operator)) {
+    // A native multiple select: no new component, and every browser already
+    // teaches its own way to add a second one.
+    if (field && field.options.length > 0) {
+      return (
+        <Select
+          aria-label="Values"
+          multiple
+          size={Math.min(field.options.length, 4)}
+          value={values}
+          onChange={(event) =>
+            onChange([...event.target.selectedOptions].map((option) => option.value))
+          }
+          className="h-auto w-auto min-w-40 flex-1 py-1"
+        >
+          {field.options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </Select>
+      )
+    }
+    return (
+      <TextInput
+        aria-label="Values, separated by commas"
+        placeholder="one, two, three"
+        value={values.join(', ')}
+        onChange={(event) =>
+          onChange(event.target.value.split(',').map((entry) => entry.trim()).filter((entry) => entry !== ''))
+        }
+        className="w-auto min-w-40 flex-1"
+      />
+    )
+  }
+
+  if (field && field.options.length > 0) {
+    return (
+      <Select
+        aria-label="Value"
+        value={values[0] ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-auto min-w-40 flex-1"
+      >
+        <option value="">Pick one</option>
+        {field.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </Select>
+    )
+  }
+
+  return (
+    <TextInput
+      aria-label="Value"
+      type={inputType}
+      value={values[0] ?? ''}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-auto min-w-40 flex-1"
+    />
+  )
 }
 
 /** AND/OR groups, one level deep. A5 draws the line there on purpose: a tree of
@@ -91,7 +226,11 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
               ...group,
               conditions: [
                 ...group.conditions,
-                { field: first.key, operator: first.operators[0] ?? 'is', value: '' },
+                {
+                  field: first.key,
+                  operator: first.operators[0] ?? 'is',
+                  value: emptyValueFor(first.operators[0] ?? 'is'),
+                },
               ],
             }
           : group,
@@ -105,18 +244,14 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
     // conditions with a different group's, so a missing value went unreported.
     const trimmed = groups.map((group) => ({
       ...group,
-      conditions: group.conditions.filter(
-        (condition) =>
-          NULLARY.has(condition.operator) ||
-          (condition.value !== undefined && condition.value !== null && String(condition.value) !== ''),
-      ),
+      conditions: group.conditions.filter(isComplete),
     }))
 
     const incomplete = trimmed.some(
       (group, i) => group.conditions.length < (groups[i]?.conditions.length ?? 0),
     )
     if (incomplete) {
-      setError('Every condition needs a value, or an operator that does not take one.')
+      setError('Every condition needs its values: both ends of a range, at least one of a list.')
       return
     }
     onApply(trimmed.filter((group) => group.conditions.length > 0))
@@ -152,10 +287,11 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
                   value={condition.field}
                   onChange={(event) => {
                     const next = fieldFor(event.target.value)
+                    const operator = next?.operators[0] ?? 'is'
                     patchCondition(groupIndex, conditionIndex, {
                       field: event.target.value,
-                      operator: next?.operators[0] ?? 'is',
-                      value: '',
+                      operator,
+                      value: emptyValueFor(operator),
                     })
                   }}
                   className="w-auto min-w-40 flex-1"
@@ -170,9 +306,10 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
                 <Select
                   aria-label="Operator"
                   value={condition.operator}
-                  onChange={(event) =>
-                    patchCondition(groupIndex, conditionIndex, { operator: event.target.value as Operator })
-                  }
+                  onChange={(event) => {
+                    const operator = event.target.value as Operator
+                    patchCondition(groupIndex, conditionIndex, { operator, value: emptyValueFor(operator) })
+                  }}
                   className="w-auto min-w-36 flex-1"
                 >
                   {(field?.operators ?? []).map((operator) => (
@@ -182,35 +319,7 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
                   ))}
                 </Select>
 
-                {takesValue ? (
-                  field && field.options.length > 0 ? (
-                    <Select
-                      aria-label="Value"
-                      value={String(condition.value ?? '')}
-                      onChange={(event) =>
-                        patchCondition(groupIndex, conditionIndex, { value: event.target.value })
-                      }
-                      className="w-auto min-w-40 flex-1"
-                    >
-                      <option value="">Pick one</option>
-                      {field.options.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <TextInput
-                      aria-label="Value"
-                      type={inputTypeFor(field?.type ?? 'text')}
-                      value={String(condition.value ?? '')}
-                      onChange={(event) =>
-                        patchCondition(groupIndex, conditionIndex, { value: event.target.value })
-                      }
-                      className="w-auto min-w-40 flex-1"
-                    />
-                  )
-                ) : null}
+                {takesValue ? <ValueControl field={field} condition={condition} onChange={(value) => patchCondition(groupIndex, conditionIndex, { value })} /> : null}
 
                 <Button
                   variant="tertiary"
@@ -259,9 +368,11 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
         <Button variant="tertiary" onClick={() => onApply([])}>
           Clear all
         </Button>
-        <Button variant="tertiary" onClick={onClose}>
-          Close
-        </Button>
+        {onClose ? (
+          <Button variant="tertiary" onClick={onClose}>
+            Close
+          </Button>
+        ) : null}
       </div>
     </div>
   )

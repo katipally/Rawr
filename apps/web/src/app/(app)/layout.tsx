@@ -1,17 +1,19 @@
-import { canWrite, getRegistry, type Role } from '@rawr/db'
+import { canWrite, getRegistry } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavSection } from '~/components/app-shell.tsx'
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
+import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
   accountPath,
   availabilityPath,
   bookedPath,
   bookingPagesPath,
-  calendarsPath,
+  calendarPath,
   createRecordPath,
   formsPath,
+  newBookingPagePath,
   duplicatesPath,
   exportPath,
   importsPath,
@@ -24,10 +26,11 @@ import {
   newsletterPath,
   reportsPath,
   sequencesPath,
+  templatesPath,
   sitesPath,
   submissionsPath,
   tasksPath,
-  workspaceHome,
+  accountHome,
 } from '~/lib/links.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 
@@ -35,12 +38,10 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
-  const workspace = session.workspaceSlug
-  const [mine, registry] = await Promise.all([
-    memberships(session.userId),
-    getRegistry(contextFrom(session)),
-  ])
-  // Built from the session, because every CRM address carries its workspace.
+  const account = session.accountSlug
+  const ctx = contextFrom(session)
+  const [mine, registry] = await Promise.all([memberships(session.userId), getRegistry(ctx)])
+  // Built from the session, because every CRM address carries its account.
   // The sections are HubSpot's hubs in HubSpot's order. Home is the logo, and
   // Settings is its own place, reached from the top bar.
   const nav: NavSection[] = [
@@ -54,18 +55,18 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           // From the registry, so an object an admin invents is in the menu the
           // moment it exists rather than only at an address somebody typed.
           items: registry.objects.map((object) => ({
-            href: objectView(workspace, object.key, 'all'),
+            href: objectView(account, object.key, 'all'),
             label: object.namePlural,
-            match: `/contacts/${workspace}/objects/${object.key}`,
+            match: `/contacts/${account}/objects/${object.key}`,
           })),
         },
         {
           label: 'Work',
           items: [
-            { href: segmentsPath(workspace), label: 'Segments (Lists)', match: `/contacts/${workspace}/segments` },
-            { href: inboxPath(workspace), label: 'Inbox', match: `/contacts/${workspace}/inbox` },
-            { href: bookedPath(workspace), label: 'Meetings', match: `/meetings/${workspace}/booked` },
-            { href: tasksPath(workspace), label: 'Tasks' },
+            { href: segmentsPath(account), label: 'Segments (Lists)', match: `/contacts/${account}/segments` },
+            { href: inboxPath(account), label: 'Inbox', match: `/contacts/${account}/inbox` },
+            { href: bookedPath(account), label: 'Meetings', match: `/meetings/${account}/booked` },
+            { href: tasksPath(account), label: 'Tasks' },
           ],
         },
       ],
@@ -78,15 +79,15 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Capture',
           items: [
-            { href: newsletterPath(workspace), label: 'Email', match: `/contacts/${workspace}/newsletter` },
-            { href: formsPath(workspace), label: 'Forms', match: `/contacts/${workspace}/forms` },
-            { href: submissionsPath(workspace, { state: 'quarantined' }), label: 'Form submissions', match: `/contacts/${workspace}/submissions` },
+            { href: newsletterPath(account), label: 'Newsletter', match: `/contacts/${account}/newsletter` },
+            { href: formsPath(account), label: 'Forms', match: `/contacts/${account}/forms` },
+            { href: submissionsPath(account, { state: 'quarantined' }), label: 'Form submissions', match: `/contacts/${account}/submissions` },
           ],
         },
         {
           label: 'Analytics',
           items: [
-            { href: reportsPath(workspace, { tab: 'forms' }), label: 'Marketing Analytics', match: `/contacts/${workspace}/reports/forms` },
+            { href: reportsPath(account, { tab: 'forms' }), label: 'Marketing Analytics', match: `/contacts/${account}/reports/forms` },
           ],
         },
       ],
@@ -99,16 +100,17 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Selling',
           items: [
-            { href: calendarsPath(workspace), label: 'Calendar', match: `/meetings/${workspace}/calendars` },
-            { href: availabilityPath(workspace), label: 'Availability', match: `/meetings/${workspace}/availability` },
-            { href: bookingPagesPath(workspace), label: 'Meetings Scheduler', match: `/meetings/${workspace}/pages` },
-            { href: sequencesPath(workspace), label: 'Sequences', match: `/contacts/${workspace}/sequences` },
+            { href: calendarPath(account), label: 'Calendar', match: `/meetings/${account}/calendar` },
+            { href: availabilityPath(account), label: 'Availability', match: `/meetings/${account}/availability` },
+            { href: bookingPagesPath(account), label: 'Meetings Scheduler', match: `/meetings/${account}/pages` },
+            { href: templatesPath(account), label: 'Templates', match: `/contacts/${account}/templates` },
+            { href: sequencesPath(account), label: 'Sequences', match: `/contacts/${account}/sequences` },
           ],
         },
         {
           label: 'Analytics',
           items: [
-            { href: reportsPath(workspace, { tab: 'pipeline' }), label: 'Sales Analytics', match: `/contacts/${workspace}/reports/pipeline` },
+            { href: reportsPath(account, { tab: 'pipeline' }), label: 'Sales Analytics', match: `/contacts/${account}/reports/pipeline` },
           ],
         },
       ],
@@ -121,9 +123,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Move data',
           items: [
-            { href: importsPath(workspace), label: 'Data Integration', match: `/contacts/${workspace}/import` },
-            { href: exportPath(workspace), label: 'Export' },
-            { href: duplicatesPath(workspace), label: 'Duplicates' },
+            { href: importsPath(account), label: 'Data Integration', match: `/contacts/${account}/import` },
+            { href: exportPath(account), label: 'Export' },
+            { href: duplicatesPath(account), label: 'Duplicates' },
           ],
         },
         {
@@ -145,8 +147,8 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Reports',
           items: [
-            { href: reportsPath(workspace, { tab: 'dashboards' }), label: 'Dashboards', match: `/contacts/${workspace}/reports/dashboards` },
-            { href: reportsPath(workspace), label: 'Reports', match: `/contacts/${workspace}/reports` },
+            { href: reportsPath(account, { tab: 'dashboards' }), label: 'Dashboards', match: `/contacts/${account}/reports/dashboards` },
+            { href: reportsPath(account), label: 'Reports', match: `/contacts/${account}/reports` },
           ],
         },
       ],
@@ -156,33 +158,65 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   return (
     <ToastProvider>
       <AppShell
-        workspaceName={session.workspaceName}
-        workspaceSlug={workspace}
-        workspaces={mine.map((m) => ({
-          slug: m.workspaceSlug,
-          name: m.workspaceName,
-          organisation: m.organisationName,
+        accountName={session.accountName}
+        accountSlug={account}
+        accounts={mine.map((m) => ({
+          slug: m.accountSlug,
+          name: m.accountName,
         }))}
         email={session.email}
-        role={session.role}
+        avatarUrl={session.avatarUrl}
         nav={nav}
-        // Only what this role can actually make. A viewer was offered four
-        // things to create and every one of them landed on a page that quietly
-        // ignored the request, because the create dialog checks the role and the
-        // menu did not.
+        // Only what these grants can actually make. A read-only member was offered
+        // four things to create and every one of them landed on a page that
+        // quietly ignored the request, because the create dialog checks the grant
+        // and the menu did not.
         create={[
-          { key: 'contact', label: 'Contact', href: createRecordPath(workspace, 'contact'), entity: 'contact' },
-          { key: 'company', label: 'Company', href: createRecordPath(workspace, 'company'), entity: 'company' },
-          { key: 'deal', label: 'Deal', href: createRecordPath(workspace, 'deal'), entity: 'deal' },
-          { key: 'task', label: 'Task', href: tasksPath(workspace, { new: '1' }), entity: 'task' },
+          { key: 'contact', label: 'Contact', href: createRecordPath(account, 'contact'), entity: 'contact' },
+          { key: 'company', label: 'Company', href: createRecordPath(account, 'company'), entity: 'company' },
+          { key: 'deal', label: 'Deal', href: createRecordPath(account, 'deal'), entity: 'deal' },
+          { key: 'task', label: 'Task', href: tasksPath(account, { new: '1' }), entity: 'task' },
+          // Both were complete and reachable only by hovering a rail icon, which
+          // is why they read as missing features.
+          { key: 'form', label: 'Form', href: formsPath(account, 'new'), entity: 'form' },
+          {
+            key: 'booking_page',
+            label: 'Scheduling page',
+            href: newBookingPagePath(account),
+            entity: 'booking_page',
+          },
         ].flatMap(({ entity, ...option }) =>
-          canWrite(session.role as Role, entity) ? [option] : [],
+          canWrite(ctx, entity) ? [option] : [],
         )}
         settingsHref={accountPath()}
         accountHref={accountPath()}
-        homeHref={workspaceHome(workspace)}
-        search={<CommandPalette workspace={workspace} />}
+        homeHref={accountHome(account)}
+        search={
+          <CommandPalette
+            account={account}
+            // The rail, flattened. One source, so a page the rail gains is
+            // findable the same day rather than when somebody remembers to add
+            // it to a second list.
+            pages={nav.flatMap((section) =>
+              section.groups
+                ? section.groups.flatMap((group) =>
+                    group.items.map((item) => ({
+                      label: item.label,
+                      section: section.label,
+                      href: item.href,
+                    })),
+                  )
+                : section.href
+                  ? [{ label: section.label, section: section.label, href: section.href }]
+                  : [],
+            )}
+          />
+        }
       >
+        {/* Above the page rather than inside it: what is waiting to be enriched
+            is a account-wide question, and the answer costs credits wherever
+            the person happens to be standing. */}
+        <EnrichmentConsent canWrite={canWrite(ctx, 'contact')} />
         {children}
       </AppShell>
       <ShortcutSheet />

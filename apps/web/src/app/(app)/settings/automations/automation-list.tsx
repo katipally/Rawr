@@ -3,6 +3,7 @@
 import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -15,7 +16,7 @@ type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task'
 export type StepView =
   | { kind: 'action'; type: ActionType; config: Record<string, string> }
   | { kind: 'delay'; minutes: number }
-  | { kind: 'guard' }
+  | { kind: 'guard'; conditions: Group[] }
 
 export type AutomationRowView = {
   id: string
@@ -23,6 +24,9 @@ export type AutomationRowView = {
   isActive: boolean
   trigger: Trigger
   objectKey: string
+  /** The rule's own conditions. A guard step with none of its own re-checks
+   *  these, which is why an empty list made "and if it still matches" a no-op. */
+  conditions: Group[]
   steps: StepView[]
   runCount: number
   lastRunAt: string | null
@@ -46,14 +50,17 @@ export type AutomationListProps = {
   runs: RunView[]
   people: { id: string; name: string }[]
   stages: string[]
-  /** Every object in the workspace, named. A rule can watch one an admin
+  /** Every object in the account, named. A rule can watch one an admin
    *  invented, so this cannot be written out here. */
   objects: { key: string; label: string }[]
   fieldsByObject: Record<string, string[]>
+  /** The same shape segments pass their builder. Keyed by object because a rule
+   *  can be repointed at another one while the editor is open. */
+  filterFieldsByObject: Record<string, FilterField[]>
 }
 
 /** The words a person uses, against the words the enum uses. `objects: null` means
- *  any object in the workspace; the rest are fixed by what the trigger needs (only
+ *  any object in the account; the rest are fixed by what the trigger needs (only
  *  a deal has a pipeline, only a contact comes from a form fill). */
 const TRIGGERS: { key: Trigger; label: string; objects: string[] | null }[] = [
   { key: 'record_created', label: 'a record is created', objects: null },
@@ -113,7 +120,7 @@ const kindFrom = (value: string): StepView =>
   value === 'delay'
     ? { kind: 'delay', minutes: 60 * 24 }
     : value === 'guard'
-      ? { kind: 'guard' }
+      ? { kind: 'guard', conditions: [] }
       : { kind: 'action', type: value as ActionType, config: {} }
 
 /** The fields one action needs, which differ per action and per object.
@@ -234,7 +241,15 @@ const ActionFields = ({
   )
 }
 
-export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByObject }: AutomationListProps) => {
+export const AutomationList = ({
+  rows,
+  runs,
+  people,
+  stages,
+  objects,
+  fieldsByObject,
+  filterFieldsByObject,
+}: AutomationListProps) => {
   const router = useRouter()
   const toast = useToast()
   const [editing, setEditing] = useState<AutomationRowView | 'new' | null>(null)
@@ -245,6 +260,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
   const [trigger, setTrigger] = useState<Trigger>('record_created')
   const [object, setObject] = useState<string>('contact')
   const [steps, setSteps] = useState<StepView[]>([])
+  const [conditions, setConditions] = useState<Group[]>([])
 
   const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
   const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
@@ -254,6 +270,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
     setName('')
     setTrigger('record_created')
     setObject('contact')
+    setConditions([])
     setSteps([{ kind: 'action', type: 'create_task', config: {} }])
     setEditing('new')
   }
@@ -262,6 +279,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
     setName(row.name)
     setTrigger(row.trigger)
     setObject(row.objectKey)
+    setConditions(row.conditions)
     setSteps(row.steps.length > 0 ? row.steps : [{ kind: 'action', type: 'create_task', config: {} }])
     setEditing(row)
   }
@@ -289,7 +307,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
           name,
           trigger,
           object,
-          conditions: [],
+          conditions,
           steps: steps.map((step) =>
             step.kind === 'action'
               ? { kind: 'action' as const, type: step.type, config: step.config }
@@ -297,8 +315,8 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
                 ? { kind: 'delay' as const, minutes: step.minutes }
                 : // A guard with no conditions of its own re-checks the rule's,
                   // which is the reading somebody means by "and if it still
-                  // matches". Its own filters are the next thing this form grows.
-                  { kind: 'guard' as const, conditions: [] },
+                  // matches".
+                  { kind: 'guard' as const, conditions: step.conditions },
           ),
         }),
       'Saved. Turn it on when you are ready.',
@@ -447,6 +465,20 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
           </Field>
 
           <div className="flex flex-col gap-2">
+            <p className="font-medium">Only if</p>
+            <p className="text-small text-secondary">
+              Leave this empty and the rule fires on every one of those. A guard step later re-checks
+              exactly these conditions, so an empty list makes that step a no-op.
+            </p>
+            <FilterBuilder
+              key={object}
+              fields={filterFieldsByObject[object] ?? []}
+              value={conditions}
+              onApply={setConditions}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
             <p className="font-medium">Then, in order</p>
             <ol className="flex flex-col gap-2">
               {steps.map((step, index) => (
@@ -516,11 +548,19 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
                   </div>
 
                   {step.kind === 'guard' ? (
-                    <p className="text-small text-secondary">
-                      Looks at the record again, as it is now, and stops the rule here unless it
-                      still matches the conditions above. This is how a rule waits and then changes
-                      its mind.
-                    </p>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-small text-secondary">
+                        Looks at the record again, as it is now, and stops the rule here unless it
+                        still matches. This is how a rule waits and then changes its mind. With
+                        nothing of its own below, it re-checks the rule&apos;s own conditions.
+                      </p>
+                      <FilterBuilder
+                        key={`${object}-guard-${index}`}
+                        fields={filterFieldsByObject[object] ?? []}
+                        value={step.conditions}
+                        onApply={(next) => setSteps(replace(steps, index, { kind: 'guard', conditions: next }))}
+                      />
+                    </div>
                   ) : null}
 
                   {step.kind === 'action' ? (
@@ -546,7 +586,7 @@ export const AutomationList = ({ rows, runs, people, stages, objects, fieldsByOb
               <Button onClick={() => setSteps([...steps, { kind: 'delay', minutes: 60 * 24 }])}>
                 Add a wait
               </Button>
-              <Button onClick={() => setSteps([...steps, { kind: 'guard' }])}>Add a check</Button>
+              <Button onClick={() => setSteps([...steps, { kind: 'guard', conditions: [] }])}>Add a check</Button>
             </div>
           </div>
 

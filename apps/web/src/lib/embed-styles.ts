@@ -22,6 +22,10 @@ export const EMBED_STYLES = `
   --_radius: var(--rawr-embed-radius, 3px);
   --_gap: var(--rawr-embed-gap, 1rem);
   --_field-bg: var(--rawr-embed-field-bg, #ffffff);
+  /* A shorthand, so a preset can draw one edge instead of four: "0 0 1px" is the
+     underlined look datasaur.ai hand-writes today, and it stays a value rather
+     than becoming a second rule for the host page to override. */
+  --_field-border-width: var(--rawr-embed-field-border-width, 1px);
 
   font-family: var(--_font);
   color: var(--_text);
@@ -54,7 +58,8 @@ export const EMBED_STYLES = `
   font-weight: 300;
   color: inherit;
   background: var(--_field-bg);
-  border: 1px solid var(--_border);
+  border: solid var(--_border);
+  border-width: var(--_field-border-width);
   border-radius: var(--_radius);
   padding: 0.5rem 0.625rem;
   min-height: 2.25rem;
@@ -69,6 +74,29 @@ export const EMBED_STYLES = `
 
 .rawr-choices { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
 .rawr-choices label { display: inline-flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; }
+
+/* A heading is page furniture, so it carries the form's own weight rather than a
+   document heading's: it names a group of questions, it does not open a section
+   of a page it knows nothing about. */
+.rawr-heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 500;
+  padding-block-start: 0.5rem;
+  border-block-start: 1px solid var(--_border);
+}
+.rawr-step > .rawr-field:first-child .rawr-heading { padding-block-start: 0; border-block-start: 0; }
+
+/* The box sits with the sentence, not above it. align-items:start so a two-line
+   statement keeps the box on the first line rather than centred against both. */
+.rawr-consent { display: flex; align-items: start; gap: 0.5rem; font-size: 0.8125rem; font-weight: 400; }
+.rawr-consent input { margin-block-start: 0.15em; flex: none; }
+
+.rawr-file { display: flex; flex-direction: column; gap: 0.375rem; }
+.rawr-file input[type="file"] { font: inherit; font-size: 0.8125rem; max-width: 100%; }
+.rawr-file input[type="file"]:disabled { opacity: 0.6; cursor: progress; }
+/* The chosen filename, which can be very long and has nowhere to wrap. */
+.rawr-file-note { color: var(--_muted); font-size: 0.75rem; overflow-wrap: anywhere; }
 
 .rawr-help { color: var(--_muted); font-size: 0.75rem; }
 .rawr-error { color: var(--_error); font-size: 0.75rem; min-height: 0; }

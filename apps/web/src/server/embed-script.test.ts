@@ -35,7 +35,7 @@ test('the checker the tests ran is the one that ships', () => {
 })
 
 test('and so are the formatters the other surfaces use', () => {
-  for (const name of ['countdown', 'formRedirecting', 'formStep']) {
+  for (const name of ['formRedirecting', 'formStep']) {
     assert.equal(script.includes('function ' + name), true, `${name} is missing`)
   }
 })
@@ -95,6 +95,8 @@ test('the configuration is escaped rather than pasted in', () => {
 
 test('it stays small enough to be a good guest on somebody else\'s page', () => {
   // Unminified and uncompressed. The budget is generous on purpose: what matters
-  // is noticing a tenfold jump, not policing a few hundred bytes.
-  assert.equal(script.length < 40_000, true, `the embed is ${script.length} bytes`)
+  // is noticing a tenfold jump, not policing a few hundred bytes. Raised from
+  // 40k when radio, consent, heading and file fields and the theme block landed;
+  // the inlined stylesheet counts here too.
+  assert.equal(script.length < 48_000, true, `the embed is ${script.length} bytes`)
 })

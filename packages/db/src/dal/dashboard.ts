@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 
 /** The Monday screen. Everything Trevor exports to a spreadsheet to see, read in
  *  one transaction: the open pipeline per stage, what closes this month, what is
@@ -51,8 +51,8 @@ export type Dashboard = {
   myOverdueTasks: number
 }
 
-export const readDashboard = async (ctx: WorkspaceContext): Promise<Dashboard> =>
-  withWorkspace(ctx, async (tx) => {
+export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
+  withAccount(ctx, async (tx) => {
     const [stages, closing, counts, upcoming] = await Promise.all([
       tx.execute<{
         pipeline_id: string

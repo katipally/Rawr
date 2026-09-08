@@ -1,11 +1,12 @@
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
-import { consentRecord, form, formSubmission } from '../schema/forms.ts'
+import { consentRecord, form, formSubmission, formUpload } from '../schema/forms.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type Attribution, type AttributionInput } from './attribution.ts'
-import { assertCanWrite, type Role, type WorkspaceContext } from './context.ts'
+import { assertCanWrite, type AccountContext } from './context.ts'
 import {
   assertSchemaIsUsable,
+  FORM_SLUG,
   readSchema,
   readSettings,
   type FormField,
@@ -13,9 +14,11 @@ import {
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
-import { isUuid, mutate, withWorkspace, writeAudit, type Tx } from './index.ts'
+import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
+import { notify, resolveNotifications } from './notifications.ts'
 import { aliasVisitor } from './stitch.ts'
+import { listSubscriptionTypes, setSubscription } from './subscriptions.ts'
 
 /** The public edge acts with marketing's ceiling: it may create and update
  *  contacts and companies, and it may not touch deals, pipelines, the field
@@ -24,20 +27,22 @@ import { aliasVisitor } from './stitch.ts'
  *  Built here and nowhere else, so no route can hand itself a wider role. The
  *  actor kind is 'public' rather than 'integration', so the audit log reads as
  *  what it is: a stranger on the internet, not a named third party. */
-const EDGE_ROLE: Role = 'marketing'
-
-export const publicEdgeContext = (workspaceId: string): WorkspaceContext => ({
-  workspaceId,
+/** A stranger on the public edge writes what a form capture needs and nothing
+ *  else: contacts and marketing, never the account itself. */
+export const publicEdgeContext = (accountId: string): AccountContext => ({
+  accountId,
   actorId: null,
   actorKind: 'public',
-  role: EDGE_ROLE,
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: ['contacts', 'marketing'],
 })
 
 export type PublicForm = {
-  workspaceId: string
+  accountId: string
   /** Needed wherever the edge builds a link back into the CRM, which addresses
    *  its tenant in the path. Resolved with the form, not looked up after. */
-  workspaceSlug: string
+  accountSlug: string
   formId: string
   name: string
   slug: string
@@ -47,8 +52,8 @@ export type PublicForm = {
 }
 
 type PublicFormRow = {
-  workspace_id: string
-  workspace_slug: string
+  account_id: string
+  account_slug: string
   form_id: string
   name: string
   slug: string
@@ -58,8 +63,8 @@ type PublicFormRow = {
 }
 
 const toPublicForm = (row: PublicFormRow): PublicForm => ({
-  workspaceId: row.workspace_id,
-  workspaceSlug: row.workspace_slug,
+  accountId: row.account_id,
+  accountSlug: row.account_slug,
   formId: row.form_id,
   name: row.name,
   slug: row.slug,
@@ -68,7 +73,7 @@ const toPublicForm = (row: PublicFormRow): PublicForm => ({
   isActive: row.is_active,
 })
 
-/** The one question the public edge has to ask before it has a workspace. Goes
+/** The one question the public edge has to ask before it has a account. Goes
  *  through a security-definer function that takes a form id and returns nothing
  *  but that form's public shape, so there is no path from here to a record. */
 export const publicFormById = async (formId: string): Promise<PublicForm | null> => {
@@ -79,11 +84,11 @@ export const publicFormById = async (formId: string): Promise<PublicForm | null>
 }
 
 export const publicFormBySlug = async (
-  workspaceSlug: string,
+  accountSlug: string,
   slug: string,
 ): Promise<PublicForm | null> => {
   const rows = await appDb.execute<PublicFormRow>(
-    sql`select * from rawr.public_form_by_slug(${workspaceSlug}, ${slug})`,
+    sql`select * from rawr.public_form_by_slug(${accountSlug}, ${slug})`,
   )
   const row = rows[0]
   return row ? toPublicForm(row) : null
@@ -131,6 +136,94 @@ export type SubmitResult = {
 /** How long two identical submissions count as the same one. F3 §5. */
 const DUPLICATE_WINDOW_SECONDS = 60
 
+/** Bigger than this is not something a stranger attaches to a web form, and every
+ *  storage service bills for what it holds. */
+export const MAX_FORM_UPLOAD_BYTES = 10 * 1024 * 1024
+
+/** What a form accepts. An allowlist rather than a blocklist: the danger is not
+ *  the extensions somebody thought of, it is the one they did not. */
+export const FORM_UPLOAD_MIME = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/csv',
+  'text/plain',
+])
+
+const fileIdsIn = (fields: FormField[], answers: Record<string, unknown>): string[] =>
+  fields.flatMap((field) => {
+    if (field.type !== 'file') return []
+    const id = String(answers[field.key] ?? '')
+    return id ? [id] : []
+  })
+
+/** Which of these ids this form issued and nothing has claimed yet. */
+const unclaimedUploads = async (
+  tx: Tx,
+  formId: string,
+  ids: string[],
+): Promise<string[]> => {
+  const rows = await tx
+    .select({ id: formUpload.id })
+    .from(formUpload)
+    .where(
+      and(
+        eq(formUpload.formId, formId),
+        inArray(formUpload.id, ids),
+        isNull(formUpload.submissionId),
+      ),
+    )
+  return rows.map((row) => row.id)
+}
+
+/** Records an upload the public edge is about to sign a URL for.
+ *
+ *  The row exists before the bytes do: the browser is handed this id and the
+ *  signed URL together, and a PUT that never happens leaves an unclaimed row the
+ *  sweep collects. The alternative, trusting the browser to tell us afterwards,
+ *  is a table anyone can write to. */
+export const beginFormUpload = async (
+  form: PublicForm,
+  input: { storageKey: string; filename: string; bytes: number; mime: string },
+): Promise<string> =>
+  withAccount(publicEdgeContext(form.accountId), async (tx) => {
+    const [row] = await tx
+      .insert(formUpload)
+      .values({ accountId: form.accountId, formId: form.formId, ...input })
+      .returning({ id: formUpload.id })
+    if (!row) throw new Error('That file could not be accepted.')
+    return row.id
+  })
+
+export type FormUploadRow = {
+  id: string
+  storageKey: string
+  filename: string
+  bytes: number
+  mime: string
+}
+
+/** The files a submission carries, for the reviewer looking at it. */
+export const uploadsForSubmission = async (
+  ctx: AccountContext,
+  submissionId: string,
+): Promise<FormUploadRow[]> =>
+  withAccount(ctx, async (tx) =>
+    tx
+      .select({
+        id: formUpload.id,
+        storageKey: formUpload.storageKey,
+        filename: formUpload.filename,
+        bytes: formUpload.bytes,
+        mime: formUpload.mime,
+      })
+      .from(formUpload)
+      .where(eq(formUpload.submissionId, submissionId)),
+  )
+
 /** The whole capture path, steps 2 to 8 of F3 §4, in one transaction.
  *
  *  Ordering is the point. Validation refuses unknown keys before anything is
@@ -138,7 +231,7 @@ const DUPLICATE_WINDOW_SECONDS = 60
  *  is stored with its reasons but creates no contact at all. Nothing is ever
  *  silently dropped: even confirmed spam is a row somebody can look at. */
 export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
-  const ctx = publicEdgeContext(input.form.workspaceId)
+  const ctx = publicEdgeContext(input.form.accountId)
   // The ceiling above is only real if it is checked. A form fill writes contacts
   // and companies, so those are asserted here; a change that widened the edge to
   // deals would fail this rather than silently succeed.
@@ -154,7 +247,24 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
   const email = emailFrom(fields, answers)
   const attribution = readAttribution({ ...input.attribution, userAgent: input.userAgent })
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
+    // A file answer is an id, and an id is a claim. Settled here, before anything
+    // is scored, because an upload that belongs to another form or was already
+    // claimed is bad input rather than something to discover after the insert.
+    const claiming = fileIdsIn(fields, answers)
+    const claimable = claiming.length > 0 ? await unclaimedUploads(tx, input.form.formId, claiming) : []
+    if (claimable.length !== claiming.length) {
+      return {
+        submissionId: '',
+        state: 'clean' as const,
+        contactId: null,
+        companyId: null,
+        errors: fields
+          .filter((f) => f.type === 'file' && answers[f.key] && !claimable.includes(String(answers[f.key])))
+          .map((f) => ({ key: f.key, message: `${f.label} was not uploaded successfully. Attach it again.` })),
+      }
+    }
+
     if (input.idempotencyKey) {
       const [seen] = await tx
         .select({ id: formSubmission.id, contactId: formSubmission.contactId, state: formSubmission.spamState })
@@ -210,7 +320,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
     const [row] = await tx
       .insert(formSubmission)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         formId: input.form.formId,
         values: answers,
         attribution,
@@ -229,7 +339,31 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
 
     if (!row) throw new Error('The submission could not be saved.')
 
+    // In the same transaction as the submission: a file that is claimed by a row
+    // that then rolls back is a file the sweep would delete out from under a lead.
+    if (claimable.length > 0) {
+      await tx
+        .update(formUpload)
+        .set({ submissionId: row.id })
+        .where(and(eq(formUpload.formId, input.form.formId), inArray(formUpload.id, claimable)))
+    }
+
+    // Written in the same transaction as the submission: a lead that saves and
+    // then fails to notify is a lead nobody is told about.
+    await notify(tx, ctx, {
+      kind: verdict.state === 'clean' ? 'form_submission' : 'form_quarantined',
+      dedupeKey: `form:${verdict.state === 'clean' ? 'new' : 'quarantined'}:${row.id}`,
+      title:
+        verdict.state === 'clean'
+          ? `${input.form.name}: a new submission`
+          : `${input.form.name}: a submission is held for review`,
+      body: email,
+      to: { hubs: ['contacts', 'sales', 'marketing'] },
+    })
+
     if (linked.contactId) {
+      await applyOptIns(tx, ctx, linked.contactId, settings.subscriptionOptIns ?? [])
+
       // F4 §3, T1. Written here, inside the transaction that created the contact,
       // and nothing more: a visitor with 5,000 views must not make a form response
       // wait for a back-fill. The worker claims this row.
@@ -290,7 +424,7 @@ const fillSecondsFrom = (body: Record<string, unknown>): number | null => {
 
 const hasRecentTwin = async (tx: Tx, formId: string, fingerprint: string): Promise<boolean> => {
   // Fingerprinting in SQL would need the same canonicalisation in two languages.
-  // The window is sixty seconds and the index is (workspace, form, at desc), so
+  // The window is sixty seconds and the index is (account, form, at desc), so
   // this reads a handful of rows even on a busy form.
   const recent = await tx
     .select({ values: formSubmission.values })
@@ -322,7 +456,7 @@ type UpsertInput = {
  *  the mapping: which answer means which column. */
 const capturePerson = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: UpsertInput,
 ): Promise<CapturedPerson> => {
   if (!input.email) return { contactId: null, companyId: null }
@@ -338,14 +472,38 @@ const capturePerson = async (
   })
 }
 
+/** The subscription types a form opts its submitter into, by name, because that
+ *  is what the builder shows and what a seeded form names.
+ *
+ *  Opt-in only, never opt-out: a form is somebody asking to hear from us, and an
+ *  unticked box on one form must not silently cancel a choice made on another.
+ *  An unsubscribed contact who fills the form again is resubscribing, which is
+ *  what the act means. Types the account does not have are skipped rather than
+ *  refused, so a renamed type never costs a lead. */
+const applyOptIns = async (
+  tx: Tx,
+  ctx: AccountContext,
+  contactId: string,
+  names: string[],
+): Promise<void> => {
+  if (names.length === 0) return
+  const wanted = new Set(names.map((name) => name.trim().toLowerCase()).filter((name) => name !== ''))
+  if (wanted.size === 0) return
+  const types = await listSubscriptionTypes(ctx)
+  for (const type of types) {
+    if (!wanted.has(type.name.trim().toLowerCase())) continue
+    await setSubscription(ctx, { contactId, typeId: type.id, state: 'subscribed', source: 'form' })
+  }
+}
+
 /** A consent choice, appended never updated: prior data stays under the consent
  *  that was in force when it was collected, so overwriting the row would destroy
  *  the only evidence of what was lawful at the time.
  *
- *  Reached from the public edge, which has no session, so the workspace is
+ *  Reached from the public edge, which has no session, so the account is
  *  resolved by the caller from a site key and never from the request body. */
 export const recordConsent = async (
-  workspaceId: string,
+  accountId: string,
   input: {
     visitorId: string
     categories: { necessary: true; analytics: boolean; advertisement: boolean }
@@ -354,12 +512,12 @@ export const recordConsent = async (
     userAgent: string | null
   },
 ): Promise<string> => {
-  const ctx = publicEdgeContext(workspaceId)
-  return withWorkspace(ctx, async (tx) => {
+  const ctx = publicEdgeContext(accountId)
+  return withAccount(ctx, async (tx) => {
     const [row] = await tx
       .insert(consentRecord)
       .values({
-        workspaceId,
+        accountId,
         visitorId: input.visitorId,
         categories: input.categories,
         policyVersion: input.policyVersion,
@@ -372,16 +530,16 @@ export const recordConsent = async (
   })
 }
 
-/** The workspace a public site key belongs to, resolved through the same
- *  security-definer path as a form so the edge never reads the workspace table
+/** The account a public site key belongs to, resolved through the same
+ *  security-definer path as a form so the edge never reads the account table
  *  unscoped.
  *
- *  Migration path: a real F4 site key wins, and a workspace slug is still accepted
+ *  Migration path: a real F4 site key wins, and a account slug is still accepted
  *  for any embed placed before sites existed. Once every embed on datasaur.ai
- *  carries a site key, the slug branch in rawr.workspace_for_site can go. */
-export const workspaceIdForSite = async (siteKey: string): Promise<string | null> => {
+ *  carries a site key, the slug branch in rawr.account_for_site can go. */
+export const accountIdForSite = async (siteKey: string): Promise<string | null> => {
   const rows = await appDb.execute<{ id: string }>(
-    sql`select id from rawr.workspace_for_site(${siteKey})`,
+    sql`select id from rawr.account_for_site(${siteKey})`,
   )
   return rows[0]?.id ?? null
 }
@@ -401,8 +559,8 @@ export type FormSummary = {
   lastSubmissionAt: Date | null
 }
 
-export const listForms = async (ctx: WorkspaceContext): Promise<FormSummary[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listForms = async (ctx: AccountContext): Promise<FormSummary[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -445,9 +603,9 @@ export type FormDetail = {
   settings: FormSettings
 }
 
-export const getForm = async (ctx: WorkspaceContext, id: string): Promise<FormDetail | null> => {
+export const getForm = async (ctx: AccountContext, id: string): Promise<FormDetail | null> => {
   if (!isUuid(id)) return null
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const [row] = await tx.select().from(form).where(eq(form.id, id)).limit(1)
     if (!row) return null
     return {
@@ -470,17 +628,27 @@ export type SaveFormInput = {
   isActive: boolean
 }
 
-const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/
-
-export const saveForm = async (ctx: WorkspaceContext, input: SaveFormInput): Promise<string> =>
+export const saveForm = async (ctx: AccountContext, input: SaveFormInput): Promise<string> =>
   mutate(ctx, 'form', async (tx) => {
     if (!input.name.trim()) throw new Error('A form needs a name.')
-    if (!SLUG.test(input.slug)) {
+    if (!FORM_SLUG.test(input.slug)) {
       throw new Error(
         `"${input.slug}" is not a usable address. Use lowercase letters, numbers and hyphens.`,
       )
     }
     assertSchemaIsUsable(input.fields)
+
+    // The unique index would catch this, but as a constraint-violation stack
+    // trace. The address is the one thing a person picks that another form may
+    // already hold, so it is worth one query to say so in words.
+    const [clash] = await tx
+      .select({ id: form.id, name: form.name })
+      .from(form)
+      .where(and(eq(form.accountId, ctx.accountId), eq(form.slug, input.slug)))
+      .limit(1)
+    if (clash && clash.id !== input.id) {
+      throw new Error(`"${clash.name}" already uses the address "${input.slug}". Pick another.`)
+    }
 
     const values = {
       name: input.name.trim(),
@@ -511,7 +679,7 @@ export const saveForm = async (ctx: WorkspaceContext, input: SaveFormInput): Pro
 
     const [created] = await tx
       .insert(form)
-      .values({ workspaceId: ctx.workspaceId, ...values })
+      .values({ accountId: ctx.accountId, ...values })
       .returning({ id: form.id })
     if (!created) throw new Error('The form could not be created.')
 
@@ -538,12 +706,15 @@ export type SubmissionRow = {
   spamReasons: { rule: string; points: number; detail: string }[]
   contactId: string | null
   at: Date
+  /** Files this submission carries. The answer in `values` is the id; this is
+   *  what a person reviewing it needs to see instead. */
+  uploads: { id: string; filename: string; bytes: number }[]
 }
 
 /** Refused while any submission exists: those are leads, and the form's schema
  *  is what makes them readable. Turn the form off instead, or delete it once its
  *  history has been dealt with. */
-export const deleteForm = async (ctx: WorkspaceContext, id: string): Promise<void> => {
+export const deleteForm = async (ctx: AccountContext, id: string): Promise<void> => {
   await mutate(ctx, 'form', async (tx) => {
     const [row] = await tx.select({ id: form.id, name: form.name, slug: form.slug }).from(form).where(eq(form.id, id)).limit(1)
     if (!row) throw new Error('That form no longer exists.')
@@ -565,14 +736,17 @@ export const deleteForm = async (ctx: WorkspaceContext, id: string): Promise<voi
 }
 
 export const listSubmissions = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     state?: SubmissionRow['spamState'] | undefined
     formId?: string | undefined
     limit?: number | undefined
+    /** Keyset, on the same (at desc, id desc) the list is ordered by, so the
+     *  hundredth page costs what the first one costs. */
+    cursor?: { at: Date; id: string } | undefined
   } = {},
 ): Promise<SubmissionRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: formSubmission.id,
@@ -592,21 +766,47 @@ export const listSubmissions = async (
         and(
           input.state ? eq(formSubmission.spamState, input.state) : undefined,
           input.formId ? eq(formSubmission.formId, input.formId) : undefined,
+          input.cursor
+            ? sql`(${formSubmission.at}, ${formSubmission.id}) < (${input.cursor.at}, ${input.cursor.id})`
+            : undefined,
         ),
       )
-      .orderBy(desc(formSubmission.at))
+      .orderBy(desc(formSubmission.at), desc(formSubmission.id))
       .limit(Math.min(Math.max(input.limit ?? 100, 1), 500))
 
-    return rows as SubmissionRow[]
+    // One query for the whole page rather than one per row: a submission's files
+    // are a rare thing, and a hundred round trips to find that out is not free.
+    const attached =
+      rows.length > 0
+        ? await tx
+            .select({
+              submissionId: formUpload.submissionId,
+              id: formUpload.id,
+              filename: formUpload.filename,
+              bytes: formUpload.bytes,
+            })
+            .from(formUpload)
+            .where(inArray(formUpload.submissionId, rows.map((row) => row.id)))
+        : []
+
+    const byRow = new Map<string, SubmissionRow['uploads']>()
+    for (const file of attached) {
+      if (!file.submissionId) continue
+      const list = byRow.get(file.submissionId) ?? []
+      list.push({ id: file.id, filename: file.filename, bytes: file.bytes })
+      byRow.set(file.submissionId, list)
+    }
+
+    return rows.map((row) => ({ ...row, uploads: byRow.get(row.id) ?? [] })) as SubmissionRow[]
   })
 
 /** Releasing runs the full capture path from step 5, with the original timestamp
  *  preserved, so the timeline does not claim a week-old lead arrived today. */
 export const releaseSubmission = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
 ): Promise<{ contactId: string | null }> => {
-  const held = await withWorkspace(ctx, async (tx) => {
+  const held = await withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({
         id: formSubmission.id,
@@ -655,6 +855,10 @@ export const releaseSubmission = async (
       })
       .where(eq(formSubmission.id, id))
 
+    // The notice said this was waiting for a person. A person has now dealt with
+    // it, so it stops being unread whether or not they opened the drawer.
+    await resolveNotifications(tx, ctx, `form:quarantined:${id}`)
+
     if (linked.contactId) {
       // A released lead gets its browsing history too. Held for a week and then
       // released is still the same person who did the browsing.
@@ -692,7 +896,7 @@ export const releaseSubmission = async (
   })
 }
 
-export const confirmSpam = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const confirmSpam = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'form_submission', async (tx) => {
     const [before] = await tx
       .select({ state: formSubmission.spamState })
@@ -705,6 +909,8 @@ export const confirmSpam = async (ctx: WorkspaceContext, id: string): Promise<vo
       .update(formSubmission)
       .set({ spamState: 'confirmed_spam', reviewedBy: ctx.actorId, reviewedAt: new Date() })
       .where(eq(formSubmission.id, id))
+
+    await resolveNotifications(tx, ctx, `form:quarantined:${id}`)
 
     return {
       result: undefined,

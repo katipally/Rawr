@@ -1,11 +1,12 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { membership, userAccount } from '../schema/identity.ts'
-import { ROLES, type Role, type WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { HUBS, type AccountContext, type Hub, assertSuperAdmin } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 
-/** Who is in this workspace and what they may do. Four fixed roles, D5.
+/** Who is in this account and what they hold, as HubSpot's grid puts it: a hub at
+ *  a time, at view or edit, with super admin above the grid rather than in it.
  *
- *  The invariant every write protects: a workspace always keeps at least one
+ *  The invariant every write protects: an account always keeps at least one super
  *  admin, because the alternative is a tenant nobody can administer. */
 
 export type MemberRow = {
@@ -13,14 +14,17 @@ export type MemberRow = {
   email: string
   name: string
   avatarUrl: string | null
-  role: Role
-  /** Null until the person has signed in with Google at least once. */
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
+  state: 'active' | 'invited' | 'deactivated'
+  /** False until the person has signed in with Google at least once. */
   linked: boolean
   joinedAt: Date
 }
 
-export const listMembers = async (ctx: WorkspaceContext): Promise<MemberRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listMembers = async (ctx: AccountContext): Promise<MemberRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         userId: userAccount.id,
@@ -28,7 +32,10 @@ export const listMembers = async (ctx: WorkspaceContext): Promise<MemberRow[]> =
         name: userAccount.name,
         avatarUrl: userAccount.avatarUrl,
         googleSub: userAccount.googleSub,
-        role: membership.role,
+        isSuperAdmin: membership.isSuperAdmin,
+        viewHubs: membership.viewHubs,
+        editHubs: membership.editHubs,
+        state: membership.state,
         joinedAt: membership.createdAt,
       })
       .from(membership)
@@ -40,79 +47,105 @@ export const listMembers = async (ctx: WorkspaceContext): Promise<MemberRow[]> =
     }))
   })
 
-const adminCount = async (tx: Tx): Promise<number> => {
+const superAdminCount = async (tx: Tx): Promise<number> => {
   const [row] = await tx.execute<{ n: number }>(
-    sql`select count(*)::int as n from membership where role = 'admin'`,
+    sql`select count(*)::int as n from membership where is_super_admin and state = 'active'`,
   )
   return Number(row?.n ?? 0)
 }
 
-const assertRole = (role: string): Role => {
-  if (!(ROLES as readonly string[]).includes(role)) throw new Error(`"${role}" is not a role.`)
-  return role as Role
+const assertHubs = (hubs: readonly string[]): Hub[] => {
+  for (const hub of hubs) {
+    if (!(HUBS as readonly string[]).includes(hub)) throw new Error(`"${hub}" is not a hub.`)
+  }
+  return hubs as Hub[]
 }
 
+export type Grants = {
+  isSuperAdmin?: boolean | undefined
+  viewHubs?: readonly string[] | undefined
+  editHubs?: readonly string[] | undefined
+}
+
+const toGrants = (input: Grants) => ({
+  isSuperAdmin: input.isSuperAdmin ?? false,
+  viewHubs: assertHubs(input.viewHubs ?? []),
+  editHubs: assertHubs(input.editHubs ?? []),
+})
+
 export const addMember = async (
-  ctx: WorkspaceContext,
-  input: { email: string; name?: string | null | undefined; role: string },
+  ctx: AccountContext,
+  input: { email: string; name?: string | null | undefined } & Grants,
 ): Promise<{ userId: string }> =>
   mutate(ctx, 'membership', async (tx) => {
+    assertSuperAdmin(ctx, 'seat somebody in this account')
     const email = input.email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('That is not an email address.')
-    const role = assertRole(input.role)
+    const grants = toGrants(input)
     const [row] = await tx.execute<{ id: string }>(
-      sql`select rawr.add_member(${email}, ${input.name ?? ''}, ${role}::rawr_role) as id`,
+      sql`select rawr.add_member(${email}, ${input.name ?? ''},
+            ${sql.raw(`ARRAY[${grants.viewHubs.map((h) => `'${h}'`).join(',')}]::rawr_hub[]`)},
+            ${sql.raw(`ARRAY[${grants.editHubs.map((h) => `'${h}'`).join(',')}]::rawr_hub[]`)}) as id`,
     )
     if (!row) throw new Error('The member was not added.')
+    if (grants.isSuperAdmin) {
+      await tx.update(membership).set({ isSuperAdmin: true }).where(eq(membership.userId, row.id))
+    }
     return {
       result: { userId: row.id },
-      audit: { entity: 'membership', entityId: row.id, action: 'add', after: { email, role } },
+      audit: { entity: 'membership', entityId: row.id, action: 'add', after: { email, ...grants } },
     }
   })
 
-export const setMemberRole = async (
-  ctx: WorkspaceContext,
-  input: { userId: string; role: string },
+export const setMemberGrants = async (
+  ctx: AccountContext,
+  input: { userId: string } & Grants,
 ): Promise<void> =>
   mutate(ctx, 'membership', async (tx) => {
-    const role = assertRole(input.role)
+    assertSuperAdmin(ctx, "change somebody's access")
+    const grants = toGrants(input)
     const [current] = await tx
-      .select({ role: membership.role })
+      .select({
+        isSuperAdmin: membership.isSuperAdmin,
+        viewHubs: membership.viewHubs,
+        editHubs: membership.editHubs,
+      })
       .from(membership)
       .where(eq(membership.userId, input.userId))
-    if (!current) throw new Error('That person is not a member of this workspace.')
-    if (current.role === 'admin' && role !== 'admin' && (await adminCount(tx)) <= 1) {
-      throw new Error('This is the only admin. Make somebody else an admin first.')
+    if (!current) throw new Error('That person is not a member of this account.')
+    if (current.isSuperAdmin && !grants.isSuperAdmin && (await superAdminCount(tx)) <= 1) {
+      throw new Error('This is the only super admin. Make somebody else one first.')
     }
-    await tx.update(membership).set({ role }).where(eq(membership.userId, input.userId))
+    await tx.update(membership).set(grants).where(eq(membership.userId, input.userId))
     return {
       result: undefined,
       audit: {
         entity: 'membership',
         entityId: input.userId,
-        action: 'set_role',
-        before: { role: current.role },
-        after: { role },
+        action: 'set_grants',
+        before: current,
+        after: grants,
       },
     }
   })
 
-export const removeMember = async (ctx: WorkspaceContext, userId: string): Promise<void> =>
+export const removeMember = async (ctx: AccountContext, userId: string): Promise<void> =>
   mutate(ctx, 'membership', async (tx) => {
+    assertSuperAdmin(ctx, "end somebody's access")
     if (userId === ctx.actorId) {
-      throw new Error('You cannot remove yourself. Ask another admin to do it.')
+      throw new Error('You cannot remove yourself. Ask another super admin to do it.')
     }
     const [current] = await tx
-      .select({ role: membership.role })
+      .select({ isSuperAdmin: membership.isSuperAdmin })
       .from(membership)
       .where(eq(membership.userId, userId))
-    if (!current) throw new Error('That person is not a member of this workspace.')
-    if (current.role === 'admin' && (await adminCount(tx)) <= 1) {
-      throw new Error('This is the only admin. Make somebody else an admin first.')
+    if (!current) throw new Error('That person is not a member of this account.')
+    if (current.isSuperAdmin && (await superAdminCount(tx)) <= 1) {
+      throw new Error('This is the only super admin. Make somebody else one first.')
     }
     await tx.delete(membership).where(eq(membership.userId, userId))
     return {
       result: undefined,
-      audit: { entity: 'membership', entityId: userId, action: 'remove', before: { role: current.role } },
+      audit: { entity: 'membership', entityId: userId, action: 'remove', before: current },
     }
   })

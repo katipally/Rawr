@@ -18,15 +18,15 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { workspaceId?: string; mailboxId?: string; limit?: number }
+    | { accountId?: string; mailboxId?: string; limit?: number }
     | null
-  if (!body?.workspaceId || !body?.mailboxId) {
-    return NextResponse.json({ error: 'A workspace and a mailbox are both required.' }, { status: 400 })
+  if (!body?.accountId || !body?.mailboxId) {
+    return NextResponse.json({ error: 'A account and a mailbox are both required.' }, { status: 400 })
   }
 
   try {
     const outcome = await hydrateMailboxBodies(
-      { ...publicEdgeContext(body.workspaceId), actorKind: 'job' },
+      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
       body.mailboxId,
       body.limit ?? 50,
     )

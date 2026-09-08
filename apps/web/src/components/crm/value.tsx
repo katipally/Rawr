@@ -1,4 +1,5 @@
-import type { FieldType } from '@rawr/db'
+import type { EnrollmentState, FieldType } from '@rawr/db'
+import type { BadgeTone } from '@rawr/ui'
 import { Markdown } from './markdown.tsx'
 import { toPlainText } from './markdown.ts'
 import type { ReactNode } from 'react'
@@ -133,15 +134,33 @@ export type ValueProps = {
 const shortLink = (text: string): string =>
   text.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '')
 
-const readableEntries = (value: unknown): [string, string][] => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return []
-  return Object.entries(value as Record<string, unknown>)
-    .filter(([, entry]) => entry !== null && entry !== undefined && entry !== '')
-    .map(([key, entry]): [string, string] => [
-      key,
-      typeof entry === 'object' ? JSON.stringify(entry) : String(entry),
-    ])
-    .slice(0, 6)
+/** A key as a person reads it: `firstSeenAt` and `first_seen_at` both land on
+ *  "First seen at". */
+const humanKey = (key: string): string => {
+  const words = key.replace(/[_-]+/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
+
+/** One leaf per line, in storage order, with the nesting thrown away.
+ *
+ *  Where a value sits inside the blob is a storage detail: `{channel, detail:
+ *  {referrer}}` is two things a person can read, not one thing and a wall of
+ *  JSON. A null means "we did not learn this", which is not worth a line, and a
+ *  leaf name that repeats keeps the first one it was given. */
+const readableEntries = (value: unknown, seen: Set<string> = new Set()): [string, string][] => {
+  if (value === null || typeof value !== 'object') return []
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]): [string, string][] => {
+    if (entry === null || entry === undefined || entry === '') return []
+    if (typeof entry === 'object' && !Array.isArray(entry)) return readableEntries(entry, seen)
+    if (seen.has(key)) return []
+    seen.add(key)
+    const text = Array.isArray(entry) ? entry.join(', ') : String(entry)
+    if (!text) return []
+    if (ISO_INSTANT.test(text)) return [[humanKey(key), formatDateTime(text)]]
+    return [[humanKey(key), /^https?:\/\//i.test(text) ? shortLink(text) : text]]
+  })
 }
 
 export const Value = ({ type, value, label, currency = 'USD', placeholder = '', oneLine = false }: ValueProps): ReactNode => {
@@ -216,10 +235,10 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '', 
 
   if (type === 'json') {
     // The attribution container: raw JSON in a 20rem column is unreadable, and the
-    // useful part is always the handful of keys that carry a value. D17 stores the
-    // whole payload verbatim; this renders the half a person can act on and keeps
-    // the rest on hover.
-    const entries = readableEntries(value)
+    // useful part is always the handful of leaves that carry a value. D17 stores
+    // the whole payload verbatim; this renders the part a person can act on and
+    // keeps the rest on hover.
+    const entries = readableEntries(value).slice(0, 8)
     if (entries.length === 0) {
       return placeholder ? <span className="text-secondary">{placeholder}</span> : null
     }
@@ -227,7 +246,7 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '', 
       <span className="flex flex-col gap-0.5" title={text}>
         {entries.map(([key, entry]) => (
           <span key={key} className="flex flex-wrap gap-x-1">
-            <span className="text-small text-secondary">{key.replace(/_/g, ' ')}</span>
+            <span className="text-small text-secondary">{key}</span>
             <span className="min-w-0 break-words">{entry}</span>
           </span>
         ))}
@@ -236,6 +255,45 @@ export const Value = ({ type, value, label, currency = 'USD', placeholder = '', 
   }
 
   return <span className="break-words">{text}</span>
+}
+
+/** Activity whose subject is a sentence about the record rather than about a
+ *  person on the team. Every one of these is written by whichever admin's sync,
+ *  webhook or public form handler noticed it, so the actor column names the
+ *  operator: "Yash was enrolled in Trial follow-up" on a contact who is not Yash. */
+const ABOUT_THE_RECORD = new Set([
+  'page_view',
+  'custom_event',
+  'form_submission',
+  'booking',
+  'marketing_email',
+  'email_tracking',
+  'sequence_activity',
+  'subscription_change',
+  'segment_change',
+])
+
+/** What a non-person doer is called on screen. The column holds an enum word,
+ *  and "public replied to Trial follow-up" reads like a bug. */
+const ACTOR_KINDS: Record<string, string> = {
+  mcp: 'An assistant',
+  job: 'A scheduled job',
+  integration: 'An integration',
+  public: 'A public form',
+}
+
+/** Who the line is about, ahead of the subject. Empty for a person on the team
+ *  whose name did not resolve, because "Somebody added a note" reads worse than
+ *  "added a note". */
+export const activityActor = (
+  type: string,
+  actor: { actorName: string | null; actorKind: string; recordName: string | null; payload?: unknown },
+): string => {
+  // A row that names its contact keeps that name on the company and deal pages
+  // it also lands on, rather than reading as if the company were enrolled.
+  const named = (actor.payload as { contactName?: unknown } | null)?.contactName
+  if (ABOUT_THE_RECORD.has(type)) return typeof named === 'string' && named ? named : (actor.recordName ?? '')
+  return actor.actorName ?? ACTOR_KINDS[actor.actorKind] ?? ''
 }
 
 /** How each timeline type is named on screen. Shared by the record timeline and
@@ -262,4 +320,30 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   enrichment: 'Enrichment',
   subscription_change: 'Subscription',
   segment_change: 'Segment',
+}
+
+export const ENROLLMENT_TONE: Record<EnrollmentState, BadgeTone> = {
+  active: 'ok',
+  waiting_task: 'info',
+  paused: 'warn',
+  finished: 'neutral',
+  replied: 'ok',
+  bounced: 'error',
+  unsubscribed: 'warn',
+  failed: 'error',
+  removed: 'neutral',
+}
+
+/** The state, said the way a salesperson would. "finished" and "replied" are both
+ *  over, and they mean opposite things. */
+export const ENROLLMENT_LABEL: Record<EnrollmentState, string> = {
+  active: 'Running',
+  waiting_task: 'Waiting on a task',
+  paused: 'Paused',
+  finished: 'Ran out of steps',
+  replied: 'They replied',
+  bounced: 'Bounced',
+  unsubscribed: 'Unsubscribed',
+  failed: 'Failed',
+  removed: 'Removed',
 }

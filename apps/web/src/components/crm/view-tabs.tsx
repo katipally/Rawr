@@ -15,7 +15,7 @@ const KIND_ICON: Record<ViewKind, typeof Table2> = { list: Table2, board: Column
 const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
 
 export type ViewTab = {
-  /** Null for the view every workspace falls back to before one is saved. It has
+  /** Null for the view every account falls back to before one is saved. It has
    *  no row, so it cannot be renamed, pinned or deleted. */
   id: string | null
   slug: string
@@ -26,7 +26,7 @@ export type ViewTab = {
 }
 
 export type ViewTabsProps = {
-  workspace: string
+  account: string
   object: string
   views: ViewTab[]
   current: string
@@ -52,9 +52,9 @@ const withoutCursor = (params: ListParams): ListParams => {
  *  right-click and copy gives someone else exactly this screen.
  *
  *  A pinned view takes a tab; the rest are one menu away, which is what keeps a
- *  workspace with forty saved views from wrapping the bar onto four lines. */
+ *  account with forty saved views from wrapping the bar onto four lines. */
 export const ViewTabs = ({
-  workspace,
+  account,
   object,
   views,
   current,
@@ -70,7 +70,7 @@ export const ViewTabs = ({
   const [busy, setBusy] = useState(false)
 
   const href = (view: { slug: string }, kind: ViewKind = currentKind): string =>
-    objectView(workspace, object, view.slug, kind, withoutCursor(params))
+    objectView(account, object, view.slug, kind, withoutCursor(params))
 
   // The open tab always shows, even when it is not pinned, so a link into an
   // unpinned view does not land on a bar that has no tab for where you are.
@@ -91,7 +91,24 @@ export const ViewTabs = ({
     }
   }
 
-  const menuFor = (view: ViewTab) => [
+  /** Tab order is the `position` column, and nothing has ever written it, so
+   *  every bar is in creation order for ever. Move left and move right rather
+   *  than dragging: the same affordance properties and form fields already use,
+   *  and one a keyboard can reach. */
+  const moveBy = (view: ViewTab, by: number) => {
+    const order = tabs.map((tab) => tab.id).filter((id): id is string => !!id)
+    const at = order.indexOf(view.id ?? '')
+    const to = at + by
+    if (at < 0 || to < 0 || to >= order.length) return
+    const next = [...order]
+    const [moved] = next.splice(at, 1)
+    if (moved) next.splice(to, 0, moved)
+    void run('Moved.', () => api.crm.views.reorder.mutate({ object, ids: next }))
+  }
+
+  const menuFor = (view: ViewTab) => {
+    const at = tabs.findIndex((tab) => tab.id === view.id)
+    return [
     {
       key: 'view',
       items: [
@@ -114,6 +131,12 @@ export const ViewTabs = ({
               api.crm.views.pin.mutate({ id: view.id!, pinned: !view.pinned }),
             ),
         },
+        ...(view.pinned && at > 0
+          ? [{ key: 'left', label: 'Move left', onSelect: () => moveBy(view, -1) }]
+          : []),
+        ...(view.pinned && at >= 0 && at < tabs.length - 1
+          ? [{ key: 'right', label: 'Move right', onSelect: () => moveBy(view, 1) }]
+          : []),
       ],
     },
     {
@@ -128,12 +151,13 @@ export const ViewTabs = ({
               await api.crm.views.remove.mutate({ id: view.id! })
               // The records are still there; only the arrangement went. Land on
               // the tab every link falls back to rather than on a dead address.
-              navigate(objectView(workspace, object, 'all', currentKind, withoutCursor(params)))
+              navigate(objectView(account, object, 'all', currentKind, withoutCursor(params)))
             }),
         },
       ],
     },
-  ]
+    ]
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-line pb-1">

@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { automationStateEnum, automationTriggerEnum } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 
 /** B11. When this happens, do that.
  *
@@ -20,7 +20,7 @@ export const automation = pgTable(
   'automation',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     isActive: boolean('is_active').notNull().default(false),
     trigger: automationTriggerEnum('trigger').notNull(),
@@ -43,7 +43,7 @@ export const automation = pgTable(
   },
   (t) => [
     /** The only query the runner makes: what is armed for this event. */
-    index('automation_trigger_idx').on(t.workspaceId, t.trigger, t.isActive),
+    index('automation_trigger_idx').on(t.accountId, t.trigger, t.isActive),
   ],
 )
 
@@ -60,7 +60,7 @@ export const automationRun = pgTable(
   'automation_run',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     automationId: uuid('automation_id')
       .notNull()
       .references(() => automation.id, { onDelete: 'cascade' }),
@@ -85,10 +85,10 @@ export const automationRun = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('automation_run_recent_idx').on(t.workspaceId, t.automationId, t.at.desc()),
-    index('automation_run_entity_idx').on(t.workspaceId, t.entityId),
+    index('automation_run_recent_idx').on(t.accountId, t.automationId, t.at.desc()),
+    index('automation_run_entity_idx').on(t.accountId, t.entityId),
     index('automation_run_due_idx')
-      .on(t.workspaceId, t.resumeAt)
+      .on(t.accountId, t.resumeAt)
       .where(sql`resume_at is not null`),
   ],
 )

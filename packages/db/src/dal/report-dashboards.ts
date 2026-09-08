@@ -1,8 +1,8 @@
 import { asc, eq, isNull, or } from 'drizzle-orm'
 import { reportDashboard } from '../schema/report-dashboard.ts'
 import { userAccount } from '../schema/identity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { isAdmin, type AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 
 /** B11. Reports somebody assembled.
  *
@@ -29,11 +29,11 @@ const cardsOf = (value: unknown): string[] =>
 
 /** Everything this person may see: the shared ones, plus their own private ones.
  *
- *  Row level security already confines this to the workspace. The owner test on
+ *  Row level security already confines this to the account. The owner test on
  *  top of it is about clutter and not about secrecy: every card reads a report
  *  the viewer's role can already open. */
-export const listReportDashboards = async (ctx: WorkspaceContext): Promise<ReportDashboardRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listReportDashboards = async (ctx: AccountContext): Promise<ReportDashboardRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: reportDashboard.id,
@@ -56,8 +56,8 @@ export const listReportDashboards = async (ctx: WorkspaceContext): Promise<Repor
     return rows.map((row) => ({ ...row, cards: cardsOf(row.cards) }))
   })
 
-export const readReportDashboard = async (ctx: WorkspaceContext, id: string): Promise<ReportDashboardRow | null> =>
-  withWorkspace(ctx, async (tx) => {
+export const readReportDashboard = async (ctx: AccountContext, id: string): Promise<ReportDashboardRow | null> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({
         id: reportDashboard.id,
@@ -77,7 +77,7 @@ export const readReportDashboard = async (ctx: WorkspaceContext, id: string): Pr
     // A private reportDashboard belongs to its owner. Not a permission boundary around
     // data, since the cards read reports this person can open anyway; it is so a
     // link to somebody's own working screen does not become everybody's.
-    if (!row.isShared && row.ownerId && row.ownerId !== ctx.actorId && ctx.role !== 'admin') return null
+    if (!row.isShared && row.ownerId && row.ownerId !== ctx.actorId && !isAdmin(ctx)) return null
     return { ...row, cards: cardsOf(row.cards) }
   })
 
@@ -89,7 +89,7 @@ export type SaveReportDashboardInput = {
 }
 
 export const saveReportDashboard = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: SaveReportDashboardInput,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'report_dashboard', async (tx) => {
@@ -104,7 +104,7 @@ export const saveReportDashboard = async (
         .where(eq(reportDashboard.id, input.id))
         .limit(1)
       if (!before) throw new Error('That reportDashboard no longer exists.')
-      if (before.ownerId && before.ownerId !== ctx.actorId && ctx.role !== 'admin') {
+      if (before.ownerId && before.ownerId !== ctx.actorId && !isAdmin(ctx)) {
         throw new Error('That reportDashboard belongs to somebody else. Copy it rather than editing it.')
       }
 
@@ -128,7 +128,7 @@ export const saveReportDashboard = async (
     const [created] = await tx
       .insert(reportDashboard)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         name,
         ownerId: ctx.actorId,
         isShared: input.isShared,
@@ -149,7 +149,7 @@ export const saveReportDashboard = async (
     }
   })
 
-export const deleteReportDashboard = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteReportDashboard = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'report_dashboard', async (tx) => {
     const [found] = await tx
       .select({ name: reportDashboard.name, ownerId: reportDashboard.ownerId })
@@ -157,7 +157,7 @@ export const deleteReportDashboard = async (ctx: WorkspaceContext, id: string): 
       .where(eq(reportDashboard.id, id))
       .limit(1)
     if (!found) throw new Error('That reportDashboard no longer exists.')
-    if (found.ownerId && found.ownerId !== ctx.actorId && ctx.role !== 'admin') {
+    if (found.ownerId && found.ownerId !== ctx.actorId && !isAdmin(ctx)) {
       throw new Error('That reportDashboard belongs to somebody else.')
     }
 

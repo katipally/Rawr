@@ -12,11 +12,13 @@ import {
   stopEnrollment,
   windowFor,
   type ClaimedRun,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
+import { createHash } from 'node:crypto'
 import { RevokedError } from '../gmail.ts'
 import { addProspect } from '../integrations/woodpecker.ts'
 import { canSendFrom, gmailSender } from './gmail-sender.ts'
+import { toEmailHtml, toEmailText } from './markdown-email.ts'
 import type { Sender } from './sender.ts'
 
 /** One step of one enrollment.
@@ -46,7 +48,7 @@ const mergeValues = (run: ClaimedRun): Record<string, string | null> => ({
   sequence: run.sequenceName,
 })
 
-export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Promise<RunOutcome> => {
+export const runStep = async (ctx: AccountContext, enrollmentId: string): Promise<RunOutcome> => {
   const run = await claimEnrollmentRun(ctx, enrollmentId)
   // Somebody else has it, or it stopped between the dispatch and now. Neither is
   // a failure worth retrying.
@@ -143,11 +145,21 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
   }
 
   const values = mergeValues(run)
-  const subject = renderMergeFields(run.step.subject ?? '', values)
-  const text = renderMergeFields(run.step.bodyText ?? '', values)
-  const html = run.step.bodyHtml ? renderMergeFields(run.step.bodyHtml, values) : null
+  // Which subject this enrollment gets, when the step is testing two. Derived
+  // from the ids rather than drawn at random, so a retry after a crash sends the
+  // line the first attempt chose rather than a different one.
+  const variant = run.step.subjectB ? (evenHash(`${enrollmentId}:${run.step.id}`) ? 'a' : 'b') : null
+  const chosen = variant === 'b' ? (run.step.subjectB ?? run.step.subject) : run.step.subject
+  const subject = renderMergeFields(chosen ?? '', values)
+  // The step is written in Markdown, and the merge fields go in before it is
+  // rendered: a contact called *Acme* must not turn the rest of the mail italic.
+  const source = renderMergeFields(run.step.bodyText ?? '', values)
+  const html = run.step.bodyHtml
+    ? renderMergeFields(run.step.bodyHtml, values)
+    : { text: toEmailHtml(source.text), missing: [] as string[] }
+  const text = { text: toEmailText(source.text), missing: source.missing }
 
-  const missing = [...new Set([...subject.missing, ...text.missing, ...(html?.missing ?? [])])]
+  const missing = [...new Set([...subject.missing, ...text.missing, ...html.missing])]
   if (missing.length > 0) {
     // Better a stopped enrollment somebody can see than "Hi ," in a prospect's
     // inbox. The template can give the field a fallback and the contact can be
@@ -173,7 +185,7 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
     sent = await sender.send(ctx, run, {
       subject: subject.text,
       text: text.text,
-      html: html?.text ?? null,
+      html: html.text || null,
       inReplyTo: inThread,
       references: inThread ? [inThread] : [],
     })
@@ -189,6 +201,8 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
   // The sent copy is stored the same way an incoming one is, so it appears in the
   // thread, on the record and in the inbox rather than only in a sequence report.
   let threadId: string | null = null
+  let messageId: string | null = null
+  let activityId: string | null = null
   if (sent.providerMessageId) {
     const stored = await ingestMessage(ctx, {
       incoming: {
@@ -203,15 +217,20 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
         internetMessageId: sent.internetMessageId,
         inReplyTo: inThread,
         references: inThread ? [inThread] : [],
-        body: { text: text.text, html: html?.text ?? null },
+        body: { text: text.text, html: html.text || null },
         hasAttachments: false,
       },
       ownerEmail: run.mailboxEmail,
       mailboxId: run.mailboxId,
       internalDomain: await internalDomainOf(ctx),
       blocked: new Set(),
+      origin: { sequenceId: run.sequenceId, sequenceName: run.sequenceName },
     })
-    if (stored.stored) threadId = stored.threadId
+    if (stored.stored) {
+      threadId = stored.threadId
+      messageId = stored.messageId
+      activityId = stored.activityId
+    }
   }
 
   const recorded = await recordSend(ctx, {
@@ -220,7 +239,10 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
     mailboxId: run.mailboxId,
     providerMessageId: sent.providerMessageId,
     internetMessageId: sent.internetMessageId,
+    variant,
     threadId,
+    messageId,
+    activityId,
     token: sent.sendToken,
     links: sent.links,
     subject: subject.text,
@@ -229,3 +251,8 @@ export const runStep = async (ctx: WorkspaceContext, enrollmentId: string): Prom
 
   return { ran: true, kind: 'email', sendId: recorded.sendId }
 }
+
+/** A stable coin toss for a string. The same enrollment and step always land the
+ *  same way, which is what makes a retried send repeat itself rather than switch
+ *  subjects halfway through a conversation. */
+const evenHash = (key: string): boolean => createHash('sha256').update(key).digest()[0]! % 2 === 0

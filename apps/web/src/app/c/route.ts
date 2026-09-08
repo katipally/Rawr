@@ -1,4 +1,4 @@
-import { recordConsent, workspaceIdForSite } from '@rawr/db'
+import { recordConsent, accountIdForSite } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { readCategories } from '~/server/consent.ts'
@@ -46,11 +46,11 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   // key a consent row to. The cookie still holds the choice.
   if (!visitorId) return done()
 
-  const workspaceId = await workspaceIdForSite(site)
-  if (!workspaceId) return done()
+  const accountId = await accountIdForSite(site)
+  if (!accountId) return done()
 
   try {
-    await recordConsent(workspaceId, {
+    await recordConsent(accountId, {
       visitorId,
       categories,
       policyVersion:

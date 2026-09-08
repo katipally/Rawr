@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
+import type { AccountContext } from '../src/dal/context.ts'
 import { listRecords } from '../src/dal/records.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { searchAll } from '../src/dal/search.ts'
@@ -18,7 +18,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
  *  check something people skip. Run it before a migration and after a change to
  *  anything the list, the board or a report reads.
  *
- *  It builds into the probe workspace rather than Datasaur, so a developer's own
+ *  It builds into the probe account rather than Datasaur, so a developer's own
  *  data is untouched, and it removes what it built even when a check fails.
  *
  *  The numbers below are ceilings a person would notice, not benchmarks. The
@@ -91,21 +91,23 @@ let built = false
 let finished = false
 
 try {
-  const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+  const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
   if (!probe) throw new Error('Run pnpm db:seed first.')
   const [member] = await db
     .select({ id: s.userAccount.id })
     .from(s.membership)
     .innerJoin(s.userAccount, eq(s.userAccount.id, s.membership.userId))
-    .where(eq(s.membership.workspaceId, probe.id))
+    .where(eq(s.membership.accountId, probe.id))
     .limit(1)
-  if (!member) throw new Error('The probe workspace has no members.')
+  if (!member) throw new Error('The probe account has no members.')
 
-  const ctx: WorkspaceContext = {
-    workspaceId: probe.id,
+  const ctx: AccountContext = {
+    accountId: probe.id,
     actorId: member.id,
     actorKind: 'user',
-    role: 'admin' as Role,
+    isSuperAdmin: true,
+    viewHubs: [],
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
   }
 
   console.log(`-- building ${CONTACTS.toLocaleString()} contacts and ${COMPANIES.toLocaleString()} companies`)
@@ -121,7 +123,7 @@ try {
   for (let from = 1; from <= COMPANIES; from += BATCH) {
     const to = Math.min(from + BATCH - 1, COMPANIES)
     await db.execute(sql`
-      insert into company (workspace_id, name, domain, created_at)
+      insert into company (account_id, name, domain, created_at)
       select ${probe.id}::uuid, 'Scale Co ' || n, 'scale-' || ${stamp} || '-' || n || '.test',
              now() - (n % 700) * interval '1 day'
         from generate_series(${from}::int, ${to}::int) as n`)
@@ -136,9 +138,9 @@ try {
       with pool as (
         select id, (row_number() over (order by id) - 1) as k
           from company
-         where workspace_id = ${probe.id}::uuid and domain like ${`scale-${stamp}-%`}
+         where account_id = ${probe.id}::uuid and domain like ${`scale-${stamp}-%`}
       )
-      insert into contact (workspace_id, first_name, last_name, email, company_id, created_at)
+      insert into contact (account_id, first_name, last_name, email, company_id, created_at)
       select ${probe.id}::uuid, 'Scale', 'Person ' || n,
              'scale-' || ${stamp} || '-' || n || '@example.test',
              p.id,
@@ -265,12 +267,12 @@ try {
   if (built) {
     console.log('')
     console.log('-- clearing up')
-    const [probe] = await db.select().from(s.workspace).where(eq(s.workspace.slug, 'probe'))
+    const [probe] = await db.select().from(s.account).where(eq(s.account.slug, 'probe'))
     if (probe) {
       // Segment first: its membership rows reference the contacts.
-      await db.execute(sql`delete from segment where workspace_id = ${probe.id} and name = ${`Scale ${stamp}`}`)
-      await db.execute(sql`delete from contact where workspace_id = ${probe.id} and email like ${`scale-${stamp}-%`}`)
-      await db.execute(sql`delete from company where workspace_id = ${probe.id} and domain like ${`scale-${stamp}-%`}`)
+      await db.execute(sql`delete from segment where account_id = ${probe.id} and name = ${`Scale ${stamp}`}`)
+      await db.execute(sql`delete from contact where account_id = ${probe.id} and email like ${`scale-${stamp}-%`}`)
+      await db.execute(sql`delete from company where account_id = ${probe.id} and domain like ${`scale-${stamp}-%`}`)
 
       // Every run deletes a few hundred thousand rows and leaves them as dead
       // tuples. Two runs in an afternoon and the next one is measuring the bloat

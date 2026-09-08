@@ -3,7 +3,9 @@ import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { mailbox, message, messageThread } from '../schema/messaging.ts'
 import { contact } from '../schema/records.ts'
+import { userAccount } from '../schema/identity.ts'
 import {
+  emailTemplate,
   sequence,
   sequenceEnrollment,
   sequenceEvent,
@@ -12,9 +14,9 @@ import {
   sequenceStep,
   type SequenceSettings,
 } from '../schema/sequences.ts'
-import { recordActivity } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { contactLabels, linksForContacts, recordActivity } from './activity.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 import { DEFAULT_WINDOW, nextSendAt, type SendWindow } from './sequence-rules.ts'
 import { createTask } from './tasks.ts'
 
@@ -60,6 +62,8 @@ export type SequenceStep = {
   delayDays: number
   delayHours: number
   subject: string | null
+  /** A second subject to test. Null means no test. */
+  subjectB: string | null
   bodyHtml: string | null
   bodyText: string | null
   taskTitle: string | null
@@ -118,8 +122,8 @@ const statsSql = sql`
                       where e.sequence_id = s.id and d.click_count > 0)
   )`
 
-export const listSequences = async (ctx: WorkspaceContext): Promise<SequenceRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listSequences = async (ctx: AccountContext): Promise<SequenceRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -154,11 +158,15 @@ export const listSequences = async (ctx: WorkspaceContext): Promise<SequenceRow[
     }))
   })
 
+/** How each subject of a step actually did. Only for a step that is testing two;
+ *  a step with one subject has nothing to compare. */
+export type VariantResult = { stepId: string; variant: string; sent: number; opened: number; replied: number }
+
 export const readSequence = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
-): Promise<{ sequence: SequenceRow; steps: SequenceStep[] } | null> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<{ sequence: SequenceRow; steps: SequenceStep[]; variants: VariantResult[] } | null> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -191,6 +199,7 @@ export const readSequence = async (
         delayDays: sequenceStep.delayDays,
         delayHours: sequenceStep.delayHours,
         subject: sequenceStep.subject,
+        subjectB: sequenceStep.subjectB,
         bodyHtml: sequenceStep.bodyHtml,
         bodyText: sequenceStep.bodyText,
         taskTitle: sequenceStep.taskTitle,
@@ -199,6 +208,25 @@ export const readSequence = async (
       .from(sequenceStep)
       .where(eq(sequenceStep.sequenceId, id))
       .orderBy(asc(sequenceStep.position))
+
+    // One grouped pass over this sequence's sends, not one query per step. A
+    // reply counts against the send that provoked it: the enrollment stopped as
+    // replied, and this is the last thing it had sent.
+    const variants = await tx.execute<{
+      step_id: string
+      variant: string
+      sent: number
+      opened: number
+      replied: number
+    }>(sql`
+      select d.step_id, d.variant,
+             count(*)::int as sent,
+             count(*) filter (where d.open_count > 0)::int as opened,
+             count(*) filter (where e.state = 'replied')::int as replied
+        from sequence_send d
+        join sequence_enrollment e on e.id = d.enrollment_id
+       where e.sequence_id = ${id} and d.variant is not null
+       group by d.step_id, d.variant`)
 
     return {
       sequence: {
@@ -214,11 +242,18 @@ export const readSequence = async (
         stats: { ...emptyStats(), ...row.stats },
       },
       steps,
+      variants: variants.map((each) => ({
+        stepId: each.step_id,
+        variant: each.variant,
+        sent: Number(each.sent),
+        opened: Number(each.opened),
+        replied: Number(each.replied),
+      })),
     }
   })
 
 export const saveSequence = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     id?: string | null | undefined
     name: string
@@ -243,7 +278,7 @@ export const saveSequence = async (
 
     if (input.id) {
       const [before] = await tx.select().from(sequence).where(eq(sequence.id, input.id))
-      if (!before) throw new Error('That sequence is not in this workspace.')
+      if (!before) throw new Error('That sequence is not in this account.')
       // A partial patch: an absent key keeps what was there, rather than
       // overwriting it with undefined, which is what a plain spread would do.
       const settings = mergeSettings(before.settings, input.settings)
@@ -269,7 +304,7 @@ export const saveSequence = async (
     const [row] = await tx
       .insert(sequence)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         name,
         description: input.description ?? null,
         sender: input.sender ?? 'gmail',
@@ -279,7 +314,7 @@ export const saveSequence = async (
       })
       .onConflictDoNothing()
       .returning({ id: sequence.id })
-    if (!row) throw new Error(`This workspace already has a sequence called "${name}".`)
+    if (!row) throw new Error(`This account already has a sequence called "${name}".`)
     return {
       result: { id: row.id },
       audit: { entity: 'sequence', entityId: row.id, action: 'create', after: { name } },
@@ -313,7 +348,7 @@ const assertWindow = (window: SendWindow): void => {
 }
 
 export const setSequenceState = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { id: string; state: SequenceState },
 ): Promise<void> =>
   mutate(ctx, 'sequence', async (tx) => {
@@ -321,7 +356,7 @@ export const setSequenceState = async (
       .select({ state: sequence.state, name: sequence.name })
       .from(sequence)
       .where(eq(sequence.id, input.id))
-    if (!before) throw new Error('That sequence is not in this workspace.')
+    if (!before) throw new Error('That sequence is not in this account.')
 
     if (input.state === 'active') {
       const [steps] = await tx.execute<{ n: number; emails: number }>(sql`
@@ -364,7 +399,7 @@ export const setSequenceState = async (
   })
 
 export const saveSteps = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     sequenceId: string
     steps: {
@@ -373,6 +408,7 @@ export const saveSteps = async (
       delayDays: number
       delayHours: number
       subject?: string | null | undefined
+      subjectB?: string | null | undefined
       bodyHtml?: string | null | undefined
       bodyText?: string | null | undefined
       taskTitle?: string | null | undefined
@@ -382,7 +418,7 @@ export const saveSteps = async (
 ): Promise<void> =>
   mutate(ctx, 'sequence_step', async (tx) => {
     const [exists] = await tx.select({ id: sequence.id }).from(sequence).where(eq(sequence.id, input.sequenceId))
-    if (!exists) throw new Error('That sequence is not in this workspace.')
+    if (!exists) throw new Error('That sequence is not in this account.')
 
     const keep = input.steps.map((step) => step.id).filter((id): id is string => Boolean(id))
     const [dropped] = await tx.execute<{ n: number }>(sql`
@@ -412,13 +448,15 @@ export const saveSteps = async (
         throw new Error(`Step ${index + 1} makes a task and needs a title for it.`)
       }
       const values = {
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         sequenceId: input.sequenceId,
         position: index,
         kind: step.kind,
         delayDays: Math.max(0, step.delayDays),
         delayHours: Math.max(0, step.delayHours),
         subject: step.subject ?? null,
+        // An empty second line means no test, not a test against nothing.
+        subjectB: (step.subjectB ?? '').trim() || null,
         bodyHtml: step.bodyHtml ?? null,
         bodyText: step.bodyText ?? null,
         taskTitle: step.taskTitle ?? null,
@@ -447,16 +485,37 @@ export type EnrollOutcome = { contactId: string; enrolled: boolean; reason?: str
  *  in. A silent partial success is how somebody discovers three months later that
  *  half the list was never contacted. */
 export const enroll = async (
-  ctx: WorkspaceContext,
-  input: { sequenceId: string; contactIds: string[]; mailboxId: string },
+  ctx: AccountContext,
+  input: { sequenceId: string; contactIds?: string[] | undefined; companyId?: string | null | undefined; mailboxId: string },
 ): Promise<EnrollOutcome[]> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
     const [found] = await tx
-      .select({ id: sequence.id, state: sequence.state, settings: sequence.settings, sender: sequence.sender })
+      .select({ id: sequence.id, name: sequence.name, state: sequence.state, settings: sequence.settings, sender: sequence.sender })
       .from(sequence)
       .where(eq(sequence.id, input.sequenceId))
-    if (!found) throw new Error('That sequence is not in this workspace.')
+    if (!found) throw new Error('That sequence is not in this account.')
     if (found.state === 'archived') throw new Error('That sequence is archived. Copy it to use it again.')
+
+    // Everyone at a company, resolved here rather than in the browser: a company
+    // with four hundred contacts should not send four hundred ids over the wire,
+    // and who is at a company is not the client's decision to make.
+    const contactIds = input.companyId
+      ? (
+          await tx.execute<{ id: string }>(sql`
+            select id from contact
+             where company_id = ${input.companyId}::uuid
+               and deleted_at is null
+               and coalesce(email, '') <> ''
+             order by created_at`)
+        ).map((row) => row.id)
+      : (input.contactIds ?? [])
+    if (contactIds.length === 0) {
+      throw new Error(
+        input.companyId
+          ? 'Nobody at that company has an email address to write to.'
+          : 'Nobody was named to enrol.',
+      )
+    }
 
     const [box] = await tx
       .select({ id: mailbox.id, state: mailbox.state, canSend: mailbox.canSend, email: mailbox.email })
@@ -473,7 +532,7 @@ export const enroll = async (
       }
     }
 
-    const ids = [...new Set(input.contactIds)]
+    const ids = [...new Set(contactIds)]
     if (ids.length === 0) return { result: [], audit: { entity: 'sequence_enrollment', entityId: input.sequenceId, action: 'enroll', after: { count: 0 } } }
 
     const people = await tx
@@ -510,7 +569,7 @@ export const enroll = async (
     for (const id of ids) {
       const person = people.find((row) => row.id === id)
       if (!person) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'That contact is not in this workspace.' })
+        outcomes.push({ contactId: id, enrolled: false, reason: 'That contact is not in this account.' })
         continue
       }
       if (!person.email) {
@@ -529,7 +588,7 @@ export const enroll = async (
       const [created] = await tx
         .insert(sequenceEnrollment)
         .values({
-          workspaceId: ctx.workspaceId,
+          accountId: ctx.accountId,
           sequenceId: input.sequenceId,
           contactId: id,
           mailboxId: input.mailboxId,
@@ -546,16 +605,16 @@ export const enroll = async (
       }
 
       await tx.insert(sequenceEvent).values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         enrollmentId: created.id,
         kind: 'sent',
         detail: { event: 'enrolled' },
       })
       await recordActivity(tx, ctx, {
         type: 'sequence_activity',
-        subject: 'Enrolled in a sequence',
-        payload: { event: 'enrolled', sequenceId: input.sequenceId, enrollmentId: created.id },
-        links: [{ entityType: 'contact', entityId: id }],
+        subject: `was enrolled in ${found.name}`,
+        payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: await contactLabels(tx, [id]) },
+        links: await linksForContacts(tx, [id]),
       })
       outcomes.push({ contactId: id, enrolled: true })
     }
@@ -587,10 +646,10 @@ export type EnrollmentRow = {
 }
 
 export const listEnrollments = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { sequenceId: string; state?: EnrollmentState | null | undefined; limit?: number | undefined },
 ): Promise<EnrollmentRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 500)
     const rows = await tx.execute<{
       id: string
@@ -637,20 +696,38 @@ export const listEnrollments = async (
   })
 
 /** Somebody's own enrollments, for the record page. */
+export type ContactEnrollment = {
+  id: string
+  sequenceId: string
+  sequenceName: string
+  sequenceState: SequenceState
+  state: EnrollmentState
+  currentStep: number
+  stepCount: number
+  nextRunAt: Date | null
+  lastSentAt: Date | null
+  stopReason: string | null
+  enrolledAt: Date
+}
+
 export const enrollmentsForContact = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
-): Promise<{ id: string; sequenceId: string; sequenceName: string; state: EnrollmentState; currentStep: number; nextRunAt: Date | null; stopReason: string | null }[]> =>
-  withWorkspace(ctx, async (tx) => {
+): Promise<ContactEnrollment[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: sequenceEnrollment.id,
         sequenceId: sequence.id,
         sequenceName: sequence.name,
+        sequenceState: sequence.state,
         state: sequenceEnrollment.state,
         currentStep: sequenceEnrollment.currentStep,
+        stepCount: sql<number>`(select count(*)::int from sequence_step st where st.sequence_id = ${sequence.id})`,
         nextRunAt: sequenceEnrollment.nextRunAt,
+        lastSentAt: sequenceEnrollment.lastSentAt,
         stopReason: sequenceEnrollment.stopReason,
+        enrolledAt: sequenceEnrollment.createdAt,
       })
       .from(sequenceEnrollment)
       .innerJoin(sequence, eq(sequence.id, sequenceEnrollment.sequenceId))
@@ -661,7 +738,7 @@ export const enrollmentsForContact = async (
   })
 
 const setEnrollmentState = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   state: EnrollmentState,
   reason: string | null,
@@ -688,7 +765,7 @@ const setEnrollmentState = async (
 
     if (STOPPED.includes(state)) {
       await tx.insert(sequenceEvent).values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         enrollmentId: id,
         kind: 'stopped',
         detail: { state, reason },
@@ -707,10 +784,10 @@ const setEnrollmentState = async (
     }
   })
 
-export const pauseEnrollment = (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const pauseEnrollment = (ctx: AccountContext, id: string): Promise<void> =>
   setEnrollmentState(ctx, id, 'paused', null)
 
-export const resumeEnrollment = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const resumeEnrollment = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
     const [row] = await tx
       .select({ state: sequenceEnrollment.state, sequenceId: sequenceEnrollment.sequenceId })
@@ -735,40 +812,17 @@ export const resumeEnrollment = async (ctx: WorkspaceContext, id: string): Promi
     return { result: undefined, audit: { entity: 'sequence_enrollment', entityId: id, action: 'resume' } }
   })
 
-export const removeEnrollment = (ctx: WorkspaceContext, id: string, reason = 'Removed by hand'): Promise<void> =>
+export const removeEnrollment = (ctx: AccountContext, id: string, reason = 'Removed by hand'): Promise<void> =>
   setEnrollmentState(ctx, id, 'removed', reason)
 
 export const stopEnrollment = (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   state: 'replied' | 'bounced' | 'unsubscribed' | 'failed' | 'finished',
   reason: string,
 ): Promise<void> => setEnrollmentState(ctx, id, state, reason)
 
 // ---------------------------------------------------------------- the queue
-
-export type DueEnrollment = {
-  id: string
-  workspaceId: string
-}
-
-/** What the scheduler picks up. A plain index range scan over the partial index,
- *  so it costs the size of the queue and not the size of the table. Runs with the
- *  worker's own connection, outside any workspace scope, because the scheduler is
- *  asking across every tenant at once. */
-export const dueEnrollments = async (tx: Tx, limit = 500): Promise<DueEnrollment[]> => {
-  const rows = await tx.execute<{ id: string; workspace_id: string }>(sql`
-    select id, workspace_id
-      from sequence_enrollment
-     where state = 'active'
-       and next_run_at is not null
-       and next_run_at <= now()
-       and (lease_until is null or lease_until < now())
-     order by next_run_at
-     limit ${limit}
-  `)
-  return rows.map((row) => ({ id: row.id, workspaceId: row.workspace_id }))
-}
 
 export type ClaimedRun = {
   enrollmentId: string
@@ -811,10 +865,10 @@ const LEASE_MINUTES = 10
  *  over the row rather than waiting for it, so a slow send never blocks the queue.
  *  The lease is the second guard, for the worker that dies holding the row. */
 export const claimEnrollmentRun = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   enrollmentId: string,
 ): Promise<ClaimedRun | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const claimed = await tx.execute<{ id: string }>(sql`
       update sequence_enrollment
          set lease_until = now() + ${`${LEASE_MINUTES} minutes`}::interval
@@ -866,7 +920,7 @@ export const claimEnrollmentRun = async (
              e.root_internet_message_id, e.unsubscribe_token, e.last_sent_at,
              (select count(*) from sequence_send d
                where d.mailbox_id = m.id and d.sent_at >= date_trunc('day', now()))::int as sent_today,
-             (select w.tracking_domain from workspace w limit 1) as tracking_domain
+             (select w.tracking_domain from account w limit 1) as tracking_domain
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
         join contact c on c.id = e.contact_id
@@ -886,6 +940,7 @@ export const claimEnrollmentRun = async (
         delayDays: sequenceStep.delayDays,
         delayHours: sequenceStep.delayHours,
         subject: sequenceStep.subject,
+        subjectB: sequenceStep.subjectB,
         bodyHtml: sequenceStep.bodyHtml,
         bodyText: sequenceStep.bodyText,
         taskTitle: sequenceStep.taskTitle,
@@ -925,23 +980,13 @@ export const claimEnrollmentRun = async (
 
 /** Puts a claimed enrollment back without advancing it: the window is shut, the
  *  cap is reached, or the gap has not passed. */
-export const deferRun = async (ctx: WorkspaceContext, enrollmentId: string, until: Date): Promise<void> =>
-  withWorkspace(ctx, async (tx) => {
+export const deferRun = async (ctx: AccountContext, enrollmentId: string, until: Date): Promise<void> =>
+  withAccount(ctx, async (tx) => {
     await tx
       .update(sequenceEnrollment)
       .set({ nextRunAt: until, leaseUntil: null })
       .where(eq(sequenceEnrollment.id, enrollmentId))
   })
-
-/** Frees leases held by a worker that died mid-run. */
-export const releaseStaleLeases = async (tx: Tx): Promise<number> => {
-  const rows = await tx.execute<{ id: string }>(sql`
-    update sequence_enrollment
-       set lease_until = null
-     where lease_until is not null and lease_until < now()
-    returning id`)
-  return rows.length
-}
 
 export type RecordedSend = { sendId: string; token: string }
 
@@ -949,14 +994,20 @@ export type RecordedSend = { sendId: string; token: string }
  *  to, and the advance to the next step in the same transaction, so a crash
  *  between the two cannot send the same mail twice. */
 export const recordSend = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     enrollmentId: string
     stepId: string
     mailboxId: string
     providerMessageId: string | null
     internetMessageId: string | null
+    /** Which subject went out, when the step was testing two. */
+    variant?: string | null | undefined
     threadId?: string | null
+    /** The stored copy and its timeline row, from the ingest that ran first. The
+     *  card reads opens and clicks through the send row this joins to it. */
+    messageId?: string | null
+    activityId?: string | null
     token: string
     links: { token: string; url: string }[]
     subject: string
@@ -967,12 +1018,14 @@ export const recordSend = async (
     const [send] = await tx
       .insert(sequenceSend)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         enrollmentId: input.enrollmentId,
         stepId: input.stepId,
         mailboxId: input.mailboxId,
         providerMessageId: input.providerMessageId,
         internetMessageId: input.internetMessageId,
+        variant: input.variant ?? null,
+        messageId: input.messageId ?? null,
         token: input.token,
       })
       .returning({ id: sequenceSend.id })
@@ -981,7 +1034,7 @@ export const recordSend = async (
     if (input.links.length > 0) {
       await tx.insert(sequenceLink).values(
         input.links.map((link) => ({
-          workspaceId: ctx.workspaceId,
+          accountId: ctx.accountId,
           sendId: send.id,
           token: link.token,
           url: link.url,
@@ -990,19 +1043,18 @@ export const recordSend = async (
     }
 
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: input.enrollmentId,
       sendId: send.id,
       kind: 'sent',
       detail: { subject: input.subject },
     })
 
-    await recordActivity(tx, ctx, {
-      type: 'sequence_activity',
-      subject: input.subject,
-      payload: { event: 'sent', enrollmentId: input.enrollmentId, sendId: send.id },
-      links: [{ entityType: 'contact', entityId: input.contactId }],
-    })
+    if (input.activityId) {
+      await tx.execute(sql`
+        update activity set payload = coalesce(payload, '{}'::jsonb) || ${JSON.stringify({ sendId: send.id })}::jsonb
+         where id = ${input.activityId}::uuid`)
+    }
 
     await advance(tx, ctx, input.enrollmentId, {
       threadId: input.threadId ?? null,
@@ -1019,13 +1071,14 @@ export const recordSend = async (
  *  send it follows. */
 const advance = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   enrollmentId: string,
   thread: { threadId: string | null; internetMessageId: string | null },
 ): Promise<void> => {
   const [row] = await tx
     .select({
       sequenceId: sequenceEnrollment.sequenceId,
+      contactId: sequenceEnrollment.contactId,
       currentStep: sequenceEnrollment.currentStep,
       rootId: sequenceEnrollment.rootInternetMessageId,
       threadId: sequenceEnrollment.threadId,
@@ -1034,7 +1087,7 @@ const advance = async (
     .where(eq(sequenceEnrollment.id, enrollmentId))
   if (!row) return
 
-  const [seq] = await tx.select({ settings: sequence.settings }).from(sequence).where(eq(sequence.id, row.sequenceId))
+  const [seq] = await tx.select({ name: sequence.name, settings: sequence.settings }).from(sequence).where(eq(sequence.id, row.sequenceId))
   const next = row.currentStep + 1
   const [following] = await tx
     .select({ delayDays: sequenceStep.delayDays, delayHours: sequenceStep.delayHours })
@@ -1062,15 +1115,24 @@ const advance = async (
         : { state: 'finished' as const, nextRunAt: null, finishedAt: new Date(), stopReason: 'Every step has run.' }),
     })
     .where(eq(sequenceEnrollment.id, enrollmentId))
+
+  if (!following) {
+    await recordActivity(tx, ctx, {
+      type: 'sequence_activity',
+      subject: `finished ${seq?.name ?? 'a sequence'}: every step ran with no reply`,
+      payload: { event: 'finished', sequenceId: row.sequenceId, sequenceName: seq?.name ?? null, enrollmentId, contactName: await contactLabels(tx, [row.contactId]) },
+      links: await linksForContacts(tx, [row.contactId]),
+    })
+  }
 }
 
 export const recordSendFailure = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { enrollmentId: string; stepId: string | null; mailboxId: string; error: string },
 ): Promise<void> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
     await tx.insert(sequenceSend).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: input.enrollmentId,
       stepId: input.stepId,
       mailboxId: input.mailboxId,
@@ -1097,7 +1159,7 @@ export const recordSendFailure = async (
 /** A non-email step: the work goes on somebody's task list and the enrollment
  *  waits there rather than running past it. */
 export const createStepTask = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { enrollmentId: string; contactId: string; title: string; body: string | null; assigneeId: string | null },
 ): Promise<{ taskId: string }> => {
   const created = await createTask(ctx, {
@@ -1113,7 +1175,7 @@ export const createStepTask = async (
       .set({ state: 'waiting_task', waitingTaskId: created.id, nextRunAt: null, leaseUntil: null })
       .where(eq(sequenceEnrollment.id, input.enrollmentId))
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: input.enrollmentId,
       kind: 'task_created',
       detail: { taskId: created.id, title: input.title },
@@ -1130,7 +1192,7 @@ export const createStepTask = async (
 /** Completing the task is what resumes the sequence. Called from `setTaskStatus`,
  *  so marking a call done in the task list moves the outreach on without anybody
  *  having to remember there is a sequence behind it. */
-export const onTaskDone = async (tx: Tx, ctx: WorkspaceContext, taskId: string): Promise<void> => {
+export const onTaskDone = async (tx: Tx, ctx: AccountContext, taskId: string): Promise<void> => {
   const [waiting] = await tx
     .select({ id: sequenceEnrollment.id, sequenceId: sequenceEnrollment.sequenceId, currentStep: sequenceEnrollment.currentStep })
     .from(sequenceEnrollment)
@@ -1164,7 +1226,7 @@ export const onTaskDone = async (tx: Tx, ctx: WorkspaceContext, taskId: string):
     .where(eq(sequenceEnrollment.id, waiting.id))
 
   await tx.insert(sequenceEvent).values({
-    workspaceId: ctx.workspaceId,
+    accountId: ctx.accountId,
     enrollmentId: waiting.id,
     kind: 'task_done',
     detail: { taskId },
@@ -1205,7 +1267,7 @@ export type InboundForDetection = {
  *  lookups whatever the mailbox holds. */
 export const detectReply = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   inbound: InboundForDetection,
 ): Promise<void> => {
   const from = inbound.fromAddr ?? ''
@@ -1214,8 +1276,8 @@ export const detectReply = async (
 
   const ids = [inbound.inReplyTo, ...inbound.references].filter((id): id is string => Boolean(id))
 
-  const rows = await tx.execute<{ enrollment_id: string; send_id: string; stop_on_reply: boolean; stop_on_bounce: boolean }>(sql`
-    select distinct e.id as enrollment_id, d.id as send_id,
+  const rows = await tx.execute<{ enrollment_id: string; send_id: string; sequence_id: string; sequence_name: string; stop_on_reply: boolean; stop_on_bounce: boolean }>(sql`
+    select distinct e.id as enrollment_id, d.id as send_id, s.id as sequence_id, s.name as sequence_name,
            (s.settings ->> 'stopOnReply')::boolean as stop_on_reply,
            (s.settings ->> 'stopOnBounce')::boolean as stop_on_bounce
       from sequence_send d
@@ -1239,7 +1301,7 @@ export const detectReply = async (
     const kind = bounced ? 'bounce' : 'reply'
 
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: row.enrollment_id,
       sendId: row.send_id,
       kind,
@@ -1264,12 +1326,18 @@ export const detectReply = async (
     }
   }
 
-  for (const contactId of inbound.contactIds) {
+  // One row per sequence rather than per contact: a reply from a contact in two
+  // sequences is two conversations that stopped.
+  const names = new Map(rows.map((row) => [row.sequence_id, row.sequence_name]))
+  const links = await linksForContacts(tx, inbound.contactIds)
+  if (links.length === 0) return
+  const contactName = await contactLabels(tx, inbound.contactIds)
+  for (const [sequenceId, sequenceName] of names) {
     await recordActivity(tx, ctx, {
       type: 'sequence_activity',
-      subject: bounced ? 'A sequence mail bounced' : 'Replied to a sequence',
-      payload: { event: bounced ? 'bounced' : 'replied' },
-      links: [{ entityType: 'contact', entityId: contactId }],
+      subject: bounced ? `did not receive ${sequenceName}: the mail bounced` : `replied, which stopped ${sequenceName}`,
+      payload: { event: bounced ? 'bounced' : 'replied', sequenceId, sequenceName, contactName },
+      links,
     })
   }
 }
@@ -1278,7 +1346,7 @@ export const detectReply = async (
  *  `setSubscription`, so unsubscribing on the record stops the outreach too. */
 export const onUnsubscribe = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { contactId: string; subscriptionTypeId: string },
 ): Promise<void> => {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -1298,7 +1366,7 @@ export const onUnsubscribe = async (
 
   for (const row of rows) {
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: row.id,
       kind: 'unsubscribe',
       detail: { via: 'app' },
@@ -1313,8 +1381,8 @@ export type OpenMeta = { userAgent?: string | null | undefined; ip?: string | nu
 /** A pixel fetch. Counted, never deduplicated: "opened four times" is a real
  *  signal, and the first open is the one that matters most, so it is kept
  *  separately. */
-export const recordOpen = async (ctx: WorkspaceContext, token: string, meta: OpenMeta = {}): Promise<boolean> =>
-  withWorkspace(ctx, async (tx) => {
+export const recordOpen = async (ctx: AccountContext, token: string, meta: OpenMeta = {}): Promise<boolean> =>
+  withAccount(ctx, async (tx) => {
     const [send] = await tx
       .update(sequenceSend)
       .set({
@@ -1327,7 +1395,7 @@ export const recordOpen = async (ctx: WorkspaceContext, token: string, meta: Ope
     if (!send) return false
 
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: send.enrollmentId,
       sendId: send.id,
       kind: 'open',
@@ -1340,8 +1408,8 @@ export const recordOpen = async (ctx: WorkspaceContext, token: string, meta: Ope
 
 /** A click. Returns the URL to redirect to, which is read from the row rather
  *  than taken from the request, so this endpoint is not an open redirect. */
-export const recordClick = async (ctx: WorkspaceContext, token: string, meta: OpenMeta = {}): Promise<string | null> =>
-  withWorkspace(ctx, async (tx) => {
+export const recordClick = async (ctx: AccountContext, token: string, meta: OpenMeta = {}): Promise<string | null> =>
+  withAccount(ctx, async (tx) => {
     const [link] = await tx
       .update(sequenceLink)
       .set({ clickCount: sql`${sequenceLink.clickCount} + 1` })
@@ -1357,7 +1425,7 @@ export const recordClick = async (ctx: WorkspaceContext, token: string, meta: Op
 
     if (send) {
       await tx.insert(sequenceEvent).values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         enrollmentId: send.enrollmentId,
         sendId: send.id,
         kind: 'click',
@@ -1369,7 +1437,7 @@ export const recordClick = async (ctx: WorkspaceContext, token: string, meta: Op
 
 export type UnsubscribeTarget = {
   enrollmentId: string
-  workspaceId: string
+  accountId: string
   contactId: string
   contactEmail: string | null
   sequenceName: string
@@ -1382,13 +1450,13 @@ export type UnsubscribeTarget = {
 export const unsubscribeTarget = async (tx: Tx, token: string): Promise<UnsubscribeTarget | null> => {
   const rows = await tx.execute<{
     enrollment_id: string
-    workspace_id: string
+    account_id: string
     contact_id: string
     contact_email: string | null
     sequence_name: string
     subscription_type_id: string | null
   }>(sql`
-    select e.id as enrollment_id, e.workspace_id, e.contact_id, c.email as contact_email,
+    select e.id as enrollment_id, e.account_id, e.contact_id, c.email as contact_email,
            s.name as sequence_name, s.settings ->> 'subscriptionTypeId' as subscription_type_id
       from sequence_enrollment e
       join sequence s on s.id = e.sequence_id
@@ -1399,7 +1467,7 @@ export const unsubscribeTarget = async (tx: Tx, token: string): Promise<Unsubscr
   if (!row) return null
   return {
     enrollmentId: row.enrollment_id,
-    workspaceId: row.workspace_id,
+    accountId: row.account_id,
     contactId: row.contact_id,
     contactEmail: row.contact_email,
     sequenceName: row.sequence_name,
@@ -1409,8 +1477,8 @@ export const unsubscribeTarget = async (tx: Tx, token: string): Promise<Unsubscr
 
 /** Records the opt-out itself. Idempotent: a mail client that prefetches the
  *  one-click URL must not produce two different answers from two fetches. */
-export const unsubscribeByToken = async (ctx: WorkspaceContext, token: string): Promise<boolean> =>
-  withWorkspace(ctx, async (tx) => {
+export const unsubscribeByToken = async (ctx: AccountContext, token: string): Promise<boolean> =>
+  withAccount(ctx, async (tx) => {
     const [enrollment] = await tx
       .update(sequenceEnrollment)
       .set({
@@ -1428,20 +1496,21 @@ export const unsubscribeByToken = async (ctx: WorkspaceContext, token: string): 
           sql`${sequenceEnrollment.state} <> 'unsubscribed'`,
         ),
       )
-      .returning({ id: sequenceEnrollment.id, contactId: sequenceEnrollment.contactId })
+      .returning({ id: sequenceEnrollment.id, contactId: sequenceEnrollment.contactId, sequenceId: sequenceEnrollment.sequenceId })
     if (!enrollment) return false
 
     await tx.insert(sequenceEvent).values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       enrollmentId: enrollment.id,
       kind: 'unsubscribe',
       detail: { via: 'link' },
     })
+    const [seq] = await tx.select({ name: sequence.name }).from(sequence).where(eq(sequence.id, enrollment.sequenceId))
     await recordActivity(tx, ctx, {
       type: 'sequence_activity',
-      subject: 'Unsubscribed from a sequence',
-      payload: { event: 'unsubscribed' },
-      links: [{ entityType: 'contact', entityId: enrollment.contactId }],
+      subject: `unsubscribed from ${seq?.name ?? 'a sequence'}`,
+      payload: { event: 'unsubscribed', sequenceId: enrollment.sequenceId, sequenceName: seq?.name ?? null, contactName: await contactLabels(tx, [enrollment.contactId]) },
+      links: await linksForContacts(tx, [enrollment.contactId]),
     })
     return true
   })
@@ -1455,42 +1524,135 @@ export const windowFor = (run: ClaimedRun): SendWindow => run.mailboxWindow ?? r
 export const trackingBase = (run: ClaimedRun, fallback: string): string =>
   run.trackingDomain ? `https://${run.trackingDomain}` : fallback
 
-export const setTrackingDomain = async (ctx: WorkspaceContext, domain: string | null): Promise<void> =>
+export const setTrackingDomain = async (ctx: AccountContext, domain: string | null): Promise<void> =>
   mutate(ctx, 'site', async (tx) => {
     const value = (domain ?? '').trim().toLowerCase()
     if (value !== '' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
       throw new Error('That is not a hostname. Use something like links.datasaur.ai.')
     }
     await tx.execute(sql`select rawr.set_tracking_domain(${value})`)
-    return { result: undefined, audit: { entity: 'workspace', entityId: ctx.workspaceId, action: 'set_tracking_domain', after: { domain: value || null } } }
+    return { result: undefined, audit: { entity: 'account', entityId: ctx.accountId, action: 'set_tracking_domain', after: { domain: value || null } } }
   })
 
-export const readTrackingDomain = async (ctx: WorkspaceContext): Promise<string | null> =>
-  withWorkspace(ctx, async (tx) => {
+export const readTrackingDomain = async (ctx: AccountContext): Promise<string | null> =>
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ tracking_domain: string | null }>(
-      sql`select tracking_domain from workspace limit 1`,
+      sql`select tracking_domain from account limit 1`,
     )
     return row?.tracking_domain ?? null
   })
 
-/** Which workspace a tracking token belongs to.
+/** Which account a tracking token belongs to.
  *
  *  The pixel, the click and the unsubscribe all arrive from a stranger's mail
- *  client with no session and no scope to pin, so the workspace has to be found
+ *  client with no session and no scope to pin, so the account has to be found
  *  before row level security can be satisfied. Read on the pool directly and
  *  answering nothing but an id, exactly as the site-key lookup does for the
  *  analytics collector. A token is 24 random bytes: guessing one is not a way in,
  *  and the id alone opens nothing. */
-const workspaceForToken = async (fn: string, token: string): Promise<string | null> => {
+const accountForToken = async (fn: string, token: string): Promise<string | null> => {
   const [row] = await appDb.execute<{ id: string }>(sql`select * from ${sql.raw(fn)}(${token}::text)`)
   return row?.id ?? null
 }
 
-export const sendWorkspaceForToken = (token: string): Promise<string | null> =>
-  workspaceForToken('rawr.workspace_for_send_token', token)
+export const sendAccountForToken = (token: string): Promise<string | null> =>
+  accountForToken('rawr.account_for_send_token', token)
 
-export const linkWorkspaceForToken = (token: string): Promise<string | null> =>
-  workspaceForToken('rawr.workspace_for_link_token', token)
+export const linkAccountForToken = (token: string): Promise<string | null> =>
+  accountForToken('rawr.account_for_link_token', token)
 
-export const enrollmentWorkspaceForToken = (token: string): Promise<string | null> =>
-  workspaceForToken('rawr.workspace_for_unsubscribe_token', token)
+export const enrollmentAccountForToken = (token: string): Promise<string | null> =>
+  accountForToken('rawr.account_for_unsubscribe_token', token)
+
+// --------------------------------------------------------------- templates
+
+export type EmailTemplateRow = {
+  id: string
+  name: string
+  subject: string
+  bodyText: string
+  authorName: string | null
+  updatedAt: Date
+}
+
+/** Every template in the account, most recently edited first. Shared, not
+ *  personal: the reason to write one down is that a colleague sends it too. */
+export const listEmailTemplates = async (ctx: AccountContext): Promise<EmailTemplateRow[]> =>
+  withAccount(ctx, (tx) =>
+    tx
+      .select({
+        id: emailTemplate.id,
+        name: emailTemplate.name,
+        subject: emailTemplate.subject,
+        bodyText: emailTemplate.bodyText,
+        authorName: userAccount.name,
+        updatedAt: emailTemplate.updatedAt,
+      })
+      .from(emailTemplate)
+      .leftJoin(userAccount, eq(userAccount.id, emailTemplate.createdBy))
+      .orderBy(desc(emailTemplate.updatedAt))
+      .limit(200),
+  )
+
+export const saveEmailTemplate = async (
+  ctx: AccountContext,
+  input: { id?: string | null | undefined; name: string; subject: string; bodyText: string },
+): Promise<{ id: string }> =>
+  mutate(ctx, 'email_template', async (tx) => {
+    const name = input.name.trim()
+    if (!name) throw new Error('A template needs a name, or nobody can find it again.')
+
+    const clash = await tx.execute<{ id: string }>(sql`
+      select id from email_template
+       where lower(name) = ${name.toLowerCase()}
+         ${input.id ? sql`and id <> ${input.id}::uuid` : sql``}
+       limit 1`)
+    if (clash.length > 0) throw new Error(`There is already a template called “${name}”.`)
+
+    if (input.id) {
+      const [updated] = await tx
+        .update(emailTemplate)
+        .set({ name, subject: input.subject, bodyText: input.bodyText, updatedAt: new Date() })
+        .where(eq(emailTemplate.id, input.id))
+        .returning({ id: emailTemplate.id })
+      if (!updated) throw new Error('That template is no longer here.')
+      return {
+        result: { id: updated.id },
+        audit: { entity: 'email_template', entityId: updated.id, action: 'update', after: { name } },
+      }
+    }
+
+    const [created] = await tx
+      .insert(emailTemplate)
+      .values({
+        accountId: ctx.accountId,
+        name,
+        subject: input.subject,
+        bodyText: input.bodyText,
+        createdBy: ctx.actorId,
+      })
+      .returning({ id: emailTemplate.id })
+    if (!created) throw new Error('The template could not be stored.')
+
+    return {
+      result: { id: created.id },
+      audit: { entity: 'email_template', entityId: created.id, action: 'create', after: { name } },
+    }
+  })
+
+/** Removing a template never touches the steps written from it. A step holds its
+ *  own copy of the words, so deleting the template a sequence was built from does
+ *  not silently empty a live sequence. */
+export const deleteEmailTemplate = async (ctx: AccountContext, id: string): Promise<void> =>
+  mutate(ctx, 'email_template', async (tx) => {
+    const [before] = await tx
+      .select({ name: emailTemplate.name })
+      .from(emailTemplate)
+      .where(eq(emailTemplate.id, id))
+    if (!before) throw new Error('That template is no longer here.')
+    await tx.delete(emailTemplate).where(eq(emailTemplate.id, id))
+    return {
+      result: undefined,
+      audit: { entity: 'email_template', entityId: id, action: 'delete', before: { name: before.name }, after: null },
+    }
+  })

@@ -11,7 +11,7 @@ export type OrderedRow = { id: string; name: string; detail: string; usedBy: num
 export type OrderedListProps = {
   rows: OrderedRow[]
   canWrite: boolean
-  role: string
+  hub: string
   noun: string
   /** Which router this list edits. Only lifecycle uses it today; naming it keeps
    *  the component honest rather than pretending to be generic. */
@@ -20,7 +20,7 @@ export type OrderedListProps = {
 
 /** An ordered, named list where deleting one entry means deciding where its records
  *  go. The same shape as a pipeline stage, without the probability. */
-export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedListProps) => {
+export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedListProps) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -59,7 +59,7 @@ export const OrderedList = ({ rows, canWrite, role, noun, namespace }: OrderedLi
     return (
       <div className="flex flex-col gap-3">
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can read this and cannot change it.
+          You need {hub} access to change this.
         </p>
         <ol className="flex flex-col rounded-panel border border-line bg-surface">
           {rows.map((row) => (

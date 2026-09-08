@@ -2,7 +2,7 @@ import { getRegistry, listDeletedFields, listFields } from '@rawr/db'
 import { PageHeader, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { propertiesPath } from '~/lib/links.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { PropertyList } from './property-list.tsx'
 
 /** D4's premise, made reachable: marketing adds a property without a deploy.
@@ -29,7 +29,7 @@ const PropertiesPage = async ({
 
   const [fields, deleted] = await Promise.all([
     listFields(ctx, current),
-    session.role === 'admin' ? listDeletedFields(ctx) : Promise.resolve([]),
+    sessionIsAdmin(session) ? listDeletedFields(ctx) : Promise.resolve([]),
   ])
 
   return (
@@ -69,7 +69,7 @@ const PropertiesPage = async ({
         object={current}
         rows={fields}
         deleted={deleted.filter((field) => field.objectKey === current)}
-        role={session.role}
+        hub="account" canWrite={sessionIsAdmin(session)}
       />
     </div>
   )

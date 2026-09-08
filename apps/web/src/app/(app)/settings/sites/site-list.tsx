@@ -102,7 +102,7 @@ export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
           <Field
             id="site-key"
             label="Site key"
-            hint="Goes in the snippet, so it is public. It names the workspace and nothing else."
+            hint="Goes in the snippet, so it is public. It names the account and nothing else."
           >
             <TextInput
               id="site-key"
@@ -127,7 +127,7 @@ export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
       {rows.length === 0 ? (
         <p className="text-secondary">
           No sites yet. Nothing is collected until one exists, because the collector resolves this
-          workspace from the site key and refuses anything it cannot place.
+          account from the site key and refuses anything it cannot place.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">

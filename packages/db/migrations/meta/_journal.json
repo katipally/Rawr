@@ -330,6 +330,97 @@
       "when": 1787980007000,
       "tag": "0046_entity_type_text",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787980008000,
+      "tag": "0047_integration_organisation",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787980009000,
+      "tag": "0048_notification",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787980010000,
+      "tag": "0049_collective_booking",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787980011000,
+      "tag": "0050_shared_page_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1787980012000,
+      "tag": "0051_one_calendar_per_person",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787980013000,
+      "tag": "0052_organisation_activity_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787980014000,
+      "tag": "0053_form_upload",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788066414000,
+      "tag": "0054_enrichment",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788152814000,
+      "tag": "0055_enrichment_consent",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788797476184,
+      "tag": "0056_email_template",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788800034179,
+      "tag": "0057_subject_test",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788886434179,
+      "tag": "0056_year_and_funding_as_text",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788972834179,
+      "tag": "0058_account_model",
+      "breakpoints": true
     }
   ]
 }

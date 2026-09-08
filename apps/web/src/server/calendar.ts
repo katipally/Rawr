@@ -5,10 +5,10 @@ import {
   type HostAvailability,
   type Interval,
   type StoredGrant,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
-import { googleClient, OAuth2RequestError } from './auth/google.ts'
+import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.
@@ -47,7 +47,7 @@ export class CalendarUnavailable extends Error {
 const REFRESH_MARGIN_MS = 60_000
 
 const accessTokenFor = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   grant: StoredGrant,
 ): Promise<string> => {
   const fresh =
@@ -66,7 +66,7 @@ const accessTokenFor = async (
   }
 
   try {
-    const tokens = await googleClient().refreshAccessToken(grant.refreshToken)
+    const tokens = await googleRefresher().refreshAccessToken(grant.refreshToken)
     const accessToken = tokens.accessToken()
     await saveGrant(ctx, {
       userId: grant.userId,
@@ -106,8 +106,8 @@ const CACHE_TTL_MS = 60_000
 const MAX_CACHE_KEYS = 5_000
 const cache = new Map<string, CacheEntry>()
 
-const cacheKey = (ctx: WorkspaceContext, userId: string, window: Window): string =>
-  `${ctx.workspaceId}:${userId}:${window.from.toISOString()}:${window.to.toISOString()}`
+const cacheKey = (ctx: AccountContext, userId: string, window: Window): string =>
+  `${ctx.accountId}:${userId}:${window.from.toISOString()}:${window.to.toISOString()}`
 
 const remember = (key: string, busy: Interval[]): void => {
   if (cache.size > MAX_CACHE_KEYS) {
@@ -136,7 +136,7 @@ export type BusyResult = {
 }
 
 export const busyForHosts = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   hosts: HostAvailability[],
   window: Window,
   { bypassCache = false } = {},
@@ -167,7 +167,7 @@ export const busyForHosts = async (
 }
 
 const busyForHost = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   host: HostAvailability,
   window: Window,
   bypassCache: boolean,
@@ -282,7 +282,7 @@ export type WrittenEvent = {
  *  caller runs inside the booking transaction, so nothing is written at all. F2 §4
  *  step 4: a CRM booking with no calendar event is worse than no booking. */
 export const createCalendarEvent = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   draft: EventDraft,
 ): Promise<WrittenEvent> => {
   const grant = await readGrant(ctx, draft.userId)
@@ -343,7 +343,7 @@ export const createCalendarEvent = async (
 }
 
 export const patchCalendarEvent = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     userId: string
     calendarId: string
@@ -383,7 +383,7 @@ export const patchCalendarEvent = async (
 /** Idempotent: a 404 or 410 means somebody already removed it, which is the state
  *  the caller wanted. Clicking cancel twice must not fail the second time. */
 export const deleteCalendarEvent = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { userId: string; calendarId: string; eventId: string },
 ): Promise<void> => {
   const grant = await readGrant(ctx, input.userId)

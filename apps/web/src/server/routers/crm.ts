@@ -42,6 +42,7 @@ import {
   readSubscriptions,
   readTimeline,
   recordOptions,
+  cancelImportRun,
   runImportChunk,
   saveView,
   searchAll,
@@ -50,10 +51,10 @@ import {
   setTaskStatus,
   timelineCounts,
   updateRecord,
-  withWorkspace,
+  withAccount,
   schema,
   type UpdateResult,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { reportEvent } from '../automations.ts'
 import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
@@ -70,7 +71,7 @@ import { protectedProcedure, router } from '../trpc.ts'
  *  `anyObject` and asks the registry. */
 const objectKey = z.enum(['contact', 'company', 'deal'])
 
-/** Any object in the workspace, including one an admin invented. The registry is
+/** Any object in the account, including one an admin invented. The registry is
  *  what decides whether it exists — this only proves the string is shaped like a
  *  key, because it reaches SQL as an alias and appears in a URL. */
 const anyObject = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
@@ -106,7 +107,7 @@ const listInput = z.object({
  *  read off the same result rather than from two separate calls. `updateRecord`
  *  reports exactly one of them per write, because they are different columns. */
 const fireChangeAutomations = (
-  ctx: { workspace: WorkspaceContext; session: { workspaceSlug: string } },
+  ctx: { account: AccountContext; session: { accountSlug: string } },
   // Any object: a custom one has no stage or lifecycle, so `trigger` below is
   // null for it and this returns before reportEvent is reached at all.
   object: string,
@@ -115,19 +116,19 @@ const fireChangeAutomations = (
 ): void => {
   const trigger = result.stageChange ? 'stage_changed' : result.lifecycleChanged ? 'lifecycle_changed' : null
   if (!trigger) return
-  reportEvent(ctx.workspace, {
+  reportEvent(ctx.account, {
     trigger,
     objectKey: object,
     entityId: id,
     displayName: result.displayName,
-    workspaceSlug: ctx.session.workspaceSlug,
+    accountSlug: ctx.session.accountSlug,
   })
 }
 
 export const crmRouter = router({
   registry: protectedProcedure.query(({ ctx }) =>
     call(async () => {
-      const registry = await getRegistry(ctx.workspace)
+      const registry = await getRegistry(ctx.account)
       return {
         objects: registry.objects.map((object) => ({
           id: object.id,
@@ -156,7 +157,7 @@ export const crmRouter = router({
    *  four of them at once. */
   lookups: protectedProcedure.query(({ ctx }) =>
     call(async () =>
-      withWorkspace(ctx.workspace, async (tx) => {
+      withAccount(ctx.account, async (tx) => {
         const [users, pipelines, stages, lifecycles] = await Promise.all([
           tx
             .select({ id: schema.userAccount.id, name: schema.userAccount.name, email: schema.userAccount.email })
@@ -186,12 +187,12 @@ export const crmRouter = router({
 
   records: router({
     list: protectedProcedure.input(listInput).query(({ ctx, input }) =>
-      call(() => listRecords(ctx.workspace, input as never)),
+      call(() => listRecords(ctx.account, input as never)),
     ),
 
     get: protectedProcedure
       .input(z.object({ object: anyObject, id: z.uuid() }))
-      .query(({ ctx, input }) => call(() => getRecord(ctx.workspace, input.object, input.id))),
+      .query(({ ctx, input }) => call(() => getRecord(ctx.account, input.object, input.id))),
 
     /** What every record picker reads. A capped, ranked answer to "which record
      *  did you mean", never the whole object. */
@@ -208,7 +209,7 @@ export const crmRouter = router({
       )
       .query(({ ctx, input }) =>
         call(() =>
-          recordOptions(ctx.workspace, {
+          recordOptions(ctx.account, {
             object: input.object,
             query: input.query ?? '',
             limit: input.limit ?? 20,
@@ -221,13 +222,13 @@ export const crmRouter = router({
       .input(z.object({ object: anyObject, values: recordValues }))
       .mutation(({ ctx, input }) =>
         call(async () => {
-          const result = await createRecord(ctx.workspace, input.object, input.values)
-          reportEvent(ctx.workspace, {
+          const result = await createRecord(ctx.account, input.object, input.values)
+          reportEvent(ctx.account, {
             trigger: 'record_created',
             objectKey: input.object,
             entityId: result.id,
             displayName: result.displayName,
-            workspaceSlug: ctx.session.workspaceSlug,
+            accountSlug: ctx.session.accountSlug,
           })
           return result
         }),
@@ -247,13 +248,13 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) =>
         call(async () => {
           const result = await updateRecord(
-            ctx.workspace,
+            ctx.account,
             input.object,
             input.id,
             input.values,
             input.expectedUpdatedAt ?? null,
           )
-          announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, input.object, input.id, result)
           return result
         }),
@@ -270,12 +271,12 @@ export const crmRouter = router({
         }),
       )
       .mutation(({ ctx, input }) =>
-        call(() => bulkUpdateRecords(ctx.workspace, input.object, input.ids, input.values)),
+        call(() => bulkUpdateRecords(ctx.account, input.object, input.ids, input.values)),
       ),
 
     remove: protectedProcedure
       .input(z.object({ object: anyObject, id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteRecord(ctx.workspace, input.object, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteRecord(ctx.account, input.object, input.id))),
 
     /** The review queue behind the merge dialog. Read-only, gated on write: it
      *  lists two records side by side asserting they might be one person, which
@@ -283,7 +284,7 @@ export const crmRouter = router({
     duplicates: protectedProcedure
       .input(z.object({ object: z.enum(['contact', 'company']), limit: z.number().int().min(1).max(200).optional() }))
       .query(({ ctx, input }) =>
-        call(() => findDuplicates(ctx.workspace, input.object, input.limit ? { limit: input.limit } : {})),
+        call(() => findDuplicates(ctx.account, input.object, input.limit ? { limit: input.limit } : {})),
       ),
 
     merge: protectedProcedure
@@ -297,7 +298,7 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          mergeRecords(ctx.workspace, {
+          mergeRecords(ctx.account, {
             objectKey: input.object,
             survivorId: input.survivorId,
             absorbedId: input.absorbedId,
@@ -310,7 +311,7 @@ export const crmRouter = router({
   views: router({
     list: protectedProcedure
       .input(z.object({ object: anyObject }))
-      .query(({ ctx, input }) => call(() => listViews(ctx.workspace, input.object))),
+      .query(({ ctx, input }) => call(() => listViews(ctx.account, input.object))),
 
     save: protectedProcedure
       .input(
@@ -327,7 +328,7 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          saveView(ctx.workspace, {
+          saveView(ctx.account, {
             objectKey: input.object,
             id: input.id ?? null,
             name: input.name,
@@ -342,23 +343,23 @@ export const crmRouter = router({
 
     rename: protectedProcedure
       .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(80) }))
-      .mutation(({ ctx, input }) => call(() => renameView(ctx.workspace, input.id, input.name))),
+      .mutation(({ ctx, input }) => call(() => renameView(ctx.account, input.id, input.name))),
 
     duplicate: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => duplicateView(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => duplicateView(ctx.account, input.id))),
 
     pin: protectedProcedure
       .input(z.object({ id: z.uuid(), pinned: z.boolean() }))
-      .mutation(({ ctx, input }) => call(() => setViewPinned(ctx.workspace, input.id, input.pinned))),
+      .mutation(({ ctx, input }) => call(() => setViewPinned(ctx.account, input.id, input.pinned))),
 
     reorder: protectedProcedure
       .input(z.object({ object: anyObject, ids: z.array(z.uuid()).min(1).max(100) }))
-      .mutation(({ ctx, input }) => call(() => reorderViews(ctx.workspace, input.object, input.ids))),
+      .mutation(({ ctx, input }) => call(() => reorderViews(ctx.account, input.object, input.ids))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteView(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteView(ctx.account, input.id))),
   }),
 
   board: router({
@@ -373,7 +374,7 @@ export const crmRouter = router({
       )
       .query(({ ctx, input }) =>
         call(() =>
-          readBoard(ctx.workspace, {
+          readBoard(ctx.account, {
             pipelineId: input.pipelineId ?? null,
             filters: (input.filters ?? []) as never,
             search: input.search ?? '',
@@ -396,10 +397,10 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(async () => {
-          const result = await updateRecord(ctx.workspace, 'deal', input.dealId, {
+          const result = await updateRecord(ctx.account, 'deal', input.dealId, {
             [input.field]: input.value,
           })
-          announceStageChange(ctx.workspace, ctx.session.workspaceSlug, result.stageChange, ctx.session.displayName)
+          announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, 'deal', input.dealId, result)
           return result
         }),
@@ -419,7 +420,7 @@ export const crmRouter = router({
       .query(({ ctx, input }) =>
         call(async () => ({
           configured: storageConfigured,
-          rows: storageConfigured ? await listAttachments(ctx.workspace, input) : [],
+          rows: storageConfigured ? await listAttachments(ctx.account, input) : [],
         })),
       ),
 
@@ -438,8 +439,8 @@ export const crmRouter = router({
           if (!storageConfigured) throw new Error(NOT_CONFIGURED)
           // Both refusals happen before a byte moves, so somebody is told while
           // they are still looking at the dialog rather than after the wait.
-          assertCanAttach(ctx.workspace, input.bytes)
-          const storageKey = storageKeyFor(ctx.workspace, input)
+          assertCanAttach(ctx.account, input.bytes)
+          const storageKey = storageKeyFor(ctx.account, input)
           const { url } = await signedUpload(storageKey)
           return { storageKey, url }
         }),
@@ -458,22 +459,22 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(async () => {
-          // The key is rebuilt from the workspace on the session, so a client
+          // The key is rebuilt from the account on the session, so a client
           // cannot confirm a row against a path in somebody else's prefix.
-          if (!input.storageKey.startsWith(`${ctx.workspace.workspaceId}/`)) {
-            throw new Error('That file does not belong to this workspace.')
+          if (!input.storageKey.startsWith(`${ctx.account.accountId}/`)) {
+            throw new Error('That file does not belong to this account.')
           }
-          return recordAttachment(ctx.workspace, input)
+          return recordAttachment(ctx.account, input)
         }),
       ),
 
     /** A link that stops working, minted per click. The row is read first, which
-     *  is what proves the key belongs to this workspace before one is issued. */
+     *  is what proves the key belongs to this account before one is issued. */
     link: protectedProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) =>
         call(async () => {
-          const row = await readAttachment(ctx.workspace, input.id)
+          const row = await readAttachment(ctx.account, input.id)
           if (!row) throw new Error('That file is gone.')
           return { url: await signedDownload(row.storageKey, 120, row.filename) }
         }),
@@ -483,7 +484,7 @@ export const crmRouter = router({
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) =>
         call(async () => {
-          const { storageKey } = await removeAttachment(ctx.workspace, input.id)
+          const { storageKey } = await removeAttachment(ctx.account, input.id)
           // The row went first. Bytes left behind are invisible and cost pennies;
           // a row pointing at nothing is a broken link on a record, so of the two
           // ways for this to fail halfway, this is the better one.
@@ -510,7 +511,7 @@ export const crmRouter = router({
       )
       .query(({ ctx, input }) =>
         call(() =>
-          readCalendar(ctx.workspace, {
+          readCalendar(ctx.account, {
             object: input.object,
             month: input.month.length === 7 ? `${input.month}-01` : input.month,
             fieldKey: input.field,
@@ -533,7 +534,7 @@ export const crmRouter = router({
       )
       .query(({ ctx, input }) =>
         call(() =>
-          readTimeline(ctx.workspace, {
+          readTimeline(ctx.account, {
             entity: input.entity,
             types: (input.types ?? []).filter(isActivityType),
             limit: input.limit ?? 50,
@@ -544,7 +545,7 @@ export const crmRouter = router({
 
     counts: protectedProcedure
       .input(z.object({ entity: entityRef }))
-      .query(({ ctx, input }) => call(() => timelineCounts(ctx.workspace, input.entity))),
+      .query(({ ctx, input }) => call(() => timelineCounts(ctx.account, input.entity))),
 
     log: protectedProcedure
       .input(
@@ -558,7 +559,7 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          logByHand(ctx.workspace, {
+          logByHand(ctx.account, {
             entity: input.entity,
             type: input.type,
             body: input.body,
@@ -569,11 +570,11 @@ export const crmRouter = router({
 
     edit: protectedProcedure
       .input(z.object({ id: z.uuid(), body: z.string().trim().min(1).max(20_000) }))
-      .mutation(({ ctx, input }) => call(() => editLoggedEntry(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => editLoggedEntry(ctx.account, input))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteLoggedEntry(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteLoggedEntry(ctx.account, input.id))),
   }),
 
   associations: router({
@@ -586,18 +587,18 @@ export const crmRouter = router({
         }),
       )
       .query(({ ctx, input }) =>
-        call(() => readAssociations(ctx.workspace, input.entity, { q: input.q, sort: input.sort })),
+        call(() => readAssociations(ctx.account, input.entity, { q: input.q, sort: input.sort })),
       ),
 
     add: protectedProcedure
       .input(z.object({ a: entityRef, b: entityRef, label: z.string().max(80).nullish() }))
       .mutation(({ ctx, input }) =>
-        call(() => associate(ctx.workspace, input.a, input.b, input.label ?? null)),
+        call(() => associate(ctx.account, input.a, input.b, input.label ?? null)),
       ),
 
     remove: protectedProcedure
       .input(z.object({ a: entityRef, b: entityRef }))
-      .mutation(({ ctx, input }) => call(() => dissociate(ctx.workspace, input.a, input.b))),
+      .mutation(({ ctx, input }) => call(() => dissociate(ctx.account, input.a, input.b))),
   }),
 
   tasks: router({
@@ -607,10 +608,11 @@ export const crmRouter = router({
           status: z.enum(['open', 'done']).optional(),
           assigneeId: z.uuid().optional(),
           overdueOnly: z.boolean().optional(),
+          due: z.enum(['today', 'upcoming']).optional(),
           entity: entityRef.optional(),
         }),
       )
-      .query(({ ctx, input }) => call(() => listTasks(ctx.workspace, input))),
+      .query(({ ctx, input }) => call(() => listTasks(ctx.account, input))),
 
     create: protectedProcedure
       .input(
@@ -622,25 +624,25 @@ export const crmRouter = router({
           entity: entityRef.nullish(),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => createTask(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => createTask(ctx.account, input))),
 
     setStatus: protectedProcedure
       .input(z.object({ id: z.uuid(), status: z.enum(['open', 'done']) }))
-      .mutation(({ ctx, input }) => call(() => setTaskStatus(ctx.workspace, input.id, input.status))),
+      .mutation(({ ctx, input }) => call(() => setTaskStatus(ctx.account, input.id, input.status))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteTask(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteTask(ctx.account, input.id))),
 
     overdueNextSteps: protectedProcedure.query(({ ctx }) =>
-      call(() => overdueNextSteps(ctx.workspace)),
+      call(() => overdueNextSteps(ctx.account)),
     ),
   }),
 
   subscriptions: router({
     read: protectedProcedure
       .input(z.object({ contactId: z.uuid() }))
-      .query(({ ctx, input }) => call(() => readSubscriptions(ctx.workspace, input.contactId))),
+      .query(({ ctx, input }) => call(() => readSubscriptions(ctx.account, input.contactId))),
 
     set: protectedProcedure
       .input(
@@ -652,28 +654,28 @@ export const crmRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(async () => {
-          await setSubscription(ctx.workspace, input)
+          await setSubscription(ctx.account, input)
           // After the write, never before: Brevo being down must not block a
           // person from recording an opt-out. A failure dead-letters and replays.
-          await propagateSubscriptionToBrevo(ctx.workspace, input).catch(() => undefined)
+          await propagateSubscriptionToBrevo(ctx.account, input).catch(() => undefined)
         }),
       ),
   }),
 
   search: protectedProcedure
     .input(z.object({ query: z.string().max(200) }))
-    .query(({ ctx, input }) => call(() => searchAll(ctx.workspace, input.query))),
+    .query(({ ctx, input }) => call(() => searchAll(ctx.account, input.query))),
 
   imports: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listImportRuns(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listImportRuns(ctx.account))),
 
     read: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .query(({ ctx, input }) => call(() => readImportRun(ctx.workspace, input.id))),
+      .query(({ ctx, input }) => call(() => readImportRun(ctx.account, input.id))),
 
     setMapping: protectedProcedure
       .input(z.object({ id: z.uuid(), mapping: z.record(z.string(), z.string().nullable()) }))
-      .mutation(({ ctx, input }) => call(() => setImportMapping(ctx.workspace, input.id, input.mapping))),
+      .mutation(({ ctx, input }) => call(() => setImportMapping(ctx.account, input.id, input.mapping))),
 
     dryRun: protectedProcedure
       .input(
@@ -687,7 +689,7 @@ export const crmRouter = router({
       )
       .query(({ ctx, input }) =>
         call(() =>
-          dryRun(ctx.workspace, {
+          dryRun(ctx.account, {
             objectKey: input.object,
             kind: input.kind,
             source: input.source,
@@ -701,7 +703,13 @@ export const crmRouter = router({
      *  reopening the page shows where it got to. */
     runChunk: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => runImportChunk(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => runImportChunk(ctx.account, input.id))),
+
+    /** Stopping for real. Without this, "Stop after this chunk" only stopped the
+     *  tab asking, and the run sat at 'running' for ever. */
+    cancel: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => cancelImportRun(ctx.account, input.id))),
   }),
 
   /** Used by the duplicate banner: given an id, what is it called. */
@@ -709,14 +717,14 @@ export const crmRouter = router({
     .input(z.object({ object: anyObject, id: z.uuid() }))
     .query(({ ctx, input }) =>
       call(async () => {
-        const record = await getRecord(ctx.workspace, input.object, input.id)
+        const record = await getRecord(ctx.account, input.object, input.id)
         return record?.displayName ?? null
       }),
     ),
 
   countsByObject: protectedProcedure.query(({ ctx }) =>
     call(() =>
-      withWorkspace(ctx.workspace, async (tx) => {
+      withAccount(ctx.account, async (tx) => {
         const rows = await tx.execute<{ object_key: string; n: number }>(sql`
           select 'contact' as object_key, count(*)::int as n from contact where deleted_at is null
           union all select 'company', count(*)::int from company where deleted_at is null

@@ -1,7 +1,7 @@
 import { PageHeader } from '@rawr/ui'
 import { listMcpTokens } from '@rawr/db'
 import { requestOrigin } from '~/server/origin.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TokenList } from './token-list.tsx'
 
 /** F5 §1. Where a person connects their assistant, or creates the token it uses.
@@ -34,7 +34,7 @@ const AgentAccessPage = async () => {
 
       <TokenList
         endpoint={endpoint}
-        isAdmin={session.role === 'admin'}
+        isAdmin={sessionIsAdmin(session)}
         userId={session.userId}
         rows={tokens.map((token) => ({
           ...token,

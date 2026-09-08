@@ -1,7 +1,7 @@
 import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { entityTypeEnum, importKindEnum, importStateEnum } from './enums.ts'
-import { userAccount, workspace } from './identity.ts'
+import { userAccount, account } from './identity.ts'
 
 /** A8. The run outlives the browser tab: an import of 90,000 rows is a server-side
  *  job whose progress and result live on a page the user can leave and come back to. */
@@ -9,7 +9,7 @@ export const importRun = pgTable(
   'import_run',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     objectType: entityTypeEnum('object_type').notNull(),
     /** Records fill columns; activities land on the timeline of the record they
      *  name. An activity run still carries an object type, because the rows are
@@ -49,7 +49,7 @@ export const importRun = pgTable(
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   (t) => [
-    index('import_run_recent_idx').on(t.workspaceId, t.createdAt.desc()),
-    index('import_run_signature_idx').on(t.workspaceId, t.fileSignature, t.createdAt.desc()),
+    index('import_run_recent_idx').on(t.accountId, t.createdAt.desc()),
+    index('import_run_signature_idx').on(t.accountId, t.fileSignature, t.createdAt.desc()),
   ],
 )

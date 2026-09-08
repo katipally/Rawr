@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
+import { INTERNAL_SECRET } from '../env.ts'
 import { defineJob } from './registry.ts'
 
 /** The clock behind a rule that waits.
@@ -25,7 +26,7 @@ const dispatch = defineJob({
   retryDelaySeconds: 60,
   handle: async () => {
     const rows = await owner`
-      select id, workspace_id from automation_run
+      select id, account_id from automation_run
        where state = 'waiting'
          and resume_at is not null
          and resume_at <= now()
@@ -36,7 +37,7 @@ const dispatch = defineJob({
     for (const row of rows) {
       await boss().send(
         'automation.resume',
-        { workspaceId: row.workspace_id, runId: row.id },
+        { accountId: row.account_id, runId: row.id },
         // One in flight per run. Without it a tick landing while the previous
         // resume is still going would queue the same step twice, and the lease
         // would only turn that into a wasted job rather than a duplicate.
@@ -50,22 +51,16 @@ const dispatch = defineJob({
 
 const resume = defineJob({
   name: 'automation.resume',
-  schema: z.object({ workspaceId: z.uuid(), runId: z.uuid() }),
+  schema: z.object({ accountId: z.uuid(), runId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
-  handle: async ({ workspaceId, runId }) => {
+  handle: async ({ accountId, runId }) => {
     const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-    const secret = process.env.RAWR_INTERNAL_SECRET ?? ''
-    if (!secret) {
-      throw new Error(
-        'RAWR_INTERNAL_SECRET is not set, so the worker cannot ask the app to run a step. Set the same value on both.',
-      )
-    }
 
     const response = await fetch(`${base}/api/internal/automation-step`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rawr-internal': secret },
-      body: JSON.stringify({ workspaceId, runId }),
+      headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
+      body: JSON.stringify({ accountId, runId }),
       signal: AbortSignal.timeout(90_000),
     })
 

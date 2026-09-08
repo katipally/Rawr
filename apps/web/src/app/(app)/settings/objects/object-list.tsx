@@ -19,11 +19,11 @@ export type ObjectView = {
 
 export const ObjectList = ({
   rows,
-  workspace,
+  account,
   canWrite,
 }: {
   rows: ObjectView[]
-  workspace: string
+  account: string
   canWrite: boolean
 }) => {
   const router = useRouter()
@@ -75,7 +75,7 @@ export const ObjectList = ({
             >
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-baseline gap-x-2">
-                  <Link href={objectView(workspace, row.key, 'all')} className="font-medium">
+                  <Link href={objectView(account, row.key, 'all')} className="font-medium">
                     {row.namePlural}
                   </Link>
                   <code className="text-small text-secondary">{row.key}</code>

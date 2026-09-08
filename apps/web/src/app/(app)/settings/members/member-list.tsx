@@ -1,33 +1,44 @@
 'use client'
 
-import type { Role } from '@rawr/db'
-import { Avatar, Badge, Button, Card, Checkbox, Combobox, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Avatar, Badge, Button, Card, Checkbox, DropdownMenu, EmptyState, Field, IconButton, Modal, TextInput, useToast } from '@rawr/ui'
 import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+
+/** Listed here as well as in the data access layer: a client bundle cannot import
+ *  the database package. The order is HubSpot's, left to right across its grid. */
+const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
+type Hub = (typeof HUBS)[number]
+
+const HUB_HINT: Record<Hub, string> = {
+  contacts: 'Contacts, companies, activity, tasks, imports',
+  sales: 'Deals, sequences, mail, meetings',
+  marketing: 'Forms, segments, subscriptions, the newsletter',
+  service: 'Tickets and the help desk',
+  reports: 'Dashboards and the reports behind them',
+  account: 'Settings, properties, pipelines, integrations',
+}
 
 export type MemberListRow = {
   userId: string
   email: string
   name: string
-  orgRole: 'org_admin' | 'member'
+  avatarUrl: string | null
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
   state: 'active' | 'invited' | 'deactivated'
   linked: boolean
   joinedAt: string
-  deactivatedAt: string | null
-  seats: { workspaceId: string; workspaceName: string; role: Role }[]
-  /** Their role in the workspace being looked at, or null if they hold no seat here. */
-  roleHere: Role | null
 }
 
 export type InvitationRow = {
   id: string
   email: string
-  orgRole: 'org_admin' | 'member'
-  workspaceName: string | null
-  workspaceRole: Role | null
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
   invitedByName: string | null
   expiresAt: string
   createdAt: string
@@ -36,450 +47,322 @@ export type InvitationRow = {
 type Props = {
   rows: MemberListRow[]
   invitations: InvitationRow[]
-  workspaces: { id: string; name: string }[]
-  workspaceId: string
-  workspaceName: string
   selfId: string
-  canSetRole: boolean
-  isOrgAdmin: boolean
-  role: string
+  isSuperAdmin: boolean
 }
 
-const ROLES = ['admin', 'sales', 'marketing', 'viewer'] as const satisfies readonly Role[]
-
-// Listed here as well as in the data access layer: a client bundle cannot import
-// the database package, and Record<Role, ...> fails to compile if the two drift.
-const ROLE_HINT: Record<Role, string> = {
-  admin: 'Everything, including settings and members',
-  sales: 'Contacts, companies, deals, tasks, bookings',
-  marketing: 'Contacts, companies, forms, segments, subscriptions',
-  viewer: 'Read only',
-}
-
+type Grants = { isSuperAdmin: boolean; viewHubs: Hub[]; editHubs: Hub[] }
+type Level = 'none' | 'view' | 'edit'
 type Tab = 'active' | 'pending' | 'deactivated'
 
-export const MemberList = ({
-  rows,
-  invitations,
-  workspaces,
-  workspaceId,
-  workspaceName,
-  selfId,
-  canSetRole,
-  isOrgAdmin,
-  role,
-}: Props) => {
-  const router = useRouter()
-  const toast = useToast()
-  const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useState<Tab>('active')
-  const [inviting, setInviting] = useState(false)
-  const [draft, setDraft] = useState({
-    email: '',
-    orgAdmin: false,
-    workspaceId: workspaceId as string | null,
-    role: 'viewer' as Role,
-  })
-  /** Shown once, after the invitation is made. Nothing stores the link. */
-  const [link, setLink] = useState<string | null>(null)
-  const [ending, setEnding] = useState<MemberListRow | null>(null)
+const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [] }
 
-  const run = async (fn: () => Promise<unknown>, done: string) => {
+const levelOf = (grants: Grants, hub: Hub): Level =>
+  grants.editHubs.includes(hub) ? 'edit' : grants.viewHubs.includes(hub) ? 'view' : 'none'
+
+const withLevel = (grants: Grants, hub: Hub, level: Level): Grants => ({
+  isSuperAdmin: grants.isSuperAdmin,
+  viewHubs: level === 'view' ? [...new Set([...grants.viewHubs, hub])] : grants.viewHubs.filter((h) => h !== hub),
+  editHubs: level === 'edit' ? [...new Set([...grants.editHubs, hub])] : grants.editHubs.filter((h) => h !== hub),
+})
+
+/** What the row shows at a glance, in HubSpot's own shorthand: the hubs someone
+ *  holds, not a count of them. */
+const summarise = (grants: Grants): string => {
+  if (grants.isSuperAdmin) return 'Super Admin'
+  const held = HUBS.filter((hub) => levelOf(grants, hub) !== 'none')
+  if (held.length === 0) return 'No access'
+  return held.map((hub) => (levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`)).join(' · ')
+}
+
+/** The grid itself: one row per hub, three exclusive levels. Super admin sits
+ *  above it and greys it out, because holding everything is not six choices. */
+const GrantGrid = ({ value, onChange }: { value: Grants; onChange: (next: Grants) => void }) => (
+  <div className="flex flex-col gap-3">
+    <Checkbox
+      label="Super Admin"
+      hint="Every hub, plus seating people and ending their access."
+      checked={value.isSuperAdmin}
+      onChange={(e) => onChange({ ...value, isSuperAdmin: e.target.checked })}
+    />
+    <div className="flex flex-col gap-1 rounded-hs border border-line">
+      <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-line px-3 py-2 text-small text-secondary">
+        <span>Hub</span>
+        <span>None · View · Edit</span>
+      </div>
+      {HUBS.map((hub) => {
+        const level = levelOf(value, hub)
+        return (
+          <div key={hub} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
+            <div>
+              <p className="capitalize text-body">{hub}</p>
+              <p className="text-small text-secondary">{HUB_HINT[hub]}</p>
+            </div>
+            <fieldset className="flex gap-1 border-0 p-0">
+              <legend className="sr-only">{hub} access</legend>
+              {(['none', 'view', 'edit'] as const).map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  variant={level === option ? 'primary' : 'secondary'}
+                  disabled={value.isSuperAdmin}
+                  onClick={() => onChange(withLevel(value, hub, option))}
+                >
+                  {option === 'none' ? 'None' : option === 'view' ? 'View' : 'Edit'}
+                </Button>
+              ))}
+            </fieldset>
+          </div>
+        )
+      })}
+    </div>
+  </div>
+)
+
+export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) => {
+  const toast = useToast()
+  const router = useRouter()
+  const [tab, setTab] = useState<Tab>('active')
+  const [editing, setEditing] = useState<{ userId: string; name: string; grants: Grants } | null>(null)
+  const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
+  const [link, setLink] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const run = async (what: () => Promise<unknown>, done: string) => {
     setBusy(true)
     try {
-      await fn()
+      await what()
       toast('success', done)
       router.refresh()
-      return true
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-      return false
+    } catch (error) {
+      toast('error', errorMessage(error))
     } finally {
       setBusy(false)
     }
   }
 
-  const active = rows.filter((row) => row.state === 'active')
-  const deactivated = rows.filter((row) => row.state === 'deactivated')
-  const counts: Record<Tab, number> = {
-    active: active.length,
-    pending: invitations.length,
-    deactivated: deactivated.length,
-  }
-  const shown = tab === 'deactivated' ? deactivated : active
-
-  const inviteLink = (token: string) => `${window.location.origin}/invite/${token}`
-
-  const person = (row: MemberListRow) => (
-    <li key={row.userId} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-      <Avatar name={row.name || row.email} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className="truncate font-medium">{row.name}</span>
-          {row.userId === selfId ? <span className="text-secondary">(you)</span> : null}
-          {row.orgRole === 'org_admin' ? <Badge tone="accent">Organisation admin</Badge> : null}
-          {row.state === 'deactivated' ? <Badge tone="error">Deactivated</Badge> : null}
-        </span>
-        <span className="truncate text-small text-secondary">{row.email}</span>
-        {row.seats.length > 0 ? (
-          <span className="truncate text-small text-secondary">
-            {row.seats.map((seat) => `${seat.workspaceName}: ${seat.role}`).join(' · ')}
-          </span>
-        ) : (
-          <span className="text-small text-secondary">No workspace seat yet</span>
-        )}
-      </span>
-
-      <span className="shrink-0">
-        {row.linked ? (
-          <Badge tone="ok" dot>
-            Signed in
-          </Badge>
-        ) : (
-          <Badge>Not signed in yet</Badge>
-        )}
-      </span>
-
-      {/* The role control edits the workspace being looked at, which is the one
-          question a workspace admin can answer without being an org admin. */}
-      <span className="w-40 shrink-0">
-        {canSetRole && row.state === 'active' ? (
-          <Select
-            aria-label={`Role for ${row.name} in ${workspaceName}`}
-            value={row.roleHere ?? ''}
-            disabled={busy}
-            onChange={(event) => {
-              const next = event.target.value
-              void run(
-                () =>
-                  next === ''
-                    ? api.admin.members.remove.mutate({ userId: row.userId })
-                    : row.roleHere === null
-                      ? api.admin.members.add.mutate({ email: row.email, name: row.name, role: next as Role })
-                      : api.admin.members.setRole.mutate({ userId: row.userId, role: next as Role }),
-                next === ''
-                  ? `${row.name} no longer has a seat in ${workspaceName}.`
-                  : `${row.name} is ${next} in ${workspaceName}.`,
-              )
-            }}
-          >
-            <option value="">No seat here</option>
-            {ROLES.map((each) => (
-              <option key={each} value={each}>
-                {each}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <span className="text-secondary">{row.roleHere ?? 'No seat here'}</span>
-        )}
-      </span>
-
-      {isOrgAdmin && row.userId !== selfId ? (
-        <DropdownMenu
-          label={`Actions for ${row.name}`}
-          groups={[
-            {
-              key: 'org',
-              items: [
-                {
-                  key: 'org-role',
-                  label: row.orgRole === 'org_admin' ? 'Remove organisation admin' : 'Make organisation admin',
-                  onSelect: () =>
-                    void run(
-                      () =>
-                        api.org.members.setOrgRole.mutate({
-                          userId: row.userId,
-                          role: row.orgRole === 'org_admin' ? 'member' : 'org_admin',
-                        }),
-                      `${row.name} is now ${row.orgRole === 'org_admin' ? 'a member' : 'an organisation admin'}.`,
-                    ),
-                },
-              ],
-            },
-            {
-              key: 'access',
-              items:
-                row.state === 'deactivated'
-                  ? [
-                      {
-                        key: 'reactivate',
-                        label: 'Restore access',
-                        onSelect: () =>
-                          void run(
-                            () => api.org.members.reactivate.mutate({ userId: row.userId }),
-                            `${row.name} can sign in again.`,
-                          ),
-                      },
-                    ]
-                  : [
-                      {
-                        key: 'deactivate',
-                        label: 'End access',
-                        destructive: true,
-                        onSelect: () => setEnding(row),
-                      },
-                    ],
-            },
-          ]}
-          trigger={(props) => (
-            <Button {...props} variant="tertiary" disabled={busy} aria-label={`Actions for ${row.name}`}>
-              <MoreHorizontal aria-hidden="true" className="size-4" />
-            </Button>
-          )}
-        />
-      ) : null}
-    </li>
+  const shown = rows.filter((row) =>
+    tab === 'active' ? row.state === 'active' : tab === 'deactivated' ? row.state === 'deactivated' : false,
   )
 
   return (
-    <div className="flex flex-col gap-3">
-      {!canSetRole && !isOrgAdmin ? (
-        <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can read this and cannot change it.
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-1" role="tablist" aria-label="Members">
-          {(['active', 'pending', 'deactivated'] as const).map((each) => (
-            <button
-              key={each}
-              type="button"
-              role="tab"
-              aria-selected={tab === each}
-              onClick={() => setTab(each)}
-              className={
-                tab === each
-                  ? 'rounded-hs bg-accent-subtle px-3 py-1.5 font-medium text-link'
-                  : 'rounded-hs px-3 py-1.5 text-secondary hover:bg-fill'
-              }
+    <Card>
+      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
+        <div className="flex gap-1">
+          {(['active', 'pending', 'deactivated'] as const).map((key) => (
+            <Button
+              key={key}
+              variant={tab === key ? 'primary' : 'secondary'}
+              onClick={() => setTab(key)}
             >
-              {each === 'active' ? 'Active' : each === 'pending' ? 'Pending invites' : 'Deactivated'}
-              <span className="ml-1.5 text-small">{counts[each]}</span>
-            </button>
+              {key === 'active'
+                ? `Active (${rows.filter((r) => r.state === 'active').length})`
+                : key === 'pending'
+                  ? `Pending (${invitations.length})`
+                  : `Deactivated (${rows.filter((r) => r.state === 'deactivated').length})`}
+            </Button>
           ))}
         </div>
-        {isOrgAdmin ? (
-          <Button variant="primary" onClick={() => setInviting(true)}>
-            Invite somebody
-          </Button>
+        {isSuperAdmin ? (
+          <Button onClick={() => setInviting({ email: '', grants: EMPTY })}>Create user</Button>
         ) : null}
       </div>
 
-      <dl className="flex flex-wrap gap-x-4 gap-y-1 text-small text-secondary">
-        {ROLES.map((each) => (
-          <div key={each} className="flex gap-1">
-            <dt className="font-medium text-body">{each}</dt>
-            <dd>{ROLE_HINT[each]}</dd>
-          </div>
-        ))}
-      </dl>
-
       {tab === 'pending' ? (
         invitations.length === 0 ? (
-          <EmptyState
-            title="No invitations are waiting"
-            description="Invite somebody by email and they will land here until they sign in."
-          />
+          <EmptyState title="No open invitations" description="Everybody invited has taken their seat." />
         ) : (
-          <Card flush>
-            <ul className="divide-y divide-divider">
-              {invitations.map((row) => (
-                <li key={row.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                  <Avatar name={row.email} />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate font-medium">{row.email}</span>
-                    <span className="truncate text-small text-secondary">
-                      {row.workspaceName ? `${row.workspaceName}: ${row.workspaceRole}` : 'Organisation only'}
-                      {row.invitedByName ? ` · invited by ${row.invitedByName}` : ''}
-                    </span>
-                  </span>
-                  <Badge tone={new Date(row.expiresAt) < new Date() ? 'error' : 'warn'}>
-                    {new Date(row.expiresAt) < new Date()
-                      ? 'Expired'
-                      : `Expires ${new Date(row.expiresAt).toLocaleDateString()}`}
-                  </Badge>
-                  <IconButton
-                    label={`Send ${row.email} a fresh invitation link`}
-                    icon={<ACTION_ICONS.resend size={16} />}
-                    disabled={busy}
-                    onClick={() =>
-                      void api.org.members.resend
-                        .mutate({ invitationId: row.id })
-                        .then((result) => {
-                          setLink(inviteLink(result.token))
-                          toast('success', 'A new link was made. The old one no longer works.')
-                          router.refresh()
-                        })
-                        .catch((cause) => toast('error', errorMessage(cause)))
-                    }
+          <ul>
+            {invitations.map((row) => (
+              <li key={row.id} className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-0">
+                <div>
+                  <p className="text-body">{row.email}</p>
+                  <p className="text-small text-secondary">
+                    {summarise(row)} · invited by {row.invitedByName ?? 'somebody'} · expires{' '}
+                    {new Date(row.expiresAt).toLocaleDateString()}
+                  </p>
+                </div>
+                {isSuperAdmin ? (
+                  <DropdownMenu
+                    label="Invitation actions"
+                    trigger={(props) => <IconButton {...props} label="Invitation actions" icon={<MoreHorizontal size={16} />} />}
+                    groups={[{ key: 'invite', items: [
+                      {
+                        key: 'resend',
+                        label: 'Resend',
+                        onSelect: () =>
+                          run(async () => {
+                            const { token } = await api.account.members.resend.mutate({ invitationId: row.id })
+                            setLink(`${window.location.origin}/invite/${token}`)
+                          }, 'A new link is ready.'),
+                      },
+                      {
+                        key: 'revoke',
+                        label: 'Revoke',
+                        onSelect: () =>
+                          run(() => api.account.members.revoke.mutate({ invitationId: row.id }), 'Invitation revoked.'),
+                      },
+                    ] }]}
                   />
-                  <IconButton
-                    label={`Revoke the invitation to ${row.email}`}
-                    tone="destructive"
-                    icon={<ACTION_ICONS.revoke size={16} />}
-                    disabled={busy}
-                    onClick={() =>
-                      void run(
-                        () => api.org.members.revoke.mutate({ invitationId: row.id }),
-                        `The invitation to ${row.email} was revoked.`,
-                      )
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          </Card>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )
       ) : shown.length === 0 ? (
         <EmptyState
-          title={tab === 'active' ? 'Nobody is in this organisation yet' : 'Nobody has been deactivated'}
-          description={
-            tab === 'active'
-              ? 'Invite somebody by email to seat them.'
-              : 'Ending somebody’s access keeps their name on everything they did.'
-          }
+          title={tab === 'active' ? 'Nobody here yet' : 'Nobody deactivated'}
+          description={tab === 'active' ? 'Invite somebody to seat them.' : 'Everybody who has been here still has access.'}
         />
       ) : (
-        <Card flush>
-          <ul className="divide-y divide-divider">{shown.map(person)}</ul>
-        </Card>
+        <ul>
+          {shown.map((row) => (
+            <li key={row.userId} className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-0">
+              <div className="flex items-center gap-3">
+                <Avatar name={row.name} />
+                <div>
+                  <p className="text-body">
+                    {row.name}
+                    {row.userId === selfId ? <span className="text-secondary"> (you)</span> : null}
+                    {row.isSuperAdmin ? (
+                      <Badge tone="accent" className="ml-2">
+                        Super Admin
+                      </Badge>
+                    ) : null}
+                    {!row.linked ? (
+                      <Badge tone="neutral" className="ml-2">
+                        Never signed in
+                      </Badge>
+                    ) : null}
+                  </p>
+                  <p className="text-small text-secondary">
+                    {row.email} · {summarise(row)}
+                  </p>
+                </div>
+              </div>
+              {isSuperAdmin && row.userId !== selfId ? (
+                <DropdownMenu
+                  label={`Actions for ${row.name}`}
+                  trigger={(props) => <IconButton {...props} label={`Actions for ${row.name}`} icon={<MoreHorizontal size={16} />} />}
+                  groups={[{ key: 'member', items: [
+                    {
+                      key: 'edit',
+                      label: 'Edit permissions',
+                      onSelect: () =>
+                        setEditing({
+                          userId: row.userId,
+                          name: row.name,
+                          grants: { isSuperAdmin: row.isSuperAdmin, viewHubs: row.viewHubs, editHubs: row.editHubs },
+                        }),
+                    },
+                    row.state === 'deactivated'
+                      ? {
+                          key: 'reactivate',
+                          label: 'Restore access',
+                          onSelect: () =>
+                            run(() => api.account.members.reactivate.mutate({ userId: row.userId }), 'Access restored.'),
+                        }
+                      : {
+                          key: 'deactivate',
+                          label: 'End access',
+                          onSelect: () =>
+                            run(() => api.account.members.deactivate.mutate({ userId: row.userId }), 'Access ended.'),
+                        },
+                    {
+                      key: 'remove',
+                      label: 'Remove from account',
+                      onSelect: () =>
+                        run(() => api.account.members.remove.mutate({ userId: row.userId }), 'Removed.'),
+                    },
+                  ] }]}
+                />
+              ) : null}
+            </li>
+          ))}
+        </ul>
       )}
 
-      {inviting ? (
-        <Modal open title="Invite somebody" onClose={() => setInviting(false)}>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              setBusy(true)
-              void api.org.members.invite
-                .mutate({
-                  email: draft.email,
-                  orgRole: draft.orgAdmin ? 'org_admin' : 'member',
-                  workspaceId: draft.workspaceId,
-                  workspaceRole: draft.workspaceId ? draft.role : null,
-                })
-                .then((result) => {
-                  setLink(inviteLink(result.token))
-                  setInviting(false)
-                  setDraft({ email: '', orgAdmin: false, workspaceId, role: 'viewer' })
-                  toast('success', 'The invitation is ready. Send them the link.')
-                  router.refresh()
-                })
-                .catch((cause) => toast('error', errorMessage(cause)))
-                .finally(() => setBusy(false))
-            }}
-          >
-            <p className="text-secondary">
-              Rawr does not send mail yet, so the link appears here once and you send it. It works only
-              for the address you name, and it expires in two weeks.
-            </p>
-            <Field label="Work email" id="invite-email" required>
+      <Modal open={editing !== null} onClose={() => setEditing(null)} title={`Permissions for ${editing?.name ?? ''}`}>
+        {editing ? (
+          <div className="flex flex-col gap-4">
+            <GrantGrid value={editing.grants} onChange={(grants) => setEditing({ ...editing, grants })} />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    await api.account.members.setGrants.mutate({ userId: editing.userId, ...editing.grants })
+                    setEditing(null)
+                  }, 'Permissions saved.')
+                }
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={inviting !== null} onClose={() => setInviting(null)} title="Create user">
+        {inviting ? (
+          <div className="flex flex-col gap-4">
+            <Field id="invite-email" label="Email address">
               <TextInput
                 id="invite-email"
                 type="email"
-                required
-                autoFocus
-                value={draft.email}
-                onChange={(event) => setDraft({ ...draft, email: event.target.value })}
+                value={inviting.email}
+                onChange={(e) => setInviting({ ...inviting, email: e.target.value })}
+                placeholder="someone@example.com"
               />
             </Field>
-            <Combobox
-              label="Workspace seat"
-              value={draft.workspaceId}
-              onChange={(value) => setDraft({ ...draft, workspaceId: value })}
-              hint="Leave it empty to add them to the organisation without a seat."
-              options={workspaces.map((each) => ({ value: each.id, label: each.name }))}
-            />
-            {draft.workspaceId ? (
-              <Field label="Role in that workspace" id="invite-role">
-                <Select
-                  id="invite-role"
-                  value={draft.role}
-                  onChange={(event) => setDraft({ ...draft, role: event.target.value as Role })}
-                >
-                  {ROLES.map((each) => (
-                    <option key={each} value={each}>
-                      {each}: {ROLE_HINT[each]}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            ) : null}
-            <Checkbox
-              label="Can administer the organisation"
-              hint="Creates workspaces, invites people and ends access."
-              checked={draft.orgAdmin}
-              onChange={(event) => setDraft({ ...draft, orgAdmin: event.target.checked })}
-            />
+            <GrantGrid value={inviting.grants} onChange={(grants) => setInviting({ ...inviting, grants })} />
             <div className="flex justify-end gap-2">
-              <Button variant="tertiary" type="button" onClick={() => setInviting(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit" busy={busy} disabled={draft.email.trim() === ''}>
-                Make the invitation
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      ) : null}
-
-      {link ? (
-        <Modal open size="sm" title="Send them this link" onClose={() => setLink(null)}>
-          <div className="flex flex-col gap-3">
-            <p className="text-secondary">
-              This is the only time it is shown. If it is lost, resend the invitation to make a new one.
-            </p>
-            <code className="block overflow-x-auto rounded-hs border border-line bg-fill px-3 py-2">{link}</code>
-            <div className="flex justify-end gap-2">
-              <Button
-                onClick={() => {
-                  void navigator.clipboard.writeText(link).then(
-                    () => toast('success', 'Copied.'),
-                    () => toast('error', 'The browser refused to copy. Select the link and copy it by hand.'),
-                  )
-                }}
-              >
-                <Copy aria-hidden="true" className="size-4" />
-                Copy
-              </Button>
-              <Button variant="primary" onClick={() => setLink(null)}>
-                Done
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      ) : null}
-
-      {ending ? (
-        <Modal open size="sm" title={`End access for ${ending.name}`} onClose={() => setEnding(null)}>
-          <div className="flex flex-col gap-3">
-            <p>
-              {ending.name} loses access to every workspace in this organisation, and every session they
-              hold stops working on its next request. Their name stays on everything they did.
-            </p>
-            <div className="flex justify-end gap-2">
-              <Button variant="tertiary" onClick={() => setEnding(null)}>
+              <Button variant="secondary" onClick={() => setInviting(null)}>
                 Cancel
               </Button>
               <Button
-                variant="destructive"
-                busy={busy}
+                disabled={busy || inviting.email.trim() === ''}
                 onClick={() =>
-                  void run(
-                    () => api.org.members.deactivate.mutate({ userId: ending.userId }),
-                    `${ending.name} can no longer sign in.`,
-                  ).then((ok) => ok && setEnding(null))
+                  run(async () => {
+                    const { token } = await api.account.members.invite.mutate({
+                      email: inviting.email.trim(),
+                      ...inviting.grants,
+                    })
+                    setInviting(null)
+                    setLink(`${window.location.origin}/invite/${token}`)
+                  }, 'Invitation ready.')
                 }
               >
-                End access
+                Send invitation
               </Button>
             </div>
           </div>
-        </Modal>
-      ) : null}
-    </div>
+        ) : null}
+      </Modal>
+
+      {/* The link is shown once and stored nowhere, so a lost one is resent rather
+          than looked up. */}
+      <Modal open={link !== null} onClose={() => setLink(null)} title="The invitation link">
+        <div className="flex flex-col gap-3">
+          <p className="text-secondary">
+            Send this to them yourself. It is shown once and works for two weeks.
+          </p>
+          <div className="flex gap-2">
+            <TextInput value={link ?? ''} readOnly />
+            <IconButton
+              label="Copy link"
+              icon={<Copy size={16} />}
+              onClick={() => {
+                if (link) void navigator.clipboard.writeText(link)
+                toast('success', 'Copied.')
+              }}
+            />
+          </div>
+        </div>
+      </Modal>
+    </Card>
   )
 }

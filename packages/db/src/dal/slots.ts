@@ -155,9 +155,6 @@ export const minutesOfDay = (value: string): number | null => {
   return total > 1440 ? null : total
 }
 
-export const formatMinutes = (total: number): string =>
-  `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
-
 // ---------------------------------------------------------------------------
 // Interval arithmetic
 // ---------------------------------------------------------------------------

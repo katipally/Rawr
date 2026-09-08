@@ -18,7 +18,11 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
     companyname: 'name',
     companydomainname: 'domain',
     companyowner: 'owner_id',
-    postalcode: 'city',
+    postalcode: 'postal_code',
+    stateregion: 'state',
+    linkedincompanypage: 'linkedin_url',
+    yearfounded: 'founded_year',
+    totalmoneyraised: 'funding_raised',
     numberofemployees: 'employee_count',
     countryregion: 'country',
     createdate: 'created_at',
@@ -31,6 +35,8 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
     mobilephonenumber: 'phone',
     jobtitle: 'title',
     linkedin: 'linkedin_url',
+    stateregion: '',
+    countryregion: 'country',
     associatedcompany: 'company_id',
     primaryassociatedcompanyid: 'company_id',
     companyname: 'company_id',
@@ -129,7 +135,7 @@ const fieldIn = (shape: string) => (
 
 const field = fieldIn('activity')
 
-/** A RegistryObject that is not one of the workspace's objects: a fixed shape the
+/** A RegistryObject that is not one of the account's objects: a fixed shape the
  *  mapper, the preview and the coercion rules run against unchanged, so a file
  *  that carries something other than records costs no second mapper. */
 const shapeOf = (

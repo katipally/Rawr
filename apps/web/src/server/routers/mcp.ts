@@ -9,15 +9,15 @@ import { protectedProcedure, router } from '../trpc.ts'
  *  without asking. Who may revoke which one is finer than a role can say and is
  *  decided in the data access layer. */
 export const mcpRouter = router({
-  tokens: protectedProcedure.query(({ ctx }) => listMcpTokens(ctx.workspace)),
+  tokens: protectedProcedure.query(({ ctx }) => listMcpTokens(ctx.account)),
 
   /** The plaintext crosses the wire exactly once, here, and is never readable
    *  again. The screen shows it and says so. */
   create: protectedProcedure
     .input(z.object({ name: z.string().min(1).max(80) }))
-    .mutation(({ ctx, input }) => createMcpToken(ctx.workspace, input)),
+    .mutation(({ ctx, input }) => createMcpToken(ctx.account, input)),
 
   revoke: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => revokeMcpToken(ctx.workspace, input.id)),
+    .mutation(({ ctx, input }) => revokeMcpToken(ctx.account, input.id)),
 })

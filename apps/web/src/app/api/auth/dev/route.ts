@@ -6,8 +6,11 @@ import { INVITE_COOKIE } from '~/server/invite.ts'
 import { sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 import { safeNext } from '~/server/auth/next.ts'
 
+/** 303 rather than the 307 NextResponse.redirect defaults to: this is a form post,
+ *  and 307 preserves the method, so the browser re-posted to the page it landed on
+ *  and a refresh asked to submit again. */
 const back = (error: string): NextResponse =>
-  NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(error)}`, env.AUTH_URL))
+  NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(error)}`, env.AUTH_URL), 303)
 
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
   if (!devLoginEnabled) {
@@ -16,7 +19,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
 
   const form = await request.formData()
   const email = String(form.get('email') ?? '').trim()
-  const workspaceSlug = String(form.get('workspace') ?? '').trim()
+  const accountSlug = String(form.get('account') ?? '').trim()
   if (!email) return back('Enter an email address.')
 
   const userId = await userIdForEmail(email)
@@ -29,15 +32,15 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     jar.delete(INVITE_COOKIE)
   }
   const memberships = userId ? await membershipsForUser(userId) : []
-  const membership = workspaceSlug
-    ? memberships.find((m) => m.workspaceSlug === workspaceSlug)
+  const membership = accountSlug
+    ? memberships.find((m) => m.accountSlug === accountSlug)
     : memberships[0]
 
   if (!membership) {
-    const detail = workspaceSlug ? ` in workspace ${workspaceSlug}` : ''
+    const detail = accountSlug ? ` in account ${accountSlug}` : ''
     return back(`No seeded user ${email}${detail}. Run pnpm db:seed.`)
   }
 
   await writeSessionCookie(sessionFromMembership(membership))
-  return NextResponse.redirect(new URL(safeNext(String(form.get('next') ?? '')), env.AUTH_URL))
+  return NextResponse.redirect(new URL(safeNext(String(form.get('next') ?? '')), env.AUTH_URL), 303)
 }

@@ -1,8 +1,9 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { recordActivity } from './activity.ts'
 import { sourceFrom, type Attribution } from './attribution.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { employerDomainFromEmail } from './domains.ts'
+import { requestEnrichment } from './enrichment.ts'
 import type { AssignOwner, FormField } from './form-schema.ts'
 import type { Tx } from './index.ts'
 
@@ -24,7 +25,7 @@ export type PersonCapture = {
   /** Company columns, used only when the address implies an employer. */
   company: Record<string, unknown>
   attribution: Attribution
-  /** Applied if the workspace has a stage by that name, ignored otherwise. */
+  /** Applied if the account has a stage by that name, ignored otherwise. */
   lifecycleStage?: string | null | undefined
   /** What the timeline says did this: 'form', 'booking'. */
   source: string
@@ -36,7 +37,7 @@ export type CapturedPerson = { contactId: string | null; companyId: string | nul
 
 export const upsertCapturedPerson = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: PersonCapture,
 ): Promise<CapturedPerson> => {
   if (!input.email) return { contactId: null, companyId: null }
@@ -87,7 +88,7 @@ export const upsertCapturedPerson = async (
 
   const columns: Record<string, unknown> = {
     ...contactValues,
-    workspace_id: ctx.workspaceId,
+    account_id: ctx.accountId,
     company_id: companyId,
     lead_source: source.channel,
     original_source: source,
@@ -114,6 +115,7 @@ export const upsertCapturedPerson = async (
     return { contactId: raced?.id ?? null, companyId }
   }
 
+  await requestEnrichment(tx, ctx, 'contact', created.id)
   await assignOwner(tx, ctx, created.id, input.assignOwner, input.source)
   if (input.lifecycleStage) {
     await applyLifecycle(tx, ctx, created.id, input.lifecycleStage, input.source)
@@ -130,7 +132,7 @@ export const upsertCapturedPerson = async (
  *  over the pool per lead. */
 const assignOwner = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
   rule: AssignOwner | null | undefined,
   source: string,
@@ -163,7 +165,7 @@ const assignOwner = async (
   await tx.execute(sql`update contact set owner_id = ${ownerId}, updated_at = now() where id = ${contactId}`)
   await recordActivity(tx, ctx, {
     type: 'field_change',
-    subject: `${owner?.label ?? 'Contact'} was assigned to ${owner?.name ?? 'a member'}`,
+    subject: `assigned ${owner?.label ?? 'the contact'} to ${owner?.name ?? 'a member'}`,
     source,
     payload: { field: 'owner_id', to: ownerId, toLabel: owner?.name ?? null, by: source },
     links: [{ entityType: 'contact', entityId: contactId }],
@@ -172,7 +174,7 @@ const assignOwner = async (
 
 const upsertCompany = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   domain: string,
   values: Record<string, unknown>,
   source: { channel: string; detail: Attribution },
@@ -184,15 +186,18 @@ const upsertCompany = async (
 
   const name = typeof values.name === 'string' && values.name ? values.name : null
   const [created] = await tx.execute<{ id: string }>(sql`
-    insert into company (workspace_id, name, domain, original_source, latest_source)
-    values (${ctx.workspaceId},
+    insert into company (account_id, name, domain, original_source, latest_source)
+    values (${ctx.accountId},
             ${name ?? domain.split('.')[0]},
             ${domain},
             ${JSON.stringify(source)}::jsonb,
             ${JSON.stringify(source)}::jsonb)
     on conflict do nothing
     returning id`)
-  if (created) return created.id
+  if (created) {
+    await requestEnrichment(tx, ctx, 'company', created.id)
+    return created.id
+  }
 
   const [raced] = await tx.execute<{ id: string }>(
     sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
@@ -202,7 +207,7 @@ const upsertCompany = async (
 
 const applyLifecycle = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
   stageName: string,
   source: string,

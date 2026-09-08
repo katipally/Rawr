@@ -1,6 +1,6 @@
 import { readTrackingDomain } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TrackingPanel } from './tracking-panel.tsx'
 
 /** Where the pixel, the click redirect and the unsubscribe link live. */
@@ -8,11 +8,11 @@ const TrackingPage = async () => {
   const session = await readSession()
   if (!session) return null
 
-  if (session.role !== 'admin') {
+  if (!sessionIsAdmin(session)) {
     return (
       <EmptyState
         title="Only an admin sets the tracking domain"
-        description={`Your role (${session.role}) can send sequences but not change where their links point.`}
+        description={`You need account access, which you do not have. can send sequences but not change where their links point.`}
       />
     )
   }

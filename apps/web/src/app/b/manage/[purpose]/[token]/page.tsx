@@ -7,9 +7,10 @@ import {
 } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
+import { RescheduleWidget } from '~/components/booking/reschedule-widget.tsx'
 import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
-import { BOOKING_COPY, hourIn, slotBandOf } from '~/lib/edge-copy.ts'
+import { BOOKING_COPY } from '~/lib/edge-copy.ts'
 import { bookingIcsPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
@@ -20,8 +21,9 @@ import { cancelBookingAction, rescheduleBookingAction } from './actions.ts'
  *  No session and no account: the token in the URL is the credential, it is single
  *  purpose, and it is not enumerable. Both actions are safe to click twice.
  *
- *  Server rendered with plain forms, because this is a link in an email opened on a
- *  phone on a train, and it has to work when a script does not load. */
+ *  Cancelling is a plain form posting to a Server Action: one field and one button,
+ *  and it works whether or not a script loaded. Moving is the same calendar the
+ *  booking page uses, because picking a new time is the same question. */
 
 export const dynamic = 'force-dynamic'
 
@@ -160,7 +162,7 @@ const ManageBookingPage = async ({
 
   // Reschedule: the availability question is asked again from scratch, because the
   // new time is a new question and the old answer says nothing about it.
-  const page = await readBookingPage(publicEdgeContext(booking.workspaceId), booking.bookingPageId)
+  const page = await readBookingPage(publicEdgeContext(booking.accountId), booking.bookingPageId)
   if (!page) {
     return (
       <Shell>
@@ -191,14 +193,6 @@ const ManageBookingPage = async ({
     now,
   })
 
-  const byDay = new Map<string, Date[]>()
-  for (const slot of offer.slots) {
-    const key = dayKey(slot.startsAt, timezone)
-    const list = byDay.get(key) ?? []
-    list.push(slot.startsAt)
-    byDay.set(key, list)
-  }
-
   return (
     <Shell>
       {details}
@@ -213,83 +207,23 @@ const ManageBookingPage = async ({
         <div className="rawr-b-note" data-bad>
           {offer.unavailable}
         </div>
-      ) : byDay.size === 0 ? (
+      ) : offer.slots.length === 0 ? (
         <div className="rawr-b-note">
           Nothing is open in the next {HORIZON_DAYS} days. Your meeting is unchanged; reply to{' '}
           {booking.hostName} to find another time.
         </div>
       ) : (
-        <form action={rescheduleBookingAction} className="rawr-b-form">
-          <input type="hidden" name="token" value={token} />
-          <input type="hidden" name="tz" value={timezone} />
-
-          <p>Pick a new time. Times are shown in {timezone}.</p>
-
-          {[...byDay.entries()].map(([day, slots]) => (
-            <fieldset key={day} style={{ border: 0, margin: 0, padding: 0 }}>
-              <legend className="rawr-b-hint" style={{ paddingBlockEnd: '0.25rem' }}>
-                {new Date(`${day}T12:00:00Z`).toLocaleDateString(locale.tag, {
-                  weekday: 'long',
-                  day: 'numeric',
-                  month: 'long',
-                })}
-              </legend>
-              {/* Banded the way the booking page bands them. Three weeks of
-                  half-hour slots is several hundred radio buttons on one page,
-                  which is what a form that has to work without JavaScript costs;
-                  naming the runs is what makes it scannable anyway. */}
-              {bandsOf(slots, timezone).map(([band, run]) => (
-                <div key={band} className="rawr-b-band">
-                  <p className="rawr-b-bandname">{band}</p>
-                  <div className="rawr-b-times">
-                    {run.map((slot) => {
-                      const iso = slot.toISOString()
-                      return (
-                        <label key={iso} className="rawr-b-slot">
-                          <input
-                            type="radio"
-                            name="slot"
-                            value={iso}
-                            required
-                            style={{ marginInlineEnd: '0.375rem' }}
-                          />
-                          {slot.toLocaleTimeString(locale.tag, {
-                            timeZone: timezone,
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </label>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </fieldset>
-          ))}
-
-          <PendingButton className="rawr-b-cta" pendingLabel={BOOKING_COPY.moving}>
-            Move my meeting
-          </PendingButton>
-          <p className="rawr-b-hint">
-            Would rather not meet at all? <a href={`/b/manage/cancel/${booking.cancelToken}`}>Cancel</a>.
-          </p>
-        </form>
+        <RescheduleWidget
+          slots={offer.slots.map((slot) => slot.startsAt.toISOString())}
+          timezone={timezone}
+          durationMinutes={page.durationMinutes}
+          token={token}
+          action={rescheduleBookingAction}
+          cancelHref={`/b/manage/cancel/${booking.cancelToken}`}
+        />
       )}
     </Shell>
   )
-}
-
-/** The day's times split into the runs a person reads them in. Insertion order is
- *  preserved by Map, and the slots arrive sorted. */
-const bandsOf = (slots: Date[], timezone: string): [string, Date[]][] => {
-  const bands = new Map<string, Date[]>()
-  for (const slot of slots) {
-    const band = slotBandOf(hourIn(slot, timezone))
-    const list = bands.get(band)
-    if (list) list.push(slot)
-    else bands.set(band, [slot])
-  }
-  return [...bands]
 }
 
 /** The width goes on a wrapper, never on the widget element itself. The embed
@@ -301,7 +235,9 @@ const Shell = ({ children }: { children: React.ReactNode }) => (
   <div className="mx-auto w-full max-w-2xl p-4">
     <div data-rawr-booking-widget data-rawr-booking-hosted>
       <style dangerouslySetInnerHTML={{ __html: BOOKING_STYLES + HOSTED_BOOKING_STYLES }} />
-      <div className="rawr-b">{children}</div>
+      <div className="rawr-b">
+        <div className="rawr-b-body">{children}</div>
+      </div>
     </div>
   </div>
 )

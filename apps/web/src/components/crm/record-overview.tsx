@@ -28,7 +28,7 @@ export type OverviewDeal = {
 export type Touch = { channel: string; at: string | null } | null
 
 export type RecordOverviewProps = {
-  workspace: string
+  account: string
   /** An object key, core or invented. */
   object: string
   tasks: OverviewTask[]
@@ -42,7 +42,7 @@ export type RecordOverviewProps = {
  *  what is owed, what was last said, what money is open, and where they came
  *  from. HubSpot calls this Overview and puts the timeline behind its own tab. */
 export const RecordOverview = ({
-  workspace,
+  account,
   object,
   tasks,
   threads,
@@ -95,7 +95,7 @@ export const RecordOverview = ({
             <ul className="flex flex-col gap-2">
               {threads.slice(0, 3).map((thread) => (
                 <li key={thread.threadId} className="min-w-0">
-                  <Link href={threadPath(workspace, thread.threadId)} className="break-words font-medium">
+                  <Link href={threadPath(account, thread.threadId)} className="break-words font-medium">
                     {thread.subject?.trim() || 'No subject'}
                   </Link>
                   <p className="text-small text-secondary">
@@ -118,7 +118,7 @@ export const RecordOverview = ({
               {deals.slice(0, 5).map((deal) => (
                 <li key={deal.id} className="min-w-0">
                   <Link
-                    href={recordPath(workspace, 'deal', deal.id)}
+                    href={recordPath(account, 'deal', deal.id)}
                     title={deal.displayName}
                     className="line-clamp-2 break-words"
                   >

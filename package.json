@@ -18,7 +18,7 @@
     "lint": "biome lint .",
     "lint:ci": "biome ci . --diagnostic-level=error",
     "test": "pnpm -r --if-present test",
-    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:org && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:seed",
+    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:account && pnpm db:verify:crm && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:verify:notifications",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
     "db:verify:forms": "pnpm --filter @rawr/db verify:forms",
     "db:verify:booking": "pnpm --filter @rawr/db verify:booking",
@@ -26,14 +26,15 @@
     "db:verify:activity": "pnpm --filter @rawr/db verify:activity",
     "db:verify:admin": "pnpm --filter @rawr/db verify:admin",
     "db:verify:integrations": "pnpm --filter @rawr/db verify:integrations",
-    "db:verify:org": "pnpm --filter @rawr/db verify:org",
+    "db:verify:account": "pnpm --filter @rawr/db verify:account",
     "db:verify:mail": "pnpm --filter @rawr/db verify:mail",
     "db:verify:sequences": "pnpm --filter @rawr/db verify:sequences",
     "db:verify:reporting": "pnpm --filter @rawr/db verify:reporting",
     "db:verify:scale": "pnpm --filter @rawr/db verify:scale",
     "db:reclaim": "pnpm --filter @rawr/db reclaim",
     "db:probe:large": "pnpm --filter @rawr/db probe:large",
-    "db:verify:objects": "pnpm --filter @rawr/db verify:objects"
+    "db:verify:objects": "pnpm --filter @rawr/db verify:objects",
+    "db:verify:notifications": "pnpm --filter @rawr/db verify:notifications"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

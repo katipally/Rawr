@@ -16,17 +16,17 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { workspaceId?: string; enrollmentId?: string }
+    | { accountId?: string; enrollmentId?: string }
     | null
-  if (!body?.workspaceId || !body?.enrollmentId) {
-    return NextResponse.json({ error: 'A workspace and an enrollment are both required.' }, { status: 400 })
+  if (!body?.accountId || !body?.enrollmentId) {
+    return NextResponse.json({ error: 'A account and an enrollment are both required.' }, { status: 400 })
   }
 
   try {
     const outcome = await runStep(
       // A job's context: no actor, marketing's ceiling, which is what sending
       // outreach on somebody's behalf needs and nothing more.
-      { ...publicEdgeContext(body.workspaceId), actorKind: 'job' },
+      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
       body.enrollmentId,
     )
     return NextResponse.json(outcome)

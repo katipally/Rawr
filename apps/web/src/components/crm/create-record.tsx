@@ -7,12 +7,13 @@ import { useId, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { FieldInput, type EditableField } from './field-input.tsx'
+import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
+import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 
 export type CreateField = EditableField
 
 export type CreateRecordDialogProps = {
-  workspace: string
+  account: string
   object: string
   objectLabel: string
   fields: CreateField[]
@@ -25,7 +26,7 @@ export type CreateRecordDialogProps = {
 }
 
 export const CreateRecordDialog = ({
-  workspace,
+  account,
   object,
   objectLabel,
   fields,
@@ -36,7 +37,15 @@ export const CreateRecordDialog = ({
   const { navigate } = useNavigation()
   const toast = useToast()
   const prefix = useId()
-  const [values, setValues] = useState<Record<string, unknown>>(initial)
+  // A deal starts on the first pipeline's first stage, the way HubSpot opens the
+  // form, rather than on "Not set" twice.
+  const [values, setValues] = useState<Record<string, unknown>>(() => {
+    const pipelineId = initial.pipeline_id ?? fields.find((field) => field.key === 'pipeline_id')?.choices?.[0]?.id
+    return pipelineId ? { ...initial, pipeline_id: pipelineId, stage_id: initial.stage_id ?? firstStageOf(fields, pipelineId) } : initial
+  })
+  // HubSpot's create-deal form asks for a contact and a company. The company is
+  // a field on the deal; the contact is an association, made once the deal exists.
+  const [contact, setContact] = useState<PickedRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -50,6 +59,13 @@ export const CreateRecordDialog = ({
         Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined),
       )
       const created = await api.crm.records.create.mutate({ object, values: filled })
+      if (contact) {
+        await api.crm.associations.add.mutate({
+          a: { entityType: object, entityId: created.id },
+          b: { entityType: 'contact', entityId: contact.id },
+          label: null,
+        })
+      }
       for (const warning of created.warnings) toast('info', warning)
       if (created.autoCompanyId) {
         toast('info', 'Filed under the company that matches the email domain.')
@@ -57,7 +73,7 @@ export const CreateRecordDialog = ({
       toast('success', `${objectLabel} created.`)
       onClose()
       if (onCreated) await onCreated(created.id)
-      else navigate(recordPath(workspace, object, created.id))
+      else navigate(recordPath(account, object, created.id))
     } catch (cause) {
       const message = errorMessage(cause)
       setError(message)
@@ -88,13 +104,31 @@ export const CreateRecordDialog = ({
           >
             <FieldInput
               id={`${prefix}-${field.key}`}
-              field={field}
+              field={scoped(field, values)}
               value={values[field.key]}
               autoFocus={index === 0}
-              onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
+              onChange={(value) =>
+                setValues((current) =>
+                  field.key === 'pipeline_id'
+                    ? { ...current, pipeline_id: value, stage_id: firstStageOf(fields, value) }
+                    : { ...current, [field.key]: value },
+                )
+              }
             />
           </Field>
         ))}
+
+        {object === 'deal' && !initial.company_id ? (
+          <Field id={`${prefix}-contact`} label="Associated contact">
+            <RecordPicker
+              id={`${prefix}-contact`}
+              object="contact"
+              label="Associated contact"
+              value={contact}
+              onChange={setContact}
+            />
+          </Field>
+        ) : null}
 
         {error ? (
           <p role="alert" className="text-error">
@@ -102,7 +136,7 @@ export const CreateRecordDialog = ({
             {duplicateId ? (
               <>
                 {' '}
-                <Link href={`/contacts/${workspace}/objects/${object}/views/all/list`}>
+                <Link href={`/contacts/${account}/objects/${object}/views/all/list`}>
                   Find it in the list
                 </Link>{' '}
                 and merge instead.

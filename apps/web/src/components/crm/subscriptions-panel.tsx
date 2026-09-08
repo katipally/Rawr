@@ -1,6 +1,6 @@
 'use client'
 
-import { Select, useToast } from '@rawr/ui'
+import { Badge, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -61,7 +61,13 @@ export const SubscriptionsPanel = ({ contactId, contactName, rows, canWrite }: S
         {rows.map((row) => (
           <li key={row.typeId} className="flex flex-wrap items-center gap-2 border-b border-divider px-6 py-2 last:border-0">
             <span className="min-w-0 flex-1">
-              <span className="block break-words font-medium">{row.name}</span>
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 break-words font-medium">{row.name}</span>
+                {/* A broadcast with no list named skips these, so the preference
+                    is real but it is not what a marketing send goes to. Said
+                    here rather than left looking like any other list. */}
+                {row.isInternal ? <Badge tone="neutral">Internal</Badge> : null}
+              </span>
               {row.description ? <span className="block text-secondary">{row.description}</span> : null}
             </span>
 

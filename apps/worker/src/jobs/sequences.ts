@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
+import { INTERNAL_SECRET } from '../env.ts'
 import { defineJob } from './registry.ts'
 
 /** The clock behind sequences.
@@ -9,7 +10,12 @@ import { defineJob } from './registry.ts'
  *  minute over every tenant; the run is one enrollment, claimed with a lease so
  *  two workers cannot send the same step; the sweep frees leases a worker died
  *  holding. Putting the send in the dispatch would mean one slow mailbox stalls
- *  every other tenant's outreach. */
+ *  every other tenant's outreach.
+ *
+ *  The queue predicate lives here and this is its only copy. Both queries ask
+ *  across every tenant at once, so they need the owner connection; a data access
+ *  layer function takes a row level security-scoped transaction and would see one
+ *  account, or nothing. */
 
 /** Enough that a busy minute is not left behind, small enough that one tick
  *  cannot flood the queue. */
@@ -22,7 +28,7 @@ const dispatch = defineJob({
   retryDelaySeconds: 60,
   handle: async () => {
     const rows = await owner`
-      select id, workspace_id from sequence_enrollment
+      select id, account_id from sequence_enrollment
        where state = 'active'
          and next_run_at is not null
          and next_run_at <= now()
@@ -33,7 +39,7 @@ const dispatch = defineJob({
     for (const row of rows) {
       await boss().send(
         'sequence.run',
-        { workspaceId: row.workspace_id, enrollmentId: row.id },
+        { accountId: row.account_id, enrollmentId: row.id },
         // One in flight per enrollment. Without this, a tick landing while the
         // previous run is still going would queue the same step twice, and the
         // lease would only turn that into a wasted job rather than a duplicate.
@@ -47,22 +53,16 @@ const dispatch = defineJob({
 
 const run = defineJob({
   name: 'sequence.run',
-  schema: z.object({ workspaceId: z.uuid(), enrollmentId: z.uuid() }),
+  schema: z.object({ accountId: z.uuid(), enrollmentId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
-  handle: async ({ workspaceId, enrollmentId }) => {
+  handle: async ({ accountId, enrollmentId }) => {
     const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-    const secret = process.env.RAWR_INTERNAL_SECRET ?? ''
-    if (!secret) {
-      throw new Error(
-        'RAWR_INTERNAL_SECRET is not set, so the worker cannot ask the app to send. Set the same value on both.',
-      )
-    }
 
     const response = await fetch(`${base}/api/internal/sequence-step`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rawr-internal': secret },
-      body: JSON.stringify({ workspaceId, enrollmentId }),
+      headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
+      body: JSON.stringify({ accountId, enrollmentId }),
       signal: AbortSignal.timeout(90_000),
     })
 

@@ -3,11 +3,11 @@ import {
   canWrite,
   getRegistry,
   schema,
-  withWorkspace,
+  withAccount,
   type ObjectKey,
   type RegistryField,
   type RegistryObject,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { asc, eq } from 'drizzle-orm'
 import type { EditableField } from '~/components/crm/field-input.tsx'
@@ -27,8 +27,8 @@ export type Lookups = {
   lifecycleStages: Choice[]
 }
 
-export const readLookups = async (ctx: WorkspaceContext): Promise<Lookups> =>
-  withWorkspace(ctx, async (tx) => {
+export const readLookups = async (ctx: AccountContext): Promise<Lookups> =>
+  withAccount(ctx, async (tx) => {
     const [users, pipelines, stages, lifecycles] = await Promise.all([
       tx
         .select({ id: schema.userAccount.id, name: schema.userAccount.name })
@@ -55,13 +55,13 @@ export const readLookups = async (ctx: WorkspaceContext): Promise<Lookups> =>
   })
 
 /** Relations small enough to enumerate. Users, pipelines, stages and lifecycle
- *  stages are workspace configuration and are counted in tens, so a select element
+ *  stages are account configuration and are counted in tens, so a select element
  *  is right. Companies are records, counted in tens of thousands, so they are
  *  searched instead: see PICK_OBJECT below. */
 const choicesFor = (field: RegistryField, lookups: Lookups): Choice[] | undefined => {
   if (field.key === 'owner_id') return lookups.users
   if (field.key === 'pipeline_id') return lookups.pipelines
-  if (field.key === 'stage_id') return lookups.stages.map(({ id, label }) => ({ id, label }))
+  if (field.key === 'stage_id') return lookups.stages
   if (field.key === 'lifecycle_stage_id') return lookups.lifecycleStages
   return undefined
 }
@@ -155,17 +155,17 @@ export type CrmContext = {
   object: RegistryObject
   lookups: Lookups
   canWrite: boolean
-  /** Every object in the workspace, for the switcher beside an index page's title. */
+  /** Every object in the account, for the switcher beside an index page's title. */
   objects: RegistryObject[]
 }
 
-export const loadCrmContext = async (ctx: WorkspaceContext, objectKey: string): Promise<CrmContext> => {
+export const loadCrmContext = async (ctx: AccountContext, objectKey: string): Promise<CrmContext> => {
   const [registry, lookups] = await Promise.all([getRegistry(ctx), readLookups(ctx)])
   const object = registry.byKey.get(objectKey)
-  if (!object) throw new Error(`This workspace has no object called "${objectKey}".`)
+  if (!object) throw new Error(`This account has no object called "${objectKey}".`)
   // A custom object has no write role of its own. Whoever may write a record may
   // write one of its records: the three roles that can change a contact. An admin
   // still decides what objects exist at all, which is the object_def role.
   const entity = object.isCustom ? 'contact' : objectKey
-  return { object, lookups, canWrite: canWrite(ctx.role, entity), objects: registry.objects }
+  return { object, lookups, canWrite: canWrite(ctx, entity), objects: registry.objects }
 }

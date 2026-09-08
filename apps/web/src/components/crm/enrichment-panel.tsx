@@ -3,7 +3,7 @@
 import { Button, Select, Spinner, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -23,7 +23,7 @@ export type ProviderHealth = {
 }
 
 export type EnrichmentPanelProps = {
-  workspace: string
+  account: string
   object: 'contact' | 'company'
   recordId: string
   /** What the enricher matches on: a contact's email, a company's domain. */
@@ -32,7 +32,11 @@ export type EnrichmentPanelProps = {
   blankFields: string[]
   apolloUrl: string | null
   apollo: ProviderHealth
+  lusha: ProviderHealth
   clay: ProviderHealth
+  /** Where this record sits on the enrichment queue: 'waiting' for somebody to
+   *  approve the batch, 'approved' and on its way, or off the queue entirely. */
+  queued: 'waiting' | 'approved' | null
   /** How many tracking and sequence events are on this record's timeline. */
   tracked: number
   sequenced: number
@@ -54,14 +58,16 @@ const usable = (health: ProviderHealth) => health.state === 'connected' || healt
  *  are enrolled from here and read back onto the timeline. A provider that is
  *  not connected says so, with the link, rather than hiding the feature. */
 export const EnrichmentPanel = ({
-  workspace,
+  account,
   object,
   recordId,
   matchKey,
   blankFields,
   apolloUrl,
   apollo,
+  lusha,
   clay,
+  queued,
   tracked,
   sequenced,
   suggestions,
@@ -98,8 +104,14 @@ export const EnrichmentPanel = ({
       return `${outcome.detail} ${wrote ? `Filled ${wrote} blank field${wrote === 1 ? '' : 's'}.` : ''} ${held ? `${held} value${held === 1 ? '' : 's'} held for review below.` : ''}`.trim()
     })
 
-  const canEnrich = canWrite && usable(apollo) && Boolean(matchKey)
-  const timeline = recordPath(workspace, object, recordId, { tab: 'activity', type: 'email_tracking,sequence_activity' })
+  const anyUsable = usable(apollo) || usable(lusha) || usable(clay)
+  const canEnrich = canWrite && anyUsable && Boolean(matchKey)
+  const providers: [string, ProviderHealth][] = [
+    ['apollo', apollo],
+    ['lusha', lusha],
+    ['clay', clay],
+  ]
+  const timeline = recordPath(account, object, recordId, { tab: 'activity', type: 'email_tracking,sequence_activity' })
   const matchLabel = object === 'contact' ? 'email' : 'domain'
 
   return (
@@ -114,45 +126,46 @@ export const EnrichmentPanel = ({
       </header>
 
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 px-6 py-2 text-small">
-        <dt className="text-secondary">Apollo</dt>
-        <dd className={HEALTH[apollo.state].tone} title={apollo.lastError ?? undefined}>
-          {HEALTH[apollo.state].label}
-          {apollo.state === 'not_configured' || apollo.state === 'disconnected' ? (
-            <>
-              {' · '}
-              <Link href={integrationsPath('apollo')}>connect</Link>
-            </>
-          ) : null}
-        </dd>
-        <dt className="text-secondary">Clay</dt>
-        <dd className={HEALTH[clay.state].tone} title={clay.lastError ?? undefined}>
-          {HEALTH[clay.state].label}
-          {clay.state === 'not_configured' || clay.state === 'disconnected' ? (
-            <>
-              {' · '}
-              <Link href={integrationsPath('clay')}>connect</Link>
-            </>
-          ) : null}
-        </dd>
+        {providers.map(([kind, health]) => (
+          <Fragment key={kind}>
+            <dt className="text-secondary capitalize">{kind}</dt>
+            <dd className={HEALTH[health.state].tone} title={health.lastError ?? undefined}>
+              {HEALTH[health.state].label}
+              {health.state === 'not_configured' || health.state === 'disconnected' ? (
+                <>
+                  {' · '}
+                  <Link href={integrationsPath(kind)}>connect</Link>
+                </>
+              ) : null}
+            </dd>
+          </Fragment>
+        ))}
       </dl>
 
-      {!usable(apollo) ? (
+      {!anyUsable ? (
         <p className="border-t border-divider px-6 py-2 text-small text-secondary">
-          <Link href={integrationsPath('apollo')}>Connect Apollo</Link>
-          {blankFields.length > 0 ? ` to fill ${blankFields.join(', ')} from its data` : ` to keep this ${object} current from its data`}
-          {object === 'contact' ? ', enrol this person in a sequence, and see opens, clicks and replies here' : ''}.
-          {!usable(clay) ? ' Clay fills whatever Apollo leaves blank on a company.' : ''}
+          <Link href={integrationsPath('apollo')}>Connect an enricher</Link>
+          {blankFields.length > 0 ? ` to fill ${blankFields.join(', ')}` : ` to keep this ${object} current`}
+          {object === 'contact' ? ', and see opens, clicks and replies from Apollo here' : ''}. New records queue up for
+          enrichment and are only looked up once somebody approves the batch.
+        </p>
+      ) : queued === 'approved' ? (
+        <p className="border-t border-divider px-6 py-2 text-small text-secondary">
+          On its way. Enrichment runs within a minute{blankFields.length > 0 ? ` and can fill ${blankFields.join(', ')}` : ''}.
+        </p>
+      ) : queued === 'waiting' ? (
+        <p className="border-t border-divider px-6 py-2 text-small text-secondary">
+          Waiting for approval with the rest of the batch, so no credits have been spent.
+          {blankFields.length > 0 ? ` It can fill ${blankFields.join(', ')}.` : ''} Enrich runs this one record now.
         </p>
       ) : blankFields.length > 0 ? (
         <p className="border-t border-divider px-6 py-2 text-small text-secondary">
           Blank and fillable: {blankFields.join(', ')}.
-          {!matchKey ? ` Add ${object === 'contact' ? 'an email address' : 'a domain'} first: that is what Apollo matches on.` : ''}
+          {!matchKey ? ` Add ${object === 'contact' ? 'an email address' : 'a domain'} first: that is what an enricher matches on.` : ''}
         </p>
-      ) : null}
-
-      {usable(apollo) && !matchKey && blankFields.length === 0 ? (
+      ) : !matchKey ? (
         <p className="border-t border-divider px-6 py-2 text-small text-secondary">
-          No {matchLabel}, so nothing to look up in Apollo.
+          No {matchLabel}, so nothing to look up.
         </p>
       ) : null}
 

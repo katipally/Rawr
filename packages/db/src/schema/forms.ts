@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -10,16 +11,16 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, updatedAt, workspaceId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { spamStateEnum } from './enums.ts'
-import { workspace } from './identity.ts'
+import { account } from './identity.ts'
 import { company, contact } from './records.ts'
 
 export const form = pgTable(
   'form',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     /** The public address is /f/:slug, so the slug is the identity a marketer
      *  pastes into Webflow, not the uuid. */
@@ -32,14 +33,14 @@ export const form = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('form_slug_key').on(t.workspaceId, t.slug)],
+  (t) => [uniqueIndex('form_slug_key').on(t.accountId, t.slug)],
 )
 
 export const formSubmission = pgTable(
   'form_submission',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     formId: uuid('form_id')
       .notNull()
       .references(() => form.id, { onDelete: 'cascade' }),
@@ -70,13 +71,44 @@ export const formSubmission = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index('form_submission_form_idx').on(t.workspaceId, t.formId, t.at.desc()),
+    index('form_submission_form_idx').on(t.accountId, t.formId, t.at.desc()),
     /** The review queue's only query: open quarantine, newest first. */
-    index('form_submission_state_idx').on(t.workspaceId, t.spamState, t.at.desc()),
-    index('form_submission_contact_idx').on(t.workspaceId, t.contactId),
+    index('form_submission_state_idx').on(t.accountId, t.spamState, t.at.desc()),
+    index('form_submission_contact_idx').on(t.accountId, t.contactId),
     uniqueIndex('form_submission_idempotency_key')
-      .on(t.workspaceId, t.idempotencyKey)
+      .on(t.accountId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),
+  ],
+)
+
+/** A file a stranger attached, before there is a submission to hang it on.
+ *
+ *  The browser is handed this row's id and nothing else, so it never names a
+ *  storage key. A submission posts the id back and the row is claimed; one that
+ *  is never claimed is a closed tab, and gets swept. */
+export const formUpload = pgTable(
+  'form_upload',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    formId: uuid('form_id')
+      .notNull()
+      .references(() => form.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    filename: text('filename').notNull(),
+    bytes: bigint('bytes', { mode: 'number' }).notNull(),
+    mime: text('mime').notNull(),
+    submissionId: uuid('submission_id').references(() => formSubmission.id, {
+      onDelete: 'cascade',
+    }),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('form_upload_storage_key').on(t.accountId, t.storageKey),
+    index('form_upload_unclaimed_idx')
+      .on(t.accountId, t.at)
+      .where(sql`${t.submissionId} is null`),
+    index('form_upload_submission_idx').on(t.accountId, t.submissionId),
   ],
 )
 
@@ -88,7 +120,7 @@ export const consentRecord = pgTable(
   'consent_record',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     visitorId: text('visitor_id').notNull(),
     /** {necessary: true, analytics: bool, advertisement: bool} — the same three
      *  categories today's HubSpot banner uses, so a stored choice maps across
@@ -99,5 +131,5 @@ export const consentRecord = pgTable(
     userAgent: text('user_agent'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('consent_record_visitor_idx').on(t.workspaceId, t.visitorId, t.at.desc())],
+  (t) => [index('consent_record_visitor_idx').on(t.accountId, t.visitorId, t.at.desc())],
 )

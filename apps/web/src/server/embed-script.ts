@@ -401,8 +401,23 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       });
   }
 
+  /** The form's own theme, as one <style> per form.
+   *
+   *  Scoped to this container rather than the document, so two differently themed
+   *  forms on one page both render correctly, and so nothing here can reach the
+   *  host site's own elements. Custom properties only: this sets the values the
+   *  stylesheet already reads and adds no rules of its own, which is why a
+   *  designer's stylesheet still wins by setting the same properties higher up. */
+  function applyTheme(mount, formId, css) {
+    if (!css) return;
+    var scoped = el('style');
+    scoped.textContent = css.replace('[data-rawr-form]', '[data-rawr-form="' + formId + '"]');
+    mount.appendChild(scoped);
+  }
+
   function paint(mount, formId, form) {
     mount.innerHTML = '';
+    applyTheme(mount, formId, form.theme);
     var node = el('form', { class: 'rawr-form', novalidate: 'novalidate' });
     var steps = [];
     var current = 0;
@@ -413,7 +428,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
         steps[step] = el('div', { class: 'rawr-step', 'data-step': String(step) });
         node.appendChild(steps[step]);
       }
-      steps[step].appendChild(fieldNode(field));
+      steps[step].appendChild(fieldNode(field, formId));
     });
 
     // The honeypot is positioned off-screen rather than display:none, and carries
@@ -457,7 +472,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       next.hidden = current >= steps.length - 1;
       submit.hidden = current < steps.length - 1;
       if (steps.length > 1) {
-        progressLabel.textContent = formStep(current + 1, steps.length);
+        progressLabel.textContent = formStep(current + 1, steps.length, (form.settings.steps || [])[current]);
         progressFill.style.width = Math.round(((current + 1) / steps.length) * 100) + '%';
       }
       applyConditions();
@@ -530,7 +545,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     return null;
   }
 
-  function fieldNode(field) {
+  function fieldNode(field, formId) {
     var wrap = el('div', { class: 'rawr-field', 'data-field': field.key });
     if (field.type === 'hidden') {
       wrap.hidden = true;
@@ -540,13 +555,55 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       return wrap;
     }
 
-    var id = 'rawr-' + field.key;
+    // Prefixed so a field key can never collide with the chrome above: a field
+    // keyed "consent" rendered as id="rawr-consent", which the consent banner's
+    // own rule then positioned fixed across the bottom of the page.
+    var id = 'rawr-f-' + field.key;
+
+    // A heading asks nothing. No label, no input, no error slot: it is the only
+    // field that exists to be read rather than answered.
+    if (field.type === 'heading') {
+      wrap.setAttribute('data-wide', '');
+      wrap.appendChild(el('p', { class: 'rawr-heading' }, field.label));
+      if (field.help) wrap.appendChild(el('small', { class: 'rawr-help' }, field.help));
+      return wrap;
+    }
+
+    // Consent reads as one sentence with a box in front of it. A label above a
+    // lone checkbox splits the statement from the thing being agreed to, which
+    // is exactly what makes a consent record hard to defend.
+    if (field.type === 'consent') {
+      wrap.setAttribute('data-wide', '');
+      var consent = el('label', { class: 'rawr-consent', for: id });
+      consent.appendChild(el('input', {
+        type: 'checkbox', id: id, name: field.key, value: 'true',
+        'aria-describedby': 'rawr-e-' + field.key
+      }));
+      consent.appendChild(el('span', {}, field.label + (field.required ? ' *' : '')));
+      wrap.appendChild(consent);
+      if (field.help) wrap.appendChild(el('small', { class: 'rawr-help' }, field.help));
+      wrap.appendChild(el('div', {
+        class: 'rawr-error', id: 'rawr-e-' + field.key, 'data-error': field.key, role: 'alert'
+      }));
+      return wrap;
+    }
+
     var label = el('label', { for: id }, field.label + (field.required ? ' *' : ''));
     wrap.appendChild(label);
 
     var input;
     if (field.type === 'long_text') {
       input = el('textarea', { id: id, name: field.key, rows: '4' });
+    } else if (field.type === 'radio') {
+      input = el('div', { class: 'rawr-choices', id: id, role: 'radiogroup' });
+      (field.options || []).forEach(function (o) {
+        var choice = el('label');
+        choice.appendChild(el('input', { type: 'radio', name: field.key, value: o.value }));
+        choice.appendChild(document.createTextNode(' ' + o.label));
+        input.appendChild(choice);
+      });
+    } else if (field.type === 'file') {
+      input = fileInput(field, id, formId);
     } else if (field.type === 'select') {
       input = el('select', { id: id, name: field.key });
       input.appendChild(el('option', { value: '' }, field.placeholder || 'Choose one'));
@@ -585,6 +642,58 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     return wrap;
   }
 
+  /** A file picker and the hidden input that carries what it produced.
+   *
+   *  The bytes never touch the form's own POST. On pick, the endpoint issues an
+   *  id and a one-shot URL, the browser PUTs straight to storage, and the id is
+   *  what the submission posts. So the answer to a file field is a claim ticket,
+   *  and the server decides whether it is honoured.
+   *
+   *  The picker itself is left unnamed on purpose: only the hidden input carries
+   *  a name, so collect never sees a File object it cannot serialise. */
+  function fileInput(field, id, formId) {
+    var box = el('div', { class: 'rawr-file', id: id });
+    var picker = el('input', { type: 'file', id: id + '-pick', 'aria-describedby': 'rawr-e-' + field.key });
+    var token = el('input', { type: 'hidden', name: field.key, value: '' });
+    var note = el('small', { class: 'rawr-file-note' });
+    box.appendChild(picker);
+    box.appendChild(token);
+    box.appendChild(note);
+
+    picker.addEventListener('change', function () {
+      var file = picker.files && picker.files[0];
+      token.value = '';
+      if (!file) { note.textContent = ''; return; }
+      note.textContent = COPY.uploading;
+      picker.disabled = true;
+
+      fetch(BASE + '/f/' + encodeURIComponent(formId) + '/upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, mime: file.type, bytes: file.size }),
+        mode: 'cors'
+      })
+        .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
+        .then(function (issued) {
+          if (!issued.body || !issued.body.url) throw new Error(issued.body && issued.body.error);
+          return fetch(issued.body.url, { method: 'PUT', body: file }).then(function (put) {
+            if (!put.ok) throw new Error('');
+            token.value = issued.body.id;
+            note.textContent = file.name;
+          });
+        })
+        .catch(function (e) {
+          picker.value = '';
+          // The endpoint's own message when there is one: "larger than 10 MB" is
+          // actionable and "that did not work" is not.
+          note.textContent = (e && e.message) || COPY.uploadFailed;
+        })
+        .then(function () { picker.disabled = false; });
+    });
+
+    return box;
+  }
+
   /** Shows or clears one field's message, and keeps aria-invalid in step with it.
    *  Every path that writes an error goes through here, so a message can never
    *  appear without the field being announced as invalid. */
@@ -616,6 +725,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
 
   /** Checks one field and paints the result. Returns true when it passes. */
   function checkOne(node, field) {
+    if (field.type === 'heading') return true;
     var wrapper = node.querySelector('[data-field="' + field.key + '"]');
     // A hidden field is not being asked, so it is not being answered wrongly.
     if (!wrapper || wrapper.hidden) {
@@ -638,7 +748,12 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       // discards these too; dropping them here keeps the payload honest.
       if (wrapper && wrapper.hidden && input.type !== 'hidden') continue;
 
-      if (input.type === 'checkbox') {
+      if (input.type === 'radio') {
+        // Every radio in a group shares a name, so the unchecked ones must not
+        // overwrite the chosen one on their way past.
+        if (input.checked) data[input.name] = input.value;
+        else if (!(input.name in data)) data[input.name] = '';
+      } else if (input.type === 'checkbox') {
         if (input.value === 'true') { data[input.name] = input.checked ? 'true' : ''; continue; }
         if (!input.checked) continue;
         if (!data[input.name]) data[input.name] = [];

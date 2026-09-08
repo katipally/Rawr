@@ -1,8 +1,8 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity } from './activity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 import { onUnsubscribe } from './sequences.ts'
 
 export type SubscriptionState = 'subscribed' | 'unsubscribed' | 'unspecified'
@@ -20,10 +20,10 @@ export type SubscriptionRow = {
  *  anything must render as exactly that, never as subscribed, never as
  *  unsubscribed, never as blank. D15, A2. */
 export const readSubscriptions = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   contactId: string,
 ): Promise<SubscriptionRow[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .select({
         typeId: subscriptionType.id,
@@ -49,7 +49,7 @@ export const sentenceFor = (contactName: string, rows: SubscriptionRow[]): strin
 /** An opt-out recorded in Rawr is the authoritative one. F6 pushes it outward and
  *  never the reverse for a Rawr-originated opt-out. A2. */
 export const setSubscription = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { contactId: string; typeId: string; state: SubscriptionState; source?: string },
 ): Promise<void> =>
   mutate(ctx, 'subscription_state', async (tx) => {
@@ -69,14 +69,14 @@ export const setSubscription = async (
     await tx
       .insert(subscriptionState)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         contactId: input.contactId,
         subscriptionTypeId: input.typeId,
         state: input.state,
         source: input.source ?? 'app',
       })
       .onConflictDoUpdate({
-        target: [subscriptionState.workspaceId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
+        target: [subscriptionState.accountId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
         set: { state: input.state, changedAt: new Date(), source: input.source ?? 'app' },
       })
 
@@ -88,7 +88,10 @@ export const setSubscription = async (
 
     await recordActivity(tx, ctx, {
       type: 'subscription_change',
-      subject: `${type.name}: ${input.state}`,
+      subject:
+        input.state === 'unspecified'
+          ? `has no answer on ${type.name}`
+          : `${input.state} ${input.state === 'subscribed' ? 'to' : 'from'} ${type.name}`,
       payload: { typeId: input.typeId, from: before?.state ?? 'unspecified', to: input.state },
       links: [{ entityType: 'contact', entityId: input.contactId }],
     })
@@ -119,8 +122,8 @@ export type SubscriptionTypeRow = {
 /** The types themselves, with how many contacts have said something about each.
  *  "Never specified" is deliberately not a count here: it is everybody else, and
  *  showing it as a number invites treating it as a third opt-in. A2. */
-export const listSubscriptionTypes = async (ctx: WorkspaceContext): Promise<SubscriptionTypeRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listSubscriptionTypes = async (ctx: AccountContext): Promise<SubscriptionTypeRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -148,7 +151,7 @@ export const listSubscriptionTypes = async (ctx: WorkspaceContext): Promise<Subs
   })
 
 export const createSubscriptionType = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { name: string; description?: string | null; isInternal?: boolean },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'subscription_type', async (tx) => {
@@ -165,7 +168,7 @@ export const createSubscriptionType = async (
     const [created] = await tx
       .insert(subscriptionType)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         name,
         description: input.description?.trim() || null,
         isInternal: input.isInternal ?? false,
@@ -180,7 +183,7 @@ export const createSubscriptionType = async (
   })
 
 export const updateSubscriptionType = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { id: string; name?: string; description?: string | null; isInternal?: boolean },
 ): Promise<void> =>
   mutate(ctx, 'subscription_type', async (tx) => {
@@ -217,7 +220,7 @@ export const updateSubscriptionType = async (
  *  one piece of consent state that must never be lost by accident. So the count is
  *  named and the caller has to say it meant it. */
 export const deleteSubscriptionType = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   confirmUnsubscribes: number,
 ): Promise<{ discarded: number }> =>

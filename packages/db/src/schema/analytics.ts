@@ -12,9 +12,9 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, workspaceId } from './columns.ts'
+import { createdAt, pk, accountId } from './columns.ts'
 import { aliasViaEnum } from './enums.ts'
-import { workspace } from './identity.ts'
+import { account } from './identity.ts'
 import { contact } from './records.ts'
 
 /** F4. The person-level timeline behind "Muhammad Owais viewed Data Studio".
@@ -26,16 +26,16 @@ import { contact } from './records.ts'
  *  uuid buys nothing. */
 
 /** One row per host that sends events. datasaur.ai and app.datasaur.ai are two
- *  sites in one workspace, which is what open item 18 is deciding between.
+ *  sites in one account, which is what open item 18 is deciding between.
  *
- *  The key is unique across every tenant, not per workspace: the collector has
- *  only this string to resolve a workspace from, so two tenants sharing one would
+ *  The key is unique across every tenant, not per account: the collector has
+ *  only this string to resolve a account from, so two tenants sharing one would
  *  make that question unanswerable. */
 export const site = pgTable(
   'site',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     host: text('host').notNull(),
     siteKey: text('site_key').notNull(),
@@ -44,14 +44,14 @@ export const site = pgTable(
   },
   (t) => [
     uniqueIndex('site_key_unique').on(t.siteKey),
-    index('site_workspace_idx').on(t.workspaceId, t.host),
+    index('site_account_idx').on(t.accountId, t.host),
   ],
 )
 
 export const visitor = pgTable(
   'visitor',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     /** The cookie value. Never accepted from a query parameter, never put in a
      *  URL, never forwarded to GA4. */
     id: text('id').notNull(),
@@ -64,8 +64,8 @@ export const visitor = pgTable(
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.id] }),
-    index('visitor_contact_idx').on(t.workspaceId, t.contactId),
+    primaryKey({ columns: [t.accountId, t.id] }),
+    index('visitor_contact_idx').on(t.accountId, t.contactId),
   ],
 )
 
@@ -79,7 +79,7 @@ export const visitorAlias = pgTable(
   'visitor_alias',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     visitorId: text('visitor_id').notNull(),
     contactId: uuid('contact_id')
       .notNull()
@@ -90,11 +90,11 @@ export const visitorAlias = pgTable(
     lastError: text('last_error'),
   },
   (t) => [
-    uniqueIndex('visitor_alias_key').on(t.workspaceId, t.visitorId, t.contactId),
+    uniqueIndex('visitor_alias_key').on(t.accountId, t.visitorId, t.contactId),
     index('visitor_alias_pending_idx')
       .on(t.createdAt)
       .where(sql`resolved_at is null`),
-    index('visitor_alias_contact_idx').on(t.workspaceId, t.contactId),
+    index('visitor_alias_contact_idx').on(t.accountId, t.contactId),
   ],
 )
 
@@ -104,7 +104,7 @@ export const visitorSession = pgTable(
   'visitor_session',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     visitorId: text('visitor_id').notNull(),
     siteId: uuid('site_id').references(() => site.id, { onDelete: 'set null' }),
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
@@ -121,9 +121,9 @@ export const visitorSession = pgTable(
     channel: text('channel'),
   },
   (t) => [
-    index('visitor_session_visitor_idx').on(t.workspaceId, t.visitorId, t.endedAt.desc()),
-    index('visitor_session_started_idx').on(t.workspaceId, t.startedAt.desc()),
-    index('visitor_session_channel_idx').on(t.workspaceId, t.channel, t.startedAt.desc()),
+    index('visitor_session_visitor_idx').on(t.accountId, t.visitorId, t.endedAt.desc()),
+    index('visitor_session_started_idx').on(t.accountId, t.startedAt.desc()),
+    index('visitor_session_channel_idx').on(t.accountId, t.channel, t.startedAt.desc()),
   ],
 )
 
@@ -133,7 +133,7 @@ export const pageView = pgTable(
   'page_view',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     visitorId: text('visitor_id').notNull(),
     contactId: uuid('contact_id').references(() => contact.id, { onDelete: 'set null' }),
     sessionId: uuid('session_id').references(() => visitorSession.id, { onDelete: 'set null' }),
@@ -152,11 +152,11 @@ export const pageView = pgTable(
     /** The back-fill's only query, and the narrowest it can be: an identification
      *  touches nothing that is already attributed. */
     index('page_view_backfill_idx')
-      .on(t.workspaceId, t.visitorId)
+      .on(t.accountId, t.visitorId)
       .where(sql`contact_id is null`),
-    index('page_view_visitor_idx').on(t.workspaceId, t.visitorId, t.at.desc()),
-    index('page_view_contact_idx').on(t.workspaceId, t.contactId, t.at.desc()),
-    index('page_view_session_idx').on(t.workspaceId, t.sessionId, t.at),
+    index('page_view_visitor_idx').on(t.accountId, t.visitorId, t.at.desc()),
+    index('page_view_contact_idx').on(t.accountId, t.contactId, t.at.desc()),
+    index('page_view_session_idx').on(t.accountId, t.sessionId, t.at),
   ],
 )
 
@@ -164,7 +164,7 @@ export const customEvent = pgTable(
   'custom_event',
   {
     id: pk(),
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     visitorId: text('visitor_id').notNull(),
     contactId: uuid('contact_id').references(() => contact.id, { onDelete: 'set null' }),
     sessionId: uuid('session_id').references(() => visitorSession.id, { onDelete: 'set null' }),
@@ -175,10 +175,10 @@ export const customEvent = pgTable(
   },
   (t) => [
     index('custom_event_backfill_idx')
-      .on(t.workspaceId, t.visitorId)
+      .on(t.accountId, t.visitorId)
       .where(sql`contact_id is null`),
-    index('custom_event_visitor_idx').on(t.workspaceId, t.visitorId, t.at.desc()),
-    index('custom_event_contact_idx').on(t.workspaceId, t.contactId, t.at.desc()),
+    index('custom_event_visitor_idx').on(t.accountId, t.visitorId, t.at.desc()),
+    index('custom_event_contact_idx').on(t.accountId, t.contactId, t.at.desc()),
   ],
 )
 
@@ -188,7 +188,7 @@ export const customEvent = pgTable(
 export const contactActivity = pgTable(
   'contact_activity',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contact.id, { onDelete: 'cascade' }),
@@ -197,7 +197,7 @@ export const contactActivity = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.contactId] })],
+  (t) => [primaryKey({ columns: [t.accountId, t.contactId] })],
 )
 
 /** Raw page views live 25 months, then collapse to one row per contact per day.
@@ -206,27 +206,27 @@ export const contactActivity = pgTable(
 export const pageViewDaily = pgTable(
   'page_view_daily',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     contactId: uuid('contact_id')
       .notNull()
       .references(() => contact.id, { onDelete: 'cascade' }),
     day: date('day').notNull(),
     views: integer('views').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.contactId, t.day] })],
+  (t) => [primaryKey({ columns: [t.accountId, t.contactId, t.day] })],
 )
 
-/** Names seen today, per workspace. Counting rows here is how the cardinality cap
+/** Names seen today, per account. Counting rows here is how the cardinality cap
  *  knows a loop has started firing distinct names, without keeping a counter that
  *  a restart would lose. F4 §2. */
 export const eventNameDay = pgTable(
   'event_name_day',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     day: date('day').notNull(),
     name: text('name').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.day, t.name] })],
+  (t) => [primaryKey({ columns: [t.accountId, t.day, t.name] })],
 )
 
 /** What the collector refused, aggregated so a loop firing a rejected event ten
@@ -237,7 +237,7 @@ export const eventNameDay = pgTable(
 export const collectorNotice = pgTable(
   'collector_notice',
   {
-    workspaceId: workspaceId().references(() => workspace.id, { onDelete: 'cascade' }),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     siteId: uuid('site_id')
       .notNull()
       .references(() => site.id, { onDelete: 'cascade' }),
@@ -253,7 +253,7 @@ export const collectorNotice = pgTable(
     lastAt: timestamp('last_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.workspaceId, t.siteId, t.kind, t.key, t.day] }),
-    index('collector_notice_recent_idx').on(t.workspaceId, t.lastAt.desc()),
+    primaryKey({ columns: [t.accountId, t.siteId, t.kind, t.key, t.day] }),
+    index('collector_notice_recent_idx').on(t.accountId, t.lastAt.desc()),
   ],
 )

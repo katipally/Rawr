@@ -45,7 +45,10 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
-  const [creating, setCreating] = useState(false)
+  /** 'new', or the endpoint being changed. One form for both: a URL that moves
+   *  used to mean delete and recreate, which rolls the signing key and takes the
+   *  receiver down until somebody redeploys it. */
+  const [composing, setComposing] = useState<'new' | EndpointView | null>(null)
   const [removing, setRemoving] = useState<EndpointView | null>(null)
   /** Shown once and never again, so it is state rather than anything read back. */
   const [issued, setIssued] = useState<{ name: string; secret: string } | null>(null)
@@ -69,15 +72,32 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
     }
   }
 
-  const create = async () => {
+  const open = (what: 'new' | EndpointView) => {
+    setComposing(what)
+    setName(what === 'new' ? '' : what.name)
+    setUrl(what === 'new' ? '' : what.url)
+    setWanted(what === 'new' ? [] : what.events)
+  }
+
+  const close = () => {
+    setComposing(null)
+    setName('')
+    setUrl('')
+    setWanted([])
+  }
+
+  const submit = async () => {
     setBusy(true)
     try {
-      const made = await api.integrations.webhooks.create.mutate({ name, url, events: wanted })
-      setIssued({ name, secret: made.secret })
-      setCreating(false)
-      setName('')
-      setUrl('')
-      setWanted([])
+      if (composing === 'new') {
+        const made = await api.integrations.webhooks.create.mutate({ name, url, events: wanted })
+        // The key is shown once, so this modal closes into the one that shows it.
+        setIssued({ name, secret: made.secret })
+      } else if (composing) {
+        await api.integrations.webhooks.update.mutate({ id: composing.id, name, url, events: wanted })
+        toast('success', 'Saved. The signing key is unchanged.')
+      }
+      close()
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -91,7 +111,7 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
       title="Outgoing webhooks"
       action={
         canWrite ? (
-          <Button onClick={() => setCreating(true)}>Add an endpoint</Button>
+          <Button onClick={() => open('new')}>Add an endpoint</Button>
         ) : null
       }
     >
@@ -168,6 +188,9 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
                         )
                       }}
                     />
+                    <Button variant="tertiary" onClick={() => open(row)}>
+                      Edit
+                    </Button>
                     <Button
                       variant="tertiary"
                       busy={busy}
@@ -195,15 +218,15 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
       )}
 
       <Modal
-        open={creating}
-        onClose={() => setCreating(false)}
-        title="Add an endpoint"
+        open={composing !== null}
+        onClose={close}
+        title={composing === 'new' || composing === null ? 'Add an endpoint' : `Edit ${composing.name}`}
         footer={
           <div className="flex gap-2">
-            <Button variant="primary" busy={busy} disabled={!name.trim() || !url.trim()} onClick={() => void create()}>
-              Create
+            <Button variant="primary" busy={busy} disabled={!name.trim() || !url.trim()} onClick={() => void submit()}>
+              {composing === 'new' ? 'Create' : 'Save'}
             </Button>
-            <Button onClick={() => setCreating(false)}>Cancel</Button>
+            <Button onClick={close}>Cancel</Button>
           </div>
         }
       >
@@ -244,7 +267,8 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
           </fieldset>
 
           <Alert tone="info">
-            The signing key is shown once, when the endpoint is created. Verify a delivery by
+            The signing key is shown once, when the endpoint is created, and changing anything here
+            leaves it alone. Verify a delivery by
             recomputing HMAC-SHA256 over <code>&lt;t&gt;.&lt;body&gt;</code> with it and comparing
             against the <code>rawr-signature</code> header, refusing anything whose{' '}
             <code>t</code> is far from your own clock.

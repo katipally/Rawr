@@ -2,8 +2,8 @@ import { asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import { recordActivityFanout, type EntityType } from './activity.ts'
-import { assertCanWrite, type WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { assertCanWrite, type AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
@@ -44,8 +44,8 @@ const toObjectKey = (value: string): ObjectKey => {
   return value
 }
 
-export const listSegments = async (ctx: WorkspaceContext, objectKey?: string): Promise<SegmentRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listSegments = async (ctx: AccountContext, objectKey?: string): Promise<SegmentRow[]> =>
+  withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const rows = await tx
       .select({
@@ -92,7 +92,7 @@ export type SaveSegmentInput = {
 /** Saving compiles the query once so a filter that cannot run is refused here,
  *  where somebody is looking at the builder, rather than silently producing an
  *  empty segment on the next scheduled pass. */
-export const saveSegment = async (ctx: WorkspaceContext, input: SaveSegmentInput): Promise<{ id: string }> =>
+export const saveSegment = async (ctx: AccountContext, input: SaveSegmentInput): Promise<{ id: string }> =>
   mutate(ctx, 'segment', async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
@@ -132,7 +132,7 @@ export const saveSegment = async (ctx: WorkspaceContext, input: SaveSegmentInput
     const [created] = await tx
       .insert(segment)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         objectId: object.id,
         name,
         description: input.description?.trim() || null,
@@ -147,7 +147,7 @@ export const saveSegment = async (ctx: WorkspaceContext, input: SaveSegmentInput
     }
   })
 
-export const deleteSegment = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteSegment = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'segment', async (tx) => {
     const [found] = await tx.select({ name: segment.name }).from(segment).where(eq(segment.id, id)).limit(1)
     if (!found) throw new Error('That segment no longer exists.')
@@ -178,16 +178,16 @@ const ENTITY_TYPE: Record<ObjectKey, EntityType> = { contact: 'contact', company
  *  Re-entry is a new row, not an un-exit. Somebody who was a customer, churned, and
  *  came back has two spells, and collapsing them would erase the churn. */
 export const evaluateSegment = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   segmentId: string,
 ): Promise<EvaluationResult> => {
   assertCanWrite(ctx, 'segment')
-  return withWorkspace(ctx, (tx) => evaluateSegmentIn(tx, ctx, segmentId))
+  return withAccount(ctx, (tx) => evaluateSegmentIn(tx, ctx, segmentId))
 }
 
 export const evaluateSegmentIn = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   segmentId: string,
 ): Promise<EvaluationResult> => {
   const registry = await getRegistryIn(tx)
@@ -264,8 +264,8 @@ export const evaluateSegmentIn = async (
     returning m.entity_id`)
 
   const entered = await tx.execute<{ entity_id: string }>(sql`
-    insert into segment_membership (workspace_id, segment_id, entity_id)
-    select ${ctx.workspaceId}, ${segmentId}, candidate.id
+    insert into segment_membership (account_id, segment_id, entity_id)
+    select ${ctx.accountId}, ${segmentId}, candidate.id
       from segment_candidate candidate
       left join segment_held held on held.id = candidate.id
      where held.id is null
@@ -297,7 +297,7 @@ export const evaluateSegmentIn = async (
 }
 
 /** The id set a segment's query selects, as a subquery rather than a result. */
-const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: WorkspaceContext): SQL => {
+const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: AccountContext): SQL => {
   const where = compileFilters(object, filters, scopeFor(ctx.actorId))
   const table = sql.raw(`"${object.key}"`)
   const notDeleted = sql.raw(`"${object.key}"."deleted_at" is null`)
@@ -320,17 +320,17 @@ const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: Worksp
  *  would put several whole-table writes on the pool at once for no gain that
  *  anybody is waiting on. */
 export const evaluateAllSegments = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
 ): Promise<{ segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[]> => {
   assertCanWrite(ctx, 'segment')
-  const rows = await withWorkspace(ctx, (tx) =>
+  const rows = await withAccount(ctx, (tx) =>
     tx.select({ id: segment.id, name: segment.name }).from(segment),
   )
 
   const out: { segmentId: string; name: string; result: EvaluationResult | null; error: string | null }[] = []
   for (const row of rows) {
     try {
-      const result = await withWorkspace(ctx, (tx) => evaluateSegmentIn(tx, ctx, row.id))
+      const result = await withAccount(ctx, (tx) => evaluateSegmentIn(tx, ctx, row.id))
       out.push({ segmentId: row.id, name: row.name, result, error: null })
     } catch (cause) {
       // One segment whose filter names a field that has since been deleted must
@@ -349,11 +349,11 @@ export const evaluateAllSegments = async (
 export type SegmentMember = { id: string; displayName: string; enteredAt: Date }
 
 export const readSegmentMembers = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   segmentId: string,
   limit = 50,
 ): Promise<SegmentMember[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const [row] = await tx
       .select({ objectId: segment.objectId })
@@ -389,10 +389,10 @@ export const readSegmentMembers = async (
 export type MembershipRow = { segmentId: string; name: string; enteredAt: Date; exitedAt: Date | null }
 
 export const readMemberships = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entityId: string,
 ): Promise<MembershipRow[]> =>
-  withWorkspace(ctx, (tx) =>
+  withAccount(ctx, (tx) =>
     tx
       .select({
         segmentId: segment.id,
@@ -410,10 +410,10 @@ export const readMemberships = async (
 /** A dry run for the builder: how many records the query selects right now, and a
  *  few of them, so nobody saves a segment without seeing what is in it. */
 export const previewSegment = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { objectKey: string; filters: FilterGroup[] },
 ): Promise<{ count: number; sample: { id: string; displayName: string }[] }> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
     const ids = matchingIds(object, input.filters, ctx)

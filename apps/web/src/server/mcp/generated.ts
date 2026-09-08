@@ -1,3 +1,4 @@
+import type { Hub } from '@rawr/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { appRouter } from '~/server/routers/_app.ts'
@@ -26,12 +27,12 @@ const GROUPS: Record<string, string> = {
   analytics: 'Website page views, events and tracked sites.',
   mail: 'Connected Gmail mailboxes and the email threads on a contact.',
   integrations: 'Brevo, Apollo, Clay, Lusha, Woodpecker, Slack, GA4 and Zoom, and reading a HubSpot export: connection, health, enrichment and replay. Also outbound webhooks: the endpoints Rawr posts to, what they subscribe to and their signing secrets.',
-  admin: 'Workspace settings: objects an admin invents, fields, pipelines, stages, lifecycle, subscription types, members, and automation rules with their run log.',
+  admin: 'Account settings: objects an admin invents, fields, pipelines, stages, lifecycle, subscription types, members, and automation rules with their run log.',
   mcp: 'Agent access tokens.',
   sequences: 'Multi-step outreach sent from a member\'s own Gmail, or handed to a Woodpecker campaign: the sequences, their steps, and who is in them.',
-  org: 'The organisation above this workspace: its workspaces, its people, their seats and the history of those decisions.',
+  org: 'The organisation above this account: its accounts, its people, their seats and the history of those decisions.',
   notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
-  teams: 'Named groups inside this workspace, used to rotate assignment within a team.',
+  teams: 'Named groups inside this account, used to rotate assignment within a team.',
   jobs: 'Failed jobs and dead letters.',
   account: 'The signed-in person\'s own sessions.',
   reporting: 'Six reports over a date range: the pipeline, forms, sequences, email, the website, and which channels the contacts who buy first arrived through.',
@@ -93,27 +94,21 @@ export const sessionFor = (caller: {
   userId: string
   userEmail: string
   userName: string
-  workspaceSlug: string
-  workspaceName: string
-  organisationId: string
-  organisationSlug: string
-  organisationName: string
-  orgRole: Session['orgRole']
-  ctx: { workspaceId: string; role: Session['role'] }
+  accountSlug: string
+  accountName: string
+  ctx: { accountId: string; isSuperAdmin: boolean; viewHubs: readonly Hub[]; editHubs: readonly Hub[] }
 }): Session => ({
   userId: caller.userId,
   email: caller.userEmail,
   displayName: caller.userName,
   avatarUrl: null,
-  workspaceId: caller.ctx.workspaceId,
-  workspaceSlug: caller.workspaceSlug,
-  workspaceName: caller.workspaceName,
-  organisationId: caller.organisationId,
-  organisationSlug: caller.organisationSlug,
-  organisationName: caller.organisationName,
-  orgRole: caller.orgRole,
+  accountId: caller.ctx.accountId,
+  accountSlug: caller.accountSlug,
+  accountName: caller.accountName,
   hostedDomain: caller.userEmail.split('@')[1] ?? '',
-  role: caller.ctx.role,
+  isSuperAdmin: caller.ctx.isSuperAdmin,
+  viewHubs: [...caller.ctx.viewHubs],
+  editHubs: [...caller.ctx.editHubs],
 })
 
 const SKIPPED = new Set(['health', 'me'])
@@ -143,13 +138,7 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
         session: sessionFor(context.caller),
         // Through the token's own context, so the audit row says "mcp" and names
         // the person, exactly as the hand-written tools do.
-        workspace: context.caller.ctx,
-        organisation: {
-          organisationId: context.caller.organisationId,
-          actorId: context.caller.userId,
-          actorKind: 'mcp',
-          orgRole: context.caller.orgRole,
-        },
+        account: context.caller.ctx,
       })
       const target = path.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], caller) as (
         input: unknown,

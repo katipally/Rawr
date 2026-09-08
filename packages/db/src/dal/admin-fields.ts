@@ -1,9 +1,9 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
 import { FIELD_TYPES, TYPE_META, type FieldType } from '../registry/types.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { assertUsableFieldKey } from './fields.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 import { forgetRegistry, SYSTEM_FIELD_KEYS } from './registry.ts'
 
 /** The write side of the metadata registry. D4's whole premise is that marketing
@@ -42,8 +42,8 @@ export type AdminField = {
 
 const OPTION_TYPES = new Set<FieldType>(['select', 'multi_select'])
 
-export const listFields = async (ctx: WorkspaceContext, objectKey?: string): Promise<AdminField[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listFields = async (ctx: AccountContext, objectKey?: string): Promise<AdminField[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: fieldDef.id,
@@ -102,7 +102,7 @@ const objectRow = async (tx: Tx, objectKey: string): Promise<{ id: string; key: 
     .from(objectDef)
     .where(eq(objectDef.key, objectKey))
     .limit(1)
-  if (!found) throw new Error(`This workspace has no object called "${objectKey}".`)
+  if (!found) throw new Error(`This account has no object called "${objectKey}".`)
   return found
 }
 
@@ -135,7 +135,7 @@ export type CreateFieldInput = {
 
 /** A new field is always jsonb-stored and always custom. The key is generated once
  *  and never changes, because renaming a label must never touch data. F0 §4. */
-export const createField = async (ctx: WorkspaceContext, input: CreateFieldInput): Promise<AdminField> =>
+export const createField = async (ctx: AccountContext, input: CreateFieldInput): Promise<AdminField> =>
   mutate(ctx, 'field_def', async (tx) => {
     const object = await objectRow(tx, input.objectKey)
     const key = input.key.trim().toLowerCase()
@@ -171,7 +171,7 @@ export const createField = async (ctx: WorkspaceContext, input: CreateFieldInput
     const [created] = await tx
       .insert(fieldDef)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         objectId: object.id,
         key,
         label,
@@ -190,7 +190,7 @@ export const createField = async (ctx: WorkspaceContext, input: CreateFieldInput
       .returning({ id: fieldDef.id })
     if (!created) throw new Error('The field could not be created.')
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: {
@@ -236,7 +236,7 @@ export type UpdateFieldInput = {
 /** Label, help text, choices and the two flags. The key and the type are not here
  *  on purpose: both would change what stored values mean, and a field whose meaning
  *  changed under the data is worse than a second field. */
-export const updateField = async (ctx: WorkspaceContext, input: UpdateFieldInput): Promise<void> =>
+export const updateField = async (ctx: AccountContext, input: UpdateFieldInput): Promise<void> =>
   mutate(ctx, 'field_def', async (tx) => {
     const [before] = await tx
       .select({
@@ -272,7 +272,7 @@ export const updateField = async (ctx: WorkspaceContext, input: UpdateFieldInput
       })
       .where(eq(fieldDef.id, input.id))
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -288,9 +288,9 @@ export const updateField = async (ctx: WorkspaceContext, input: UpdateFieldInput
 
 /** Order is what the record page and the picker read, so moving a field is a real
  *  edit rather than a display preference. Positions are rewritten densely so a
- *  long-lived workspace never accumulates gaps. */
+ *  long-lived account never accumulates gaps. */
 export const reorderFields = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   objectKey: string,
   orderedIds: string[],
 ): Promise<void> =>
@@ -315,7 +315,7 @@ export const reorderFields = async (
       await tx.update(fieldDef).set({ position: position++ }).where(eq(fieldDef.id, id))
     }
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -333,8 +333,8 @@ export type FieldUsage = { filled: number; label: string; key: string; objectKey
 
 /** How many records hold a value, so a delete confirmation can say what is at stake
  *  rather than asking somebody to guess. */
-export const fieldUsage = async (ctx: WorkspaceContext, fieldId: string): Promise<FieldUsage> =>
-  withWorkspace(ctx, async (tx) => {
+export const fieldUsage = async (ctx: AccountContext, fieldId: string): Promise<FieldUsage> =>
+  withAccount(ctx, async (tx) => {
     const [found] = await tx
       .select({
         key: fieldDef.key,
@@ -347,7 +347,7 @@ export const fieldUsage = async (ctx: WorkspaceContext, fieldId: string): Promis
       .innerJoin(objectDef, eq(objectDef.id, fieldDef.objectId))
       .where(eq(fieldDef.id, fieldId))
       .limit(1)
-    if (!found) throw new Error('That field does not exist in this workspace.')
+    if (!found) throw new Error('That field does not exist in this account.')
 
     assertUsableFieldKey(found.key)
     assertUsableFieldKey(found.objectKey)
@@ -365,7 +365,7 @@ export const fieldUsage = async (ctx: WorkspaceContext, fieldId: string): Promis
 
 /** Phase one of two. The field disappears from every surface immediately and the
  *  data stays exactly where it was, so a misclick costs nothing. F0 §4. */
-export const deleteField = async (ctx: WorkspaceContext, fieldId: string): Promise<void> =>
+export const deleteField = async (ctx: AccountContext, fieldId: string): Promise<void> =>
   mutate(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({ key: fieldDef.key, label: fieldDef.label, isCustom: fieldDef.isCustom, storage: fieldDef.storage })
@@ -385,7 +385,7 @@ export const deleteField = async (ctx: WorkspaceContext, fieldId: string): Promi
     await tx.update(fieldDef).set({ isHot: false }).where(eq(fieldDef.id, fieldId))
     await tx.delete(fieldIndex).where(eq(fieldIndex.fieldId, fieldId))
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -399,17 +399,17 @@ export const deleteField = async (ctx: WorkspaceContext, fieldId: string): Promi
     }
   })
 
-export const restoreField = async (ctx: WorkspaceContext, fieldId: string): Promise<void> =>
+export const restoreField = async (ctx: AccountContext, fieldId: string): Promise<void> =>
   mutate(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({ key: fieldDef.key })
       .from(fieldDef)
       .where(eq(fieldDef.id, fieldId))
       .limit(1)
-    if (!found) throw new Error('That field does not exist in this workspace.')
+    if (!found) throw new Error('That field does not exist in this account.')
 
     await tx.update(fieldDef).set({ deletedAt: null }).where(eq(fieldDef.id, fieldId))
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -423,8 +423,8 @@ export const restoreField = async (ctx: WorkspaceContext, fieldId: string): Prom
     }
   })
 
-export const listDeletedFields = async (ctx: WorkspaceContext): Promise<AdminField[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listDeletedFields = async (ctx: AccountContext): Promise<AdminField[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx
       .select({
         id: fieldDef.id,
@@ -467,7 +467,7 @@ export type PurgeResult = { stripped: number }
 /** Phase two. Strips the key out of every record and removes the definition. This
  *  is the only irreversible half, and it is a separate, explicit action for exactly
  *  that reason. F0 §4. */
-export const purgeField = async (ctx: WorkspaceContext, fieldId: string): Promise<PurgeResult> =>
+export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<PurgeResult> =>
   mutate(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({
@@ -481,7 +481,7 @@ export const purgeField = async (ctx: WorkspaceContext, fieldId: string): Promis
       .innerJoin(objectDef, eq(objectDef.id, fieldDef.objectId))
       .where(eq(fieldDef.id, fieldId))
       .limit(1)
-    if (!found) throw new Error('That field does not exist in this workspace.')
+    if (!found) throw new Error('That field does not exist in this account.')
     if (!found.deletedAt) {
       throw new Error(`${found.label} has not been deleted yet. Delete it first, then purge it.`)
     }
@@ -499,7 +499,7 @@ export const purgeField = async (ctx: WorkspaceContext, fieldId: string): Promis
     )
     await tx.delete(fieldDef).where(eq(fieldDef.id, fieldId))
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
 
     return {
       result: { stripped: stripped.length },
@@ -512,9 +512,3 @@ export const purgeField = async (ctx: WorkspaceContext, fieldId: string): Promis
       },
     }
   })
-
-export const FIELD_TYPE_CHOICES = FIELD_TYPES.map((type) => ({
-  type,
-  needsOptions: OPTION_TYPES.has(type),
-  editor: TYPE_META[type].editor,
-}))

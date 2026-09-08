@@ -7,7 +7,7 @@ import {
   MAX_DELAY_MINUTES,
   AUTOMATION_TRIGGERS,
   FIELD_TYPES,
-  ROLES,
+  HUBS,
   listAutomationRuns,
   listAutomations,
   parseFilters,
@@ -15,7 +15,6 @@ import {
   removeAutomation,
   saveAutomation,
   setAutomationActive,
-  addMember,
   auditEntities,
   deleteTeam,
   listAssignable,
@@ -24,8 +23,6 @@ import {
   listTeams,
   saveTeam,
   setTeamMembers,
-  removeMember,
-  setMemberRole,
   createField,
   createLifecycleStage,
   createPipeline,
@@ -58,7 +55,7 @@ import { z } from 'zod'
 import { call } from '../errors.ts'
 import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 
-/** Workspace configuration: the field registry, the pipelines, the lifecycle list
+/** Account configuration: the field registry, the pipelines, the lifecycle list
  *  and the subscription types.
  *
  *  Reads are open to anybody signed in, because every surface in the app already
@@ -66,7 +63,7 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
  *  see the same stage names on a board would be theatre. Writes go through the data
  *  access layer's role matrix, which is the thing that actually decides. */
 
-/** Any object in the workspace, including one an admin invented: a field belongs
+/** Any object in the account, including one an admin invented: a field belongs
  *  to whichever object the registry says exists, and fields are the whole point
  *  of inventing one. Shaped-like-a-key only; the registry decides the rest. */
 const objectKey = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
@@ -80,24 +77,15 @@ const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
 
 export const adminRouter = router({
   members: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listMembers(ctx.workspace))),
-    roles: protectedProcedure.query(() => ROLES),
-    add: adminProcedure
-      .input(z.object({ email: z.string().trim().email().max(254), name: z.string().trim().max(120).optional(), role: z.enum(ROLES) }))
-      .mutation(({ ctx, input }) => call(() => addMember(ctx.workspace, input))),
-    setRole: adminProcedure
-      .input(z.object({ userId: z.string().uuid(), role: z.enum(ROLES) }))
-      .mutation(({ ctx, input }) => call(() => setMemberRole(ctx.workspace, input))),
-    remove: adminProcedure
-      .input(z.object({ userId: z.string().uuid() }))
-      .mutation(({ ctx, input }) => call(() => removeMember(ctx.workspace, input.userId))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listMembers(ctx.account))),
+    hubs: protectedProcedure.query(() => HUBS),
   }),
 
-  /** Named groups inside this workspace. A team decides where a round-robin lead
+  /** Named groups inside this account. A team decides where a round-robin lead
    *  lands, so reading one is open and changing one is an admin's. */
   teams: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listTeams(ctx.workspace))),
-    assignable: protectedProcedure.query(({ ctx }) => call(() => listAssignable(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listTeams(ctx.account))),
+    assignable: protectedProcedure.query(({ ctx }) => call(() => listAssignable(ctx.account))),
     save: adminProcedure
       .input(
         z.object({
@@ -106,10 +94,10 @@ export const adminRouter = router({
           description: z.string().trim().max(500).nullable().optional(),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => saveTeam(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => saveTeam(ctx.account, input))),
     delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteTeam(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteTeam(ctx.account, input.id))),
     setMembers: adminProcedure
       .input(
         z.object({
@@ -117,13 +105,13 @@ export const adminRouter = router({
           members: z.array(z.object({ userId: z.string().uuid(), isLead: z.boolean().optional() })).max(200),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => setTeamMembers(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => setTeamMembers(ctx.account, input))),
   }),
 
-  /** Who changed what in this workspace. Admin only, and refused again in the
+  /** Who changed what in this account. Admin only, and refused again in the
    *  data access layer, because a history is a security record. */
   audit: router({
-    entities: adminProcedure.query(({ ctx }) => call(() => auditEntities(ctx.workspace))),
+    entities: adminProcedure.query(({ ctx }) => call(() => auditEntities(ctx.account))),
     list: adminProcedure
       .input(
         z
@@ -137,13 +125,13 @@ export const adminRouter = router({
           })
           .optional(),
       )
-      .query(({ ctx, input }) => call(() => listAudit(ctx.workspace, input ?? {}))),
+      .query(({ ctx, input }) => call(() => listAudit(ctx.account, input ?? {}))),
   }),
 
   /** Objects an admin invents. The three Rawr is built on are not here: they
    *  cannot be created, renamed or deleted, and the layer refuses each. */
   objects: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listCustomObjects(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listCustomObjects(ctx.account))),
 
     create: adminProcedure
       .input(
@@ -153,7 +141,7 @@ export const adminRouter = router({
           labelFieldLabel: z.string().max(60).optional(),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => createCustomObject(ctx.workspace, input))),
+      .mutation(({ ctx, input }) => call(() => createCustomObject(ctx.account, input))),
 
     rename: adminProcedure
       .input(
@@ -164,20 +152,20 @@ export const adminRouter = router({
         }),
       )
       .mutation(({ ctx, input: { id, ...names } }) =>
-        call(() => renameCustomObject(ctx.workspace, id, names)),
+        call(() => renameCustomObject(ctx.account, id, names)),
       ),
 
     remove: adminProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteCustomObject(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteCustomObject(ctx.account, input.id))),
   }),
 
   fields: router({
     list: protectedProcedure
       .input(z.object({ object: objectKey.optional() }).optional())
-      .query(({ ctx, input }) => call(() => listFields(ctx.workspace, input?.object))),
+      .query(({ ctx, input }) => call(() => listFields(ctx.account, input?.object))),
 
-    listDeleted: adminProcedure.query(({ ctx }) => call(() => listDeletedFields(ctx.workspace))),
+    listDeleted: adminProcedure.query(({ ctx }) => call(() => listDeletedFields(ctx.account))),
 
     types: protectedProcedure.query(() => FIELD_TYPES),
 
@@ -190,19 +178,21 @@ export const adminRouter = router({
           type: fieldType,
           options: z.array(z.string().max(120)).max(200).optional(),
           helpText: z.string().max(500).nullish(),
+          groupName: z.string().trim().max(80).nullish(),
           isRequired: z.boolean().optional(),
           trackChanges: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          createField(ctx.workspace, {
+          createField(ctx.account, {
             objectKey: input.object,
             key: input.key,
             label: input.label,
             type: input.type as never,
             ...(input.options ? { options: input.options } : {}),
             ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
+            ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
             ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
             ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
           }),
@@ -216,17 +206,19 @@ export const adminRouter = router({
           label: name.optional(),
           options: z.array(z.string().max(120)).max(200).optional(),
           helpText: z.string().max(500).nullish(),
+          groupName: z.string().trim().max(80).nullish(),
           isRequired: z.boolean().optional(),
           trackChanges: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          updateField(ctx.workspace, {
+          updateField(ctx.account, {
             id: input.id,
             ...(input.label !== undefined ? { label: input.label } : {}),
             ...(input.options !== undefined ? { options: input.options } : {}),
             ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
+            ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
             ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
             ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
           }),
@@ -235,48 +227,48 @@ export const adminRouter = router({
 
     reorder: protectedProcedure
       .input(z.object({ object: objectKey, orderedIds: z.array(z.uuid()).max(400) }))
-      .mutation(({ ctx, input }) => call(() => reorderFields(ctx.workspace, input.object, input.orderedIds))),
+      .mutation(({ ctx, input }) => call(() => reorderFields(ctx.account, input.object, input.orderedIds))),
 
     /** What a delete would hide, so the confirmation can say it out loud. */
     usage: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .query(({ ctx, input }) => call(() => fieldUsage(ctx.workspace, input.id))),
+      .query(({ ctx, input }) => call(() => fieldUsage(ctx.account, input.id))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteField(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deleteField(ctx.account, input.id))),
 
     restore: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => restoreField(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => restoreField(ctx.account, input.id))),
 
     /** Gives a jsonb-stored field its own expression index, so filtering and
      *  sorting on it stops being a scan. The index itself is built by the worker:
      *  CREATE INDEX CONCURRENTLY cannot run inside a request. F0 §4. */
     promoteToHot: protectedProcedure
       .input(z.object({ fieldId: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => promoteFieldToHot(ctx.workspace, input.fieldId))),
+      .mutation(({ ctx, input }) => call(() => promoteFieldToHot(ctx.account, input.fieldId))),
 
     /** The irreversible half, deliberately separate from delete. F0 §4. */
     purge: adminProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => purgeField(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => purgeField(ctx.account, input.id))),
   }),
 
   pipelines: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listPipelines(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listPipelines(ctx.account))),
 
     create: protectedProcedure
       .input(z.object({ name }))
-      .mutation(({ ctx, input }) => call(() => createPipeline(ctx.workspace, input.name))),
+      .mutation(({ ctx, input }) => call(() => createPipeline(ctx.account, input.name))),
 
     rename: protectedProcedure
       .input(z.object({ id: z.uuid(), name }))
-      .mutation(({ ctx, input }) => call(() => renamePipeline(ctx.workspace, input.id, input.name))),
+      .mutation(({ ctx, input }) => call(() => renamePipeline(ctx.account, input.id, input.name))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deletePipeline(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => deletePipeline(ctx.account, input.id))),
 
     createStage: protectedProcedure
       .input(
@@ -290,7 +282,7 @@ export const adminRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          createStage(ctx.workspace, {
+          createStage(ctx.account, {
             pipelineId: input.pipelineId,
             name: input.name,
             ...(input.probability !== undefined ? { probability: input.probability } : {}),
@@ -312,7 +304,7 @@ export const adminRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          updateStage(ctx.workspace, {
+          updateStage(ctx.account, {
             id: input.id,
             ...(input.name !== undefined ? { name: input.name } : {}),
             ...(input.probability !== undefined ? { probability: input.probability } : {}),
@@ -325,7 +317,7 @@ export const adminRouter = router({
     reorderStages: protectedProcedure
       .input(z.object({ pipelineId: z.uuid(), orderedIds: z.array(z.uuid()).max(100) }))
       .mutation(({ ctx, input }) =>
-        call(() => reorderStages(ctx.workspace, input.pipelineId, input.orderedIds)),
+        call(() => reorderStages(ctx.account, input.pipelineId, input.orderedIds)),
       ),
 
     /** Deleting a stage with deals in it needs a destination, and every deal that
@@ -333,29 +325,29 @@ export const adminRouter = router({
     removeStage: protectedProcedure
       .input(z.object({ id: z.uuid(), destinationStageId: z.uuid().nullish() }))
       .mutation(({ ctx, input }) =>
-        call(() => deleteStage(ctx.workspace, input.id, input.destinationStageId ?? null)),
+        call(() => deleteStage(ctx.account, input.id, input.destinationStageId ?? null)),
       ),
   }),
 
   lifecycle: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listLifecycleStages(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listLifecycleStages(ctx.account))),
 
     create: protectedProcedure
       .input(z.object({ name }))
-      .mutation(({ ctx, input }) => call(() => createLifecycleStage(ctx.workspace, input.name))),
+      .mutation(({ ctx, input }) => call(() => createLifecycleStage(ctx.account, input.name))),
 
     rename: protectedProcedure
       .input(z.object({ id: z.uuid(), name }))
-      .mutation(({ ctx, input }) => call(() => renameLifecycleStage(ctx.workspace, input.id, input.name))),
+      .mutation(({ ctx, input }) => call(() => renameLifecycleStage(ctx.account, input.id, input.name))),
 
     reorder: protectedProcedure
       .input(z.object({ orderedIds: z.array(z.uuid()).max(100) }))
-      .mutation(({ ctx, input }) => call(() => reorderLifecycleStages(ctx.workspace, input.orderedIds))),
+      .mutation(({ ctx, input }) => call(() => reorderLifecycleStages(ctx.account, input.orderedIds))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid(), destinationId: z.uuid().nullish() }))
       .mutation(({ ctx, input }) =>
-        call(() => deleteLifecycleStage(ctx.workspace, input.id, input.destinationId ?? null)),
+        call(() => deleteLifecycleStage(ctx.account, input.id, input.destinationId ?? null)),
       ),
   }),
 
@@ -363,11 +355,11 @@ export const adminRouter = router({
    *  read the log of what it did: a rule writes to every record matching a
    *  filter, which is not a thing to hand to whoever can write one record. */
   automations: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listAutomations(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listAutomations(ctx.account))),
 
     get: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .query(({ ctx, input }) => call(() => readAutomation(ctx.workspace, input.id))),
+      .query(({ ctx, input }) => call(() => readAutomation(ctx.account, input.id))),
 
     save: protectedProcedure
       .input(
@@ -403,7 +395,7 @@ export const adminRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          saveAutomation(ctx.workspace, {
+          saveAutomation(ctx.account, {
             id: input.id ?? null,
             name: input.name,
             trigger: input.trigger,
@@ -421,27 +413,27 @@ export const adminRouter = router({
 
     setActive: protectedProcedure
       .input(z.object({ id: z.uuid(), isActive: z.boolean() }))
-      .mutation(({ ctx, input }) => call(() => setAutomationActive(ctx.workspace, input.id, input.isActive))),
+      .mutation(({ ctx, input }) => call(() => setAutomationActive(ctx.account, input.id, input.isActive))),
 
     remove: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => removeAutomation(ctx.workspace, input.id))),
+      .mutation(({ ctx, input }) => call(() => removeAutomation(ctx.account, input.id))),
 
     runs: protectedProcedure
       .input(z.object({ automationId: z.uuid().optional() }).optional())
       .query(({ ctx, input }) =>
-        call(() => listAutomationRuns(ctx.workspace, input?.automationId ? { automationId: input.automationId } : {})),
+        call(() => listAutomationRuns(ctx.account, input?.automationId ? { automationId: input.automationId } : {})),
       ),
   }),
 
   subscriptionTypes: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listSubscriptionTypes(ctx.workspace))),
+    list: protectedProcedure.query(({ ctx }) => call(() => listSubscriptionTypes(ctx.account))),
 
     create: protectedProcedure
       .input(z.object({ name, description: z.string().max(500).nullish(), isInternal: z.boolean().optional() }))
       .mutation(({ ctx, input }) =>
         call(() =>
-          createSubscriptionType(ctx.workspace, {
+          createSubscriptionType(ctx.account, {
             name: input.name,
             ...(input.description !== undefined ? { description: input.description } : {}),
             ...(input.isInternal !== undefined ? { isInternal: input.isInternal } : {}),
@@ -460,7 +452,7 @@ export const adminRouter = router({
       )
       .mutation(({ ctx, input }) =>
         call(() =>
-          updateSubscriptionType(ctx.workspace, {
+          updateSubscriptionType(ctx.account, {
             id: input.id,
             ...(input.name !== undefined ? { name: input.name } : {}),
             ...(input.description !== undefined ? { description: input.description } : {}),
@@ -474,7 +466,7 @@ export const adminRouter = router({
     remove: protectedProcedure
       .input(z.object({ id: z.uuid(), confirmUnsubscribes: z.number().int().min(0) }))
       .mutation(({ ctx, input }) =>
-        call(() => deleteSubscriptionType(ctx.workspace, input.id, input.confirmUnsubscribes)),
+        call(() => deleteSubscriptionType(ctx.account, input.id, input.confirmUnsubscribes)),
       ),
   }),
 })

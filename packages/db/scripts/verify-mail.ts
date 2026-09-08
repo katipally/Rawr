@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
-import type { Role, WorkspaceContext } from '../src/dal/context.ts'
-import { withWorkspace } from '../src/dal/index.ts'
+import type { AccountContext } from '../src/dal/context.ts'
+import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import {
   bodyProgress,
@@ -47,9 +47,9 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 const stamp = Date.now()
 
 try {
-  const [ws] = await owner`select id from workspace where slug = 'datasaur'`
+  const [ws] = await owner`select id from account where slug = 'datasaur'`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
-  const workspaceId = ws.id as string
+  const accountId = ws.id as string
 
   const person = async (email: string) => {
     const [row] = await owner`select id, email, name from user_account where email = ${email}`
@@ -60,15 +60,17 @@ try {
   const marketingUser = await person('marketing@datasaur.ai')
   const adminUser = await person('admin@datasaur.ai')
 
-  const ctxFor = (userId: string, role: Role): WorkspaceContext => ({
-    workspaceId,
+  const ctxFor = (userId: string, editHubs: string[]): AccountContext => ({
+    accountId,
     actorId: userId,
     actorKind: 'user',
-    role,
+    isSuperAdmin: editHubs.includes('account'),
+    viewHubs: [],
+    editHubs: editHubs as AccountContext['editHubs'],
   })
-  const sales = ctxFor(salesUser.id, 'sales')
-  const marketing = ctxFor(marketingUser.id, 'marketing')
-  const admin = ctxFor(adminUser.id, 'admin')
+  const sales = ctxFor(salesUser.id, ['contacts', 'sales'])
+  const marketing = ctxFor(marketingUser.id, ['contacts', 'marketing'])
+  const admin = ctxFor(adminUser.id, ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
 
   const internalDomain = await internalDomainOf(sales)
 
@@ -251,12 +253,12 @@ try {
   )
 
   // Everything this script made goes with it.
-  await withWorkspace(admin, async (tx) => {
+  await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from message_thread where provider_thread_id like ${`mail-%${stamp}`}`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`mail-%-${stamp}`}`
   await owner`delete from mailbox where id = ${box.id}`
-  await owner`delete from contact where workspace_id = ${workspaceId} and email like ${`body-${stamp}%`}`
+  await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
 }

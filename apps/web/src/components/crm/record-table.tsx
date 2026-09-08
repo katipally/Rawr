@@ -22,7 +22,7 @@ export type TableRow = {
 }
 
 export type RecordTableProps = {
-  workspace: string
+  account: string
   object: string
   view: string
   columns: TableColumn[]
@@ -48,7 +48,7 @@ const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
 const DEFAULT_PAGE_SIZE = 50
 
 export const RecordTable = ({
-  workspace,
+  account,
   object,
   view,
   columns,
@@ -90,7 +90,7 @@ export const RecordTable = ({
         const text = own.trim() || row.displayName
         return (
           <Link
-            href={recordPath(workspace, object, row.id)}
+            href={recordPath(account, object, row.id)}
             className="block truncate font-medium"
             title={text}
             onClick={(event) => event.stopPropagation()}
@@ -140,7 +140,7 @@ export const RecordTable = ({
   const offset = Math.max(0, Number(params.skip ?? 0) || 0)
   const perPage = Math.max(1, Number(params.limit ?? 0) || DEFAULT_PAGE_SIZE)
 
-  const pageHref = (next: ListParams): string => objectView(workspace, object, view, 'list', next)
+  const pageHref = (next: ListParams): string => objectView(account, object, view, 'list', next)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -161,7 +161,7 @@ export const RecordTable = ({
         columns={tableColumns}
         rows={rows}
         rowKey={(row) => row.id}
-        onRowClick={(row) => router.push(recordPath(workspace, object, row.id))}
+        onRowClick={(row) => router.push(recordPath(account, object, row.id))}
         caption={`${object} records in the ${view} view`}
         {...(canBulk
           ? { selection: { selected, onChange: setSelected, noun: objectLabel.toLowerCase() } }

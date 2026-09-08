@@ -1,4 +1,4 @@
-import { publicEdgeContext, workspaceSlugFor } from '@rawr/db'
+import { publicEdgeContext, accountSlugFor } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { resumeAutomation } from '~/server/automations.ts'
@@ -15,18 +15,18 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { workspaceId?: string; runId?: string }
+    | { accountId?: string; runId?: string }
     | null
-  if (!body?.workspaceId || !body?.runId) {
-    return NextResponse.json({ error: 'A workspace and a run are both required.' }, { status: 400 })
+  if (!body?.accountId || !body?.runId) {
+    return NextResponse.json({ error: 'A account and a run are both required.' }, { status: 400 })
   }
 
   try {
     // A job's context: no actor, marketing's ceiling. That is already what the
     // trigger path writes under, so a resumed step can do nothing a triggered
     // one could not.
-    const ctx = { ...publicEdgeContext(body.workspaceId), actorKind: 'job' as const }
-    return NextResponse.json(await resumeAutomation(ctx, body.runId, await workspaceSlugFor(ctx)))
+    const ctx = { ...publicEdgeContext(body.accountId), actorKind: 'job' as const }
+    return NextResponse.json(await resumeAutomation(ctx, body.runId, await accountSlugFor(ctx)))
   } catch (cause) {
     return NextResponse.json(
       { error: cause instanceof Error ? cause.message : String(cause) },

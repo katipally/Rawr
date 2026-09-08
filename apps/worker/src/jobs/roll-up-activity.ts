@@ -1,20 +1,18 @@
-import { refreshAllContactActivity, rollUpExpired, type WorkspaceContext } from '@rawr/db'
+import { refreshAllContactActivity, rollUpExpired, type AccountContext } from '@rawr/db'
 import { z } from 'zod'
 import { owner } from '../db.ts'
 import { defineJob } from './registry.ts'
 
-/** F4 §1. Raw page views live for the retention window, then collapse to one row
- *  per contact per day. Aggregate counts stay honest afterwards, which is what
- *  lets the window be a data-protection decision rather than a lossy one.
- *
- *  Configurable because it is that decision, not a technical constant. */
-const RETENTION_MONTHS = Number(process.env.ACTIVITY_RETENTION_MONTHS ?? '25')
+/** F4 §1. Raw page views collapse to one row per contact per day once past the
+ *  organisation's window. Aggregate counts stay honest, so nothing is lost. */
 
-const jobContext = (workspaceId: string): WorkspaceContext => ({
-  workspaceId,
+const jobContext = (accountId: string): AccountContext => ({
+  accountId,
   actorId: null,
   actorKind: 'job',
-  role: 'marketing',
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: ['contacts', 'marketing'],
 })
 
 export const rollUpActivity = defineJob({
@@ -23,27 +21,20 @@ export const rollUpActivity = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async () => {
-    if (!Number.isFinite(RETENTION_MONTHS) || RETENTION_MONTHS < 1) {
-      throw new Error(
-        `ACTIVITY_RETENTION_MONTHS is "${process.env.ACTIVITY_RETENTION_MONTHS}", which is not a number of months.`,
-      )
-    }
+    // Per account, so one tenant's backlog cannot stall another's.
+    const accounts = await owner<{ id: string; months: number }[]>`
+      select w.id, o.activity_retention_months as months
+        from account w
+        join organisation o on o.id = w.organisation_id`
 
-    // Per workspace, so one tenant's backlog cannot stall another's. This is the
-    // one query that crosses tenants, and it reads nothing but ids.
-    const workspaces = await owner`select id from workspace`
-
-    for (const row of workspaces) {
+    for (const row of accounts) {
       const ctx = jobContext(row.id)
-      const { rolled } = await rollUpExpired(ctx, RETENTION_MONTHS)
+      const { rolled } = await rollUpExpired(ctx, Number(row.months))
       if (rolled === 0) continue
 
-      console.log(`[activity.rollup] rolled ${rolled} page view(s) in workspace ${row.id}.`)
+      console.log(`[activity.rollup] rolled ${rolled} page view(s) in account ${row.id}.`)
 
-      // The counters were computed from rows that have just moved into the daily
-      // table. Recomputing reads both, so the numbers on the panel do not change.
-      // One statement for the whole workspace: this used to be a round trip per
-      // contact, which is fine at 20 seeded rows and not at 88,270.
+      // One statement, not one per contact: 88,270 round trips is not a strategy.
       const refreshed = await refreshAllContactActivity(ctx)
       console.log(`[activity.rollup] recomputed ${refreshed} contact counter(s).`)
     }

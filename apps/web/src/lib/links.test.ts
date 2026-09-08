@@ -1,37 +1,37 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, objectView, recordPath, workspaceInPath } from './links.ts'
+import { exportCsvPath, exportPath, objectView, recordPath, accountInPath } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
- *  chooses which workspace to land in, so a wrong answer here is either a
+ *  chooses which account to land in, so a wrong answer here is either a
  *  redirect loop or somebody dropped into the wrong tenant's screen. */
 
 test('both scoped families put the slug in the same place', () => {
-  assert.equal(workspaceInPath('/contacts/datasaur/home'), 'datasaur')
-  assert.equal(workspaceInPath('/meetings/datasaur/pages'), 'datasaur')
-  assert.equal(workspaceInPath('/contacts/probe/record/contact/abc'), 'probe')
+  assert.equal(accountInPath('/contacts/datasaur/home'), 'datasaur')
+  assert.equal(accountInPath('/meetings/datasaur/pages'), 'datasaur')
+  assert.equal(accountInPath('/contacts/probe/record/contact/abc'), 'probe')
 })
 
 test('the slug stops at the next separator, whichever it is', () => {
-  assert.equal(workspaceInPath('/contacts/datasaur'), 'datasaur')
-  assert.equal(workspaceInPath('/contacts/datasaur/'), 'datasaur')
-  assert.equal(workspaceInPath('/contacts/datasaur?tab=activity'), 'datasaur')
-  assert.equal(workspaceInPath('/contacts/datasaur#top'), 'datasaur')
+  assert.equal(accountInPath('/contacts/datasaur'), 'datasaur')
+  assert.equal(accountInPath('/contacts/datasaur/'), 'datasaur')
+  assert.equal(accountInPath('/contacts/datasaur?tab=activity'), 'datasaur')
+  assert.equal(accountInPath('/contacts/datasaur#top'), 'datasaur')
 })
 
 test('an escaped slug is decoded, because that is what the switch handler compares', () => {
-  assert.equal(workspaceInPath('/contacts/two%20words/home'), 'two words')
+  assert.equal(accountInPath('/contacts/two%20words/home'), 'two words')
 })
 
 test('a half-escaped slug is no slug rather than a guess', () => {
-  assert.equal(workspaceInPath('/contacts/%E0%A4%A/home'), null)
+  assert.equal(accountInPath('/contacts/%E0%A4%A/home'), null)
 })
 
-test('paths outside the two families name no workspace', () => {
+test('paths outside the two families name no account', () => {
   for (const path of [
     '/settings/properties',
     '/sign-in',
-    '/api/auth/workspace',
+    '/api/auth/account',
     '/form/datasaur/contact-us',
     '/b/datasaur/intro',
     '/contacts',
@@ -41,13 +41,13 @@ test('paths outside the two families name no workspace', () => {
     null,
     undefined,
   ]) {
-    assert.equal(workspaceInPath(path), null, String(path))
+    assert.equal(accountInPath(path), null, String(path))
   }
 })
 
-test('the pattern is anchored, so a workspace cannot be smuggled in later', () => {
-  assert.equal(workspaceInPath('/settings/contacts/probe/home'), null)
-  assert.equal(workspaceInPath('https://evil.example/contacts/probe/home'), null)
+test('the pattern is anchored, so a account cannot be smuggled in later', () => {
+  assert.equal(accountInPath('/settings/contacts/probe/home'), null)
+  assert.equal(accountInPath('https://evil.example/contacts/probe/home'), null)
 })
 
 /** B8. What the toolbar and the pager put in the address. Both are read back on

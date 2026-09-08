@@ -4,7 +4,7 @@ import { segmentsPath } from '~/lib/links.ts'
 import { formatDate } from './value.tsx'
 
 export type SegmentsPanelProps = {
-  workspace: string
+  account: string
   recordName: string
   rows: MembershipRow[]
 }
@@ -12,7 +12,7 @@ export type SegmentsPanelProps = {
 /** Which lists this record is in, and which it used to be in. Past spells are kept
  *  on purpose: somebody asking "why did they stop getting the newsletter" is asking
  *  about an exit, and an exit that leaves no trace cannot answer them. A2. */
-export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProps) => {
+export const SegmentsPanel = ({ account, recordName, rows }: SegmentsPanelProps) => {
   const live = rows.filter((row) => row.exitedAt === null)
   const past = rows.filter((row) => row.exitedAt !== null)
 
@@ -20,7 +20,7 @@ export const SegmentsPanel = ({ workspace, recordName, rows }: SegmentsPanelProp
     <section className="rounded-panel border border-line bg-surface shadow-panel">
       <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
         <h3 className="text-base font-semibold">Segments ({live.length})</h3>
-        <Link href={segmentsPath(workspace)} className="text-small">
+        <Link href={segmentsPath(account)} className="text-small">
           Manage
         </Link>
       </header>

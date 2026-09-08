@@ -1,9 +1,9 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { customRecord } from '../schema/records.ts'
-import type { WorkspaceContext } from './context.ts'
+import type { AccountContext } from './context.ts'
 import { forgetRegistry, OBJECT_KEYS } from './registry.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { mutate, withAccount } from './index.ts'
 
 /** Objects an admin invents.
  *
@@ -49,7 +49,7 @@ export const objectKeyFrom = (name: string): string =>
 const RESERVED = new Set([
   ...OBJECT_KEYS,
   'custom_record',
-  'workspace',
+  'account',
   'user_account',
   'activity',
   'task',
@@ -60,8 +60,8 @@ const RESERVED = new Set([
   'attachment',
 ])
 
-export const listCustomObjects = async (ctx: WorkspaceContext): Promise<CustomObjectRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listCustomObjects = async (ctx: AccountContext): Promise<CustomObjectRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       key: string
@@ -101,7 +101,7 @@ export type CreateObjectInput = {
 }
 
 export const createCustomObject = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: CreateObjectInput,
 ): Promise<{ id: string; key: string }> =>
   mutate(ctx, 'object_def', async (tx) => {
@@ -124,7 +124,7 @@ export const createCustomObject = async (
 
     const [created] = await tx
       .insert(objectDef)
-      .values({ workspaceId: ctx.workspaceId, key, nameSingular, namePlural, isCustom: true, icon: input.icon ?? null })
+      .values({ accountId: ctx.accountId, key, nameSingular, namePlural, isCustom: true, icon: input.icon ?? null })
       .returning({ id: objectDef.id })
     if (!created) throw new Error('The object could not be created.')
 
@@ -134,7 +134,7 @@ export const createCustomObject = async (
     const [labelField] = await tx
       .insert(fieldDef)
       .values({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         objectId: created.id,
         key: 'name',
         label: (input.labelFieldLabel ?? 'Name').trim() || 'Name',
@@ -149,7 +149,7 @@ export const createCustomObject = async (
       await tx.update(objectDef).set({ labelFieldId: labelField.id }).where(eq(objectDef.id, created.id))
     }
 
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     return {
       result: { id: created.id, key },
       audit: { entity: 'object_def', entityId: created.id, action: 'create', before: null, after: { key, nameSingular, namePlural } },
@@ -162,7 +162,7 @@ export const createCustomObject = async (
  *  every registry read, and still have to be filtered out of every list — which
  *  is most of the cost of having it with none of the use. The records go by
  *  cascade, the way dropping a table would have taken them. */
-export const deleteCustomObject = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteCustomObject = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'object_def', async (tx) => {
     const [before] = await tx
       .select({ key: objectDef.key, nameSingular: objectDef.nameSingular, isCustom: objectDef.isCustom })
@@ -207,7 +207,7 @@ export const deleteCustomObject = async (ctx: WorkspaceContext, id: string): Pro
     }
 
     await tx.delete(objectDef).where(eq(objectDef.id, id))
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     return {
       result: undefined,
       audit: {
@@ -221,7 +221,7 @@ export const deleteCustomObject = async (ctx: WorkspaceContext, id: string): Pro
   })
 
 export const renameCustomObject = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   id: string,
   input: { nameSingular: string; namePlural: string },
 ): Promise<void> =>
@@ -241,7 +241,7 @@ export const renameCustomObject = async (
     // The key is untouched on purpose: it is in every saved view's address and in
     // every stored filter, and renaming a label must never move stored data.
     await tx.update(objectDef).set({ nameSingular, namePlural }).where(eq(objectDef.id, id))
-    forgetRegistry(ctx.workspaceId)
+    forgetRegistry(ctx.accountId)
     return {
       result: undefined,
       audit: { entity: 'object_def', entityId: id, action: 'rename', before, after: { nameSingular, namePlural } },

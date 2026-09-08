@@ -12,7 +12,7 @@ import {
   type Range,
   type SequencesReport,
   type WebsiteReport,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { formatCurrency } from '~/components/crm/value.tsx'
 
@@ -320,7 +320,7 @@ export type RenderedCard = CardChoice & { data: CardData }
  *  dropped rather than throwing, so retiring a card cannot break a saved
  *  dashboard somebody opens every morning. */
 export const renderCards = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   keys: string[],
   range: Range,
 ): Promise<RenderedCard[]> => {
@@ -331,7 +331,7 @@ export const renderCards = async (
   if (chosen.length === 0) return []
 
   const needed = [...new Set(chosen.map((card) => card.report))]
-  const readers: Record<ReportKey, (ctx: WorkspaceContext, range: Range) => Promise<unknown>> = {
+  const readers: Record<ReportKey, (ctx: AccountContext, range: Range) => Promise<unknown>> = {
     pipeline: pipelineReport,
     forms: formsReport,
     sequences: sequencesReport,

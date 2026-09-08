@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
-import type { WorkspaceContext } from './context.ts'
-import { withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
@@ -65,7 +65,7 @@ export const groupableFields = (object: RegistryObject): { key: string; label: s
  *  and totalling from the loaded cards would be wrong the moment a column has more
  *  than CARDS_PER_COLUMN deals. A5. */
 export const readBoard = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     pipelineId?: string | null
     filters?: FilterGroup[]
@@ -93,9 +93,9 @@ export const readBoard = async (
     // pipeline so an empty stage still shows; a select takes them from the
     // registry's own option list for the same reason.
     // Three independent reads, three connections, so the board costs one read's
-    // round trips rather than three in a row. See withWorkspaceReads.
+    // round trips rather than three in a row. See withAccountReads.
     const columnsRead = byStage
-      ? withWorkspace(ctx, async (tx) =>
+      ? withAccount(ctx, async (tx) =>
           (
             await tx.execute<{ id: string; name: string; probability: string | null }>(sql`
               select s.id, s.name, s.probability
@@ -127,7 +127,7 @@ export const readBoard = async (
       : sql`coalesce(sum("deal"."amount"), 0)::text`
     const weightJoin = byStage ? sql`left join pipeline_stage s on s.id = "deal"."stage_id"` : sql``
 
-    const totalsRead = withWorkspace(ctx, (tx) => tx.execute<{
+    const totalsRead = withAccount(ctx, (tx) => tx.execute<{
       group_key: string | null
       currency: string
       n: number
@@ -146,7 +146,7 @@ export const readBoard = async (
 
     // row_number over the same partition the footers group by, so a column's cards
     // and its count can never disagree about which deals belong to it.
-    const cardsRead = withWorkspace(ctx, (tx) => tx.execute<{
+    const cardsRead = withAccount(ctx, (tx) => tx.execute<{
       id: string
       group_key: string | null
       name: string | null

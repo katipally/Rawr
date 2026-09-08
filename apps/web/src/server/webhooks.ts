@@ -6,7 +6,7 @@ import {
   publicEdgeContext,
   recordDeadLetter,
   recordDelivery,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
 
@@ -32,7 +32,7 @@ export const signPayload = (secret: string, body: string, at = signedAt()): stri
   `t=${at},v1=${createHmac('sha256', secret).update(`${at}.${body}`).digest('hex')}`
 
 export type WebhookJob = {
-  workspaceId: string
+  accountId: string
   endpointId: string
   url: string
   secret: string
@@ -44,8 +44,8 @@ export type WebhookJob = {
  *  to reassemble state from a sequence of deltas has to receive every one of them
  *  in order, and nothing over HTTP promises that. */
 export const buildDelivery = async (
-  ctx: WorkspaceContext,
-  input: { event: string; objectKey: string; entityId: string; workspaceSlug: string },
+  ctx: AccountContext,
+  input: { event: string; objectKey: string; entityId: string; accountSlug: string },
 ): Promise<WebhookJob[]> => {
   const endpoints = await endpointsFor(ctx, input.event)
   if (endpoints.length === 0) return []
@@ -54,7 +54,7 @@ export const buildDelivery = async (
   const body = JSON.stringify({
     event: input.event,
     at: new Date().toISOString(),
-    workspace: input.workspaceSlug,
+    account: input.accountSlug,
     object: input.objectKey,
     id: input.entityId,
     // Null when the record was deleted between the event and the send. Said
@@ -64,7 +64,7 @@ export const buildDelivery = async (
   })
 
   return endpoints.map((endpoint) => ({
-    workspaceId: ctx.workspaceId,
+    accountId: ctx.accountId,
     endpointId: endpoint.id,
     url: endpoint.url,
     secret: endpoint.secret,
@@ -86,7 +86,7 @@ export const WEBHOOK_JOB = 'webhook.deliver'
  *  failing for two days" is the question a subscriber's owner actually has, and a
  *  dead letter in an admin's list does not answer it. */
 export const deliverWebhook = async (job: WebhookJob): Promise<void> => {
-  const ctx = publicEdgeContext(job.workspaceId)
+  const ctx = publicEdgeContext(job.accountId)
   const failed = async (status: number | null, error: string) => {
     await recordDelivery(ctx, job.endpointId, { ok: false, status, error }).catch(() => {})
     await recordDeadLetter(ctx, {
@@ -139,8 +139,8 @@ const describe = (cause: unknown, url: string): string => {
  *  receiver must not make the write that triggered it feel slow, and one that is
  *  down must not fail that write at all. */
 export const notifySubscribers = (
-  ctx: WorkspaceContext,
-  input: { objectKey: string; trigger: string; entityId: string; workspaceSlug: string },
+  ctx: AccountContext,
+  input: { objectKey: string; trigger: string; entityId: string; accountSlug: string },
 ): void => {
   const event = eventNameFor(input.objectKey, input.trigger)
   inBackground(`webhooks for ${event}`, async () => {

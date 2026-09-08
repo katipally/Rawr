@@ -1,9 +1,9 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { team, teamMember, userAccount } from '../schema/identity.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 
-/** A named group inside one workspace. Round robin assignment rotates within a
+/** A named group inside one account. Round robin assignment rotates within a
  *  team, which is what lets a form hand European leads to the people who work
  *  them rather than to whoever happens to own the fewest contacts overall. */
 
@@ -14,8 +14,8 @@ export type TeamRow = {
   members: { userId: string; name: string; email: string; isLead: boolean }[]
 }
 
-export const listTeams = async (ctx: WorkspaceContext): Promise<TeamRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+export const listTeams = async (ctx: AccountContext): Promise<TeamRow[]> =>
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       name: string
@@ -40,7 +40,7 @@ export const listTeams = async (ctx: WorkspaceContext): Promise<TeamRow[]> =>
   })
 
 export const saveTeam = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { id?: string | null | undefined; name: string; description?: string | null | undefined },
 ): Promise<{ id: string }> =>
   mutate(ctx, 'team', async (tx) => {
@@ -52,39 +52,39 @@ export const saveTeam = async (
         .set({ name, description: input.description ?? null })
         .where(eq(team.id, input.id))
         .returning({ id: team.id })
-      if (!row) throw new Error('That team is not in this workspace.')
+      if (!row) throw new Error('That team is not in this account.')
       return { result: { id: row.id }, audit: { entity: 'team', entityId: row.id, action: 'update', after: { name } } }
     }
     const [row] = await tx
       .insert(team)
-      .values({ workspaceId: ctx.workspaceId, name, description: input.description ?? null })
+      .values({ accountId: ctx.accountId, name, description: input.description ?? null })
       .onConflictDoNothing()
       .returning({ id: team.id })
-    if (!row) throw new Error(`This workspace already has a team called "${name}".`)
+    if (!row) throw new Error(`This account already has a team called "${name}".`)
     return { result: { id: row.id }, audit: { entity: 'team', entityId: row.id, action: 'create', after: { name } } }
   })
 
-export const deleteTeam = async (ctx: WorkspaceContext, id: string): Promise<void> =>
+export const deleteTeam = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'team', async (tx) => {
     const [row] = await tx.delete(team).where(eq(team.id, id)).returning({ name: team.name })
-    if (!row) throw new Error('That team is not in this workspace.')
+    if (!row) throw new Error('That team is not in this account.')
     return { result: undefined, audit: { entity: 'team', entityId: id, action: 'delete', before: row } }
   })
 
 /** The whole membership at once. A team is small and the list is edited as a set,
  *  so replacing it is one statement rather than a diff nobody can read. */
 export const setTeamMembers = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { teamId: string; members: { userId: string; isLead?: boolean | undefined }[] },
 ): Promise<void> =>
   mutate(ctx, 'team_member', async (tx) => {
     const [exists] = await tx.select({ id: team.id }).from(team).where(eq(team.id, input.teamId))
-    if (!exists) throw new Error('That team is not in this workspace.')
+    if (!exists) throw new Error('That team is not in this account.')
     await tx.delete(teamMember).where(eq(teamMember.teamId, input.teamId))
     if (input.members.length > 0) {
       await tx.insert(teamMember).values(
         input.members.map((member) => ({
-          workspaceId: ctx.workspaceId,
+          accountId: ctx.accountId,
           teamId: input.teamId,
           userId: member.userId,
           isLead: member.isLead ?? false,
@@ -102,11 +102,11 @@ export const setTeamMembers = async (
     }
   })
 
-/** Who can be put on a team: everybody seated in this workspace. */
+/** Who can be put on a team: everybody seated in this account. */
 export const listAssignable = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
 ): Promise<{ userId: string; name: string; email: string }[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ user_id: string; name: string; email: string }>(sql`
       select u.id as user_id, u.name, u.email
         from membership m join user_account u on u.id = m.user_id

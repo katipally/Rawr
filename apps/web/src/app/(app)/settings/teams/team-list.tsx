@@ -17,18 +17,18 @@ export const TeamList = ({
   teams,
   people,
   canWrite,
-  role,
+  hub,
 }: {
   teams: Team[]
   people: Person[]
   canWrite: boolean
-  role: string
+  hub: string
 }) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<{ id: string | null; name: string; description: string } | null>(null)
-  const [members, setMembers] = useState<{ team: Team; chosen: string[] } | null>(null)
+  const [members, setMembers] = useState<{ team: Team; chosen: string[]; leads: string[] } | null>(null)
   const [deleting, setDeleting] = useState<Team | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -50,7 +50,7 @@ export const TeamList = ({
     <div className="flex flex-col gap-3">
       {!canWrite ? (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can read this and cannot change it.
+          You need {hub} access to change this.
         </p>
       ) : (
         <div>
@@ -90,7 +90,13 @@ export const TeamList = ({
                 {canWrite ? (
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button
-                      onClick={() => setMembers({ team, chosen: team.members.map((member) => member.userId) })}
+                      onClick={() =>
+                        setMembers({
+                          team,
+                          chosen: team.members.map((member) => member.userId),
+                          leads: team.members.filter((member) => member.isLead).map((member) => member.userId),
+                        })
+                      }
                     >
                       Edit members
                     </Button>
@@ -168,14 +174,47 @@ export const TeamList = ({
               label="Members"
               multiple
               value={members.chosen}
-              onChange={(chosen) => setMembers({ ...members, chosen })}
-              hint="Everybody seated in this workspace can be on a team."
+              onChange={(chosen) =>
+                setMembers({ ...members, chosen, leads: members.leads.filter((id) => chosen.includes(id)) })
+              }
+              hint="Everybody seated in this account can be on a team."
               options={people.map((person) => ({
                 value: person.userId,
                 label: person.name,
                 hint: person.email,
               }))}
             />
+
+            {members.chosen.length > 0 ? (
+              <fieldset className="flex flex-col gap-1">
+                <legend className="pb-1 font-medium">Leads</legend>
+                <p className="pb-1 text-secondary">
+                  A lead is a member the team is headed by. Leaving this empty is fine; nothing rotates
+                  differently because of it.
+                </p>
+                {members.chosen.map((userId) => {
+                  const person = people.find((entry) => entry.userId === userId)
+                  return (
+                    <label key={userId} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={members.leads.includes(userId)}
+                        onChange={(event) =>
+                          setMembers({
+                            ...members,
+                            leads: event.target.checked
+                              ? [...members.leads, userId]
+                              : members.leads.filter((id) => id !== userId),
+                          })
+                        }
+                      />
+                      <span className="min-w-0 truncate">{person?.name ?? userId}</span>
+                    </label>
+                  )
+                })}
+              </fieldset>
+            ) : null}
+
             <div className="flex justify-end gap-2">
               <Button variant="tertiary" onClick={() => setMembers(null)}>
                 Cancel
@@ -188,7 +227,10 @@ export const TeamList = ({
                     () =>
                       api.admin.teams.setMembers.mutate({
                         teamId: members.team.id,
-                        members: members.chosen.map((userId) => ({ userId })),
+                        members: members.chosen.map((userId) => ({
+                          userId,
+                          isLead: members.leads.includes(userId),
+                        })),
                       }),
                     `${members.team.name} now has ${members.chosen.length} ${members.chosen.length === 1 ? 'member' : 'members'}.`,
                   ).then((ok) => ok && setMembers(null))
@@ -206,7 +248,7 @@ export const TeamList = ({
           <div className="flex flex-col gap-3">
             <p>
               The team goes; nobody loses their seat. Anything set to round-robin within it falls back to
-              rotating through the whole workspace.
+              rotating through the whole account.
             </p>
             <div className="flex justify-end gap-2">
               <Button variant="tertiary" onClick={() => setDeleting(null)}>

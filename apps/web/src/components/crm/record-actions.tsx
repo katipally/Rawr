@@ -15,7 +15,7 @@ import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
 
 export type RecordActionsProps = {
-  workspace: string
+  account: string
   object: string
   objectLabel: string
   recordId: string
@@ -35,7 +35,7 @@ export type RecordActionsProps = {
 const MERGEABLE = new Set(['contact', 'company', 'deal'])
 
 export const RecordActions = ({
-  workspace,
+  account,
   object,
   objectLabel,
   recordId,
@@ -107,7 +107,7 @@ export const RecordActions = ({
     try {
       await api.crm.records.remove.mutate({ object, id: recordId })
       toast('success', `${objectLabel} deleted. Its history is kept on the records it touched.`)
-      navigate(objectView(workspace, object, 'all'))
+      navigate(objectView(account, object, 'all'))
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {

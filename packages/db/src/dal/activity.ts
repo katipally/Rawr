@@ -3,8 +3,8 @@ import { and, count, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { activity, activityLink } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import type { activityTypeEnum } from '../schema/enums.ts'
-import type { WorkspaceContext } from './context.ts'
-import { mutate, withWorkspace, type Tx } from './index.ts'
+import type { AccountContext } from './context.ts'
+import { mutate, withAccount, type Tx } from './index.ts'
 
 export type ActivityType = (typeof activityTypeEnum.enumValues)[number]
 /** The key of the object a link, a task or a file points at.
@@ -15,6 +15,29 @@ export type ActivityType = (typeof activityTypeEnum.enumValues)[number]
 export type EntityType = string
 
 export type EntityRef = { entityType: EntityType; entityId: string }
+
+/** What an email row carries, written at ingest and read by the card. */
+export type EmailPayload = {
+  threadId: string
+  messageId: string
+  direction: 'inbound' | 'outbound'
+  /** Who it went to, or came from: the other side of the conversation. */
+  counterpart: string[]
+  source: 'gmail' | 'sequence'
+  sequenceId?: string
+  sequenceName?: string
+  sendId?: string
+}
+
+/** What the card shows under an outbound email: read live, never stored, so a
+ *  count is never stale. Opens and clicks come from the sequence send that
+ *  produced the mail, and are null for mail nothing measured. */
+export type EmailStats = {
+  opens: number | null
+  clicks: number | null
+  replies: number
+  bounced: boolean
+}
 
 export type NewActivity = {
   type: ActivityType
@@ -48,7 +71,7 @@ export const isActivityType = (value: string): value is ActivityType => ACTIVITY
  *  timeline entry is missing is not a reachable state. */
 export const recordActivity = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entry: NewActivity,
 ): Promise<string | null> => {
   const links = entry.links.filter((link) => link.entityId)
@@ -58,7 +81,7 @@ export const recordActivity = async (
   const [row] = await tx
     .insert(activity)
     .values({
-      workspaceId: ctx.workspaceId,
+      accountId: ctx.accountId,
       type: entry.type,
       subject: entry.subject ?? null,
       body: entry.body ?? null,
@@ -76,7 +99,7 @@ export const recordActivity = async (
     .insert(activityLink)
     .values(
       links.map((link) => ({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         activityId: row.id,
         entityType: link.entityType,
         entityId: link.entityId,
@@ -106,7 +129,7 @@ const FANOUT_CHUNK = 2_000
  *  order Postgres does not promise. */
 export const recordActivityFanout = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entry: Omit<NewActivity, 'links'> & { entityType: EntityType; entityIds: string[] },
 ): Promise<number> => {
   // ISO text rather than a Date: these statements are raw SQL, and the driver
@@ -127,16 +150,16 @@ export const recordActivityFanout = async (
 
     await tx.execute(sql`
       insert into activity
-        (id, workspace_id, type, subject, body, occurred_at, actor_id, actor_kind, source, payload)
-      select a.id, ${ctx.workspaceId}::uuid, ${entry.type}::rawr_activity_type,
+        (id, account_id, type, subject, body, occurred_at, actor_id, actor_kind, source, payload)
+      select a.id, ${ctx.accountId}::uuid, ${entry.type}::rawr_activity_type,
              ${entry.subject ?? null}::text, ${entry.body ?? null}::text, ${occurredAt}::timestamptz,
              ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind, ${entry.source ?? null}::text,
              ${payload}::jsonb
         from unnest(${idArray}::uuid[]) as a(id)`)
 
     await tx.execute(sql`
-      insert into activity_link (workspace_id, activity_id, entity_type, entity_id, type, occurred_at)
-      select ${ctx.workspaceId}::uuid, t.activity_id, ${entry.entityType}::text, t.entity_id,
+      insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
+      select ${ctx.accountId}::uuid, t.activity_id, ${entry.entityType}::text, t.entity_id,
              ${entry.type}::rawr_activity_type, ${occurredAt}::timestamptz
         from unnest(${idArray}::uuid[], ${entityArray}::uuid[]) as t(activity_id, entity_id)
       on conflict do nothing`)
@@ -152,7 +175,7 @@ export const recordActivityFanout = async (
  *  this is for the caller whose activity IS the change, which today is F5's
  *  log_activity tool and the "I had a call" it exists for. */
 export const logActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entry: NewActivity,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'activity', async (tx) => {
@@ -183,6 +206,85 @@ export type TimelineRow = {
   actorId: string | null
   actorName: string | null
   actorKind: string
+  /** Only on an outbound email. */
+  stats?: EmailStats
+}
+
+/** Everything a contact's activity lands on: the contact, their company, and
+ *  every deal they are associated with. One list, so mail and sequence rows
+ *  reach the company and deal timelines the same way. */
+export const linksForContacts = async (tx: Tx, contactIds: string[]): Promise<EntityRef[]> => {
+  const ids = [...new Set(contactIds)].filter(Boolean)
+  if (ids.length === 0) return []
+  const links: EntityRef[] = ids.map((id) => ({ entityType: 'contact', entityId: id }))
+  const list = sql.join(ids.map((id) => sql`${id}`), sql`, `)
+
+  const companies = await tx.execute<{ company_id: string }>(sql`
+    select distinct company_id from contact
+     where id in (${list}) and company_id is not null`)
+  for (const row of companies) links.push({ entityType: 'company', entityId: row.company_id })
+
+  const deals = await tx.execute<{ deal_id: string }>(sql`
+    select distinct a.from_id as deal_id from association a
+     where a.from_type = 'deal' and a.to_type = 'contact' and a.to_id in (${list})
+    union
+    select distinct a.to_id from association a
+     where a.to_type = 'deal' and a.from_type = 'contact' and a.from_id in (${list})`)
+  for (const row of deals) links.push({ entityType: 'deal', entityId: row.deal_id })
+
+  return links
+}
+
+/** How a contact is named on a row that other records also carry: "Gde
+ *  Ardyansyah was enrolled" on the company page, not "Staffinc was enrolled". */
+export const contactLabels = async (tx: Tx, contactIds: string[]): Promise<string> => {
+  const ids = [...new Set(contactIds)].filter(Boolean)
+  if (ids.length === 0) return ''
+  const rows = await tx.execute<{ label: string }>(sql`
+    select coalesce(nullif(trim(concat_ws(' ', first_name, last_name)), ''), email) as label
+      from contact where id in (${sql.join(ids.map((id) => sql`${id}`), sql`, `)})`)
+  return rows.map((row) => row.label).join(', ')
+}
+
+const emailPayloadOf = (row: { type: ActivityType; payload: unknown }): EmailPayload | null => {
+  if (row.type !== 'email') return null
+  const payload = row.payload as Partial<EmailPayload> | null
+  return payload?.messageId && payload.direction === 'outbound' ? (payload as EmailPayload) : null
+}
+
+/** Opens, clicks and replies for every outbound email on the page, in one
+ *  statement: the send row by message id, and a reply is any inbound message in
+ *  the same thread after this one went out. O(page), not O(thread). */
+const attachEmailStats = async (tx: Tx, rows: TimelineRow[]): Promise<void> => {
+  const outbound = rows.map((row) => ({ row, mail: emailPayloadOf(row) })).filter((entry) => entry.mail)
+  if (outbound.length === 0) return
+
+  const ids = outbound.map((entry) => (entry.mail as EmailPayload).messageId)
+  const found = await tx.execute<{
+    id: string
+    opens: number | null
+    clicks: number | null
+    bounced: boolean
+    replies: number
+  }>(sql`
+    select m.id, s.open_count as opens, s.click_count as clicks,
+           coalesce(s.state = 'bounced', false) as bounced,
+           (select count(*)::int from message r
+             where r.thread_id = m.thread_id and r.direction = 'inbound' and r.sent_at > m.sent_at) as replies
+      from message m
+      left join sequence_send s on s.message_id = m.id
+     where m.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
+
+  const byMessage = new Map(found.map((row) => [row.id, row]))
+  for (const entry of outbound) {
+    const stat = byMessage.get((entry.mail as EmailPayload).messageId)
+    entry.row.stats = {
+      opens: stat?.opens ?? null,
+      clicks: stat?.clicks ?? null,
+      replies: Number(stat?.replies ?? 0),
+      bounced: stat?.bounced ?? false,
+    }
+  }
 }
 
 export type TimelinePage = { rows: TimelineRow[]; nextCursor: TimelineCursor | null }
@@ -190,7 +292,7 @@ export type TimelinePage = { rows: TimelineRow[]; nextCursor: TimelineCursor | n
 /** Keyset on (occurred_at, id) straight off activity_link's timeline index, so a
  *  contact with 4,000 events opens as fast as one with three. */
 export const readTimeline = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: {
     entity: EntityRef
     types?: ActivityType[]
@@ -201,8 +303,8 @@ export const readTimeline = async (
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
   const { entityType, entityId } = input.entity
 
-  const rows = await withWorkspace(ctx, (tx) =>
-    tx
+  const rows = await withAccount(ctx, async (tx) => {
+    const found = await tx
       .select({
         id: activity.id,
         type: activity.type,
@@ -237,13 +339,15 @@ export const readTimeline = async (
         ),
       )
       .orderBy(desc(activityLink.occurredAt), desc(activityLink.activityId))
-      .limit(limit + 1),
-  )
+      .limit(limit + 1)
+    await attachEmailStats(tx, found as TimelineRow[])
+    return found as TimelineRow[]
+  })
 
   const page = rows.slice(0, limit)
   const more = rows.length > limit ? page.at(-1) : undefined
   return {
-    rows: page as TimelineRow[],
+    rows: page,
     nextCursor: more ? { occurredAt: more.occurredAt, id: more.id } : null,
   }
 }
@@ -251,10 +355,10 @@ export const readTimeline = async (
 /** One grouped count query, never "load everything and count in memory". This is
  *  what feeds HubSpot's Activity (28/42) control. */
 export const timelineCounts = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   entity: EntityRef,
 ): Promise<Record<string, number>> => {
-  const rows = await withWorkspace(ctx, (tx) =>
+  const rows = await withAccount(ctx, (tx) =>
     tx
       .select({ type: activityLink.type, n: count() })
       .from(activityLink)
@@ -274,7 +378,7 @@ export const timelineCounts = async (
  *  so an update and a delete over the same rows in one statement is undefined. */
 export const moveActivityLinks = async (
   tx: Tx,
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   from: EntityRef,
   to: EntityRef,
 ): Promise<number> => {
@@ -282,12 +386,12 @@ export const moveActivityLinks = async (
   // first. The activity itself is untouched and stays visible on the survivor.
   await tx.execute(sql`
     delete from activity_link l
-     where l.workspace_id = ${ctx.workspaceId}
+     where l.account_id = ${ctx.accountId}
        and l.entity_type = ${from.entityType}
        and l.entity_id = ${from.entityId}
        and exists (
          select 1 from activity_link keep
-          where keep.workspace_id = l.workspace_id
+          where keep.account_id = l.account_id
             and keep.activity_id = l.activity_id
             and keep.entity_type = ${to.entityType}
             and keep.entity_id = ${to.entityId}
@@ -315,16 +419,16 @@ export type RecentActivityRow = TimelineRow & {
   entityName: string
 }
 
-/** The workspace's timeline, newest first: what the team did today, across every
+/** The account's timeline, newest first: what the team did today, across every
  *  record, for the Home screen, and narrowed to a few types for a screen that is
  *  about one of them. One indexed scan of activity plus a lateral pick of one link
  *  per entry; O(limit), never a join over the whole link table. */
 export const recentActivity = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   limit = 12,
   types?: ActivityType[],
 ): Promise<RecentActivityRow[]> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
       type: ActivityType

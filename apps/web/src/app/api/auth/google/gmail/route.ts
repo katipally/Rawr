@@ -2,7 +2,7 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { devGmailEnabled, env, googleConfigured } from '~/lib/env.ts'
 import { mailboxesPath } from '~/lib/links.ts'
-import { generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
+import { GOOGLE_GMAIL_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { GMAIL_READ_SCOPES, GMAIL_SEND_SCOPES } from '~/server/gmail.ts'
 import { readSession } from '~/server/session.ts'
 
@@ -34,7 +34,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const state = generateState()
   const codeVerifier = generateCodeVerifier()
   const wantsSending = request.nextUrl.searchParams.get('send') === '1'
-  const url = googleClient().createAuthorizationURL(
+  const url = googleClient(GOOGLE_GMAIL_CALLBACK_PATH).createAuthorizationURL(
     state,
     codeVerifier,
     wantsSending ? GMAIL_SEND_SCOPES : GMAIL_READ_SCOPES,

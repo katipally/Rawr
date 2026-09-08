@@ -6,7 +6,7 @@ import { memberships, readSession } from '~/server/session.ts'
 type Props = { searchParams: Promise<Record<string, string | string[] | undefined>> }
 
 /** The consent screen. A person signed in to Rawr sees who is asking, where they
- *  will be sent back to, and which workspace the assistant will act in, then
+ *  will be sent back to, and which account the assistant will act in, then
  *  approves or refuses. Nothing is issued until they press Approve. */
 const AuthorizePage = async ({ searchParams }: Props) => {
   const raw = await searchParams
@@ -35,7 +35,7 @@ const AuthorizePage = async ({ searchParams }: Props) => {
   const { client, request } = checked
   const redirectHost = new URL(request.redirectUri).host
   const loopback = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(redirectHost)
-  const workspaces = await memberships(session.userId)
+  const accounts = await memberships(session.userId)
 
   return (
     <Frame title={`Connect ${client.name} to Rawr`}>
@@ -59,15 +59,15 @@ const AuthorizePage = async ({ searchParams }: Props) => {
         ))}
 
         <label className="flex flex-col gap-1">
-          <span className="font-medium">Workspace</span>
+          <span className="font-medium">Account</span>
           <select
-            name="workspace_id"
-            defaultValue={session.workspaceId}
+            name="account_id"
+            defaultValue={session.accountId}
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           >
-            {workspaces.map((membership) => (
-              <option key={membership.workspaceId} value={membership.workspaceId}>
-                {membership.workspaceName} · {membership.role}
+            {accounts.map((membership) => (
+              <option key={membership.accountId} value={membership.accountId}>
+                {membership.accountName}{membership.isSuperAdmin ? ' · super admin' : ''}
               </option>
             ))}
           </select>

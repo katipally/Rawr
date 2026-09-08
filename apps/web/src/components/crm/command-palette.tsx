@@ -7,12 +7,20 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
 
-type Hit = { objectKey: string; id: string; displayName: string; detail: string | null }
-type Group = { label: string; hits: Hit[] }
+type Item = { key: string; label: string; detail: string | null; href: string }
+type Group = { label: string; items: Item[] }
+
+/** A page the rail can reach, so "Find or Ask" finds pages as well as records.
+ *  Passed down from the same NavSection[] the rail is built from, so the two
+ *  cannot drift: a page added to the rail is searchable the same day. */
+export type Page = { label: string; section: string; href: string }
 
 const DEBOUNCE_MS = 180
 
-export const CommandPalette = ({ workspace }: { workspace: string }) => {
+/** More than this and the list is a rail with extra steps. */
+const MAX_PAGES = 6
+
+export const CommandPalette = ({ account, pages }: { account: string; pages: Page[] }) => {
   const { navigate } = useNavigation()
   const listId = useId()
   const input = useRef<HTMLInputElement>(null)
@@ -51,9 +59,19 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         .then((results) => {
           if (cancelled) return
           setError(null)
-          // Whatever the workspace has, named by the registry, so an object an
+          // Whatever the account has, named by the registry, so an object an
           // admin invented is searched from here the day it exists.
-          setGroups(results.groups.map((group) => ({ label: group.namePlural, hits: group.hits })))
+          setGroups(
+            results.groups.map((group) => ({
+              label: group.namePlural,
+              items: group.hits.map((hit) => ({
+                key: hit.id,
+                label: hit.displayName,
+                detail: hit.detail,
+                href: recordPath(account, hit.objectKey, hit.id),
+              })),
+            })),
+          )
           setActive(0)
         })
         .catch((cause: unknown) => {
@@ -70,15 +88,30 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [text])
+  }, [text, account])
 
-  const flat = groups.flatMap((group) => group.hits)
+  // Pages are matched here rather than on the server: the list is the rail, it
+  // is already in memory, and a page match should not wait for a round trip.
+  const term = text.trim().toLowerCase()
+  const matched: Group[] =
+    term.length < 2
+      ? []
+      : (() => {
+          const hits = pages
+            .filter((page) => page.label.toLowerCase().includes(term) || page.section.toLowerCase().includes(term))
+            .slice(0, MAX_PAGES)
+            .map((page) => ({ key: page.href, label: page.label, detail: page.section, href: page.href }))
+          return hits.length > 0 ? [{ label: 'Go to', items: hits }] : []
+        })()
 
-  const go = (hit: Hit) => {
+  const shown = [...matched, ...groups]
+  const flat = shown.flatMap((group) => group.items)
+
+  const go = (item: Item) => {
     setOpen(false)
     setText('')
     setGroups([])
-    navigate(recordPath(workspace, hit.objectKey, hit.id))
+    navigate(item.href)
   }
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -91,10 +124,10 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
       setActive((current) => Math.max(current - 1, 0))
     }
     if (event.key === 'Enter') {
-      const hit = flat[active]
-      if (hit) {
+      const item = flat[active]
+      if (item) {
         event.preventDefault()
-        go(hit)
+        go(item)
       }
     }
     if (event.key === 'Escape') {
@@ -116,7 +149,7 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         role="combobox"
         aria-expanded={showing}
         aria-controls={listId}
-        aria-label="Search records"
+        aria-label="Search records and pages"
         placeholder="Find or Ask"
         onChange={(event) => {
           setText(event.target.value)
@@ -132,7 +165,10 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
         <div
           id={listId}
           role="listbox"
-          className="absolute top-full right-0 left-0 z-40 mt-1 max-h-[70vh] overflow-y-auto rounded-panel border border-line bg-surface shadow-overlay"
+          // text-body is not decoration: this panel hangs off an input in the
+          // charcoal top bar, so without it every unstyled label inherits that
+          // bar's near-white ink and renders white on white.
+          className="absolute top-full right-0 left-0 z-40 mt-1 max-h-[70vh] overflow-y-auto rounded-panel border border-line bg-surface text-body shadow-overlay"
         >
           {error ? (
             <p role="alert" className="px-3 py-2 text-error">
@@ -143,32 +179,32 @@ export const CommandPalette = ({ workspace }: { workspace: string }) => {
               {searching ? 'Searching…' : `Nothing matches “${text.trim()}”.`}
             </p>
           ) : (
-            groups.map((group) => (
+            shown.map((group) => (
               <div key={group.label}>
                 <p className="bg-fill px-3 py-1 text-small font-medium text-secondary uppercase">
                   {group.label}
                 </p>
                 <ul>
-                  {group.hits.map((hit) => {
+                  {group.items.map((item) => {
                     index += 1
                     const current = index
                     return (
-                      <li key={hit.id}>
+                      <li key={item.key}>
                         <button
                           type="button"
                           role="option"
                           aria-selected={current === active}
                           onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => go(hit)}
+                          onClick={() => go(item)}
                           onMouseEnter={() => setActive(current)}
                           className={cn(
                             'block w-full px-3 py-1.5 text-left',
                             current === active && 'bg-accent-subtle',
                           )}
                         >
-                          <span className="block truncate font-medium">{hit.displayName}</span>
-                          {hit.detail ? (
-                            <span className="block truncate text-secondary">{hit.detail}</span>
+                          <span className="block truncate font-medium">{item.label}</span>
+                          {item.detail ? (
+                            <span className="block truncate text-secondary">{item.detail}</span>
                           ) : null}
                         </button>
                       </li>

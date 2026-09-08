@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { calendarsPath } from '~/lib/links.ts'
-import { googleClient } from '~/server/auth/google.ts'
+import { GOOGLE_CALENDAR_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Stores the grant. The tokens are encrypted with a key held outside this
@@ -17,7 +17,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const jar = await cookies()
   const expectedState = jar.get('rawr_cal_state')?.value
   const codeVerifier = jar.get('rawr_cal_verifier')?.value
-  const returnTo = jar.get('rawr_cal_return')?.value ?? calendarsPath(session.workspaceSlug)
+  const returnTo = jar.get('rawr_cal_return')?.value ?? calendarsPath(session.accountSlug)
   jar.delete('rawr_cal_state')
   jar.delete('rawr_cal_verifier')
   jar.delete('rawr_cal_return')
@@ -42,7 +42,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   try {
-    const tokens = await googleClient().validateAuthorizationCode(code, codeVerifier)
+    const tokens = await googleClient(GOOGLE_CALENDAR_CALLBACK_PATH).validateAuthorizationCode(code, codeVerifier)
     if (!tokens.hasRefreshToken()) {
       // Without one, the connection would work for an hour and then fail in a way
       // nobody could explain. Better to refuse now and say why.

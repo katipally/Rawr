@@ -2,7 +2,6 @@ import {
   BarChart3,
   Ban,
   Bookmark,
-  Bot,
   Briefcase,
   Building2,
   CalendarDays,
@@ -12,18 +11,17 @@ import {
   Contact,
   Copy,
   Database,
-  FileText,
+  Globe,
   Handshake,
   Hash,
   Home,
-  LifeBuoy,
   Mail,
   Megaphone,
   Pencil,
   Phone,
-  Receipt,
   RotateCcw,
   Send,
+  ShieldCheck,
   Sparkles,
   Trash2,
   Unlink,
@@ -43,12 +41,8 @@ export type IconKey =
   | 'bookmarks'
   | 'crm'
   | 'marketing'
-  | 'content'
   | 'sales'
-  | 'commerce'
-  | 'service'
   | 'data'
-  | 'agents'
   | 'reporting'
 
 /** HubSpot's rail, top to bottom. */
@@ -57,12 +51,8 @@ export const SECTION_ICONS: Record<IconKey, LucideIcon> = {
   bookmarks: Bookmark,
   crm: Contact,
   marketing: Megaphone,
-  content: FileText,
   sales: Briefcase,
-  commerce: Receipt,
-  service: LifeBuoy,
   data: Database,
-  agents: Bot,
   reporting: ChartNoAxesColumn,
 }
 
@@ -90,6 +80,8 @@ export const INTEGRATION_ICONS: Record<IntegrationKind, LucideIcon> = {
   ga4: BarChart3,
   zoom: Video,
   google_calendar: CalendarDays,
+  turnstile: ShieldCheck,
+  webflow: Globe,
 }
 
 /** The verbs that act on one row of a list. Named here for the same reason the

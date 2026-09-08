@@ -1,9 +1,9 @@
 import { PageHeader } from '@rawr/ui'
 import { listAssignable, listTeams } from '@rawr/db'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TeamList } from './team-list.tsx'
 
-/** Named groups inside this workspace. A form or a booking page that round-robins
+/** Named groups inside this account. A form or a booking page that round-robins
  *  within a team hands European inbound to the people who work it, rather than to
  *  whoever happens to own the fewest contacts overall. */
 const TeamsPage = async () => {
@@ -18,7 +18,7 @@ const TeamsPage = async () => {
       <PageHeader
         as="h2"
         title="Teams"
-        lead={`Groups inside ${session.workspaceName}.`}
+        lead={`Groups inside ${session.accountName}.`}
         why={
           <p>
             A form set to round-robin within a team rotates through its members rather than through
@@ -27,7 +27,7 @@ const TeamsPage = async () => {
         }
       />
 
-      <TeamList teams={teams} people={people} canWrite={session.role === 'admin'} role={session.role} />
+      <TeamList teams={teams} people={people} canWrite={sessionIsAdmin(session)} hub="account" />
     </div>
   )
 }

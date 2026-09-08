@@ -84,7 +84,7 @@ export function clientFieldError(field: ClientField, value: unknown): string | n
     }
   } else if (field.type === 'phone') {
     if (!/^[+0-9][0-9\s().-]{4,30}$/.test(text)) return field.label + ' is not a phone number.'
-  } else if (field.type === 'select') {
+  } else if (field.type === 'select' || field.type === 'radio') {
     if (field.options && field.options.length) {
       var found = false
       for (var i = 0; i < field.options.length; i++) {

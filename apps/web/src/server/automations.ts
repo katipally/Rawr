@@ -13,7 +13,7 @@ import {
   type AutomationAction,
   type AutomationRow,
   type AutomationTrigger,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
 import { notifySubscribers } from './webhooks.ts'
@@ -45,7 +45,7 @@ export type AutomationEvent = {
    *  hold an id and nothing else; the runner reads it then, and only if a rule is
    *  actually armed. */
   displayName?: string | undefined
-  workspaceSlug: string
+  accountSlug: string
 }
 
 const text = (config: Record<string, unknown>, key: string): string => {
@@ -60,7 +60,7 @@ const fill = (template: string, name: string): string =>
   template.replace(/\{\{\s*name\s*\}\}/g, name)
 
 const runAction = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   event: AutomationEvent,
   action: AutomationAction,
   ruleId: string,
@@ -105,9 +105,9 @@ const runAction = async (
 
     case 'notify_slack': {
       const message = fill(text(action.config, 'message') || '{{name}}', name)
-      const link = `/contacts/${event.workspaceSlug}/record/${event.objectKey}/${event.entityId}`
+      const link = `/contacts/${event.accountSlug}/record/${event.objectKey}/${event.entityId}`
       queueHostAlert({
-        workspaceId: ctx.workspaceId,
+        accountId: ctx.accountId,
         jobName: 'slack.automation',
         // Keyed on the rule and the record, so a retry of the same firing posts
         // once. A rule that fires twice for real carries two different records or
@@ -133,7 +133,7 @@ const runAction = async (
  *  record in a state no rule describes, which is worse than one that did not run.
  *  The trail says how far it got. */
 export const walkSteps = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
   runId: string,
@@ -206,7 +206,7 @@ const describeDelay = (minutes: number): string => {
 }
 
 const runOne = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
   name: string,
@@ -237,9 +237,9 @@ const runOne = async (
  *  sentence saying why. A rule switched off, deleted, or pointing at a record
  *  that has since gone are all ordinary, and none of them is a failure to retry. */
 export const resumeAutomation = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   runId: string,
-  workspaceSlug: string,
+  accountSlug: string,
 ): Promise<{ resumed: boolean; reason?: string }> => {
   const claimed = await claimAutomationRun(ctx, runId)
   // Somebody else has it, or it is not due. Not an error: the dispatcher is
@@ -275,7 +275,7 @@ export const resumeAutomation = async (
       objectKey: claimed.entityType,
       entityId: claimed.entityId,
       displayName: record.displayName,
-      workspaceSlug,
+      accountSlug,
     },
     rule,
     runId,
@@ -295,7 +295,7 @@ export const resumeAutomation = async (
  *
  *  Never awaited by a request. */
 export const reportEvent = (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   // Widened at the door rather than at every call site: a record of a custom
   // object goes through the same create and update procedures, and asking each
   // of them to narrow first would be five copies of the check below.
@@ -307,12 +307,12 @@ export const reportEvent = (
     objectKey: event.objectKey,
     trigger: event.trigger,
     entityId: event.entityId,
-    workspaceSlug: event.workspaceSlug,
+    accountSlug: event.accountSlug,
   })
 }
 
 /** Fire everything armed for this event. Never awaited by a request. */
-export const runAutomations = (ctx: WorkspaceContext, event: AutomationEvent | undefined): void => {
+export const runAutomations = (ctx: AccountContext, event: AutomationEvent | undefined): void => {
   if (!event) return
   inBackground(`automations for ${event.objectKey} ${event.entityId}`, async () => {
     const rules = await armedFor(ctx, event.trigger, event.objectKey)

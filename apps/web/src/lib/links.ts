@@ -1,7 +1,7 @@
 
 /** Every address in the CRM, built here and nowhere else.
  *
- *  The shape mirrors HubSpot's so muscle memory carries over: the workspace sits
+ *  The shape mirrors HubSpot's so muscle memory carries over: the account sits
  *  where HubSpot puts the portal id, and the /objects/.../views/:slug/list and
  *  /record/:object/:id segments are theirs. The one deliberate difference is
  *  readable object keys instead of HubSpot's 0-1 and 0-3 codes.
@@ -19,23 +19,23 @@ export const CRM_ROOT = 'contacts'
  *  invent one, and its list and record pages are these same builders. Whether
  *  the key names a real object is the registry's answer, not a URL's. */
 
-/** The reverse of every builder below: which workspace an address names, or null
+/** The reverse of every builder below: which account an address names, or null
  *  when it names none. Both scoped families put the slug in the same position,
  *  which is what lets one pattern read either.
  *
- *  Read by src/proxy.ts, to notice a link into a workspace the session is not on,
- *  and by the Google callback, to land somebody on the workspace their link asked
+ *  Read by src/proxy.ts, to notice a link into a account the session is not on,
+ *  and by the Google callback, to land somebody on the account their link asked
  *  for rather than on whichever membership came back first. */
 const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)(?:[/?#]|$)/
 
-export const workspaceInPath = (path: string | null | undefined): string | null => {
+export const accountInPath = (path: string | null | undefined): string | null => {
   const found = path ? WORKSPACE_PATH.exec(path)?.[1] : null
   if (!found) return null
   try {
     return decodeURIComponent(found)
   } catch {
     // A half-escaped slug from a hand-edited link. It cannot match a real
-    // workspace, and guessing at it is worse than saying there was none.
+    // account, and guessing at it is worse than saying there was none.
     return null
   }
 }
@@ -82,16 +82,16 @@ const query = (params: Record<string, string | number | undefined | null>): stri
 }
 
 /** The front door: the Monday screen, not a list. */
-export const workspaceHome = (workspace: string): string => `/${CRM_ROOT}/${workspace}/home`
+export const accountHome = (account: string): string => `/${CRM_ROOT}/${account}/home`
 
 export const objectView = (
-  workspace: string,
+  account: string,
   object: string,
   view: string,
   kind: ViewKind = 'list',
   params: ListParams = {},
 ): string =>
-  `/${CRM_ROOT}/${workspace}/objects/${object}/views/${view}/${kind}${query(params)}`
+  `/${CRM_ROOT}/${account}/objects/${object}/views/${view}/${kind}${query(params)}`
 
 /** `tab` is Overview or Activities, `type` filters the timeline, and the last
  *  three are the quick-action row asking a panel that is already on the page to
@@ -99,7 +99,7 @@ export const objectView = (
  *  the address rather than in component state so "log a call on this deal" is a
  *  link somebody can be sent. */
 export const recordPath = (
-  workspace: string,
+  account: string,
   object: string,
   id: string,
   params: {
@@ -109,49 +109,49 @@ export const recordPath = (
     task?: string | undefined
     compose?: string | undefined
   } = {},
-): string => `/${CRM_ROOT}/${workspace}/record/${object}/${id}${query(params)}`
+): string => `/${CRM_ROOT}/${account}/record/${object}/${id}${query(params)}`
 
 /** The + in the top bar. It lands on the object's own list, which is where the
  *  create dialog lives, so there is one create form per object rather than a
  *  second copy in the shell that would have to learn the same fields. */
-export const createRecordPath = (workspace: string, object: string): string =>
-  `${objectView(workspace, object, 'all')}?new=1`
+export const createRecordPath = (account: string, object: string): string =>
+  `${objectView(account, object, 'all')}?new=1`
 
 /** The export screen, and the file it hands over. The CSV lives one segment
  *  deeper than the page so the page has an address of its own: a download route
  *  cannot also be a screen somebody browses to. */
-export const exportPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/export`
+export const exportPath = (account: string): string => `/${CRM_ROOT}/${account}/export`
 
-export const duplicatesPath = (workspace: string, object?: 'contact' | 'company'): string =>
-  `/${CRM_ROOT}/${workspace}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`
+export const duplicatesPath = (account: string, object?: 'contact' | 'company'): string =>
+  `/${CRM_ROOT}/${account}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`
 
 export const exportCsvPath = (
-  workspace: string,
+  account: string,
   params: { object: string; columns?: string; filters?: string; sort?: string; q?: string },
-): string => `/${CRM_ROOT}/${workspace}/export/csv${query(params)}`
+): string => `/${CRM_ROOT}/${account}/export/csv${query(params)}`
 
-export const importsPath = (workspace: string, id?: string): string =>
-  id ? `/${CRM_ROOT}/${workspace}/import/${id}` : `/${CRM_ROOT}/${workspace}/import`
+export const importsPath = (account: string, id?: string): string =>
+  id ? `/${CRM_ROOT}/${account}/import/${id}` : `/${CRM_ROOT}/${account}/import`
 
-/** Forms live under the same workspace-addressed tree as every other surface, so
+/** Forms live under the same account-addressed tree as every other surface, so
  *  a link to one form, or to the review queue filtered to a state, pastes like
  *  anything else. */
-export const formsPath = (workspace: string, id?: string): string =>
-  id ? `/${CRM_ROOT}/${workspace}/forms/${id}` : `/${CRM_ROOT}/${workspace}/forms`
+export const formsPath = (account: string, id?: string): string =>
+  id ? `/${CRM_ROOT}/${account}/forms/${id}` : `/${CRM_ROOT}/${account}/forms`
 
 export const submissionsPath = (
-  workspace: string,
-  params: { state?: string; form?: string } = {},
-): string => `/${CRM_ROOT}/${workspace}/submissions${query(params)}`
+  account: string,
+  params: { state?: string; form?: string; before?: string } = {},
+): string => `/${CRM_ROOT}/${account}/submissions${query(params)}`
 
 /** F4. One page view, addressed by its own id, so the screen a salesperson is
- *  looking at pastes into Slack like every other surface. The workspace is in the
+ *  looking at pastes into Slack like every other surface. The account is in the
  *  path for the same reason it is everywhere else. */
-export const pageViewPath = (workspace: string, id: string): string =>
-  `/${CRM_ROOT}/${workspace}/activity/${id}`
+export const pageViewPath = (account: string, id: string): string =>
+  `/${CRM_ROOT}/${account}/activity/${id}`
 
-/** Everything under /settings is workspace configuration rather than a record, so
- *  none of it carries a workspace in the path: a session is already in exactly one.
+/** Everything under /settings is account configuration rather than a record, so
+ *  none of it carries a account in the path: a session is already in exactly one.
  *  Kept in one list so the settings sub-navigation and the pages agree. */
 export const sitesPath = (): string => '/settings/sites'
 
@@ -176,22 +176,29 @@ export const subscriptionsPath = (): string => '/settings/subscriptions'
 export const integrationsPath = (kind?: string): string =>
   kind ? `/settings/integrations?open=${kind}` : '/settings/integrations'
 
+/** Connected apps sit above a account, because the credential belongs to the
+ *  organisation, and outside settings, because they have a frame of their own the
+ *  way HubSpot's do. */
+export const appsPath = (): string => '/apps'
+export const availableAppsPath = (): string => '/apps/available'
+export const appPath = (kind: string): string => `/apps/${kind}`
+
 /** Segments live in the CRM tree, not settings: a segment is a view of records
  *  that salespeople open, not configuration an admin sets once. */
-export const segmentsPath = (workspace: string, id?: string): string =>
-  id ? `/${CRM_ROOT}/${workspace}/segments/${id}` : `/${CRM_ROOT}/${workspace}/segments`
+export const segmentsPath = (account: string, id?: string): string =>
+  id ? `/${CRM_ROOT}/${account}/segments/${id}` : `/${CRM_ROOT}/${account}/segments`
 
 export type TaskView = 'all' | 'today' | 'overdue' | 'upcoming' | 'done'
 export const tasksPath = (
-  workspace: string,
+  account: string,
   params: { view?: TaskView; mine?: '1'; q?: string; new?: '1' } = {},
 ): string =>
-  `/${CRM_ROOT}/${workspace}/tasks${query(params)}`
+  `/${CRM_ROOT}/${account}/tasks${query(params)}`
 
 /** The shared inbox. Every filter is in the address, so a filtered view pastes
  *  into Slack and the back button works. */
 export const inboxPath = (
-  workspace: string,
+  account: string,
   params: {
     scope?: string | undefined
     mailbox?: string | undefined
@@ -199,70 +206,87 @@ export const inboxPath = (
     unread?: string | undefined
     q?: string | undefined
   } = {},
-): string => `/${CRM_ROOT}/${workspace}/inbox${query(params)}`
+): string => `/${CRM_ROOT}/${account}/inbox${query(params)}`
 
-export const threadPath = (workspace: string, threadId: string): string =>
-  `/${CRM_ROOT}/${workspace}/inbox/${threadId}`
+export const threadPath = (account: string, threadId: string): string =>
+  `/${CRM_ROOT}/${account}/inbox/${threadId}`
 
 /** Sequences live in the CRM tree, not settings: they are outreach salespeople
  *  run, not configuration an admin sets once. */
-export const sequencesPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/sequences`
+export const sequencesPath = (account: string): string => `/${CRM_ROOT}/${account}/sequences`
 
 /** The six reports. `tab` is the report, `from` and `to` are the range, so a
  *  report worth looking at is a link somebody can send. */
 export const reportsPath = (
-  workspace: string,
+  account: string,
   params: { tab?: string; from?: string; to?: string } = {},
 ): string => {
   const { tab, ...rest } = params
-  return `/${CRM_ROOT}/${workspace}/reports${tab ? `/${tab}` : ''}${query(rest)}`
+  return `/${CRM_ROOT}/${account}/reports${tab ? `/${tab}` : ''}${query(rest)}`
 }
 
 /** B11. One assembled dashboard, carrying the range it is read over. */
 export const dashboardPath = (
-  workspace: string,
+  account: string,
   id: string,
   params: { from?: string; to?: string } = {},
-): string => `/${CRM_ROOT}/${workspace}/reports/dashboards/${id}${query(params)}`
+): string => `/${CRM_ROOT}/${account}/reports/dashboards/${id}${query(params)}`
 
 /** Brevo's seam: the audience and the opt-out are Rawr's, the send is Brevo's. */
-export const newsletterPath = (workspace: string): string => `/${CRM_ROOT}/${workspace}/newsletter`
+export const newsletterPath = (account: string): string => `/${CRM_ROOT}/${account}/newsletter`
 
-export const sequencePath = (workspace: string, id: string): string =>
-  `/${CRM_ROOT}/${workspace}/sequences/${id}`
+/** Words to reuse, beside the sequences that use them. HubSpot files these under
+ *  Sales as Message Templates; the same place, by the same reasoning. */
+export const templatesPath = (account: string): string => `/${CRM_ROOT}/${account}/templates`
 
-export const enrollmentsPath = (workspace: string, id: string, params: { state?: string | undefined } = {}): string =>
-  `/${CRM_ROOT}/${workspace}/sequences/${id}/enrollments${query(params)}`
+export const sequencePath = (account: string, id: string): string =>
+  `/${CRM_ROOT}/${account}/sequences/${id}`
+
+export const enrollmentsPath = (account: string, id: string, params: { state?: string | undefined } = {}): string =>
+  `/${CRM_ROOT}/${account}/sequences/${id}/enrollments${query(params)}`
 
 /** Where sequence pixels and click redirects are served from. */
 export const trackingPath = (): string => '/settings/tracking'
 
 /** Booking sits under its own root, the way HubSpot puts scheduling pages under
  *  /meetings/:portalId rather than inside the contacts app. Same rule as everything
- *  else: the workspace is in the path, so any screen pastes. */
+ *  else: the account is in the path, so any screen pastes. */
 export const MEETINGS_ROOT = 'meetings'
 
-export const bookingPagesPath = (workspace: string, id?: string): string =>
-  id ? `/${MEETINGS_ROOT}/${workspace}/pages/${id}` : `/${MEETINGS_ROOT}/${workspace}/pages`
+export const bookingPagesPath = (account: string, id?: string): string =>
+  id ? `/${MEETINGS_ROOT}/${account}/pages/${id}` : `/${MEETINGS_ROOT}/${account}/pages`
+
+/** The list with the create dialog already open, for the Create menu. */
+export const newBookingPagePath = (account: string): string =>
+  `/${MEETINGS_ROOT}/${account}/pages?new=1`
 
 export const bookedPath = (
-  workspace: string,
+  account: string,
   params: { when?: 'upcoming' | 'past'; page?: string; host?: string; state?: string } = {},
-): string => `/${MEETINGS_ROOT}/${workspace}/booked${query(params)}`
+): string => `/${MEETINGS_ROOT}/${account}/booked${query(params)}`
 
 /** A person's own working hours, and an admin looking at somebody else's. The user
  *  is a query parameter rather than a path segment because the default subject is
  *  always "me", and a link with nobody named still opens on the right person. */
-export const availabilityPath = (workspace: string, params: { user?: string; month?: string } = {}): string =>
-  `/${MEETINGS_ROOT}/${workspace}/availability${query(params)}`
+export const availabilityPath = (account: string, params: { user?: string; month?: string } = {}): string =>
+  `/${MEETINGS_ROOT}/${account}/availability${query(params)}`
 
-export const calendarsPath = (workspace: string): string =>
-  `/${MEETINGS_ROOT}/${workspace}/calendars`
+/** The month: meetings booked with somebody and tasks due from them. What the
+ *  rail's Calendar means to a salesperson. */
+export const calendarPath = (
+  account: string,
+  params: { month?: string; who?: string } = {},
+): string => `/${MEETINGS_ROOT}/${account}/calendar${query(params)}`
+
+/** Which Google accounts Rawr may read free-busy from. Plumbing, not a calendar,
+ *  which is why the rail no longer points here. */
+export const calendarsPath = (account: string): string =>
+  `/${MEETINGS_ROOT}/${account}/calendars`
 
 /** The public booking page. Absolute elsewhere; relative here because the app
  *  links to it too, from the page editor's preview. */
 export const bookingPublicPath = (
-  workspaceSlug: string,
+  accountSlug: string,
   slug: string,
   params: {
     month?: string | undefined
@@ -282,8 +306,11 @@ export const bookingPublicPath = (
     /** A non-fatal note on an otherwise successful booking, such as a joining
      *  link that is still being created. */
     w?: string | undefined
+    /** The soft hold on the chosen slot. Carried in the URL because the hosted
+     *  page has no script and nowhere else to keep it between renders. */
+    hold?: string | undefined
   } = {},
-): string => `/b/${workspaceSlug}/${slug}${query(params)}`
+): string => `/b/${accountSlug}/${slug}${query(params)}`
 
 export const bookingManagePath = (purpose: 'cancel' | 'reschedule', token: string): string =>
   `/b/manage/${purpose}/${token}`
@@ -293,7 +320,7 @@ export const bookingManagePath = (purpose: 'cancel' | 'reschedule', token: strin
  *  behind the same token does not already show. */
 export const bookingIcsPath = (token: string): string => `/b/ics/${token}.ics`
 
-/** Settings has no workspace segment: a person belongs to one at a time and the
+/** Settings has no account segment: a person belongs to one at a time and the
  *  switcher in the shell is what moves them. Kept as functions anyway so the day
  *  that changes is one edit here. */
 export const agentAccessPath = (): string => '/settings/agent'
@@ -303,8 +330,8 @@ export const accountPath = (): string => '/settings/account'
 
 export const failedJobsPath = (): string => '/settings/jobs'
 
-/** The company above this workspace: its workspaces, its seats, its history. */
-export const organisationPath = (): string => '/settings/organisation'
+/** The company above this account: its accounts, its seats, its history. */
+export const defaultsPath = (): string => '/settings/defaults'
 
 export const teamsPath = (): string => '/settings/teams'
 

@@ -1,11 +1,10 @@
 import { sql } from 'drizzle-orm'
 import { hashToken, randomToken } from '../internal/crypto.ts'
 import { appDb } from '../internal/pool.ts'
-import type { Role, WorkspaceContext } from './context.ts'
-import { ForbiddenError } from './context.ts'
-import { mutate, withWorkspace } from './index.ts'
+import { ForbiddenError, isAdmin, type Hub, type AccountContext } from './context.ts'
+import { mutate, withAccount } from './index.ts'
 
-/** F5 §1. Tokens, and the lookup that turns one into a workspace context.
+/** F5 §1. Tokens, and the lookup that turns one into a account context.
  *
  *  Everything an agent can do goes through the same data access layer and the same
  *  role checks as the screens. This file adds the credential and nothing else:
@@ -54,11 +53,11 @@ const toRow = (row: TokenRow): McpTokenRow => ({
 })
 
 /** Everyone sees their own tokens. An admin also sees everybody's, because
- *  revoking the token of somebody who has left is workspace security and cannot
+ *  revoking the token of somebody who has left is account security and cannot
  *  wait for them to log in and do it themselves. */
-export const listMcpTokens = async (ctx: WorkspaceContext): Promise<McpTokenRow[]> =>
-  withWorkspace(ctx, async (tx) => {
-    const mine = ctx.role === 'admin' ? sql`true` : sql`t.user_id = ${ctx.actorId}`
+export const listMcpTokens = async (ctx: AccountContext): Promise<McpTokenRow[]> =>
+  withAccount(ctx, async (tx) => {
+    const mine = isAdmin(ctx) ? sql`true` : sql`t.user_id = ${ctx.actorId}`
     const rows = await tx.execute<TokenRow>(sql`
       select t.id, t.name, t.prefix, t.user_id, u.name as user_name, u.email as user_email,
              t.last_used_at, t.created_at, t.revoked_at
@@ -74,7 +73,7 @@ export type IssuedToken = { row: McpTokenRow; token: string }
 /** The plaintext is returned exactly once, here. Nothing stores it, so a person who
  *  loses it makes a new one rather than recovering the old. */
 export const createMcpToken = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { name: string },
 ): Promise<IssuedToken> => {
   const name = input.name.trim()
@@ -88,8 +87,8 @@ export const createMcpToken = async (
   return mutate<IssuedToken>(ctx, 'mcp_token', async (tx) => {
     const [row] = await tx.execute<TokenRow>(sql`
       with inserted as (
-        insert into mcp_token (workspace_id, user_id, name, token_hash, prefix)
-        values (${ctx.workspaceId}, ${ctx.actorId}, ${name}, ${hashToken(token)},
+        insert into mcp_token (account_id, user_id, name, token_hash, prefix)
+        values (${ctx.accountId}, ${ctx.actorId}, ${name}, ${hashToken(token)},
                 ${token.slice(0, PREFIX.length + PREVIEW_CHARS)})
         returning *
       )
@@ -115,14 +114,14 @@ export const createMcpToken = async (
 
 /** Idempotent: revoking twice reports the same thing both times, because somebody
  *  who is not sure it worked will click again. */
-export const revokeMcpToken = async (ctx: WorkspaceContext, id: string): Promise<boolean> =>
+export const revokeMcpToken = async (ctx: AccountContext, id: string): Promise<boolean> =>
   mutate<boolean>(ctx, 'mcp_token', async (tx) => {
     const [existing] = await tx.execute<{ user_id: string; name: string; revoked_at: Date | null }>(
       sql`select user_id, name, revoked_at from mcp_token where id = ${id} limit 1`,
     )
     if (!existing) throw new Error('That token no longer exists.')
-    if (existing.user_id !== ctx.actorId && ctx.role !== 'admin') {
-      throw new ForbiddenError(ctx.role, "revoke somebody else's token")
+    if (existing.user_id !== ctx.actorId && !isAdmin(ctx)) {
+      throw new ForbiddenError('account', "revoke somebody else's token")
     }
 
     const rows = await tx.execute<{ id: string }>(sql`
@@ -148,21 +147,16 @@ export const revokeMcpToken = async (ctx: WorkspaceContext, id: string): Promise
 
 export type McpCaller = {
   tokenId: string
-  ctx: WorkspaceContext
-  workspaceSlug: string
-  workspaceName: string
-  organisationId: string
-  organisationSlug: string
-  organisationName: string
-  orgRole: 'org_admin' | 'member'
+  ctx: AccountContext
+  accountSlug: string
+  accountName: string
   userId: string
   userEmail: string
   userName: string
-  role: Role
 }
 
 /** A request carrying a token has no session and does not know its own tenant. The
- *  security-definer function answers with ids and a live role and nothing else, and
+ *  security-definer function answers with ids and live grants and nothing else, and
  *  answers nothing at all for a revoked token, which is what makes revocation take
  *  effect on the next call rather than at the next cache expiry. */
 export const callerForToken = async (plaintext: string): Promise<McpCaller | null> => {
@@ -170,17 +164,15 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
 
   const rows = await appDb.execute<{
     token_id: string
-    workspace_id: string
-    workspace_slug: string
-    workspace_name: string
-    organisation_id: string
-    organisation_slug: string
-    organisation_name: string
-    org_role: 'org_admin' | 'member'
+    account_id: string
+    account_slug: string
+    account_name: string
     user_id: string
     user_email: string
     user_name: string
-    role: Role
+    is_super_admin: boolean
+    view_hubs: Hub[]
+    edit_hubs: Hub[]
   }>(sql`select * from rawr.mcp_token_owner(${hashToken(plaintext)})`)
 
   const found = rows[0]
@@ -189,23 +181,20 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
   return {
     tokenId: found.token_id,
     ctx: {
-      workspaceId: found.workspace_id,
+      accountId: found.account_id,
       actorId: found.user_id,
       // The audit log says which person did it, through which door. "The MCP
       // server did it" is not an answer anybody can act on. F5 §1.
       actorKind: 'mcp',
-      role: found.role,
+      isSuperAdmin: found.is_super_admin,
+      viewHubs: found.view_hubs ?? [],
+      editHubs: found.edit_hubs ?? [],
     },
-    workspaceSlug: found.workspace_slug,
-    workspaceName: found.workspace_name,
-    organisationId: found.organisation_id,
-    organisationSlug: found.organisation_slug,
-    organisationName: found.organisation_name,
-    orgRole: found.org_role,
+    accountSlug: found.account_slug,
+    accountName: found.account_name,
     userId: found.user_id,
     userEmail: found.user_email,
     userName: found.user_name,
-    role: found.role,
   }
 }
 
@@ -224,11 +213,11 @@ export const touchMcpToken = (tokenId: string): void => {
 const KEEP_HOURS = 24
 
 export const recallMcpCall = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   tokenId: string,
   key: string,
 ): Promise<unknown | null> =>
-  withWorkspace(ctx, async (tx) => {
+  withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ result: unknown }>(sql`
       select result from mcp_call
        where token_id = ${tokenId} and idempotency_key = ${key}
@@ -240,15 +229,15 @@ export const recallMcpCall = async (
 /** Written after the work, so a call that failed can be retried rather than being
  *  answered forever with its own failure. */
 export const rememberMcpCall = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { tokenId: string; key: string; tool: string; result: unknown },
 ): Promise<void> => {
-  await withWorkspace(ctx, async (tx) => {
+  await withAccount(ctx, async (tx) => {
     await tx.execute(sql`
-      insert into mcp_call (workspace_id, token_id, idempotency_key, tool, result)
-      values (${ctx.workspaceId}, ${input.tokenId}, ${input.key}, ${input.tool},
+      insert into mcp_call (account_id, token_id, idempotency_key, tool, result)
+      values (${ctx.accountId}, ${input.tokenId}, ${input.key}, ${input.tool},
               ${JSON.stringify(input.result)}::jsonb)
-      on conflict (workspace_id, token_id, idempotency_key) do nothing`)
+      on conflict (account_id, token_id, idempotency_key) do nothing`)
     // Cheap on an indexed column, and it keeps the ledger from needing a job of its
     // own for a table that only ever holds a day of rows.
     await tx.execute(sql`
@@ -291,7 +280,7 @@ const toClient = (row: ClientRow): McpClientRow => ({
 })
 
 /** Outside any tenant, deliberately: a client registers before anybody has signed
- *  in, and its record is a name and a redirect list, not workspace data. */
+ *  in, and its record is a name and a redirect list, not account data. */
 export const saveMcpClient = async (input: {
   id: string
   name: string
@@ -321,7 +310,7 @@ export const readMcpClient = async (id: string): Promise<McpClientRow | null> =>
 /** Written by the person approving on the consent screen. The plaintext goes back
  *  to the client in the redirect and is never stored. */
 export const createOauthCode = async (
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   input: { clientId: string; codeChallenge: string; redirectUri: string; resource: string | null; scope: string | null },
 ): Promise<string> => {
   if (!ctx.actorId) throw new Error('An approval belongs to a person, and this request has no one.')
@@ -329,8 +318,8 @@ export const createOauthCode = async (
   await mutate(ctx, 'mcp_oauth_code', async (tx) => {
     const [row] = await tx.execute<{ id: string }>(sql`
       insert into mcp_oauth_code
-        (workspace_id, user_id, client_id, code_hash, code_challenge, redirect_uri, resource, scope, expires_at)
-      values (${ctx.workspaceId}, ${ctx.actorId}, ${input.clientId}, ${hashToken(code)},
+        (account_id, user_id, client_id, code_hash, code_challenge, redirect_uri, resource, scope, expires_at)
+      values (${ctx.accountId}, ${ctx.actorId}, ${input.clientId}, ${hashToken(code)},
               ${input.codeChallenge}, ${input.redirectUri}, ${input.resource}, ${input.scope},
               now() + interval '5 minutes')
       returning id`)
@@ -350,7 +339,7 @@ export const createOauthCode = async (
 }
 
 export type RedeemedCode = {
-  workspaceId: string
+  accountId: string
   userId: string
   clientId: string
   codeChallenge: string
@@ -364,7 +353,7 @@ export type RedeemedCode = {
  *  the caller can name the reason, and is gone either way. */
 export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode | null> => {
   const [row] = await appDb.execute<{
-    workspace_id: string
+    account_id: string
     user_id: string
     client_id: string
     code_challenge: string
@@ -375,7 +364,7 @@ export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode |
   }>(sql`select * from rawr.mcp_code_redeem(${hashToken(plaintext)})`)
   if (!row) return null
   return {
-    workspaceId: row.workspace_id,
+    accountId: row.account_id,
     userId: row.user_id,
     clientId: row.client_id,
     codeChallenge: row.code_challenge,
@@ -388,19 +377,22 @@ export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode |
 
 export type IssuedOauthToken = { accessToken: string; refreshToken: string; expiresIn: number; scope: string | null }
 
-const oauthContext = (workspaceId: string, userId: string): WorkspaceContext => ({
-  workspaceId,
+const oauthContext = (accountId: string, userId: string): AccountContext => ({
+  accountId,
   actorId: userId,
   actorKind: 'user',
-  // Every role may hold a token (WRITE_ROLES), and the live role is read from the
-  // membership on each call, so the least one is the right one to issue under.
-  role: 'viewer',
+  // Issuing the token grants nothing of its own: `callerForToken` reads the
+  // holder's live grants on every call, so a token can only ever reach what its
+  // holder can reach at the time it is used.
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: [],
 })
 
 /** A token the consent flow issues. It is an mcp_token like any other, named
  *  after the client, so it appears in Settings and is revoked the same way. */
 export const issueOauthToken = async (input: {
-  workspaceId: string
+  accountId: string
   userId: string
   clientId: string
   clientName: string
@@ -408,13 +400,13 @@ export const issueOauthToken = async (input: {
 }): Promise<IssuedOauthToken> => {
   const accessToken = `${PREFIX}${randomToken(32)}`
   const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
-  const ctx = oauthContext(input.workspaceId, input.userId)
+  const ctx = oauthContext(input.accountId, input.userId)
 
   await mutate(ctx, 'mcp_token', async (tx) => {
     const [row] = await tx.execute<{ id: string; prefix: string }>(sql`
       insert into mcp_token
-        (workspace_id, user_id, name, token_hash, prefix, client_id, scope, expires_at, refresh_hash)
-      values (${ctx.workspaceId}, ${ctx.actorId}, ${input.clientName}, ${hashToken(accessToken)},
+        (account_id, user_id, name, token_hash, prefix, client_id, scope, expires_at, refresh_hash)
+      values (${ctx.accountId}, ${ctx.actorId}, ${input.clientName}, ${hashToken(accessToken)},
               ${accessToken.slice(0, PREFIX.length + PREVIEW_CHARS)}, ${input.clientId}, ${input.scope},
               now() + make_interval(secs => ${OAUTH_ACCESS_SECONDS}), ${hashToken(refreshToken)})
       returning id, prefix`)
@@ -444,7 +436,7 @@ export const refreshOauthToken = async (
   if (!plaintext.startsWith(REFRESH_PREFIX)) return null
   const [owner] = await appDb.execute<{
     token_id: string
-    workspace_id: string
+    account_id: string
     user_id: string
     client_id: string | null
     scope: string | null
@@ -453,9 +445,9 @@ export const refreshOauthToken = async (
 
   const accessToken = `${PREFIX}${randomToken(32)}`
   const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
-  const ctx = oauthContext(owner.workspace_id, owner.user_id)
+  const ctx = oauthContext(owner.account_id, owner.user_id)
 
-  const rotated = await withWorkspace(ctx, async (tx) => {
+  const rotated = await withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{ id: string }>(sql`
       update mcp_token
          set token_hash = ${hashToken(accessToken)},

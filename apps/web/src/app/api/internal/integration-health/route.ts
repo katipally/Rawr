@@ -16,14 +16,14 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const body = (await request.json().catch(() => null)) as
-    | { workspaceId?: string; kind?: string }
+    | { accountId?: string; kind?: string }
     | null
-  if (!body?.workspaceId || !body?.kind) {
-    return NextResponse.json({ error: 'A workspace and a kind are both required.' }, { status: 400 })
+  if (!body?.accountId || !body?.kind) {
+    return NextResponse.json({ error: 'A account and a kind are both required.' }, { status: 400 })
   }
 
   const result = await testConnection(
-    { ...publicEdgeContext(body.workspaceId), actorKind: 'job' },
+    { ...publicEdgeContext(body.accountId), actorKind: 'job' },
     body.kind as never,
   )
   // Always 200: the worker wants the answer, not an HTTP error. A failing provider

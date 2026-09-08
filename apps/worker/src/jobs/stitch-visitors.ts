@@ -2,7 +2,7 @@ import {
   backfillVisitor,
   markAliasResolved,
   refreshContactActivity,
-  type WorkspaceContext,
+  type AccountContext,
 } from '@rawr/db'
 import { z } from 'zod'
 import { boss } from '../boss.ts'
@@ -20,11 +20,13 @@ import { basePayload, defineJob } from './registry.ts'
 /** The context a job acts with. 'job' rather than 'public': the actor in the audit
  *  log has to read as what it is, and marketing's ceiling is what a back-fill
  *  needs — it writes contacts' activity and touches nothing else. */
-const jobContext = (workspaceId: string): WorkspaceContext => ({
-  workspaceId,
+const jobContext = (accountId: string): AccountContext => ({
+  accountId,
   actorId: null,
   actorKind: 'job',
-  role: 'marketing',
+  isSuperAdmin: false,
+  viewHubs: [],
+  editHubs: ['contacts', 'marketing'],
 })
 
 export const dispatchStitches = defineJob({
@@ -38,7 +40,7 @@ export const dispatchStitches = defineJob({
     // genuinely finishes, which is what lets a bounded run be picked up again.
     // Field_index can claim in SQL because it has a 'building' state to claim into.
     const claimed = await owner`
-      select id, workspace_id, visitor_id, contact_id
+      select id, account_id, visitor_id, contact_id
         from visitor_alias
        where resolved_at is null
        order by created_at
@@ -51,7 +53,7 @@ export const dispatchStitches = defineJob({
       await boss().send(
         'activity.stitch',
         {
-          workspaceId: row.workspace_id,
+          accountId: row.account_id,
           aliasId: row.id,
           visitorId: row.visitor_id,
           contactId: row.contact_id,
@@ -85,8 +87,8 @@ export const stitchVisitor = defineJob({
   schema: payload,
   retryLimit: 5,
   retryDelaySeconds: 60,
-  handle: async ({ workspaceId, aliasId, visitorId, contactId }) => {
-    const ctx = jobContext(workspaceId)
+  handle: async ({ accountId, aliasId, visitorId, contactId }) => {
+    const ctx = jobContext(accountId)
 
     let moved = 0
     let passes = 0

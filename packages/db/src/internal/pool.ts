@@ -10,30 +10,27 @@ const required = (name: string): string => {
   const value = process.env[name]
   if (!value) {
     throw new Error(
-      `${name} is not set. Copy .env.example to .env.local and fill in the Supabase pooler URLs.`,
+      `${name} is not set. Copy .env.example to .env.local and fill in the database URLs.`,
     )
   }
   return value
 }
 
-/** Transaction-mode pooler. Prepared statements do not survive it, hence prepare: false.
- *
- *  Opened on first use rather than at import. A build renders pages that import
- *  this module transitively and never touch the database, and connecting at
- *  module scope made `next build` fail on a machine that has no DATABASE_URL,
- *  which is every build machine that is not also a deploy. */
+/** Opened on first use, not at import: a build renders pages that reach this
+ *  module and never touch the database, and connecting at module scope made
+ *  `next build` fail on every machine that is not also a deploy. */
 let opened: { client: ReturnType<typeof postgres>; db: ReturnType<typeof connect>['db'] } | null = null
 
 const connect = () => {
   const client = postgres(required('DATABASE_URL'), {
-    prepare: false,
+    // Prepared statements do not survive a transaction pooler (Supavisor, PgBouncer,
+    // RDS Proxy). Set DATABASE_PREPARED=1 when connecting straight to Postgres.
+    prepare: process.env.DATABASE_PREPARED === '1',
     // A record screen fans out to about fifteen reads, each on its own connection.
     max: Number(process.env.DATABASE_POOL_MAX ?? 20),
-    // A fresh connection to the pooler is a TLS handshake of roughly half a second,
-    // so a connection dropped after twenty idle seconds made every click after a
-    // pause pay it again. Ten minutes keeps a working session warm; the pooler
-    // still reclaims anything left open overnight.
-    idle_timeout: 600,
+    // A fresh connection costs a TLS handshake, so dropping one after twenty idle
+    // seconds made every click after a pause pay it again.
+    idle_timeout: Number(process.env.DATABASE_IDLE_TIMEOUT ?? 600),
     max_lifetime: 60 * 60,
     connect_timeout: 10,
   })
@@ -55,8 +52,8 @@ export const appDb = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, 
   },
 })
 
-/** Session-mode pooler as the table owner. Migrations and the tenancy DDL only.
- *  This role has BYPASSRLS, so nothing that serves a request may use it. */
+/** The table owner. Migrations and tenancy DDL only: it bypasses RLS, so nothing
+ *  that serves a request may use it. */
 export const ownerClient = () =>
   postgres(required('DATABASE_URL_OWNER'), { max: 1, onnotice: () => {} })
 

@@ -10,10 +10,10 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 export type SubscriptionTypesProps = {
   rows: SubscriptionTypeRow[]
   canWrite: boolean
-  role: string
+  hub: string
 }
 
-export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesProps) => {
+export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProps) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -85,7 +85,7 @@ export const SubscriptionTypes = ({ rows, canWrite, role }: SubscriptionTypesPro
         </form>
       ) : (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Your role ({role}) can read this and cannot change it. Marketing and admins manage
+          You need {hub} access to change this. Marketing and admins manage
           subscription types.
         </p>
       )}

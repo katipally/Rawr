@@ -12,7 +12,7 @@ import {
 import { recordActivity } from './activity.ts'
 import { channelOfSession, sourceFromSession } from './attribution.ts'
 import { publicEdgeContext } from './forms.ts'
-import { withWorkspace, type Tx } from './index.ts'
+import { withAccount, type Tx } from './index.ts'
 
 /** F4 §2. The collector's half of the data access layer: everything an anonymous
  *  request may write, and nothing else.
@@ -25,17 +25,17 @@ import { withWorkspace, type Tx } from './index.ts'
 // Resolving a site
 // ---------------------------------------------------------------------------
 
-export type PublicSite = { workspaceId: string; siteId: string; host: string }
+export type PublicSite = { accountId: string; siteId: string; host: string }
 
 /** Never taken from the payload: the site key names the tenant, and a request
- *  that could name its own workspace could write into anybody's. */
+ *  that could name its own account could write into anybody's. */
 export const publicSite = async (siteKey: string): Promise<PublicSite | null> => {
   if (!siteKey || siteKey.length > 128) return null
-  const rows = await appDb.execute<{ workspace_id: string; site_id: string; host: string }>(
-    sql`select workspace_id, site_id, host from rawr.public_site(${siteKey})`,
+  const rows = await appDb.execute<{ account_id: string; site_id: string; host: string }>(
+    sql`select account_id, site_id, host from rawr.public_site(${siteKey})`,
   )
   const row = rows[0]
-  return row ? { workspaceId: row.workspace_id, siteId: row.site_id, host: row.host } : null
+  return row ? { accountId: row.account_id, siteId: row.site_id, host: row.host } : null
 }
 
 // ---------------------------------------------------------------------------
@@ -172,10 +172,10 @@ const trim = (value: string | null | undefined, max: number): string | null => {
 }
 
 export const collect = async (input: CollectInput): Promise<CollectResult> => {
-  const ctx = publicEdgeContext(input.site.workspaceId)
-  const { workspaceId, siteId } = input.site
+  const ctx = publicEdgeContext(input.site.accountId)
+  const { accountId, siteId } = input.site
 
-  return withWorkspace(ctx, async (tx) => {
+  return withAccount(ctx, async (tx) => {
     const referrer = trim(input.referrer, 2048)
     const path = trim(input.path, 2048) ?? '/'
 
@@ -184,7 +184,7 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
     await tx
       .insert(visitor)
       .values({
-        workspaceId,
+        accountId,
         id: input.visitorId,
         firstReferrer: referrer,
         firstLandingPage: trim(input.url, 2048),
@@ -192,7 +192,7 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
         firstSeenAt: input.at,
       })
       .onConflictDoUpdate({
-        target: [visitor.workspaceId, visitor.id],
+        target: [visitor.accountId, visitor.id],
         set: { lastSeenAt: input.at },
       })
 
@@ -226,7 +226,7 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
       const [created] = await tx
         .insert(visitorSession)
         .values({
-          workspaceId,
+          accountId,
           visitorId: input.visitorId,
           siteId,
           startedAt: input.at,
@@ -268,7 +268,7 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
     // only when the session names a channel: a second page view must not overwrite
     // the campaign the visit arrived through.
     if (contactId && newSession) {
-      await noteLatestTouch(tx, workspaceId, contactId, {
+      await noteLatestTouch(tx, accountId, contactId, {
         referrer,
         utm: input.utm ?? {},
         landingPage: trim(input.url, 2048),
@@ -278,7 +278,7 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
     }
 
     if (contactId) {
-      await bumpCounters(tx, workspaceId, contactId, input.at, {
+      await bumpCounters(tx, accountId, contactId, input.at, {
         views: input.event ? 0 : 1,
         visits: newSession ? 1 : 0,
       })
@@ -309,7 +309,7 @@ const writeView = async (
   const [row] = await tx
     .insert(pageView)
     .values({
-      workspaceId: input.site.workspaceId,
+      accountId: input.site.accountId,
       visitorId: input.visitorId,
       contactId,
       sessionId,
@@ -359,7 +359,7 @@ const writeEvent = async (
   const [row] = await tx
     .insert(customEvent)
     .values({
-      workspaceId: input.site.workspaceId,
+      accountId: input.site.accountId,
       visitorId: input.visitorId,
       contactId,
       sessionId,
@@ -381,7 +381,7 @@ const capName = async (tx: Tx, site: PublicSite, raw: string): Promise<string> =
 
   const claimed = await tx
     .insert(eventNameDay)
-    .values({ workspaceId: site.workspaceId, day: sql`current_date`, name })
+    .values({ accountId: site.accountId, day: sql`current_date`, name })
     .onConflictDoNothing()
     .returning({ name: eventNameDay.name })
 
@@ -410,7 +410,7 @@ const notice = async (
   await tx
     .insert(collectorNotice)
     .values({
-      workspaceId: site.workspaceId,
+      accountId: site.accountId,
       siteId: site.siteId,
       kind,
       key: key.slice(0, 120),
@@ -419,7 +419,7 @@ const notice = async (
     })
     .onConflictDoUpdate({
       target: [
-        collectorNotice.workspaceId,
+        collectorNotice.accountId,
         collectorNotice.siteId,
         collectorNotice.kind,
         collectorNotice.key,
@@ -439,7 +439,7 @@ const notice = async (
  *  definition not the first one. */
 const noteLatestTouch = async (
   tx: Tx,
-  workspaceId: string,
+  accountId: string,
   contactId: string,
   visit: {
     referrer: string | null
@@ -465,12 +465,12 @@ const noteLatestTouch = async (
        set latest_source = ${payload}::jsonb,
            original_source = coalesce(original_source, ${payload}::jsonb),
            updated_at = now()
-     where id = ${contactId} and workspace_id = ${workspaceId}`)
+     where id = ${contactId} and account_id = ${accountId}`)
 }
 
 export const bumpCounters = async (
   tx: Tx,
-  workspaceId: string,
+  accountId: string,
   contactId: string,
   at: Date,
   by: { views: number; visits: number },
@@ -478,7 +478,7 @@ export const bumpCounters = async (
   await tx
     .insert(contactActivity)
     .values({
-      workspaceId,
+      accountId,
       contactId,
       siteVisits: by.visits,
       pagesViewed: by.views,
@@ -486,7 +486,7 @@ export const bumpCounters = async (
       lastSeenAt: at,
     })
     .onConflictDoUpdate({
-      target: [contactActivity.workspaceId, contactActivity.contactId],
+      target: [contactActivity.accountId, contactActivity.contactId],
       set: {
         siteVisits: sql`${contactActivity.siteVisits} + ${by.visits}`,
         pagesViewed: sql`${contactActivity.pagesViewed} + ${by.views}`,

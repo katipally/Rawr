@@ -1,29 +1,24 @@
-import { ForbiddenError, OrgForbiddenError, type OrganisationContext, type WorkspaceContext } from '@rawr/db'
+import { ForbiddenError, canEdit, type AccountContext } from '@rawr/db'
 import { initTRPC, TRPCError } from '@trpc/server'
 import superjson from 'superjson'
-import { contextFrom, orgContextFrom, readSession, type Session } from './session.ts'
+import { contextFrom, readSession, type Session } from './session.ts'
 
 export type Context = {
   session: Session | null
-  workspace: WorkspaceContext | null
-  organisation: OrganisationContext | null
+  account: AccountContext | null
 }
 
 export const createContext = async (): Promise<Context> => {
   const session = await readSession()
-  return {
-    session,
-    workspace: session ? contextFrom(session) : null,
-    organisation: session ? orgContextFrom(session) : null,
-  }
+  return { session, account: session ? contextFrom(session) : null }
 }
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
   errorFormatter: ({ shape, error }) => {
-    // A role refusal is a 403 with a sentence a person can act on, never a
+    // A refused grant is a 403 with a sentence a person can act on, never a
     // generic failure. 03-build-order, FAILING.
-    if (error.cause instanceof ForbiddenError || error.cause instanceof OrgForbiddenError) {
+    if (error.cause instanceof ForbiddenError) {
       return { ...shape, message: error.cause.message, data: { ...shape.data, code: 'FORBIDDEN' } }
     }
     return shape
@@ -34,35 +29,32 @@ export const router = t.router
 export const publicProcedure = t.procedure
 
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
-  if (!ctx.session || !ctx.workspace || !ctx.organisation) {
+  if (!ctx.session || !ctx.account) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in to continue.' })
   }
-  return next({
-    ctx: { ...ctx, session: ctx.session, workspace: ctx.workspace, organisation: ctx.organisation },
-  })
+  return next({ ctx: { ...ctx, session: ctx.session, account: ctx.account } })
 })
 
-/** A convenience for surfaces that only an admin can even open. The data access
- *  layer still checks the role on every write, so this is a second gate, not the
- *  only one. */
+/** A convenience for surfaces nobody without the account hub can even open. The
+ *  data access layer still checks the grant on every write, so this is a second
+ *  gate, not the only one. */
 export const adminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (ctx.session.role !== 'admin') {
+  if (!canEdit(ctx.account, 'account')) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: `Your role (${ctx.session.role}) cannot open workspace settings.`,
+      message: 'You need account access to open account settings.',
     })
   }
   return next({ ctx })
 })
 
-/** A screen that sits above a workspace: members across the company, workspaces,
- *  seats, the organisation history. The organisation data access layer checks the
- *  role again on every write, so this is a second gate, not the only one. */
-export const orgAdminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
-  if (ctx.session.orgRole !== 'org_admin') {
+/** Seating somebody, ending their access, changing what the account itself is.
+ *  Above the hubs, so holding one is never enough. */
+export const superAdminProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  if (!ctx.session.isSuperAdmin) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'Only an organisation admin can open this. Ask one of them.',
+      message: 'Only a super admin can open this. Ask one of them.',
     })
   }
   return next({ ctx })

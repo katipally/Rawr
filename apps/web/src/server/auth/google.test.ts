@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mock, test } from 'node:test'
 import {
+  GOOGLE_CALENDAR_CALLBACK_PATH,
+  GOOGLE_CALLBACK_PATH,
+  GOOGLE_GMAIL_CALLBACK_PATH,
   decodeIdToken,
   generateCodeVerifier,
   generateState,
@@ -44,6 +47,38 @@ test('the authorization URL carries everything Google needs', () => {
   assert.equal(url.searchParams.get('redirect_uri'), 'https://rawr.example/cb')
   assert.equal(url.searchParams.get('state'), 'the-state')
   assert.equal(url.searchParams.get('scope'), 'openid email')
+})
+
+test('each flow comes back to its own route', () => {
+  // Calendar and Gmail consent both used to be built with the sign-in callback, so
+  // Google returned the browser to a route that reads a different state cookie and
+  // the grant was never stored. Three distinct paths, and every one of them has to
+  // be registered on the Google client.
+  const paths = [GOOGLE_CALLBACK_PATH, GOOGLE_CALENDAR_CALLBACK_PATH, GOOGLE_GMAIL_CALLBACK_PATH]
+  assert.equal(new Set(paths).size, 3, 'two flows share a callback path')
+  assert.equal(paths.every((path) => path.startsWith('/api/auth/google')), true)
+})
+
+test('the redirect asked for is the redirect exchanged', async (t) => {
+  // Google refuses the exchange when the two differ, so a flow that asks with one
+  // path and exchanges with another fails at the last step, after consent.
+  const asked = new URL(client().createAuthorizationURL('s', 'v', ['openid']))
+  const fetched = t.mock.method(globalThis, 'fetch', async () =>
+    new Response(JSON.stringify({ access_token: 'a' }), { status: 200 }),
+  )
+  await client().validateAuthorizationCode('code', 'v')
+  const body = new URLSearchParams(String(fetched.mock.calls[0]?.arguments[1]?.body))
+  assert.equal(body.get('redirect_uri'), asked.searchParams.get('redirect_uri'))
+})
+
+test('a sign-in that carries calendar scopes asks for offline access', () => {
+  // Signing in is the whole setup now: the calendar scopes ride along with the
+  // sign-in ones. Without offline access Google returns no refresh token, and
+  // free-busy is read long after the access token has expired.
+  const url = client().createAuthorizationURL('s', 'v', ['openid', 'https://www.googleapis.com/auth/calendar.events'])
+  const scopes = (url.searchParams.get('scope') ?? '').split(' ')
+  assert.equal(scopes.includes('openid'), true)
+  assert.equal(scopes.includes('https://www.googleapis.com/auth/calendar.events'), true)
 })
 
 test('PKCE is S256 over the verifier, and the verifier itself never travels', () => {

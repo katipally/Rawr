@@ -10,9 +10,8 @@ import {
   getRecord,
   listMcpTokens,
   revokeMcpToken,
-  withWorkspace,
-  type Role,
-  type WorkspaceContext,
+  withAccount,
+  type AccountContext,
 } from '../src/index.ts'
 
 /** F5's definition of done, run against the real endpoint over HTTP.
@@ -140,22 +139,22 @@ const call = async (
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const ctxFor = async (slug: string, role: Role = 'admin'): Promise<WorkspaceContext> => {
+const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']): Promise<AccountContext> => {
   const rows = await appDb.execute<{ id: string }>(
-    sql`select id from rawr.workspace_for_site(${slug})`,
+    sql`select id from rawr.account_for_site(${slug})`,
   )
   const id = rows[0]?.id
-  if (!id) throw new Error(`workspace ${slug} is not seeded. Run pnpm db:seed.`)
-  return { workspaceId: id, actorId: null, actorKind: 'user', role }
+  if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
+  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(
-  ctx: WorkspaceContext,
+  ctx: AccountContext,
   query: ReturnType<typeof sql>,
-): Promise<T[]> => withWorkspace(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
+): Promise<T[]> => withAccount(ctx, (tx) => tx.execute<T>(query) as Promise<T[]>)
 
-const actorCtx = async (slug: string, email: string, role: Role): Promise<WorkspaceContext> => {
-  const base = await ctxFor(slug, role)
+const actorCtx = async (slug: string, email: string, editHubs: string[]): Promise<AccountContext> => {
+  const base = await ctxFor(slug, editHubs)
   const rows = await scoped<{ id: string }>(
     base,
     sql`select id from user_account where email = ${email} limit 1`,
@@ -187,12 +186,12 @@ try {
     process.exit(1)
   }
 
-  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin')
-  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', 'sales')
-  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', 'viewer')
-  const probe = await actorCtx('probe', 'admin@probe.example', 'admin')
+  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  const sales = await actorCtx('datasaur', 'sales@datasaur.ai', ['contacts', 'sales'])
+  const viewer = await actorCtx('datasaur', 'viewer@datasaur.ai', [])
+  const probe = await actorCtx('probe', 'admin@probe.example', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
 
-  const issue = async (ctx: WorkspaceContext, name: string): Promise<string> => {
+  const issue = async (ctx: AccountContext, name: string): Promise<string> => {
     const issued = await createMcpToken(ctx, { name: `${MARK} ${name}` })
     created.tokens.push(issued.row.id)
     return issued.token
@@ -408,9 +407,11 @@ try {
     generated.text,
   )
   const generatedRefusal = await call(viewerToken, 'crm_records_remove', { object: 'deal', id: mggId })
+  // The refusal names the hub that was missing, so the assistant relaying it tells
+  // the person what to ask for rather than which role they are not.
   check(
-    'and a generated write is refused by role in the layer, in a sentence',
-    generatedRefusal.isError && /viewer/i.test(generatedRefusal.text),
+    'and a generated write is refused by grant in the layer, in a sentence',
+    generatedRefusal.isError && /sales access/i.test(generatedRefusal.text),
     generatedRefusal.text,
   )
 
@@ -549,14 +550,14 @@ try {
 
   const [customField] = await scoped<{ id: string }>(
     admin,
-    sql`insert into field_def (workspace_id, object_id, key, label, type, storage, options, position, is_custom)
-        select ${admin.workspaceId}, o.id, 'f5_verify_flavour', 'F5 Verify Flavour', 'select', 'jsonb',
+    sql`insert into field_def (account_id, object_id, key, label, type, storage, options, position, is_custom)
+        select ${admin.accountId}, o.id, 'f5_verify_flavour', 'F5 Verify Flavour', 'select', 'jsonb',
                '["Vanilla","Chocolate"]'::jsonb, 900, true
           from object_def o where o.key = 'deal'
         returning id`,
   )
   created.fields.push(customField!.id)
-  forgetRegistry(admin.workspaceId)
+  forgetRegistry(admin.accountId)
 
   // The app holds its own registry for thirty seconds, so this waits it out rather
   // than asserting an instant that was never promised. "No deploy" is the claim.
@@ -839,10 +840,10 @@ try {
     id: mggId,
     fields: { amount: 1 },
   })
-  check('a viewer token cannot write', viewerWrite.isError, viewerWrite.text)
+  check('a read-only token cannot write', viewerWrite.isError, viewerWrite.text)
   check(
     'and is told why, in a sentence rather than a stack trace',
-    viewerWrite.text.toLowerCase().includes('viewer'),
+    viewerWrite.text.toLowerCase().includes('sales access'),
     viewerWrite.text,
   )
 
@@ -861,7 +862,7 @@ try {
 
   const crossRead = await call(probeToken, 'get_record', { object: 'deal', id: mggId })
   check(
-    'a token for one workspace cannot read another\'s record',
+    'a token for one account cannot read another\'s record',
     crossRead.isError,
     crossRead.text.split('\n')[0] ?? '',
   )
@@ -951,15 +952,15 @@ try {
     .catch((cause: unknown) => (cause instanceof Error ? cause.message : String(cause)))
   check(
     "one person cannot revoke somebody else's token",
-    typeof notMine === 'string' && notMine.includes('cannot'),
+    typeof notMine === 'string' && /you need account access/i.test(notMine),
     String(notMine),
   )
 
   const adminSees = await listMcpTokens(admin)
   const salesSees = await listMcpTokens(sales)
   check(
-    'an admin sees every token in the workspace',
-    // Three by hand: the probe tenant's token belongs to the other workspace and
+    'an admin sees every token in the account',
+    // Three by hand: the probe tenant's token belongs to the other account and
     // is correctly invisible here. The OAuth section's token is named for its client.
     adminSees.filter((t) => t.name.startsWith(MARK) && !t.name.endsWith('client')).length === 3,
     `${adminSees.length} visible`,
@@ -997,9 +998,9 @@ try {
   })
   check('a batch is refused with a reason', batched.status === 400)
 } finally {
-  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', 'admin').catch(() => null)
+  const admin = await actorCtx('datasaur', 'admin@datasaur.ai', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']).catch(() => null)
   if (admin) {
-    await withWorkspace(admin, async (tx) => {
+    await withAccount(admin, async (tx) => {
       await tx.execute(sql`delete from activity_link where activity_id in (
         select id from activity where subject like ${`${MARK}%`} or body like ${`${MARK}%`})`)
       await tx.execute(sql`delete from activity where subject like ${`${MARK}%`} or body like ${`${MARK}%`}`)
@@ -1013,7 +1014,7 @@ try {
         select id from mcp_client where name like ${`${MARK}%`})`)
       await tx.execute(sql`delete from field_def where key = 'f5_verify_flavour'`)
     })
-    forgetRegistry(admin.workspaceId)
+    forgetRegistry(admin.accountId)
     await appDb.execute(sql`delete from mcp_client where name like ${`${MARK}%`}`)
   }
   await closeAppPool()
