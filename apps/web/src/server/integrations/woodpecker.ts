@@ -119,11 +119,13 @@ export const addProspect = async (
   const answer = await attempt(
     { ctx, kind: 'woodpecker', jobName: 'woodpecker.enroll', payload: { ...input } },
     () =>
-      json<{ prospects?: { status?: string; msg?: string }[] }>({
+      json<{ prospects?: { prospect_campaign?: string }[]; status?: { status?: string; code?: string; msg?: string } }>({
         url: `${API}/add_prospects_campaign`,
         method: 'POST',
         headers: headers(secret!),
         body: {
+          // Required by the API even for a first add; false only re-adds nothing.
+          update: true,
           campaign: { campaign_id: input.campaignId },
           prospects: [
             {
@@ -138,11 +140,18 @@ export const addProspect = async (
   )
 
   await recordHealth(ctx, 'woodpecker', { ok: true })
-  const outcome = answer.prospects?.[0]
-  const refused = outcome?.status && outcome.status !== 'OK' && outcome.status !== 'ADDED'
-  return refused
-    ? { handed: false, detail: outcome?.msg ?? `Woodpecker refused ${input.email} (${outcome?.status}).` }
-    : { handed: true, detail: `${input.email} is in Woodpecker campaign ${input.campaignId}.` }
+  // The verdict is the response's own status block; a prospect already in the
+  // campaign comes back as DUPLICATE, which is the outcome asked for, not a refusal.
+  const verdict = answer.status?.status ?? 'OK'
+  return verdict !== 'OK'
+    ? { handed: false, detail: answer.status?.msg ?? `Woodpecker refused ${input.email} (${verdict}).` }
+    : {
+        handed: true,
+        detail:
+          answer.prospects?.[0]?.prospect_campaign === 'DUPLICATE'
+            ? `${input.email} was already in Woodpecker campaign ${input.campaignId}.`
+            : `${input.email} is in Woodpecker campaign ${input.campaignId}.`,
+      }
 }
 
 /** Woodpecker posts an array of event objects, up to 100 at a time, because it

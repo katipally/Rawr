@@ -34,6 +34,7 @@ export type IntegrationKind =
   | 'hubspot'
   | 'turnstile'
   | 'webflow'
+  | 'gmail'
 
 export const INTEGRATION_KINDS: IntegrationKind[] = [
   'brevo',
@@ -48,7 +49,12 @@ export const INTEGRATION_KINDS: IntegrationKind[] = [
   'hubspot',
   'turnstile',
   'webflow',
+  'gmail',
 ]
+
+/** Granted per person rather than once for the company: there is no shared
+ *  credential row, so their health is read from the grants themselves. */
+export const PERSONAL_KINDS = new Set<IntegrationKind>(['gmail', 'google_calendar'])
 
 /** F6 §1's four states. The stored column predates the doc's wording, so the two
  *  names that differ are mapped here rather than migrated: 'revoked' is stored,
@@ -146,7 +152,67 @@ const asDate = (value: string | Date | null): Date | null =>
 export type OrgIntegrationRow = IntegrationRow & {
   installedAt: Date | null
   installedByName: string | null
+  installedByEmail: string | null
   lastActivityAt: Date | null
+  /** How many people hold a working grant. Only a personal app counts anyone. */
+  people: number
+}
+
+/** One row per personal app, folded from every person's grant: connected while
+ *  anyone's works, degraded when the newest failure is newer than the newest
+ *  success, and absent until somebody connects. */
+const personalRows = async (tx: Tx): Promise<Map<IntegrationKind, OrgIntegrationRow>> => {
+  const rows = await tx.execute<{
+    kind: IntegrationKind
+    people: number
+    installed_at: string | Date | null
+    last_ok_at: string | Date | null
+    last_error: string | null
+    last_error_at: string | Date | null
+  }>(sql`
+    select 'gmail' as kind,
+           count(*) filter (where m.state <> 'revoked')::int as people,
+           min(m.created_at) as installed_at,
+           max(m.last_sync_at) as last_ok_at,
+           (array_agg(m.last_error order by m.last_error_at desc nulls last))[1] as last_error,
+           max(m.last_error_at) as last_error_at
+      from mailbox m
+    union all
+    select 'google_calendar',
+           count(*) filter (where g.state = 'connected')::int,
+           min(g.created_at), max(g.last_ok_at),
+           (array_agg(g.last_error order by g.last_error_at desc nulls last))[1],
+           max(g.last_error_at)
+      from calendar_grant g`)
+
+  return new Map(
+    rows
+      .filter((row) => row.installed_at !== null)
+      .map((row) => {
+        const lastOkAt = asDate(row.last_ok_at)
+        const lastErrorAt = asDate(row.last_error_at)
+        const failing = lastErrorAt !== null && (lastOkAt === null || lastErrorAt > lastOkAt)
+        return [
+          row.kind,
+          {
+            id: null,
+            kind: row.kind,
+            config: {},
+            hasSecret: false,
+            state: row.people === 0 ? ('disconnected' as const) : failing ? ('degraded' as const) : ('connected' as const),
+            lastOkAt,
+            lastError: failing ? row.last_error : null,
+            lastErrorAt: failing ? lastErrorAt : null,
+            deadLetters: 0,
+            installedAt: asDate(row.installed_at),
+            installedByName: null,
+            installedByEmail: null,
+            lastActivityAt: lastOkAt && lastErrorAt ? (lastOkAt > lastErrorAt ? lastOkAt : lastErrorAt) : (lastOkAt ?? lastErrorAt),
+            people: Number(row.people),
+          },
+        ]
+      }),
+  )
 }
 
 export const listIntegrationsForOrg = async (
@@ -164,11 +230,12 @@ export const listIntegrationsForOrg = async (
       last_error_at: string | Date | null
       created_at: string | Date
       installed_by_name: string | null
+      installed_by_email: string | null
       dead_letters: number
     }>(sql`
       select i.id, i.kind, i.config, i.secret_ref, i.state,
              i.last_ok_at, i.last_error, i.last_error_at, i.created_at,
-             u.name as installed_by_name,
+             u.name as installed_by_name, u.email as installed_by_email,
              (select count(*)::int from dead_letter d
                where d.integration_id = i.id and d.replayed_at is null) as dead_letters
         from integration i
@@ -176,9 +243,12 @@ export const listIntegrationsForOrg = async (
        where i.account_id = ${ctx.accountId}`)
 
     const byKind = new Map(rows.map((row) => [row.kind, row]))
+    const personal = await personalRows(tx)
     // Every known kind, connected or not: the Available list is the complement of
     // this one, and neither can be built from a table that only holds what exists.
     return INTEGRATION_KINDS.map((kind) => {
+      const grant = personal.get(kind)
+      if (grant) return grant
       const found = byKind.get(kind)
       if (!found) {
         return {
@@ -193,7 +263,9 @@ export const listIntegrationsForOrg = async (
           deadLetters: 0,
           installedAt: null,
           installedByName: null,
+          installedByEmail: null,
           lastActivityAt: null,
+          people: 0,
         }
       }
       // tx.execute hands back what the driver parsed, and a timestamptz arrives
@@ -219,6 +291,8 @@ export const listIntegrationsForOrg = async (
         deadLetters: Number(found.dead_letters ?? 0),
         installedAt: asDate(found.created_at),
         installedByName: found.installed_by_name,
+        installedByEmail: found.installed_by_email,
+        people: 0,
         // Whichever happened last. Computed rather than stored: two columns
         // already say it and a third would be one more thing to keep in step.
         lastActivityAt:

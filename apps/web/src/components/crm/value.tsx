@@ -71,6 +71,20 @@ export const formatDateTime = (value: unknown): string => {
   return date ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
 }
 
+/** "3 days ago", in the reader's language. Only for a timeline the reader scans
+ *  for recency; anything they might quote gets the full date and time. */
+export const formatAgo = (value: unknown): string => {
+  const date = asDate(value)
+  if (!date) return ''
+  const seconds = Math.round((date.getTime() - Date.now()) / 1000)
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86_400], ['hour', 3_600], ['minute', 60]]
+  const [unit, size] = units.find(([, s]) => Math.abs(seconds) >= s) ?? ['minute', 60]
+  const amount = Math.trunc(seconds / size)
+  return amount === 0
+    ? 'just now'
+    : new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(amount, unit)
+}
+
 export const isPast = (value: unknown): boolean => {
   const date = asDate(value)
   if (!date) return false

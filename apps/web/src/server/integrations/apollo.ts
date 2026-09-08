@@ -151,10 +151,9 @@ export const enrichContact = async (
           { ctx, kind: 'apollo', jobName: 'apollo.enrich', payload: { contactId: input.contactId } },
           () =>
             json<{ person?: ApolloPerson }>({
-              url: `${API}/people/match`,
+              url: `${API}/people/match?${new URLSearchParams({ email: input.email, reveal_personal_emails: 'false' }).toString()}`,
               method: 'POST',
               headers: headers(secret!),
-              body: { email: input.email, reveal_personal_emails: false },
             }),
         )
         return answer.person ?? null

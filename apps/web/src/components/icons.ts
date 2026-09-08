@@ -1,35 +1,25 @@
 import {
-  BarChart3,
   Ban,
   Bookmark,
   Briefcase,
   Building2,
-  CalendarDays,
   ChartNoAxesColumn,
   ChevronDown,
   ChevronUp,
   Contact,
   Copy,
   Database,
-  Globe,
   Handshake,
-  Hash,
   Home,
-  Mail,
   Megaphone,
   Pencil,
-  Phone,
   RotateCcw,
   Send,
-  ShieldCheck,
-  Sparkles,
   Trash2,
   Unlink,
-  Video,
-  Workflow,
   type LucideIcon,
 } from 'lucide-react'
-import type { IntegrationKind, ObjectKey } from '@rawr/db'
+import type { ObjectKey } from '@rawr/db'
 
 /** Icons cross the server/client boundary as names: a component reference is not
  *  serialisable, so the layout names the icon and the client resolves it here.
@@ -65,24 +55,6 @@ export const OBJECT_ICONS: Record<ObjectKey, LucideIcon> = {
 export const objectIcon = (object: string): LucideIcon =>
   OBJECT_ICONS[object as ObjectKey] ?? Contact
 
-/** One mark per provider, so a row in the integrations list is recognisable
- *  before its name is read. Lucide rather than brand logos: shipping somebody
- *  else's trademark is a licence question, and a glyph for what it does is more
- *  use than a logo anyway. */
-export const INTEGRATION_ICONS: Record<IntegrationKind, LucideIcon> = {
-  brevo: Mail,
-  apollo: Sparkles,
-  clay: Database,
-  lusha: Phone,
-  woodpecker: Send,
-  hubspot: Workflow,
-  slack: Hash,
-  ga4: BarChart3,
-  zoom: Video,
-  google_calendar: CalendarDays,
-  turnstile: ShieldCheck,
-  webflow: Globe,
-}
 
 /** The verbs that act on one row of a list. Named here for the same reason the
  *  object icons are: a delete that is a bin in one list and a cross in another is

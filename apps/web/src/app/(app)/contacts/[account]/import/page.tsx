@@ -3,7 +3,7 @@ import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@ra
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
-import { importsPath, integrationsPath } from '~/lib/links.ts'
+import { availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MAX_BYTES, MAX_ROWS } from '~/server/spreadsheet.ts'
 
@@ -114,7 +114,7 @@ const ImportPage = async ({
           <p className="text-secondary">Keep data flowing between the CRM and the tools already connected to it: mail, enrichment, calendars and the rest.</p>
           <div className="mt-auto">
             <Link
-              href={integrationsPath()}
+              href={availableAppsPath()}
               className="inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
             >
               Connect an app

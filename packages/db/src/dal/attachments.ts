@@ -38,7 +38,7 @@ export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const slug = (filename: string): string =>
   filename
     .normalize('NFKD')
-    .replace(/[^\w.\-]+/g, '-')
+    .replace(/[^\w.-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 80) || 'file'
 

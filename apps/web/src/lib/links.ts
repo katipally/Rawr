@@ -173,15 +173,19 @@ export const automationsPath = (): string => '/settings/automations'
 
 export const subscriptionsPath = (): string => '/settings/subscriptions'
 
+/** Outgoing webhooks and unmatched inbound events. Connecting a provider is an
+ *  app's own settings tab, so a "connect X" link lands there. */
 export const integrationsPath = (kind?: string): string =>
-  kind ? `/settings/integrations?open=${kind}` : '/settings/integrations'
+  kind ? appPath(kind, 'settings') : '/settings/integrations'
 
 /** Connected apps sit above a account, because the credential belongs to the
  *  organisation, and outside settings, because they have a frame of their own the
  *  way HubSpot's do. */
 export const appsPath = (): string => '/apps'
 export const availableAppsPath = (): string => '/apps/available'
-export const appPath = (kind: string): string => `/apps/${kind}`
+export type AppTab = 'overview' | 'settings' | 'insights'
+export const appPath = (kind: string, tab: AppTab = 'overview'): string =>
+  tab === 'overview' ? `/apps/${kind}` : `/apps/${kind}?tab=${tab}`
 
 /** Segments live in the CRM tree, not settings: a segment is a view of records
  *  that salespeople open, not configuration an admin sets once. */

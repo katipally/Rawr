@@ -8,6 +8,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
+import { appPath, calendarsPath, mailboxesPath } from '~/lib/links.ts'
 import { enrichCompany, enrichContact, testApollo } from './apollo.ts'
 import { testBrevo } from './brevo.ts'
 import { enrichWithClay, testClay } from './clay.ts'
@@ -42,9 +43,9 @@ export type IntegrationMeta = {
   kind: IntegrationKind
   name: string
   category: IntegrationCategory
-  /** Shared: one connection the whole organisation uses. Private: granted per
-   *  person, so the organisation-wide row only records that it exists. */
-  appType: 'Shared' | 'Private'
+  /** Shared: one connection the whole organisation uses. Personal: granted per
+   *  person, so the organisation-wide row is folded from everyone's grant. */
+  appType: 'Shared' | 'Personal'
   permissions: PermissionGroup[]
   /** What it does, in the words of the row it satisfies. */
   purpose: string
@@ -139,8 +140,8 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     rows: ['Email Tracking', 'Company & Contact Enrichment'],
     setup: [
       'In Apollo, open Settings, then Integrations, then API. This needs API access on the plan, not only a seat (open item 7).',
-      'Create a key with people and organisations scopes, and sequences too if Apollo is still sending anything of its own. Paste it below.',
-      'Paste the webhook URL below into Apollo under Settings, Integrations, Webhooks so opens, clicks and replies flow back.',
+      'Create a master API key, or one with people/match, organizations/enrich, contacts, emailer_campaigns/search and emailer_messages/search. Paste it below.',
+      'Sequence opens, clicks and replies are pulled by the Apollo sync rather than pushed: Apollo has no email-event webhook, so the webhook URL below only matters if something of yours posts to it.',
     ],
   },
   {
@@ -361,7 +362,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
   {
     kind: 'google_calendar',
     category: 'Calendar',
-    appType: 'Private',
+    appType: 'Personal',
     permissions: [
       {
         group: "Read free-busy",
@@ -386,6 +387,37 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     setup: [
       'Nothing to paste here. Each host connects their own calendar from Your account, or Meetings, Calendars.',
       'The Google project behind it is open item 3; until then the development calendar stands in.',
+    ],
+  },
+  {
+    kind: 'gmail',
+    category: 'Email',
+    appType: 'Personal',
+    permissions: [
+      {
+        group: 'Read a mailbox',
+        lines: [
+          'Read the threads in each connected mailbox and file them on the contact, company or deal they are about.',
+          'Anything internal, personal or on the exclusion list is refused before it is stored.',
+        ],
+      },
+      {
+        group: 'Send on your behalf',
+        lines: [
+          'Send sequence steps and one-off replies through a mailbox that granted sending, and nothing else.',
+        ],
+      },
+    ],
+    name: 'Gmail',
+    purpose: 'Email history on every record, and the mailbox a sequence goes out through.',
+    failureMode:
+      'A mailbox that stops syncing keeps every thread it already brought in; only new mail waits. Sending through it fails loudly rather than silently, so a sequence step is retried, not lost.',
+    secretLabel: null,
+    configFields: [],
+    rows: ['Email Tracking', 'Email Sequences'],
+    setup: [
+      'Nothing to paste here. Each person connects their own Gmail from Settings, Mailboxes.',
+      'Reading is asked for first. Sending is a second consent, granted only by somebody who sends from Rawr.',
     ],
   },
   {
@@ -435,12 +467,12 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     purpose: 'Native Webflow forms reaching Rawr without the paid bridge, F3 \u00a77.',
     failureMode:
       'An unsigned or wrongly signed delivery is refused, because an unverified webhook is an open lead-injection endpoint. Replacing the native form with the Rawr embed is the better path: Webflow sends no query string, so attribution is weaker here.',
-    secretLabel: 'OAuth app client secret',
+    secretLabel: 'Webhook signing secret',
     configFields: [],
     rows: ['Custom Lead Forms'],
     setup: [
       'At webflow.com/dashboard/account/apps build an app, then create the form_submission webhook through its Data API so deliveries are signed. A webhook made from the site dashboard carries no signature and is refused.',
-      'Point it at /w/webflow?account=<account slug>&form=<form slug>, and paste the app\u2019s client secret below.',
+      'Point it at /w/webflow?account=<account slug>&form=<form slug>. Paste the app\u2019s client secret below, or, for a webhook created with a site token, the secretKey Webflow returned when the webhook was made.',
     ],
   },
 ]
@@ -450,6 +482,11 @@ export const metaFor = (kind: IntegrationKind): IntegrationMeta => {
   if (!found) throw new Error(`"${kind}" is not an integration Rawr knows about.`)
   return found
 }
+
+/** Where somebody goes to connect it. A shared app is connected on its own
+ *  settings tab; a personal one where each person grants their own. */
+export const connectPathFor = (kind: IntegrationKind, accountSlug: string): string =>
+  kind === 'gmail' ? mailboxesPath() : kind === 'google_calendar' ? calendarsPath(accountSlug) : appPath(kind, 'settings')
 
 export type IntegrationView = IntegrationRow & { meta: IntegrationMeta }
 
@@ -485,7 +522,7 @@ export const testConnection = async (
   return {
     ok: false,
     detail:
-      'Google Calendar is granted per person rather than per account. Connect yours from Meetings, under Calendars.',
+      `${metaFor(kind).name} is granted per person rather than once for the company, so there is no shared connection to test. Each person connects their own.`,
   }
 }
 

@@ -88,9 +88,17 @@ type LushaContact = {
   seniority?: string | null
   department?: string | null
   location?: LushaPlace | null
-  emailAddresses?: { email?: string | null }[] | null
-  phoneNumbers?: { number?: string | null }[] | null
+  emails?: (string | { email?: string | null })[] | null
+  phones?: (string | { number?: string | null })[] | null
   company?: LushaCompany | null
+}
+
+const firstValue = (list: (string | { number?: string | null } | { email?: string | null })[] | null | undefined): string | undefined => {
+  const head = firstOf(list)
+  if (typeof head === 'string') return head
+  if (head && 'number' in head) return head.number ?? undefined
+  if (head && 'email' in head) return head.email ?? undefined
+  return undefined
 }
 
 type LushaCompany = {
@@ -128,7 +136,7 @@ export const contactFieldsFrom = (person: LushaContact): Record<string, unknown>
   last_name: person.lastName ?? undefined,
   title: person.jobTitle ?? undefined,
   linkedin_url: person.linkedinUrl ?? undefined,
-  phone: firstOf(person.phoneNumbers)?.number ?? undefined,
+  phone: firstValue(person.phones),
   city: person.location?.city ?? undefined,
   country: person.location?.country ?? undefined,
   seniority: person.seniority ?? undefined,
@@ -164,7 +172,7 @@ const devContact: LushaContact = {
   lastName: 'Person',
   jobTitle: 'Head of Data',
   linkedinUrl: 'https://linkedin.com/in/dev-person',
-  phoneNumbers: [{ number: '+1 555 0100' }],
+  phones: ['+1 555 0100'],
   company: {
     name: 'Development Co',
     industry: 'Software',
