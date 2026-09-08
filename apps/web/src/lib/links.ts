@@ -26,10 +26,10 @@ export const CRM_ROOT = 'contacts'
  *  Read by src/proxy.ts, to notice a link into an account the session is not on,
  *  and by the Google callback, to land somebody on the account their link asked
  *  for rather than on whichever membership came back first. */
-const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)(?:[/?#]|$)/
+const ACCOUNT_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)(?:[/?#]|$)/
 
 export const accountInPath = (path: string | null | undefined): string | null => {
-  const found = path ? WORKSPACE_PATH.exec(path)?.[1] : null
+  const found = path ? ACCOUNT_PATH.exec(path)?.[1] : null
   if (!found) return null
   try {
     return decodeURIComponent(found)

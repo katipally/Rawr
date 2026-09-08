@@ -1,4 +1,4 @@
-import { listIntegrationsForOrg } from '@rawr/db'
+import { listIntegrationsForAccount } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { INTEGRATIONS } from '~/server/integrations/index.ts'
@@ -16,7 +16,7 @@ const AvailableAppsPage = async () => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
-  const rows = await listIntegrationsForOrg(contextFrom(session))
+  const rows = await listIntegrationsForAccount(contextFrom(session))
   const stateOf = new Map(rows.map((row) => [row.kind, row.state]))
   const available = INTEGRATIONS.filter((meta) => stateOf.get(meta.kind) === 'not_configured')
   const connectedCount = rows.length - available.length

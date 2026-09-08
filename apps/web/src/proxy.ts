@@ -12,10 +12,10 @@ import { NextResponse, type NextRequest } from 'next/server'
 // The slug ends at a slash, a query string or a fragment. Without the last two,
 // /contacts/probe?tab=x captured "probe?tab=x" and the switch handler then
 // refused an account by that name.
-const WORKSPACE_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
+const ACCOUNT_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
-  const match = WORKSPACE_PATH.exec(request.nextUrl.pathname)
+  const match = ACCOUNT_PATH.exec(request.nextUrl.pathname)
   if (!match) return NextResponse.next()
 
   const wanted = match[1]

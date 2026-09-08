@@ -919,7 +919,7 @@ export const claimEnrollmentRun = async (
              e.root_internet_message_id, e.unsubscribe_token, e.last_sent_at,
              (select count(*) from sequence_send d
                where d.mailbox_id = m.id and d.sent_at >= date_trunc('day', now()))::int as sent_today,
-             (select w.tracking_domain from account w limit 1) as tracking_domain
+             (select a.tracking_domain from account a limit 1) as tracking_domain
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
         join contact c on c.id = e.contact_id

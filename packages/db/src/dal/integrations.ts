@@ -149,7 +149,7 @@ export const listIntegrations = async (ctx: AccountContext): Promise<Integration
 const asDate = (value: string | Date | null): Date | null =>
   value === null ? null : value instanceof Date ? value : new Date(value)
 
-export type OrgIntegrationRow = IntegrationRow & {
+export type AccountIntegrationRow = IntegrationRow & {
   installedAt: Date | null
   installedByName: string | null
   installedByEmail: string | null
@@ -161,7 +161,7 @@ export type OrgIntegrationRow = IntegrationRow & {
 /** One row per personal app, folded from every person's grant: connected while
  *  anyone's works, degraded when the newest failure is newer than the newest
  *  success, and absent until somebody connects. */
-const personalRows = async (tx: Tx): Promise<Map<IntegrationKind, OrgIntegrationRow>> => {
+const personalRows = async (tx: Tx): Promise<Map<IntegrationKind, AccountIntegrationRow>> => {
   const rows = await tx.execute<{
     kind: IntegrationKind
     people: number
@@ -215,9 +215,9 @@ const personalRows = async (tx: Tx): Promise<Map<IntegrationKind, OrgIntegration
   )
 }
 
-export const listIntegrationsForOrg = async (
+export const listIntegrationsForAccount = async (
   ctx: AccountContext,
-): Promise<OrgIntegrationRow[]> =>
+): Promise<AccountIntegrationRow[]> =>
   withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string

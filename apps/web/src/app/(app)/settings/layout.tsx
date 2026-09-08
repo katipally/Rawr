@@ -44,7 +44,7 @@ const groupsFor = (account: string): SettingsGroup[] => [
     label: 'Account management',
     sections: [
       { href: defaultsPath(), label: 'Account Defaults' },
-      { href: membersPath(), label: 'Users & Teams' },
+      { href: membersPath(), label: 'Users' },
       { href: teamsPath(), label: 'Teams' },
       { href: auditPath(), label: 'History' },
     ],

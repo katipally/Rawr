@@ -1,4 +1,4 @@
-import { INTEGRATION_KINDS, listIntegrationsForOrg, listSites, PERSONAL_KINDS, type IntegrationKind } from '@rawr/db'
+import { INTEGRATION_KINDS, listIntegrationsForAccount, listSites, PERSONAL_KINDS, type IntegrationKind } from '@rawr/db'
 import { Alert, Badge, Breadcrumb, Card, Tabs } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
@@ -39,7 +39,7 @@ const AppPage = async ({
   if (!session) redirect('/sign-in')
 
   const ctx = contextFrom(session)
-  const [rows, sites] = await Promise.all([listIntegrationsForOrg(ctx), listSites(ctx)])
+  const [rows, sites] = await Promise.all([listIntegrationsForAccount(ctx), listSites(ctx)])
   const row = rows.find((entry) => entry.kind === kind)
   if (!row) notFound()
 

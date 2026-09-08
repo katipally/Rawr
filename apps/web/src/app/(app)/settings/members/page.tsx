@@ -22,7 +22,7 @@ const MembersPage = async () => {
     <div className="flex flex-col gap-4">
       <PageHeader
         as="h2"
-        title="Users & Teams"
+        title="Users"
         lead={`Everyone in ${session.accountName}.`}
         why={
           <p>

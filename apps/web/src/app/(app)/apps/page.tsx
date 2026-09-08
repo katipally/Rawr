@@ -1,4 +1,4 @@
-import { listIntegrationsForOrg, PERSONAL_KINDS } from '@rawr/db'
+import { listIntegrationsForAccount, PERSONAL_KINDS } from '@rawr/db'
 import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
@@ -22,7 +22,7 @@ const AppsPage = async () => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
-  const rows = await listIntegrationsForOrg(contextFrom(session))
+  const rows = await listIntegrationsForAccount(contextFrom(session))
   const connected = rows.filter((row) => row.state !== 'not_configured')
   const attention = connected.filter((row) => row.lastError !== null || row.state === 'disconnected')
 

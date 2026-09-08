@@ -159,7 +159,7 @@ export type BookingPageConfig = PublicBookingPage & {
 }
 
 const PAGE_COLUMNS = sql`
-  p.account_id, w.slug as account_slug, w.name as account_name, p.id as booking_page_id,
+  p.account_id, a.slug as account_slug, a.name as account_name, p.id as booking_page_id,
   p.slug, p.name, p.kind, p.owner_id, p.duration_minutes, p.buffer_before_minutes,
   p.buffer_after_minutes, p.min_notice_minutes, p.max_horizon_days, p.granularity_minutes,
   p.location, p.location_detail, p.title_tpl, p.description_tpl, p.company_fallback,
@@ -208,7 +208,7 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
 const readConfig = async (tx: Tx, pageId: string): Promise<BookingPageConfig | null> => {
   const [row] = await tx.execute<ConfigRow>(sql`
     select ${PAGE_COLUMNS} from booking_page p
-      join account w on w.id = p.account_id
+      join account a on a.id = p.account_id
      where p.id = ${pageId} limit 1`)
   return row ? toConfig(row) : null
 }
@@ -1103,7 +1103,7 @@ type BookingRow = {
 
 const BOOKING_COLUMNS = sql`
   b.id, b.account_id, b.booking_page_id, p.name as page_name, p.slug as page_slug,
-  w.slug as account_slug, b.host_user_id, u.name as host_name, u.email as host_email,
+  a.slug as account_slug, b.host_user_id, u.name as host_name, u.email as host_email,
   b.contact_id, b.company_id, b.starts_at, b.ends_at, b.attendee_name, b.attendee_email,
   b.attendee_timezone, b.answers, b.conference_url, b.conference_ref, b.calendar_event_id,
   b.calendar_id, b.state, b.cancel_token, b.reschedule_token, b.cancel_reason`
@@ -1111,7 +1111,7 @@ const BOOKING_COLUMNS = sql`
 const BOOKING_JOINS = sql`
   from booking b
   join booking_page p on p.id = b.booking_page_id
-  join account w on w.id = b.account_id
+  join account a on a.id = b.account_id
   join user_account u on u.id = b.host_user_id`
 
 const toBooking = (row: BookingRow): BookingRecord => ({

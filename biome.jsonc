@@ -42,7 +42,7 @@
         "noLabelWithoutControl": {
           "level": "error",
           "options": {
-            "inputComponents": ["TextInput", "TextArea", "Select", "FieldInput", "DatePicker", "TagInput"]
+            "inputComponents": ["TextInput", "TextArea", "Select", "FieldInput"]
           }
         },
         "noNoninteractiveElementToInteractiveRole": "error",
