@@ -67,8 +67,8 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied(`Rawr is limited to ${env.GOOGLE_HOSTED_DOMAIN} accounts.`)
   }
 
-  // An identity whose domain an organisation claims joins it, and its accounts
-  // as a viewer when that organisation auto-joins. Everybody else is seated by an
+  // An identity whose domain an account claims joins it, on that account's default
+  // view grants when it auto-joins. Everybody else is seated by an
   // invitation, which is checked against the address they signed in with.
   const userId = await signInWithGoogle({
     sub: identity.sub,

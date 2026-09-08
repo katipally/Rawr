@@ -1,7 +1,7 @@
-import { canWrite, getRegistry } from '@rawr/db'
+import { canView, canWrite, getRegistry } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
-import { AppShell, type NavSection } from '~/components/app-shell.tsx'
+import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell.tsx'
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
 import { CommandPalette } from '~/components/crm/command-palette.tsx'
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
@@ -18,7 +18,7 @@ import {
   exportPath,
   importsPath,
   inboxPath,
-  integrationsPath,
+  appsPath,
   objectsPath,
   objectView,
   propertiesPath,
@@ -33,6 +33,12 @@ import {
   accountHome,
 } from '~/lib/links.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
+import type { Hub } from '~/lib/hubs.ts'
+
+/** A rail section before its grants are applied. The hub on a group overrides the
+ *  section's, which is how Data Management lists moving contacts next to the
+ *  account settings that configure them. */
+type HubSection = Omit<NavSection, 'groups'> & { hub: Hub; groups: (NavGroup & { hub?: Hub })[] }
 
 const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const session = await readSession()
@@ -44,11 +50,12 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   // Built from the session, because every CRM address carries its account.
   // The sections are HubSpot's hubs in HubSpot's order. Home is the logo, and
   // Settings is its own place, reached from the top bar.
-  const nav: NavSection[] = [
+  const sections: HubSection[] = [
     {
       key: 'crm',
       label: 'CRM',
       icon: 'crm',
+      hub: 'contacts',
       groups: [
         {
           label: 'Records',
@@ -75,6 +82,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       key: 'marketing',
       label: 'Marketing',
       icon: 'marketing',
+      hub: 'marketing',
       groups: [
         {
           label: 'Capture',
@@ -86,6 +94,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         },
         {
           label: 'Analytics',
+          hub: 'reports',
           items: [
             { href: reportsPath(account, { tab: 'forms' }), label: 'Marketing Analytics', match: `/contacts/${account}/reports/forms` },
           ],
@@ -96,6 +105,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       key: 'sales',
       label: 'Sales',
       icon: 'sales',
+      hub: 'sales',
       groups: [
         {
           label: 'Selling',
@@ -109,6 +119,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         },
         {
           label: 'Analytics',
+          hub: 'reports',
           items: [
             { href: reportsPath(account, { tab: 'pipeline' }), label: 'Sales Analytics', match: `/contacts/${account}/reports/pipeline` },
           ],
@@ -119,6 +130,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       key: 'data',
       label: 'Data Management',
       icon: 'data',
+      hub: 'contacts',
       groups: [
         {
           label: 'Move data',
@@ -130,11 +142,12 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         },
         {
           label: 'Configure',
+          hub: 'account',
           items: [
             { href: objectsPath(), label: 'Data Model' },
             { href: propertiesPath(), label: 'Properties' },
             { href: sitesPath(), label: 'Event Management' },
-            { href: integrationsPath(), label: 'Data Enrichment' },
+            { href: appsPath(), label: 'Connected Apps' },
           ],
         },
       ],
@@ -143,6 +156,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       key: 'reporting',
       label: 'Reporting',
       icon: 'reporting',
+      hub: 'reports',
       groups: [
         {
           label: 'Reports',
@@ -154,6 +168,16 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       ],
     },
   ]
+
+  // A grant the person does not hold hides its links rather than letting them
+  // walk into a refusal, which is what HubSpot does and what the + menu below
+  // already did.
+  const nav: NavSection[] = sections.flatMap(({ hub, groups, ...section }) => {
+    const kept = groups.flatMap(({ hub: groupHub, ...group }) =>
+      canView(ctx, groupHub ?? hub) ? [group] : [],
+    )
+    return kept.length ? [{ ...section, groups: kept }] : []
+  })
 
   return (
     <ToastProvider>

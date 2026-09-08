@@ -49,7 +49,7 @@ export type NavSection = {
   groups?: NavGroup[]
 }
 
-export type AccountOption = { slug: string; name: string; organisation?: string }
+export type AccountOption = { slug: string; name: string }
 
 export type CreateOption = { key: string; label: string; href: string }
 
@@ -336,29 +336,22 @@ const Shell = ({
     window.location.assign(target.toString())
   }
 
-  /** Accounts grouped by the organisation that owns them, so a person on two
-   *  organisations sees which is which rather than one flat list of names. */
-  const accountGroups: MenuGroup[] = (() => {
-    const byOrg = new Map<string, AccountOption[]>()
-    for (const option of accounts) {
-      const key = option.organisation ?? ''
-      byOrg.set(key, [...(byOrg.get(key) ?? []), option])
-    }
-    return [...byOrg.entries()].map(([organisation, options]) => ({
-      key: organisation || 'accounts',
-      label: organisation || 'Accounts',
-      items: options.map((option) => ({
-        key: option.slug,
-        label: option.name,
-        checked: option.slug === accountSlug,
-        onSelect: () => switchTo(option.slug),
-      })),
-    }))
-  })()
-
   const accountMenu: MenuGroup[] = [
     { key: 'you', items: [{ key: 'account', label: 'Your account', href: accountHref, icon: <UserRound className="size-4" /> }] },
-    ...(accounts.length > 1 ? accountGroups : []),
+    ...(accounts.length > 1
+      ? [
+          {
+            key: 'accounts',
+            label: 'Accounts',
+            items: accounts.map((option) => ({
+              key: option.slug,
+              label: option.name,
+              checked: option.slug === accountSlug,
+              onSelect: () => switchTo(option.slug),
+            })),
+          },
+        ]
+      : []),
   ]
 
   /** The phone sheet: same sections, inline lists, no hover. Ends with who is

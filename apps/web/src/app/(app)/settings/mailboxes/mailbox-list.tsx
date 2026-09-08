@@ -124,7 +124,7 @@ export const MailboxList = ({
             {!googleReady && !devReady ? (
               <Alert tone="warning">
                 Gmail sync needs a Google client and an internal consent screen on the{' '}
-                {internalDomain} organisation (open item 3). Until that exists, nothing here can
+                {internalDomain} Google Workspace (open item 3). Until that exists, nothing here can
                 connect.
               </Alert>
             ) : null}

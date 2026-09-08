@@ -4,9 +4,7 @@ import { Button, Card, Field, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-
-const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
-type Hub = (typeof HUBS)[number]
+import { HUBS, type Hub } from '~/lib/hubs.ts'
 
 type Account = {
   id: string

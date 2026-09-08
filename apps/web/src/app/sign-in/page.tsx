@@ -137,7 +137,7 @@ const SignIn = async ({ searchParams }: Props) => {
       ) : (
         <p className="text-small text-secondary">
           Trouble signing in? Any Google account is accepted, but it needs a seat: either an
-          invitation sent to that address, or an organisation that claims its domain.
+          invitation sent to that address, or an account that claims its domain.
         </p>
       )}
     </main>

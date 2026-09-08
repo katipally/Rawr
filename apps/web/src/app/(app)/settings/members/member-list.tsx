@@ -5,20 +5,7 @@ import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-
-/** Listed here as well as in the data access layer: a client bundle cannot import
- *  the database package. The order is HubSpot's, left to right across its grid. */
-const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
-type Hub = (typeof HUBS)[number]
-
-const HUB_HINT: Record<Hub, string> = {
-  contacts: 'Contacts, companies, activity, tasks, imports',
-  sales: 'Deals, sequences, mail, meetings',
-  marketing: 'Forms, segments, subscriptions, the newsletter',
-  service: 'Tickets and the help desk',
-  reports: 'Dashboards and the reports behind them',
-  account: 'Settings, properties, pipelines, integrations',
-}
+import { HUBS, HUBS_WITHOUT_SCREENS, HUB_HINT, type Hub } from '~/lib/hubs.ts'
 
 export type MemberListRow = {
   userId: string
@@ -95,7 +82,10 @@ const GrantGrid = ({ value, onChange }: { value: Grants; onChange: (next: Grants
         return (
           <div key={hub} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
             <div>
-              <p className="capitalize text-body">{hub}</p>
+              <p className="capitalize text-body">
+                {hub}
+                {HUBS_WITHOUT_SCREENS.has(hub) ? <span className="ml-2 text-small text-secondary">no screens yet</span> : null}
+              </p>
               <p className="text-small text-secondary">{HUB_HINT[hub]}</p>
             </div>
             <fieldset className="flex gap-1 border-0 p-0">
