@@ -362,7 +362,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
     })
 
     if (linked.contactId) {
-      await applyOptIns(tx, ctx, linked.contactId, settings.subscriptionOptIns ?? [])
+      await applyOptIns(ctx, linked.contactId, settings.subscriptionOptIns ?? [])
 
       // F4 §3, T1. Written here, inside the transaction that created the contact,
       // and nothing more: a visitor with 5,000 views must not make a form response
@@ -480,12 +480,7 @@ const capturePerson = async (
  *  An unsubscribed contact who fills the form again is resubscribing, which is
  *  what the act means. Types the account does not have are skipped rather than
  *  refused, so a renamed type never costs a lead. */
-const applyOptIns = async (
-  tx: Tx,
-  ctx: AccountContext,
-  contactId: string,
-  names: string[],
-): Promise<void> => {
+const applyOptIns = async (ctx: AccountContext, contactId: string, names: string[]): Promise<void> => {
   if (names.length === 0) return
   const wanted = new Set(names.map((name) => name.trim().toLowerCase()).filter((name) => name !== ''))
   if (wanted.size === 0) return

@@ -41,7 +41,7 @@ import {
   type Provisioner,
   type AccountContext,
 } from '../src/index.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { PEER, SANDBOX, seatFor } from './fixture.ts'
 
 /** F2's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-crm.ts and verify-forms.ts.
@@ -79,7 +79,9 @@ const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', '
   )
   const id = rows[0]?.id
   if (!id) throw new Error(`account ${slug} is not seeded. Run pnpm db:seed.`)
-  return { accountId: id, actorId: null, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
+  // Seated on a real member, because this context writes and every write names
+  // its actor in audit_log.
+  return { accountId: id, actorId: await seatFor(id, slug), actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(

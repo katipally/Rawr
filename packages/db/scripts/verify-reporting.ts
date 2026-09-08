@@ -15,7 +15,7 @@ import {
   saveReportDashboard,
 } from '../src/dal/report-dashboards.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { PEER, SANDBOX, seatFor } from './fixture.ts'
 
 /** B7 against the real database.
  *
@@ -84,7 +84,9 @@ try {
 
   const admin = ctxFor('admin')
   const viewer = ctxFor('viewer')
-  const probeCtx: AccountContext = { accountId: probe.id, actorId: null, actorKind: 'user', isSuperAdmin: true, viewHubs: [], editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] }
+  // Seated, because this context writes into the peer account and every write
+  // names its actor in audit_log.
+  const probeCtx: AccountContext = { accountId: probe.id, actorId: await seatFor(probe.id, PEER.slug), actorKind: 'user', isSuperAdmin: true, viewHubs: [], editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] }
   const wide = clampRange({ from: new Date(Date.now() - 300 * DAY), to: new Date(Date.now() + DAY) })
 
   console.log('-- the range -----------------------------------------------------')

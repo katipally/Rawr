@@ -26,7 +26,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { PEER, SANDBOX, seatFor } from './fixture.ts'
 
 /** F4's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-forms.ts. */
@@ -64,20 +64,9 @@ const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', '
   // person and naming nobody left rows that verify-account rightly refuses —
   // which it only noticed on the run after this suite, since the two share a
   // database and account goes first.
-  // Through withAccount, because membership is tenant-scoped and the bare pool
-  // has no account pinned: unscoped it returns nothing at all, which is the
-  // whole point of the tenancy suite.
-  const [seat] = await withAccount(
-    { accountId: id, actorId: null, actorKind: 'job', isSuperAdmin: false, viewHubs: [], editHubs: [] },
-    (tx) =>
-      tx.execute<{ id: string }>(
-        sql`select m.user_id as id from membership m
-             where m.is_super_admin and m.deactivated_at is null
-             order by m.created_at limit 1`,
-      ) as Promise<{ id: string }[]>,
-  )
-  if (!seat) throw new Error(`account ${slug} has no super admin seated. Run pnpm db:seed.`)
-  return { accountId: id, actorId: seat.id, actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
+  // Seated on a real member, because this context writes and every write names
+  // its actor in audit_log.
+  return { accountId: id, actorId: await seatFor(id, slug), actorKind: 'user', isSuperAdmin: false, viewHubs: [], editHubs: editHubs as AccountContext['editHubs'] }
 }
 
 const scoped = <T extends Record<string, unknown>>(

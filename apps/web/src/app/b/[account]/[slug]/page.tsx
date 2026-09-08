@@ -14,6 +14,7 @@ import { BookingWidget } from '~/components/booking/booking-widget.tsx'
 import { EmbedHeight } from '~/components/booking/embed-height.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
 import { BOOKING_COPY } from '~/lib/edge-copy.ts'
+import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { bookingIcsPath } from '~/lib/links.ts'
 import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
 
@@ -81,6 +82,24 @@ const BookingPublicPage = async ({
   // real, so it is answered from the URL rather than left to a widget that is
   // evidently not running.
   if (single('confirmed') === '1') {
+    // `at` has been in this URL since the confirm route was written and nothing
+    // ever read it, so the one screen whose whole job is to say a meeting is real
+    // did not say when it is. This is the path for somebody whose script died, so
+    // the confirmation mail may not have arrived either.
+    const confirmedAt = new Date(single('at') ?? '')
+    const zone = isKnownTimezone(single('tz') ?? '') ? (single('tz') as string) : 'UTC'
+    const locale = await visitorLocale()
+    const when = Number.isNaN(confirmedAt.getTime())
+      ? null
+      : confirmedAt.toLocaleString(locale.tag, {
+          timeZone: zone,
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+
     return (
       <Shell page={summary} embedded={embedded}>
         <div className="rawr-b">
@@ -90,6 +109,13 @@ const BookingPublicPage = async ({
               {page.confirmationCopy ??
                 'A calendar invitation is on its way to your inbox, with the joining details and links to move or cancel the meeting.'}
             </p>
+            {when ? (
+              <p className="rawr-b-panel">
+                <span className="rawr-b-title">{page.name}</span>
+                <br />
+                {when} <span className="rawr-b-hint">({zone})</span>
+              </p>
+            ) : null}
             <p className="rawr-b-actions">
               {single('r') ? (
                 <>

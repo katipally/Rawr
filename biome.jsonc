@@ -70,11 +70,7 @@
         "noUnusedVariables": "error",
         "noInnerDeclarations": "error",
         "useExhaustiveDependencies": "error",
-        // The one finding still open, and it is not a lint problem: applyOptIns
-        // in dal/forms.ts takes the submission's transaction and ignores it, so
-        // the opt-ins it writes are outside the transaction that created the
-        // contact. Removing the parameter would hide that rather than fix it.
-        "noUnusedFunctionParameters": "warn"
+        "noUnusedFunctionParameters": "error"
       },
       "suspicious": {
         "noExplicitAny": "error",
