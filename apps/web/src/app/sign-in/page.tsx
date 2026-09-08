@@ -15,7 +15,7 @@ const SignIn = async ({ searchParams }: Props) => {
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 p-6">
       <div className="flex flex-col gap-2">
-        <p className="text-xl font-semibold tracking-tight text-cta">Rawr</p>
+        <img src="/rawr-logo.svg" alt="Rawr" width={190} height={80} className="h-12 w-auto self-start" />
         <h1 className="text-lg font-medium">Sign in</h1>
         <p className="text-secondary">
           The CRM behind datasaur.ai: contacts, companies, deals, forms, bookings and the

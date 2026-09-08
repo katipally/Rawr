@@ -411,9 +411,9 @@ const Shell = ({
       <header className="relative z-topbar flex h-topbar shrink-0 items-center gap-2 pr-3 text-nav-text">
         <NavigationProgress />
 
-        {/* The logo owns the rail's width, so the bar's contents start level
-            with the page card below. */}
-        <div className="flex w-rail shrink-0 items-center justify-center">
+        {/* At least the rail's width, so the phone menu button sits over the rail;
+            wider on desktop because the lockup is, and the search starts after it. */}
+        <div className="flex min-w-rail shrink-0 items-center justify-center px-2">
           <button
             type="button"
             aria-expanded={sheetOpen}
@@ -424,10 +424,8 @@ const Shell = ({
           >
             <PanelLeft aria-hidden="true" className="size-4" />
           </button>
-          <Link href={homeHref} aria-label="Rawr home" className="hidden rounded-hs p-1.5 md:block">
-            <span aria-hidden="true" className="grid size-6 place-items-center rounded-hs bg-brand font-semibold text-inverse">
-              R
-            </span>
+          <Link href={homeHref} aria-label="Rawr home" className="hidden rounded-hs p-1 md:block">
+            <img src="/rawr-logo.svg" alt="" aria-hidden="true" width={167} height={70} className="h-7 w-auto" />
           </Link>
         </div>
 
@@ -578,7 +576,10 @@ const Shell = ({
           <>
             <div id="primary-nav" className="fixed inset-y-0 left-0 z-overlay flex w-64 flex-col bg-nav text-nav-text md:hidden">
               <div className="flex h-topbar shrink-0 items-center justify-between gap-2 px-4">
-                <span className="font-semibold tracking-tight">Rawr</span>
+                <span className="flex items-center gap-2 font-semibold tracking-tight">
+                  <img src="/rawr-mark.svg" alt="" aria-hidden="true" width={20} height={20} className="size-5" />
+                  Rawr
+                </span>
                 <button
                   type="button"
                   aria-label="Close menu"

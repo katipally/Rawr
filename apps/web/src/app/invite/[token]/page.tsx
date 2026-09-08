@@ -69,7 +69,9 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
-      <h1 className="text-lg font-medium text-cta">Rawr</h1>
+      <h1>
+        <img src="/rawr-logo.svg" alt="Rawr" width={143} height={60} className="h-9 w-auto" />
+      </h1>
       <div className="rounded-panel border border-line bg-surface p-4">
         <h2 className="text-base font-medium">You have been invited to {offer.accountName}</h2>
         <p className="mt-1 text-secondary">
