@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
-import type { FieldType, ObjectKey } from '@rawr/db'
+import type { FieldType } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
@@ -30,7 +30,6 @@ export type RecordTableProps = {
   /** Base query for the next-page link, so paging keeps the filters and the sort. */
   params: ListParams
   nextCursor: string | undefined
-  sort: { key: string; direction: 'asc' | 'desc' } | null
   totalHint: number | null
   objectLabel: string
   objectPlural: string
@@ -55,7 +54,6 @@ export const RecordTable = ({
   rows,
   params,
   nextCursor,
-  sort,
   totalHint,
   objectLabel,
   objectPlural,

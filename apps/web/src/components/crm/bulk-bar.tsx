@@ -3,7 +3,6 @@
 import { Button, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'

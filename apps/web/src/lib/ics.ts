@@ -29,7 +29,7 @@ export type IcsEvent = {
 const stamp = (date: Date): string => `${date.toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`
 
 /** Backslash first, or every escape added after it gets escaped again. */
-const escape = (value: string): string =>
+const escapeText = (value: string): string =>
   value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n')
 
 /** Folded at 75 octets rather than 75 characters: the limit is on bytes, and a
@@ -58,7 +58,7 @@ const fold = (line: string): string => {
 
 export const buildIcs = (event: IcsEvent): string => {
   const person = (role: 'ORGANIZER' | 'ATTENDEE', who: { name: string; email: string }): string =>
-    `${role};CN=${escape(who.name)}:mailto:${who.email}`
+    `${role};CN=${escapeText(who.name)}:mailto:${who.email}`
 
   const lines = [
     'BEGIN:VCALENDAR',
@@ -72,9 +72,9 @@ export const buildIcs = (event: IcsEvent): string => {
     `DTSTAMP:${stamp(new Date())}`,
     `DTSTART:${stamp(event.startsAt)}`,
     `DTEND:${stamp(event.endsAt)}`,
-    `SUMMARY:${escape(event.summary)}`,
-    event.description ? `DESCRIPTION:${escape(event.description)}` : null,
-    event.location ? `LOCATION:${escape(event.location)}` : null,
+    `SUMMARY:${escapeText(event.summary)}`,
+    event.description ? `DESCRIPTION:${escapeText(event.description)}` : null,
+    event.location ? `LOCATION:${escapeText(event.location)}` : null,
     event.organiser ? person('ORGANIZER', event.organiser) : null,
     event.attendee ? person('ATTENDEE', event.attendee) : null,
     `STATUS:${event.cancelled ? 'CANCELLED' : 'CONFIRMED'}`,

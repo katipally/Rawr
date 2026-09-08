@@ -3,7 +3,7 @@ import { deadLetter } from '../schema/platform.ts'
 import { fieldIndex } from '../schema/metadata.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
-import { notify, resolveNotifications } from './notifications.ts'
+import { notify } from './notifications.ts'
 
 export type DeadLetterRow = {
   id: string

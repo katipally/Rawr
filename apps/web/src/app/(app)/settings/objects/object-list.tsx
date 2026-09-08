@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, EmptyState, Field, IconButton, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import Link from 'next/link'

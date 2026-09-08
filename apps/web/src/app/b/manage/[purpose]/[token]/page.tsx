@@ -1,10 +1,8 @@
 import {
   bookingForToken,
-  dayKey,
   isKnownTimezone,
   publicEdgeContext,
-  readBookingPage,
-} from '@rawr/db'
+  readBookingPage } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { RescheduleWidget } from '~/components/booking/reschedule-widget.tsx'

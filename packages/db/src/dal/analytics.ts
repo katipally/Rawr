@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   collectorNotice,
   contactActivity,
@@ -6,8 +6,7 @@ import {
   pageView,
   site,
   visitor,
-  visitorSession,
-} from '../schema/analytics.ts'
+  visitorSession } from '../schema/analytics.ts'
 import { consentRecord } from '../schema/forms.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
 import { isUuid, mutate, withAccount } from './index.ts'

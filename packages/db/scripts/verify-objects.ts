@@ -1,4 +1,4 @@
-import { createCustomObject, deleteCustomObject, listCustomObjects } from '../src/dal/objects.ts'
+import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { associate, groupFor, readAssociations } from '../src/dal/associations.ts'
 import { createTask, listTasks, logByHand } from '../src/dal/tasks.ts'

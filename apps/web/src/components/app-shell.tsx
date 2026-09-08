@@ -533,7 +533,6 @@ const Shell = ({
                   // Not next/image: this is whatever host the identity provider
                   // serves from, and a remote loader for one 24px square is not
                   // worth the configuration.
-                  // biome-ignore lint/performance/noImgElement: see above
                   <img src={avatarUrl} alt="" width={24} height={24} className="size-6 rounded-full object-cover" />
                 ) : (
                   <Building2 aria-hidden="true" className="size-4" />

@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Select, Spinner, useToast } from '@rawr/ui'
+import { Button, Spinner, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Fragment, useCallback, useEffect, useState } from 'react'

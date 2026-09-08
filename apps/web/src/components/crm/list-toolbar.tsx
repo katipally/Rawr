@@ -4,7 +4,6 @@ import { Badge, Button, Checkbox, DropdownMenu, IconButton, Modal, TextInput, cn
 import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, Settings, SlidersHorizontal, Search, X } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useState, type ReactNode } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'

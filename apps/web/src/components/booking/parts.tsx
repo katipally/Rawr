@@ -43,14 +43,14 @@ export const TimezonePicker = ({
     const away = (event: MouseEvent) => {
       if (!wrap.current?.contains(event.target as Node)) onToggle()
     }
-    const escape = (event: KeyboardEvent) => {
+    const onEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onToggle()
     }
     document.addEventListener('mousedown', away)
-    document.addEventListener('keydown', escape)
+    document.addEventListener('keydown', onEscape)
     return () => {
       document.removeEventListener('mousedown', away)
-      document.removeEventListener('keydown', escape)
+      document.removeEventListener('keydown', onEscape)
     }
   }, [open, onToggle])
 
@@ -219,8 +219,6 @@ export const Calendar = ({
         >
           {cells.map((cell, index) =>
             cell === null ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: leading blanks have
-              // no identity of their own; the index is the only thing they are.
               <span key={`pad-${index}`} className="rawr-b-day" />
             ) : (
               <Day

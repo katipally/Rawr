@@ -2,16 +2,13 @@ import {
   applyEnrichment,
   contactsLinkedTo,
   externalIdOf,
-  assertCanWrite,
   getRecord,
   ingestMarketingEvent,
-  once,
   readCredentials,
   recordHealth,
   setExternalId,
   type MarketingEvent,
-  type AccountContext,
-} from '@rawr/db'
+  type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
 

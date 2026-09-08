@@ -64,6 +64,9 @@ export const Combobox = (props: ComboboxProps) => {
   const selected = props.multiple ? props.value : props.value === null ? [] : [props.value]
   const chosen = options.filter((option) => selected.includes(option.value))
 
+  // Both are triggers rather than reads: a new query or a new list puts the
+  // highlight back on the first row.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => setActive(0), [query, options])
 
   const commit = (option: ComboboxOption) => {
@@ -202,7 +205,6 @@ export const Combobox = (props: ComboboxProps) => {
               // The input keeps the focus and drives the list through
               // aria-activedescendant, which is the listbox pattern: an option is
               // never itself a focus stop, so it is a list item and not a button.
-              // biome-ignore lint/a11y/useKeyWithClickEvents: the keyboard path is on the input
               <div
                 key={option.value}
                 id={`${id}-option-${option.value}`}

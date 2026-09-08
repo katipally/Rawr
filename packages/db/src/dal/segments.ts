@@ -1,7 +1,7 @@
 import { asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
-import { recordActivityFanout, type EntityType } from './activity.ts'
+import { recordActivityFanout } from './activity.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
@@ -164,8 +164,6 @@ export const deleteSegment = async (ctx: AccountContext, id: string): Promise<vo
   })
 
 export type EvaluationResult = { entered: number; exited: number; members: number }
-
-const ENTITY_TYPE: Record<ObjectKey, EntityType> = { contact: 'contact', company: 'company', deal: 'deal' }
 
 /** Recomputes one segment and writes the difference.
  *

@@ -55,7 +55,7 @@
         // 19 hits, all `a && a.b` written out. A preference, not a defect, and
         // turning it on would rewrite files nobody is otherwise touching.
         "useOptionalChain": "off",
-        "noUselessCatch": "warn"
+        "noUselessCatch": "error"
       },
       "style": {
         // 10 hits. Same reasoning as useOptionalChain.
@@ -66,21 +66,26 @@
         "noParameterAssign": "error"
       },
       "correctness": {
-        "noUnusedImports": "warn",
-        "noUnusedVariables": "warn",
-        "noInnerDeclarations": "warn",
-        "useExhaustiveDependencies": "warn"
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noInnerDeclarations": "error",
+        "useExhaustiveDependencies": "error",
+        // The one finding still open, and it is not a lint problem: applyOptIns
+        // in dal/forms.ts takes the submission's transaction and ignores it, so
+        // the opt-ins it writes are outside the transaction that created the
+        // contact. Removing the parameter would hide that rather than fix it.
+        "noUnusedFunctionParameters": "warn"
       },
       "suspicious": {
-        "noExplicitAny": "warn",
-        "noImplicitAnyLet": "warn",
-        "noConfusingVoidType": "warn",
-        "noSelfCompare": "warn",
-        "noShadowRestrictedNames": "warn",
+        "noExplicitAny": "error",
+        "noImplicitAnyLet": "error",
+        "noConfusingVoidType": "error",
+        "noSelfCompare": "error",
+        "noShadowRestrictedNames": "error",
         // alert, confirm and prompt. Clear, so it gates: the three rename dialogs
         // that used prompt() now ask through the RenamePrompt primitive.
         "noAlert": "error",
-        "noConsole": { "level": "warn", "options": { "allow": ["error", "log", "warn"] } }
+        "noConsole": { "level": "error", "options": { "allow": ["error", "log", "warn"] } }
       },
       "nursery": {
         // Needs type information, so it stays a warning. It is the rule that

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import { importRun } from '../schema/imports.ts'
-import { activity, activityLink } from '../schema/records.ts'
+import { activityLink } from '../schema/records.ts'
 import {
   ACTIVITY_IMPORT,
   ASSOCIATION_IMPORT,
@@ -12,8 +12,7 @@ import {
   LIST_IMPORT,
   looksLikeHubspot,
   PROPERTY_IMPORT,
-  SUBMISSION_IMPORT,
-} from '../registry/hubspot.ts'
+  SUBMISSION_IMPORT } from '../registry/hubspot.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'

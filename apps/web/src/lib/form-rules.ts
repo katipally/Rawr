@@ -1,3 +1,7 @@
+// biome-ignore-all lint/correctness/noInnerDeclarations: written in ES5 on purpose — see the module comment
+// biome-ignore-all lint/suspicious/noGlobalIsNan: same, `Number.isNaN` is ES2015
+// biome-ignore-all lint/suspicious/noGlobalIsFinite: same, `Number.isFinite` is ES2015
+// biome-ignore-all lint/correctness/noUnusedVariables: same, a bare `catch {}` is ES2019
 /** Checking one answer in the browser, before it is sent.
  *
  *  The server is the authority and revalidates everything, so this exists only to

@@ -310,7 +310,6 @@ export const ScheduleEditor = ({
                   // Position is the identity here: the times themselves change as
                   // they are typed, and two identical blocks are a thing a person
                   // can briefly have on screen.
-                  // biome-ignore lint/suspicious/noArrayIndexKey: see above
                   <div key={index} className="flex items-end gap-2">
                     <Field id={`override-from-${index}`} label={index === 0 ? 'From' : ''}>
                       <TextInput

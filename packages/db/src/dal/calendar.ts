@@ -3,7 +3,6 @@ import type { AccountContext } from './context.ts'
 import { withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import type { ObjectKey } from '../registry/core.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 
 /** What is happening this month.

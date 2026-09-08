@@ -31,6 +31,9 @@ const titleOf = (): string => document.querySelector('main h1')?.textContent?.tr
  *  shell's preferences live. */
 export const BookmarksPanel = ({ here }: { here: string }) => {
   const [rows, setRows] = useState<BookmarkEntry[]>([])
+  // `here` is a trigger rather than something the body reads: the pinned list is
+  // re-read whenever the person navigates.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => setRows(readAll()), [here])
 
   const save = (next: BookmarkEntry[]) => {

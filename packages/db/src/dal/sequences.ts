@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
-import { mailbox, message, messageThread } from '../schema/messaging.ts'
+import { mailbox } from '../schema/messaging.ts'
 import { contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import {
@@ -12,8 +12,7 @@ import {
   sequenceLink,
   sequenceSend,
   sequenceStep,
-  type SequenceSettings,
-} from '../schema/sequences.ts'
+  type SequenceSettings } from '../schema/sequences.ts'
 import { contactLabels, linksForContacts, recordActivity } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'

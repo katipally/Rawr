@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
-import { FIELD_TYPES, TYPE_META, type FieldType } from '../registry/types.ts'
+import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import type { AccountContext } from './context.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { mutate, withAccount, type Tx } from './index.ts'

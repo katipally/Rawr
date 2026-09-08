@@ -1,5 +1,5 @@
-import { asc, eq, sql } from 'drizzle-orm'
-import { team, teamMember, userAccount } from '../schema/identity.ts'
+import { eq, sql } from 'drizzle-orm'
+import { team, teamMember } from '../schema/identity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 

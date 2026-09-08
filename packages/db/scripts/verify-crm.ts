@@ -12,8 +12,7 @@ import {
   getRecord,
   listRecords,
   mergeRecords,
-  updateRecord,
-} from '../src/dal/records.ts'
+  updateRecord } from '../src/dal/records.ts'
 import { findDuplicates } from '../src/dal/duplicates.ts'
 import {
   armedFor,
@@ -27,16 +26,14 @@ import {
   parkAutomationRun,
   removeAutomation,
   saveAutomation,
-  setAutomationActive,
-} from '../src/dal/automations.ts'
+  setAutomationActive } from '../src/dal/automations.ts'
 import {
   assertCanAttach,
   listAttachments,
   MAX_ATTACHMENT_BYTES,
   recordAttachment,
   removeAttachment,
-  storageKeyFor,
-} from '../src/dal/attachments.ts'
+  storageKeyFor } from '../src/dal/attachments.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
@@ -49,9 +46,8 @@ import {
   reorderViews,
   resolveView,
   saveView,
-  setViewPinned,
-} from '../src/dal/views.ts'
-import { readAssociations, associate, groupFor } from '../src/dal/associations.ts'
+  setViewPinned } from '../src/dal/views.ts'
+import { readAssociations, groupFor } from '../src/dal/associations.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingIsUsable } from '../src/dal/imports.ts'
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'

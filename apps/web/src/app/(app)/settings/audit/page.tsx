@@ -19,11 +19,10 @@ const AuditPage = async () => {
   }
 
   const ctx = contextFrom(session)
-  const [page, entities, members, orgRows] = await Promise.all([
+  const [page, entities, members] = await Promise.all([
     listAudit(ctx, { limit: 50 }),
     auditEntities(ctx),
     listMembers(ctx),
-    session.isSuperAdmin ? listAudit(contextFrom(session), { limit: 25 }) : Promise.resolve([]),
   ])
 
   return (

@@ -161,7 +161,6 @@ export const Timeline = ({
 
   /** The URL wins, because a link has to open the screen it was taken from. With
    *  nothing in the URL, the last choice this person made is restored. A3. */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: load is rebuilt every render; listing it would refetch on every render
   // The quick-action row is a link, so asking for a kind arrives as a new prop on
   // the same instance. Focus follows, because a person who clicked "Log call"
   // wants the cursor in the box, not a scrolled page they have to click into.
@@ -171,6 +170,9 @@ export const Timeline = ({
     composer.current?.focus()
   }, [openKind])
 
+  // Restores a remembered filter, once. `load` and `counts` are rebuilt every
+  // render, so listing them would refetch on every render.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (urlTypes !== null) {
       setHydrated(true)

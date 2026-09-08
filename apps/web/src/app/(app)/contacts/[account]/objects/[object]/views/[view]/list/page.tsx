@@ -1,4 +1,4 @@
-import { calendarFields, isObjectKey, listRecords, listViews, parseFilters, resolveView, withAccountReads } from '@rawr/db'
+import { calendarFields, listRecords, listViews, parseFilters, resolveView, withAccountReads } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
@@ -249,7 +249,6 @@ const ListPage = async ({
           }))}
           params={listParams}
           nextCursor={encodeCursor(page!.nextCursor)}
-          sort={sorts[0] ?? null}
           totalHint={page!.total}
           objectLabel={object.nameSingular}
           objectPlural={object.namePlural}

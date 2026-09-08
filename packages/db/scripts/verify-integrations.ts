@@ -145,10 +145,9 @@ try {
 
   // A credential belongs to the account, so connecting one needs the account hub
   // and every save and disconnect below runs in the account scope.
-  const orgAdmin = admin
-  const orgMember = sales
+  const accountAdmin = admin
+  const accountMember = sales
   const salesUser = members.find((m) => m.email === 'sales@sandbox.test')!
-  const probeOrg = probeCtx
 
   console.log('-- the framework -----------------------------------------------')
 
@@ -164,7 +163,7 @@ try {
   })
 
   await check('a credential is stored encrypted and never returned in the list', async () => {
-    await saveIntegration(orgAdmin, { kind: 'brevo', config: { listId: 42 }, secret: `verify-${stamp}` })
+    await saveIntegration(accountAdmin, { kind: 'brevo', config: { listId: 42 }, secret: `verify-${stamp}` })
     const rows = await listIntegrations(admin)
     const brevo = rows.find((row) => row.kind === 'brevo')
     expect(brevo?.hasSecret === true, 'the secret was not stored')
@@ -185,7 +184,7 @@ try {
   })
 
   await check('saving a config change keeps the stored key', async () => {
-    await saveIntegration(orgAdmin, { kind: 'brevo', config: { listId: 43 } })
+    await saveIntegration(accountAdmin, { kind: 'brevo', config: { listId: 43 } })
     const creds = await readCredentials(admin, 'brevo')
     expect(creds?.secret === `verify-${stamp}`, 'the key was lost when only the config changed')
     expect(creds?.config.listId === 43, 'the config did not change')
@@ -212,7 +211,7 @@ try {
 
   await check('a member without the account hub cannot change a credential', async () =>
     refuses('an ordinary organisation member saving an integration', () =>
-      saveIntegration(orgMember, { kind: 'apollo', secret: 'nope' }),
+      saveIntegration(accountMember, { kind: 'apollo', secret: 'nope' }),
     ),
   )
 
@@ -246,7 +245,7 @@ try {
   })
 
   await check('a credential is stored once for the account', async () => {
-    await saveIntegration(orgAdmin, { kind: 'lusha', secret: `shared-${stamp}` })
+    await saveIntegration(accountAdmin, { kind: 'lusha', secret: `shared-${stamp}` })
     const here = await readCredentials(admin, 'lusha')
     expect(here !== null, 'the credential was not readable')
     expect(here!.secret === `shared-${stamp}`, 'the secret did not round-trip')
@@ -310,7 +309,7 @@ try {
     return 'written and read back in the account'
   })
 
-  await disconnectIntegration(orgAdmin, 'lusha')
+  await disconnectIntegration(accountAdmin, 'lusha')
 
   console.log('')
   console.log('-- idempotency and deduplication -------------------------------')
@@ -530,7 +529,7 @@ try {
   console.log('-- woodpecker, whose events are its own ------------------------')
 
   await check('saving Woodpecker mints a webhook token, and keeps it', async () => {
-    await saveIntegration(orgAdmin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
+    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
     const [first] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
            where account_id = ${datasaur.id} and kind = 'woodpecker'`,
@@ -538,7 +537,7 @@ try {
     expect(typeof first?.token === 'string' && first.token.length >= 24, 'no token was minted')
 
     // A second save must not roll it: the URL is already pasted at Woodpecker.
-    await saveIntegration(orgAdmin, { kind: 'woodpecker', config: { campaignId: 102 } })
+    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: { campaignId: 102 } })
     const [second] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
            where account_id = ${datasaur.id} and kind = 'woodpecker'`,
@@ -1601,8 +1600,8 @@ try {
 
   // Leave the account as it was found: every row saved above was created here,
   // and one left behind reads as a real connection on the Connected apps page.
-  await disconnectIntegration(orgAdmin, 'brevo')
-  await disconnectIntegration(orgAdmin, 'woodpecker')
+  await disconnectIntegration(accountAdmin, 'brevo')
+  await disconnectIntegration(accountAdmin, 'woodpecker')
 
   console.log('')
   if (failures > 0) {

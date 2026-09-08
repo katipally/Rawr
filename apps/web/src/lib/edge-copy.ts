@@ -1,3 +1,4 @@
+// biome-ignore-all lint/correctness/noInnerDeclarations: written in ES5 on purpose — see the module comment
 /** Every sentence a stranger reads while a form or a booking is in flight.
  *
  *  One module because the same moment happens in four places: the inline embed,

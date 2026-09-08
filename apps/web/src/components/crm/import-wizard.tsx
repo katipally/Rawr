@@ -447,7 +447,6 @@ const SampleRows = ({ title, rows }: { title: string; rows: Record<string, strin
             {rows.map((row, index) => (
               // A sample has no id of its own and two identical rows are exactly
               // what a duplicate-laden file looks like.
-              // biome-ignore lint/suspicious/noArrayIndexKey: see above
               <tr key={index}>
                 {columns.map((column) => (
                   <td key={column} className="border-b border-divider px-2 py-1 text-secondary">

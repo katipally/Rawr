@@ -1,6 +1,5 @@
 import { listDeadLetters, signOutEverywhere } from '@rawr/db'
 import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
-import { call } from '../errors.ts'
 import { accountRouter } from './account.ts'
 import { adminRouter } from './admin.ts'
 import { analyticsRouter } from './analytics.ts'

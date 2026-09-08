@@ -242,7 +242,6 @@ const Field = ({
           ))}
         </select>
       ) : field.type === 'radio' ? (
-        // biome-ignore lint/a11y/useSemanticElements: see the multi_select note
         <div className="rawr-choices" role="radiogroup" aria-labelledby={id}>
           {(field.options ?? []).map((option) => (
             <label key={option.value}>

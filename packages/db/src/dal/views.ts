@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, or, isNull, sql } from 'drizzle-orm'
 import { fieldDef } from '../schema/metadata.ts'
 import { savedView } from '../schema/marketing.ts'
-import { CORE_VIEWS, type ObjectKey } from '../registry/core.ts'
+import { CORE_VIEWS } from '../registry/core.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 import { parseFilters, parseSorts, type FilterGroup, type Sort } from './query.ts'

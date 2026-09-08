@@ -1,4 +1,4 @@
-import { calendarFields, isObjectKey, listViews, parseFilters, readCalendar, resolveView } from '@rawr/db'
+import { calendarFields, listViews, parseFilters, readCalendar, resolveView } from '@rawr/db'
 import { Alert, cn } from '@rawr/ui'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'

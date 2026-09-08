@@ -5,7 +5,6 @@ import { CalendarDays, ChevronDown, Columns3, MoreHorizontal, Pin, Plus, Table2 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { ObjectKey } from '@rawr/db'
 import { useNavigation } from '~/components/navigation.tsx'
 import { objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'

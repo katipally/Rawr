@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { visitor, visitorAlias } from '../schema/analytics.ts'
 import { sourceFromSession } from './attribution.ts'
 import type { AccountContext } from './context.ts'

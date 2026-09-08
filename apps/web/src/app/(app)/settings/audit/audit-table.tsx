@@ -16,8 +16,6 @@ type Row = {
   after: unknown
 }
 
-type OrgRow = { id: string; at: string; actorName: string | null; entity: string; action: string }
-
 type Cursor = { at: string; id: string } | null
 
 const KIND_TONE: Record<string, 'neutral' | 'accent' | 'info' | 'warn'> = {

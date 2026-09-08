@@ -3,7 +3,7 @@
 import { Alert, Button, Field, IconButton, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { AdminField, FieldType, ObjectKey } from '@rawr/db'
+import type { AdminField, FieldType } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
