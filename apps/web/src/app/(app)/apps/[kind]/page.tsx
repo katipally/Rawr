@@ -7,6 +7,7 @@ import { AppLogo } from '~/components/app-logo.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { appPath, appsPath, availableAppsPath, failedJobsPath, importsPath, type AppTab } from '~/lib/links.ts'
+import { listEmailAccounts } from '~/server/integrations/apollo.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppActions } from '../app-actions.tsx'
@@ -45,6 +46,12 @@ const AppPage = async ({
   const meta = metaFor(row.kind)
   const personal = PERSONAL_KINDS.has(row.kind)
   const connected = row.state !== 'not_configured'
+  // Apollo is the one provider whose key can be valid and still be pointed at the
+  // wrong workspace: the connection test proves Apollo answered, not that it
+  // answered for the mailboxes the sync is meant to read back. Asking it who it
+  // sends as turns that into something an admin can check by looking.
+  const sendingAs =
+    row.kind === 'apollo' && connected ? await listEmailAccounts(ctx).catch(() => null) : null
   const connectPath = connectPathFor(row.kind, session.accountSlug)
   // The webhook URL names the account through a tracked site's key; the first
   // active one is the account's public identity for that purpose.
@@ -245,6 +252,27 @@ const AppPage = async ({
           <Card title="When it is down">
             <p className="text-secondary">{meta.failureMode}</p>
           </Card>
+          {sendingAs ? (
+            <Card title="Sends as">
+              {sendingAs.length === 0 ? (
+                <p className="text-secondary">
+                  This key reaches Apollo, but no mailbox is connected there, so a sequence has
+                  nothing to send from and the sync will read nothing back.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {sendingAs.map((mailbox) => (
+                    <li key={mailbox.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{mailbox.email}</span>
+                      <Badge tone={mailbox.active ? 'ok' : 'neutral'} dot>
+                        {mailbox.active ? 'Active' : 'Paused'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          ) : null}
         </div>
       ) : null}
     </div>
