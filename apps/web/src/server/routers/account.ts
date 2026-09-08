@@ -1,5 +1,6 @@
 import {
   HUBS,
+  SCOPES,
   acceptInvitation,
   deactivateMember,
   invite,
@@ -26,10 +27,15 @@ import { protectedProcedure, router, superAdminProcedure } from '../trpc.ts'
  *  layer. */
 
 const hub = z.enum(HUBS)
+/** Partial rather than a full record: a hub reaching everything is absent, which
+ *  is the same shape the data access layer stores. */
+const scopes = z.partialRecord(hub, z.enum(SCOPES)).optional()
 const grants = {
   isSuperAdmin: z.boolean().optional(),
   viewHubs: z.array(hub).optional(),
   editHubs: z.array(hub).optional(),
+  viewScopes: scopes,
+  editScopes: scopes,
 }
 
 export const accountRouter = router({

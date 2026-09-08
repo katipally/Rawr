@@ -5,7 +5,9 @@ import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { HUBS, HUBS_WITHOUT_SCREENS, HUB_HINT, type Hub } from '~/lib/hubs.ts'
+import { HUBS, HUBS_WITHOUT_SCREENS, HUBS_WITH_RECORDS, HUB_HINT, SCOPES, SCOPE_LABEL, type Hub, type Scope } from '~/lib/hubs.ts'
+
+type HubScopes = Partial<Record<Hub, Scope>>
 
 export type MemberListRow = {
   userId: string
@@ -15,6 +17,8 @@ export type MemberListRow = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  viewScopes: HubScopes
+  editScopes: HubScopes
   state: 'active' | 'invited' | 'deactivated'
   linked: boolean
   joinedAt: string
@@ -26,6 +30,8 @@ export type InvitationRow = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  viewScopes: HubScopes
+  editScopes: HubScopes
   invitedByName: string | null
   expiresAt: string
   createdAt: string
@@ -38,19 +44,49 @@ type Props = {
   isSuperAdmin: boolean
 }
 
-type Grants = { isSuperAdmin: boolean; viewHubs: Hub[]; editHubs: Hub[] }
+type Grants = {
+  isSuperAdmin: boolean
+  viewHubs: Hub[]
+  editHubs: Hub[]
+  viewScopes: HubScopes
+  editScopes: HubScopes
+}
 type Level = 'none' | 'view' | 'edit'
 type Tab = 'active' | 'pending' | 'deactivated'
 
-const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [] }
+const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [], viewScopes: {}, editScopes: {} }
 
 const levelOf = (grants: Grants, hub: Hub): Level =>
   grants.editHubs.includes(hub) ? 'edit' : grants.viewHubs.includes(hub) ? 'view' : 'none'
+
+/** A hub that reaches everything is absent from the map rather than stored as
+ *  'everything', which is the shape the server keeps and the policy reads. */
+const withScope = (map: HubScopes, hub: Hub, scope: Scope): HubScopes => {
+  const next = { ...map }
+  if (scope === 'everything') delete next[hub]
+  else next[hub] = scope
+  return next
+}
+
+const scopeOf = (grants: Grants, hub: Hub): Scope => grants.viewScopes[hub] ?? 'everything'
 
 const withLevel = (grants: Grants, hub: Hub, level: Level): Grants => ({
   isSuperAdmin: grants.isSuperAdmin,
   viewHubs: level === 'view' ? [...new Set([...grants.viewHubs, hub])] : grants.viewHubs.filter((h) => h !== hub),
   editHubs: level === 'edit' ? [...new Set([...grants.editHubs, hub])] : grants.editHubs.filter((h) => h !== hub),
+  // Dropping a hub drops its scope with it, so granting it again starts open
+  // rather than silently narrowed by a decision somebody made months ago.
+  viewScopes: level === 'none' ? withScope(grants.viewScopes, hub, 'everything') : grants.viewScopes,
+  editScopes: level === 'edit' ? grants.editScopes : withScope(grants.editScopes, hub, 'everything'),
+})
+
+/** One control, both maps. Reading and writing are narrowed together because a
+ *  seat that may only edit its own records has no reason to read everybody's,
+ *  and HubSpot's own grid moves them together too. */
+const withRecordScope = (grants: Grants, hub: Hub, scope: Scope): Grants => ({
+  ...grants,
+  viewScopes: withScope(grants.viewScopes, hub, scope),
+  editScopes: grants.editHubs.includes(hub) ? withScope(grants.editScopes, hub, scope) : grants.editScopes,
 })
 
 /** What the row shows at a glance, in HubSpot's own shorthand: the hubs someone
@@ -59,7 +95,13 @@ const summarise = (grants: Grants): string => {
   if (grants.isSuperAdmin) return 'Super Admin'
   const held = HUBS.filter((hub) => levelOf(grants, hub) !== 'none')
   if (held.length === 0) return 'No access'
-  return held.map((hub) => (levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`)).join(' · ')
+  return held
+    .map((hub) => {
+      const level = levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`
+      const scope = scopeOf(grants, hub)
+      return scope === 'everything' ? level : `${level} · ${SCOPE_LABEL[scope].toLowerCase()}`
+    })
+    .join(' · ')
 }
 
 /** The grid itself: one row per hub, three exclusive levels. Super admin sits
@@ -102,6 +144,29 @@ const GrantGrid = ({ value, onChange }: { value: Grants; onChange: (next: Grants
                 </Button>
               ))}
             </fieldset>
+            {level !== 'none' && HUBS_WITH_RECORDS.has(hub) && !value.isSuperAdmin ? (
+              <fieldset className="col-span-2 flex flex-wrap items-center gap-1 border-0 p-0 pl-0 pt-1">
+                <legend className="sr-only">how much of {hub} this seat reaches</legend>
+                <span className="pr-1 text-small text-secondary">Reaches</span>
+                {SCOPES.map((option) => (
+                  <Button
+                    key={option}
+                    type="button"
+                    variant={scopeOf(value, hub) === option ? 'primary' : 'secondary'}
+                    onClick={() => onChange(withRecordScope(value, hub, option))}
+                  >
+                    {SCOPE_LABEL[option]}
+                  </Button>
+                ))}
+                <span className="text-small text-secondary">
+                  {scopeOf(value, hub) === 'everything'
+                    ? 'every record in the account'
+                    : scopeOf(value, hub) === 'team'
+                      ? 'records owned by anybody on their teams, and unassigned ones'
+                      : 'only records they own, and unassigned ones'}
+                </span>
+              </fieldset>
+            ) : null}
           </div>
         )
       })}
@@ -242,7 +307,13 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                         setEditing({
                           userId: row.userId,
                           name: row.name,
-                          grants: { isSuperAdmin: row.isSuperAdmin, viewHubs: row.viewHubs, editHubs: row.editHubs },
+                          grants: {
+                            isSuperAdmin: row.isSuperAdmin,
+                            viewHubs: row.viewHubs,
+                            editHubs: row.editHubs,
+                            viewScopes: row.viewScopes,
+                            editScopes: row.editScopes,
+                          },
                         }),
                     },
                     row.state === 'deactivated'

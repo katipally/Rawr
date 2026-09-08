@@ -1,6 +1,6 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { membership, userAccount } from '../schema/identity.ts'
-import { HUBS, type AccountContext, type Hub, assertSuperAdmin } from './context.ts'
+import { HUBS, assertScopes, type AccountContext, type Hub, type HubScopes, assertSuperAdmin } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 
 /** Who is in this account and what they hold, as HubSpot's grid puts it: a hub at
@@ -17,6 +17,8 @@ export type MemberRow = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  viewScopes: HubScopes
+  editScopes: HubScopes
   state: 'active' | 'invited' | 'deactivated'
   /** False until the person has signed in with Google at least once. */
   linked: boolean
@@ -35,6 +37,8 @@ export const listMembers = async (ctx: AccountContext): Promise<MemberRow[]> =>
         isSuperAdmin: membership.isSuperAdmin,
         viewHubs: membership.viewHubs,
         editHubs: membership.editHubs,
+        viewScopes: membership.viewScopes,
+        editScopes: membership.editScopes,
         state: membership.state,
         joinedAt: membership.createdAt,
       })
@@ -65,13 +69,22 @@ export type Grants = {
   isSuperAdmin?: boolean | undefined
   viewHubs?: readonly string[] | undefined
   editHubs?: readonly string[] | undefined
+  viewScopes?: Record<string, string> | undefined
+  editScopes?: Record<string, string> | undefined
 }
 
-const toGrants = (input: Grants) => ({
-  isSuperAdmin: input.isSuperAdmin ?? false,
-  viewHubs: assertHubs(input.viewHubs ?? []),
-  editHubs: assertHubs(input.editHubs ?? []),
-})
+const toGrants = (input: Grants) => {
+  const viewHubs = assertHubs(input.viewHubs ?? [])
+  const editHubs = assertHubs(input.editHubs ?? [])
+  return {
+    isSuperAdmin: input.isSuperAdmin ?? false,
+    viewHubs,
+    editHubs,
+    // A view scope covers what edit grants too, because canView unions the two.
+    viewScopes: assertScopes(input.viewScopes, [...viewHubs, ...editHubs]),
+    editScopes: assertScopes(input.editScopes, editHubs),
+  }
+}
 
 export const addMember = async (
   ctx: AccountContext,
@@ -88,8 +101,13 @@ export const addMember = async (
             ${sql.raw(`ARRAY[${grants.editHubs.map((h) => `'${h}'`).join(',')}]::rawr_hub[]`)}) as id`,
     )
     if (!row) throw new Error('The member was not added.')
-    if (grants.isSuperAdmin) {
-      await tx.update(membership).set({ isSuperAdmin: true }).where(eq(membership.userId, row.id))
+    // rawr.add_member seats the person and hands back the id; the rest of the
+    // grant is applied here rather than widening that function's signature.
+    if (grants.isSuperAdmin || Object.keys(grants.viewScopes).length > 0 || Object.keys(grants.editScopes).length > 0) {
+      await tx
+        .update(membership)
+        .set({ isSuperAdmin: grants.isSuperAdmin, viewScopes: grants.viewScopes, editScopes: grants.editScopes })
+        .where(eq(membership.userId, row.id))
     }
     return {
       result: { userId: row.id },
@@ -109,6 +127,8 @@ export const setMemberGrants = async (
         isSuperAdmin: membership.isSuperAdmin,
         viewHubs: membership.viewHubs,
         editHubs: membership.editHubs,
+        viewScopes: membership.viewScopes,
+        editScopes: membership.editScopes,
       })
       .from(membership)
       .where(eq(membership.userId, input.userId))

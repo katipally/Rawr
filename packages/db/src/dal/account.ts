@@ -1,7 +1,7 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { account, invitation, membership, userAccount } from '../schema/identity.ts'
-import { HUBS, type AccountContext, type Hub, assertSuperAdmin } from './context.ts'
+import { HUBS, assertScopes, type AccountContext, type Hub, type HubScopes, assertSuperAdmin } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { provisionAccount } from './provision.ts'
 
@@ -112,6 +112,8 @@ export type PendingInvitation = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  viewScopes: HubScopes
+  editScopes: HubScopes
   invitedByName: string | null
   expiresAt: Date
   createdAt: Date
@@ -126,6 +128,8 @@ export const listInvitations = async (ctx: AccountContext): Promise<PendingInvit
         isSuperAdmin: invitation.isSuperAdmin,
         viewHubs: invitation.viewHubs,
         editHubs: invitation.editHubs,
+        viewScopes: invitation.viewScopes,
+        editScopes: invitation.editScopes,
         invitedByName: userAccount.name,
         expiresAt: invitation.expiresAt,
         createdAt: invitation.createdAt,
@@ -162,6 +166,8 @@ export const invite = async (
     isSuperAdmin?: boolean | undefined
     viewHubs?: readonly string[] | undefined
     editHubs?: readonly string[] | undefined
+    viewScopes?: Record<string, string> | undefined
+    editScopes?: Record<string, string> | undefined
   },
 ): Promise<{ token: string; id: string }> =>
   mutate(ctx, 'invitation', async (tx) => {
@@ -174,6 +180,8 @@ export const invite = async (
       throw new Error(`All ${seats.limit} seats are taken. Deactivate somebody, or raise the limit first.`)
     }
 
+    const viewHubs = assertHubs(input.viewHubs ?? [])
+    const editHubs = assertHubs(input.editHubs ?? [])
     const token = newToken()
     const [created] = await tx
       .insert(invitation)
@@ -181,8 +189,12 @@ export const invite = async (
         accountId: ctx.accountId,
         email,
         isSuperAdmin: input.isSuperAdmin ?? false,
-        viewHubs: assertHubs(input.viewHubs ?? []),
-        editHubs: assertHubs(input.editHubs ?? []),
+        viewHubs,
+        editHubs,
+        // The seat is scoped from the moment it is accepted, not after somebody
+        // remembers to narrow it.
+        viewScopes: assertScopes(input.viewScopes, [...viewHubs, ...editHubs]),
+        editScopes: assertScopes(input.editScopes, editHubs),
         tokenHash: await hashToken(token),
         invitedBy: ctx.actorId,
         expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),

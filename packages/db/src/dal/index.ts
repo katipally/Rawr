@@ -18,20 +18,32 @@ export type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0]
 /** An open transaction with its account already pinned, offered to any nested
  *  call for the same account. Keyed by account id and checked on every join,
  *  so a call for a different tenant can never land on a handle pinned to this one. */
-const ambient = new AsyncLocalStorage<{ accountId: string; tx: Tx }>()
+const ambient = new AsyncLocalStorage<{ key: string; tx: Tx }>()
+
+/** Both the tenant and the actor, because the record policies narrow what a seat
+ *  reaches by who owns the row. Two actors in one account must not share a
+ *  transaction, so the actor is part of the key as well as of the session. */
+const keyOf = (ctx: AccountContext): string => `${ctx.accountId}:${ctx.actorId ?? ''}`
 
 const open = async <T>(ctx: AccountContext, fn: (tx: Tx) => Promise<T>): Promise<T> =>
   appDb.transaction(async (tx) => {
-    // The id is inlined as a literal rather than bound: assertUsable has already
-    // proven it is a bare UUID, and a statement with no parameters is one round
+    // The ids are inlined as literals rather than bound: assertUsable has already
+    // proven each is a bare UUID, and a statement with no parameters is one round
     // trip where a bound one is two (the driver describes before it binds).
-    await tx.execute(sql`select set_config('rawr.account_id', ${sql.raw(`'${ctx.accountId}'`)}, true)`)
-    return ambient.run({ accountId: ctx.accountId, tx }, () => fn(tx))
+    // An empty actor is a session with no seat, which the policies read as no
+    // ownership restriction: the worker and a public form submission have none.
+    await tx.execute(sql`select
+      set_config('rawr.account_id', ${sql.raw(`'${ctx.accountId}'`)}, true),
+      set_config('rawr.user_id', ${sql.raw(`'${ctx.actorId ?? ''}'`)}, true)`)
+    return ambient.run({ key: keyOf(ctx), tx }, () => fn(tx))
   })
 
 const assertUsable = (ctx: AccountContext): void => {
   if (!UUID.test(ctx.accountId)) {
     throw new Error(`Refusing to open a transaction: "${ctx.accountId}" is not a account id.`)
+  }
+  if (ctx.actorId !== null && !UUID.test(ctx.actorId)) {
+    throw new Error(`Refusing to open a transaction: "${ctx.actorId}" is not a user id.`)
   }
 }
 
@@ -51,7 +63,7 @@ export const withAccount = async <T>(
 ): Promise<T> => {
   assertUsable(ctx)
   const current = ambient.getStore()
-  if (current && current.accountId === ctx.accountId) return fn(current.tx)
+  if (current && current.key === keyOf(ctx)) return fn(current.tx)
   return open(ctx, fn)
 }
 

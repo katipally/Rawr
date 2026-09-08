@@ -5,6 +5,8 @@ import { ForbiddenError, type AccountContext, type Hub } from '../src/dal/contex
 import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
+import { listRecords } from '../src/dal/records.ts'
+import { setMemberGrants } from '../src/dal/members.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX } from './fixture.ts'
 
@@ -216,6 +218,83 @@ try {
     (await outcomeOf(() => rematchInbound(contextFor(accountId, actorId, 'admin')))) === 'allowed',
     'admin can rematch inbound provider events',
   )
+
+  // ---------------------------------------------------------- record scope
+  // The third axis, and the only one enforced in the policy rather than in a
+  // guard: a seat reaching everything, its team's records, or only its own.
+  // Checked by counting through listRecords, because a scope that holds in the
+  // data access layer but not in the policy would still leak to the exporter
+  // and the agent surface, which do not go through it.
+  // Saved whole, because setMemberGrants replaces a grant rather than merging
+  // into it: narrowing a seat for this section and walking away would leave the
+  // seeded seats stripped, and every later suite would fail on a refusal.
+  const seats = await owner<{ id: string; email: string; is_super_admin: boolean; view_hubs: Hub[]; edit_hubs: Hub[] }[]>`
+    select u.id, u.email, m.is_super_admin, m.view_hubs, m.edit_hubs
+      from membership m join user_account u on u.id = m.user_id
+     where m.account_id = ${accountId}`
+  const salesSeat = seats.find((row) => row.email === 'sales@sandbox.test')!
+  const marketingSeat = seats.find((row) => row.email === 'marketing@sandbox.test')!
+  const adminSeat = seats.find((row) => row.email === 'admin@sandbox.test')!
+  const superAdmin: AccountContext = {
+    accountId, actorId: adminSeat.id, actorKind: 'user',
+    isSuperAdmin: true, viewHubs: [], editHubs: [],
+  }
+
+  const scopeStamp = Date.now()
+  const held = async (userId: string) => {
+    const ctx: AccountContext = {
+      accountId, actorId: userId, actorKind: 'user',
+      isSuperAdmin: false, viewHubs: ['contacts'], editHubs: [],
+    }
+    return (await listRecords(ctx, { object: 'contact', limit: 1, count: true })).total ?? 0
+  }
+  const scopeTo = (userId: string, scope: 'everything' | 'team' | 'own') =>
+    setMemberGrants(superAdmin, {
+      userId, viewHubs: ['contacts'], editHubs: [],
+      viewScopes: scope === 'everything' ? {} : { contacts: scope },
+    })
+
+  // Two contacts nobody else owns, so the counts do not depend on the seed.
+  await owner`insert into contact (account_id, first_name, last_name, email, owner_id) values
+    (${accountId}, 'Scope', 'Sales', ${`scope.s.${scopeStamp}@guard.test`}, ${salesSeat.id}),
+    (${accountId}, 'Scope', 'Marketing', ${`scope.m.${scopeStamp}@guard.test`}, ${marketingSeat.id})`
+
+  await scopeTo(salesSeat.id, 'everything')
+  const everything = await held(salesSeat.id)
+  await scopeTo(salesSeat.id, 'own')
+  const ownOnly = await held(salesSeat.id)
+  check(ownOnly < everything, 'a seat scoped to its own records sees fewer than the whole account',
+    `${ownOnly} of ${everything}`)
+
+  const [scopeTeam] = await owner<{ id: string }[]>`
+    insert into team (account_id, name) values (${accountId}, ${`Scope probe ${scopeStamp}`}) returning id`
+  await owner`insert into team_member (account_id, team_id, user_id) values
+    (${accountId}, ${scopeTeam!.id}, ${salesSeat.id}), (${accountId}, ${scopeTeam!.id}, ${marketingSeat.id})`
+
+  await scopeTo(marketingSeat.id, 'own')
+  const marketingOwn = await held(marketingSeat.id)
+  await scopeTo(marketingSeat.id, 'team')
+  const marketingTeam = await held(marketingSeat.id)
+  check(marketingTeam === ownOnly + marketingOwn,
+    "a team scope reaches exactly its team's records and no further",
+    `${marketingTeam} = ${ownOnly} + ${marketingOwn}`)
+
+  // A lead nobody holds must stay reachable, or scoping an account strands every
+  // unassigned record in it.
+  await owner`insert into contact (account_id, first_name, last_name, email)
+    values (${accountId}, 'Scope', 'Unowned', ${`scope.u.${scopeStamp}@guard.test`})`
+  check(await held(salesSeat.id) === ownOnly + 1, 'an unassigned record is visible at every scope')
+
+  for (const seat of [salesSeat, marketingSeat]) {
+    await setMemberGrants(superAdmin, {
+      userId: seat.id,
+      isSuperAdmin: seat.is_super_admin,
+      viewHubs: seat.view_hubs,
+      editHubs: seat.edit_hubs,
+    })
+  }
+  await owner`delete from team where id = ${scopeTeam!.id}`
+  await owner`delete from contact where account_id = ${accountId} and email like ${`scope.%.${scopeStamp}@guard.test`}`
 
   // The probes are artefacts of this script, so it takes them with it.
   await owner`delete from saved_view where account_id = ${accountId} and slug = 'guard-probe-view'`

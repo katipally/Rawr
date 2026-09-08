@@ -3,6 +3,19 @@ export type Hub = (typeof HUBS)[number]
 
 export type ActorKind = 'user' | 'mcp' | 'job' | 'integration' | 'public'
 
+/** How much of a granted hub a seat reaches. HubSpot's third axis, under view and
+ *  edit: everything in the account, everything its team owns, or only its own.
+ *
+ *  A record's team is its owner's, so moving somebody between teams moves what
+ *  they can reach without touching a single record. */
+export const SCOPES = ['everything', 'team', 'own'] as const
+export type Scope = (typeof SCOPES)[number]
+
+/** A hub left out reaches everything. Stored on the membership and read by the
+ *  row level security policy rather than by any query, which is why it is not on
+ *  AccountContext: one enforcement point, and no way for a caller to forget it. */
+export type HubScopes = Partial<Record<Hub, Scope>>
+
 /** Everything the data access layer needs to answer "who is asking, on behalf of
  *  which account". A request without one of these never reaches the database.
  *
@@ -16,6 +29,20 @@ export type AccountContext = {
   isSuperAdmin: boolean
   viewHubs: readonly Hub[]
   editHubs: readonly Hub[]
+}
+
+/** A hub the seat does not hold, or one set to reach everything, is dropped
+ *  rather than stored: the map only ever says where a seat is narrowed, so an
+ *  ungranted hub cannot leave a stale scope behind when it is granted again. */
+export const assertScopes = (raw: Record<string, string> | undefined, granted: readonly Hub[]): HubScopes => {
+  const scopes: HubScopes = {}
+  for (const [hub, scope] of Object.entries(raw ?? {})) {
+    if (!(HUBS as readonly string[]).includes(hub)) throw new Error(`"${hub}" is not a hub.`)
+    if (!(SCOPES as readonly string[]).includes(scope)) throw new Error(`"${scope}" is not a scope.`)
+    if (scope === 'everything' || !granted.includes(hub as Hub)) continue
+    scopes[hub as Hub] = scope as Scope
+  }
+  return scopes
 }
 
 export class ForbiddenError extends Error {

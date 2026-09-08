@@ -1,6 +1,7 @@
 import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { accountId, createdAt, pk } from './columns.ts'
 import { actorKindEnum, hubEnum, memberStateEnum } from './enums.ts'
+import type { HubScopes } from '../dal/context.ts'
 
 /** The tenant, and the only one. HubSpot calls it an account, addresses it by a
  *  portal id in every URL, and puts nothing above or below it: one billing
@@ -64,6 +65,13 @@ export const membership = pgTable(
     isSuperAdmin: boolean('is_super_admin').notNull().default(false),
     viewHubs: hubEnum('view_hubs').array().notNull().default([]),
     editHubs: hubEnum('edit_hubs').array().notNull().default([]),
+    /** How much of each granted hub this seat reaches: everything in the account,
+     *  everything its team owns, or only what it owns. A hub left out of the map
+     *  reaches everything, so a seat written before scopes existed is unchanged.
+     *  Read by the row level security policy, never by a query, so the exporter
+     *  and the agent surface obey it without knowing it is there. */
+    viewScopes: jsonb('view_scopes').$type<HubScopes>().notNull().default({}),
+    editScopes: jsonb('edit_scopes').$type<HubScopes>().notNull().default({}),
     state: memberStateEnum('state').notNull().default('active'),
     invitedBy: uuid('invited_by').references(() => userAccount.id, { onDelete: 'set null' }),
     deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
@@ -85,6 +93,8 @@ export const invitation = pgTable(
     isSuperAdmin: boolean('is_super_admin').notNull().default(false),
     viewHubs: hubEnum('view_hubs').array().notNull().default([]),
     editHubs: hubEnum('edit_hubs').array().notNull().default([]),
+    viewScopes: jsonb('view_scopes').$type<HubScopes>().notNull().default({}),
+    editScopes: jsonb('edit_scopes').$type<HubScopes>().notNull().default({}),
     tokenHash: text('token_hash').notNull().unique(),
     invitedBy: uuid('invited_by').references(() => userAccount.id, { onDelete: 'set null' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

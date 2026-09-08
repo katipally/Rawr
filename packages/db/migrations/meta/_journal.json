@@ -421,6 +421,13 @@
       "when": 1788972834179,
       "tag": "0058_account_model",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1789059234179,
+      "tag": "0059_record_scope",
+      "breakpoints": true
     }
   ]
 }

@@ -19,3 +19,19 @@ export const HUB_HINT: Record<Hub, string> = {
 /** Hubs granted for parity with HubSpot's grid that no screen reads yet. Granting
  *  one changes nothing, so the grid says so rather than implying an effect. */
 export const HUBS_WITHOUT_SCREENS = new Set<Hub>(['service'])
+
+/** Hubs whose records carry an owner, and so the only ones a scope can narrow.
+ *  Marketing, service, reports and account reach settings and aggregates, which
+ *  belong to the account rather than to a person. */
+export const HUBS_WITH_RECORDS = new Set<Hub>(['contacts', 'sales'])
+
+/** How much of a hub a seat reaches. Mirrors SCOPES in the data access layer;
+ *  hubs.test.ts asserts the two agree. */
+export const SCOPES = ['everything', 'team', 'own'] as const
+export type Scope = (typeof SCOPES)[number]
+
+export const SCOPE_LABEL: Record<Scope, string> = {
+  everything: 'All',
+  team: "Team's",
+  own: 'Mine',
+}
