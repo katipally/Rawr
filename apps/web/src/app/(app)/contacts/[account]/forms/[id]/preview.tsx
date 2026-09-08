@@ -2,6 +2,7 @@
 
 import { isVisible, type FormField, type FormSettings } from '@rawr/db/forms'
 import { Button } from '@rawr/ui'
+import { Smartphone } from 'lucide-react'
 import { useState } from 'react'
 import { FORM_COPY, formStep } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
@@ -48,13 +49,16 @@ export const FormPreview = ({
     <aside className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-4 lg:max-h-[calc(100dvh-2rem)] lg:overflow-y-auto">
       <div className="flex flex-wrap items-baseline gap-x-3">
         <h2 className="font-medium">Preview</h2>
-        <button
+        <Button
           type="button"
+          variant="tertiary"
+          className="px-2 py-1"
+          aria-pressed={narrow}
+          icon={<Smartphone aria-hidden="true" className="size-3.5" />}
           onClick={() => setNarrow((value) => !value)}
-          className="text-xs text-link"
         >
           {narrow ? 'Show wide' : 'Show at 320px'}
-        </button>
+        </Button>
         {steps > 1 ? (
           <span className="ml-auto text-xs text-secondary">
             {formStep(current + 1, steps, stepLabel)}

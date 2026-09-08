@@ -1,6 +1,7 @@
 import { readCustomEvent, readPageView, type PageViewDetail } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { Value, formatDateTime } from '~/components/crm/value.tsx'
 import { objectView, pageViewPath, recordPath } from '~/lib/links.ts'
@@ -86,7 +87,7 @@ const PageViewScreen = async ({
       <EmptyState
         title="There is nothing at that address"
         description="It was erased, it aged past the retention window, or the link points at another account."
-        action={<Link href={objectView(account, 'contact', 'all')}>Back to contacts</Link>}
+        action={<LinkButton variant="primary" href={objectView(account, 'contact', 'all')}>Back to contacts</LinkButton>}
       />
     )
   }

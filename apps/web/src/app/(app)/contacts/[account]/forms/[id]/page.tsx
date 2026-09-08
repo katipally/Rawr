@@ -7,8 +7,9 @@ import {
   SEED_FORMS,
   type FormDetail,
 } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Breadcrumb, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { formsPath } from '~/lib/links.ts'
 import { notFound, redirect } from 'next/navigation'
 import { publicBaseUrl } from '~/lib/env.ts'
@@ -40,8 +41,8 @@ const BuilderPage = async ({
     return (
       <EmptyState
         title="Forms are built by marketing"
-        description={`You need marketing access, which you do not have. can read forms and their submissions, and cannot create one.`}
-        action={<Link href={formsPath(account)}>Back to forms</Link>}
+        description="Building one needs marketing access, which you do not have. You can read forms and their submissions, but not create one."
+        action={<LinkButton variant="primary" href={formsPath(account)}>Back to forms</LinkButton>}
       />
     )
   }
@@ -102,11 +103,8 @@ const BuilderPage = async ({
  *  they ask, and that has to be readable before the choice, not after it. */
 const TemplatePicker = ({ account }: { account: string }) => (
   <div className="w-full max-w-5xl">
-    <header className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Link href={formsPath(account)} className="text-sm text-link">
-        Forms
-      </Link>
-      <span className="text-secondary">/</span>
+    <header className="mb-4 flex flex-col gap-2">
+      <Breadcrumb items={[{ label: 'Forms', href: formsPath(account) }, { label: 'Start a form' }]} />
       <h1 className="text-lg font-medium">Start a form</h1>
     </header>
 

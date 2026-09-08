@@ -1,7 +1,7 @@
 export { cn } from './cn.ts'
 export { Avatar, type AvatarProps } from './primitives/avatar.tsx'
 export { Badge, type BadgeProps, type BadgeTone } from './primitives/badge.tsx'
-export { Button, type ButtonProps } from './primitives/button.tsx'
+export { Button, buttonClass, type ButtonProps } from './primitives/button.tsx'
 export { Card, type CardProps } from './primitives/card.tsx'
 export { Checkbox, Switch, type CheckboxProps } from './primitives/choice.tsx'
 export { Combobox, type ComboboxOption, type ComboboxProps } from './primitives/combobox.tsx'

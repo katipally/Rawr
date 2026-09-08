@@ -6,7 +6,7 @@ import { MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { enrollmentsPath, recordPath, sequencePath } from '~/lib/links.ts'
+import { enrollmentsPath, recordPath, sequencePath, sequencesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE } from '~/components/crm/value.tsx'
 
@@ -63,7 +63,7 @@ export const EnrollmentTable = ({
     <div className="flex min-w-0 flex-col gap-3">
       <Breadcrumb
         items={[
-          { label: 'Sequences', href: `/contacts/${account}/sequences` },
+          { label: 'Sequences', href: sequencesPath(account) },
           { label: sequenceName, href: sequencePath(account, sequenceId) },
           { label: 'Who is in it' },
         ]}

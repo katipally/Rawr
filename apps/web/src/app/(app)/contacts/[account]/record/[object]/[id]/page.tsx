@@ -26,6 +26,7 @@ import {
 import { Avatar, EmptyState, cn } from '@rawr/ui'
 import { ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
 import { EnrichmentPanel } from '~/components/crm/enrichment-panel.tsx'
@@ -186,7 +187,7 @@ const RecordPage = async ({
       <EmptyState
         title={`That ${object.nameSingular.toLowerCase()} is not here`}
         description="It was deleted, or the link points at a record in another account. Its history is still on the records it touched."
-        action={<Link href={objectView(account, objectParam, 'all')}>Back to {object.namePlural.toLowerCase()}</Link>}
+        action={<LinkButton variant="primary" href={objectView(account, objectParam, 'all')}>Back to {object.namePlural.toLowerCase()}</LinkButton>}
       />
     )
   }

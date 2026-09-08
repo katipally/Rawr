@@ -13,10 +13,11 @@ import {
   type FormThemeToken,
 } from '@rawr/db/forms'
 import type { FormDetail } from '@rawr/db'
-import Link from 'next/link'
+import { Code2, Inbox } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { LinkButton } from '~/components/link-button.tsx'
 import { useEffect, useState } from 'react'
-import { Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -188,53 +189,61 @@ export const FormBuilder = ({
 
   return (
     <div className="w-full max-w-7xl">
-      <header className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <Link href={formsPath(account)} className="text-sm text-link">
-          Forms
-        </Link>
-        <span className="text-secondary">/</span>
-        <h1 className="text-lg font-medium">{form.id ? form.name : 'New form'}</h1>
-        {form.id ? (
-          <Link
-            href={submissionsPath(account, { form: form.id, state: 'clean' })}
-            className="text-sm text-link"
-          >
-            Submissions
-          </Link>
-        ) : null}
-        {form.id ? (
-          <button type="button" className="text-sm text-link" onClick={() => setShowEmbed(true)}>
-            Embed code
-          </button>
-        ) : null}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {!canEdit ? (
-            <span className="text-xs text-secondary">Your role can view this but not change it.</span>
-          ) : (
-            <>
-              {blockers.length > 0 ? (
-                <span className="text-xs text-secondary">
-                  {blockers.length === 1 ? blockers[0] : `${blockers.length} things to fix first`}
-                </span>
-              ) : dirty ? (
-                <span className="text-xs text-secondary">Unsaved changes</span>
-              ) : null}
-              {form.id ? (
-                <Button type="button" variant="destructive" onClick={() => setShowDelete(true)}>
-                  Delete
-                </Button>
-              ) : null}
+      <header className="mb-4 flex flex-col gap-2">
+        <Breadcrumb
+          items={[
+            { label: 'Forms', href: formsPath(account) },
+            { label: form.id ? form.name : 'New form' },
+          ]}
+        />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-lg font-medium">{form.id ? form.name : 'New form'}</h1>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {form.id ? (
+              <LinkButton
+                href={submissionsPath(account, { form: form.id, state: 'clean' })}
+                icon={<Inbox aria-hidden="true" className="size-4" />}
+              >
+                Submissions
+              </LinkButton>
+            ) : null}
+            {form.id ? (
               <Button
                 type="button"
-                variant="primary"
-                busy={saving}
-                disabled={!dirty || blockers.length > 0}
-                onClick={() => void save()}
+                icon={<Code2 aria-hidden="true" className="size-4" />}
+                onClick={() => setShowEmbed(true)}
               >
-                {saving ? 'Saving…' : 'Save form'}
+                Embed code
               </Button>
-            </>
-          )}
+            ) : null}
+            {!canEdit ? (
+              <span className="text-xs text-secondary">Your role can view this but not change it.</span>
+            ) : (
+              <>
+                {blockers.length > 0 ? (
+                  <span className="text-xs text-secondary">
+                    {blockers.length === 1 ? blockers[0] : `${blockers.length} things to fix first`}
+                  </span>
+                ) : dirty ? (
+                  <span className="text-xs text-secondary">Unsaved changes</span>
+                ) : null}
+                {form.id ? (
+                  <Button type="button" variant="destructive" onClick={() => setShowDelete(true)}>
+                    Delete
+                  </Button>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="primary"
+                  busy={saving}
+                  disabled={!dirty || blockers.length > 0}
+                  onClick={() => void save()}
+                >
+                  {saving ? 'Saving…' : 'Save form'}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 

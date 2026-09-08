@@ -1,7 +1,8 @@
 'use client'
 
 import { Alert, Badge, Button, Card, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { LinkButton } from '~/components/link-button.tsx'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -154,12 +155,14 @@ export const DashboardView = ({
               key={card.key}
               title={card.label}
               action={
-                <Link
+                <LinkButton
                   href={reportsPath(account, { tab: card.report, from, to })}
-                  className="text-small text-link"
+                  variant="tertiary"
+                  className="shrink-0 gap-1 px-2 py-1"
+                  icon={<ChevronRight aria-hidden="true" className="order-1 size-3.5" />}
                 >
                   Full report
-                </Link>
+                </LinkButton>
               }
             >
               {card.data.kind === 'metric' ? (

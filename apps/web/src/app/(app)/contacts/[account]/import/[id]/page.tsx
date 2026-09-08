@@ -11,6 +11,7 @@ import {
 import { EmptyState } from '@rawr/ui'
 import { desc, eq, and, ne } from 'drizzle-orm'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '~/components/crm/import-wizard.tsx'
 import { importsPath } from '~/lib/links.ts'
@@ -31,7 +32,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
       <EmptyState
         title="That import is not here"
         description="It was never started in this account, or the link is wrong."
-        action={<Link href={importsPath(account)}>Back to imports</Link>}
+        action={<LinkButton variant="primary" href={importsPath(account)}>Back to imports</LinkButton>}
       />
     )
   }

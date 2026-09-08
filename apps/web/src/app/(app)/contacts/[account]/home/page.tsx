@@ -13,7 +13,9 @@ import {
   withAccountReads,
 } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
+import { ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateTime } from '~/components/crm/value.tsx'
 import {
@@ -125,6 +127,20 @@ const Setup = ({ items }: { items: { done: boolean; label: string; href: string 
     </details>
   )
 }
+
+/** The "see everything" link in a card's corner. Small and quiet, but a control
+ *  rather than a sentence: it is the same shape in all six cards, which is what
+ *  makes it findable without being read. */
+const SeeAll = ({ href, children }: { href: string; children: React.ReactNode }) => (
+  <LinkButton
+    href={href}
+    variant="tertiary"
+    className="shrink-0 gap-1 px-2 py-1"
+    icon={<ChevronRight aria-hidden="true" className="size-3.5 order-1" />}
+  >
+    {children}
+  </LinkButton>
+)
 
 const Panel = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
   <section className="flex min-w-0 flex-col rounded-panel border border-line bg-surface shadow-panel">
@@ -265,7 +281,7 @@ const HomePage = async ({
       <div className="grid gap-4 @3xl:grid-cols-2">
         <Panel
           title="Pipeline by stage"
-          action={<Link href={objectView(account, 'deal', 'all', 'board')}>Open the board</Link>}
+          action={<SeeAll href={objectView(account, 'deal', 'all', 'board')}>Open the board</SeeAll>}
         >
           {board.stages.length === 0 ? (
             <EmptyState title="No pipeline yet" description="Add stages under Settings, Pipelines, and deals will land here." />
@@ -276,8 +292,8 @@ const HomePage = async ({
                   <tr className="text-left text-small text-secondary">
                     <th className="py-1 pr-3 font-medium">Stage</th>
                     <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Deals</th>
-                    <th className="py-1 pr-3 text-right font-medium">Total</th>
-                    <th className="py-1 text-right font-medium">Weighted</th>
+                    <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Total</th>
+                    <th className="whitespace-nowrap py-1 text-right font-medium">Weighted</th>
                   </tr>
                 </thead>
                 {pipelines.map(([pipelineId, pipelineName]) => (
@@ -315,7 +331,7 @@ const HomePage = async ({
 
         <Panel
           title="Next step overdue"
-          action={<Link href={objectView(account, 'deal', 'overdue-next-step', 'board')}>All overdue</Link>}
+          action={<SeeAll href={objectView(account, 'deal', 'overdue-next-step', 'board')}>All overdue</SeeAll>}
         >
           {overdue.length === 0 ? (
             <p className="text-secondary">Nothing is overdue. Every open deal has a next step in the future, or none set.</p>
@@ -340,7 +356,7 @@ const HomePage = async ({
           )}
         </Panel>
 
-        <Panel title="Closing this month" action={<Link href={objectView(account, 'deal', 'all', 'list', { sort: 'close_date' })}>All deals</Link>}>
+        <Panel title="Closing this month" action={<SeeAll href={objectView(account, 'deal', 'all', 'list', { sort: 'close_date' })}>All deals</SeeAll>}>
           {board.closingThisMonth.length === 0 ? (
             <p className="text-secondary">No open deal has a close date this month.</p>
           ) : (
@@ -366,7 +382,7 @@ const HomePage = async ({
           )}
         </Panel>
 
-        <Panel title="Meetings in the next 7 days" action={<Link href={bookedPath(account)}>All booked</Link>}>
+        <Panel title="Meetings in the next 7 days" action={<SeeAll href={bookedPath(account)}>All booked</SeeAll>}>
           {board.upcoming.length === 0 ? (
             <p className="text-secondary">Nothing booked for the coming week.</p>
           ) : (
@@ -393,7 +409,7 @@ const HomePage = async ({
           )}
         </Panel>
 
-        <Panel title="My tasks" action={<Link href={tasksPath(account, { mine: '1' })}>All mine</Link>}>
+        <Panel title="My tasks" action={<SeeAll href={tasksPath(account, { mine: '1' })}>All mine</SeeAll>}>
           {myTasks.length === 0 ? (
             <p className="text-secondary">No open tasks are assigned to you.</p>
           ) : (
@@ -419,7 +435,7 @@ const HomePage = async ({
           )}
         </Panel>
 
-        <Panel title="Recent activity" action={<Link href={objectView(account, 'contact', 'all', 'list', { sort: '-updated_at' })}>Recently changed</Link>}>
+        <Panel title="Recent activity" action={<SeeAll href={objectView(account, 'contact', 'all', 'list', { sort: '-updated_at' })}>Recently changed</SeeAll>}>
           {recent.length === 0 ? (
             <p className="text-secondary">Nothing has happened yet. Notes, calls, stage moves and form fills land here as the team works.</p>
           ) : (

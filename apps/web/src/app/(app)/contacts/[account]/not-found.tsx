@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { EmptyState } from '@rawr/ui'
 
 /** A record that was merged away, deleted, or never existed. The address is kept
@@ -8,9 +8,9 @@ const NotFound = () => (
     title="That record is not here"
     description="It may have been merged into another one, deleted, or the link may be from a different account."
     action={
-      <Link href="/" className="font-medium">
+      <LinkButton variant="primary" href="/">
         Go to Home
-      </Link>
+      </LinkButton>
     }
   />
 )

@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Button, Select, useToast } from '@rawr/ui'
+import { Alert, Button, buttonClass, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import type { ImportKind, ObjectKey } from '@rawr/db'
@@ -256,7 +256,7 @@ export const ImportWizard = ({
             <a
               href={`/contacts/${account}/import/${runId}/errors`}
               download
-              className="inline-flex min-h-9 w-fit items-center justify-center rounded-hs border border-line bg-surface px-3 py-1.5 font-medium text-body no-underline hover:border-line-pressed hover:bg-fill-hover"
+              className={buttonClass('secondary', 'w-fit no-underline')}
             >
               Download the failed rows as CSV
             </a>

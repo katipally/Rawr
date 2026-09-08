@@ -1,10 +1,11 @@
 'use client'
 
 import type { SubmissionRow } from '@rawr/db'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 import { Button, useToast } from '@rawr/ui'
+import { Contact } from 'lucide-react'
+import { LinkButton } from '~/components/link-button.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -136,12 +137,12 @@ export const ReviewList = ({
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {row.contactId ? (
-              <Link
+              <LinkButton
                 href={recordPath(account, 'contact', row.contactId)}
-                className="text-sm font-semibold text-link"
+                icon={<Contact aria-hidden="true" className="size-4" />}
               >
                 Open contact
-              </Link>
+              </LinkButton>
             ) : null}
 
             {canReview && state === 'quarantined' ? (

@@ -1,5 +1,5 @@
 import { EmptyState } from '@rawr/ui'
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { accountHome } from '~/lib/links.ts'
 import { readSession } from '~/server/session.ts'
@@ -23,7 +23,7 @@ const AccountLayout = async ({
       <EmptyState
         title={`You are not a member of “${account}”`}
         description="That link belongs to another account. Ask an admin there to add this account, or go back to your own."
-        action={<Link href={accountHome(session.accountSlug)}>Open {session.accountName}</Link>}
+        action={<LinkButton variant="primary" href={accountHome(session.accountSlug)}>Open {session.accountName}</LinkButton>}
       />
     )
   }

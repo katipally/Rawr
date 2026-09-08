@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useId, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
-import { recordPath } from '~/lib/links.ts'
+import { objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -136,7 +136,7 @@ export const CreateRecordDialog = ({
             {duplicateId ? (
               <>
                 {' '}
-                <Link href={`/contacts/${account}/objects/${object}/views/all/list`}>
+                <Link href={objectView(account, object, 'all')}>
                   Find it in the list
                 </Link>{' '}
                 and merge instead.

@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { EmptyState } from '@rawr/ui'
 
 /** A meeting link or a booking that is gone. Distinct from the public manage
@@ -8,9 +8,9 @@ const NotFound = () => (
     title="That meeting link is not here"
     description="It may have been deleted, or the link may be from a different account."
     action={
-      <Link href="/" className="font-medium">
+      <LinkButton variant="primary" href="/">
         Go to Home
-      </Link>
+      </LinkButton>
     }
   />
 )

@@ -1,6 +1,6 @@
 import { listReportDashboards, readReportDashboard } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { reportsPath } from '~/lib/links.ts'
 import { cardCatalogue, renderCards } from '~/server/dashboard-cards.ts'
@@ -38,9 +38,9 @@ const DashboardScreen = async ({
           title="That dashboard is not here"
           description="It may have been deleted, or it may be somebody's private one."
           action={
-            <Link href={reportsPath(account, { tab: 'dashboards', from: range.fromDay, to: range.toDay })}>
+            <LinkButton variant="primary" href={reportsPath(account, { tab: 'dashboards', from: range.fromDay, to: range.toDay })}>
               Back to dashboards
-            </Link>
+            </LinkButton>
           }
         />
       </div>
