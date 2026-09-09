@@ -1,4 +1,4 @@
-import { Alert, PageHeader } from '@rawr/ui'
+import { Alert, FilterRow, PageHeader } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
 import { listGrants, pagesHostedBy, readSchedule } from '@rawr/db'
 import Link from 'next/link'
@@ -65,23 +65,17 @@ const AvailabilityScreen = async ({
       ) : null}
 
       {sessionIsAdmin(session) && lookups.users.length > 1 ? (
-        <nav className="mb-4 flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-secondary">Looking at</span>
-          {lookups.users.map((member) => (
-            <Link
-              key={member.id}
-              href={availabilityPath(account, member.id === session.userId ? {} : { user: member.id })}
-              aria-current={member.id === subject ? 'page' : undefined}
-              className={
-                member.id === subject
-                  ? 'rounded-hs bg-accent-subtle px-2 py-0.5 font-semibold text-link no-underline'
-                  : 'rounded-hs px-2 py-0.5 no-underline hover:bg-fill-hover'
-              }
-            >
-              {member.label}
-            </Link>
-          ))}
-        </nav>
+        <FilterRow
+          className="mb-4"
+          label="Whose hours"
+          lead="Looking at"
+          items={lookups.users.map((member) => ({
+            key: member.id,
+            label: member.label,
+            href: availabilityPath(account, member.id === session.userId ? {} : { user: member.id }),
+            current: member.id === subject,
+          }))}
+        />
       ) : null}
 
       <ScheduleEditor

@@ -1,6 +1,5 @@
 import { calendarFields, listViews, parseFilters, readCalendar, resolveView } from '@rawr/db'
-import { Alert, cn } from '@rawr/ui'
-import Link from 'next/link'
+import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
@@ -171,28 +170,20 @@ const CalendarPage = async ({
       />
 
       {placeable.length > 1 ? (
-        <nav aria-label="Place on" className="flex flex-wrap items-baseline gap-1">
-          <span className="text-small text-secondary">Place on</span>
-          {placeable.map((field) => (
-            <Link
-              key={field.key}
-              href={objectView(account, objectParam, resolved.view.slug, 'calendar', {
-                ...listParams,
-                group: field.key,
-                month,
-              })}
-              aria-current={field.key === calendar?.fieldKey ? 'true' : undefined}
-              className={cn(
-                'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
-                field.key === calendar?.fieldKey
-                  ? 'bg-fill-hover'
-                  : 'border-line text-body hover:bg-fill',
-              )}
-            >
-              {field.label}
-            </Link>
-          ))}
-        </nav>
+        <FilterRow
+          label="Place on"
+          lead="Place on"
+          items={placeable.map((field) => ({
+            key: field.key,
+            label: field.label,
+            href: objectView(account, objectParam, resolved.view.slug, 'calendar', {
+              ...listParams,
+              group: field.key,
+              month,
+            }),
+            current: field.key === calendar?.fieldKey,
+          }))}
+        />
       ) : null}
 
       {calendar ? (

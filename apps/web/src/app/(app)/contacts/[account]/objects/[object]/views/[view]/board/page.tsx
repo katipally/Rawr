@@ -1,6 +1,5 @@
 import { calendarFields, isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
-import { Alert, cn } from '@rawr/ui'
-import Link from 'next/link'
+import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
@@ -139,25 +138,16 @@ const BoardPage = async ({
       ) : null}
 
       {board && board.groupableFields.length > 1 ? (
-        <nav aria-label="Group by" className="flex flex-wrap items-baseline gap-1">
-          <span className="text-small text-secondary">Group by</span>
-          {board.groupableFields.map((field) => (
-            <Link
-              key={field.key}
-              href={objectView(account, 'deal', resolved.view.slug, 'board', {
-                ...listParams,
-                group: field.key,
-              })}
-              aria-current={field.key === board.groupByKey ? 'true' : undefined}
-              className={cn(
-                'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
-                field.key === board.groupByKey ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
-              )}
-            >
-              {field.label}
-            </Link>
-          ))}
-        </nav>
+        <FilterRow
+          label="Group by"
+          lead="Group by"
+          items={board.groupableFields.map((field) => ({
+            key: field.key,
+            label: field.label,
+            href: objectView(account, 'deal', resolved.view.slug, 'board', { ...listParams, group: field.key }),
+            current: field.key === board.groupByKey,
+          }))}
+        />
       ) : null}
 
       <ListToolbar

@@ -114,9 +114,9 @@ export const AttachmentsPanel = ({
 
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
-      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">
+      <h2 className="px-6 pt-6 pb-4 text-base font-semibold">
         Files{files.length > 0 ? ` (${files.length})` : ''}
-      </h3>
+      </h2>
       <div className="flex min-w-0 flex-col gap-2 px-6 pb-6">
       {!configured ? (
         <Alert tone="info">

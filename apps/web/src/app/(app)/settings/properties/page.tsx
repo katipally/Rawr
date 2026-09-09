@@ -1,6 +1,5 @@
 import { getRegistry, listDeletedFields, listFields } from '@rawr/db'
-import { PageHeader, cn } from '@rawr/ui'
-import Link from 'next/link'
+import { FilterRow, PageHeader } from '@rawr/ui'
 import { propertiesPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { PropertyList } from './property-list.tsx'
@@ -47,23 +46,15 @@ const PropertiesPage = async ({
         }
       />
 
-      <nav aria-label="Object" className="flex flex-wrap gap-1">
-        {objects.map((entry) => (
-          <Link
-            key={entry.key}
-            href={propertiesPath(entry.key)}
-            aria-current={entry.key === current ? 'page' : undefined}
-            className={cn(
-              'inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline',
-              entry.key === current
-                ? 'bg-fill-hover'
-                : 'bg-surface hover:bg-fill',
-            )}
-          >
-            {entry.label}
-          </Link>
-        ))}
-      </nav>
+      <FilterRow
+        label="Object"
+        items={objects.map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          href: propertiesPath(entry.key),
+          current: entry.key === current,
+        }))}
+      />
 
       <PropertyList
         object={current}

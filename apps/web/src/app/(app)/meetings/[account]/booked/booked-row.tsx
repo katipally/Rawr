@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, type BadgeTone, Button, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Field, Modal, TextArea, TextInput, buttonClass, type BadgeTone, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -140,7 +140,12 @@ export const BookedRow = ({
             row is what gets torn down and that can fail. Offering it as a link
             invited somebody to join a meeting nobody is coming to. */}
         {booking.state !== 'confirmed' ? null : booking.conferenceUrl ? (
-          <a href={booking.conferenceUrl} target="_blank" rel="noreferrer">
+          <a
+            href={booking.conferenceUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonClass('secondary', 'no-underline')}
+          >
             Join link
           </a>
         ) : (

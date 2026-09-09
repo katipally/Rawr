@@ -1,5 +1,5 @@
 import { canWrite, getRegistry, listTasks, overdueNextSteps } from '@rawr/db'
-import { EmptyState, cn } from '@rawr/ui'
+import { EmptyState, Tabs, cn } from '@rawr/ui'
 import { CalendarDays, Search, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -72,26 +72,23 @@ const TasksPage = async ({
         more={[]}
       />
 
-      <nav aria-label="Task views" className="flex flex-wrap items-center gap-1 border-b border-line pb-1">
-        {VIEWS.map((option) => {
-          const active = option.key === view.key
+      <Tabs
+        label="Task views"
+        items={VIEWS.map((option) => {
           const Icon = option.key === 'today' || option.key === 'upcoming' ? CalendarDays : Table2
-          return (
-            <Link
-              key={option.key}
-              href={at({ view: option.key })}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex min-h-control items-center gap-2 rounded-hs px-3 py-1 font-normal no-underline',
-                active ? 'bg-fill-hover text-body' : 'text-secondary hover:bg-fill hover:text-body',
-              )}
-            >
-              <Icon aria-hidden="true" className="size-4 shrink-0" />
-              {option.label}
-            </Link>
-          )
+          return {
+            key: option.key,
+            label: (
+              <span className="flex items-center gap-2">
+                <Icon aria-hidden="true" className="size-4 shrink-0" />
+                {option.label}
+              </span>
+            ),
+            href: at({ view: option.key }),
+            current: option.key === view.key,
+          }
         })}
-      </nav>
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <form className="relative w-full min-w-0 sm:w-56" action={tasksPath(account)}>

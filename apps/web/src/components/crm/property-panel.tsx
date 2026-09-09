@@ -114,7 +114,7 @@ export const PropertyPanel = ({
 
         return (
           <section key={section.title} className="rounded-panel border border-line bg-surface shadow-panel">
-            <h3 className={cn('px-6 pt-6', isCollapsed ? 'pb-6' : 'pb-4')}>
+            <h2 className={cn('px-6 pt-6', isCollapsed ? 'pb-6' : 'pb-4')}>
               <button
                 type="button"
                 aria-expanded={!isCollapsed}
@@ -128,9 +128,14 @@ export const PropertyPanel = ({
                 ) : (
                   <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
                 )}
-                {section.title}
+                {/* A group name is typed by an admin and nothing caps its length.
+                    Without this a long one pushes the panel wider than its column
+                    rather than ending in an ellipsis. */}
+                <span className="min-w-0 truncate" title={section.title}>
+                  {section.title}
+                </span>
               </button>
-            </h3>
+            </h2>
 
             {isCollapsed ? null : (
               <dl className="flex flex-col gap-4 px-6 pb-6">

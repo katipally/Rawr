@@ -1,6 +1,5 @@
 import { getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
-import { Alert, EmptyState, PageHeader } from '@rawr/ui'
-import Link from 'next/link'
+import { Alert, Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
@@ -77,25 +76,15 @@ const BookingPageEditorScreen = async ({
 
   return (
     <div className="w-full max-w-5xl">
-      <nav className="mb-1 text-sm">
-        <Link href={bookingPagesPath(account)} className="font-semibold text-link">
-          Meeting links
-        </Link>
-      </nav>
+      <Breadcrumb items={[{ label: 'Meeting links', href: bookingPagesPath(account) }, { label: page.name }]} />
       <PageHeader
-        className="mb-4"
+        className="mt-1 mb-4"
         title={page.name}
         action={
           <>
-            <Link href={bookedPath(account, { page: page.bookingPageId })} className="text-sm text-link">
-              Booked meetings
-            </Link>
-            <Link href={availabilityPath(account)} className="text-sm text-link">
-              My hours
-            </Link>
-            <Link href={calendarsPath(account)} className="text-sm text-link">
-              Calendars
-            </Link>
+            <LinkButton href={bookedPath(account, { page: page.bookingPageId })}>Booked meetings</LinkButton>
+            <LinkButton href={availabilityPath(account)}>My hours</LinkButton>
+            <LinkButton href={calendarsPath(account)}>Calendars</LinkButton>
           </>
         }
       />

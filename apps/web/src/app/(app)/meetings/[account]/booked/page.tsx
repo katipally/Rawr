@@ -1,7 +1,6 @@
 import { listBookingPages, listBookings, listMembers } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { EmptyState, FilterRow, PageHeader } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { bookedPath, recordPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
@@ -64,22 +63,16 @@ const BookedScreen = async ({
 
       <MeetingsTabs account={account} current="booked" />
 
-      <nav className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-        {(['upcoming', 'past'] as const).map((option) => (
-          <Link
-            key={option}
-            href={bookedPath(account, { ...query, when: option } as never)}
-            aria-current={when === option ? 'page' : undefined}
-            className={
-              when === option
-                ? 'rounded-hs bg-accent-subtle px-2 py-0.5 font-semibold text-link no-underline'
-                : 'rounded-hs px-2 py-0.5 no-underline hover:bg-fill-hover'
-            }
-          >
-            {option === 'upcoming' ? 'Upcoming' : 'Past'}
-          </Link>
-        ))}
-      </nav>
+      <FilterRow
+        className="mb-3"
+        label="When"
+        items={(['upcoming', 'past'] as const).map((option) => ({
+          key: option,
+          label: option === 'upcoming' ? 'Upcoming' : 'Past',
+          href: bookedPath(account, { ...query, when: option } as never),
+          current: when === option,
+        }))}
+      />
 
       {result.rows.length === 0 ? (
         <EmptyState

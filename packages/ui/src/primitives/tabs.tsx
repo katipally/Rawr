@@ -41,6 +41,43 @@ export const Tabs = ({ label, items, className }: TabsProps) => (
   </nav>
 )
 
+export type FilterRowProps = {
+  label: string
+  items: TabItem[]
+  /** Named in front of the row when the choices alone do not say what is being
+   *  chosen: "Group by", "Looking at". */
+  lead?: ReactNode
+  className?: string
+}
+
+/** A row of choices that narrows what the page already shows, as against `Tabs`,
+ *  which moves between screens. Both are links, for the same reason.
+ *
+ *  The distinction is worth a second component because it was already being drawn
+ *  five different ways by hand -- pills here, soft chips in Meetings, an icon row
+ *  on Tasks, an underline on Submissions -- and a person cannot learn a control
+ *  that looks different on every screen. */
+export const FilterRow = ({ label, items, lead, className }: FilterRowProps) => (
+  <nav aria-label={label} className={cn('flex flex-wrap items-center gap-1', className)}>
+    {lead ? <span className="text-small text-secondary">{lead}</span> : null}
+    {items.map((item) => (
+      <a
+        key={item.key}
+        href={item.href}
+        aria-current={item.current ? 'page' : undefined}
+        className={cn(
+          'inline-flex h-control shrink-0 items-center gap-1.5 rounded-pill border border-line-strong px-4',
+          'text-small font-light text-body no-underline',
+          item.current ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
+        )}
+      >
+        <span className="truncate">{item.label}</span>
+        {item.hint ? <span className="shrink-0 text-secondary">{item.hint}</span> : null}
+      </a>
+    ))}
+  </nav>
+)
+
 export type Crumb = { label: string; href?: string }
 
 /** Where this record sits. The last crumb is the page itself and is never a

@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import type { MembershipRow } from '@rawr/db'
 import { segmentsPath } from '~/lib/links.ts'
 import { formatDate } from './value.tsx'
@@ -19,10 +19,10 @@ export const SegmentsPanel = ({ account, recordName, rows }: SegmentsPanelProps)
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
       <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
-        <h3 className="text-base font-semibold">Segments ({live.length})</h3>
-        <Link href={segmentsPath(account)} className="text-small">
+        <h2 className="text-base font-semibold">Segments ({live.length})</h2>
+        <LinkButton variant="tertiary" href={segmentsPath(account)}>
           Manage
-        </Link>
+        </LinkButton>
       </header>
 
       {rows.length === 0 ? (

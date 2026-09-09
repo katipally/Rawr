@@ -1,7 +1,7 @@
 import { listSubmissions } from '@rawr/db'
-import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { EmptyState, PageHeader, Tabs } from '@rawr/ui'
 import { submissionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsReadOnly } from '~/server/session.ts'
 import { ReviewList } from './review-list.tsx'
@@ -82,22 +82,16 @@ const SubmissionsPage = async ({
         why="Nothing the spam engine catches is dropped. A false positive is recovered here rather than lost invisibly, and the state sits in the URL so a held queue is a link somebody can send."
       />
 
-      <nav aria-label="Submission state" className="mb-4 flex flex-wrap gap-1 border-b border-divider">
-        {STATES.map((option) => (
-          <Link
-            key={option.key}
-            href={submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) })}
-            aria-current={option.key === state ? 'page' : undefined}
-            className={
-              option.key === state
-                ? '-mb-px border-b-2 border-accent px-3 py-2 text-sm font-medium text-link'
-                : '-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-secondary'
-            }
-          >
-            {option.label}
-          </Link>
-        ))}
-      </nav>
+      <Tabs
+        className="mb-4"
+        label="Submission state"
+        items={STATES.map((option) => ({
+          key: option.key,
+          label: option.label,
+          href: submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) }),
+          current: option.key === state,
+        }))}
+      />
 
       {rows.length === 0 ? (
         <EmptyState
@@ -113,9 +107,9 @@ const SubmissionsPage = async ({
       )}
 
       {olderHref ? (
-        <Link href={olderHref} className="mt-3 inline-block text-link">
+        <LinkButton href={olderHref} className="mt-3">
           Older submissions
-        </Link>
+        </LinkButton>
       ) : null}
     </div>
   )

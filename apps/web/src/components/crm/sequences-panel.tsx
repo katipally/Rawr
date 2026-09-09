@@ -70,9 +70,9 @@ export const SequencesPanel = ({
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
       <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
-        <h3 className="text-base font-semibold">
+        <h2 className="text-base font-semibold">
           {companyId ? 'Sequences' : `Sequences (${live.length})`}
-        </h3>
+        </h2>
         {canWrite ? (
           <Button variant="tertiary" onClick={() => setEnrolling(true)}>
             {companyId ? 'Enrol everyone here' : 'Enrol'}

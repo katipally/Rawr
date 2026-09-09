@@ -117,7 +117,7 @@ export const EnrichmentPanel = ({
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
       <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
-        <h3 className="text-base font-semibold">Enrichment and outreach</h3>
+        <h2 className="text-base font-semibold">Enrichment and outreach</h2>
         {canEnrich ? (
           <Button onClick={() => void enrich()} busy={busy === 'enrich'}>
             Enrich

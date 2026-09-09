@@ -51,7 +51,7 @@ export const SubscriptionsPanel = ({ contactId, contactName, rows, canWrite }: S
 
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
-      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">Communication preferences</h3>
+      <h2 className="px-6 pt-6 pb-4 text-base font-semibold">Communication preferences</h2>
 
       {allUnspecified ? (
         <p className="px-6 pt-2 text-secondary">{contactName} has not specified any preferences.</p>

@@ -2,6 +2,7 @@
 
 import { Button, Field, PageHeader, Select, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { formatDate } from '~/components/crm/value.tsx'
@@ -214,9 +215,9 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
                 Use {detected}
               </Button>
             ) : null}
-            <Link href={links.availability} className="text-small">
+            <LinkButton variant="tertiary" href={links.availability}>
               Working hours
-            </Link>
+            </LinkButton>
           </div>
         </Field>
       </Panel>

@@ -24,7 +24,7 @@ export type MailPanelProps = {
 export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) => (
   <section className="rounded-panel border border-line bg-surface shadow-panel">
     <header className="px-6 pt-6 pb-4">
-      <h3 className="text-base font-semibold">Email ({threads.length})</h3>
+      <h2 className="text-base font-semibold">Email ({threads.length})</h2>
     </header>
 
     {engagement.lastContactedAt || engagement.lastRepliedAt ? (

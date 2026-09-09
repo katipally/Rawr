@@ -68,9 +68,9 @@ export const TasksPanel = ({
 
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
-      <h3 className="px-6 pt-6 pb-4 text-base font-semibold">
+      <h2 className="px-6 pt-6 pb-4 text-base font-semibold">
         {heading} ({open.length} open)
-      </h3>
+      </h2>
 
       {canWrite ? (
         <TaskForm
