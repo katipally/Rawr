@@ -1,0 +1,30 @@
+# The build installs its own dependencies and runs its own build, so anything a
+# laptop left behind is at best dead weight in the context and at worst a stale
+# artifact shadowing a fresh one.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.turbo
+*.tsbuildinfo
+**/*.tsbuildinfo
+next-env.d.ts
+**/next-env.d.ts
+
+# Secrets. The image must never carry them; the host supplies them at boot.
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.claude
+.agents
+docs
+Design
+.shots
+.vercel
+*.log
+.DS_Store

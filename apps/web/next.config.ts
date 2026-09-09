@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { NextConfig } from 'next'
 
 /** Two populations, two answers.
@@ -14,9 +15,9 @@ import type { NextConfig } from 'next'
 /** Set on every response.
  *
  *  HSTS is deliberately absent: it is a promise about the whole origin that
- *  cannot be taken back for two years, and until open item 9 picks a hosting
- *  target there is no origin to make it about. It belongs in the reverse proxy's
- *  config next to the certificate, not here. */
+ *  cannot be taken back for two years, and the origin it would be about changes
+ *  with the host. It belongs in the terminating proxy's config next to the
+ *  certificate, not here. See DEPLOY.md. */
 const BASELINE = [
   { key: 'x-content-type-options', value: 'nosniff' },
   // Full URL to our own origin, only the origin to anyone else. A record page
@@ -84,6 +85,15 @@ const EDGE_PATHS = [
 
 const config: NextConfig = {
   reactStrictMode: true,
+  /** Traces the imports the server actually reaches and copies them, and their
+   *  workspace packages, into `.next/standalone` with pnpm's symlinks resolved.
+   *  Without it a container has to carry the whole hoisted `node_modules` and the
+   *  link graph that makes it work, which is most of a gigabyte of the wrong
+   *  layout. `outputFileTracingRoot` is the repository, not this app: the trace
+   *  reaches up into `packages/`, and left to infer it Next stops at the first
+   *  lockfile it finds and drops them. */
+  output: 'standalone',
+  outputFileTracingRoot: join(import.meta.dirname, '../..'),
   // The workspace packages ship TypeScript source, not a build step.
   transpilePackages: ['@rawr/db', '@rawr/ui'],
   // Every address is built in ~/lib/links.ts, which is the typed layer. Typed

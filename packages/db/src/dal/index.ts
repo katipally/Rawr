@@ -15,6 +15,14 @@ export const isUuid = (value: string): boolean => UUID.test(value)
 
 export type Tx = Parameters<Parameters<typeof appDb.transaction>[0]>[0]
 
+/** Whether the database answers, for the health endpoint. It is here rather than
+ *  the caller reaching for the pool itself: the pool is internal so that every
+ *  read of tenant data has to go through `withAccount` and its policies, and one
+ *  exception to that is how the rule stops being one. Reads nothing. */
+export const databaseReachable = async (): Promise<void> => {
+  await appDb.execute(sql`select 1`)
+}
+
 /** An open transaction with its account already pinned, offered to any nested
  *  call for the same account. Keyed by account id and checked on every join,
  *  so a call for a different tenant can never land on a handle pinned to this one. */
