@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
 type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task' | 'notify_slack'
@@ -403,8 +404,8 @@ export const AutomationList = ({
                     has two more days to sit. */}
                 <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
                   {entry.resumeAt
-                    ? `continues ${new Date(entry.resumeAt).toLocaleString()}`
-                    : new Date(entry.at).toLocaleString()}
+                    ? `continues ${formatDateTime(entry.resumeAt)}`
+                    : formatDateTime(entry.at)}
                 </span>
               </li>
             ))}

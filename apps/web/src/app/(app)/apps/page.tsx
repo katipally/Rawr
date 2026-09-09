@@ -6,7 +6,7 @@ import { redirect } from 'next/navigation'
 import { AppLogo } from '~/components/app-logo.tsx'
 import { formatAgo } from '~/components/crm/value.tsx'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
-import { appPath, availableAppsPath } from '~/lib/links.ts'
+import { appPath } from '~/lib/links.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTable } from './apps-table.tsx'
@@ -38,11 +38,6 @@ const AppsPage = async () => {
             connected and whether it is working.
           </p>
         }
-        action={
-          <LinkButton href={availableAppsPath()}>
-            Add more connections
-          </LinkButton>
-        }
       />
 
       <AppsTabs current="home" connectedCount={connected.length} />
@@ -55,14 +50,11 @@ const AppsPage = async () => {
         </Alert>
       ) : null}
 
+      {attention.length === 0 ? null : (
       <section className="flex flex-col gap-2">
-        <h2 className="text-base font-semibold">Needs attention</h2>
         <div className="rounded-panel border border-line bg-surface shadow-panel">
-          <p className="border-b border-divider px-4 py-3 text-small font-medium">Needs attention ({attention.length})</p>
-          {attention.length === 0 ? (
-            <p className="px-4 py-3 text-secondary">Every connected app answered its last call.</p>
-          ) : (
-            <ul>
+          <h2 className="border-b border-divider px-4 py-3 font-medium text-small">Needs attention ({attention.length})</h2>
+          <ul>
               {attention.map((row) => {
                 const meta = metaFor(row.kind)
                 const personal = PERSONAL_KINDS.has(row.kind)
@@ -88,10 +80,10 @@ const AppsPage = async () => {
                   </li>
                 )
               })}
-            </ul>
-          )}
+          </ul>
         </div>
       </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">My apps</h2>

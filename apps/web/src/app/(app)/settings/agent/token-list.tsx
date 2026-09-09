@@ -4,6 +4,7 @@ import { Button, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 export type TokenRow = {
   id: string
@@ -212,11 +213,11 @@ export const TokenList = ({
                   </p>
                   <p className="text-secondary text-small">
                     {row.revokedAt
-                      ? `Revoked ${when(row.revokedAt)}`
+                      ? `Revoked ${formatDateTime(row.revokedAt)}`
                       : row.lastUsedAt
-                        ? `Last used ${when(row.lastUsedAt)}`
+                        ? `Last used ${formatDateTime(row.lastUsedAt)}`
                         : 'Never used'}{' '}
-                    · created {when(row.createdAt)}
+                    · created {formatDateTime(row.createdAt)}
                   </p>
                 </div>
                 {row.revokedAt ? null : (
@@ -237,11 +238,3 @@ export const TokenList = ({
   )
 }
 
-const when = (iso: string): string =>
-  new Date(iso).toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })

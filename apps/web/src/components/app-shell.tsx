@@ -219,7 +219,10 @@ const Shell = ({
     (section.groups ?? []).map((group, index) => (
       <div key={group.label ?? index}>
         {index > 0 ? <hr className="mx-4 my-4 border-nav-active" /> : null}
-        <ul className="flex flex-col gap-1">
+        {group.label ? (
+          <h3 className="px-4 pb-1 font-medium text-nav-muted text-small uppercase tracking-wide">{group.label}</h3>
+        ) : null}
+        <ul aria-label={group.label} className="flex flex-col gap-1">
           {group.items.map((item) => (
             <li key={item.href}>
               <Link

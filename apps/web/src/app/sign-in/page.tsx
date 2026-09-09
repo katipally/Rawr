@@ -95,7 +95,7 @@ const SignIn = async ({ searchParams }: Props) => {
               Development sign-in
             </label>
             <p className="text-small text-secondary">
-              Seeded addresses only: admin@, sales@, marketing@ or viewer@datasaur.ai. Not available in
+              Seeded addresses only: admin@, sales@, marketing@ or viewer@sandbox.test. Not available in
               production.
             </p>
           </div>
@@ -109,7 +109,7 @@ const SignIn = async ({ searchParams }: Props) => {
             required
             autoComplete="off"
             suppressHydrationWarning
-            placeholder="admin@datasaur.ai"
+            placeholder="admin@sandbox.test"
             className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
           />
           <input

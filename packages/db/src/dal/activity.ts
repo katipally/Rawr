@@ -417,6 +417,9 @@ export type RecentActivityRow = TimelineRow & {
   entityType: EntityRef['entityType']
   entityId: string
   entityName: string
+  /** The entry outlives the record it hangs on, so the name resolves to null
+   *  once that record is deleted. Callers must not link to it. */
+  entityDeleted: boolean
 }
 
 /** The account's timeline, newest first: what the team did today, across every
@@ -448,9 +451,9 @@ export const recentActivity = async (
              a.actor_id, u.name as actor_name, a.actor_kind,
              l.entity_type, l.entity_id,
              case l.entity_type
-               when 'contact' then (select coalesce(nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''), c.email) from contact c where c.id = l.entity_id)
-               when 'company' then (select coalesce(co.name, co.domain) from company co where co.id = l.entity_id)
-               when 'deal' then (select d.name from deal d where d.id = l.entity_id)
+               when 'contact' then (select coalesce(nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''), c.email, 'Unnamed contact') from contact c where c.id = l.entity_id and c.deleted_at is null)
+               when 'company' then (select coalesce(co.name, co.domain, 'Unnamed company') from company co where co.id = l.entity_id and co.deleted_at is null)
+               when 'deal' then (select coalesce(d.name, 'Unnamed deal') from deal d where d.id = l.entity_id and d.deleted_at is null)
              end as entity_name
         from activity a
         left join user_account u on u.id = a.actor_id
@@ -485,5 +488,6 @@ export const recentActivity = async (
       entityType: row.entity_type,
       entityId: row.entity_id,
       entityName: row.entity_name ?? 'a deleted record',
+      entityDeleted: row.entity_name === null,
     }))
   })

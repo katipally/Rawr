@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 export type EndpointView = {
   id: string
@@ -34,10 +35,10 @@ const health = (row: EndpointView): { tone: 'ok' | 'warn' | 'error' | 'neutral';
   if (row.lastError) {
     return {
       tone: 'error',
-      text: `failing since ${row.lastErrorAt ? new Date(row.lastErrorAt).toLocaleString() : 'recently'}`,
+      text: `failing since ${row.lastErrorAt ? formatDateTime(row.lastErrorAt) : 'recently'}`,
     }
   }
-  if (row.lastOkAt) return { tone: 'ok', text: `last delivered ${new Date(row.lastOkAt).toLocaleString()}` }
+  if (row.lastOkAt) return { tone: 'ok', text: `last delivered ${formatDateTime(row.lastOkAt)}` }
   return { tone: 'warn', text: 'nothing sent yet' }
 }
 

@@ -5,7 +5,7 @@ import { BarChart, Funnel } from '~/components/reports/chart.tsx'
 import { formatCurrency, formatDayShort } from '~/components/crm/value.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 
 /** Amounts are summed without converting between currencies: converting at
  *  today's rate would make last quarter's number move every morning. */
@@ -22,7 +22,7 @@ const PipelineReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const report = await pipelineReport(contextFrom(session), range)
 
   // One funnel per pipeline. The rows arrive in pipeline then stage order, so

@@ -5,7 +5,7 @@ import { BarChart } from '~/components/reports/chart.tsx'
 import { formatCurrency } from '~/components/crm/value.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 
 /** Both touches, side by side and never blended. First touch credits what found
  *  somebody, last touch credits what closed them, and one number that mixes the
@@ -63,7 +63,7 @@ const AttributionReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const report = await attributionReport(contextFrom(session), range)
   const unattributed = report.first.find((row) => row.channel === 'Not attributed')
 

@@ -3,6 +3,7 @@
 import { Badge, Button, Card, Combobox, EmptyState, Spinner, useToast } from '@rawr/ui'
 import { Fragment, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 type Row = {
   id: string
@@ -130,7 +131,7 @@ export const AuditTable = ({
               <li key={row.id} className="px-4 py-2">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
-                    {new Date(row.at).toLocaleString()}
+                    {formatDateTime(row.at)}
                   </time>
                   <span className="min-w-0 flex-1">{sentence(row)}</span>
                   {row.actorKind === 'user' ? null : (

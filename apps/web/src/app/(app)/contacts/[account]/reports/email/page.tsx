@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 
 const hours = (value: number | null): string => {
   if (value === null) return '—'
@@ -24,7 +24,7 @@ const EmailReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const report = await emailReport(contextFrom(session), range)
   const lagOf = (mailbox: string) => report.replyLag.find((row) => row.mailbox === mailbox)
 

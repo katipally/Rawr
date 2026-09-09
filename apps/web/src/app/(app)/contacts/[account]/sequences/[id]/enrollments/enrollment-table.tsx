@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { enrollmentsPath, recordPath, sequencePath, sequencesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE } from '~/components/crm/value.tsx'
+import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE, formatDate, formatDateTime } from '~/components/crm/value.tsx'
 
 type Row = {
   id: string
@@ -119,9 +119,9 @@ export const EnrollmentTable = ({
 
                 <span className="w-40 shrink-0 text-small text-secondary">
                   {row.state === 'active' && row.nextRunAt
-                    ? `Next ${new Date(row.nextRunAt).toLocaleString()}`
+                    ? `Next ${formatDateTime(row.nextRunAt)}`
                     : row.lastSentAt
-                      ? `Last ${new Date(row.lastSentAt).toLocaleDateString()}`
+                      ? `Last ${formatDate(row.lastSentAt)}`
                       : 'Nothing sent yet'}
                 </span>
 

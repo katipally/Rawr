@@ -8,6 +8,7 @@ import { Contact } from 'lucide-react'
 import { LinkButton } from '~/components/link-button.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 /** Each held submission shows what was submitted and exactly which rule caught
  *  it, because "score 45" tells a person nothing about whether this is a real
@@ -70,12 +71,7 @@ export const ReviewList = ({
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="font-medium">{row.formName}</span>
             <span className="text-xs text-secondary">
-              {new Date(row.at).toLocaleString(undefined, {
-                month: 'short',
-                day: 'numeric',
-                hour: 'numeric',
-                minute: '2-digit',
-              })}
+              {formatDateTime(row.at)}
               {' · score '}
               {row.spamScore}
             </span>

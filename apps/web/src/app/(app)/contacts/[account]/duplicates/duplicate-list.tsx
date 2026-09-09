@@ -4,7 +4,7 @@ import { Alert, Button, EmptyState, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { shortName } from '~/components/crm/value.tsx'
+import { formatDate, shortName } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -40,8 +40,6 @@ const RULES: Record<string, string> = {
   same_domain: 'Same domain',
   same_name_ignoring_suffix: 'Same name, different legal form',
 }
-
-const when = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
 /** One row per pair, with the reason in front of the decision.
  *
@@ -157,7 +155,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                 >
                   {survivor.displayName}
                 </Link>
-                <span className="text-small text-secondary">kept, here since {when(survivor.createdAt)}</span>
+                <span className="text-small text-secondary">kept, here since {formatDate(survivor.createdAt)}</span>
                 <span aria-hidden="true" className="text-secondary">
                   &larr;
                 </span>
@@ -168,7 +166,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                 >
                   {absorbed.displayName}
                 </Link>
-                <span className="text-small text-secondary">merged in, here since {when(absorbed.createdAt)}</span>
+                <span className="text-small text-secondary">merged in, here since {formatDate(absorbed.createdAt)}</span>
               </div>
 
               <div className="flex flex-wrap gap-2">

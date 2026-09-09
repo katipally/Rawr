@@ -9,7 +9,6 @@ import {
   listIntegrations,
   listSuggestions,
   listTasks,
-  groupFor,
   readAssociations,
   readEmailEngagement,
   readMemberships,
@@ -322,7 +321,7 @@ const RecordPage = async ({
                         value={record.values[field.key]}
                         label={record.labels[field.key]}
                         currency={String(record.values.currency ?? 'USD')}
-                        placeholder="--"
+                        placeholder="—"
                         oneLine
                       />
                     </dd>
@@ -461,22 +460,11 @@ const RecordPage = async ({
             <RecordOverview
               account={account}
               object={objectParam}
-              tasks={tasks.map((row) => ({
-                id: row.id,
-                title: row.title,
-                dueDate: row.dueDate,
-                status: row.status,
-              }))}
               threads={threads.map((thread) => ({
                 threadId: thread.id,
                 subject: thread.subject,
                 lastAt: thread.lastAt?.toISOString() ?? thread.firstAt?.toISOString() ?? null,
                 messageCount: thread.messageCount,
-              }))}
-              deals={(groupFor(rail, 'deal')?.records ?? []).map((deal) => ({
-                id: deal.id,
-                displayName: deal.displayName,
-                detail: deal.detail,
               }))}
               firstTouch={touchFrom(record.values.original_source)}
               lastTouch={touchFrom(record.values.latest_source)}

@@ -4,6 +4,7 @@ import { Button, DataTable, EmptyState, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatDateTime } from '~/components/crm/value.tsx'
 
 export type DeadLetter = {
   id: string
@@ -40,7 +41,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       key: 'at',
       header: 'Failed at',
       width: 200,
-      render: (row) => new Date(row.at).toLocaleString(),
+      render: (row) => formatDateTime(row.at),
     },
     { key: 'attempts', header: 'Attempts', width: 100, align: 'right', render: (row) => row.attempts },
     { key: 'error', header: 'Error', render: (row) => <span className="break-words">{row.error}</span> },

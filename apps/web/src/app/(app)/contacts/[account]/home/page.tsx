@@ -211,7 +211,14 @@ const HomePage = async ({
     byCurrency.size === 0
       ? formatCurrency(0)
       : [...byCurrency.entries()].map(([currency, m]) => formatCurrency(pick(m), currency)).join(' · ')
-  const pipelines = [...new Map(board.stages.map((s) => [s.pipelineId, s.pipelineName])).entries()]
+  const allPipelines = [...new Map(board.stages.map((s) => [s.pipelineId, s.pipelineName])).entries()]
+  // A pipeline nobody has put a deal in is a column of zeroes the length of its
+  // stage list, and it pushed the work below it off the screen. Kept when it is
+  // the only one, so a new account still sees the shape of the table.
+  const withDeals = allPipelines.filter(([id]) =>
+    board.stages.some((s) => s.pipelineId === id && s.count > 0),
+  )
+  const pipelines = withDeals.length > 0 ? withDeals : allPipelines.slice(0, 1)
 
   const tiles: Tile[] = [
     { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
@@ -453,7 +460,11 @@ const HomePage = async ({
                     </time>
                   </div>
                   <p className="truncate text-small text-secondary">
-                    <Link href={recordPath(account, entry.entityType, entry.entityId)}>{entry.entityName}</Link>
+                    {entry.entityDeleted ? (
+                      <span className="italic">{entry.entityName}</span>
+                    ) : (
+                      <Link href={recordPath(account, entry.entityType, entry.entityId)}>{entry.entityName}</Link>
+                    )}
                     {entry.body ? ` · ${entry.body}` : ''}
                   </p>
                 </li>

@@ -8,10 +8,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime } from './value.tsx'
-
-const monthOf = (iso: string): string =>
-  new Date(iso).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
+import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime, formatMonth } from './value.tsx'
 
 export type TimelineEntry = {
   id: string
@@ -472,8 +469,8 @@ export const Timeline = ({
           {shown.map((entry, index) => {
             // HubSpot heads each month; the rows arrive newest first, so a month
             // starts wherever it differs from the row before.
-            const month = monthOf(entry.occurredAt)
-            const heads = index === 0 || monthOf(shown[index - 1]!.occurredAt) !== month
+            const month = formatMonth(entry.occurredAt)
+            const heads = index === 0 || formatMonth(shown[index - 1]!.occurredAt) !== month
             const folded = collapsed.has(entry.id)
             const mail = emailOf(entry)
             const who = activityActor(entry.type, { ...entry, recordName })

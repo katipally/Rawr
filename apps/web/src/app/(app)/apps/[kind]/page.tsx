@@ -130,8 +130,8 @@ const AppPage = async ({
                     'Connected by',
                     row.people === 0 ? 'Nobody yet' : row.people === 1 ? '1 person' : `${row.people.toLocaleString()} people`,
                   )
-                : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : '--'))}
-              {detail('Installed date', row.installedAt ? formatDateTime(row.installedAt.toISOString()) : '--')}
+                : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : '—'))}
+              {detail('Installed date', row.installedAt ? formatDateTime(row.installedAt.toISOString()) : '—')}
               {detail(
                 'App type',
                 <>

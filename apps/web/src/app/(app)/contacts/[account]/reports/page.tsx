@@ -13,7 +13,7 @@ import { formatCurrency } from '~/components/crm/value.tsx'
 import { reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from './header.tsx'
-import { rangeFrom } from './range.ts'
+import { reportRange } from './range.ts'
 
 /** The headline from each of the six, with a link into the one somebody wants.
  *
@@ -57,7 +57,7 @@ const ReportsOverview = async ({
 
   const { account } = await params
   const search = await searchParams
-  const range = rangeFrom(search)
+  const range = await reportRange(session, search)
   const ctx = contextFrom(session)
   const link = (tab: string) => reportsPath(account, { tab, from: range.fromDay, to: range.toDay })
 

@@ -5,7 +5,7 @@ import { formatDayShort } from '~/components/crm/value.tsx'
 import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 
 const FormsReport = async ({
   params,
@@ -18,7 +18,7 @@ const FormsReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const report = await formsReport(contextFrom(session), range)
 
   return (

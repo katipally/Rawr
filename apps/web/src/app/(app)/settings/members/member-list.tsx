@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { invitePath } from '~/lib/links.ts'
 import { HUBS, HUBS_WITHOUT_SCREENS, HUBS_WITH_RECORDS, HUB_HINT, SCOPES, SCOPE_LABEL, type Hub, type Scope } from '~/lib/hubs.ts'
+import { formatDate } from '~/components/crm/value.tsx'
 
 type HubScopes = Partial<Record<Hub, Scope>>
 
@@ -235,7 +236,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                   <p className="text-body">{row.email}</p>
                   <p className="text-small text-secondary">
                     {summarise(row)} · invited by {row.invitedByName ?? 'somebody'} · expires{' '}
-                    {new Date(row.expiresAt).toLocaleDateString()}
+                    {formatDate(row.expiresAt)}
                   </p>
                 </div>
                 {isSuperAdmin ? (

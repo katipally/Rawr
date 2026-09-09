@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 
 const WebsiteReport = async ({
   params,
@@ -17,7 +17,7 @@ const WebsiteReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const report = await websiteReport(contextFrom(session), range)
   const { sessions, identified } = report.identifiedShare
 

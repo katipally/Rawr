@@ -70,7 +70,7 @@ const PageViewScreen = async ({
                   {/* A property is whatever the site sent, so a nested object is
                       as likely as a string. Same renderer as a json field on a
                       record, rather than a second answer to the same question. */}
-                  <Value type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="--" />
+                  <Value type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
                 </Row>
               ))}
             </dl>

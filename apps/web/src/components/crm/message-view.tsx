@@ -4,6 +4,7 @@ import type { ThreadMessage } from '@rawr/db'
 import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { formatDateTime } from './value.tsx'
 
 /** One message, with its stored body.
  *
@@ -55,7 +56,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
             : (message.fromAddr ?? '(unknown)')}
         </span>
         <time className="text-secondary tabular-nums" dateTime={new Date(message.sentAt).toISOString()}>
-          {new Date(message.sentAt).toLocaleString()}
+          {formatDateTime(message.sentAt)}
         </time>
       </header>
       {message.ccAddrs.length > 0 ? (

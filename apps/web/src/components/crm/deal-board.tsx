@@ -259,7 +259,7 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
                           />
                         ) : null}
                       </div>
-                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '--' : formatCurrency(card.amount, card.currency)}</p>
+                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '—' : formatCurrency(card.amount, card.currency)}</p>
                       <p className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
                         Close date:
                         {card.closeDate === null ? (

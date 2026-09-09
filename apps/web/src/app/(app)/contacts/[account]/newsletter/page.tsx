@@ -107,7 +107,11 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
                 className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-divider py-1.5 last:border-0"
               >
                 <span className="min-w-0">
-                  <Link href={recordPath(account, event.entityType, event.entityId)}>{event.entityName}</Link>{' '}
+                  {event.entityDeleted ? (
+                    <span className="italic">{event.entityName}</span>
+                  ) : (
+                    <Link href={recordPath(account, event.entityType, event.entityId)}>{event.entityName}</Link>
+                  )}{' '}
                   <span className="text-secondary">{event.subject}</span>
                 </span>
                 <span className="text-small text-secondary">{formatDateTime(event.occurredAt)}</span>

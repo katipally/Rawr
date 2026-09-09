@@ -193,7 +193,7 @@ export const PropertyPanel = ({
                                 type={field.type}
                                 value={local[field.key]}
                                 label={labels[field.key]}
-                                placeholder="--"
+                                placeholder="—"
                               />
                             </div>
                             {editable ? (
@@ -227,7 +227,7 @@ export const PropertyPanel = ({
                               value={local[field.key]}
                               label={labels[field.key]}
                               currency={String(local.currency ?? 'USD')}
-                              placeholder="--"
+                              placeholder="—"
                             />
                             {editable ? (
                               <span

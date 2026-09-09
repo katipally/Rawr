@@ -6,7 +6,7 @@ import { reportsPath } from '~/lib/links.ts'
 import { cardCatalogue, renderCards } from '~/server/dashboard-cards.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { ReportsHeader } from '../../header.tsx'
-import { rangeFrom } from '../../range.ts'
+import { reportRange } from '../../range.ts'
 import { DashboardView } from './dashboard-view.tsx'
 
 /** B11. One dashboard, drawn over the range in the URL.
@@ -26,7 +26,7 @@ const DashboardScreen = async ({
   if (!session) redirect('/sign-in')
 
   const { account, id } = await params
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const ctx = contextFrom(session)
   const [found, all] = await Promise.all([readReportDashboard(ctx, id), listReportDashboards(ctx)])
 

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { cardCatalogue } from '~/server/dashboard-cards.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
-import { rangeFrom } from '../range.ts'
+import { reportRange } from '../range.ts'
 import { DashboardList } from './dashboard-list.tsx'
 
 /** B11. The dashboards this person can see, and the button that makes another.
@@ -22,7 +22,7 @@ const DashboardsScreen = async ({
   if (!session) redirect('/sign-in')
 
   const { account } = await params
-  const range = rangeFrom(await searchParams)
+  const range = await reportRange(session, await searchParams)
   const rows = await listReportDashboards(contextFrom(session))
 
   return (

@@ -66,6 +66,12 @@ export const formatDayShort = (value: unknown): string => {
   return date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''
 }
 
+/** A month, for the headings a long timeline is broken up by. */
+export const formatMonth = (value: unknown): string => {
+  const date = asDate(value)
+  return date ? date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : ''
+}
+
 export const formatDateTime = (value: unknown): string => {
   const date = asDate(value)
   return date ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''
