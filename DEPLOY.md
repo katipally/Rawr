@@ -66,22 +66,27 @@ Node refuses to strip types from any file whose real path is inside
 
 ## Database
 
-Any Postgres 15 or newer. Three URLs, and they are not interchangeable:
+Any Postgres 15 or newer. Two URLs, and they are not interchangeable:
 
 ```
- DATABASE_URL          the app. A transaction pooler is fine and preferred.
- DATABASE_URL_SESSION  pg-boss. Must outlive one statement, so session mode.
- DATABASE_URL_OWNER    migrations and the worker's own bookkeeping.
+ DATABASE_URL        the app, as rawr_app, which owns no tables and cannot
+                     bypass row level security. A transaction pooler is fine.
+ DATABASE_URL_OWNER  the table owner: migrations, and pg-boss, which holds
+                     advisory locks across statements. Session mode, always.
+                     A transaction pooler here breaks the queue quietly.
 ```
 
-On Supabase, `DATABASE_URL` is the pooler on `:6543` and the other two are
-`:5432`, with the user `rawr_app.PROJECT_REF`. Leave `DATABASE_PREPARED` unset
-there; set it to `1` on a direct connection.
+`DATABASE_URL_SESSION` is a third URL in `.env.example` and is not needed here:
+the tenancy suite is the only thing that reads it.
+
+On Supabase, `DATABASE_URL` is the pooler on `:6543` and `DATABASE_URL_OWNER` is
+`:5432`, both as `rawr_app.PROJECT_REF`. Set `DATABASE_PREPARED` to `0` through
+the pooler, which drops the prepared statements out from under the driver.
 
 Migrations run from the image, against the same environment:
 
 ```
- docker run --env-file .env.local rawr pnpm db:migrate
+ docker run --env-file .env.docker rawr pnpm db:migrate
 ```
 
 `APP_DB_PASSWORD` on a fresh database creates the `rawr_app` role. Clear it

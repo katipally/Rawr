@@ -27,10 +27,10 @@ Every script reads `.env.local` through `node --env-file-if-exists`, so that fil
 is how a laptop supplies configuration and its absence is how a deployment does.
 
 The app connects as `rawr_app`, which owns no tables and cannot bypass row level
-security. `DATABASE_URL_OWNER` is the table owner and is used only by migrations
-and the worker's own bookkeeping. `DATABASE_URL_SESSION` must not be a
-transaction pooler: pg-boss and migrations need a session that outlives one
-statement.
+security. `DATABASE_URL_OWNER` is the table owner, used by migrations and by
+pg-boss, and must not be a transaction pooler: both need a session that outlives
+one statement. `DATABASE_URL_SESSION` is read by the tenancy suite alone, which
+wants a second handle to prove one tenant cannot reach another.
 
 `pnpm db:migrate` runs `packages/db/sql/bootstrap.sql` first, which creates the
 `extensions` schema and the `rawr_app` role if they are absent. Set
@@ -39,7 +39,7 @@ idempotent, so an existing database is untouched.
 
 On Supabase, point `DATABASE_URL` at the pooler on `:6543` (transaction mode) and
 the other two at `:5432` (session mode), with the user `rawr_app.PROJECT_REF`.
-Leave `DATABASE_PREPARED` unset there; set it to `1` on a direct connection.
+Set `DATABASE_PREPARED` to `0` there; `1` on a direct connection.
 
 ## Running
 
