@@ -1,12 +1,11 @@
 import { Alert } from '@rawr/ui'
-import { calendarAtSignIn, devLoginEnabled, env, googleConfigured, hostedDomainRequired } from '~/lib/env.ts'
+import { calendarAtSignIn, env, googleConfigured, hostedDomainRequired, visitorAccessOpen } from '~/lib/env.ts'
 
 type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 
-/** The front door for staff. There is one way in, Google with a verified
- *  @datasaur.ai account, and the page says so plainly: who can enter, what happens
- *  the first time, and who to ask when a role is not enough. No passwords, no
- *  invites, no magic links. */
+/** The front door. There is one way in, a verified Google account, and the page
+ *  says plainly who can enter and what they get the first time. No passwords, no
+ *  magic links, and nothing that takes an address on trust. */
 const SignIn = async ({ searchParams }: Props) => {
   const { error, next } = await searchParams
   const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''
@@ -51,11 +50,13 @@ const SignIn = async ({ searchParams }: Props) => {
                   <span className="font-medium text-body">@{env.GOOGLE_HOSTED_DOMAIN}</span> account
                   works.{' '}
                 </>
+              ) : visitorAccessOpen ? (
+                'Any verified Google account works. '
               ) : (
                 'Sign in with the address you were invited on. '
               )}
-              The first time in you can read everything and change nothing; an admin raises your
-              role under Settings, Members.
+              You arrive able to read everything and change nothing; an admin raises what you can
+              reach under Settings, Users and Teams.
             </p>
             {calendarAtSignIn ? (
               /* Google blocks the whole authorisation when a Account admin has
@@ -87,52 +88,14 @@ const SignIn = async ({ searchParams }: Props) => {
         )}
       </div>
 
-      {devLoginEnabled ? (
-        <form action="/api/auth/dev" method="post" className="flex flex-col gap-2 rounded-panel border border-dashed border-line p-4">
-          {after ? <input type="hidden" name="next" value={after} /> : null}
-          <div>
-            <label htmlFor="dev-email" className="font-medium">
-              Development sign-in
-            </label>
-            <p className="text-small text-secondary">
-              Seeded addresses only: admin@, sales@, marketing@ or viewer@sandbox.test. Not available in
-              production.
-            </p>
-          </div>
-          {/* Password managers and mail-alias extensions decorate an email input
-              with their own attributes before React hydrates, which reads as a
-              server/client mismatch on a field the server rendered correctly. */}
-          <input
-            id="dev-email"
-            name="email"
-            type="email"
-            required
-            autoComplete="off"
-            suppressHydrationWarning
-            placeholder="admin@sandbox.test"
-            className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
-          />
-          <input
-            name="account"
-            type="text"
-            aria-label="Account slug, optional"
-            suppressHydrationWarning
-            placeholder="account slug (optional)"
-            className="h-9 rounded-hs border border-line bg-fill px-3 text-body outline-none focus:border-line-interactive"
-          />
-          <button
-            type="submit"
-            className="h-9 rounded-hs border border-line bg-surface px-3 font-medium transition-colors hover:bg-fill-hover"
-          >
-            Sign in as a seeded user
-          </button>
-        </form>
-      ) : null}
-
       {hostedDomainRequired ? (
         <p className="text-small text-secondary">
           Trouble signing in? Your account has to be in the {env.GOOGLE_HOSTED_DOMAIN} Google
           Account. Personal Gmail addresses are refused.
+        </p>
+      ) : visitorAccessOpen ? (
+        <p className="text-small text-secondary">
+          Trouble signing in? Any Google account works, as long as its address is verified.
         </p>
       ) : (
         <p className="text-small text-secondary">

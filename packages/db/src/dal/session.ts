@@ -60,32 +60,29 @@ export const membershipsForUser = async (userId: string): Promise<Membership[]> 
   return rows.map(toMembership)
 }
 
-/** Development sign-in. The caller is responsible for refusing this in production. */
-export const userIdForEmail = async (email: string): Promise<string | null> => {
-  const [row] = await appDb.execute<{ id: string | null }>(
-    sql`select rawr.user_id_for_email(${email}) as id`,
-  )
-  return row?.id ?? null
-}
-
 export type GoogleSignIn = {
   sub: string
   email: string
   name: string
   picture: string | null
-  /** Null for a consumer address. It claims no domain, so that person is seated by
-   *  invitation rather than by opening or joining an account. */
+  /** Null for a consumer address. It claims no domain, so that person is seated as
+   *  a visitor rather than by opening or joining an account. */
   hostedDomain: string | null
+  /** The account slug an otherwise unseated person joins to read, from
+   *  RAWR_VISITOR_ACCOUNT. Empty seats them nowhere, which is what a deployment
+   *  that never named one should do. */
+  visitorAccount: string
 }
 
-/** Links or creates the person, then settles what account they land in: a domain
- *  no account claims opens one with them as its super admin, a domain some account
- *  claims joins it on that account's terms, and a personal address joins nothing
- *  until it is invited. Returns the user id; the memberships are read separately so
- *  sign-in and every later request go through the same function. */
+/** Links or creates the person, then settles what account they land in: an empty
+ *  database is opened by whoever signs in first, a domain some account claims joins
+ *  it on that account's terms, a domain no account claims opens one, and anybody
+ *  else takes a read-only seat in the visitor account. Returns the user id; the
+ *  memberships are read separately so sign-in and every later request go through
+ *  the same function. */
 export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> => {
   const [row] = await appDb.execute<{ id: string }>(
-    sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}) as id`,
+    sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}, ${identity.visitorAccount}) as id`,
   )
   if (!row) throw new Error('Sign-in did not return an account.')
   return row.id

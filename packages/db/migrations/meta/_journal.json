@@ -428,6 +428,13 @@
       "when": 1789059234179,
       "tag": "0059_record_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1789145634179,
+      "tag": "0060_visitor_access",
+      "breakpoints": true
     }
   ]
 }

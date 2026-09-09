@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { INTEGRATION_KINDS } from '../src/dal/integrations.ts'
 import { randomToken } from '../src/internal/crypto.ts'
@@ -139,6 +139,26 @@ const call = async (
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
+
+/** A browser session for the consent screen, minted rather than signed in for.
+ *
+ *  There is one way into this app and it is Google, which a suite cannot walk. So
+ *  the cookie is built here from the same secret the app verifies with. That is not
+ *  a back door: it needs AUTH_SECRET, which is the signing key itself, and anybody
+ *  holding it can already mint any session. The alternative was a sign-in route
+ *  that took an address on trust, which is a back door, and it is gone.
+ *
+ *  Only `userId` and `accountId` are carried: `readSession` re-reads the membership
+ *  and rebuilds every other field, so a stale claim in here cannot grant anything. */
+const sessionCookie = (userId: string | null, accountId: string): string | null => {
+  const secret = process.env.AUTH_SECRET
+  if (!secret || !userId) return null
+  const b64 = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url')
+  const now = Math.floor(Date.now() / 1000)
+  const body = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ userId, accountId, iss: 'rawr', iat: now, exp: now + 600 })}`
+  const signature = createHmac('sha256', secret).update(body).digest('base64url')
+  return `rawr_session=${body}.${signature}`
+}
 
 const ctxFor = async (slug: string, editHubs: string[] = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account']): Promise<AccountContext> => {
   const rows = await appDb.execute<{ id: string }>(
@@ -464,14 +484,9 @@ try {
   })
   check('a plain-http redirect off the loopback is refused', badRegistration.status === 400)
 
-  const devLogin = await fetch(`${BASE}/api/auth/dev`, {
-    method: 'POST',
-    body: new URLSearchParams({ email: 'sales@sandbox.test' }),
-    redirect: 'manual',
-  })
-  const cookie = devLogin.headers.get('set-cookie')?.split(';')[0] ?? ''
-  if (!cookie.startsWith('rawr_session=')) {
-    console.log('skip  consent flow: dev sign-in is not enabled here (RAWR_DEV_LOGIN)')
+  const cookie = sessionCookie(sales.actorId, sales.accountId)
+  if (!cookie) {
+    console.log('skip  consent flow: AUTH_SECRET is not set, so no session can be minted')
   } else {
     const verifier = randomToken(48)
     const challenge = createHash('sha256').update(verifier).digest('base64url')

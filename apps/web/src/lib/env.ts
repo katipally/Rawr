@@ -11,7 +11,10 @@ const schema = z.object({
   /** Empty means any Google account may sign in, seated by invitation or by an
    *  account whose own domain matches. Set it to lock sign-in to one domain. */
   GOOGLE_HOSTED_DOMAIN: z.string().default(''),
-  RAWR_DEV_LOGIN: z.string().optional(),
+  /** The account an otherwise unseated person joins to read. Empty means a
+   *  sign-in that matches no domain and holds no invitation gets no seat, which is
+   *  the right answer for a deployment that serves one company. */
+  RAWR_VISITOR_ACCOUNT: z.string().default(''),
 
   /** Where the public edge is reachable from the outside. The embed script and
    *  the hosted form page both build absolute URLs from it, and they are served
@@ -43,17 +46,19 @@ const schema = z.object({
   /** --- F2 booking ------------------------------------------------------- */
   /** 32 bytes, base64 or hex, from a secrets store. It encrypts the calendar and
    *  mailbox tokens Rawr holds, and must not live in the database it protects
-   *  (open item 9). */
+   */
   TOKEN_ENCRYPTION_KEY: z.string().default(''),
   /** Open item 3 is outstanding, so there is no Google project to read free-busy
    *  from. This lets a host be marked available with Rawr's own bookings as the
    *  only source of busy time, which is what makes the engine exercisable end to
    *  end today. It refuses to be reachable in production. */
   RAWR_DEV_CALENDAR: z.string().optional(),
-  /** Whether signing in also asks for the calendar. On by default, because a host
-   *  who has to find a second screen is a host whose booking page silently offers
-   *  nothing. Set to 0 where a Google Account blocks the calendar scopes: without
-   *  it, a policy on Google's side stops people signing in to the CRM at all. */
+  /** Whether signing in also asks for the calendar. Off unless set to 1: the
+   *  calendar scopes are "restricted", so an OAuth client Google has not verified
+   *  refuses the whole authorisation over them, and a policy on Google's side then
+   *  stops people signing in to the CRM at all. Turn it on once the client is
+   *  verified, and hosts connect their calendar from Meetings, Calendars until
+   *  then. */
   RAWR_CALENDAR_AT_SIGNIN: z.string().optional(),
   RAWR_DEV_GMAIL: z.string().optional(),
   RAWR_DEV_INTEGRATIONS: z.string().optional(),
@@ -94,31 +99,28 @@ export const googleConfigured = env.GOOGLE_CLIENT_ID !== '' && env.GOOGLE_CLIENT
  *  not leaves this empty and seats people by invitation. */
 export const hostedDomainRequired = env.GOOGLE_HOSTED_DOMAIN !== ''
 
-/** Dev sign-in exists so the role matrix and the isolation tests can be exercised
- *  before Google Cloud access lands. It refuses to be reachable in production even
- *  if the variable is set. */
-export const devLoginEnabled = env.RAWR_DEV_LOGIN === '1' && env.NODE_ENV !== 'production'
+/** Whether anybody who can sign in gets a read-only seat. True on the demo
+ *  deployment, false where seats are earned by a domain or an invitation. */
+export const visitorAccessOpen = env.RAWR_VISITOR_ACCOUNT !== ''
 
-/** Free-busy and event writing both need a Google project. Until open item 3
- *  lands this is false and every host falls back to the dev provider or to being
- *  unavailable, which is the safe direction. */
+/** Free-busy and event writing both need Google credentials and a key to encrypt
+ *  the grants with. Without either, every host falls back to the dev provider or to
+ *  being unavailable, which is the safe direction. */
 export const googleCalendarConfigured = googleConfigured && env.TOKEN_ENCRYPTION_KEY !== ''
 
 /** Never in production: a booking confirmed against a calendar nobody checked is
  *  worse than no booking. */
 export const devCalendarEnabled = env.RAWR_DEV_CALENDAR === '1' && env.NODE_ENV !== 'production'
 
-/** Opt out, not opt in: the bundled consent is the behaviour worth having, and
- *  this exists for the one deployment where Google refuses it. */
-export const calendarAtSignIn = env.RAWR_CALENDAR_AT_SIGNIN !== '0'
+export const calendarAtSignIn = env.RAWR_CALENDAR_AT_SIGNIN === '1'
 
 /** F1 phase B. A stand-in Gmail so the sync, the matching and the blocklist are
- *  exercisable before the Google consent screen exists (open item 3). */
+ *  exercisable before a Google consent screen exists. */
 export const devGmailEnabled = env.RAWR_DEV_GMAIL === '1' && env.NODE_ENV !== 'production'
 
 /** F6. Stand-in providers for Brevo, Apollo, Clay, Slack and GA4, so the framework
  *  — connection test, health, idempotency, retry, dead letter, replay — is
- *  exercisable before open items 4, 6, 7 and 12 land. Nothing leaves the machine. */
+ *  exercisable before those provider accounts exist. Nothing leaves the machine. */
 export const devIntegrationsEnabled =
   env.RAWR_DEV_INTEGRATIONS === '1' && env.NODE_ENV !== 'production'
 

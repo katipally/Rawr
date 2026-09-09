@@ -68,14 +68,15 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   // An identity whose domain an account claims joins it, on that account's default
-  // view grants when it auto-joins. Everybody else is seated by an
-  // invitation, which is checked against the address they signed in with.
+  // view grants when it auto-joins. Everybody else takes the read-only seat in
+  // RAWR_VISITOR_ACCOUNT, or none at all where that is unset.
   const userId = await signInWithGoogle({
     sub: identity.sub,
     email: identity.email,
     name: identity.name,
     picture: identity.picture,
     hostedDomain: identity.hostedDomain,
+    visitorAccount: env.RAWR_VISITOR_ACCOUNT,
   })
   // A link somebody followed before signing in. It seats them, and it is checked
   // against the address they actually signed in with, so a forwarded link cannot
@@ -101,7 +102,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied(
       identity.hostedDomain
         ? `${identity.email} signed in, but no account exists for ${identity.hostedDomain} and one could not be opened. Ask an admin to invite you.`
-        : `${identity.email} signed in, but that account has no seat yet. Ask an admin to invite you from Settings, Users and Teams.`,
+        : `${identity.email} signed in, but has no seat. Ask an admin to invite you from Settings, Users and Teams.`,
     )
   }
 

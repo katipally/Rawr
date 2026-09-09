@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import postgres from 'postgres'
 
 /** Every table, column and function named in a raw SQL template, resolved
@@ -144,6 +144,10 @@ try {
     .split('\n')
     .filter((f) => !f.startsWith('packages/db/migrations/'))
     .map((f) => `${root}/${f}`)
+    // `git ls-files` lists what is tracked, which includes a file deleted in the
+    // working tree and not yet staged. Reading one throws, and the suite died on
+    // the deletion rather than on any query.
+    .filter((f) => existsSync(f))
 
   let templates = 0
   for (const file of files) {
