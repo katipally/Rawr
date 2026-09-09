@@ -7,6 +7,7 @@ import { FilterBuilder, type FilterField, type Group } from '~/components/crm/fi
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
 type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task' | 'notify_slack'
@@ -251,6 +252,7 @@ export const AutomationList = ({
   fieldsByObject,
   filterFieldsByObject,
 }: AutomationListProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [editing, setEditing] = useState<AutomationRowView | 'new' | null>(null)
@@ -404,8 +406,8 @@ export const AutomationList = ({
                     has two more days to sit. */}
                 <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
                   {entry.resumeAt
-                    ? `continues ${formatDateTime(entry.resumeAt)}`
-                    : formatDateTime(entry.at)}
+                    ? `continues ${formatDateTime(entry.resumeAt, zone)}`
+                    : formatDateTime(entry.at, zone)}
                 </span>
               </li>
             ))}

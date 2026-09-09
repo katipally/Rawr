@@ -126,6 +126,7 @@ const RecordPage = async ({
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const zone = session.timezone
 
   const { account, object: objectParam, id } = await params
   // Not `isObjectKey`: an admin can invent an object, and its records are opened
@@ -316,7 +317,7 @@ const RecordPage = async ({
                   <div key={field.key} className="min-w-0">
                     <dt className="text-small text-secondary">{field.label}</dt>
                     <dd className="min-w-0">
-                      <Value
+                      <Value zone={zone}
                         type={field.type}
                         value={record.values[field.key]}
                         label={record.labels[field.key]}
@@ -364,7 +365,7 @@ const RecordPage = async ({
             />
           ) : null}
           {memberships.length > 0 || objectParam === 'contact' ? (
-            <SegmentsPanel account={account} recordName={record.displayName} rows={memberships} />
+            <SegmentsPanel zone={zone} account={account} recordName={record.displayName} rows={memberships} />
           ) : null}
           {core && core !== 'deal' ? (
             <EnrichmentPanel
@@ -422,7 +423,7 @@ const RecordPage = async ({
             />
           ) : null}
           {objectParam === 'contact' ? (
-            <MailPanel contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
+            <MailPanel zone={zone} contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
           ) : null}
           {objectParam === 'contact' ? (
             <SubscriptionsPanel
@@ -457,7 +458,7 @@ const RecordPage = async ({
           </nav>
 
           {activeTab === 'overview' ? (
-            <RecordOverview
+            <RecordOverview zone={zone}
               account={account}
               object={objectParam}
               threads={threads.map((thread) => ({

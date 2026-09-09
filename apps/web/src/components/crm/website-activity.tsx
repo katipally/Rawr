@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
 import { formatDateTime } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type WebsiteActivityProps = {
   account: string
@@ -38,6 +39,7 @@ export const WebsiteActivity = ({
   devices,
   isAdmin,
 }: WebsiteActivityProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<'export' | 'erase' | null>(null)
@@ -103,7 +105,7 @@ export const WebsiteActivity = ({
             </div>
             <div className="min-w-0">
               <dt className="text-small text-secondary uppercase">Most recent visit</dt>
-              <dd className="break-words">{lastSeenAt ? formatDateTime(lastSeenAt) : '—'}</dd>
+              <dd className="break-words">{lastSeenAt ? formatDateTime(lastSeenAt, zone) : '—'}</dd>
             </div>
           </dl>
 

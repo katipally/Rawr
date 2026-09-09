@@ -10,6 +10,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatCurrency, formatDate, isPast } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type BoardCard = {
   id: string
@@ -80,6 +81,7 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
 )
 
 export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardProps) => {
+  const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -265,9 +267,9 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
                         {card.closeDate === null ? (
                           <span>--</span>
                         ) : isPast(card.closeDate) ? (
-                          <Badge tone="error">{formatDate(card.closeDate)}</Badge>
+                          <Badge tone="error">{formatDate(card.closeDate, zone)}</Badge>
                         ) : (
-                          <span>{formatDate(card.closeDate)}</span>
+                          <span>{formatDate(card.closeDate, zone)}</span>
                         )}
                       </p>
                       {card.ownerName ? <p className="truncate">Deal owner: {card.ownerName}</p> : null}
@@ -280,7 +282,7 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
                       {card.nextStep ? (
                         <p className="mt-1 break-words text-small text-secondary">
                           <span className={cn(isPast(card.nextStepDate) && 'font-medium text-error')}>
-                            {card.nextStepDate ? `${formatDate(card.nextStepDate)}: ` : ''}
+                            {card.nextStepDate ? `${formatDate(card.nextStepDate, zone)}: ` : ''}
                           </span>
                           {card.nextStep}
                         </p>

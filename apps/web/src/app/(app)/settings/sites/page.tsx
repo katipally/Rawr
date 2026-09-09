@@ -13,6 +13,7 @@ import { SiteList } from './site-list.tsx'
 const SitesPage = async () => {
   const session = await readSession()
   if (!session) return null
+  const zone = session.timezone
 
   if (!sessionIsAdmin(session)) {
     return (
@@ -78,7 +79,7 @@ const SitesPage = async () => {
                     ? `The offending properties were dropped and the rest of the event was kept. Fix it where it is fired, on ${row.siteName}.`
                     : 'Extra names were bucketed into "_overflow" so the table survives.'}{' '}
                   {row.n.toLocaleString()} time{row.n === 1 ? '' : 's'} on {row.day}, last{' '}
-                  {formatDateTime(row.lastAt.toISOString())}.
+                  {formatDateTime(row.lastAt.toISOString(), zone)}.
                 </p>
                 <pre className="mt-1 overflow-x-auto text-small text-secondary">
                   {JSON.stringify(row.detail)}

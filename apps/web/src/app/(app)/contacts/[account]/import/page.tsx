@@ -16,6 +16,7 @@ const ImportPage = async ({
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const zone = session.timezone
 
   const { account } = await params
   const { error } = await searchParams
@@ -161,7 +162,7 @@ const ImportPage = async ({
                     <td className="px-6 tabular-nums">{run.updated.toLocaleString()}</td>
                     <td className="px-6 tabular-nums">{run.skipped.toLocaleString()}</td>
                     <td className="px-6 tabular-nums">{run.errored.toLocaleString()}</td>
-                    <td className="px-6 whitespace-nowrap text-secondary">{formatDateTime(run.createdAt)}</td>
+                    <td className="px-6 whitespace-nowrap text-secondary">{formatDateTime(run.createdAt, zone)}</td>
                   </tr>
                 ))}
               </tbody>

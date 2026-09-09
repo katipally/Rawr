@@ -10,6 +10,7 @@ import { FilterBuilder, type FilterField, type Group } from '~/components/crm/fi
 import { objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type SegmentRow = {
   id: string
@@ -40,6 +41,7 @@ const OBJECT_LABEL: Record<ObjectKey, string> = {
 }
 
 export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: SegmentListProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -199,7 +201,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         ) : row.lastEvaluatedAt === null ? (
           <span className="text-secondary">Never</span>
         ) : (
-          formatDateTime(row.lastEvaluatedAt)
+          formatDateTime(row.lastEvaluatedAt, zone)
         ),
     },
     {
@@ -482,7 +484,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                   {member.displayName}
                 </Link>
                 <span className="text-small text-secondary">
-                  joined {formatDateTime(member.enteredAt.toISOString())}
+                  joined {formatDateTime(member.enteredAt.toISOString(), zone)}
                 </span>
               </li>
             ))}

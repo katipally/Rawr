@@ -1,4 +1,4 @@
-import { membershipsForUser, type AccountContext, type Hub, type Membership } from '@rawr/db'
+import { displayTimezone, membershipsForUser, type AccountContext, type Hub, type Membership } from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
@@ -26,6 +26,14 @@ export type Session = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  /** The IANA zone every timestamp on screen is written in: the one Settings
+   *  promises under "Times are shown to you in".
+   *
+   *  On the session rather than read where it is needed, because the server has to
+   *  render the same string the browser would. Formatting in whatever zone each
+   *  side happens to sit in made the two disagree, which React reports as a
+   *  hydration failure and repairs by throwing the server's markup away. */
+  timezone: string
 }
 
 export const sessionFromMembership = (m: Membership): Session => ({
@@ -40,6 +48,9 @@ export const sessionFromMembership = (m: Membership): Session => ({
   isSuperAdmin: m.isSuperAdmin,
   viewHubs: m.viewHubs,
   editHubs: m.editHubs,
+  // Overwritten by readSession, which knows the account context to read it in.
+  // The sign-in path writes the cookie before that row can be looked up.
+  timezone: 'UTC',
 })
 
 export const writeSessionCookie = async (session: Session): Promise<void> => {
@@ -95,7 +106,8 @@ export const readSession = cache(async (): Promise<Session | null> => {
   // everywhere must not be refused by its own rounding.
   if (current.sessionsValidAfter && ((claims.iat ?? 0) + 1) * 1000 <= current.sessionsValidAfter.getTime()) return null
 
-  return sessionFromMembership(current)
+  const session = sessionFromMembership(current)
+  return { ...session, timezone: await displayTimezone(contextFrom(session), session.userId) }
 })
 
 export const contextFrom = (session: Session): AccountContext => ({

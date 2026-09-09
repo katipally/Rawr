@@ -105,14 +105,14 @@ export const readPageView = async (
       at: Date
       session_id: string | null
     }>(sql`
-      select p.id, p.contact_id, p.url, p.path, p.title, p.referrer, p.utm,
+      select p.id, c.id as contact_id, p.url, p.path, p.title, p.referrer, p.utm,
              p.device, p.ua_family, p.country, p.at, p.session_id,
              s.name as site_name,
              nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), '')
                as contact_name
         from page_view p
         left join site s on s.id = p.site_id
-        left join contact c on c.id = p.contact_id
+        left join contact c on c.id = p.contact_id and c.deleted_at is null
        where p.id = ${id}`)
 
     if (!row) return null
@@ -170,13 +170,13 @@ export const readCustomEvent = async (
       at: Date
       session_id: string | null
     }>(sql`
-      select e.id, e.name, e.properties, e.contact_id, e.at, e.session_id,
+      select e.id, e.name, e.properties, c.id as contact_id, e.at, e.session_id,
              s.name as site_name,
              nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), '')
                as contact_name
         from custom_event e
         left join site s on s.id = e.site_id
-        left join contact c on c.id = e.contact_id
+        left join contact c on c.id = e.contact_id and c.deleted_at is null
        where e.id = ${id}`)
 
     if (!row) return null

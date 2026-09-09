@@ -9,6 +9,7 @@ import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { TaskForm } from './task-form.tsx'
 import { formatDate, isPast } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type TaskRow = {
   id: string
@@ -46,6 +47,7 @@ export const TasksPanel = ({
   heading = 'Tasks',
   startNew,
 }: TasksPanelProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -126,7 +128,7 @@ export const TasksPanel = ({
                 <span className="block text-small text-secondary">
                   {row.dueDate ? (
                     <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>
-                      {formatDate(row.dueDate)}
+                      {formatDate(row.dueDate, zone)}
                     </span>
                   ) : (
                     'No due date'

@@ -21,6 +21,8 @@ export type RecordOverviewProps = {
   threads: OverviewThread[]
   firstTouch: Touch
   lastTouch: Touch
+  /** The reader's zone, from the page's session. */
+  zone: string
 }
 
 /** The answer to "what is going on with this record" without reading a timeline:
@@ -33,6 +35,7 @@ export const RecordOverview = ({
   threads,
   firstTouch,
   lastTouch,
+  zone,
 }: RecordOverviewProps) => {
   return (
     <div className="flex flex-col gap-3">
@@ -51,7 +54,7 @@ export const RecordOverview = ({
                   </Link>
                   <p className="text-small text-secondary">
                     {thread.messageCount} message{thread.messageCount === 1 ? '' : 's'}
-                    {thread.lastAt ? ` · last ${formatDate(thread.lastAt)}` : ''}
+                    {thread.lastAt ? ` · last ${formatDate(thread.lastAt, zone)}` : ''}
                   </p>
                 </li>
               ))}
@@ -75,7 +78,7 @@ export const RecordOverview = ({
                   <>
                     <Badge tone="info">{firstTouch.channel}</Badge>
                     {firstTouch.at ? (
-                      <span className="ml-2 text-secondary">{formatDate(firstTouch.at)}</span>
+                      <span className="ml-2 text-secondary">{formatDate(firstTouch.at, zone)}</span>
                     ) : null}
                   </>
                 ) : (
@@ -90,7 +93,7 @@ export const RecordOverview = ({
                   <>
                     <Badge tone="info">{lastTouch.channel}</Badge>
                     {lastTouch.at ? (
-                      <span className="ml-2 text-secondary">{formatDate(lastTouch.at)}</span>
+                      <span className="ml-2 text-secondary">{formatDate(lastTouch.at, zone)}</span>
                     ) : null}
                   </>
                 ) : (

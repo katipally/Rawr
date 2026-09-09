@@ -11,6 +11,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { TaskForm } from './task-form.tsx'
 import type { TaskRow } from './tasks-panel.tsx'
 import { formatDate, isPast } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type TasksTableProps = {
   account: string
@@ -26,6 +27,7 @@ export type TasksTableProps = {
  *  The "Add tasks" button on the header links here with ?new=1, so the create
  *  dialog lives once, next to the table it adds to. */
 export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: TasksTableProps) => {
+  const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -116,7 +118,7 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
       width: 160,
       render: (row) =>
         row.dueDate ? (
-          <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>{formatDate(row.dueDate)}</span>
+          <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>{formatDate(row.dueDate, zone)}</span>
         ) : (
           <span className="text-secondary">--</span>
         ),

@@ -8,6 +8,8 @@ import { MessageView } from './message-view.tsx'
 import { formatDate } from './value.tsx'
 
 export type MailPanelProps = {
+  /** The reader's zone, from the page's session. */
+  zone: string
   contactName: string
   threads: ThreadSummary[]
   /** The four derived numbers, so the panel says where the conversation stands
@@ -21,7 +23,7 @@ export type MailPanelProps = {
  *  Threads and their bodies are read from here, not from Gmail, so the history
  *  outlives the mailbox that brought it in. Which threads are visible is decided
  *  by each mailbox's own sharing setting, in SQL. */
-export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) => (
+export const MailPanel = ({ contactName, threads, engagement, zone }: MailPanelProps) => (
   <section className="rounded-panel border border-line bg-surface shadow-panel">
     <header className="px-6 pt-6 pb-4">
       <h2 className="text-base font-semibold">Email ({threads.length})</h2>
@@ -30,9 +32,9 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
     {engagement.lastContactedAt || engagement.lastRepliedAt ? (
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-divider px-6 py-2 text-small">
         <dt className="text-secondary">Last contacted</dt>
-        <dd className="tabular-nums">{engagement.lastContactedAt ? formatDate(engagement.lastContactedAt) : '—'}</dd>
+        <dd className="tabular-nums">{engagement.lastContactedAt ? formatDate(engagement.lastContactedAt, zone) : '—'}</dd>
         <dt className="text-secondary">Last reply</dt>
-        <dd className="tabular-nums">{engagement.lastRepliedAt ? formatDate(engagement.lastRepliedAt) : 'Never'}</dd>
+        <dd className="tabular-nums">{engagement.lastRepliedAt ? formatDate(engagement.lastRepliedAt, zone) : 'Never'}</dd>
         <dt className="text-secondary">Sent · received</dt>
         <dd className="tabular-nums">
           {engagement.emailsSent} · {engagement.emailsReceived}
@@ -56,7 +58,7 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
     ) : (
       <ul className="flex flex-col">
         {threads.map((thread) => (
-          <ThreadRow key={thread.id} thread={thread} />
+          <ThreadRow key={thread.id} thread={thread} zone={zone} />
         ))}
       </ul>
     )}
@@ -65,7 +67,7 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
 
 type Loaded = { state: 'idle' } | { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; messages: ThreadMessage[] }
 
-const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
+const ThreadRow = ({ thread, zone }: { thread: ThreadSummary; zone: string }) => {
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState<Loaded>({ state: 'idle' })
 
@@ -93,7 +95,7 @@ const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
         <span className="break-words font-medium">{thread.subject ?? '(no subject)'}</span>
         <span className="text-small text-secondary tabular-nums">
           {thread.messageCount} message{thread.messageCount === 1 ? '' : 's'}
-          {thread.lastAt ? ` · last ${formatDate(new Date(thread.lastAt).toISOString())}` : ''}
+          {thread.lastAt ? ` · last ${formatDate(new Date(thread.lastAt).toISOString(), zone)}` : ''}
         </span>
       </button>
 

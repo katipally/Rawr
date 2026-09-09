@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import { notification } from '../schema/notification.ts'
 import type { AccountContext, Hub } from './context.ts'
 import { withAccount, type Tx } from './index.ts'
+import { entityAlive } from './registry.ts'
 
 /** What the bell has to say, kept rather than recomputed.
  *
@@ -169,7 +170,12 @@ export const listNotifications = async (
       trashed_at: string | null
       at: string
     }>(sql`
-      select id, kind, title, body, entity, entity_id, count, read_at, trashed_at, at
+      select id, kind, title, body, count, read_at, trashed_at, at,
+             -- A notification outlives the record it is about. It keeps its
+             -- sentence, which still reads correctly, and loses the link rather
+             -- than offering a page that has been deleted.
+             case when ${entityAlive(sql`entity`, sql`entity_id`)} then entity end as entity,
+             case when ${entityAlive(sql`entity`, sql`entity_id`)} then entity_id end as entity_id
         from notification
        where account_id = ${ctx.accountId} and user_id = ${ctx.actorId} and ${tab} ${after}
        order by at desc, id desc

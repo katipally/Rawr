@@ -406,6 +406,42 @@ export type Schedule = {
   overrides: { day: string; isUnavailable: boolean; blocks: TimeRange[]; note: string | null }[]
 }
 
+/** The zone a person's times are written in, which Settings calls "Times are
+ *  shown to you in". Stored on their availability row, because the working hours
+ *  it holds are wall-clock times and needed a zone first; a person has one clock,
+ *  so the two are the same answer.
+ *
+ *  UTC when nothing is stored rather than a guess: a wrong zone is a wrong time
+ *  with no sign that it is wrong, and UTC at least reads as unset. The app seeds
+ *  this from the browser the first time somebody opens it.
+ *
+ *  Read on every request, so it is one indexed lookup on the unique
+ *  (account, user) key. */
+/** Writes the zone a browser reports, once, for somebody who has never said.
+ *
+ *  Without it a new person reads every timestamp in UTC, which is worse than the
+ *  browser guess this replaced. Only ever an insert: a stored zone is a choice,
+ *  and a laptop carried to another country must not silently rewrite it. */
+export const adoptTimezone = async (ctx: AccountContext, userId: string, timezone: string): Promise<boolean> => {
+  if (!isKnownTimezone(timezone)) return false
+  return withAccount(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string }>(sql`
+      insert into availability (account_id, user_id, timezone, weekly)
+      values (${ctx.accountId}, ${userId}, ${timezone}, '{}'::jsonb)
+      on conflict (account_id, user_id) do nothing
+      returning id`)
+    return rows.length > 0
+  })
+}
+
+export const displayTimezone = async (ctx: AccountContext, userId: string): Promise<string> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{ timezone: string }>(
+      sql`select timezone from availability where user_id = ${userId} limit 1`,
+    )
+    return row?.timezone ?? 'UTC'
+  })
+
 export const readSchedule = async (ctx: AccountContext, userId: string): Promise<Schedule> =>
   withAccount(ctx, async (tx) => {
     const [row] = await tx.execute<{ timezone: string; weekly: unknown }>(

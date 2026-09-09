@@ -33,6 +33,7 @@ const TasksPage = async ({
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const zone = session.timezone
 
   const { account } = await params
   const search = await searchParams
@@ -138,7 +139,7 @@ const TasksPage = async ({
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
                     <time dateTime={deal.nextStepDate} className="shrink-0 font-medium text-error">
-                      {formatDate(deal.nextStepDate)}
+                      {formatDate(deal.nextStepDate, zone)}
                     </time>
                   </p>
                   {deal.nextStep ? <p className="break-words">{deal.nextStep}</p> : null}

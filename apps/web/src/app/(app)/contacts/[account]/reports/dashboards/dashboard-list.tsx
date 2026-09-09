@@ -8,6 +8,7 @@ import { formatDateTime } from '~/components/crm/value.tsx'
 import { dashboardPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CardPicker, type CardChoice } from './card-picker.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type DashboardSummary = {
   id: string
@@ -28,6 +29,7 @@ export type DashboardListProps = {
 }
 
 export const DashboardList = ({ account, rows, catalogue, from, to }: DashboardListProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [composing, setComposing] = useState(false)
@@ -65,7 +67,7 @@ export const DashboardList = ({ account, rows, catalogue, from, to }: DashboardL
       render: (row) => (row.isShared ? <Badge tone="info">Shared</Badge> : <Badge tone="neutral">Private</Badge>),
     },
     { key: 'cards', header: 'Reports', width: 100, align: 'right', render: (row) => row.cards.length },
-    { key: 'updated', header: 'Last updated', width: 200, render: (row) => formatDateTime(row.updatedAt) },
+    { key: 'updated', header: 'Last updated', width: 200, render: (row) => formatDateTime(row.updatedAt, zone) },
   ]
 
   return (

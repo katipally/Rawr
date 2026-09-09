@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql, type Column, type SQL } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { TYPE_META, type FieldType, type Operator } from '../registry/types.ts'
 import type { ObjectKey } from '../registry/core.ts'
@@ -212,6 +212,25 @@ export class UnknownFieldError extends Error {
     this.name = 'UnknownFieldError'
   }
 }
+
+/** Whether the record an `(entity_type, entity_id)` pair names is still there.
+ *
+ *  Four tables hold records and no constraint spans them, so "does this still
+ *  exist" is a case over the type. Written once because four surfaces need the
+ *  same answer: a task keeps its place in the list when its record goes, a note
+ *  stops being offered by search, and a page view or a notification stops
+ *  pointing at a page that has been deleted.
+ *
+ *  Existence, never a name: a contact with neither a name nor an email is
+ *  nameless and still real, and reading the name as a proxy retired those. */
+export const entityAlive = (type: SQL | Column, id: SQL | Column): SQL<boolean> => sql<boolean>`case
+  when ${type} = 'contact' then exists (select 1 from contact x where x.id = ${id} and x.deleted_at is null)
+  when ${type} = 'company' then exists (select 1 from company x where x.id = ${id} and x.deleted_at is null)
+  when ${type} = 'deal' then exists (select 1 from deal x where x.id = ${id} and x.deleted_at is null)
+  when ${type} is null then false
+  else exists (select 1 from custom_record x join object_def o on o.id = x.object_id
+                where x.id = ${id} and o.key = ${type} and x.deleted_at is null)
+end`
 
 export const objectOrThrow = (registry: Registry, key: string): RegistryObject => {
   const object = registry.byKey.get(key)

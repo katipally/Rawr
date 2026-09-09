@@ -8,6 +8,7 @@ import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useZone } from '~/components/zone.tsx'
 
 /** How stale the badge may get. Long enough that moving around the app is not a
  *  request per page; short enough that clearing a queue shows while the person is
@@ -38,6 +39,7 @@ const hrefFor = (row: Row, account: string): string | null => {
 }
 
 export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
+  const zone = useZone()
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<NotificationTab>('unread')
   const [count, setCount] = useState(0)
@@ -211,7 +213,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                     )}
                     {row.body ? <span className="text-secondary">{row.body}</span> : null}
                     <span className="text-small text-secondary">
-                      {formatDateTime(row.at)}
+                      {formatDateTime(row.at, zone)}
                       {row.count > 1 ? ` · ${row.count} times` : ''}
                     </span>
                   </span>

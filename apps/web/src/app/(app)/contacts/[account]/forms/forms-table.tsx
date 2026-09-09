@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EmbedSnippet } from './embed-snippet.tsx'
 import { formatDate } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type FormRow = {
   id: string
@@ -24,6 +25,7 @@ export type FormRow = {
  *  numbers that matter in the columns. The embed code is one click away on each
  *  row rather than printed under every form. */
 export const FormsTable = ({ account, baseUrl, rows }: { account: string; baseUrl: string; rows: FormRow[] }) => {
+  const zone = useZone()
   const router = useRouter()
   const [embedding, setEmbedding] = useState<FormRow | null>(null)
 
@@ -66,7 +68,7 @@ export const FormsTable = ({ account, baseUrl, rows }: { account: string; baseUr
       width: 180,
       render: (row) =>
         row.lastSubmissionAt
-          ? formatDate(row.lastSubmissionAt)
+          ? formatDate(row.lastSubmissionAt, zone)
           : '—',
     },
     {

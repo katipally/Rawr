@@ -1151,6 +1151,18 @@ try {
     forgetRegistry(admin.accountId)
     await appDb.execute(sql`delete from mcp_client where name like ${`${MARK}%`}`)
   }
+
+  // The peer tenant's token is invisible from the sandbox: row level security is
+  // the thing this suite proves, and it hides the row from its own cleanup. One
+  // token was left behind per run until this ran in the peer's own context.
+  const peer = await actorCtx(PEER.slug, 'admin@sandbox.test', []).catch(() => null)
+  if (peer) {
+    await withAccount(peer, async (tx) => {
+      await tx.execute(sql`delete from mcp_call where token_id in (
+        select id from mcp_token where name like ${`${MARK}%`})`)
+      await tx.execute(sql`delete from mcp_token where name like ${`${MARK}%`}`)
+    })
+  }
   await closeAppPool()
 }
 

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type TokenRow = {
   id: string
@@ -33,6 +34,7 @@ export const TokenList = ({
   userId: string
   isAdmin: boolean
 }) => {
+  const zone = useZone()
   const toast = useToast()
   const router = useRouter()
   const [name, setName] = useState('')
@@ -213,11 +215,11 @@ export const TokenList = ({
                   </p>
                   <p className="text-secondary text-small">
                     {row.revokedAt
-                      ? `Revoked ${formatDateTime(row.revokedAt)}`
+                      ? `Revoked ${formatDateTime(row.revokedAt, zone)}`
                       : row.lastUsedAt
-                        ? `Last used ${formatDateTime(row.lastUsedAt)}`
+                        ? `Last used ${formatDateTime(row.lastUsedAt, zone)}`
                         : 'Never used'}{' '}
-                    · created {formatDateTime(row.createdAt)}
+                    · created {formatDateTime(row.createdAt, zone)}
                   </p>
                 </div>
                 {row.revokedAt ? null : (

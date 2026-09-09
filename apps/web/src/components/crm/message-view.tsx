@@ -5,6 +5,7 @@ import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { formatDateTime } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 /** One message, with its stored body.
  *
@@ -14,6 +15,7 @@ import { formatDateTime } from './value.tsx'
  *  images stay blocked until asked for, because loading one tells the sender the
  *  mail was opened and by whom. */
 export const MessageView = ({ message }: { message: ThreadMessage }) => {
+  const zone = useZone()
   const [showHtml, setShowHtml] = useState(true)
   const [loadImages, setLoadImages] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -56,7 +58,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
             : (message.fromAddr ?? '(unknown)')}
         </span>
         <time className="text-secondary tabular-nums" dateTime={new Date(message.sentAt).toISOString()}>
-          {formatDateTime(message.sentAt)}
+          {formatDateTime(message.sentAt, zone)}
         </time>
       </header>
       {message.ccAddrs.length > 0 ? (

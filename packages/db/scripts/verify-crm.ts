@@ -554,35 +554,48 @@ try {
   })
 
   await check('search finds a task and a note, not only records', async () => {
+    // A word this run invented, so a leftover from an earlier one cannot answer
+    // for it and the assertions do not depend on which row sorts first.
+    const word = `aardvark${Date.now().toString(36)}`
     const contact = await createRecord(sales, 'contact', {
       first_name: 'Searchable',
       last_name: 'Fixture',
-      email: 'searchable.fixture@verify.test',
+      email: `searchable.${word}@verify.test`,
     })
     const task = await createTask(sales, {
-      title: 'Chase the aardvark renewal',
+      title: `Chase the ${word} renewal`,
       entity: { entityType: 'contact', entityId: contact.id },
     })
     await logByHand(sales, {
       type: 'call',
-      body: 'They asked about the aardvark tier.',
+      body: `They asked about the ${word} tier.`,
       entity: { entityType: 'contact', entityId: contact.id },
     })
     try {
-      const results = await searchAll(sales, 'aardvark')
+      const results = await searchAll(sales, word)
       const tasks = hitsOf(results, 'task')
       const activity = hitsOf(results, 'activity')
-      expect(tasks.length > 0, 'the task did not come back')
-      expect(activity.length > 0, 'the logged call did not come back')
+      expect(tasks.length === 1, `expected one task, got ${tasks.length}`)
+      expect(activity.length === 1, `expected one activity, got ${activity.length}`)
       // Neither has a page of its own, so both name the record they open.
       expect(activity[0]!.parent?.id === contact.id, 'the activity did not name its record')
+      expect(tasks[0]!.parent?.id === contact.id, 'the task did not name its record')
       // A peer tenant must not see either, the same way it sees no records.
-      const peerHits = await searchAll(probeCtx, 'aardvark')
-      expect(peerHits.total === 0, `the peer tenant saw ${peerHits.total} rows`)
-      return `${tasks.length} tasks, ${activity.length} activity, top: ${tasks[0]!.displayName}`
+      expect((await searchAll(probeCtx, word)).total === 0, 'the peer tenant saw rows')
+
+      // A note outlives the record it was written on, and must stop being offered
+      // once that record is gone: the link would open a page that no longer is.
+      await deleteRecord(admin, 'contact', contact.id)
+      const orphaned = await searchAll(sales, word)
+      const stillPointing = [...hitsOf(orphaned, 'activity'), ...hitsOf(orphaned, 'task')].filter(
+        (hit) => hit.parent?.id === contact.id,
+      )
+      expect(stillPointing.length === 0, `${stillPointing.length} hits still open the deleted record`)
+      return `${tasks.length} task, ${activity.length} activity, both dropped when the record went`
     } finally {
       await db.delete(s.task).where(eq(s.task.id, task.id))
-      await deleteRecord(admin, 'contact', contact.id)
+      await db.delete(s.activity).where(sql`body like ${`%${word}%`}`)
+      await db.delete(s.contact).where(eq(s.contact.id, contact.id))
     }
   })
 

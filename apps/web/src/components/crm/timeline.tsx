@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime, formatMonth } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type TimelineEntry = {
   id: string
@@ -131,6 +132,7 @@ export const Timeline = ({
   viewer,
   openKind,
 }: TimelineProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const params = useSearchParams()
@@ -469,8 +471,8 @@ export const Timeline = ({
           {shown.map((entry, index) => {
             // HubSpot heads each month; the rows arrive newest first, so a month
             // starts wherever it differs from the row before.
-            const month = formatMonth(entry.occurredAt)
-            const heads = index === 0 || formatMonth(shown[index - 1]!.occurredAt) !== month
+            const month = formatMonth(entry.occurredAt, zone)
+            const heads = index === 0 || formatMonth(shown[index - 1]!.occurredAt, zone) !== month
             const folded = collapsed.has(entry.id)
             const mail = emailOf(entry)
             const who = activityActor(entry.type, { ...entry, recordName })
@@ -514,7 +516,7 @@ export const Timeline = ({
                   className="ml-auto shrink-0 text-small text-secondary"
                   title={entry.occurredAt}
                 >
-                  {formatDateTime(entry.occurredAt)}
+                  {formatDateTime(entry.occurredAt, zone)}
                 </time>
               </p>
               {folded ? null : editing?.id === entry.id ? (

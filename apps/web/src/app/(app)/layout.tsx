@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell.tsx'
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
+import { AdoptZone, ZoneProvider } from '~/components/zone.tsx'
 import { CommandPalette, type Action } from '~/components/crm/command-palette.tsx'
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
@@ -221,6 +222,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   ]
 
   return (
+    <ZoneProvider zone={session.timezone}>
     <ToastProvider>
       <AppShell
         accountName={session.accountName}
@@ -276,7 +278,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {children}
       </AppShell>
       <ShortcutSheet />
+      <AdoptZone stored={session.timezone} />
     </ToastProvider>
+    </ZoneProvider>
   )
 }
 

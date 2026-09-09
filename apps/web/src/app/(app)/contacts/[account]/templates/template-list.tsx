@@ -7,6 +7,7 @@ import { Markdown } from '~/components/crm/markdown.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useZone } from '~/components/zone.tsx'
 
 export type TemplateRow = {
   id: string
@@ -22,6 +23,7 @@ type Draft = { id: string | null; name: string; subject: string; bodyText: strin
 const BLANK: Draft = { id: null, name: '', subject: '', bodyText: '' }
 
 export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite: boolean }) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -102,7 +104,7 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
                 </div>
                 <p className="text-small text-secondary">
                   {row.authorName ? `${row.authorName} · ` : ''}
-                  last edited {formatDateTime(row.updatedAt)}
+                  last edited {formatDateTime(row.updatedAt, zone)}
                 </p>
                 {canWrite ? (
                   <div className="flex flex-wrap items-center gap-2">

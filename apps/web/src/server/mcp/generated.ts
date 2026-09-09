@@ -90,6 +90,10 @@ export const sessionFor = (caller: {
   isSuperAdmin: caller.ctx.isSuperAdmin,
   viewHubs: [...caller.ctx.viewHubs],
   editHubs: [...caller.ctx.editHubs],
+  // Nothing here renders a screen: a procedure answers with data and the client
+  // writes the sentence. The curated tools resolve dates in the caller's own zone
+  // through `todayFor`, which reads it where it is needed.
+  timezone: 'UTC',
 })
 
 const SKIPPED = new Set(['health', 'me'])

@@ -11,6 +11,7 @@ import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
 import { Value, isPast } from './value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
 
@@ -60,6 +61,7 @@ export const RecordTable = ({
   bulkFields,
   exportHref,
 }: RecordTableProps) => {
+  const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -119,7 +121,7 @@ export const RecordTable = ({
             overdue && 'font-medium text-error',
           )}
         >
-          <Value
+          <Value zone={zone}
             type={column.type}
             value={value}
             label={row.labels[column.key]}

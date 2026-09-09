@@ -1,7 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
 import { withAccount } from './index.ts'
-import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type RegistryObject } from './registry.ts'
+import { entityAlive, getRegistryIn, objectOrThrow, rowsOf, tableFor, type RegistryObject } from './registry.ts'
 
 export type SearchHit = {
   objectKey: string
@@ -113,13 +113,16 @@ export const searchAll = async (
         order by 5 desc, r.created_at desc
         limit ${limit})
       union all
-      (select 'task'::text, id, title, to_char(due_date, 'FMDay DD Mon'),
-              extensions.similarity(title, ${trimmed}),
-              entity_type, entity_id
-         from task
-        where title OPERATOR(extensions.%) ${trimmed}
-           or lower(title) like lower(${prefix})
-        order by 5 desc, created_at desc
+      (select 'task'::text, t.id, t.title, to_char(t.due_date, 'FMDay DD Mon'),
+              extensions.similarity(t.title, ${trimmed}),
+              -- A task on a record that has been deleted keeps its place in the
+              -- list and loses the link, rather than offering a page that 404s.
+              case when ${entityAlive(sql`t.entity_type`, sql`t.entity_id`)} then t.entity_type end,
+              case when ${entityAlive(sql`t.entity_type`, sql`t.entity_id`)} then t.entity_id end
+         from task t
+        where t.title OPERATOR(extensions.%) ${trimmed}
+           or lower(t.title) like lower(${prefix})
+        order by 5 desc, t.created_at desc
         limit ${limit})
       union all
       (select 'activity'::text, h.id, h.label, h.detail, h.rank, h.parent_object, h.parent_id
@@ -139,10 +142,16 @@ export const searchAll = async (
                  -- most recently attached when it hangs on several records.
                  join activity_link l on l.activity_id = a.id
                 where a.search @@ plainto_tsquery('simple', ${trimmed})
+                  -- And the record it hangs on has to still be there. A note
+                  -- outlives the contact it was written on, which is deliberate,
+                  -- but offering it here sends somebody to a page that has gone.
+                  and ${entityAlive(sql`l.entity_type`, sql`l.entity_id`)}
                   -- What somebody wrote or said. The system types are templated
                   -- ("changed Next step from X to Y") and repeat across thousands
                   -- of rows, so searching them buries the one note that matters.
-                  and a.type in ('note', 'call', 'email', 'meeting', 'task')
+                  -- 'task' is left out because a task is its own arm above, and
+                  -- carrying both returns the same task twice under two headings.
+                  and a.type in ('note', 'call', 'email', 'meeting')
                 order by a.id, l.occurred_at desc) h
         order by h.rank desc, h.occurred_at desc
         limit ${limit})`)

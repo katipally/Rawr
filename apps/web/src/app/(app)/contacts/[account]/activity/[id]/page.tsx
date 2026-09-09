@@ -28,6 +28,7 @@ const PageViewScreen = async ({
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const zone = session.timezone
 
   const { account, id } = await params
   const ctx = contextFrom(session)
@@ -52,7 +53,7 @@ const PageViewScreen = async ({
             ) : (
               <span>Not attributed to anyone. This visitor has not identified themselves.</span>
             )}{' '}
-            · {formatDateTime(event.at.toISOString())}
+            · {formatDateTime(event.at.toISOString(), zone)}
             {event.siteName ? ` · ${event.siteName}` : ''}
           </p>
         </header>
@@ -70,14 +71,14 @@ const PageViewScreen = async ({
                   {/* A property is whatever the site sent, so a nested object is
                       as likely as a string. Same renderer as a json field on a
                       record, rather than a second answer to the same question. */}
-                  <Value type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
+                  <Value zone={zone} type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
                 </Row>
               ))}
             </dl>
           )}
         </section>
 
-        <Visit account={account} session={event.session} currentId={event.id} />
+        <Visit account={account} session={event.session} currentId={event.id} zone={zone} />
       </div>
     )
   }
@@ -109,7 +110,7 @@ const PageViewScreen = async ({
             // empty slot that reads like a bug.
             <span>Not attributed to anyone. This visitor has not identified themselves.</span>
           )}{' '}
-          · {formatDateTime(view.at.toISOString())}
+          · {formatDateTime(view.at.toISOString(), zone)}
         </p>
       </header>
 
@@ -144,7 +145,7 @@ const PageViewScreen = async ({
         </section>
       ) : null}
 
-      <Visit account={account} session={view.session} currentId={view.id} />
+      <Visit account={account} session={view.session} currentId={view.id} zone={zone} />
     </div>
   )
 }
@@ -155,10 +156,12 @@ const Visit = ({
   account,
   session,
   currentId,
+  zone,
 }: {
   account: string
   session: PageViewDetail['session']
   currentId: string
+  zone: string
 }) => (
   <section className="rounded-panel border border-line bg-surface shadow-panel">
     <h2 className="px-6 pt-6 pb-4 text-base font-semibold">
@@ -170,8 +173,8 @@ const Visit = ({
     {session ? (
       <>
         <p className="px-3 py-2 text-secondary">
-          {formatDateTime(session.startedAt.toISOString())} to{' '}
-          {formatDateTime(session.endedAt.toISOString())}
+          {formatDateTime(session.startedAt.toISOString(), zone)} to{' '}
+          {formatDateTime(session.endedAt.toISOString(), zone)}
           {session.referrer ? ` · arrived from ${session.referrer}` : ''}
         </p>
         <ol className="flex flex-col">
@@ -193,7 +196,7 @@ const Visit = ({
                 dateTime={row.at.toISOString()}
                 className="ml-auto shrink-0 text-small text-secondary"
               >
-                {formatDateTime(row.at.toISOString())}
+                {formatDateTime(row.at.toISOString(), zone)}
               </time>
             </li>
           ))}

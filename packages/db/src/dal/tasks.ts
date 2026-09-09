@@ -5,6 +5,7 @@ import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
+import { entityAlive } from './registry.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
 // The two modules import each other for exactly that pair of calls; Node resolves
 // the cycle because neither reads the other at module scope.
@@ -46,8 +47,8 @@ const SELECT = {
   status: task.status,
   assigneeId: task.assigneeId,
   assigneeName: userAccount.name,
-  entityType: task.entityType,
-  entityId: task.entityId,
+  entityType: sql<string | null>`case when ${entityAlive(task.entityType, task.entityId)} then ${task.entityType} end`,
+  entityId: sql<string | null>`case when ${entityAlive(task.entityType, task.entityId)} then ${task.entityId} end`,
   entityName: ENTITY_NAME,
 }
 

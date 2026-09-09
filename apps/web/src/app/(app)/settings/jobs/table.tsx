@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type DeadLetter = {
   id: string
@@ -16,6 +17,7 @@ export type DeadLetter = {
 }
 
 export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
+  const zone = useZone()
   const toast = useToast()
   const router = useRouter()
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -41,7 +43,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       key: 'at',
       header: 'Failed at',
       width: 200,
-      render: (row) => formatDateTime(row.at),
+      render: (row) => formatDateTime(row.at, zone),
     },
     { key: 'attempts', header: 'Attempts', width: 100, align: 'right', render: (row) => row.attempts },
     { key: 'error', header: 'Error', render: (row) => <span className="break-words">{row.error}</span> },

@@ -38,6 +38,8 @@ const AppPage = async ({
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
+  const zone = session.timezone
+
   const ctx = contextFrom(session)
   const [rows, sites] = await Promise.all([listIntegrationsForAccount(ctx), listSites(ctx)])
   const row = rows.find((entry) => entry.kind === kind)
@@ -117,7 +119,7 @@ const AppPage = async ({
       {row.lastError ? (
         <Alert tone="warning">
           {meta.name} last reported: {row.lastError}
-          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt.toISOString())})` : ''}
+          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt.toISOString(), zone)})` : ''}
         </Alert>
       ) : null}
 
@@ -131,7 +133,7 @@ const AppPage = async ({
                     row.people === 0 ? 'Nobody yet' : row.people === 1 ? '1 person' : `${row.people.toLocaleString()} people`,
                   )
                 : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : '—'))}
-              {detail('Installed date', row.installedAt ? formatDateTime(row.installedAt.toISOString()) : '—')}
+              {detail('Installed date', row.installedAt ? formatDateTime(row.installedAt.toISOString(), zone) : '—')}
               {detail(
                 'App type',
                 <>
@@ -229,10 +231,10 @@ const AppPage = async ({
           <Card title="Health">
             <dl className="flex flex-col gap-3">
               {detail('Status', <Badge tone={HEALTH[row.state].tone} dot>{HEALTH[row.state].label}</Badge>)}
-              {detail('Last succeeded', row.lastOkAt ? formatDateTime(row.lastOkAt.toISOString()) : 'Never yet')}
+              {detail('Last succeeded', row.lastOkAt ? formatDateTime(row.lastOkAt.toISOString(), zone) : 'Never yet')}
               {detail(
                 'Last failure',
-                row.lastErrorAt ? `${formatDateTime(row.lastErrorAt.toISOString())} · ${row.lastError ?? ''}` : 'None recorded',
+                row.lastErrorAt ? `${formatDateTime(row.lastErrorAt.toISOString(), zone)} · ${row.lastError ?? ''}` : 'None recorded',
               )}
               {detail(
                 'Failed jobs',

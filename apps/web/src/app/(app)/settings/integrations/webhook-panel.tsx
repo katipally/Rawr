@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type EndpointView = {
   id: string
@@ -30,19 +31,20 @@ export type WebhookPanelProps = {
  *  Health is the point of the list, not the URL. An endpoint that quietly stopped
  *  receiving looks exactly like one that was never called, so every row leads
  *  with what the last delivery answered. */
-const health = (row: EndpointView): { tone: 'ok' | 'warn' | 'error' | 'neutral'; text: string } => {
+const health = (row: EndpointView, zone: string): { tone: 'ok' | 'warn' | 'error' | 'neutral'; text: string } => {
   if (!row.isActive) return { tone: 'neutral', text: 'off' }
   if (row.lastError) {
     return {
       tone: 'error',
-      text: `failing since ${row.lastErrorAt ? formatDateTime(row.lastErrorAt) : 'recently'}`,
+      text: `failing since ${row.lastErrorAt ? formatDateTime(row.lastErrorAt, zone) : 'recently'}`,
     }
   }
-  if (row.lastOkAt) return { tone: 'ok', text: `last delivered ${formatDateTime(row.lastOkAt)}` }
+  if (row.lastOkAt) return { tone: 'ok', text: `last delivered ${formatDateTime(row.lastOkAt, zone)}` }
   return { tone: 'warn', text: 'nothing sent yet' }
 }
 
 export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -153,7 +155,7 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
       ) : (
         <ul className="flex flex-col rounded-panel border border-line bg-surface">
           {rows.map((row) => {
-            const state = health(row)
+            const state = health(row, zone)
             return (
               <li
                 key={row.id}

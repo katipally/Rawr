@@ -161,6 +161,7 @@ const HomePage = async ({
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const zone = session.timezone
   const [{ account }, { error }] = await Promise.all([params, searchParams])
   const ctx = contextFrom(session)
   const isAdmin = sessionIsAdmin(session)
@@ -236,7 +237,7 @@ const HomePage = async ({
         <div>
           <h1 className="text-xl font-medium">Home</h1>
           <p className="text-secondary">
-            {session.accountName}, {formatDate(new Date())}. Every number opens the list behind it.
+            {session.accountName}, {formatDate(new Date(), zone)}. Every number opens the list behind it.
           </p>
         </div>
         <Link
@@ -350,7 +351,7 @@ const HomePage = async ({
                     <Link href={recordPath(account, 'deal', deal.id)} className="min-w-0 truncate font-medium">
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
-                    <span className="shrink-0 text-small text-error">{formatDate(deal.nextStepDate)}</span>
+                    <span className="shrink-0 text-small text-error">{formatDate(deal.nextStepDate, zone)}</span>
                   </div>
                   <p className="truncate text-small text-secondary">
                     {deal.nextStep ?? 'No next step written'}
@@ -381,7 +382,7 @@ const HomePage = async ({
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="tabular-nums">{deal.amount === null ? '—' : formatCurrency(deal.amount, deal.currency)}</p>
-                    <p className="text-small text-secondary">{formatDate(deal.closeDate)}</p>
+                    <p className="text-small text-secondary">{formatDate(deal.closeDate, zone)}</p>
                   </div>
                 </li>
               ))}
@@ -409,7 +410,7 @@ const HomePage = async ({
                       {b.hostName ? ` · with ${b.hostName}` : ''}
                     </p>
                   </div>
-                  <span className="shrink-0 text-small text-secondary">{formatDateTime(b.startsAt)}</span>
+                  <span className="shrink-0 text-small text-secondary">{formatDateTime(b.startsAt, zone)}</span>
                 </li>
               ))}
             </ul>
@@ -433,7 +434,7 @@ const HomePage = async ({
                   </div>
                   {t.dueDate ? (
                     <span className={`shrink-0 text-small ${t.dueDate < new Date().toISOString().slice(0, 10) ? 'text-error' : 'text-secondary'}`}>
-                      {formatDate(t.dueDate)}
+                      {formatDate(t.dueDate, zone)}
                     </span>
                   ) : null}
                 </li>
@@ -456,7 +457,7 @@ const HomePage = async ({
                       {entry.subject ?? ''}
                     </p>
                     <time dateTime={entry.occurredAt.toISOString()} className="shrink-0 text-small text-secondary">
-                      {formatDateTime(entry.occurredAt)}
+                      {formatDateTime(entry.occurredAt, zone)}
                     </time>
                   </div>
                   <p className="truncate text-small text-secondary">

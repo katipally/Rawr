@@ -4,6 +4,8 @@ import { segmentsPath } from '~/lib/links.ts'
 import { formatDate } from './value.tsx'
 
 export type SegmentsPanelProps = {
+  /** The reader's zone, from the page's session. */
+  zone: string
   account: string
   recordName: string
   rows: MembershipRow[]
@@ -12,7 +14,7 @@ export type SegmentsPanelProps = {
 /** Which lists this record is in, and which it used to be in. Past spells are kept
  *  on purpose: somebody asking "why did they stop getting the newsletter" is asking
  *  about an exit, and an exit that leaves no trace cannot answer them. A2. */
-export const SegmentsPanel = ({ account, recordName, rows }: SegmentsPanelProps) => {
+export const SegmentsPanel = ({ account, recordName, rows, zone }: SegmentsPanelProps) => {
   const live = rows.filter((row) => row.exitedAt === null)
   const past = rows.filter((row) => row.exitedAt !== null)
 
@@ -39,7 +41,7 @@ export const SegmentsPanel = ({ account, recordName, rows }: SegmentsPanelProps)
             >
               <span className="min-w-0 break-words">{row.name}</span>
               <span className="shrink-0 text-small text-secondary">
-                since {formatDate(row.enteredAt.toISOString())}
+                since {formatDate(row.enteredAt.toISOString(), zone)}
               </span>
             </li>
           ))}
@@ -50,7 +52,7 @@ export const SegmentsPanel = ({ account, recordName, rows }: SegmentsPanelProps)
             >
               <span className="min-w-0 break-words">{row.name}</span>
               <span className="shrink-0 text-small">
-                left {formatDate(row.exitedAt!.toISOString())}
+                left {formatDate(row.exitedAt!.toISOString(), zone)}
               </span>
             </li>
           ))}

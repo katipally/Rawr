@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { enrollmentsPath, recordPath, sequencePath, sequencesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE, formatDate, formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 type Row = {
   id: string
@@ -42,6 +43,7 @@ export const EnrollmentTable = ({
   rows: Row[]
   canWrite: boolean
 }) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -119,9 +121,9 @@ export const EnrollmentTable = ({
 
                 <span className="w-40 shrink-0 text-small text-secondary">
                   {row.state === 'active' && row.nextRunAt
-                    ? `Next ${formatDateTime(row.nextRunAt)}`
+                    ? `Next ${formatDateTime(row.nextRunAt, zone)}`
                     : row.lastSentAt
-                      ? `Last ${formatDate(row.lastSentAt)}`
+                      ? `Last ${formatDate(row.lastSentAt, zone)}`
                       : 'Nothing sent yet'}
                 </span>
 

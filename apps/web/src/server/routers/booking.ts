@@ -14,6 +14,7 @@ import {
   saveGrant,
   setGrantCalendar,
   saveOverride,
+  adoptTimezone,
   saveSchedule,
   setPageActive,
 } from '@rawr/db'
@@ -164,6 +165,12 @@ export const bookingRouter = router({
         }),
       ),
     ),
+
+  /** Called once by the shell when nothing is stored, so a first visit reads its
+   *  own clock rather than UTC. Never overwrites a zone somebody chose. */
+  adoptTimezone: protectedProcedure
+    .input(z.object({ timezone: z.string().min(1).max(64) }))
+    .mutation(({ ctx, input }) => call(() => adoptTimezone(ctx.account, ctx.session.userId, input.timezone))),
 
   saveOverride: protectedProcedure
     .input(

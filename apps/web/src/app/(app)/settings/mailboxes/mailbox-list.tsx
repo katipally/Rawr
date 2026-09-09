@@ -7,6 +7,7 @@ import type { BlocklistRow, MailboxState } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 export type MailboxSummary = {
   id: string
@@ -75,6 +76,7 @@ export const MailboxList = ({
   googleReady,
   devReady,
 }: MailboxListProps) => {
+  const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -161,7 +163,7 @@ export const MailboxList = ({
                       </p>
                       <p className="text-small text-secondary">{copy.hint}</p>
                       <p className="text-small text-secondary">
-                        {row.lastSyncAt ? `Last pass ${formatDateTime(row.lastSyncAt)}` : 'Never run'} ·{' '}
+                        {row.lastSyncAt ? `Last pass ${formatDateTime(row.lastSyncAt, zone)}` : 'Never run'} ·{' '}
                         {row.backfillDone ? 'History read in full' : 'History still being read'}
                       </p>
                       <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
@@ -185,7 +187,7 @@ export const MailboxList = ({
                       {row.lastError ? (
                         <p role="alert" className="break-words text-small text-error">
                           {row.lastError}
-                          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt)})` : ''}
+                          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt, zone)})` : ''}
                         </p>
                       ) : null}
                     </div>
