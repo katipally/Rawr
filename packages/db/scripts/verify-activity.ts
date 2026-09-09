@@ -116,7 +116,7 @@ try {
     host: 'app.datasaur.ai',
     siteKey: `app-${stamp}`,
   })
-  check('two sites can share one account', created.id.length === 36, 'open item 18 either way')
+  check('two sites can share one account', created.id.length === 36, 'undecided either way')
 
   check(
     'a site key already held by another tenant is refused with a real message',

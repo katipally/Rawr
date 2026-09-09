@@ -200,7 +200,7 @@ const challengeFor = (verifier: string): string =>
 const configured = (): void => {
   if (!googleConfigured) {
     throw new Error(
-      'Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or use the dev sign-in while open item 3 is outstanding.',
+      'Google sign-in is not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from a Google Cloud OAuth client. There is no other way in.',
     )
   }
 }

@@ -13,7 +13,7 @@ import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.
  *
- *  Two providers. `google` is the real one. `dev` exists because open item 3 has
+ *  Two providers. `google` is the real one. `dev` exists because a Google project has
  *  not landed: it reports no external commitments, so Rawr's own confirmed bookings
  *  are the only busy time, which makes the whole engine exercisable before a Google
  *  project exists. It is unreachable in production.
@@ -187,7 +187,7 @@ const busyForHost = async (
   if (!googleCalendarConfigured) {
     throw new CalendarUnavailable(
       host.userId,
-      'Google Calendar is not configured on this deployment (open item 3), so availability cannot be read.',
+      'Google Calendar is not configured on this deployment, so availability cannot be read.',
     )
   }
 

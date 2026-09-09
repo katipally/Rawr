@@ -225,7 +225,7 @@ export const bookingStateEnum = pgEnum('rawr_booking_state', [
   'rescheduled',
 ])
 
-/** 'dev' exists because open item 3 has not landed: it reads busy time from Rawr's
+/** 'dev' exists for a deployment with no Google project: it reads busy time from Rawr's
  *  own confirmed bookings so the engine is exercisable end to end before a Google
  *  project exists. It is refused in production. */
 export const calendarProviderEnum = pgEnum('rawr_calendar_provider', ['google', 'dev'])

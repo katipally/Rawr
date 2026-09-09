@@ -208,7 +208,7 @@ export const bookingRouter = router({
           throw new TRPCError({
             code: 'FORBIDDEN',
             message:
-              'The development calendar provider is not available here. Connect Google Calendar instead (open item 3).',
+              'The development calendar provider is not available here. Connect Google Calendar instead.',
           })
         }
         await saveGrant(ctx.account, {

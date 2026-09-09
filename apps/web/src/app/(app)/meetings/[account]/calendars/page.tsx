@@ -57,8 +57,8 @@ const CalendarsScreen = async ({
       {!googleCalendarConfigured ? (
         <Alert tone="warning" className="mb-4">
           Google Calendar is not configured on this deployment. It needs a Google Cloud project with
-          an internal consent screen (open item 3) and an encryption key held outside the database
-          (open item 9). Until then, free-busy cannot be read and no host can offer real times.
+          a consent screen Google has reviewed, and an encryption key held outside the database.
+          Until then, free-busy cannot be read and no host can offer real times.
           {devCalendarEnabled
             ? ' The development provider below is available in the meantime: it treats a host as available except where Rawr already holds a booking, which exercises the whole engine without touching anybody’s real calendar.'
             : ''}

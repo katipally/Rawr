@@ -573,7 +573,7 @@ try {
     )
 
     // The development provider: Rawr's own confirmed bookings are the only source
-    // of busy time. It is what makes the engine exercisable while open item 3 is
+    // of busy time. It is what makes the engine exercisable while no Google project is
     // outstanding, and the web layer refuses it outside development.
     await db.insert(s.calendarGrant).values(
       staff.map((id) => ({

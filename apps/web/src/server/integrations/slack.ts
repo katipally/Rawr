@@ -65,7 +65,7 @@ export const testSlack = async (ctx: AccountContext): Promise<ConnectionTest> =>
     const creds = await slackCredentials(ctx)
     if (!creds) {
       const detail =
-        'Slack is not connected. Paste a bot token or an incoming webhook URL (open item 4).'
+        'Slack is not connected. Paste a bot token or an incoming webhook URL.'
       await recordHealth(ctx, 'slack', { ok: false, error: detail })
       return { ok: false, detail }
     }
@@ -98,7 +98,7 @@ export const testSlack = async (ctx: AccountContext): Promise<ConnectionTest> =>
     return {
       ok: true,
       detail:
-        'The webhook accepted a test message; check the channel. A webhook has no health check and no deep-link unfurl, which is the cost of not having a full app (open item 4).',
+        'The webhook accepted a test message; check the channel. A webhook has no health check and no deep-link unfurl, which is the cost of a webhook rather than a full Slack app.',
     }
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
@@ -122,7 +122,7 @@ export const postToSlack = async (
   const creds = await slackCredentials(ctx)
   if (!creds) {
     throw providerError(
-      'Slack is not configured. Set a bot token or a webhook URL in Settings, under Integrations (open item 4).',
+      'Slack is not configured. Set a bot token or a webhook URL in Settings, under Integrations.',
     )
   }
 

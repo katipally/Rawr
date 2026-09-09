@@ -74,7 +74,7 @@ const ServiceRow = ({ name, service, what }: { name: string; service: Service; w
             {connected ? 'Reconnect' : 'Connect'}
           </a>
         ) : (
-          <span className="text-small text-secondary">Needs the Google project (open item 3).</span>
+          <span className="text-small text-secondary">Needs a Google Cloud project with Gmail enabled.</span>
         )}
         <Link href={service.managePath} className="inline-flex min-h-8 items-center">
           Manage

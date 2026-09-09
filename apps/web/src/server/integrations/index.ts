@@ -139,7 +139,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     configFields: [],
     rows: ['Email Tracking', 'Company & Contact Enrichment'],
     setup: [
-      'In Apollo, open Settings, then Integrations, then API. This needs API access on the plan, not only a seat (open item 7).',
+      'In Apollo, open Settings, then Integrations, then API. This needs API access on the plan, not only a seat.',
       'Create a master API key, or one with people/match, organizations/enrich, contacts, emailer_campaigns/search and emailer_messages/search. Paste it below.',
       'Sequence opens, clicks and replies are pulled by the Apollo sync rather than pushed: Apollo has no email-event webhook, so the webhook URL below only matters if something of yours posts to it.',
     ],
@@ -171,7 +171,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       'In Clay, open the enrichment table and add a Webhook source; copy its URL into "Table webhook URL".',
       'Add an HTTP API column at the end of the table that posts each row to the webhook URL below, with the token as a bearer header.',
       'Make up a long random token, paste it below and into that column\u2019s Authorization header. Rawr refuses anything else.',
-      'Set the tier to what the Clay account is on. Launch has no HTTP API, so enrichment degrades to CSV (open item 12).',
+      'Set the tier to what the Clay account is on. Launch has no HTTP API, so enrichment degrades to CSV.',
     ],
   },
   {
@@ -302,7 +302,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     rows: ['Custom Lead Forms'],
     setup: [
       'Quickest: in Slack open the channel, then its settings, Integrations, Add an app, Incoming WebHooks; copy the webhook URL and paste it as the secret.',
-      'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the account and paste the xoxb bot token instead (open item 4).',
+      'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the account and paste the xoxb bot token instead.',
       'Invite the bot to #sales-leads-2026, or whichever channel you name as the default.',
     ],
   },
@@ -355,7 +355,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     ],
     rows: ['Book Meeting'],
     setup: [
-      'At marketplace.zoom.us, Develop, Build App, choose Server-to-Server OAuth (open item 5).',
+      'At marketplace.zoom.us, Develop, Build App, choose Server-to-Server OAuth.',
       'Add the meeting:write:admin scope, activate the app, and copy the Account ID, Client ID and Client Secret from the App Credentials tab.',
     ],
   },
@@ -386,7 +386,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     rows: ['Book Meeting', 'Calendar Links'],
     setup: [
       'Nothing to paste here. Each host connects their own calendar from Your account, or Meetings, Calendars.',
-      'The Google project behind it is open item 3; until then the development calendar stands in.',
+      'Without a Google project behind it, the development calendar stands in.',
     ],
   },
   {

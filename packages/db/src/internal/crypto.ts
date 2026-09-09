@@ -23,7 +23,7 @@ const key = (): Buffer => {
   const raw = process.env.TOKEN_ENCRYPTION_KEY ?? ''
   if (!raw) {
     throw new Error(
-      'TOKEN_ENCRYPTION_KEY is not set, so a calendar or mailbox token cannot be stored. It must come from a secrets store, never from the database it protects (open item 9).',
+      'TOKEN_ENCRYPTION_KEY is not set, so a calendar or mailbox token cannot be stored. It must come from a secrets store, never from the database it protects.',
     )
   }
   const decoded = /^[0-9a-f]{64}$/i.test(raw) ? Buffer.from(raw, 'hex') : Buffer.from(raw, 'base64')

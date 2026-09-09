@@ -26,7 +26,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   if (!googleCalendarConfigured) {
     back.searchParams.set(
       'error',
-      'Google Calendar is not configured on this deployment. It needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and TOKEN_ENCRYPTION_KEY (open items 3 and 9).',
+      'Google Calendar is not configured on this deployment. It needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and TOKEN_ENCRYPTION_KEY.',
     )
     return NextResponse.redirect(back)
   }

@@ -23,8 +23,8 @@ the data layer is vendor-specific.
  pnpm db:seed                   # two fixture accounts, ~20 records each
 ```
 
-Every script reads `.env.local` directly through `node --env-file`, so that file
-has to exist before any `db:` command.
+Every script reads `.env.local` through `node --env-file-if-exists`, so that file
+is how a laptop supplies configuration and its absence is how a deployment does.
 
 The app connects as `rawr_app`, which owns no tables and cannot bypass row level
 security. `DATABASE_URL_OWNER` is the table owner and is used only by migrations
@@ -48,14 +48,26 @@ Leave `DATABASE_PREPARED` unset there; set it to `1` on a direct connection.
  pnpm worker     the job daemon — nothing scheduled happens without it
 ```
 
-Sign in with Google. A domain no account claims opens one, and whoever signs in
-first becomes its super admin, which is how this starts from an empty database.
-A verified address on a domain an account already claims joins that account.
+Sign in with Google. There is no other way in: no passwords, no magic links, and
+nothing that takes an address on trust.
 
-Without Google credentials, `/sign-in` also offers a development form taking any
-seeded address — `admin@sandbox.test`, `sales@`, `marketing@`, `viewer@`,
-`former@`, `newstarter@`, and `admin@peer.test` for the second account. It
-refuses to render unless `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
+What that sign-in gets you is settled in `rawr.sign_in_google`, in order:
+
+```
+ the database is empty   whoever signs in first opens the account and owns it.
+                         Fires once, ever, which is how this starts from nothing.
+ a claimed domain        they join that account on its default view grants
+ an invitation           the seat it was written for, checked against the
+                         address they actually signed in with
+ anybody else            RAWR_VISITOR_ACCOUNT, able to read and change nothing,
+                         or no seat at all when that is empty
+```
+
+Set `RAWR_VISITOR_ACCOUNT` on a deployment anyone may look around; leave it empty
+and set `GOOGLE_HOSTED_DOMAIN` on one that serves a single company.
+
+The seeded fixture accounts are for the verify suites, which reach the database
+directly. Nothing signs in as them.
 
 ## Commands
 
@@ -75,6 +87,8 @@ refuses to render unless `RAWR_DEV_LOGIN=1` and `NODE_ENV` is not production.
  pnpm db:probe:large          find oversized stored values
 
  pnpm verify                  everything below, in order, as a build gate
+
+ docker build -t rawr .       the deployable image — see DEPLOY.md
 ```
 
 `pnpm verify` runs typecheck, lint, the unit tests, and sixteen suites against
@@ -296,9 +310,17 @@ day.
 
 ## In production
 
+**DEPLOY.md** has the whole of it: the image, the three database URLs, the bucket,
+the Google client, and what a host that sleeps needs.
+
 The app refuses to boot on the development placeholders for `AUTH_SECRET`,
-`RAWR_INTERNAL_SECRET` or `EDGE_IP_SALT`, or on an empty
-`TOKEN_ENCRYPTION_KEY`, and names which.
+`RAWR_INTERNAL_SECRET` or `EDGE_IP_SALT`, or on an empty `TOKEN_ENCRYPTION_KEY`,
+and names which.
+
+`RAWR_CALENDAR_AT_SIGNIN` stays at `0` until Google has verified the OAuth
+client. The calendar scopes are "restricted", and an unverified client asking for
+them can have the whole authorisation refused, which locks people out of the CRM
+rather than out of their calendar.
 
 Turnstile, Slack and the Webflow secret are optional in development. Without
 Turnstile a submission scoring into the challenge band fails closed to the

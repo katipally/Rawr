@@ -529,7 +529,7 @@ export const hydrateMailboxBodies = async (
 // ------------------------------------------------------- development only
 
 /** A stand-in Gmail so the whole path — back-fill, cursor, participant matching,
- *  blocklist, incremental catch-up, revocation — is exercisable before open item 3
+ *  blocklist, incremental catch-up, revocation — is exercisable before a Google project
  *  lands. Same shape as the real API, five fixed messages, no network. */
 const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
   const day = 24 * 60 * 60 * 1000
