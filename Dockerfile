@@ -39,18 +39,22 @@ FROM base AS build
 COPY --from=deps /repo/ /repo/
 COPY . .
 
-# next build sets NODE_ENV=production and renders pages, which reaches the env
-# module. These are parseable placeholders that never connect: the real values
-# arrive at boot, where assertProductionSecrets refuses exactly these.
+# next build sets NODE_ENV=production and renders pages, and those pages reach
+# the env module, which validates. So the build needs values that parse. They
+# never connect to anything: the real ones arrive at boot, where
+# assertProductionSecrets refuses exactly these.
 #
-# ARG rather than ENV, so they are visible to the build and are not written into
-# the image's config. Nothing here is a secret, and an image that carries a
-# variable named AUTH_SECRET invites somebody to trust it.
-ARG DATABASE_URL=postgres://build:build@127.0.0.1:5432/none
-ARG DATABASE_URL_OWNER=postgres://build:build@127.0.0.1:5432/none
-ARG AUTH_SECRET=build-time-placeholder-at-least-32-chars
-ARG AUTH_URL=http://localhost:3000
-RUN pnpm --filter @rawr/web build
+# Set on the command and nowhere else, on purpose. As ARG they would be
+# overridable by --build-arg, and a host that forwards the service's own
+# environment into the build then decides what the build validates -- which is
+# how AUTH_URL="REPLACE_ME..." reached this line and failed it. As ENV they
+# would linger in the stage. Here they exist for one command and cannot be
+# reached from outside it.
+RUN DATABASE_URL=postgres://build:build@127.0.0.1:5432/none \
+    DATABASE_URL_OWNER=postgres://build:build@127.0.0.1:5432/none \
+    AUTH_SECRET=build-time-placeholder-at-least-32-chars \
+    AUTH_URL=http://localhost:3000 \
+    pnpm --filter @rawr/web build
 
 
 # --- runtime ----------------------------------------------------------------
