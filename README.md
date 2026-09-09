@@ -18,10 +18,23 @@ the data layer is vendor-specific.
 
 ```
  pnpm install
- cp .env.example .env.local     # fill in the three database URLs
+ cp .env.example .env.local     # fill in the database URLs and a Google client
  pnpm db:migrate                # schema, then row level security on every table
  pnpm db:seed                   # two fixture accounts, ~20 records each
 ```
+
+`.env.example` is written for a deployment, so on a laptop add these four and
+give the four secrets any value long enough to parse:
+
+```
+ DATABASE_URL_SESSION   a second handle, for the tenancy suite only
+ RAWR_DEV_CALENDAR=1    free-busy without a Google project
+ RAWR_DEV_GMAIL=1       mailbox sync without one either
+ RAWR_DEV_INTEGRATIONS=1  stand-ins for Brevo, Apollo, Clay, Slack and GA4
+```
+
+All three `RAWR_DEV_` flags refuse to work when `NODE_ENV` is production,
+whatever they are set to.
 
 Every script reads `.env.local` through `node --env-file-if-exists`, so that file
 is how a laptop supplies configuration and its absence is how a deployment does.
