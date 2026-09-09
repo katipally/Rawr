@@ -32,8 +32,25 @@ Docker:
  sed 's/^\([A-Z_]*\)="\(.*\)"$/\1=\2/' .env.local > .env.docker
 ```
 
-A real host does not have this problem: Render, Fly and the rest take key and
-value as separate fields, so there are no quotes to strip.
+A real host does not have this problem. Render's Environment tab has an "Add
+from .env" import that parses the file properly, quotes included, and turns each
+line into an ordinary environment variable.
+
+**Do not put a `.env` file in the image and expect it to be read.** It half
+works, which is worse than not working:
+
+```
+ /repo/apps/web/.env.local    the app reads it -- Next loads .env files from
+                              the directory its server.js sits in
+ the worker                   does not, and stops with
+                              "DATABASE_URL_OWNER is not set"
+```
+
+Render's Secret Files are not a way around that either: they are written to
+`/etc/secrets/<name>` and deliberately not loaded into the environment, and for
+a Docker service they are not copied to the repository root. Nothing here reads
+them. Configuration reaches both processes as environment variables or it
+reaches one of them.
 
 Nothing is baked in but code: every value arrives at boot. The build stage sets
 four placeholder variables because `next build` renders pages that read the
