@@ -162,6 +162,21 @@ export type AuthorizeRequest = {
   resource: string | null
 }
 
+/** A resource identifier with the parts RFC 8707 §2 says it should not carry
+ *  removed, so two spellings of this endpoint compare equal. Anything that is not
+ *  a URL is returned as it came and fails the comparison it was headed for. */
+const canonicalResource = (uri: string | null): string | null => {
+  if (!uri) return null
+  try {
+    const url = new URL(uri)
+    url.search = ''
+    url.hash = ''
+    return url.href.replace(/\/$/, '')
+  } catch {
+    return uri
+  }
+}
+
 /** Everything an authorization request has to get right before a consent screen
  *  is worth showing. Returns the reason when it is not. */
 export const checkAuthorizeRequest = async (
@@ -185,7 +200,11 @@ export const checkAuthorizeRequest = async (
   }
   // RFC 8707. A client that names the resource it wants a token for must name
   // this one, read from the origin it reached rather than from configuration.
-  const asked = params.get('resource')
+  //
+  // Compared canonically, because the endpoint address carries a ?toolsets query
+  // and a client that echoes back the URL a person pasted is naming this server,
+  // not another one. RFC 8707 §2 says the canonical form drops the query anyway.
+  const asked = canonicalResource(params.get('resource'))
   const ours = await resource()
   if (asked && asked !== ours) {
     return { ok: false, problem: `This server issues tokens for ${ours}, not ${asked}.` }

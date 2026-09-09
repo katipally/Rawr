@@ -1,5 +1,5 @@
 import { recallMcpCall, rememberMcpCall, type McpCaller } from '@rawr/db'
-import { TOOLS, TOOLS_BY_NAME } from './catalogue.ts'
+import { TOOLS, TOOLS_BY_NAME, toolsetOf } from './catalogue.ts'
 import { contextFor, explain, type ToolResult } from './tools.ts'
 
 /** F5 §1. JSON-RPC over one endpoint, written against two versions of the spec.
@@ -82,6 +82,11 @@ export type Handled = { response: JsonRpcResponse | null; status: number }
 export const handle = async (
   caller: McpCaller,
   message: JsonRpcRequest,
+  /** Which toolsets this connection asked to see. Visibility only: a tool left
+   *  out of the list still runs, because the person's role decides that and the
+   *  same token used from a second client would otherwise disagree about which
+   *  tools exist. */
+  enabled: ReadonlySet<string>,
 ): Promise<Handled> => {
   const id = message.id ?? null
   const isNotification = message.id === undefined || message.id === null
@@ -136,10 +141,11 @@ export const handle = async (
 
     case 'tools/list': {
       const { registry } = await contextFor(caller)
+      const listed = TOOLS.filter((tool) => enabled.has(toolsetOf(tool)))
       return {
         response: ok(id, {
           resultType: 'complete',
-          tools: TOOLS.map((tool) => ({
+          tools: listed.map((tool) => ({
             name: tool.name,
             title: tool.title,
             description: tool.description({ registry }),
@@ -167,8 +173,13 @@ export const handle = async (
       const name = String(params.name ?? '')
       const tool = TOOLS_BY_NAME.get(name)
       if (!tool) {
+        const listed = TOOLS.filter((entry) => enabled.has(toolsetOf(entry))).length
         return {
-          response: fail(id, INVALID_PARAMS, `Unknown tool: ${name}. Call tools/list for the ${TOOLS.length} this server has.`),
+          response: fail(
+            id,
+            INVALID_PARAMS,
+            `Unknown tool: ${name}. Call tools/list for the ${listed} this connection offers, or add ?toolsets=all to the address for all ${TOOLS.length}.`,
+          ),
           status: 200,
         }
       }

@@ -9,10 +9,15 @@ export type SearchHit = {
   displayName: string
   detail: string | null
   rank: number
+  /** Where the hit opens, when it is not a record with a page of its own. A task
+   *  and an activity live on a record's page, so both name that record here and
+   *  the caller routes to it. Null on a record, which is its own address. */
+  parent: { objectKey: string; id: string } | null
 }
 
 /** One object's hits. Groups come back in registry order, so the three the system
- *  is built on come before whatever an admin invented. */
+ *  is built on come before whatever an admin invented, and the two that are not
+ *  registry objects at all come last. */
 export type SearchGroup = {
   objectKey: string
   nameSingular: string
@@ -23,6 +28,14 @@ export type SearchGroup = {
 export type SearchResults = { groups: SearchGroup[]; total: number }
 
 const PER_OBJECT = 8
+
+/** Searchable, but not objects: neither has a record page, a view or a field
+ *  definition, and neither belongs in the registry for the sake of a search
+ *  result. Named here, last, after everything the registry does name. */
+const EXTRA: Record<string, { nameSingular: string; namePlural: string }> = {
+  task: { nameSingular: 'Task', namePlural: 'Tasks' },
+  activity: { nameSingular: 'Activity', namePlural: 'Activity' },
+}
 
 /** Postgres only, no search service. The tsvector is a generated column so it can
  *  never go stale, and pg_trgm covers the misspelling a full-text match misses.
@@ -48,14 +61,15 @@ export const searchAll = async (
 
   return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
-    const rows = await tx.execute<{ object_key: string; id: string; label: string | null; detail: string | null; rank: number }>(sql`
+    const rows = await tx.execute<{ object_key: string; id: string; label: string | null; detail: string | null; rank: number; parent_object: string | null; parent_id: string | null }>(sql`
       (select 'contact'::text as object_key, id,
               coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email) as label,
               email as detail,
               greatest(
                 ts_rank(search, plainto_tsquery('simple', ${trimmed})),
                 extensions.similarity(coalesce(first_name,'') || ' ' || coalesce(last_name,''), ${trimmed})
-              ) as rank
+              ) as rank,
+              null::text as parent_object, null::uuid as parent_id
          from contact
         where deleted_at is null
           and (search @@ plainto_tsquery('simple', ${trimmed})
@@ -68,7 +82,7 @@ export const searchAll = async (
               greatest(
                 ts_rank(search, plainto_tsquery('simple', ${trimmed})),
                 extensions.similarity(coalesce(name, ''), ${trimmed})
-              )
+              ), null::text, null::uuid
          from company
         where deleted_at is null
           and (search @@ plainto_tsquery('simple', ${trimmed})
@@ -81,7 +95,7 @@ export const searchAll = async (
               greatest(
                 ts_rank(search, plainto_tsquery('simple', ${trimmed})),
                 extensions.similarity(coalesce(name, ''), ${trimmed})
-              )
+              ), null::text, null::uuid
          from deal
         where deleted_at is null
           and (search @@ plainto_tsquery('simple', ${trimmed})
@@ -90,35 +104,73 @@ export const searchAll = async (
         limit ${limit})
       union all
       (select o.key, r.id, nullif(trim(r.custom ->> f.key), ''), null::text,
-              ts_rank(r.search, plainto_tsquery('simple', ${trimmed}))
+              ts_rank(r.search, plainto_tsquery('simple', ${trimmed})), null::text, null::uuid
          from custom_record r
          join object_def o on o.id = r.object_id
          left join field_def f on f.id = o.label_field_id
         where r.deleted_at is null
           and r.search @@ plainto_tsquery('simple', ${trimmed})
         order by 5 desc, r.created_at desc
+        limit ${limit})
+      union all
+      (select 'task'::text, id, title, to_char(due_date, 'FMDay DD Mon'),
+              extensions.similarity(title, ${trimmed}),
+              entity_type, entity_id
+         from task
+        where title OPERATOR(extensions.%) ${trimmed}
+           or lower(title) like lower(${prefix})
+        order by 5 desc, created_at desc
+        limit ${limit})
+      union all
+      (select 'activity'::text, h.id, h.label, h.detail, h.rank, h.parent_object, h.parent_id
+         from (select distinct on (a.id)
+                      a.id,
+                      -- A note has no subject, and "Note" eight times over says
+                      -- nothing. What was written is the line worth showing.
+                      coalesce(nullif(trim(a.subject), ''), nullif(trim(left(a.body, 90)), ''), initcap(a.type::text)) as label,
+                      initcap(a.type::text) as detail,
+                      ts_rank(a.search, plainto_tsquery('simple', ${trimmed})) as rank,
+                      l.entity_type as parent_object,
+                      l.entity_id as parent_id,
+                      a.occurred_at
+                 from activity a
+                 -- An activity with no link is on nobody's timeline and has no
+                 -- page to open, so it is not a result. distinct on keeps the one
+                 -- most recently attached when it hangs on several records.
+                 join activity_link l on l.activity_id = a.id
+                where a.search @@ plainto_tsquery('simple', ${trimmed})
+                  -- What somebody wrote or said. The system types are templated
+                  -- ("changed Next step from X to Y") and repeat across thousands
+                  -- of rows, so searching them buries the one note that matters.
+                  and a.type in ('note', 'call', 'email', 'meeting', 'task')
+                order by a.id, l.occurred_at desc) h
+        order by h.rank desc, h.occurred_at desc
         limit ${limit})`)
 
     const byObject = new Map<string, SearchHit[]>()
     for (const row of rows) {
-      const object = registry.byKey.get(row.object_key)
-      if (!object) continue
+      const unnamed = registry.byKey.get(row.object_key)?.nameSingular.toLowerCase() ?? EXTRA[row.object_key]?.nameSingular.toLowerCase()
+      if (unnamed === undefined) continue
       const hit: SearchHit = {
         objectKey: row.object_key,
         id: row.id,
-        displayName: row.label?.trim() || `Unnamed ${object.nameSingular.toLowerCase()}`,
+        displayName: row.label?.trim() || `Unnamed ${unnamed}`,
         detail: row.detail,
         rank: Number(row.rank),
+        parent: row.parent_object && row.parent_id ? { objectKey: row.parent_object, id: row.parent_id } : null,
       }
       byObject.set(row.object_key, [...(byObject.get(row.object_key) ?? []), hit])
     }
 
-    const groups = registry.objects.flatMap((object): SearchGroup[] => {
-      const hits = byObject.get(object.key) ?? []
-      return hits.length === 0
-        ? []
-        : [{ objectKey: object.key, nameSingular: object.nameSingular, namePlural: object.namePlural, hits }]
-    })
+    const named = (key: string, nameSingular: string, namePlural: string): SearchGroup[] => {
+      const hits = byObject.get(key) ?? []
+      return hits.length === 0 ? [] : [{ objectKey: key, nameSingular, namePlural, hits }]
+    }
+
+    const groups = [
+      ...registry.objects.flatMap((object) => named(object.key, object.nameSingular, object.namePlural)),
+      ...Object.entries(EXTRA).flatMap(([key, names]) => named(key, names.nameSingular, names.namePlural)),
+    ]
 
     return { groups, total: groups.reduce((sum, group) => sum + group.hits.length, 0) }
   })

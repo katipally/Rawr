@@ -1,8 +1,11 @@
 import { PageHeader } from '@rawr/ui'
 import { listMcpTokens } from '@rawr/db'
 import { requestOrigin } from '~/server/origin.ts'
+import { TOOLS_BY_TOOLSET } from '~/server/mcp/catalogue.ts'
+import { TOOLSETS } from '~/server/mcp/toolsets.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TokenList } from './token-list.tsx'
+import { ToolsetPicker } from './toolset-picker.tsx'
 
 /** F5 §1. Where a person connects their assistant, or creates the token it uses.
  *
@@ -17,6 +20,21 @@ const AgentAccessPage = async () => {
   // The address the person is reading this on is the address their client should
   // be given, whatever host this deployment answers as.
   const endpoint = `${await requestOrigin()}/api/mcp`
+
+  // Read here rather than through a procedure: building the catalogue walks the
+  // tRPC router, and a router that imports it back would be a cycle evaluated at
+  // module load. A server component is already past that.
+  const catalogue = Object.entries(TOOLSETS).map(([key, set]) => ({
+    key,
+    label: set.label,
+    description: set.description,
+    isDefault: set.default === true,
+    tools: (TOOLS_BY_TOOLSET.get(key) ?? []).map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      writes: tool.writes,
+    })),
+  }))
 
   return (
     <div className="flex flex-col gap-6">
@@ -43,6 +61,8 @@ const AgentAccessPage = async () => {
           revokedAt: token.revokedAt?.toISOString() ?? null,
         }))}
       />
+
+      <ToolsetPicker endpoint={endpoint} groups={catalogue} />
     </div>
   )
 }

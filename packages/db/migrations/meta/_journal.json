@@ -435,6 +435,13 @@
       "when": 1789145634179,
       "tag": "0060_visitor_access",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1789232034179,
+      "tag": "0061_task_activity_search",
+      "breakpoints": true
     }
   ]
 }

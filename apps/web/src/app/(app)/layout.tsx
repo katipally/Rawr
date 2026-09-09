@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell.tsx'
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
-import { CommandPalette } from '~/components/crm/command-palette.tsx'
+import { CommandPalette, type Action } from '~/components/crm/command-palette.tsx'
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
   accountPath,
@@ -31,7 +31,9 @@ import {
   submissionsPath,
   tasksPath,
   accountHome,
+  agentAccessPath,
 } from '~/lib/links.ts'
+import { settingsGroups } from '~/lib/settings-nav.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import type { Hub } from '~/lib/hubs.ts'
 
@@ -179,6 +181,45 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
     return kept.length ? [{ ...section, groups: kept }] : []
   })
 
+  // Only what these grants can actually make. A read-only member was offered
+  // four things to create and every one of them landed on a page that quietly
+  // ignored the request, because the create dialog checks the grant and the menu
+  // did not.
+  const create = [
+    { key: 'contact', label: 'Contact', href: createRecordPath(account, 'contact'), entity: 'contact' as const },
+    { key: 'company', label: 'Company', href: createRecordPath(account, 'company'), entity: 'company' as const },
+    { key: 'deal', label: 'Deal', href: createRecordPath(account, 'deal'), entity: 'deal' as const },
+    { key: 'task', label: 'Task', href: tasksPath(account, { new: '1' }), entity: 'task' as const },
+    // Both were complete and reachable only by hovering a rail icon, which is why
+    // they read as missing features.
+    { key: 'form', label: 'Form', href: formsPath(account, 'new'), entity: 'form' as const },
+    {
+      key: 'booking_page',
+      label: 'Scheduling page',
+      href: newBookingPagePath(account),
+      entity: 'booking_page' as const,
+    },
+  ].flatMap(({ entity, ...option }) => (canWrite(ctx, entity) ? [option] : []))
+
+  // The + menu is already a list of verbs behind a grant check. Search says them
+  // the way a person would, and adds the ones that were only ever a rail item.
+  const actions: Action[] = [
+    ...create.map((option) => ({
+      href: option.href,
+      label: `Create ${option.label.toLowerCase()}`,
+      keywords: ['new', 'add', option.label],
+    })),
+    ...(canWrite(ctx, 'contact')
+      ? [
+          { href: importsPath(account), label: 'Import records', keywords: ['csv', 'upload', 'migrate'] },
+          { href: duplicatesPath(account), label: 'Find duplicates', keywords: ['merge', 'dedupe'] },
+        ]
+      : []),
+    { href: exportPath(account), label: 'Export to CSV', keywords: ['download', 'xlsx', 'spreadsheet'] },
+    { href: appsPath(), label: 'Connect an app', keywords: ['integration', 'gmail', 'slack', 'apollo'] },
+    { href: agentAccessPath(), label: 'Connect an assistant', keywords: ['mcp', 'token', 'agent', 'claude'] },
+  ]
+
   return (
     <ToastProvider>
       <AppShell
@@ -191,49 +232,40 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         email={session.email}
         avatarUrl={session.avatarUrl}
         nav={nav}
-        // Only what these grants can actually make. A read-only member was offered
-        // four things to create and every one of them landed on a page that
-        // quietly ignored the request, because the create dialog checks the grant
-        // and the menu did not.
-        create={[
-          { key: 'contact', label: 'Contact', href: createRecordPath(account, 'contact'), entity: 'contact' },
-          { key: 'company', label: 'Company', href: createRecordPath(account, 'company'), entity: 'company' },
-          { key: 'deal', label: 'Deal', href: createRecordPath(account, 'deal'), entity: 'deal' },
-          { key: 'task', label: 'Task', href: tasksPath(account, { new: '1' }), entity: 'task' },
-          // Both were complete and reachable only by hovering a rail icon, which
-          // is why they read as missing features.
-          { key: 'form', label: 'Form', href: formsPath(account, 'new'), entity: 'form' },
-          {
-            key: 'booking_page',
-            label: 'Scheduling page',
-            href: newBookingPagePath(account),
-            entity: 'booking_page',
-          },
-        ].flatMap(({ entity, ...option }) =>
-          canWrite(ctx, entity) ? [option] : [],
-        )}
+        create={create}
         settingsHref={accountPath()}
         accountHref={accountPath()}
         homeHref={accountHome(account)}
         search={
           <CommandPalette
             account={account}
-            // The rail, flattened. One source, so a page the rail gains is
-            // findable the same day rather than when somebody remembers to add
-            // it to a second list.
-            pages={nav.flatMap((section) =>
-              section.groups
-                ? section.groups.flatMap((group) =>
-                    group.items.map((item) => ({
-                      label: item.label,
-                      section: section.label,
-                      href: item.href,
-                    })),
-                  )
-                : section.href
-                  ? [{ label: section.label, section: section.label, href: section.href }]
-                  : [],
-            )}
+            actions={actions}
+            // The rail and the settings rail, flattened. Two sources, both the
+            // ones those rails render from, so a page either gains is findable
+            // the same day rather than when somebody remembers a third list.
+            pages={[
+              ...nav.flatMap((section) =>
+                section.groups
+                  ? section.groups.flatMap((group) =>
+                      group.items.map((item) => ({
+                        label: item.label,
+                        section: section.label,
+                        href: item.href,
+                      })),
+                    )
+                  : section.href
+                    ? [{ label: section.label, section: section.label, href: section.href }]
+                    : [],
+              ),
+              ...settingsGroups(account).flatMap((group) =>
+                group.sections.map((entry) => ({
+                  label: entry.label,
+                  section: `Settings · ${group.label}`,
+                  href: entry.href,
+                  keywords: entry.keywords,
+                })),
+              ),
+            ]}
           />
         }
       >

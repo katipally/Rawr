@@ -95,8 +95,15 @@ type OAuthFailure = { error?: string; error_description?: string }
 
 let nextId = 1
 
-const rpc = async (token: string | null, method: string, params?: unknown): Promise<Rpc> => {
-  const response = await fetch(ENDPOINT, {
+const rpc = async (
+  token: string | null,
+  method: string,
+  params?: unknown,
+  /** Which toolsets the connection asks to see. The default is no query at all,
+   *  which is what a client that pastes the plain address gets. */
+  toolsets?: string,
+): Promise<Rpc> => {
+  const response = await fetch(toolsets === undefined ? ENDPOINT : `${ENDPOINT}?toolsets=${encodeURIComponent(toolsets)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -275,7 +282,7 @@ try {
   const shaped = await rpc('not-even-the-right-shape', 'tools/list')
   check('a token of the wrong shape is refused before any lookup', shaped.status === 401)
 
-  const listed = await rpc(salesToken, 'tools/list')
+  const listed = await rpc(salesToken, 'tools/list', undefined, 'all')
   check('a real token lists the tools', listed.status === 200 && Array.isArray(listed.body?.result?.tools))
 
   // -----------------------------------------------------------------------
@@ -439,6 +446,78 @@ try {
   )
 
   // -----------------------------------------------------------------------
+  section('toolsets: what a connection lists, and what it can still call')
+
+  const listedBy = async (toolsets?: string): Promise<string[]> =>
+    ((await rpc(salesToken, 'tools/list', undefined, toolsets)).body?.result?.tools ?? []).map(
+      (tool: ToolDescriptor) => tool.name,
+    )
+
+  const byDefault = await listedBy()
+  check(
+    'the plain address lists the CRM and not the other fourteen groups',
+    byDefault.includes('search_records') &&
+      byDefault.includes('crm_records_list') &&
+      !byDefault.includes('admin_fields_list') &&
+      !byDefault.includes('mail_inbox'),
+    `${byDefault.length} tools`,
+  )
+  check(
+    'which is a working set rather than a wall',
+    byDefault.length >= 40 && byDefault.length <= 90,
+    `${byDefault.length} tools, and clients stop accepting them somewhere near 128`,
+  )
+  check(
+    'toolsets=all is still every tool, so nothing was lost by grouping',
+    names.length === new Set(names).size && names.length > byDefault.length,
+    `${names.length} in all, ${byDefault.length} by default`,
+  )
+  check(
+    'every tool belongs to a group somebody can turn on',
+    byDefault.every((name) => names.includes(name)),
+  )
+
+  const mailOnly = await listedBy('mail')
+  check(
+    'naming a group lists that group, plus the ten that find records by name',
+    mailOnly.includes('mail_inbox') &&
+      mailOnly.includes('search_records') &&
+      !mailOnly.includes('admin_fields_list') &&
+      !mailOnly.includes('crm_records_list'),
+    `${mailOnly.length} tools`,
+  )
+  const added = await listedBy('+mail')
+  check(
+    'a leading plus adds to the default set rather than replacing it',
+    added.includes('mail_inbox') && added.includes('crm_records_list'),
+    `${added.length} tools`,
+  )
+
+  const nonsense = await listedBy('nonsense')
+  const empty = await listedBy('')
+  check(
+    'a name nobody has leaves a working connection, never one with no tools',
+    nonsense.length === byDefault.length && empty.length === byDefault.length,
+    `${nonsense.length} and ${empty.length}`,
+  )
+
+  // The whole point of filtering the list rather than the call: two clients on one
+  // token disagree about which tools exist, and that disagreement must not look
+  // like a permission error.
+  const hidden = await call(salesToken, 'crm_registry', {})
+  check(
+    'a tool the connection does not list still runs, because listing is not a grant',
+    !hidden.isError && hidden.rpcError === null,
+    hidden.rpcError ?? hidden.text,
+  )
+  const hiddenAndRefused = await call(salesToken, 'admin_audit_entities', {})
+  check(
+    'and the role is still what refuses it, unchanged by any of this',
+    hiddenAndRefused.isError && /account access/i.test(hiddenAndRefused.text),
+    hiddenAndRefused.text,
+  )
+
+  // -----------------------------------------------------------------------
   section('oauth: the way a client actually connects')
 
   const discovery = await fetch(`${BASE}/.well-known/oauth-protected-resource/api/mcp`).then(
@@ -507,6 +586,43 @@ try {
       'approving sends a code back to the loopback with any port, plus state and iss',
       back.port === '5555' && back.searchParams.get('state') === 'verify' && back.searchParams.get('iss') === BASE && Boolean(back.searchParams.get('code')),
       back.toString(),
+    )
+
+    // RFC 8707. A client that echoes the address a person pasted names this
+    // server, ?toolsets and all, and must reach consent rather than a refusal.
+    const withQuery = await fetch(`${BASE}/api/oauth/authorize`, {
+      method: 'POST',
+      headers: { cookie },
+      body: new URLSearchParams({
+        client_id: registered.client_id,
+        redirect_uri: 'http://localhost:5555/callback',
+        code_challenge: challenge,
+        resource: `${ENDPOINT}?toolsets=mail,forms`,
+        decision: 'approve',
+      }),
+      redirect: 'manual',
+    })
+    check(
+      'a resource carrying the toolsets query is this endpoint, not another one',
+      Boolean(new URL(withQuery.headers.get('location') ?? 'http://x/').searchParams.get('code')),
+      withQuery.headers.get('location') ?? String(withQuery.status),
+    )
+    const otherHost = await fetch(`${BASE}/api/oauth/authorize`, {
+      method: 'POST',
+      headers: { cookie },
+      body: new URLSearchParams({
+        client_id: registered.client_id,
+        redirect_uri: 'http://localhost:5555/callback',
+        code_challenge: challenge,
+        resource: 'https://not-this-server.example/api/mcp',
+        decision: 'approve',
+      }),
+      redirect: 'manual',
+    })
+    check(
+      'and a resource naming somewhere else is still refused',
+      !new URL(otherHost.headers.get('location') ?? 'http://x/').searchParams.get('code'),
+      otherHost.headers.get('location') ?? String(otherHost.status),
     )
 
     const wrongVerifier = await fetch(`${BASE}/api/oauth/token`, {

@@ -5,9 +5,7 @@ import { ChevronLeft, Search } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
-
-export type SettingsSection = { href: string; label: string }
-export type SettingsGroup = { label: string; sections: SettingsSection[] }
+import type { SettingsGroup } from '~/lib/settings-nav.ts'
 
 /** Labels only. Every settings page opens with its own title and a sentence
  *  saying what it is for, so repeating that sentence sixteen times in the rail

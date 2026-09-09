@@ -11,3 +11,14 @@ export const TOOLS: ToolDefinition[] = [
 ]
 
 export const TOOLS_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]))
+
+/** Carried on the definition rather than read back off the name: every router is
+ *  one word today, so splitting the name would work, and would break silently the
+ *  day somebody adds a two-word one. */
+export const toolsetOf = (tool: ToolDefinition): string => tool.toolset ?? 'core'
+
+export const TOOLS_BY_TOOLSET = TOOLS.reduce<Map<string, ToolDefinition[]>>((groups, tool) => {
+  const key = toolsetOf(tool)
+  groups.set(key, [...(groups.get(key) ?? []), tool])
+  return groups
+}, new Map())

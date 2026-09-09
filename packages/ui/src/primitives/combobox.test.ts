@@ -42,3 +42,9 @@ test('ties keep the caller order, so a recency sort survives', () => {
   const ranked = filterOptions([option('Sales A'), option('Sales B')], 'sales')
   assert.deepEqual(ranked.map((o) => o.label), ['Sales A', 'Sales B'])
 })
+
+test('a label hit beats a keyword hit, so a page named for the word wins', () => {
+  // "Users" is a settings page; "billing" is a keyword on Subscriptions. Typing
+  // "users" must not put Subscriptions above the page actually called Users.
+  assert.ok(rank(option('Users'), 'users') < rank(option('Subscriptions', undefined, ['users', 'billing']), 'users'))
+})

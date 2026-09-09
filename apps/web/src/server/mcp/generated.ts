@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { appRouter } from '~/server/routers/_app.ts'
 import type { Session } from '~/server/session.ts'
 import type { ToolDefinition, ToolResult } from './tools.ts'
+import { TOOLSETS, TOOLSET_ALIAS } from './toolsets.ts'
 
 /** F5 §2, the other half: every screen in Rawr, reachable from an assistant.
  *
@@ -16,25 +17,6 @@ import type { ToolDefinition, ToolResult } from './tools.ts'
 
 type Procedure = {
   _def: { type: 'query' | 'mutation' | 'subscription'; inputs: unknown[] }
-}
-
-/** What each router is for, in the words a model needs to pick the right one. */
-const GROUPS: Record<string, string> = {
-  crm: 'Records of every object including ones an admin invented, views, board, calendar, timeline, tasks, associations, files, imports and exports.',
-  segments: 'Saved audiences built from filters, and who is in them.',
-  booking: 'Meeting pages, availability, calendars and booked meetings.',
-  forms: 'Lead forms, their submissions and the review queue.',
-  analytics: 'Website page views, events and tracked sites.',
-  mail: 'Connected Gmail mailboxes and the email threads on a contact.',
-  integrations: 'Brevo, Apollo, Clay, Lusha, Woodpecker, Slack, GA4 and Zoom, and reading a HubSpot export: connection, health, enrichment and replay. Also outbound webhooks: the endpoints Rawr posts to, what they subscribe to and their signing secrets.',
-  admin: 'Account settings: objects an admin invents, fields, pipelines, stages, lifecycle, subscription types, members, and automation rules with their run log.',
-  mcp: 'Agent access tokens.',
-  sequences: 'Multi-step outreach sent from a member\'s own Gmail, or handed to a Woodpecker campaign: the sequences, their steps, and who is in them.',
-  notifications: 'What is waiting on the signed-in person: overdue tasks, held submissions, and, for an admin, what is broken.',
-  teams: 'Named groups inside this account, used to rotate assignment within a team.',
-  jobs: 'Failed jobs and dead letters.',
-  account: 'The signed-in person\'s own sessions.',
-  reporting: 'Six reports over a date range: the pipeline, forms, sequences, email, the website, and which channels the contacts who buy first arrived through.',
 }
 
 const DESTRUCTIVE = /delete|remove|merge|purge|revoke|disconnect|erase|bulk|dismiss|signOut|roll/i
@@ -119,7 +101,7 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
   const { schema, wrapped } = inputSchemaFor(procedure._def.inputs)
   const title = `${group}: ${words(leaf)}`
   const description = [
-    `${writes ? 'Changes' : 'Reads'} ${words(leaf)} in ${group}. ${GROUPS[group] ?? ''}`.trim(),
+    `${writes ? 'Changes' : 'Reads'} ${words(leaf)} in ${group}. ${TOOLSETS[group]?.description ?? ''}`.trim(),
     'Takes ids, not names: find them with search_records or a list tool first.',
     writes && DESTRUCTIVE.test(path) ? 'This is hard to undo. Confirm with the person before calling it.' : '',
   ]
@@ -129,6 +111,7 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
   return {
     name: toolName(path),
     title,
+    toolset: TOOLSET_ALIAS[group] ?? group,
     description: () => description,
     inputSchema: () => schema,
     writes,

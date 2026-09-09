@@ -11,6 +11,7 @@ import {
 } from '~/server/mcp/protocol.ts'
 import { byteLength, clientIp, rateLimit } from '~/server/edge.ts'
 import { challengeHeader } from '~/server/mcp/oauth.ts'
+import { parseToolsets } from '~/server/mcp/toolsets.ts'
 
 /** F5 §1. The MCP endpoint. One path, POST for messages, and nothing else.
  *
@@ -170,7 +171,10 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   touchMcpToken(caller.tokenId)
 
   try {
-    const handled = await handle(caller, message)
+    // Which tools this connection lists. On the address rather than on the
+    // token, so one person's two clients can differ and neither needs a new
+    // credential to change its mind.
+    const handled = await handle(caller, message, parseToolsets(request.nextUrl.searchParams.get('toolsets')))
     if (!handled.response) return new NextResponse(null, { status: handled.status })
     return NextResponse.json(handled.response, { status: handled.status })
   } catch (cause) {

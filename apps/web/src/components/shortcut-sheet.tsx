@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
  *  key every tool that has this uses, and ignored while a field has focus, so
  *  typing a question mark into search does not open a dialog over it. */
 const SHORTCUTS: { keys: string[]; what: string }[] = [
-  { keys: ['cmd', 'k'], what: 'Jump to the search box' },
+  { keys: ['cmd', 'k'], what: 'Search, or jump to a page or an action' },
   { keys: ['esc'], what: 'Close a dialog, a menu or a flyout' },
   { keys: ['enter'], what: 'Open the highlighted search result' },
   { keys: ['?'], what: 'Open this list' },

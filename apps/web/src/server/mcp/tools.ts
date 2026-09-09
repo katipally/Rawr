@@ -68,6 +68,9 @@ export type ToolDefinition = {
   inputSchema: (context: { registry: Registry }) => Record<string, unknown>
   /** Writes take an idempotency key and are replayed from the ledger on a retry. */
   writes: boolean
+  /** Which group a connection turns on to list this tool. Absent means `core`,
+   *  which is every hand-written tool below and is always listed. */
+  toolset?: string
   run: (context: ToolContext, args: Record<string, unknown>) => Promise<ToolResult>
 }
 
@@ -117,7 +120,7 @@ const searchRecords: ToolDefinition = {
   title: 'Search records',
   writes: false,
   description: ({ registry }) =>
-    `Find records by name, email or domain across every object in this account (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}). Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. Omit \`object\` to search everything.`,
+    `Find records by name, email or domain across every object in this account (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}), and also tasks by title and timeline entries by what they say. Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. A task or a timeline entry is not a record: each carries \`on\`, the record it hangs on, and that is what get_record and the write tools take. Omit \`object\` to search everything.`,
   inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
@@ -142,7 +145,10 @@ const searchRecords: ToolDefinition = {
 
     const lines = shown.flatMap((group) => [
       `${group.namePlural}:`,
-      ...group.hits.map((hit) => `  ${hit.displayName}${hit.detail ? ` (${hit.detail})` : ''} (id ${hit.id})`),
+      ...group.hits.map(
+        (hit) =>
+          `  ${hit.displayName}${hit.detail ? ` (${hit.detail})` : ''} (id ${hit.id}${hit.parent ? `, on ${hit.parent.objectKey} ${hit.parent.id}` : ''})`,
+      ),
     ])
 
     return {
@@ -150,7 +156,15 @@ const searchRecords: ToolDefinition = {
       data: {
         total,
         results: shown.flatMap((group) =>
-          group.hits.map((hit) => ({ object: group.objectKey, id: hit.id, name: hit.displayName, detail: hit.detail })),
+          group.hits.map((hit) => ({
+            object: group.objectKey,
+            id: hit.id,
+            name: hit.displayName,
+            detail: hit.detail,
+            // A task and a timeline entry have no page and no get_record of their
+            // own. This is the record they belong to, which every other tool takes.
+            ...(hit.parent ? { on: { object: hit.parent.objectKey, id: hit.parent.id } } : {}),
+          })),
         ),
       },
     }

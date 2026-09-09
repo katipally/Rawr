@@ -236,10 +236,15 @@ export const activity = pgTable(
      *  than writing every note a second time. Null for anything Rawr wrote itself. */
     importKey: text('import_key'),
     payload: jsonb('payload'),
+    /** The timeline is what people search for by memory: "the call where they
+     *  mentioned the renewal". Generated, so it cannot go stale the way the
+     *  custom-record vector has to be written by hand. */
+    search: searchVector('subject', 'body'),
     createdAt: createdAt(),
   },
   (t) => [
     index('activity_occurred_idx').on(t.accountId, t.occurredAt.desc(), t.id.desc()),
+    index('activity_search_idx').using('gin', t.search),
     uniqueIndex('activity_import_key_idx').on(t.accountId, t.importKey).where(sql`import_key is not null`),
   ],
 )

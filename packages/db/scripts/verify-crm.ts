@@ -35,6 +35,7 @@ import {
   removeAttachment,
   storageKeyFor } from '../src/dal/attachments.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
+import { createTask, logByHand } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
@@ -550,6 +551,39 @@ try {
     const contacts = hitsOf(await searchAll(sales, 'contact1@'), 'contact')
     expect(contacts.length > 0, 'no contact matched the prefix')
     return contacts[0]!.displayName
+  })
+
+  await check('search finds a task and a note, not only records', async () => {
+    const contact = await createRecord(sales, 'contact', {
+      first_name: 'Searchable',
+      last_name: 'Fixture',
+      email: 'searchable.fixture@verify.test',
+    })
+    const task = await createTask(sales, {
+      title: 'Chase the aardvark renewal',
+      entity: { entityType: 'contact', entityId: contact.id },
+    })
+    await logByHand(sales, {
+      type: 'call',
+      body: 'They asked about the aardvark tier.',
+      entity: { entityType: 'contact', entityId: contact.id },
+    })
+    try {
+      const results = await searchAll(sales, 'aardvark')
+      const tasks = hitsOf(results, 'task')
+      const activity = hitsOf(results, 'activity')
+      expect(tasks.length > 0, 'the task did not come back')
+      expect(activity.length > 0, 'the logged call did not come back')
+      // Neither has a page of its own, so both name the record they open.
+      expect(activity[0]!.parent?.id === contact.id, 'the activity did not name its record')
+      // A peer tenant must not see either, the same way it sees no records.
+      const peerHits = await searchAll(probeCtx, 'aardvark')
+      expect(peerHits.total === 0, `the peer tenant saw ${peerHits.total} rows`)
+      return `${tasks.length} tasks, ${activity.length} activity, top: ${tasks[0]!.displayName}`
+    } finally {
+      await db.delete(s.task).where(eq(s.task.id, task.id))
+      await deleteRecord(admin, 'contact', contact.id)
+    }
   })
 
   await check('a filtered list returns only matching rows and pages by keyset', async () => {

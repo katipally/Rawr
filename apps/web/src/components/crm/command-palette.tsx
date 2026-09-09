@@ -1,31 +1,64 @@
 'use client'
 
 import { Search } from 'lucide-react'
-import { cn } from '@rawr/ui'
+import { cn, filterOptions } from '@rawr/ui'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { recordPath } from '~/lib/links.ts'
+import { recordPath, tasksPath } from '~/lib/links.ts'
 
 type Item = { key: string; label: string; detail: string | null; href: string }
 type Group = { label: string; items: Item[] }
 
-/** A page the rail can reach, so "Find or Ask" finds pages as well as records.
- *  Passed down from the same NavSection[] the rail is built from, so the two
- *  cannot drift: a page added to the rail is searchable the same day. */
-export type Page = { label: string; section: string; href: string }
+/** A page the rail or Settings can reach, so the box finds pages as well as
+ *  records. Passed down from the same lists those two are built from, so the
+ *  three cannot drift: a page added to either is searchable the same day.
+ *
+ *  `keywords` carry the words somebody actually types. "billing" and "users" are
+ *  not our labels, and a search that finds nothing for them reads as a missing
+ *  feature rather than a missing synonym. */
+export type Page = { label: string; section: string; href: string; keywords?: string[] }
+
+/** A verb rather than a place: "Create contact", "Import records". Every one is
+ *  a plain href, so an action is a navigation with a name somebody would say. */
+export type Action = { label: string; href: string; keywords?: string[] }
 
 const DEBOUNCE_MS = 180
 
 /** More than this and the list is a rail with extra steps. */
-const MAX_PAGES = 6
+const MAX_PAGES = 8
+const MAX_ACTIONS = 5
 
-export const CommandPalette = ({ account, pages }: { account: string; pages: Page[] }) => {
+const RECENT_KEY = 'rawr.recent-search'
+const MAX_RECENT = 5
+
+const readRecent = (): Item[] => {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? '[]')
+    return Array.isArray(parsed)
+      ? parsed.filter((row): row is Item => typeof row?.href === 'string' && typeof row?.label === 'string')
+      : []
+  } catch {
+    // Private windows and blocked site data are normal, not an error.
+    return []
+  }
+}
+
+export const CommandPalette = ({
+  account,
+  pages,
+  actions,
+}: {
+  account: string
+  pages: Page[]
+  actions: Action[]
+}) => {
   const { navigate } = useNavigation()
   const listId = useId()
   const input = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [groups, setGroups] = useState<Group[]>([])
+  const [recent, setRecent] = useState<Item[]>([])
   const [active, setActive] = useState(0)
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,6 +70,10 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
         event.preventDefault()
         input.current?.focus()
         input.current?.select()
+        // Not only on focus: choosing a result closes the panel without blurring,
+        // so the box is often already focused and no focus event would fire.
+        setRecent(readRecent())
+        setOpen(true)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -68,7 +105,14 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
                 key: hit.id,
                 label: hit.displayName,
                 detail: hit.detail,
-                href: recordPath(account, hit.objectKey, hit.id),
+                // A task and an activity live on a record's page rather than one
+                // of their own, so both open the record they name. A task on
+                // nothing has only the task list.
+                href: hit.parent
+                  ? recordPath(account, hit.parent.objectKey, hit.parent.id)
+                  : hit.objectKey === 'task'
+                    ? tasksPath(account, { q: hit.displayName })
+                    : recordPath(account, hit.objectKey, hit.id),
               })),
             })),
           )
@@ -90,27 +134,73 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
     }
   }, [text, account])
 
-  // Pages are matched here rather than on the server: the list is the rail, it
-  // is already in memory, and a page match should not wait for a round trip.
-  const term = text.trim().toLowerCase()
-  const matched: Group[] =
+  // The rail and Settings both reach a handful of the same pages under different
+  // names: "Data Model" is /settings/objects, "Properties" is in both lists. One
+  // entry each, keeping the name the rail uses and the words Settings added to it,
+  // so the panel never offers the same page twice and no two rows share a key.
+  const unique = useMemo(() => {
+    const byHref = new Map<string, Page>()
+    for (const page of pages) {
+      const seen = byHref.get(page.href)
+      if (!seen) byHref.set(page.href, page)
+      else if (page.keywords) byHref.set(page.href, { ...seen, keywords: [...(seen.keywords ?? []), page.label, ...page.keywords] })
+    }
+    return [...byHref.values()]
+  }, [pages])
+
+  // Pages and actions are matched here rather than on the server: both lists are
+  // already in memory, and neither match should wait for a round trip.
+  const term = text.trim()
+  const local: Group[] =
     term.length < 2
       ? []
-      : (() => {
-          const hits = pages
-            .filter((page) => page.label.toLowerCase().includes(term) || page.section.toLowerCase().includes(term))
-            .slice(0, MAX_PAGES)
-            .map((page) => ({ key: page.href, label: page.label, detail: page.section, href: page.href }))
-          return hits.length > 0 ? [{ label: 'Go to', items: hits }] : []
-        })()
+      : [
+          {
+            label: 'Actions',
+            items: filterOptions(actions, term)
+              .slice(0, MAX_ACTIONS)
+              .map((action) => ({ key: action.href, label: action.label, detail: null, href: action.href })),
+          },
+          {
+            label: 'Go to',
+            items: filterOptions(
+              unique.map((page) => ({ ...page, hint: page.section })),
+              term,
+            )
+              .slice(0, MAX_PAGES)
+              .map((page) => ({ key: page.href, label: page.label, detail: page.section, href: page.href })),
+          },
+        ].filter((group) => group.items.length > 0)
 
-  const shown = [...matched, ...groups]
+  // An empty box is not a dead box: what somebody opened last, then what they can
+  // make, which is the whole reason to press the shortcut before typing.
+  const resting: Group[] =
+    term.length >= 2
+      ? []
+      : [
+          { label: 'Recent', items: recent },
+          {
+            label: 'Actions',
+            items: actions
+              .slice(0, MAX_ACTIONS)
+              .map((action) => ({ key: action.href, label: action.label, detail: null, href: action.href })),
+          },
+        ].filter((group) => group.items.length > 0)
+
+  const shown = term.length >= 2 ? [...local, ...groups] : resting
   const flat = shown.flatMap((group) => group.items)
 
   const go = (item: Item) => {
     setOpen(false)
     setText('')
     setGroups([])
+    const next = [item, ...recent.filter((row) => row.href !== item.href)].slice(0, MAX_RECENT)
+    setRecent(next)
+    try {
+      window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    } catch {
+      // Nothing depends on this surviving the tab.
+    }
     navigate(item.href)
   }
 
@@ -136,7 +226,7 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
     }
   }
 
-  const showing = open && text.trim().length >= 2
+  const showing = open && flat.length + (term.length >= 2 ? 1 : 0) > 0
   let index = -1
 
   return (
@@ -149,13 +239,21 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
         role="combobox"
         aria-expanded={showing}
         aria-controls={listId}
-        aria-label="Search records and pages"
-        placeholder="Find or Ask"
+        aria-label="Search Rawr"
+        placeholder="Search"
         onChange={(event) => {
           setText(event.target.value)
           setOpen(true)
         }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          setRecent(readRecent())
+          setActive(0)
+          setOpen(true)
+        }}
+        onClick={() => {
+          setRecent(readRecent())
+          setOpen(true)
+        }}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}
         className="h-8 w-full min-w-0 rounded-pill border border-nav-line bg-nav pl-4 pr-10 text-nav-text placeholder:text-nav-text outline-none focus:border-nav-text"
@@ -176,7 +274,7 @@ export const CommandPalette = ({ account, pages }: { account: string; pages: Pag
             </p>
           ) : flat.length === 0 ? (
             <p className="px-3 py-2 text-secondary">
-              {searching ? 'Searching…' : `Nothing matches “${text.trim()}”.`}
+              {searching ? 'Searching…' : `Nothing matches “${term}”.`}
             </p>
           ) : (
             shown.map((group) => (
