@@ -74,8 +74,22 @@ export const ListToolbar = ({
   // and is a race against anything that remounts the toolbar in between.
   const askedToCreate = openCreate && canWrite
   const askedForView = openView && canWrite
-  const [showSave, setShowSave] = useState(askedForView)
-  const [showCreate, setShowCreate] = useState(askedToCreate)
+
+  // Derived from the prop, not seeded into state from it. `useState(x)` reads x
+  // once, on the mount that creates the state -- so arriving by a client-side
+  // navigation, which re-renders this component with openCreate now true rather
+  // than remounting it, left the dialog shut while the address bar said it was
+  // open. A deep link worked, because that mounts fresh, which is what made it
+  // look like the menu item rather than the state was broken.
+  //
+  // Closing navigates the flag out of the URL, below, so there is nothing to
+  // hold here: the address is the state, which is what the rest of this screen
+  // already does with filters, sort and columns.
+  const showCreate = askedToCreate
+  // The view dialog has a second way in, the toolbar button, so it does keep a
+  // local flag -- ORed with the URL rather than initialised from it.
+  const [savePicked, setSavePicked] = useState(false)
+  const showSave = askedForView || savePicked
 
   const [showColumns, setShowColumns] = useState(false)
   const [draftColumns, setDraftColumns] = useState(columns)
@@ -109,7 +123,7 @@ export const ListToolbar = ({
         sorts,
         isShared: shared,
       })
-      setShowSave(false)
+      setSavePicked(false)
       setShowColumns(false)
       if (into) {
         toast('success', `Saved to “${saved.name}”.`)
@@ -128,7 +142,7 @@ export const ListToolbar = ({
   }
 
   const closeSave = () => {
-    setShowSave(false)
+    setSavePicked(false)
     // Drop ?view=new so a refresh, or a step back, does not reopen it.
     if (askedForView) navigate(objectView(account, object, view, kind, params))
   }
@@ -240,7 +254,7 @@ export const ListToolbar = ({
               label={kind === 'list' ? 'Save these filters and columns as a view' : 'Save these filters as a view'}
               icon={<BookmarkPlus className="size-4" />}
               className="border border-line-strong text-body"
-              onClick={() => setShowSave(true)}
+              onClick={() => setSavePicked(true)}
             />
           ) : null}
           {kind === 'list' ? (
@@ -403,11 +417,9 @@ export const ListToolbar = ({
           object={object}
           objectLabel={objectLabel}
           fields={createFields}
-          onClose={() => {
-            setShowCreate(false)
-            // Drop ?new=1 so a refresh, or a step back, does not reopen it.
-            if (askedToCreate) navigate(objectView(account, object, view, kind, params))
-          }}
+          // Dropping ?new=1 is what closes it, since that flag is the only thing
+          // holding it open. A refresh or a step back therefore cannot reopen it.
+          onClose={() => navigate(objectView(account, object, view, kind, params))}
         />
       ) : null}
     </div>
