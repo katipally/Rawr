@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import Link from 'next/link'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { usePagedRows } from '~/components/paged.tsx'
 import { objectView, propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -35,6 +36,7 @@ export const ObjectList = ({
 
   const [singular, setSingular] = useState('')
   const [plural, setPlural] = useState('')
+  const { page, pager } = usePagedRows(rows, 'objects')
 
   const run = async (what: () => Promise<unknown>, said: string) => {
     setBusy(true)
@@ -56,7 +58,7 @@ export const ObjectList = ({
       {canWrite ? (
         <div>
           <Button variant="primary" onClick={() => { setSingular(''); setPlural(''); setCreating(true) }}>
-            Create an object
+            Create object
           </Button>
         </div>
       ) : null}
@@ -68,7 +70,7 @@ export const ObjectList = ({
         />
       ) : (
         <ul className="flex flex-col rounded-panel border border-line bg-surface">
-          {rows.map((row) => (
+          {page.map((row) => (
             <li
               key={row.id}
               className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
@@ -108,10 +110,12 @@ export const ObjectList = ({
         </ul>
       )}
 
+      {pager}
+
       <Modal
         open={creating}
         onClose={() => setCreating(false)}
-        title="Create an object"
+        title="Create object"
         footer={
           <div className="flex gap-2">
             <Button

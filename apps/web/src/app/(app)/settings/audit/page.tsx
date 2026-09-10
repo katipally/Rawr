@@ -29,7 +29,7 @@ const AuditPage = async () => {
     <div className="flex flex-col gap-4">
       <PageHeader
         as="h2"
-        title="History"
+        title="Audit log"
         lead={`Every change made in ${session.accountName}, newest first.`}
         why={
           <p>

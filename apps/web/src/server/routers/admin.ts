@@ -60,8 +60,8 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
  *
  *  Reads are open to anybody signed in, because every surface in the app already
  *  shows this configuration; hiding the settings page from a salesperson who can
- *  see the same stage names on a board would be theatre. Writes go through the data
- *  access layer's role matrix, which is the thing that actually decides. */
+ *  see the same stage names on a board would be theatre. Writes need the account
+ *  hub here and are refused again by the data access layer's role matrix. */
 
 /** Any object in the account, including one an admin invented: a field belongs
  *  to whichever object the registry says exists, and fields are the whole point
@@ -169,7 +169,7 @@ export const adminRouter = router({
 
     types: protectedProcedure.query(() => FIELD_TYPES),
 
-    create: protectedProcedure
+    create: adminProcedure
       .input(
         z.object({
           object: objectKey,
@@ -199,7 +199,7 @@ export const adminRouter = router({
         ),
       ),
 
-    update: protectedProcedure
+    update: adminProcedure
       .input(
         z.object({
           id: z.uuid(),
@@ -225,7 +225,7 @@ export const adminRouter = router({
         ),
       ),
 
-    reorder: protectedProcedure
+    reorder: adminProcedure
       .input(z.object({ object: objectKey, orderedIds: z.array(z.uuid()).max(400) }))
       .mutation(({ ctx, input }) => call(() => reorderFields(ctx.account, input.object, input.orderedIds))),
 
@@ -234,18 +234,18 @@ export const adminRouter = router({
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => call(() => fieldUsage(ctx.account, input.id))),
 
-    remove: protectedProcedure
+    remove: adminProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteField(ctx.account, input.id))),
 
-    restore: protectedProcedure
+    restore: adminProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => restoreField(ctx.account, input.id))),
 
     /** Gives a jsonb-stored field its own expression index, so filtering and
      *  sorting on it stops being a scan. The index itself is built by the worker:
      *  CREATE INDEX CONCURRENTLY cannot run inside a request. F0 §4. */
-    promoteToHot: protectedProcedure
+    promoteToHot: adminProcedure
       .input(z.object({ fieldId: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => promoteFieldToHot(ctx.account, input.fieldId))),
 
@@ -258,19 +258,19 @@ export const adminRouter = router({
   pipelines: router({
     list: protectedProcedure.query(({ ctx }) => call(() => listPipelines(ctx.account))),
 
-    create: protectedProcedure
+    create: adminProcedure
       .input(z.object({ name }))
       .mutation(({ ctx, input }) => call(() => createPipeline(ctx.account, input.name))),
 
-    rename: protectedProcedure
+    rename: adminProcedure
       .input(z.object({ id: z.uuid(), name }))
       .mutation(({ ctx, input }) => call(() => renamePipeline(ctx.account, input.id, input.name))),
 
-    remove: protectedProcedure
+    remove: adminProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deletePipeline(ctx.account, input.id))),
 
-    createStage: protectedProcedure
+    createStage: adminProcedure
       .input(
         z.object({
           pipelineId: z.uuid(),
@@ -292,7 +292,7 @@ export const adminRouter = router({
         ),
       ),
 
-    updateStage: protectedProcedure
+    updateStage: adminProcedure
       .input(
         z.object({
           id: z.uuid(),
@@ -314,7 +314,7 @@ export const adminRouter = router({
         ),
       ),
 
-    reorderStages: protectedProcedure
+    reorderStages: adminProcedure
       .input(z.object({ pipelineId: z.uuid(), orderedIds: z.array(z.uuid()).max(100) }))
       .mutation(({ ctx, input }) =>
         call(() => reorderStages(ctx.account, input.pipelineId, input.orderedIds)),
@@ -322,7 +322,7 @@ export const adminRouter = router({
 
     /** Deleting a stage with deals in it needs a destination, and every deal that
      *  moves writes its own stage_change. F1's edge-case table. */
-    removeStage: protectedProcedure
+    removeStage: adminProcedure
       .input(z.object({ id: z.uuid(), destinationStageId: z.uuid().nullish() }))
       .mutation(({ ctx, input }) =>
         call(() => deleteStage(ctx.account, input.id, input.destinationStageId ?? null)),
@@ -332,28 +332,28 @@ export const adminRouter = router({
   lifecycle: router({
     list: protectedProcedure.query(({ ctx }) => call(() => listLifecycleStages(ctx.account))),
 
-    create: protectedProcedure
+    create: adminProcedure
       .input(z.object({ name }))
       .mutation(({ ctx, input }) => call(() => createLifecycleStage(ctx.account, input.name))),
 
-    rename: protectedProcedure
+    rename: adminProcedure
       .input(z.object({ id: z.uuid(), name }))
       .mutation(({ ctx, input }) => call(() => renameLifecycleStage(ctx.account, input.id, input.name))),
 
-    reorder: protectedProcedure
+    reorder: adminProcedure
       .input(z.object({ orderedIds: z.array(z.uuid()).max(100) }))
       .mutation(({ ctx, input }) => call(() => reorderLifecycleStages(ctx.account, input.orderedIds))),
 
-    remove: protectedProcedure
+    remove: adminProcedure
       .input(z.object({ id: z.uuid(), destinationId: z.uuid().nullish() }))
       .mutation(({ ctx, input }) =>
         call(() => deleteLifecycleStage(ctx.account, input.id, input.destinationId ?? null)),
       ),
   }),
 
-  /** B11. When this happens, do that. Admin only, both to write a rule and to
-   *  read the log of what it did: a rule writes to every record matching a
-   *  filter, which is not a thing to hand to whoever can write one record. */
+  /** B11. When this happens, do that. Writing a rule is an admin's: it writes to
+   *  every record matching a filter, which is not a thing to hand to whoever can
+   *  write one record. The rules and their run log read like any other list. */
   automations: router({
     list: protectedProcedure.query(({ ctx }) => call(() => listAutomations(ctx.account))),
 
@@ -361,7 +361,7 @@ export const adminRouter = router({
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => call(() => readAutomation(ctx.account, input.id))),
 
-    save: protectedProcedure
+    save: adminProcedure
       .input(
         z.object({
           id: z.uuid().nullish(),
@@ -411,11 +411,11 @@ export const adminRouter = router({
         ),
       ),
 
-    setActive: protectedProcedure
+    setActive: adminProcedure
       .input(z.object({ id: z.uuid(), isActive: z.boolean() }))
       .mutation(({ ctx, input }) => call(() => setAutomationActive(ctx.account, input.id, input.isActive))),
 
-    remove: protectedProcedure
+    remove: adminProcedure
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => removeAutomation(ctx.account, input.id))),
 
@@ -429,7 +429,7 @@ export const adminRouter = router({
   subscriptionTypes: router({
     list: protectedProcedure.query(({ ctx }) => call(() => listSubscriptionTypes(ctx.account))),
 
-    create: protectedProcedure
+    create: adminProcedure
       .input(z.object({ name, description: z.string().max(500).nullish(), isInternal: z.boolean().optional() }))
       .mutation(({ ctx, input }) =>
         call(() =>
@@ -441,7 +441,7 @@ export const adminRouter = router({
         ),
       ),
 
-    update: protectedProcedure
+    update: adminProcedure
       .input(
         z.object({
           id: z.uuid(),
@@ -463,7 +463,7 @@ export const adminRouter = router({
 
     /** The opt-out count is echoed back so a stale page cannot discard consent it
      *  did not know about. */
-    remove: protectedProcedure
+    remove: adminProcedure
       .input(z.object({ id: z.uuid(), confirmUnsubscribes: z.number().int().min(0) }))
       .mutation(({ ctx, input }) =>
         call(() => deleteSubscriptionType(ctx.account, input.id, input.confirmUnsubscribes)),

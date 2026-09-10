@@ -1,11 +1,12 @@
 'use client'
 
-import { Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, PageHeader, Select, TextInput, useToast, type Column } from '@rawr/ui'
+import { Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, NOTHING_MATCHED, PageHeader, Select, TextInput, useToast, type Column } from '@rawr/ui'
 import { MoreVertical, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
+import { usePagedRows } from '~/components/paged.tsx'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -131,6 +132,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
 
   const query = needle.trim().toLowerCase()
   const shown = query ? rows.filter((row) => row.name.toLowerCase().includes(query)) : rows
+  const { page, pager } = usePagedRows(shown, 'segments')
 
   const recompute = (row: SegmentRow) =>
     void run(async () => {
@@ -320,7 +322,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
 
       <DataTable
         columns={columns}
-        rows={shown}
+        rows={page}
         rowKey={(row) => row.id}
         caption="Segments in this account"
         storageKey="segments"
@@ -328,7 +330,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         empty={
           <div className="flex flex-1 flex-col justify-center">
           {query ? (
-            <EmptyState title="No segment matches that search" />
+            <EmptyState {...NOTHING_MATCHED} />
           ) : (
             <EmptyState
               title="No segments yet"
@@ -340,6 +342,8 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         }
       />
 
+      {pager}
+
       <div className="-mx-3 flex shrink-0 items-center border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
           {shown.length.toLocaleString()} {shown.length === 1 ? 'segment' : 'segments'}
@@ -350,7 +354,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
       <Modal
         open={editing !== null}
         size="lg"
-        title={editing === 'new' ? 'New segment' : `Edit ${editing === null ? '' : editing.name}`}
+        title={editing === 'new' ? 'Create segment' : `Edit ${editing === null ? '' : editing.name}`}
         onClose={() => setEditing(null)}
       >
         <div className="flex flex-col gap-3">

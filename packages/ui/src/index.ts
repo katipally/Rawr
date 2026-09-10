@@ -8,7 +8,7 @@ export { Combobox, type ComboboxOption, type ComboboxProps } from './primitives/
 export { filterOptions, rank, type Rankable } from './primitives/combobox.ts'
 export { DropdownMenu, type DropdownMenuProps, type MenuGroup, type MenuItem } from './primitives/dropdown-menu.tsx'
 export { Alert, type AlertProps, type AlertTone } from './primitives/alert.tsx'
-export { EmptyState, type EmptyStateProps } from './primitives/empty-state.tsx'
+export { EmptyState, NOTHING_MATCHED, type EmptyStateProps } from './primitives/empty-state.tsx'
 export { Kbd, type KbdProps } from './primitives/kbd.tsx'
 export { PageHeader, type PageHeaderProps } from './primitives/page-header.tsx'
 export { Field, Select, TextArea, TextInput, type FieldProps } from './primitives/field.tsx'

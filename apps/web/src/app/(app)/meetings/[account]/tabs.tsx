@@ -14,7 +14,7 @@ export const MeetingsTabs = ({ account, current }: { account: string; current: M
     label="Meetings"
     items={[
       { key: 'calendar', label: 'Calendar', href: calendarPath(account) },
-      { key: 'booked', label: 'Booked meetings', href: bookedPath(account) },
+      { key: 'booked', label: 'Booked', href: bookedPath(account) },
       { key: 'pages', label: 'Meeting links', href: bookingPagesPath(account) },
       { key: 'availability', label: 'My hours', href: availabilityPath(account) },
       { key: 'calendars', label: 'Calendar connections', href: calendarsPath(account) },

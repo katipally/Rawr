@@ -102,7 +102,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied(
       identity.hostedDomain
         ? `${identity.email} signed in, but no account exists for ${identity.hostedDomain} and one could not be opened. Ask an admin to invite you.`
-        : `${identity.email} signed in, but has no seat. Ask an admin to invite you from Settings, Users and Teams.`,
+        : `${identity.email} signed in, but has no seat. Ask an admin to invite you from Settings, Members and Teams.`,
     )
   }
 

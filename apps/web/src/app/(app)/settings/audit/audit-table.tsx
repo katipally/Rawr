@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, Card, Combobox, EmptyState, Spinner, useToast } from '@rawr/ui'
+import { Badge, Button, Card, Combobox, EmptyState, NOTHING_MATCHED, Spinner, useToast } from '@rawr/ui'
 import { Fragment, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -122,10 +122,7 @@ export const AuditTable = ({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState
-          title="Nothing matches"
-          description="Clear a filter, or look further back: only changes made through Rawr appear here."
-        />
+        <EmptyState {...NOTHING_MATCHED} />
       ) : (
         <Card flush>
           <ul className="divide-y divide-divider">

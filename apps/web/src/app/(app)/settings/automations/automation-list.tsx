@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
+import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
 type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
@@ -257,6 +258,7 @@ export const AutomationList = ({
   const toast = useToast()
   const [editing, setEditing] = useState<AutomationRowView | 'new' | null>(null)
   const [removing, setRemoving] = useState<AutomationRowView | null>(null)
+  const { page, pager } = usePagedRows(rows, 'automations')
   const [busy, setBusy] = useState(false)
 
   const [name, setName] = useState('')
@@ -340,7 +342,7 @@ export const AutomationList = ({
         />
       ) : (
         <ul className="flex flex-col rounded-panel border border-line bg-surface">
-          {rows.map((row) => (
+          {page.map((row) => (
             <li
               key={row.id}
               className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
@@ -358,7 +360,7 @@ export const AutomationList = ({
                 <p className="text-small text-secondary tabular-nums">
                   {row.runCount === 0
                     ? 'Has not fired yet'
-                    : `Fired ${row.runCount.toLocaleString()} time${row.runCount === 1 ? '' : 's'}, last ${new Date(row.lastRunAt ?? row.createdAt).toLocaleString()}`}
+                    : `Fired ${formatNumber(row.runCount)} time${row.runCount === 1 ? '' : 's'}, last ${formatDateTime(row.lastRunAt ?? row.createdAt, zone)}`}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -390,6 +392,8 @@ export const AutomationList = ({
         </ul>
       )}
 
+      {pager}
+
       <section className="flex flex-col gap-2">
         <h3 className="text-base font-semibold">What they did</h3>
         {runs.length === 0 ? (
@@ -419,7 +423,7 @@ export const AutomationList = ({
         open={editing !== null}
         onClose={() => setEditing(null)}
         size="lg"
-        title={editing === 'new' ? 'New automation' : 'Edit automation'}
+        title={editing === 'new' ? 'Create automation' : 'Edit automation'}
         footer={
           <div className="flex gap-2">
             <Button variant="primary" busy={busy} disabled={!name.trim()} onClick={() => void save()}>

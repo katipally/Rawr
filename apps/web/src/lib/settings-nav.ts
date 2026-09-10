@@ -46,10 +46,10 @@ export const settingsGroups = (account: string): SettingsGroup[] => [
   {
     label: 'Account management',
     sections: [
-      { href: defaultsPath(), label: 'Account Defaults', keywords: ['currency', 'timezone', 'locale'] },
-      { href: membersPath(), label: 'Users', keywords: ['members', 'people', 'seats', 'invite', 'permissions', 'roles'] },
+      { href: defaultsPath(), label: 'Account defaults', keywords: ['currency', 'timezone', 'locale'] },
+      { href: membersPath(), label: 'Members', keywords: ['members', 'people', 'seats', 'invite', 'permissions', 'roles'] },
       { href: teamsPath(), label: 'Teams', keywords: ['groups', 'assignment'] },
-      { href: auditPath(), label: 'History', keywords: ['audit', 'log', 'who changed'] },
+      { href: auditPath(), label: 'Audit log', keywords: ['audit', 'log', 'who changed'] },
     ],
   },
   {

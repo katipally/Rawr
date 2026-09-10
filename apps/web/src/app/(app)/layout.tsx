@@ -138,7 +138,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Move data',
           items: [
-            { href: importsPath(account), label: 'Data Integration', match: `/contacts/${account}/import` },
+            { href: importsPath(account), label: 'Import', match: `/contacts/${account}/import` },
             { href: exportPath(account), label: 'Export' },
             { href: duplicatesPath(account), label: 'Duplicates' },
           ],

@@ -99,7 +99,7 @@ export const DashboardList = ({ account, rows, catalogue, from, to }: DashboardL
         busy={busy}
         catalogue={catalogue}
         initial={{ name: '', cards: [], isShared: false }}
-        title="New dashboard"
+        title="Create dashboard"
         onClose={() => setComposing(false)}
         onSave={create}
       />

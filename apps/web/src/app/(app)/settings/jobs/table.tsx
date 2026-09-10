@@ -11,7 +11,8 @@ export type DeadLetter = {
   id: string
   jobName: string
   error: string
-  attempts: number
+  /** Null for work that never reached the queue, so it never had an attempt. */
+  attempts: number | null
   at: string
   payload: unknown
 }
@@ -45,7 +46,13 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       width: 200,
       render: (row) => formatDateTime(row.at, zone),
     },
-    { key: 'attempts', header: 'Attempts', width: 100, align: 'right', render: (row) => row.attempts },
+    {
+      key: 'attempts',
+      header: 'Attempts',
+      width: 120,
+      align: 'right',
+      render: (row) => (row.attempts === null ? <span className="text-secondary">not queued</span> : row.attempts),
+    },
     { key: 'error', header: 'Error', render: (row) => <span className="break-words">{row.error}</span> },
     {
       key: 'replay',
@@ -64,7 +71,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       columns={columns}
       rows={rows}
       rowKey={(row) => row.id}
-      caption="Jobs that exhausted their retries"
+      caption="Jobs that could not be delivered"
       empty={
         <EmptyState
           title="No failed jobs"

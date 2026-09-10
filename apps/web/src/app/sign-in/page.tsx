@@ -56,7 +56,7 @@ const SignIn = async ({ searchParams }: Props) => {
                 'Sign in with the address you were invited on. '
               )}
               You arrive able to read everything and change nothing; an admin raises what you can
-              reach under Settings, Users and Teams.
+              reach under Settings, Members and Teams.
             </p>
             {calendarAtSignIn ? (
               /* Google blocks the whole authorisation when a Account admin has

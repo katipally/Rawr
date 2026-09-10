@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Markdown } from '~/components/crm/markdown.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
+import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useZone } from '~/components/zone.tsx'
 
@@ -29,6 +30,7 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
+  const { page, pager } = usePagedRows(rows, 'templates')
 
   const save = async () => {
     if (!draft) return
@@ -91,7 +93,7 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {rows.map((row) => (
+          {page.map((row) => (
             <Card key={row.id} title={row.name}>
               <div className="flex min-w-0 flex-col gap-2">
                 <p className="break-words font-medium">{row.subject || '(no subject)'}</p>
@@ -136,11 +138,12 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
               </div>
             </Card>
           ))}
+          {pager}
         </div>
       )}
 
       {draft ? (
-        <Modal open title={draft.id ? 'Edit template' : 'Create a template'} onClose={() => setDraft(null)}>
+        <Modal open title={draft.id ? 'Edit template' : 'Create template'} onClose={() => setDraft(null)}>
           <div className="flex flex-col gap-3">
             <Field label="Name" id="template-name" required hint="What it is called in the picker.">
               <TextInput

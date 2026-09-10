@@ -1,10 +1,11 @@
 'use client'
 
 import type { SequenceRow } from '@rawr/db'
-import { Badge, Button, Card, EmptyState, Field, Modal, TextArea, TextInput, useToast, PageHeader } from '@rawr/ui'
+import { Badge, Button, Card, EmptyState, Field, Modal, NOTHING_MATCHED, TextArea, TextInput, useToast, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { usePagedRows } from '~/components/paged.tsx'
 import { sequencePath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -53,6 +54,7 @@ export const SequenceList = ({
         (row.description ?? '').toLowerCase().includes(wanted) ||
         (row.ownerName ?? '').toLowerCase().includes(wanted)),
   )
+  const { page, pager } = usePagedRows(shown, 'sequences')
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -107,13 +109,10 @@ export const SequenceList = ({
           description="A sequence is a run of steps with a wait between them. The first one takes a couple of minutes to write."
         />
       ) : shown.length === 0 ? (
-        <EmptyState
-          title="Nothing matches"
-          description="Clear the filter or the search to see the rest."
-        />
+        <EmptyState {...NOTHING_MATCHED} />
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
-          {shown.map((row) => (
+          {page.map((row) => (
             <Card
               key={row.id}
               title={
@@ -155,8 +154,10 @@ export const SequenceList = ({
         </div>
       )}
 
+      {pager}
+
       {creating ? (
-        <Modal open title="Create a sequence" onClose={() => setCreating(false)}>
+        <Modal open title="Create sequence" onClose={() => setCreating(false)}>
           <form
             className="flex flex-col gap-3"
             onSubmit={(event) => {

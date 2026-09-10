@@ -6,6 +6,7 @@ import { ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { usePagedRows } from '~/components/paged.tsx'
 import { availabilityPath, bookedPath, bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { BookingLinkSnippet } from './snippet.tsx'
@@ -60,6 +61,7 @@ export const PagesTable = ({
   const router = useRouter()
   const toast = useToast()
   const [embedding, setEmbedding] = useState<PageRow | null>(null)
+  const { page, pager } = usePagedRows(rows, 'scheduling pages')
   const [pending, setPending] = useState<string | null>(null)
 
   const setActive = async (row: PageRow, isActive: boolean) => {
@@ -83,7 +85,7 @@ export const PagesTable = ({
       render: (row) => (
         <span className="flex min-w-0 flex-col py-1">
           <span className="flex min-w-0 items-center gap-2">
-            <Link href={bookingPagesPath(account, row.id)} className="truncate font-semibold" onClick={(event) => event.stopPropagation()}>
+            <Link href={bookingPagesPath(account, row.id)} title={row.name} className="truncate font-semibold" onClick={(event) => event.stopPropagation()}>
               {row.name}
             </Link>
             {row.unhealthyHosts > 0 ? <Badge tone="error">{row.unhealthyHosts} without a calendar</Badge> : null}
@@ -175,7 +177,8 @@ export const PagesTable = ({
 
   return (
     <>
-      <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption="Scheduling pages in this account" />
+      <DataTable columns={columns} rows={page} rowKey={(row) => row.id} caption="Scheduling pages in this account" />
+      {pager}
       <Modal open={embedding !== null} title={embedding ? `Share “${embedding.name}”` : 'Share'} onClose={() => setEmbedding(null)}>
         {embedding ? <BookingLinkSnippet baseUrl={baseUrl} account={account} slug={embedding.slug} open /> : null}
       </Modal>

@@ -5,7 +5,7 @@ import { DefaultsPanel } from './defaults-panel.tsx'
 
 /** What the account itself is: its name, the domain it trusts, what a domain
  *  joiner arrives holding, how many seats there are and how long raw activity is
- *  kept. HubSpot files this under Account Defaults, and so does Rawr. */
+ *  kept. HubSpot files this under Account defaults, and so does Rawr. */
 const DefaultsPage = async () => {
   const session = await readSession()
   if (!session) return null
@@ -16,7 +16,7 @@ const DefaultsPage = async () => {
     <div className="flex flex-col gap-4">
       <PageHeader
         as="h2"
-        title="Account Defaults"
+        title="Account defaults"
         lead={`Settings that apply to everyone in ${account.name}.`}
       />
       <DefaultsPanel

@@ -56,25 +56,19 @@ const BoardPage = async ({
 
   let board: Awaited<ReturnType<typeof readBoard>> | null = null
   let boardError: string | null = null
+  // What the board was actually read with, which is what "Show more" has to ask
+  // for again. It follows the retry below rather than the address.
+  let query = { pipelineId: byStage ? pipelineId : null, filters, search: search.q ?? '', groupBy }
   try {
-    board = await readBoard(ctx, {
-      pipelineId: byStage ? pipelineId : null,
-      filters,
-      search: search.q ?? '',
-      groupBy,
-    })
+    board = await readBoard(ctx, query)
   } catch (cause) {
     // A hand-edited group in a URL is the usual cause, and the message names the
     // fields that would have worked, so the default grouping is worth one retry.
     boardError = cause instanceof Error ? cause.message : String(cause)
     // A hand-edited filter is the other cause, and it survives that retry. Saying
     // so beats the crash screen the second throw used to reach.
-    board = await readBoard(ctx, {
-      pipelineId,
-      filters,
-      search: search.q ?? '',
-      groupBy: 'stage_id',
-    }).catch(() => null)
+    query = { pipelineId, filters, search: search.q ?? '', groupBy: 'stage_id' }
+    board = await readBoard(ctx, query).catch(() => null)
   }
 
   const listParams: ListParams = {
@@ -196,6 +190,7 @@ const BoardPage = async ({
         <DealBoard
           account={account}
           columns={board.columns}
+          query={{ ...query, filters: query.filters as never }}
           groupByKey={board.groupByKey}
           canWrite={canWrite}
         />

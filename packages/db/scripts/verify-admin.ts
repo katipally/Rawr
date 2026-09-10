@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { AccountContext } from '../src/dal/context.ts'
+import { canEdit, type AccountContext } from '../src/dal/context.ts'
 import {
   createField,
   deleteField,
@@ -14,6 +15,13 @@ import {
   restoreField,
   updateField,
 } from '../src/dal/admin-fields.ts'
+import { promoteFieldToHot } from '../src/dal/fields.ts'
+import {
+  listAutomations,
+  removeAutomation,
+  saveAutomation,
+  setAutomationActive,
+} from '../src/dal/automations.ts'
 import {
   createLifecycleStage,
   createPipeline,
@@ -23,6 +31,9 @@ import {
   deleteStage,
   listLifecycleStages,
   listPipelines,
+  renameLifecycleStage,
+  renamePipeline,
+  reorderLifecycleStages,
   reorderStages,
   updateStage,
 } from '../src/dal/pipelines.ts'
@@ -30,6 +41,7 @@ import {
   createSubscriptionType,
   deleteSubscriptionType,
   listSubscriptionTypes,
+  updateSubscriptionType,
 } from '../src/dal/subscriptions.ts'
 import {
   deleteSegment,
@@ -46,7 +58,7 @@ import { readBoard, groupableFields } from '../src/dal/board.ts'
 import { recordOptions } from '../src/dal/search.ts'
 import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
 /** The parts of F1 that had no code: the metadata registry's write side, pipeline
  *  and lifecycle administration, subscription types, segments, bulk edit, board
@@ -407,6 +419,71 @@ try {
   )
 
   console.log('')
+  console.log('-- settings mutations are an admin\'s ---------------------------')
+
+  /** Somebody who can edit contacts and nothing else. Built here rather than
+   *  seeded, so the check does not wait on a seat existing. */
+  const contactsOnly: AccountContext = {
+    ...admin,
+    isSuperAdmin: false,
+    viewHubs: ['reports'],
+    editHubs: ['contacts'],
+  }
+
+  await check('the gate the router now puts these mutations behind refuses it', async () => {
+    expect(!canEdit(contactsOnly, 'account'), 'a contacts-only seat passed the account check')
+    expect(canEdit(admin, 'account'), 'the admin seat failed the account check')
+    return 'canEdit(ctx, "account") is false for contacts-only and true for admin'
+  })
+
+  await check('a contacts-only editor is refused on every settings mutation', async () => {
+    // The grant is checked before any row is read, so an id that exists is not
+    // needed to prove the refusal.
+    const absent = randomUUID()
+    const mutations: [string, () => Promise<unknown>][] = [
+      ['fields.create', () => createField(contactsOnly, { objectKey: 'deal', key: `nope_${stamp}`, label: 'Nope', type: 'text' })],
+      ['fields.update', () => updateField(contactsOnly, { id: absent, label: 'Nope' })],
+      ['fields.reorder', () => reorderFields(contactsOnly, 'deal', [])],
+      ['fields.remove', () => deleteField(contactsOnly, absent)],
+      ['fields.restore', () => restoreField(contactsOnly, absent)],
+      ['fields.promoteToHot', () => promoteFieldToHot(contactsOnly, absent)],
+      ['fields.purge', () => purgeField(contactsOnly, absent)],
+      ['pipelines.create', () => createPipeline(contactsOnly, 'Nope')],
+      ['pipelines.rename', () => renamePipeline(contactsOnly, absent, 'Nope')],
+      ['pipelines.remove', () => deletePipeline(contactsOnly, absent)],
+      ['pipelines.createStage', () => createStage(contactsOnly, { pipelineId: absent, name: 'Nope' })],
+      ['pipelines.updateStage', () => updateStage(contactsOnly, { id: absent, name: 'Nope' })],
+      ['pipelines.reorderStages', () => reorderStages(contactsOnly, absent, [])],
+      ['pipelines.removeStage', () => deleteStage(contactsOnly, absent, null)],
+      ['lifecycle.create', () => createLifecycleStage(contactsOnly, 'Nope')],
+      ['lifecycle.rename', () => renameLifecycleStage(contactsOnly, absent, 'Nope')],
+      ['lifecycle.reorder', () => reorderLifecycleStages(contactsOnly, [])],
+      ['lifecycle.remove', () => deleteLifecycleStage(contactsOnly, absent, null)],
+      ['automations.save', () => saveAutomation(contactsOnly, { id: null, name: 'Nope', trigger: 'record_created', objectKey: 'contact', conditions: [], steps: [{ kind: 'delay', minutes: 1 }] })],
+      ['automations.setActive', () => setAutomationActive(contactsOnly, absent, false)],
+      ['automations.remove', () => removeAutomation(contactsOnly, absent)],
+      ['subscriptionTypes.create', () => createSubscriptionType(contactsOnly, { name: 'Nope' })],
+      ['subscriptionTypes.update', () => updateSubscriptionType(contactsOnly, { id: absent, name: 'Nope' })],
+      ['subscriptionTypes.remove', () => deleteSubscriptionType(contactsOnly, absent, 0)],
+    ]
+    for (const [what, run] of mutations) {
+      const message = await refuses(what, run)
+      expect(message.trim().length > 0, `${what} was refused without saying why`)
+    }
+    return `${mutations.length} mutations refused`
+  })
+
+  await check('and the same seat still reads every settings list', async () => {
+    const fields = await listFields(contactsOnly, 'deal')
+    const pipelines = await listPipelines(contactsOnly)
+    const stages = await listLifecycleStages(contactsOnly)
+    const types = await listSubscriptionTypes(contactsOnly)
+    const automations = await listAutomations(contactsOnly)
+    expect(fields.length > 0, 'deal has no fields to read')
+    return `${fields.length} fields, ${pipelines.length} pipelines, ${stages.length} lifecycle stages, ${types.length} subscription types, ${automations.length} automations`
+  })
+
+  console.log('')
   console.log('-- segments ----------------------------------------------------')
 
   let segmentId = ''
@@ -636,4 +713,5 @@ try {
 } finally {
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }

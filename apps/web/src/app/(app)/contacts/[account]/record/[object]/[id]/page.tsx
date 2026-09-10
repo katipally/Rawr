@@ -3,6 +3,7 @@ import {
   enrichmentQueued,
   getRecord,
   getRegistry,
+  groupFor,
   isActivityType,
   isObjectKey,
   isUuid,
@@ -198,6 +199,23 @@ const RecordPage = async ({
     return { state: row?.state ?? ('not_configured' as const), lastError: row?.lastError ?? null }
   }
   const email = typeof record.values.email === 'string' && record.values.email ? record.values.email : null
+  // A company and a deal have no address of their own. The rail is already
+  // loaded, so the composer opens on the first contact linked to this record that
+  // has one rather than the button being dead.
+  const via = email || objectParam === 'contact' ? null : (groupFor(rail, 'contact')?.records.find((row) => row.email) ?? null)
+  const composeOn = (target: string, targetId: string) =>
+    recordPath(account, target, targetId, { tab: 'activities', compose: '1' })
+  const emailAction = email
+    ? { href: composeOn(objectParam, id), title: `Email ${email}` }
+    : via
+      ? { href: composeOn('contact', via.id), title: `Email ${via.displayName}` }
+      : {
+          href: null,
+          title:
+            objectParam === 'contact'
+              ? 'No email address on this record'
+              : `No contact linked to this ${objectParam} has an email address`,
+        }
   const domain = typeof record.values.domain === 'string' && record.values.domain ? record.values.domain : null
   // What an enricher can fill on this object, so the panel can name what is
   // still blank rather than offering a button with nothing behind it.
@@ -335,7 +353,7 @@ const RecordPage = async ({
                 account={account}
                 object={objectParam}
                 recordId={id}
-                email={email}
+                email={emailAction}
                 canWrite={canWrite}
               />
             </div>

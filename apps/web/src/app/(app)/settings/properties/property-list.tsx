@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { AdminField, FieldType } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type PropertyListProps = {
@@ -189,6 +190,7 @@ export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyL
   /** Reordering writes the whole ordered id list, so it can only be offered when
    *  the whole list is on screen. Hidden rather than broken, and said out loud. */
   const filtered = visible.length !== rows.length
+  const { page, pager, offset } = usePagedRows(visible, 'properties')
 
   return (
     <div className="flex flex-col gap-4">
@@ -239,7 +241,7 @@ export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyL
       </p>
 
       <ul className="flex flex-col rounded-panel border border-line bg-surface">
-        {visible.map((field, index) => (
+        {page.map((field, index) => (
           <li
             key={field.id}
             className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
@@ -275,14 +277,14 @@ export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyL
                   <IconButton
                     label={`Move ${field.label} up`}
                     icon={<ACTION_ICONS.moveUp size={16} />}
-                    disabled={busy || index === 0}
-                    onClick={() => move(index, -1)}
+                    disabled={busy || offset + index === 0}
+                    onClick={() => move(offset + index, -1)}
                   />
                   <IconButton
                     label={`Move ${field.label} down`}
                     icon={<ACTION_ICONS.moveDown size={16} />}
-                    disabled={busy || index === rows.length - 1}
-                    onClick={() => move(index, 1)}
+                    disabled={busy || offset + index === rows.length - 1}
+                    onClick={() => move(offset + index, 1)}
                   />
                 </>
               )}
@@ -323,6 +325,8 @@ export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyL
           </li>
         ))}
       </ul>
+
+      {pager}
 
       {deleted.length > 0 ? (
         <section className="flex flex-col gap-2">
@@ -370,7 +374,7 @@ export const PropertyList = ({ object, rows, deleted, hub, canWrite }: PropertyL
       ) : null}
 
       {/* ---------------------------------------------------------- create */}
-      <Modal open={creating} title={`New property on ${object}`} onClose={() => setCreating(false)}>
+      <Modal open={creating} title={`Create property on ${object}`} onClose={() => setCreating(false)}>
         <div className="flex flex-col gap-3">
           <Field id="prop-label" label="Label" hint="What people see on the record.">
             <TextInput

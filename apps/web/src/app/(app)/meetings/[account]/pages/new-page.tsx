@@ -97,7 +97,7 @@ export const NewPageButton = ({
         Create scheduling page
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="New meeting page">
+      <Modal open={open} onClose={() => setOpen(false)} title="Create scheduling page">
         <div className="flex flex-col gap-3">
           <Field
             id="new-booking-name"

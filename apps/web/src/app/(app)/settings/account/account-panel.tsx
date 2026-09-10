@@ -169,7 +169,7 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
               <div className="min-w-0">
                 <p className="font-medium">{w.name}</p>
                 <p className="text-small text-secondary">
-                  What you may do here is under Settings, Users &amp; Teams.
+                  What you may do here is under Settings, Members &amp; Teams.
                 </p>
               </div>
               <p className="shrink-0 text-small text-secondary">Joined {formatDate(w.joinedAt, zone)}</p>
@@ -178,7 +178,7 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
         </ul>
         {admins.length > 0 ? (
           <p className="text-small text-secondary">
-            What you may do is set by a super admin under Settings, Users &amp; Teams.{' '}
+            What you may do is set by a super admin under Settings, Members &amp; Teams.{' '}
             {admins.length > 0 ? (
               <>
                 Ask{' '}

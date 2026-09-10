@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, EmptyState, Field, TextInput } from '@rawr/ui'
+import { Badge, EmptyState, Field, NOTHING_MATCHED, TextInput } from '@rawr/ui'
 import Link from 'next/link'
 import { useState } from 'react'
 import type { IntegrationKind } from '@rawr/db'
@@ -47,7 +47,7 @@ export const AvailableGrid = ({ apps }: { apps: AvailableApp[] }) => {
       </Field>
 
       {byCategory.size === 0 ? (
-        <EmptyState title="Nothing matches" description="Try a shorter word, or clear the search." />
+        <EmptyState {...NOTHING_MATCHED} />
       ) : (
         [...byCategory].map(([category, list]) => (
           <section key={category} className="flex flex-col gap-3">

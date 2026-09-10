@@ -32,8 +32,8 @@ const JobsPage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Failed jobs"
-        lead="A job that ran out of retries, with its payload and the real error."
+        title="Jobs that could not be delivered"
+        lead="A job that ran out of retries, or never reached the queue at all, with its payload and the real error."
         why={
           <>
             <p>

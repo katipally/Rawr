@@ -11,6 +11,14 @@ export type EmptyStateProps = {
   icon?: ReactNode
 }
 
+/** What every screen says when a search or a filter matched nothing. Each one
+ *  wrote its own sentence, so clearing a search on one screen taught the reader
+ *  nothing about the next. Spread it: `<EmptyState {...NOTHING_MATCHED} />`. */
+export const NOTHING_MATCHED = {
+  title: 'Nothing matches',
+  description: 'Clear the search or widen the filters to see the rest.',
+} as const
+
 export const EmptyState = ({ title, description, action, icon }: EmptyStateProps) => (
   <div className="flex flex-col items-center gap-2 px-4 py-6 text-center @md:px-6 @md:py-12">
     {icon ? <div className="text-secondary">{icon}</div> : null}

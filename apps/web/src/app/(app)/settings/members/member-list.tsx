@@ -223,7 +223,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
           ))}
         </div>
         {isSuperAdmin ? (
-          <Button onClick={() => setInviting({ email: '', grants: EMPTY })}>Create user</Button>
+          <Button onClick={() => setInviting({ email: '', grants: EMPTY })}>Create member</Button>
         ) : null}
       </div>
 
@@ -371,7 +371,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
         ) : null}
       </Modal>
 
-      <Modal open={inviting !== null} onClose={() => setInviting(null)} title="Create user">
+      <Modal open={inviting !== null} onClose={() => setInviting(null)} title="Create member">
         {inviting ? (
           <div className="flex flex-col gap-4">
             <Field id="invite-email" label="Email address">

@@ -3,6 +3,7 @@
 import { Badge, Button, Card, Combobox, EmptyState, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Person = { userId: string; name: string; email: string }
@@ -30,6 +31,7 @@ export const TeamList = ({
   const [editing, setEditing] = useState<{ id: string | null; name: string; description: string } | null>(null)
   const [members, setMembers] = useState<{ team: Team; chosen: string[]; leads: string[] } | null>(null)
   const [deleting, setDeleting] = useState<Team | null>(null)
+  const { page, pager } = usePagedRows(teams, 'teams')
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -67,7 +69,7 @@ export const TeamList = ({
         />
       ) : (
         <div className="grid gap-3 lg:grid-cols-2">
-          {teams.map((team) => (
+          {page.map((team) => (
             <Card
               key={team.id}
               title={team.name}
@@ -117,11 +119,13 @@ export const TeamList = ({
         </div>
       )}
 
+      {pager}
+
       {editing ? (
         <Modal
           open
           size="sm"
-          title={editing.id ? `Rename ${editing.name}` : 'Create a team'}
+          title={editing.id ? `Rename ${editing.name}` : 'Create team'}
           onClose={() => setEditing(null)}
         >
           <form

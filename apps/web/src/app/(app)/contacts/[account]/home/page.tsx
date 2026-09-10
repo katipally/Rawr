@@ -17,7 +17,7 @@ import { ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateTime } from '~/components/crm/value.tsx'
+import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateTime, todayIn } from '~/components/crm/value.tsx'
 import {
   bookedPath,
   calendarsPath,
@@ -433,7 +433,7 @@ const HomePage = async ({
                     ) : null}
                   </div>
                   {t.dueDate ? (
-                    <span className={`shrink-0 text-small ${t.dueDate < new Date().toISOString().slice(0, 10) ? 'text-error' : 'text-secondary'}`}>
+                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(zone) ? 'text-error' : 'text-secondary'}`}>
                       {formatDate(t.dueDate, zone)}
                     </span>
                   ) : null}
