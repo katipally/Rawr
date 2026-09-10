@@ -1,10 +1,11 @@
-import { and, asc, eq, gt, isNotNull, lt, sql } from 'drizzle-orm'
-import { task } from '../schema/records.ts'
+import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm'
+import { task, taskQueue, type TaskPriority, type TaskType } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
+import { notify } from './notifications.ts'
 import { entityAlive } from './registry.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
 // The two modules import each other for exactly that pair of calls; Node resolves
@@ -15,7 +16,12 @@ export type TaskRow = {
   id: string
   title: string
   body: string | null
+  type: TaskType
+  priority: TaskPriority
   dueDate: string | null
+  remindAt: Date | null
+  queueId: string | null
+  queueName: string | null
   status: 'open' | 'done'
   assigneeName: string | null
   assigneeId: string | null
@@ -43,7 +49,12 @@ const SELECT = {
   id: task.id,
   title: task.title,
   body: task.body,
+  type: task.type,
+  priority: task.priority,
   dueDate: task.dueDate,
+  remindAt: task.remindAt,
+  queueId: task.queueId,
+  queueName: taskQueue.name,
   status: task.status,
   assigneeId: task.assigneeId,
   assigneeName: userAccount.name,
@@ -59,6 +70,9 @@ export type TaskFilter = {
   /** Open tasks due today, or open tasks due after today. */
   due?: 'today' | 'upcoming' | undefined
   entity?: EntityRef | undefined
+  type?: TaskType | undefined
+  /** A queue id, or 'none' for the tasks that are in no queue. */
+  queueId?: string | 'none' | undefined
 }
 
 export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
@@ -67,10 +81,17 @@ export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): P
       .select(SELECT)
       .from(task)
       .leftJoin(userAccount, eq(userAccount.id, task.assigneeId))
+      .leftJoin(taskQueue, eq(taskQueue.id, task.queueId))
       .where(
         and(
           filter.status ? eq(task.status, filter.status) : undefined,
           filter.assigneeId ? eq(task.assigneeId, filter.assigneeId) : undefined,
+          filter.type ? eq(task.type, filter.type) : undefined,
+          filter.queueId === 'none'
+            ? isNull(task.queueId)
+            : filter.queueId
+              ? eq(task.queueId, filter.queueId)
+              : undefined,
           filter.overdueOnly
             ? and(eq(task.status, 'open'), isNotNull(task.dueDate), lt(task.dueDate, sql`current_date`))
             : undefined,
@@ -90,9 +111,33 @@ export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): P
 export type NewTask = {
   title: string
   body?: string | null | undefined
+  type?: TaskType | undefined
+  priority?: TaskPriority | undefined
   dueDate?: string | null | undefined
+  remindAt?: Date | null | undefined
+  queueId?: string | null | undefined
   assigneeId?: string | null | undefined
   entity?: EntityRef | null | undefined
+}
+
+/** Handing work to somebody is not done until they know. Silent when the task is
+ *  your own, and `notify` drops the actor anyway, so this stays true even if a
+ *  caller passes its own id explicitly. */
+const tellAssignee = async (
+  tx: Tx,
+  ctx: AccountContext,
+  input: { id: string; title: string; assigneeId: string | null; dueDate: string | null },
+): Promise<void> => {
+  if (!input.assigneeId || input.assigneeId === ctx.actorId) return
+  await notify(tx, ctx, {
+    kind: 'task_assigned',
+    dedupeKey: `task:assigned:${input.id}:${input.assigneeId}`,
+    title: `${input.title} was assigned to you`,
+    body: input.dueDate ? `Due ${input.dueDate}.` : 'No due date.',
+    entity: 'task',
+    entityId: input.id,
+    to: { userIds: [input.assigneeId] },
+  })
 }
 
 export const createTask = async (ctx: AccountContext, input: NewTask): Promise<{ id: string }> =>
@@ -100,20 +145,27 @@ export const createTask = async (ctx: AccountContext, input: NewTask): Promise<{
     const title = input.title.trim()
     if (!title) throw new Error('A task needs a title.')
 
+    const assigneeId = input.assigneeId ?? ctx.actorId
     const [row] = await tx
       .insert(task)
       .values({
         accountId: ctx.accountId,
         title,
         body: input.body ?? null,
+        type: input.type ?? 'todo',
+        priority: input.priority ?? 'medium',
         dueDate: input.dueDate ?? null,
-        assigneeId: input.assigneeId ?? ctx.actorId,
+        remindAt: input.remindAt ?? null,
+        queueId: input.queueId ?? null,
+        assigneeId,
         entityType: input.entity?.entityType ?? null,
         entityId: input.entity?.entityId ?? null,
         createdBy: ctx.actorId,
       })
       .returning({ id: task.id })
     if (!row) throw new Error('The task could not be created.')
+
+    await tellAssignee(tx, ctx, { id: row.id, title, assigneeId, dueDate: input.dueDate ?? null })
 
     if (input.entity) {
       await recordActivity(tx, ctx, {
@@ -128,6 +180,134 @@ export const createTask = async (ctx: AccountContext, input: NewTask): Promise<{
     return {
       result: { id: row.id },
       audit: { entity: 'task', entityId: row.id, action: 'create', before: null, after: { title, dueDate: input.dueDate ?? null } },
+    }
+  })
+
+/** Every field a person can change after the fact, including who it belongs to.
+ *  An absent key is left alone; an explicit null clears the column, which is how
+ *  "no queue" and "no reminder" are said. */
+export type TaskEdit = {
+  id: string
+  title?: string | undefined
+  body?: string | null | undefined
+  type?: TaskType | undefined
+  priority?: TaskPriority | undefined
+  dueDate?: string | null | undefined
+  remindAt?: Date | null | undefined
+  queueId?: string | null | undefined
+  assigneeId?: string | null | undefined
+}
+
+export const updateTask = async (ctx: AccountContext, input: TaskEdit): Promise<void> =>
+  mutate(ctx, 'task', async (tx) => {
+    const [before] = await tx
+      .select({ title: task.title, assigneeId: task.assigneeId, dueDate: task.dueDate, queueId: task.queueId })
+      .from(task)
+      .where(eq(task.id, input.id))
+    if (!before) throw new Error('That task no longer exists.')
+
+    const title = input.title === undefined ? before.title : input.title.trim()
+    if (!title) throw new Error('A task needs a title.')
+
+    const values = {
+      title,
+      ...(input.body === undefined ? {} : { body: input.body }),
+      ...(input.type === undefined ? {} : { type: input.type }),
+      ...(input.priority === undefined ? {} : { priority: input.priority }),
+      ...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+      ...(input.remindAt === undefined ? {} : { remindAt: input.remindAt }),
+      ...(input.queueId === undefined ? {} : { queueId: input.queueId }),
+      ...(input.assigneeId === undefined ? {} : { assigneeId: input.assigneeId }),
+      updatedAt: new Date(),
+    }
+    await tx.update(task).set(values).where(eq(task.id, input.id))
+
+    const assigneeId = input.assigneeId === undefined ? before.assigneeId : input.assigneeId
+    if (assigneeId !== before.assigneeId) {
+      const dueDate = input.dueDate === undefined ? before.dueDate : input.dueDate
+      await tellAssignee(tx, ctx, { id: input.id, title, assigneeId, dueDate })
+    }
+
+    return {
+      result: undefined,
+      audit: {
+        entity: 'task',
+        entityId: input.id,
+        action: 'update',
+        before: { title: before.title, assigneeId: before.assigneeId, queueId: before.queueId },
+        after: { title, assigneeId, queueId: input.queueId === undefined ? before.queueId : input.queueId },
+      },
+    }
+  })
+
+export type TaskQueueRow = { id: string; name: string; openCount: number }
+
+/** Bounded because the sidebar renders every one of them. A hundred named lists
+ *  is already past the point where anybody finds theirs by reading. */
+const MAX_QUEUES = 200
+
+export const listTaskQueues = async (ctx: AccountContext): Promise<TaskQueueRow[]> =>
+  withAccount(ctx, (tx) =>
+    tx.execute(sql`
+      select q.id, q.name,
+             (select count(*)::int from task t
+               where t.queue_id = q.id and t.status = 'open') as "openCount"
+        from task_queue q
+       order by lower(q.name)
+       limit ${MAX_QUEUES}`),
+  ) as Promise<TaskQueueRow[]>
+
+export const createTaskQueue = async (ctx: AccountContext, name: string): Promise<{ id: string }> =>
+  mutate(ctx, 'task', async (tx) => {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('A queue needs a name.')
+
+    // The unique index is on lower(name), so letting it decide is both the check
+    // and the race, in one statement.
+    const [row] = await tx
+      .insert(taskQueue)
+      .values({ accountId: ctx.accountId, name: trimmed, createdBy: ctx.actorId })
+      .onConflictDoNothing()
+      .returning({ id: taskQueue.id })
+    if (!row) throw new Error(`There is already a queue called “${trimmed}”.`)
+
+    return {
+      result: { id: row.id },
+      audit: { entity: 'task_queue', entityId: row.id, action: 'create', before: null, after: { name: trimmed } },
+    }
+  })
+
+export const renameTaskQueue = async (ctx: AccountContext, id: string, name: string): Promise<void> =>
+  mutate(ctx, 'task', async (tx) => {
+    const trimmed = name.trim()
+    if (!trimmed) throw new Error('A queue needs a name.')
+
+    const [before] = await tx.select({ name: taskQueue.name }).from(taskQueue).where(eq(taskQueue.id, id))
+    if (!before) throw new Error('That queue no longer exists.')
+
+    const clash = await tx.execute<{ id: string }>(
+      sql`select id from task_queue where lower(name) = lower(${trimmed}) and id <> ${id} limit 1`,
+    )
+    if (clash.length > 0) throw new Error(`There is already a queue called “${trimmed}”.`)
+
+    await tx.update(taskQueue).set({ name: trimmed, updatedAt: new Date() }).where(eq(taskQueue.id, id))
+
+    return {
+      result: undefined,
+      audit: { entity: 'task_queue', entityId: id, action: 'rename', before, after: { name: trimmed } },
+    }
+  })
+
+/** The tasks in it are returned to no queue by the foreign key, not deleted.
+ *  Somebody tidying their lists must never lose work by doing it. */
+export const deleteTaskQueue = async (ctx: AccountContext, id: string): Promise<void> =>
+  mutate(ctx, 'task', async (tx) => {
+    const [before] = await tx.select({ name: taskQueue.name }).from(taskQueue).where(eq(taskQueue.id, id))
+    if (!before) throw new Error('That queue has already been deleted.')
+    await tx.delete(taskQueue).where(eq(taskQueue.id, id))
+    return {
+      result: undefined,
+      audit: { entity: 'task_queue', entityId: id, action: 'delete', before, after: null },
     }
   })
 

@@ -1,14 +1,16 @@
 'use client'
 
-import { Checkbox, DataTable, EmptyState, IconButton, Modal, cn, useToast, type Column } from '@rawr/ui'
+import { Checkbox, DataTable, EmptyState, IconButton, Modal, Select, cn, useToast, type Column } from '@rawr/ui'
+import { Pencil } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { useNavigation } from '~/components/navigation.tsx'
+import { usePagedRows } from '~/components/paged.tsx'
 import { recordPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { TaskForm } from './task-form.tsx'
+import { TaskForm, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-form.tsx'
 import type { TaskRow } from './tasks-panel.tsx'
 import { formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -17,16 +19,27 @@ export type TasksTableProps = {
   account: string
   rows: TaskRow[]
   assignees: { id: string; label: string }[]
+  queues: { id: string; name: string }[]
+  /** The queue being looked at, so a task created here lands in it. */
+  queueId?: string | undefined
   canWrite: boolean
   /** Shown when the view matched nothing. */
   emptyTitle: string
+}
+
+/** High is the only one worth colouring: medium is the default every task has,
+ *  and a table where every row shouts says nothing. */
+const PRIORITY_TONE: Record<TaskRow['priority'], string> = {
+  low: 'text-secondary',
+  medium: '',
+  high: 'font-medium text-error',
 }
 
 /** HubSpot's tasks index: a table with the done checkbox in the first column,
  *  the record the task hangs on one click away, and the count in the footer.
  *  The "Add tasks" button on the header links here with ?new=1, so the create
  *  dialog lives once, next to the table it adds to. */
-export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: TasksTableProps) => {
+export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite, emptyTitle }: TasksTableProps) => {
   const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -34,7 +47,9 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
   const query = useSearchParams()
   const askedToCreate = query.get('new') === '1'
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<TaskRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const { page, pager } = usePagedRows(rows, 'task')
 
   useEffect(() => {
     if (askedToCreate && canWrite) setCreating(true)
@@ -99,6 +114,13 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
         </span>
       ),
     },
+    { key: 'type', header: 'Type', width: 110, render: (row) => TASK_TYPE_LABELS[row.type] },
+    {
+      key: 'priority',
+      header: 'Priority',
+      width: 110,
+      render: (row) => <span className={PRIORITY_TONE[row.priority]}>{TASK_PRIORITY_LABELS[row.priority]}</span>,
+    },
     {
       key: 'record',
       header: 'Associated record',
@@ -123,24 +145,64 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
           <span className="text-secondary">--</span>
         ),
     },
+    {
+      key: 'queue',
+      header: 'Queue',
+      width: 180,
+      render: (row) =>
+        canWrite ? (
+          <Select
+            aria-label={`Queue for “${row.title}”`}
+            value={row.queueId ?? ''}
+            disabled={busy}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) =>
+              void run(
+                () => api.crm.tasks.update.mutate({ id: row.id, queueId: event.target.value || null }),
+                'Task moved.',
+              )
+            }
+          >
+            <option value="">No queue</option>
+            {queues.map((queue) => (
+              <option key={queue.id} value={queue.id}>
+                {queue.name}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <span className={row.queueName ? '' : 'text-secondary'}>{row.queueName ?? '--'}</span>
+        ),
+    },
     { key: 'assignee', header: 'Assigned to', width: 180, render: (row) => row.assigneeName ?? <span className="text-secondary">Unassigned</span> },
     ...(canWrite
       ? [
           {
             key: 'actions',
             header: '',
-            width: 64,
+            width: 96,
             render: (row: TaskRow) => (
-              <IconButton
-                label={`Delete “${row.title}”`}
-                tone="destructive"
-                icon={<ACTION_ICONS.delete size={16} />}
-                disabled={busy}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  void run(() => api.crm.tasks.remove.mutate({ id: row.id }), 'Task deleted.')
-                }}
-              />
+              <span className="flex items-center gap-1">
+                <IconButton
+                  label={`Edit “${row.title}”`}
+                  icon={<Pencil size={16} />}
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    setEditing(row)
+                  }}
+                />
+                <IconButton
+                  label={`Delete “${row.title}”`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  disabled={busy}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void run(() => api.crm.tasks.remove.mutate({ id: row.id }), 'Task deleted.')
+                  }}
+                />
+              </span>
             ),
           },
         ]
@@ -151,7 +213,7 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={page}
         rowKey={(row) => row.id}
         caption="Tasks in this account"
         storageKey="tasks"
@@ -165,13 +227,34 @@ export const TasksTable = ({ account, rows, assignees, canWrite, emptyTitle }: T
           </div>
         }
       />
-      <div className="-mx-3 flex shrink-0 items-center border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
+      <div className="-mx-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
           {rows.length.toLocaleString()} {rows.length === 1 ? 'task' : 'tasks'}
         </span>
+        {pager}
       </div>
       <Modal open={creating} title="Create task" onClose={closeCreate}>
-        <TaskForm assignees={assignees} autoFocus={creating} onCreated={closeCreate} className="flex flex-wrap items-end gap-2" />
+        <TaskForm
+          assignees={assignees}
+          queues={queues}
+          defaultQueueId={queueId}
+          autoFocus={creating}
+          onCreated={closeCreate}
+          className="flex flex-wrap items-end gap-2"
+        />
+      </Modal>
+      <Modal open={editing !== null} title="Edit task" onClose={() => setEditing(null)}>
+        {editing ? (
+          <TaskForm
+            key={editing.id}
+            assignees={assignees}
+            queues={queues}
+            task={editing}
+            autoFocus
+            onCreated={() => setEditing(null)}
+            className="flex flex-wrap items-end gap-2"
+          />
+        ) : null}
       </Modal>
     </div>
   )

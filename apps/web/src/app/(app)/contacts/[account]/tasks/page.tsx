@@ -1,14 +1,16 @@
-import { canWrite, getRegistry, listTasks, overdueNextSteps } from '@rawr/db'
+import { canWrite, getRegistry, isUuid, listTaskQueues, listTasks, overdueNextSteps, schema } from '@rawr/db'
 import { EmptyState, Tabs, cn } from '@rawr/ui'
 import { CalendarDays, Search, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
+import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-form.tsx'
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
 import { formatDate } from '~/components/crm/value.tsx'
 import { objectView, recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+import { QueueSidebar } from './queue-sidebar.tsx'
 
 /** HubSpot's task views, each one an address so it can be linked into. */
 const VIEWS: { key: TaskView; label: string; empty: string }[] = [
@@ -29,7 +31,7 @@ const TasksPage = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ view?: string; mine?: string; q?: string }>
+  searchParams: Promise<{ view?: string; mine?: string; q?: string; queue?: string; type?: string }>
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -41,16 +43,35 @@ const TasksPage = async ({
   const view = VIEWS.find((option) => option.key === search.view) ?? VIEWS[0]!
   const mine = search.mine === '1'
   const q = search.q?.trim() ?? ''
-  const at = (next: { view?: TaskView; mine?: '1'; q?: string }) =>
-    tasksPath(account, { view: view.key, ...(mine ? { mine: '1' } : {}), ...(q ? { q } : {}), ...next })
+  // A hand-edited address must not reach a uuid comparison with something that
+  // is not one.
+  const asked = search.queue?.trim() ?? ''
+  const queue = asked === 'none' || isUuid(asked) ? asked : undefined
+  const type = (schema.TASK_TYPES as readonly string[]).includes(search.type ?? '')
+    ? (search.type as TaskType)
+    : undefined
+  /** Everything but the queue, because the sidebar is what changes the queue and
+   *  its "All queues" link has to be able to drop it. */
+  const filters = {
+    view: view.key,
+    ...(mine ? { mine: '1' as const } : {}),
+    ...(q ? { q } : {}),
+    ...(type ? { type } : {}),
+  }
+  const kept = { ...filters, ...(queue ? { queue } : {}) }
+  const at = (next: { view?: TaskView; mine?: '1'; q?: string; queue?: string; type?: string }) =>
+    tasksPath(account, { ...kept, ...next })
 
-  const [tasks, overdue, lookups, registry] = await Promise.all([
+  const [tasks, queues, overdue, lookups, registry] = await Promise.all([
     listTasks(ctx, {
       ...(mine && ctx.actorId ? { assigneeId: ctx.actorId } : {}),
       ...(view.key === 'overdue' ? { overdueOnly: true } : {}),
       ...(view.key === 'today' || view.key === 'upcoming' ? { due: view.key } : {}),
       ...(view.key === 'done' ? { status: 'done' as const } : {}),
+      ...(queue ? { queueId: queue } : {}),
+      ...(type ? { type } : {}),
     }),
+    listTaskQueues(ctx),
     view.key === 'overdue' ? overdueNextSteps(ctx) : Promise.resolve([]),
     readLookups(ctx),
     getRegistry(ctx),
@@ -95,6 +116,8 @@ const TasksPage = async ({
         <form className="relative w-full min-w-0 sm:w-56" action={tasksPath(account)}>
           {view.key !== 'all' ? <input type="hidden" name="view" value={view.key} /> : null}
           {mine ? <input type="hidden" name="mine" value="1" /> : null}
+          {queue ? <input type="hidden" name="queue" value={queue} /> : null}
+          {type ? <input type="hidden" name="type" value={type} /> : null}
           <input
             type="search"
             name="q"
@@ -112,15 +135,36 @@ const TasksPage = async ({
           </button>
         </form>
         <Link
-          href={mine ? tasksPath(account, { view: view.key, ...(q ? { q } : {}) }) : at({ mine: '1' })}
+          href={mine ? tasksPath(account, { ...kept, mine: undefined }) : at({ mine: '1' })}
           aria-pressed={mine}
           className={cn(pill, mine ? 'bg-fill-hover' : 'bg-surface hover:bg-fill')}
         >
           Assigned to me
         </Link>
+        {(Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((key) => (
+          <Link
+            key={key}
+            href={tasksPath(account, { ...kept, type: type === key ? undefined : key })}
+            aria-pressed={type === key}
+            className={cn(pill, type === key ? 'bg-fill-hover' : 'bg-surface hover:bg-fill')}
+          >
+            {TASK_TYPE_LABELS[key]}
+          </Link>
+        ))}
       </div>
 
-      <TasksTable account={account} rows={rows} assignees={lookups.users} canWrite={writable} emptyTitle={q ? 'No tasks match the search' : view.empty} />
+      <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
+        <QueueSidebar account={account} queues={queues} current={queue} keep={filters} canWrite={writable} />
+        <TasksTable
+          account={account}
+          rows={rows}
+          assignees={lookups.users}
+          queues={queues}
+          {...(queue && queue !== 'none' ? { queueId: queue } : {})}
+          canWrite={writable}
+          emptyTitle={q ? 'No tasks match the search' : view.empty}
+        />
+      </div>
 
       {view.key === 'overdue' ? (
         <section className="max-h-[40%] shrink-0 overflow-y-auto rounded-panel border border-line bg-surface shadow-panel">

@@ -1,14 +1,16 @@
 import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
 import { owner, recordDeadLetter } from './db.ts'
-import { automationJobs, dispatchAutomations } from './jobs/automations.ts'
+import { automationJobs, dispatchAutomations, scanAutomationRules } from './jobs/automations.ts'
+import { bulkJobs, dispatchBulk } from './jobs/bulk.ts'
 import { checkIntegrations } from './jobs/check-integrations.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
 import { dispatchEnrichment, enrichmentJobs } from './jobs/enrichment.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
+import { fillFieldRates } from './jobs/fill-rates.ts'
 import { dispatchImports, importJobs } from './jobs/imports.ts'
-import { notificationSweep } from './jobs/notification-sweep.ts'
+import { notificationReminders, notificationSweep } from './jobs/notification-sweep.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
 import { syncApollo } from './jobs/sync-apollo.ts'
 import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
@@ -24,9 +26,12 @@ const JOBS: Job[] = [
   stitchVisitor,
   rollUpActivity,
   notificationSweep,
+  notificationReminders,
   evaluateSegments,
+  fillFieldRates,
   ...mailJobs,
   ...importJobs,
+  ...bulkJobs,
   ...sequenceJobs,
   ...automationJobs,
   ...enrichmentJobs,
@@ -92,7 +97,7 @@ await boss.schedule(dispatchFieldIndexes.name, '* * * * *', {})
 // a back-fill. A minute is the ceiling on how long a new contact reads as having
 // no browsing history.
 await boss.schedule(dispatchStitches.name, '* * * * *', {})
-// The two daily jobs, declared once so the boot-time catch-up below asks about
+// The daily jobs, declared once so the boot-time catch-up below asks about
 // the same times the schedule fires at. The roll-up is nightly: retention is
 // measured in months, so the hour it runs does not matter, only that it runs off
 // the request path. The sweep is early morning. The only notice with no event
@@ -102,11 +107,17 @@ await boss.schedule(dispatchStitches.name, '* * * * *', {})
 const DAILY: { job: Job; at: DailyAt }[] = [
   { job: rollUpActivity, at: { hourUtc: 3, minuteUtc: 30 } },
   { job: notificationSweep, at: { hourUtc: 7, minuteUtc: 0 } },
+  // Before the sweep and after the roll-up, so the numbers a person sees when
+  // they open settings in the morning were taken while nothing else was scanning.
+  { job: fillFieldRates, at: { hourUtc: 4, minuteUtc: 15 } },
 ]
 for (const daily of DAILY) await boss.schedule(daily.job.name, cronFor(daily.at), {})
 // Hourly, which is the bound on how stale a segment's membership can be. A2 asks
 // for "on write and on a schedule"; a write recomputes the one segment somebody is
 // looking at, and this covers everything else.
+// A reminder is set for an instant, so it cannot wait for the nightly sweep. A
+// quarter hour is the bound on how late one arrives.
+await boss.schedule(notificationReminders.name, '*/15 * * * *', {})
 await boss.schedule(evaluateSegments.name, '0 * * * *', {})
 // F1 phase B. Every ten minutes: connected mailboxes catch up, and one still
 // reading its history queues its own next page immediately rather than waiting.
@@ -120,6 +131,11 @@ await boss.schedule(dispatchMailboxBodies.name, '*/5 * * * *', {})
 // up again, and a run that finishes its chunk queues the next one itself.
 await boss.schedule(dispatchImports.name, '* * * * *', {})
 
+// Every minute, and for the same reason imports are: a bulk action somebody
+// started before a deploy picks itself up again, and one that finishes its chunk
+// queues the next one itself.
+await boss.schedule(dispatchBulk.name, '* * * * *', {})
+
 // Every minute: a step whose delay says "two hours" should not wait until the top
 // of the next hour, and the scan is one indexed range over the due queue.
 await boss.schedule(dispatchSequences.name, '* * * * *', {})
@@ -128,6 +144,11 @@ await boss.schedule(sweepSequenceLeases.name, '*/10 * * * *', {})
 // "wait twenty minutes" should not wait until the top of the hour, and the scan
 // is one indexed range over the runs that are actually parked.
 await boss.schedule(dispatchAutomations.name, '* * * * *', {})
+// B11 again, for the two triggers no write announces. Hourly, because both are
+// measured in days and the run's per-day uniqueness makes a second sweep in the
+// same day a no-op. Ten past, so it does not queue behind the top-of-hour segment
+// evaluation.
+await boss.schedule(scanAutomationRules.name, '10 * * * *', {})
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})

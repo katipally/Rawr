@@ -11,6 +11,7 @@ import {
   trashNotification,
   unreadCount,
 } from '../src/dal/notifications.ts'
+import { createTask, deleteTask } from '../src/dal/tasks.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
@@ -197,6 +198,82 @@ try {
     'resolving marks every notice about the resolved thing read',
     'without this the drawer fills with unread notices about work already done',
   )
+
+  // ------------------------------------------------------------ tasks
+
+  const kinds = await owner`
+    select enumlabel from pg_enum
+     where enumtypid = 'public.rawr_notification_kind'::regtype`
+  const kindNames = kinds.map((row) => row.enumlabel as string)
+  check(
+    kindNames.includes('task_reminder') && kindNames.includes('task_assigned'),
+    'the bell knows the two task kinds',
+    'blocked until 0069 is applied',
+  )
+
+  // Caught rather than thrown so the retention and plan checks below still run
+  // on a database where 0070 has not been applied yet.
+  try {
+  const handed = await createTask(ctx, { title: 'Verify: chase the renewal', assigneeId: alice, dueDate: '2030-01-31' })
+  const own = await createTask(ctx, { title: 'Verify: my own errand', assigneeId: actor })
+
+  const [toldAlice] = await owner`
+    select count(*)::int as n from notification
+     where kind = 'task_assigned' and user_id = ${alice}
+       and dedupe_key = ${`task:assigned:${handed.id}:${alice}`}`
+  check(
+    toldAlice?.n === 1,
+    'handing a task to somebody tells them once',
+    'a task assigned in silence is work nobody knows they have',
+  )
+
+  const [toldSelf] = await owner`
+    select count(*)::int as n from notification
+     where kind = 'task_assigned' and dedupe_key like ${`task:assigned:${own.id}:%`}`
+  check(toldSelf?.n === 0, 'a task you gave yourself tells nobody')
+
+  // The notifications.reminders pass, narrowed to this account so a suite run never
+  // writes a notice to a real tenant. Everything else about it is the worker's
+  // statement, including the key.
+  await owner`
+    update task set remind_at = now() - interval '1 hour' where id = ${handed.id}`
+  const remindPass = () => owner`
+    insert into notification (account_id, user_id, kind, dedupe_key, title, body, entity, entity_id)
+    select t.account_id, t.assignee_id, 'task_reminder',
+           'task:remind:' || t.id || ':' || extract(epoch from t.remind_at)::bigint,
+           'Reminder: ' || t.title,
+           case when t.due_date is null then 'No due date.'
+                else 'Due ' || to_char(t.due_date, 'FMDay DD FMMonth') || '.' end,
+           'task', t.id
+      from task t
+     where t.account_id = ${accountId}
+       and t.status = 'open'
+       and t.assignee_id is not null
+       and t.remind_at is not null
+       and t.remind_at <= now()
+    on conflict (account_id, user_id, dedupe_key) do nothing`
+  await remindPass()
+  await remindPass()
+
+  const reminders = await owner`
+    select count, user_id from notification
+     where kind = 'task_reminder' and entity_id = ${handed.id}`
+  check(
+    reminders.length === 1 && Number(reminders[0]?.count) === 1,
+    'a reminder that is still due is sent once, not every run',
+    'blocked until 0070 is applied; the key carries the instant, so moving it arms it again',
+  )
+  check(
+    reminders[0]?.user_id === alice,
+    'and goes to the person the task belongs to, not the one who wrote it',
+  )
+
+  await owner`delete from notification where entity_id in (${handed.id}, ${own.id})`
+  await deleteTask(ctx, handed.id)
+  await deleteTask(ctx, own.id)
+  } catch (cause) {
+    check(false, 'the task type, queue and reminder columns exist', String(cause))
+  }
 
   // ------------------------------------------------------------ retention
 

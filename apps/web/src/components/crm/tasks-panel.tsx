@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { TaskForm } from './task-form.tsx'
+import { TaskForm, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-form.tsx'
 import { formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -15,8 +15,14 @@ export type TaskRow = {
   id: string
   title: string
   body: string | null
+  type: TaskType
+  priority: TaskPriority
   dueDate: string | null
+  remindAt: Date | string | null
+  queueId: string | null
+  queueName: string | null
   status: 'open' | 'done'
+  assigneeId: string | null
   assigneeName: string | null
   /** An object key, core or invented. Null for a task that hangs on nothing. */
   entityType: string | null
@@ -28,6 +34,8 @@ export type TasksPanelProps = {
   account: string
   rows: TaskRow[]
   assignees: { id: string; label: string }[]
+  /** Absent on a record, where there is no queue sidebar to file into. */
+  queues?: { id: string; name: string }[] | undefined
   /** Set on a record page, so a new task is filed against that record. */
   entity?: { entityType: string; entityId: string }
   canWrite: boolean
@@ -42,6 +50,7 @@ export const TasksPanel = ({
   account,
   rows,
   assignees,
+  queues = [],
   entity,
   canWrite,
   heading = 'Tasks',
@@ -77,6 +86,7 @@ export const TasksPanel = ({
       {canWrite ? (
         <TaskForm
           assignees={assignees}
+          queues={queues}
           entity={entity}
           autoFocus={startNew}
           className="flex flex-wrap items-end gap-2 border-b border-divider px-6 py-2"
@@ -119,6 +129,11 @@ export const TasksPanel = ({
               <span className="min-w-0 flex-1">
                 <span className={cn('block break-words', row.status === 'done' && 'text-secondary line-through')}>
                   {row.title}
+                </span>
+                <span className="block text-small text-secondary">
+                  {TASK_TYPE_LABELS[row.type]}
+                  {row.priority === 'high' ? ' · High priority' : ''}
+                  {row.queueName ? ` · ${row.queueName}` : ''}
                 </span>
                 {row.body ? (
                   <span className="block whitespace-pre-wrap break-words text-small text-secondary">

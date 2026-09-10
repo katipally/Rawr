@@ -31,7 +31,11 @@ type Row = Omit<NotificationRow, 'readAt' | 'trashedAt' | 'at'> & {
  *  changes does not leave a table full of dead links. */
 const hrefFor = (row: Row, account: string): string | null => {
   if (row.entity && row.entityId) return recordPath(account, row.entity, row.entityId)
+  // A task is not a record page, so `entity` never resolves for these three and
+  // the list is where all of them lead.
   if (row.kind === 'task_overdue') return tasksPath(account)
+  if (row.kind === 'task_reminder') return tasksPath(account)
+  if (row.kind === 'task_assigned') return tasksPath(account, { mine: '1' })
   if (row.kind === 'form_quarantined') return submissionsPath(account, { state: 'quarantined' })
   if (row.kind === 'form_submission') return submissionsPath(account)
   if (row.kind === 'mailbox_revoked') return mailboxesPath()

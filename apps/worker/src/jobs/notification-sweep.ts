@@ -10,7 +10,10 @@ import { defineJob } from './registry.ts'
  *  Second, a bound. Every other table here is bounded by what people create; this
  *  one is bounded by what happens, which is unbounded. Four rules rather than one
  *  because "old" means something different for a notice you never opened than for
- *  one you threw away. */
+ *  one you threw away.
+ *
+ *  A reminder is neither: the person picked an instant, so it belongs on its own
+ *  short cycle rather than on a pass tuned to run once, overnight. */
 
 /** Trash is an undo window, not an archive. */
 const TRASHED_DAYS = 30
@@ -75,5 +78,35 @@ export const notificationSweep = defineJob({
     }
 
     console.log(`[notifications] ${made ?? 0} overdue notices, ${removed} rows retired.`)
+  },
+})
+
+/** Every quarter hour, so a reminder set for a time is delivered near it. The key
+ *  carries the instant, so moving a reminder arms it again and leaving one alone
+ *  never says it twice, and re-running inside the same quarter hour is a no-op.
+ *  Rides task_remind_idx. */
+export const notificationReminders = defineJob({
+  name: 'notifications.reminders',
+  schema: z.object({}),
+  retryLimit: 3,
+  retryDelaySeconds: 60,
+  handle: async () => {
+    const sent = await owner`
+      insert into notification (account_id, user_id, kind, dedupe_key, title, body, entity, entity_id)
+      select t.account_id, t.assignee_id, 'task_reminder',
+             'task:remind:' || t.id || ':' || extract(epoch from t.remind_at)::bigint,
+             'Reminder: ' || t.title,
+             case when t.due_date is null then 'No due date.'
+                  else 'Due ' || to_char(t.due_date, 'FMDay DD FMMonth') || '.' end,
+             'task', t.id
+        from task t
+       where t.status = 'open'
+         and t.assignee_id is not null
+         and t.remind_at is not null
+         and t.remind_at <= now()
+      on conflict (account_id, user_id, dedupe_key) do nothing
+      returning 1`
+
+    if (sent.length > 0) console.log(`[notifications] ${sent.length} reminders.`)
   },
 })

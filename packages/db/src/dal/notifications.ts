@@ -22,6 +22,8 @@ export type NotificationKind =
   | 'dead_letter'
   | 'integration_error'
   | 'mailbox_revoked'
+  | 'task_reminder'
+  | 'task_assigned'
 
 export type NotificationTab = 'unread' | 'all' | 'trash'
 

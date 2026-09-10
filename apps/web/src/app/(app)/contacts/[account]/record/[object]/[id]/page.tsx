@@ -9,6 +9,7 @@ import {
   isUuid,
   listIntegrations,
   listSuggestions,
+  listTaskQueues,
   listTasks,
   readAssociations,
   readEmailEngagement,
@@ -156,7 +157,7 @@ const RecordPage = async ({
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
     // panels only need the id, and a missing record just discards their answers.
-    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments] = await Promise.all([
+    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments] = await Promise.all([
       loadCrmContext(ctx, objectParam),
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
@@ -165,6 +166,7 @@ const RecordPage = async ({
       timelineCounts(ctx, entity),
       readAssociations(ctx, entity),
       listTasks(ctx, { entity }),
+      listTaskQueues(ctx),
       objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
       objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
       readMemberships(ctx, id),
@@ -178,7 +180,7 @@ const RecordPage = async ({
       objectParam === 'contact' ? enrollmentsForContact(ctx, id) : Promise.resolve([]),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments }
+    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments }
   })
 
   if (!screen) {
@@ -192,7 +194,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments } = screen
+  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments } = screen
 
   const health = (kind: 'apollo' | 'lusha' | 'clay') => {
     const row = integrations.find((i) => i.kind === kind)
@@ -537,14 +539,21 @@ const RecordPage = async ({
               id: row.id,
               title: row.title,
               body: row.body,
+              type: row.type,
+              priority: row.priority,
               dueDate: row.dueDate,
+              remindAt: row.remindAt,
+              queueId: row.queueId,
+              queueName: row.queueName,
               status: row.status,
+              assigneeId: row.assigneeId,
               assigneeName: row.assigneeName,
               entityType: row.entityType,
               entityId: row.entityId,
               entityName: row.entityName,
             }))}
             assignees={lookups.users}
+            queues={queues}
             entity={entity}
             canWrite={canWrite}
             startNew={task === 'new'}
