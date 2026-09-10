@@ -157,7 +157,15 @@ export const DataTable = <Row,>({
            header says it is, so a 500-character name stretches its column past
            17,000px and pushes every other column off the screen. Fixed layout
            makes the colgroup authoritative and the per-cell `truncate` real. */}
-      <table className="w-full table-fixed border-collapse text-left">
+      {/*  A min-width of what the columns actually ask for. Without it `w-full`
+           shrinks the table to the box and fixed layout squeezes every column
+           proportionally, so the last one is clipped by the viewport edge with
+           nothing to scroll -- the columns are narrower, but none of them are
+           reachable. With it the table overflows and the box above scrolls. */}
+      <table
+        className="w-full table-fixed border-collapse text-left"
+        style={{ minWidth: (selection ? SELECT_WIDTH : 0) + columns.reduce((sum, column) => sum + widthOf(column), 0) }}
+      >
         <caption className="sr-only">{caption}</caption>
         <colgroup>
           {selection ? <col style={{ width: SELECT_WIDTH }} /> : null}

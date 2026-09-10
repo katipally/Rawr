@@ -108,6 +108,36 @@ export const fileSignature = (objectType: string, headers: string[]): string =>
 /** A best guess so the mapper opens with the obvious columns already matched.
  *  A preset from a known export wins over the guess, because "Associated Company"
  *  is a company on a contact and no amount of loose matching says so. */
+/** What people actually head a column with, where it is nothing like the field's
+ *  own name. "Company" is the commonest header in any contact export and matches
+ *  neither "company_id" nor "Primary company", so a file that names the company
+ *  on every row opens with that column dismissed.
+ *
+ *  Only the headers that would otherwise miss. Anything the label or key already
+ *  catches is not repeated here. */
+const HEADER_SYNONYMS: Record<string, string> = {
+  company: 'company_id',
+  companyname: 'company_id',
+  account: 'company_id',
+  accountname: 'company_id',
+  organisation: 'company_id',
+  organization: 'company_id',
+  employer: 'company_id',
+  owner: 'owner_id',
+  contactowner: 'owner_id',
+  assignedto: 'owner_id',
+  website: 'domain',
+  websiteurl: 'domain',
+  companydomain: 'domain',
+  emailaddress: 'email',
+  workemail: 'email',
+  jobtitle: 'title',
+  position: 'title',
+  mobile: 'phone',
+  phonenumber: 'phone',
+  linkedin: 'linkedin_url',
+}
+
 export const suggestMapping = (
   object: RegistryObject,
   headers: string[],
@@ -128,8 +158,13 @@ export const suggestMapping = (
       mapping[header] = preset[header] ?? null
       continue
     }
+    const synonym = HEADER_SYNONYMS[loose(header)]
     const candidate =
-      byKey.get(header.trim()) ?? byLabel.get(loose(header)) ?? byLooseKey.get(loose(header)) ?? null
+      byKey.get(header.trim()) ??
+      byLabel.get(loose(header)) ??
+      byLooseKey.get(loose(header)) ??
+      // Last, so a real field called "Website" always beats the synonym for it.
+      (synonym && object.byKey.has(synonym) ? synonym : null)
     // Two headers mapping to one field is blocked in the mapper, so the second
     // one is left unmapped rather than silently overwriting the first. A8.
     mapping[header] = candidate && !taken.has(candidate) ? candidate : null
@@ -713,7 +748,7 @@ const lookupOnce = async (
   find: SQL,
   make?: () => Promise<string>,
 ): Promise<string | null> => {
-  const cacheKey = `${bucket} ${needle.toLowerCase()}`
+  const cacheKey = `${bucket}\u0000${needle.toLowerCase()}`
   const remembered = deps.cache.get(cacheKey)
   if (remembered !== undefined) return remembered
 

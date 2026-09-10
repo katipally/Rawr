@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { syncLinkedContacts } from '~/server/integrations/apollo.ts'
@@ -15,7 +15,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   if (!body?.accountId) return NextResponse.json({ error: 'A account is required.' }, { status: 400 })
 
   try {
-    const outcome = await syncLinkedContacts({ ...publicEdgeContext(body.accountId), actorKind: 'job' })
+    const outcome = await syncLinkedContacts(systemContext(body.accountId))
     return NextResponse.json(outcome)
   } catch (cause) {
     return NextResponse.json({ error: cause instanceof Error ? cause.message : String(cause) }, { status: 500 })

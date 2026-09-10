@@ -101,7 +101,10 @@ const AppPage = async ({
           />
         ) : (
           <LinkButton href={connectPath}>
-            {personal ? 'Connect yours' : 'Connect'}
+            {/* Gmail and Calendar are consented to per person, from the page that
+                first says what Rawr will read. Naming the step beats a button that
+                looks like consent and lands somewhere else. */}
+            {personal ? 'Set up yours' : 'Connect'}
           </LinkButton>
         )}
       </div>

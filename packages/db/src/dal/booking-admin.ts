@@ -52,6 +52,9 @@ export type BookingPageSummary = {
   /** Hosts on the page with no usable calendar. A number an admin can see at a
    *  glance beats a page that quietly offers nothing. */
   unhealthyHosts: number
+  /** Active hosts who have working hours set. Zero means the page offers nothing
+   *  however healthy every calendar is. */
+  hostsWithHours: number
 }
 
 /** Shared pages, plus the person's own links. Somebody else's personal link is not
@@ -71,6 +74,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       host_count: string
       upcoming: string
       unhealthy: string
+      hosts_with_hours: string
     }>(sql`
       select p.id, p.slug, p.name, p.kind, p.owner_id, o.name as owner_name,
              p.duration_minutes, p.location, p.is_active,
@@ -78,11 +82,18 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
              count(distinct b.id) filter (where b.state = 'confirmed' and b.starts_at >= now()) as upcoming,
              count(distinct h.user_id) filter (
                where h.is_active and (g.state is null or g.state <> 'connected')
-             ) as unhealthy
+             ) as unhealthy,
+             -- An empty weekly map offers no times, so a page whose every host has
+             -- one is published and unbookable. Counted here rather than read per
+             -- row, which would be a query per page on a list.
+             count(distinct h.user_id) filter (
+               where h.is_active and a.weekly is not null and a.weekly <> '{}'::jsonb
+             ) as hosts_with_hours
         from booking_page p
         left join user_account o on o.id = p.owner_id
         left join booking_host h on h.booking_page_id = p.id
         left join calendar_grant g on g.user_id = h.user_id
+        left join availability a on a.user_id = h.user_id and a.account_id = p.account_id
         left join booking b on b.booking_page_id = p.id
        where p.kind <> 'one_on_one' or p.owner_id = ${ctx.actorId}
        group by p.id, o.name
@@ -101,6 +112,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       hostCount: Number(row.host_count),
       upcoming: Number(row.upcoming),
       unhealthyHosts: Number(row.unhealthy),
+      hostsWithHours: Number(row.hosts_with_hours),
     }))
   })
 

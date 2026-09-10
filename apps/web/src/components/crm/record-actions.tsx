@@ -14,6 +14,7 @@ import { Value } from './value.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
 import { useZone } from '~/components/zone.tsx'
+import { sameWords } from '~/lib/same-words.ts'
 
 export type RecordActionsProps = {
   account: string
@@ -275,7 +276,7 @@ export const RecordActions = ({
             <Button
               variant="destructive"
               busy={busy}
-              disabled={confirmText.trim() !== displayName}
+              disabled={!sameWords(confirmText, displayName)}
               onClick={() => void remove()}
             >
               Delete {objectLabel.toLowerCase()}

@@ -2,7 +2,8 @@
 
 import { Select, TextArea, TextInput } from '@rawr/ui'
 import type { FieldType, ObjectKey } from '@rawr/db'
-import { RecordPicker } from './record-picker.tsx'
+import { useState } from 'react'
+import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { RichTextInput } from './rich-text-input.tsx'
 
 export type Choice = { id: string; label: string; pipelineId?: string }
@@ -46,21 +47,62 @@ export type FieldInputProps = {
   valueLabel?: string | null | undefined
 }
 
+/** Only the id is stored, so on the next render there is nothing left to say what
+ *  was chosen and the picker falls back to showing a uuid. The caller supplies a
+ *  label when it has one, from the record being edited; a create form has none,
+ *  because the record does not exist yet. So the name of whatever was just picked
+ *  is remembered here, which is the only place that sees it. */
+const RelationField = ({
+  id,
+  pickObject,
+  label: fieldLabel,
+  allowClear,
+  value,
+  onChange,
+  valueLabel,
+}: {
+  id: string
+  pickObject: ObjectKey
+  label: string
+  allowClear: boolean
+  value: unknown
+  onChange: (value: unknown) => void
+  valueLabel?: string | null | undefined
+}) => {
+  const [picked, setPicked] = useState<PickedRecord | null>(null)
+  const current = typeof value === 'string' && value !== '' ? value : null
+  const label = valueLabel || (picked?.id === current ? picked.label : null) || current
+
+  return (
+    <RecordPicker
+      id={id}
+      object={pickObject}
+      label={fieldLabel}
+      allowClear={allowClear}
+      value={current ? { id: current, label: label ?? current } : null}
+      onChange={(next) => {
+        setPicked(next)
+        onChange(next?.id ?? null)
+      }}
+    />
+  )
+}
+
 /** One editor per field type, chosen from the registry. Adding a type means adding
  *  a branch here and nowhere else on the write side. */
 export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }: FieldInputProps) => {
   const common = { id, 'aria-label': field.label, autoFocus }
 
   if (field.pickObject) {
-    const current = typeof value === 'string' && value !== '' ? value : null
     return (
-      <RecordPicker
+      <RelationField
         id={id}
-        object={field.pickObject}
+        pickObject={field.pickObject}
         label={field.label}
         allowClear={!field.isRequired}
-        value={current ? { id: current, label: valueLabel || current } : null}
-        onChange={(next) => onChange(next?.id ?? null)}
+        value={value}
+        onChange={onChange}
+        valueLabel={valueLabel}
       />
     )
   }

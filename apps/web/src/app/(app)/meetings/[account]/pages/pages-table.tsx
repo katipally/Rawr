@@ -6,7 +6,7 @@ import { ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { bookedPath, bookingPagesPath } from '~/lib/links.ts'
+import { availabilityPath, bookedPath, bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { BookingLinkSnippet } from './snippet.tsx'
 
@@ -23,6 +23,7 @@ export type PageRow = {
   hostCount: number
   upcoming: number
   unhealthyHosts: number
+  hostsWithHours: number
 }
 
 const KINDS: Record<BookingKind, string> = {
@@ -110,15 +111,30 @@ export const PagesTable = ({
         // Publishing with nobody to meet is refused by the data access layer,
         // so the reason is said here rather than thrown after the click.
         const blocked = !row.isActive && row.hostCount === 0
+        // A page with hosts but no working hours publishes fine and then offers a
+        // visitor nothing, which reads as a broken link rather than an empty diary.
+        // Said here, where the switch is, not only on the availability screen.
+        const noHours = row.hostCount > 0 && row.hostsWithHours === 0
         return (
-          <Switch
-            label={row.isActive ? `Turn “${row.name}” off` : `Turn “${row.name}” on`}
-            hideLabel
-            checked={row.isActive}
-            disabled={pending === row.id || blocked}
-            title={blocked ? 'Add an active host before this page can take bookings.' : undefined}
-            onChange={(event) => void setActive(row, event.target.checked)}
-          />
+          <span className="flex items-center gap-2">
+            <Switch
+              label={row.isActive ? `Turn “${row.name}” off` : `Turn “${row.name}” on`}
+              hideLabel
+              checked={row.isActive}
+              disabled={pending === row.id || blocked}
+              title={blocked ? 'Add an active host before this page can take bookings.' : undefined}
+              onChange={(event) => void setActive(row, event.target.checked)}
+            />
+            {noHours ? (
+              <Link
+                href={availabilityPath(account)}
+                onClick={(event) => event.stopPropagation()}
+                title="No host on this page has working hours, so it offers no times."
+              >
+                <Badge tone="warn">No hours</Badge>
+              </Link>
+            ) : null}
+          </span>
         )
       },
     },

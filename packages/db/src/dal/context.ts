@@ -45,6 +45,22 @@ export const assertScopes = (raw: Record<string, string> | undefined, granted: r
   return scopes
 }
 
+/** Work Rawr does on its own behalf: a queued job, a token refresh, a booking
+ *  lifecycle step that runs after the person who started it has gone. No hub
+ *  grant describes it, because there is no seat asking, so it holds them all and
+ *  stays below the super admin line. The actor kind keeps the audit log honest.
+ *
+ *  Not for anything a stranger on the internet reaches: that is
+ *  `publicEdgeContext`, which is deliberately narrow. */
+export const systemContext = (accountId: string): AccountContext => ({
+  accountId,
+  actorId: null,
+  actorKind: 'job',
+  isSuperAdmin: false,
+  viewHubs: HUBS,
+  editHubs: HUBS,
+})
+
 export class ForbiddenError extends Error {
   // Plain fields rather than constructor parameter properties: Node's type
   // stripping runs the scripts in this package with no transform step.

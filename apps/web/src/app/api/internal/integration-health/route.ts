@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { testConnection } from '~/server/integrations/index.ts'
@@ -23,7 +23,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const result = await testConnection(
-    { ...publicEdgeContext(body.accountId), actorKind: 'job' },
+    systemContext(body.accountId),
     body.kind as never,
   )
   // Always 200: the worker wants the answer, not an HTTP error. A failing provider

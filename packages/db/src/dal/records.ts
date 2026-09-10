@@ -524,6 +524,27 @@ export type CreateResult = {
  *  at a time from the record itself. Every other path asks. */
 export type WriteOptions = { enrich?: boolean }
 
+/** A record has to be findable by somebody who did not create it. Neither of
+ *  these columns can be marked required on its own -- an import of company
+ *  domains has no names, and a form capture has an email and no name -- so the
+ *  rule is "one of", checked once here rather than at each of the four writers.
+ *
+ *  A deal is absent because its name already is required outright. */
+const IDENTITY: Record<string, { columns: string[]; message: string }> = {
+  contact: { columns: ['email', 'first_name', 'last_name'], message: 'A contact needs an email or a name.' },
+  company: { columns: ['name', 'domain'], message: 'A company needs a name or a domain.' },
+}
+
+const assertIdentified = (object: RegistryObject, columns: Record<string, unknown>): void => {
+  const rule = IDENTITY[object.key]
+  if (!rule) return
+  const named = rule.columns.some((column) => {
+    const value = columns[column]
+    return typeof value === 'string' ? value.trim() !== '' : value != null
+  })
+  if (!named) throw new Error(rule.message)
+}
+
 export const createRecord = async (
   ctx: AccountContext,
   objectKey: string,
@@ -547,6 +568,8 @@ export const createRecord = async (
           : prepared.custom[field.key] != null
       if (!present) throw new ValueError(field, 'is required.')
     }
+
+    assertIdentified(object, prepared.columns)
 
     const duplicate = await findDuplicate(tx, object, prepared.columns)
     if (duplicate) throw new DuplicateError(duplicate.what, duplicate.id)

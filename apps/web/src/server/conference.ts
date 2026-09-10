@@ -1,4 +1,4 @@
-import { attachConference, publicEdgeContext, readBooking, recordDeadLetter } from '@rawr/db'
+import { attachConference, readBooking, recordDeadLetter, systemContext } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { bookedPath } from '~/lib/links.ts'
 import { inBackground } from './background.ts'
@@ -47,7 +47,7 @@ export const queueConferenceBackfill = (pending: PendingConference): void => {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const chase = async (pending: PendingConference): Promise<void> => {
-  const ctx = publicEdgeContext(pending.accountId)
+  const ctx = systemContext(pending.accountId)
   let lastError = pending.reason
 
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
@@ -104,7 +104,7 @@ const chase = async (pending: PendingConference): Promise<void> => {
 /** Nobody is watching a background retry, so the last word goes to the people who
  *  can add a link by hand. */
 const announce = async (
-  ctx: ReturnType<typeof publicEdgeContext>,
+  ctx: ReturnType<typeof systemContext>,
   pending: PendingConference,
   reason: string,
 ): Promise<void> => {
@@ -131,7 +131,7 @@ const announce = async (
 
 const record = async (pending: PendingConference, error: string, attempts: number): Promise<void> => {
   try {
-    await recordDeadLetter(publicEdgeContext(pending.accountId), {
+    await recordDeadLetter(systemContext(pending.accountId), {
       jobName: 'zoom.backfill',
       payload: { bookingId: pending.bookingId, topic: pending.topic },
       error,

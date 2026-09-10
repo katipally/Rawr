@@ -1,4 +1,4 @@
-import { publicEdgeContext, accountSlugFor } from '@rawr/db'
+import { systemContext, accountSlugFor } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { resumeAutomation } from '~/server/automations.ts'
@@ -25,7 +25,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     // A job's context: no actor, marketing's ceiling. That is already what the
     // trigger path writes under, so a resumed step can do nothing a triggered
     // one could not.
-    const ctx = { ...publicEdgeContext(body.accountId), actorKind: 'job' as const }
+    const ctx = systemContext(body.accountId)
     return NextResponse.json(await resumeAutomation(ctx, body.runId, await accountSlugFor(ctx)))
   } catch (cause) {
     return NextResponse.json(

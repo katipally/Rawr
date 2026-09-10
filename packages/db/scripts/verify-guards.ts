@@ -42,10 +42,15 @@ const contextFor = (accountId: string, userId: string, seat: Seat): AccountConte
   editHubs: [...SEATS[seat]],
 })
 
+/** Set as soon as the account is known, so the cleanup in `finally` can run even
+ *  when a check throws before the probes are made. */
+let probeAccountId: string | null = null
+
 try {
   const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!ws) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = ws.id as string
+  probeAccountId = accountId
 
   const [actor] = await owner`
     select u.id from user_account u
@@ -303,12 +308,19 @@ try {
   await owner`delete from team where id = ${scopeTeam!.id}`
   await owner`delete from contact where account_id = ${accountId} and email like ${`scope.%.${scopeStamp}@guard.test`}`
 
-  // The probes are artefacts of this script, so it takes them with it.
-  await owner`delete from saved_view where account_id = ${accountId} and slug = 'guard-probe-view'`
-  await owner`delete from dead_letter where account_id = ${accountId} and error like 'Simulated failure%'`
-  await owner`delete from field_def where account_id = ${accountId} and key like 'guard_probe_%'`
-  await owner.unsafe('drop index if exists hot_contact_guard_probe_admin')
 } finally {
+  // The probes are artefacts of this script, so it takes them with it -- from
+  // here, not from the end of the checks. A failing check used to skip this and
+  // leave four properties named "Guard probe ..." in a real account's contact
+  // editor, where nobody could tell they were not somebody's own field.
+  if (probeAccountId) {
+    const at = probeAccountId
+    await owner`delete from saved_view where account_id = ${at} and slug = 'guard-probe-view'`
+    await owner`delete from dead_letter where account_id = ${at} and error like 'Simulated failure%'`
+    await owner`delete from field_def where account_id = ${at} and key like 'guard_probe_%'`
+    await owner.unsafe('drop index if exists hot_contact_guard_probe_admin')
+  }
+
   // The mutations under test query through the app pool, so this script owns two
   // connections to give back, not one. Leaving the second open is what made
   // `pnpm verify` hang here on an unsettled top-level await.

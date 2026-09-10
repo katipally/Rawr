@@ -1329,10 +1329,15 @@ export const listBookings = async (
       conference_url: string | null
     }>(sql`
       select b.id, p.name as page_name, u.name as host_name, b.attendee_name, b.attendee_email,
-             b.starts_at, b.ends_at, b.state, b.contact_id, b.conference_url
+             b.starts_at, b.ends_at, b.state, b.conference_url,
+             -- Deleting a contact is a soft delete, so the column still points at
+             -- a row. Offering it as a link sends somebody to a 404 after the
+             -- delete dialog has just promised the meeting would read as plain text.
+             c.id as contact_id
         from booking b
         join booking_page p on p.id = b.booking_page_id
         join user_account u on u.id = b.host_user_id
+        left join contact c on c.id = b.contact_id and c.deleted_at is null
        where ${input.pageId ? sql`b.booking_page_id = ${input.pageId}` : sql`true`}
          and ${input.hostUserId ? sql`b.host_user_id = ${input.hostUserId}` : sql`true`}
          and ${input.state ? sql`b.state = ${input.state}` : sql`true`}

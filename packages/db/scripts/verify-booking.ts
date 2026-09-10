@@ -1,6 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import {
+  canWrite,
+  publicEdgeContext,
+  systemContext,
   assignHost,
   attachConference,
   bookingForToken,
@@ -1074,7 +1077,7 @@ try {
     'the slot is reported as gone rather than double booked',
   )
 
-  const panelCancelled = await cancelBooking(datasaur, panelResult.bookingId, { by: 'host' })
+  const panelCancelled = await cancelBooking(systemContext(datasaur.accountId), panelResult.bookingId, { by: 'host' })
   check(
     'cancelling a collective hands back the invitations written for the others',
     panelCancelled.releasedEvents.length === panelHosts.length - 1,
@@ -1123,10 +1126,21 @@ try {
   // -----------------------------------------------------------------------
   section('cancel and reschedule')
 
-  const cancelled = await cancelBooking(datasaur, zoomDown.bookingId, { by: 'host', reason: 'testing' })
+  // Through the context the app builds, not the full-hub one this script holds.
+  // Cancelling was dead for every caller for weeks while this section passed,
+  // because the wrapper the CRM and the attendee's own link both run makes its own
+  // context and this checked the layer underneath it.
+  const asTheAppDoes = systemContext(datasaur.accountId)
+  const cancelled = await cancelBooking(asTheAppDoes, zoomDown.bookingId, { by: 'host', reason: 'testing' })
   check('cancelling works', !cancelled.alreadyDone && cancelled.booking.state === 'cancelled')
 
-  const again = await cancelBooking(datasaur, zoomDown.bookingId, { by: 'host' })
+  check(
+    'and the public edge is not what cancels',
+    !canWrite(publicEdgeContext(datasaur.accountId), 'booking'),
+    'a stranger on a form cannot reach the booking lifecycle',
+  )
+
+  const again = await cancelBooking(asTheAppDoes, zoomDown.bookingId, { by: 'host' })
   check('cancelling twice cancels once', again.alreadyDone, 'safe to click twice')
 
   const cancelActivity = await scoped<{ n: string }>(

@@ -135,6 +135,10 @@ export const SEED_FORMS: SeedForm[] = [
       submitLabel: 'Request a demo',
       successValue: 'Thanks. We will be in touch to arrange a time.',
       lifecycleStageOnSubmit: 'Lead',
+      // The consent field above is what this names. Without it the tick is stored
+      // in the submission and subscribes nobody, and the unsubscribe link the
+      // person is promised has no state to act on.
+      subscriptionOptIns: ['One-to-one sales email'],
       notifySlack: true,
     },
   },

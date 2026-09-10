@@ -3,6 +3,7 @@ import {
   confirmBooking,
   isKnownTimezone,
   publicEdgeContext,
+  systemContext,
   readBookingPage,
   readHolds,
   readPageHosts,
@@ -501,7 +502,10 @@ export const cancelWithProviders = async (
   booking: BookingRecord,
   input: { reason?: string | null; by: 'attendee' | 'host' },
 ): Promise<{ alreadyDone: boolean }> => {
-  const ctx = publicEdgeContext(booking.accountId)
+  // Rawr's own act, not the caller's: the host cancels from the CRM and the
+  // attendee cancels from a link in their mail, and neither holds a seat the
+  // booking lifecycle could be checked against.
+  const ctx = systemContext(booking.accountId)
   const result = await cancelBooking(ctx, booking.id, input)
   if (result.alreadyDone) return { alreadyDone: true }
 
@@ -558,7 +562,7 @@ export const rescheduleWithProviders = async (input: RescheduleInput): Promise<B
     }
   }
 
-  const ctx = publicEdgeContext(booking.accountId)
+  const ctx = systemContext(booking.accountId)
   const page = await readBookingPage(ctx, booking.bookingPageId)
   if (!page) {
     return { ok: false, kind: 'closed', message: 'The page this meeting was booked on no longer exists.' }

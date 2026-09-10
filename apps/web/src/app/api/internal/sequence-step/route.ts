@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { RevokedError } from '~/server/gmail.ts'
@@ -26,7 +26,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const outcome = await runStep(
       // A job's context: no actor, marketing's ceiling, which is what sending
       // outreach on somebody's behalf needs and nothing more.
-      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
+      systemContext(body.accountId),
       body.enrollmentId,
     )
     return NextResponse.json(outcome)

@@ -17,12 +17,13 @@ import { Code2, Inbox } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useEffect, useState } from 'react'
-import { Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Alert, Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { EmbedSnippet } from '../embed-snippet.tsx'
 import { FormPreview } from './preview.tsx'
+import { sameWords } from '~/lib/same-words.ts'
 
 /** Edit the questions, the mapping and what happens on submit.
  *
@@ -186,6 +187,7 @@ export const FormBuilder = ({
   // An internal type is how the company talks to itself, so it is never
   // something a stranger filling in a web form can be signed up to.
   const optInTypes = subscriptions.filter((type) => !type.isInternal)
+  const askingConsent = fields.some((field) => field.type === 'consent')
 
   return (
     <div className="w-full max-w-7xl">
@@ -267,7 +269,7 @@ export const FormBuilder = ({
             <Button
               variant="destructive"
               busy={deleting}
-              disabled={confirmText.trim() !== form.name}
+              disabled={!sameWords(confirmText, form.name)}
               onClick={() => void remove()}
             >
               Delete form
@@ -662,6 +664,13 @@ export const FormBuilder = ({
             </fieldset>
             <fieldset className="mt-3 flex flex-col gap-2">
               <legend className="font-medium">Subscribe new contacts to</legend>
+              {askingConsent && (settings.subscriptionOptIns ?? []).length === 0 ? (
+                <Alert tone="warning">
+                  This form asks for consent but names nothing to subscribe to, so ticking
+                  the box subscribes the person to nothing and the unsubscribe link they are
+                  promised has nothing to act on.
+                </Alert>
+              ) : null}
               {optInTypes.length === 0 ? (
                 <p className="text-small text-secondary">
                   This account has no customer-facing subscription types yet.
