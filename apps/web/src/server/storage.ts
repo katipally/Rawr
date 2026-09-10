@@ -42,18 +42,6 @@ const client = (): S3Client => {
   return opened
 }
 
-/** A one-shot URL the browser PUTs to, scoped to this exact key, so a token for
- *  one record cannot write over another. Content type is left unsigned so the
- *  browser may send its own; storage keeps whatever arrives. */
-export const signedUpload = async (key: string): Promise<{ url: string }> => {
-  const url = await getSignedUrl(
-    client(),
-    new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key }),
-    { expiresIn: 300 },
-  )
-  return { url }
-}
-
 /** A link that stops working. Short, because a long-lived one is a public file
  *  with extra steps. */
 export const signedDownload = async (
