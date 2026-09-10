@@ -129,7 +129,16 @@ export type SubmitResult = {
   challengeRequired?: boolean | undefined
   /** For the Slack job, which runs outside this transaction. */
   notify?:
-    | { formName: string; contactId: string; values: Record<string, unknown>; attribution: Attribution }
+    | {
+        formName: string
+        contactId: string
+        values: Record<string, unknown>
+        attribution: Attribution
+        /** The channel this form names, if it names one. A bot token can post
+         *  anywhere; a webhook is bound to the channel it was created for and
+         *  ignores it. */
+        channel: string | null
+      }
     | undefined
 }
 
@@ -409,7 +418,13 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
       success: { mode: settings.successMode, value: settings.successValue },
       notify:
         verdict.state === 'clean' && settings.notifySlack && linked.contactId
-          ? { formName: input.form.name, contactId: linked.contactId, values: answers, attribution }
+          ? {
+              formName: input.form.name,
+              contactId: linked.contactId,
+              values: answers,
+              attribution,
+              channel: settings.slackChannel ?? null,
+            }
           : undefined,
     }
   })

@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { todayIn } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 import { bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -41,8 +43,6 @@ const zones = (): string[] => {
   return []
 }
 
-const today = (): string => new Date().toISOString().slice(0, 10)
-
 export const ScheduleEditor = ({
   schedule,
   editable,
@@ -58,11 +58,12 @@ export const ScheduleEditor = ({
 }) => {
   const show = useToast()
   const router = useRouter()
+  const zone = useZone()
   const [timezone, setTimezone] = useState(schedule.timezone)
   const [weekly, setWeekly] = useState<Ranges>(schedule.weekly as Ranges)
   const [saving, setSaving] = useState(false)
 
-  const [overrideDay, setOverrideDay] = useState(today())
+  const [overrideDay, setOverrideDay] = useState(() => todayIn(zone))
   const [overrideKind, setOverrideKind] = useState<'off' | 'hours'>('off')
   // A list, not a pair: the column is a jsonb array and the reader below already
   // renders every block, so a morning and an afternoon with a gap between them

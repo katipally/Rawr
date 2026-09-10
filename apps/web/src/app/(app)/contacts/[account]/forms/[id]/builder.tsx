@@ -21,6 +21,7 @@ import { Alert, Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, u
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useRowIds } from '~/lib/row-ids.ts'
 import { EmbedSnippet } from '../embed-snippet.tsx'
 import { FormPreview } from './preview.tsx'
 import { sameWords } from '~/lib/same-words.ts'
@@ -58,6 +59,7 @@ export const FormBuilder = ({
   subscriptions,
   baseUrl,
   canEdit,
+  slackIsWebhook,
 }: {
   account: string
   form: FormDetail
@@ -69,6 +71,9 @@ export const FormBuilder = ({
   subscriptions: { name: string; isInternal: boolean }[]
   baseUrl: string
   canEdit: boolean
+  /** The account's Slack is an incoming webhook rather than a bot token, so the
+   *  channel is fixed by the URL and nothing this form asks for can change it. */
+  slackIsWebhook: boolean
 }) => {
   const router = useRouter()
   const toast = useToast()
@@ -82,12 +87,20 @@ export const FormBuilder = ({
   const [slugFollowsName, setSlugFollowsName] = useState(!form.id)
   const [isActive, setIsActive] = useState(form.isActive)
   const [fields, setFields] = useState<FormField[]>(form.fields)
+  const rowIds = useRowIds(fields.length)
   const [settings, setSettings] = useState(form.settings)
   const [saving, setSaving] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   const [showEmbed, setShowEmbed] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const [stages, setStages] = useState<{ name: string }[]>([])
+
+  useEffect(() => {
+    // A seat that cannot read the list gets an empty one, and the Select still
+    // offers what the form is already set to rather than losing it.
+    api.admin.lifecycle.list.query().then(setStages).catch(() => {})
+  }, [])
 
   const remove = async () => {
     setDeleting(true)
@@ -130,17 +143,25 @@ export const FormBuilder = ({
   const patch = (index: number, change: Partial<FormField>) =>
     setFields((all) => all.map((field, i) => (i === index ? { ...field, ...change } : field)))
 
-  const move = (index: number, by: number) =>
+  const move = (index: number, by: number) => {
+    const target = index + by
+    if (target < 0 || target >= fields.length) return
+    rowIds.moved(index, by)
     setFields((all) => {
       const next = [...all]
-      const target = index + by
-      if (target < 0 || target >= next.length) return all
       const [moved] = next.splice(index, 1)
       if (moved) next.splice(target, 0, moved)
       return next
     })
+  }
 
-  const addField = () =>
+  const removeField = (index: number) => {
+    rowIds.removed(index)
+    setFields((all) => all.filter((_, i) => i !== index))
+  }
+
+  const addField = () => {
+    rowIds.added()
     setFields((all) => {
       // Numbered off the highest key in use, not off the count. Adding three,
       // deleting the second and adding again produced a second "field_3", which
@@ -161,6 +182,7 @@ export const FormBuilder = ({
         },
       ]
     })
+  }
 
   const save = async () => {
     setSaving(true)
@@ -187,6 +209,14 @@ export const FormBuilder = ({
   // An internal type is how the company talks to itself, so it is never
   // something a stranger filling in a web form can be signed up to.
   const optInTypes = subscriptions.filter((type) => !type.isInternal)
+
+  // A stage the account has since renamed or deleted is still what this form is
+  // set to, so it is offered rather than silently dropped by opening the builder.
+  const stageNames = stages.map((stage) => stage.name)
+  const stageOptions =
+    settings.lifecycleStageOnSubmit && !stageNames.includes(settings.lifecycleStageOnSubmit)
+      ? [...stageNames, settings.lifecycleStageOnSubmit]
+      : stageNames
   const askingConsent = fields.some((field) => field.type === 'consent')
 
   return (
@@ -391,7 +421,7 @@ export const FormBuilder = ({
 
             <ol className="flex flex-col gap-3">
               {fields.map((field, index) => (
-                <li key={`${field.key}-${index}`} className="rounded-hs border border-divider p-3">
+                <li key={rowIds.at(index)} className="rounded-hs border border-divider p-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <Field id={`label-${index}`} label="Label">
                       <TextInput
@@ -517,7 +547,7 @@ export const FormBuilder = ({
                           type="button"
                           variant="tertiary"
                           className="text-error"
-                          onClick={() => setFields((all) => all.filter((_, i) => i !== index))}
+                          onClick={() => removeField(index)}
                         >
                           Remove
                         </Button>
@@ -571,21 +601,36 @@ export const FormBuilder = ({
                   />
                 </Field>
               </div>
-              <Field id="lifecycle" label="Set lifecycle stage to" hint="Leave blank to change nothing.">
-                <TextInput
+              <Field id="lifecycle" label="Set lifecycle stage to">
+                <Select
                   id="lifecycle"
                   value={settings.lifecycleStageOnSubmit ?? ''}
                   disabled={!canEdit}
                   onChange={(event) =>
                     setSettings({ ...settings, lifecycleStageOnSubmit: event.target.value || null })
                   }
-                />
+                >
+                  <option value="">Leave unchanged</option>
+                  {stageOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </Select>
               </Field>
-              <Field id="slack-channel" label="Slack channel" hint="Blank uses the account default.">
+              <Field
+                id="slack-channel"
+                label="Slack channel"
+                hint={
+                  slackIsWebhook
+                    ? 'This account connects Slack with an incoming webhook, and a webhook posts to the one channel it was created for.'
+                    : 'Blank uses the account default.'
+                }
+              >
                 <TextInput
                   id="slack-channel"
                   value={settings.slackChannel ?? ''}
-                  disabled={!canEdit}
+                  disabled={!canEdit || slackIsWebhook}
                   onChange={(event) =>
                     setSettings({ ...settings, slackChannel: event.target.value || null })
                   }

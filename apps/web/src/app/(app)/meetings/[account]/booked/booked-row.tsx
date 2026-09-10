@@ -4,14 +4,17 @@ import { Badge, Button, Field, Modal, TextArea, TextInput, buttonClass, type Bad
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** One booked meeting.
  *
- *  Times are rendered in the browser's own zone with the zone name shown, because
- *  a meeting time with no zone on it is the thing people get wrong. The instant is
- *  passed in as an ISO string and formatted here rather than on the server, so a
- *  person in Jakarta reading a Los Angeles rep's screen sees their own clock. */
+ *  Times are rendered in the reader's own zone with the zone name shown, because
+ *  a meeting time with no zone on it is the thing people get wrong. That zone is
+ *  the one on the session rather than the one the browser reports: the server
+ *  renders this row first, and two clocks for one node is what React throws the
+ *  server's markup away over. */
 
 const STATES: Record<string, BadgeTone> = {
   confirmed: 'ok',
@@ -44,9 +47,9 @@ export const BookedRow = ({
   const router = useRouter()
   const [busy, setBusy] = useState(false)
 
+  const zone = useZone()
   const start = new Date(booking.startsAt)
   const end = new Date(booking.endsAt)
-  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const minutes = Math.round((end.getTime() - start.getTime()) / 60_000)
 
   const [asking, setAsking] = useState<'cancel' | 'reschedule' | null>(null)
@@ -105,15 +108,9 @@ export const BookedRow = ({
     <li className="flex flex-col gap-1 rounded-panel border border-line bg-surface p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="font-medium">
-          {start.toLocaleString(undefined, {
-            weekday: 'short',
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-          })}
+          {formatDateTime(booking.startsAt, zone)}
           {' – '}
-          {end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+          {end.toLocaleTimeString('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit' })}
         </span>
         <span className="text-xs text-secondary">{zone}</span>
         <Badge tone={STATES[booking.state] ?? 'neutral'} dot>
@@ -202,7 +199,7 @@ export const BookedRow = ({
           <Field
             id={`move-${booking.id}`}
             label="New start"
-            hint={`${minutes} minutes, in ${zone}. A time the host is not free for is refused.`}
+            hint={`${minutes} minutes. A datetime-local field carries no zone, so this is read in the browser's own clock, not ${zone}. A time the host is not free for is refused.`}
           >
             <TextInput
               id={`move-${booking.id}`}

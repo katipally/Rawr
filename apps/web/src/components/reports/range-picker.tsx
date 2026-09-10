@@ -3,6 +3,8 @@
 import { Button, Select } from '@rawr/ui'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
+import { todayIn } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 
 /** The range every report reads, kept in the URL so a report somebody found worth
  *  looking at is a link they can send. */
@@ -18,6 +20,7 @@ const iso = (date: Date): string => date.toISOString().slice(0, 10)
 
 export const RangePicker = ({ from, to }: { from: string; to: string }) => {
   const router = useRouter()
+  const zone = useZone()
   const pathname = usePathname()
   const search = useSearchParams()
   const [draft, setDraft] = useState({ from, to })
@@ -44,10 +47,12 @@ export const RangePicker = ({ from, to }: { from: string; to: string }) => {
           onChange={(event) => {
             const chosen = PRESETS.find((entry) => entry.key === event.target.value)
             if (!chosen) return
-            const end = new Date()
-            const start = new Date(end)
+            // The last day of the range is the reader's own today, not the
+            // container's, so "Last 7 days" ends on the day they are looking at.
+            const to = todayIn(zone)
+            const start = new Date(`${to}T00:00:00Z`)
             start.setUTCDate(start.getUTCDate() - (chosen.days - 1))
-            const next = { from: iso(start), to: iso(end) }
+            const next = { from: iso(start), to }
             setDraft(next)
             go(next)
           }}

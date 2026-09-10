@@ -4,6 +4,7 @@
 // value from '@rawr/db' here pulls the Postgres driver into the client bundle.
 import { FORM_FIELD_TYPES, type FormField } from '@rawr/db/forms'
 import { Button, Field, Select, TextInput } from '@rawr/ui'
+import { useRowIds } from '~/lib/row-ids.ts'
 
 /** The extra questions a booking page asks.
  *
@@ -73,11 +74,14 @@ export const QuestionList = ({
   editable: boolean
   targets?: MappingTarget[]
 }) => {
+  const rowIds = useRowIds(questions.length)
+
   const patch = (index: number, changes: Partial<FormField>) =>
     onChange(questions.map((question, at) => (at === index ? { ...question, ...changes } : question)))
 
   const add = () => {
     const taken = new Set(questions.map((question) => question.key))
+    rowIds.added()
     onChange([
       ...questions,
       {
@@ -93,6 +97,7 @@ export const QuestionList = ({
   const move = (index: number, by: number) => {
     const to = index + by
     if (to < 0 || to >= questions.length) return
+    rowIds.moved(index, by)
     const next = [...questions]
     const [moved] = next.splice(index, 1)
     if (moved) next.splice(to, 0, moved)
@@ -109,7 +114,7 @@ export const QuestionList = ({
 
       {questions.map((question, index) => (
         <div
-          key={question.key}
+          key={rowIds.at(index)}
           className="grid gap-2 rounded-hs border border-divider p-2 sm:grid-cols-2"
         >
           <Field id={`q-label-${index}`} label="Question" required>
@@ -285,7 +290,10 @@ export const QuestionList = ({
               type="button"
               variant="destructive"
               disabled={!editable}
-              onClick={() => onChange(questions.filter((_, at) => at !== index))}
+              onClick={() => {
+                rowIds.removed(index)
+                onChange(questions.filter((_, at) => at !== index))
+              }}
             >
               Remove
             </Button>

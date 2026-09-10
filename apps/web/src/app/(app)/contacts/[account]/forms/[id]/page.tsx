@@ -13,6 +13,7 @@ import { LinkButton } from '~/components/link-button.tsx'
 import { formsPath } from '~/lib/links.ts'
 import { notFound, redirect } from 'next/navigation'
 import { publicBaseUrl } from '~/lib/env.ts'
+import { slackCredentials } from '~/server/integrations/slack.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { FormBuilder } from './builder.tsx'
 
@@ -63,11 +64,12 @@ const BuilderPage = async ({
     fields: template?.fields ?? [],
     settings: template?.settings ?? readSettings({}),
   }
-  const [form, registry, members, subscriptions] = await Promise.all([
+  const [form, registry, members, subscriptions, slack] = await Promise.all([
     id === 'new' ? blank : getForm(ctx, id),
     getRegistry(ctx),
     listMembers(ctx),
     listSubscriptionTypes(ctx),
+    slackCredentials(ctx),
   ])
   if (!form) notFound()
 
@@ -93,6 +95,7 @@ const BuilderPage = async ({
       subscriptions={subscriptions.map((type) => ({ name: type.name, isInternal: type.isInternal }))}
       baseUrl={publicBaseUrl}
       canEdit={canEdit}
+      slackIsWebhook={slack?.webhookUrl != null}
     />
   )
 }

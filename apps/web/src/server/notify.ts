@@ -1,7 +1,7 @@
 import { recordDeadLetter, systemContext, type Attribution, type AccountContext } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { inBackground } from './background.ts'
-import { postToSlack, type SlackBody } from './integrations/slack.ts'
+import { postToSlack, slackCredentials, type SlackBody } from './integrations/slack.ts'
 
 /** Replaces what HubSpot posts to #sales-leads-2026 today. Trevor flagged this
  *  loss first: a form fill from a real prospect lands in Slack, and that stops at
@@ -68,10 +68,14 @@ type Outbound = {
  *  to swallow rather than throw, because every caller is fire-and-forget. */
 const send = async (ctx: AccountContext, outbound: Outbound): Promise<void> => {
   try {
+    // An account that has never connected Slack is not a delivery that failed.
+    // Dead-lettering it filled the failed-jobs screen with rows whose replay
+    // button could only fail again, and buried the ones worth looking at.
+    if (!(await slackCredentials(ctx))) return
     await postToSlack(ctx, outbound)
   } catch (cause) {
-    // postToSlack dead-letters through the provider layer on the way out, but an
-    // unconnected Slack throws before reaching it, so this catches the rest.
+    // postToSlack dead-letters through the provider layer on the way out; this
+    // catches what throws before it gets there.
     await deadLetter(ctx, outbound, cause instanceof Error ? cause.message : String(cause))
   }
 }
@@ -107,7 +111,9 @@ const deadLetter = async (ctx: AccountContext, outbound: Outbound, error: string
       jobName: outbound.jobName,
       payload: outbound.payload,
       error,
-      attempts: 0,
+      // Never queued: this is a synchronous post from the request that captured
+      // the lead, so nought tries would read as a job that ran and did nothing.
+      attempts: null,
     })
   } catch {
     // The database is the last place to record this. If it is unreachable too,

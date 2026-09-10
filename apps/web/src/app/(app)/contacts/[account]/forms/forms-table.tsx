@@ -4,6 +4,7 @@ import { DataTable, Modal, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { usePagedRows } from '~/components/paged.tsx'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EmbedSnippet } from './embed-snippet.tsx'
 import { formatDate } from '~/components/crm/value.tsx'
@@ -28,6 +29,7 @@ export const FormsTable = ({ account, baseUrl, rows }: { account: string; baseUr
   const zone = useZone()
   const router = useRouter()
   const [embedding, setEmbedding] = useState<FormRow | null>(null)
+  const { page, pager } = usePagedRows(rows, 'forms')
 
   const columns: Column<FormRow>[] = [
     {
@@ -94,11 +96,12 @@ export const FormsTable = ({ account, baseUrl, rows }: { account: string; baseUr
     <>
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={page}
         rowKey={(row) => row.id}
         caption="Forms in this account"
         onRowClick={(row) => router.push(formsPath(account, row.id))}
       />
+      {pager}
       <Modal open={embedding !== null} title={embedding ? `Embed “${embedding.name}”` : 'Embed'} onClose={() => setEmbedding(null)}>
         {embedding ? <EmbedSnippet baseUrl={baseUrl} formId={embedding.id} account={account} slug={embedding.slug} /> : null}
       </Modal>

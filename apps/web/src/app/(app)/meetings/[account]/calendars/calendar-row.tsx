@@ -6,6 +6,8 @@ import { Clock, Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useState } from 'react'
+import { formatDateTime } from '~/components/crm/value.tsx'
+import { useZone } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** One person's calendar connection, with the real reason when it is not working.
@@ -45,6 +47,7 @@ export const CalendarRow = ({
 }) => {
   const show = useToast()
   const router = useRouter()
+  const zone = useZone()
   const [busy, setBusy] = useState(false)
   const [editingCalendar, setEditingCalendar] = useState(false)
   const [calendarId, setCalendarId] = useState(grant?.calendarId ?? 'primary')
@@ -134,7 +137,7 @@ export const CalendarRow = ({
         <div>
           <dt className="inline">Last worked </dt>
           <dd className="inline font-medium text-body">
-            {grant?.lastOkAt ? grant.lastOkAt.toLocaleString() : 'never'}
+            {grant?.lastOkAt ? formatDateTime(grant.lastOkAt, zone) : 'never'}
           </dd>
         </div>
         {grant && !grant.hasRefreshToken && grant.provider === 'google' ? (
@@ -148,7 +151,7 @@ export const CalendarRow = ({
       {grant?.lastError ? (
         <p className="text-xs text-error">
           {grant.lastError}
-          {grant.lastErrorAt ? ` (${grant.lastErrorAt.toLocaleString()})` : ''}
+          {grant.lastErrorAt ? ` (${formatDateTime(grant.lastErrorAt, zone)})` : ''}
         </p>
       ) : null}
 

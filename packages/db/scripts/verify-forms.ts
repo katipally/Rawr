@@ -25,7 +25,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
-import { PEER, SANDBOX, seatFor } from './fixture.ts'
+import { PEER, SANDBOX, seatFor, cleanup } from './fixture.ts'
 
 /** F3's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-crm.ts. */
@@ -395,6 +395,58 @@ try {
     spamState[0]?.spam_state === 'confirmed_spam' && spamState[0]?.reviewed_by !== null,
     'attributed to the reviewer')
 
+  // ------------------------------------------------- slack channel, lifecycle
+  section('slack channel and lifecycle stage')
+
+  const stages = await scoped<{ name: string }>(datasaur, sql`
+    select name from lifecycle_stage order by position limit 1`)
+  const stageName = stages[0]?.name ?? null
+
+  const admin = await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
+  await saveForm(admin, {
+    name: `Announced ${stamp}`,
+    slug: `announced-${stamp}`,
+    isActive: true,
+    fields: [{ key: 'email', label: 'Email', type: 'email', required: true }],
+    settings: {
+      ...contactUs.settings,
+      notifySlack: true,
+      slackChannel: '#leads-verify',
+      lifecycleStageOnSubmit: stageName,
+      assignOwner: { mode: 'none', userId: null, pool: [] },
+    },
+  })
+  const announced = await submitForm({
+    form: (await publicFormBySlug(SANDBOX.slug, `announced-${stamp}`))!,
+    body: { email: `announce.${stamp}@verify-corp.example`, rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+
+  // The channel a form names has to survive the trip out of the transaction, or
+  // the builder's Slack channel field is a setting that changes nothing.
+  check('the channel the form names rides out on the notify payload',
+    announced.notify?.channel === '#leads-verify', announced.notify?.channel ?? 'nothing carried')
+
+  const onStage = await scoped<{ name: string | null }>(datasaur, sql`
+    select s.name from contact c
+      left join lifecycle_stage s on s.id = c.lifecycle_stage_id
+     where c.id = ${announced.contactId}`)
+  check('the lifecycle stage the form names is the one the contact lands on',
+    stageName !== null && onStage[0]?.name === stageName, `${onStage[0]?.name ?? 'none'} (wanted ${stageName ?? 'no stage seeded'})`)
+
+  // Nothing is connected to Slack for a fixture tenant, and an account that never
+  // connected it has no delivery to replay. Dead-lettering those filled the
+  // failed-jobs screen with rows whose replay button could only fail again.
+  const slackLetters = await scoped<{ n: number }>(datasaur, sql`
+    select count(*)::int as n from dead_letter where job_name = 'slack.form-submission'`)
+  check('an unconnected Slack leaves no dead letter behind',
+    (slackLetters[0]?.n ?? 0) === 0, `${slackLetters[0]?.n ?? 0} rows`)
+
+  // The hosted page's rate limiter reads the right end of x-forwarded-for, which
+  // is web-layer code this suite cannot import. Covered by
+  // apps/web/src/server/edge.test.ts, with a forged left entry.
+
   // ---------------------------------------------------------------- roles
   section('roles and tenancy')
 
@@ -463,6 +515,7 @@ try {
   // Given back before exiting, so the next suite in `pnpm verify` does not start
   // against a pooler this one is still holding connections on.
   await closeAppPool()
+  await cleanup()
   process.exit(failures === 0 ? 0 : 1)
 }
 

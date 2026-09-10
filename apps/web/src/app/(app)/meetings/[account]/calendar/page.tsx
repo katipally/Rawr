@@ -1,6 +1,7 @@
 import { listMembers, readAgenda } from '@rawr/db'
 import { PageHeader, Select } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
+import { todayIn } from '~/components/crm/value.tsx'
 import { redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import {
@@ -23,10 +24,6 @@ import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
 const MONTH = /^\d{4}-\d{2}$/
 
-/** UTC, and the same as the object calendar's: the grid highlights a day by
- *  string comparison, so both screens have to agree on what today is called. */
-const todayIso = (): string => new Date().toISOString().slice(0, 10)
-
 const CalendarScreen = async ({
   params,
   searchParams,
@@ -41,7 +38,8 @@ const CalendarScreen = async ({
 
   const ctx = contextFrom(session)
   // The reader's own today decides the default month, not the server's.
-  const month = MONTH.test(query.month ?? '') ? `${query.month}-01` : `${todayIso().slice(0, 7)}-01`
+  const today = todayIn(session.timezone)
+  const month = MONTH.test(query.month ?? '') ? `${query.month}-01` : `${today.slice(0, 7)}-01`
   // Everybody's is only an admin's to ask for: a rep's calendar is theirs.
   const everyone = query.who === 'all' && sessionIsAdmin(session)
   const who = everyone ? null : query.who && sessionIsAdmin(session) ? query.who : session.userId
@@ -92,7 +90,7 @@ const CalendarScreen = async ({
 
       <CalendarGrid
         month={agenda.month}
-        today={todayIso()}
+        today={today}
         truncated={agenda.truncated}
         fieldLabel="The day they happen, or fall due"
         entries={agenda.entries.map((entry) => ({

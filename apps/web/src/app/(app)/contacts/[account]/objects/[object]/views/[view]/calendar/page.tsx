@@ -2,6 +2,7 @@ import { calendarFields, listViews, parseFilters, readCalendar, resolveView } fr
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
+import { todayIn } from '~/components/crm/value.tsx'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
@@ -20,11 +21,6 @@ const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
 
 type Params = { account: string; object: string; view: string }
 type Search = { q?: string; filters?: string; month?: string; group?: string; new?: string; view?: string }
-
-/** Today, as the server sees it. The grid only compares it to a stored day to
- *  decide which square to ring, and being an hour out on that once a year is a
- *  fair trade for not shipping a client component to draw a month. */
-const todayIso = (): string => new Date().toISOString().slice(0, 10)
 
 /** Which shapes this object can be looked at in. A board needs a pipeline, which
  *  only a deal has; a calendar needs a date field, which the registry knows. */
@@ -63,8 +59,9 @@ const CalendarPage = async ({
   // explanation of why it is empty.
   if (placeable.length === 0) redirect(objectView(account, objectParam, viewSlug, 'list'))
 
+  const today = todayIn(session.timezone)
   const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
-  const month = search.month ?? todayIso().slice(0, 7)
+  const month = search.month ?? today.slice(0, 7)
   // A saved view's group is a board's grouping, which is a stage, not a date.
   // Honoured only when it happens to name a field a calendar can use, so opening
   // the calendar on a view saved as a board is a calendar rather than an error
@@ -189,7 +186,7 @@ const CalendarPage = async ({
       {calendar ? (
         <CalendarGrid
           month={calendar.month}
-          today={todayIso()}
+          today={today}
           entries={calendar.entries.map((entry) => ({
             ...entry,
             href: recordPath(account, objectParam, entry.id),

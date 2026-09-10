@@ -21,8 +21,8 @@ import { env } from '~/lib/env.ts'
  *  bucket, so it is deliberately explicit rather than guessed.
  *
  *  Still used only for rate limiting and a rotating hash. It is never stored. */
-export const clientIp = (request: NextRequest): string | null => {
-  const forwarded = request.headers.get('x-forwarded-for')
+export const clientIpFrom = (get: (name: string) => string | null): string | null => {
+  const forwarded = get('x-forwarded-for')
   if (forwarded) {
     const hops = forwarded.split(',').map((entry) => entry.trim()).filter(Boolean)
     // The last entry our own proxy appended: the address it saw, which is the
@@ -30,8 +30,13 @@ export const clientIp = (request: NextRequest): string | null => {
     const trusted = hops[hops.length - env.TRUSTED_PROXY_HOPS]
     if (trusted) return trusted
   }
-  return request.headers.get('x-real-ip')?.trim() || null
+  return get('x-real-ip')?.trim() || null
 }
+
+/** The same answer from a request. A Server Action has a header jar instead and
+ *  calls `clientIpFrom` directly. */
+export const clientIp = (request: NextRequest): string | null =>
+  clientIpFrom((name) => request.headers.get(name))
 
 export const ipHashOf = (request: NextRequest): string | null =>
   hashIp(clientIp(request), env.EDGE_IP_SALT)

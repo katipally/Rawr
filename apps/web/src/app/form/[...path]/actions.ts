@@ -7,7 +7,7 @@ import {
 import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { NextRequest } from 'next/server'
-import { checkSubmitLimits } from '~/server/edge.ts'
+import { checkSubmitLimits, clientIpFrom } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { answersFromFormData, runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
@@ -34,7 +34,9 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
   if (!form || !form.isActive) redirect(`${back}?e=${errorParam('That form is no longer accepting submissions.')}`)
 
   const incoming = await headers()
-  const ip = incoming.get('x-forwarded-for')?.split(',')[0]?.trim() ?? incoming.get('x-real-ip') ?? null
+  // The left end of x-forwarded-for is whatever the caller chose to send, so
+  // reading it put every forged header in its own rate-limit bucket.
+  const ip = clientIpFrom((name) => incoming.get(name))
 
   const limit = checkSubmitLimits(form.formId, ip)
   if (!limit.allowed) {
