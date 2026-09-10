@@ -9,6 +9,7 @@ import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import type { Group } from './filter-builder.tsx'
 import { formatCurrency, formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -45,9 +46,19 @@ export type BoardColumn = {
  *  read as a deal id. */
 const DRAG_TYPE = 'application/x-rawr-deal'
 
+/** What the board on screen was read with, so "Show more" asks for the next page
+ *  of the same deals rather than of an unfiltered board. */
+export type BoardQuery = {
+  pipelineId: string | null
+  filters: Group[]
+  search: string
+  groupBy: string
+}
+
 export type DealBoardProps = {
   account: string
   columns: BoardColumn[]
+  query: BoardQuery
   /** Which field a column stands for. A drop writes that field, so a board grouped
    *  by deal type moves the deal's type rather than its stage. */
   groupByKey: string
@@ -80,7 +91,7 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
   />
 )
 
-export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardProps) => {
+export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: DealBoardProps) => {
   const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -88,6 +99,39 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [moving, setMoving] = useState<string | null>(null)
+  /** Pages fetched after the first, per column. Cleared whenever the board is
+   *  reread, because a card that moved would otherwise be on two columns. */
+  const [pages, setPages] = useState<Record<string, { cards: BoardCard[]; hasMore: boolean }>>({})
+  const [loadingMore, setLoadingMore] = useState<string | null>(null)
+
+  const shownCards = (column: BoardColumn): BoardCard[] => {
+    const page = pages[column.key]
+    return page ? [...column.cards, ...page.cards] : column.cards
+  }
+  const stillMore = (column: BoardColumn): boolean => pages[column.key]?.hasMore ?? column.hasMore
+
+  const showMore = async (column: BoardColumn) => {
+    setLoadingMore(column.key)
+    const loaded = pages[column.key]?.cards ?? []
+    try {
+      const page = await api.crm.board.more.query({
+        pipelineId: query.pipelineId,
+        filters: query.filters as never,
+        search: query.search,
+        groupBy: query.groupBy,
+        groupKey: column.key,
+        offset: column.cards.length + loaded.length,
+      })
+      setPages((current) => ({
+        ...current,
+        [column.key]: { cards: [...loaded, ...page.cards], hasMore: page.hasMore },
+      }))
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setLoadingMore(null)
+    }
+  }
 
   const move = async (dealId: string, columnKey: string) => {
     setMoving(dealId)
@@ -99,6 +143,7 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
           ? 'Stage changed. The move is on the deal timeline.'
           : 'Moved. The change is in the audit log.',
       )
+      setPages({})
       router.refresh()
     } catch (cause) {
       // The card snaps back because the server never accepted the move.
@@ -205,12 +250,12 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
                 viewport rather than a fixed pixel count so a short laptop screen
                 and a tall monitor both show whole cards. */}
             <ol className="flex min-h-0 max-h-[min(65svh,50rem)] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2 @[60rem]:max-h-none">
-              {column.cards.length === 0 ? (
+              {shownCards(column).length === 0 ? (
                 <li className="px-1 py-2 text-secondary">
                   Nothing {groupByKey === 'stage_id' ? 'in this stage' : 'here'} yet.
                 </li>
               ) : (
-                column.cards.map((card) => (
+                shownCards(column).map((card) => (
                   <li key={card.id}>
                     {/* biome-ignore lint/a11y/noStaticElementInteractions: the drag
                         source for the drop target above, and the same reasoning
@@ -308,9 +353,19 @@ export const DealBoard = ({ account, columns, groupByKey, canWrite }: DealBoardP
                 ))
               )}
 
-              {column.hasMore ? (
-                <li className="px-1 py-1 text-small text-secondary">
-                  Showing {column.cards.length} of {column.count}. Narrow the filters to see the rest.
+              {stillMore(column) ? (
+                <li className="flex flex-col items-start gap-1 px-1 py-1 text-small text-secondary">
+                  <span className="tabular-nums">
+                    Showing {shownCards(column).length} of {column.count}.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void showMore(column)}
+                    disabled={loadingMore === column.key}
+                    className="rounded-pill border border-line-strong bg-surface px-3 py-1 font-light text-body hover:bg-fill disabled:opacity-60"
+                  >
+                    {loadingMore === column.key ? 'Loading' : 'Show more'}
+                  </button>
                 </li>
               ) : null}
             </ol>

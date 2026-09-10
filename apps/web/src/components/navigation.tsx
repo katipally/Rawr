@@ -19,10 +19,10 @@ import {
  *  the server answers. The clicked destination is known immediately, which is
  *  what lets the rail light up the new tab before the page exists.
  *
- *  Plain left clicks on same-origin links are intercepted at the document, so
- *  every Link in the app takes part without being wrapped. Modified clicks,
- *  new-tab targets, downloads, hashes and other origins are left to the
- *  browser. */
+ *  Plain left clicks on same-origin links are watched at the document, after
+ *  every handler on the way up has had the event, so a Link keeps its own
+ *  navigation and an ordinary anchor gets one. Modified clicks, new-tab targets,
+ *  downloads, hashes and other origins are left to the browser. */
 
 type Navigation = {
   /** The href a transition is heading for, or null when nothing is pending. */
@@ -35,18 +35,20 @@ const Context = createContext<Navigation>({ pendingHref: null, navigate: () => {
 export const useNavigation = () => useContext(Context)
 
 const isPlainLeftClick = (event: MouseEvent) =>
-  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && !event.defaultPrevented
+  event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
 
 export const NavigationProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter()
   const pathname = usePathname()
   const [pending, startTransition] = useTransition()
   const [target, setTarget] = useState<string | null>(null)
-  const targetRef = useRef<string | null>(null)
+  /** True while the pending navigation is one this provider pushed. A Link's own
+   *  push has no transition here to end, and is ended by the address instead. */
+  const ours = useRef(false)
 
   const navigate = useCallback(
     (href: string) => {
-      targetRef.current = href
+      ours.current = true
       // Outside the transition so the rail moves on this very frame.
       setTarget(href)
       startTransition(() => router.push(href))
@@ -54,16 +56,22 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
     [router],
   )
 
-  // The transition ends when the new route commits. The address is what the
-  // person sees, so it is what clears the target, not the pending flag alone:
-  // pathname is a trigger here rather than something the body reads.
+  // Arriving is what ends a navigation, whoever started it, and the address is
+  // what the person sees arrive: pathname is a trigger here rather than
+  // something the body reads.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
-    if (!pending && targetRef.current !== null) {
-      targetRef.current = null
-      reactStartTransition(() => setTarget(null))
-    }
-  }, [pending, pathname])
+    ours.current = false
+    setTarget(null)
+  }, [pathname])
+
+  // A push of our own that ends on the address it started from: the same page
+  // asked for again, or a route that sent the person back.
+  useEffect(() => {
+    if (pending || !ours.current) return
+    ours.current = false
+    reactStartTransition(() => setTarget(null))
+  }, [pending])
 
   useEffect(() => {
     const onClick = (event: MouseEvent) => {
@@ -78,14 +86,20 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
       if (url.hash && there === here) return
       // The public and API routes are not part of the app router tree.
       if (/^\/(api|b|f|form|c|e|w|t|u|invite|embed\.js|booking\.js)(\/|$)/.test(url.pathname)) return
-      // Next's own Link handler sees defaultPrevented and does not push a second
-      // time. Propagation carries on so the anchor's React handlers, a menu
-      // closing itself for one, still run.
+      if (event.defaultPrevented) {
+        // Preventing the browser's own navigation is how a Link takes a click, so
+        // by here that navigation is already under way. Nothing to start: only
+        // the destination to light up.
+        reactStartTransition(() => setTarget(there + url.hash))
+        return
+      }
+      // An ordinary anchor, which React never saw. Its default is a full page
+      // load, so this one is ours to take over.
       event.preventDefault()
       navigate(there + url.hash)
     }
-    document.addEventListener('click', onClick, true)
-    return () => document.removeEventListener('click', onClick, true)
+    document.addEventListener('click', onClick)
+    return () => document.removeEventListener('click', onClick)
   }, [navigate])
 
   const value = useMemo(() => ({ pendingHref: pending || target ? target : null, navigate }), [pending, target, navigate])

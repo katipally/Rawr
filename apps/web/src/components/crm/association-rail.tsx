@@ -18,6 +18,7 @@ export type Associated = {
   displayName: string
   detail: string | null
   isPrimary: boolean
+  canUnlink: boolean
   label: string | null
 }
 
@@ -284,7 +285,7 @@ export const AssociationRail = ({
                       {row.label ? <Badge tone="neutral">{row.label}</Badge> : null}
                     </span>
 
-                    {canWrite && !row.isPrimary ? (
+                    {canWrite && row.canUnlink ? (
                       <IconButton
                         label={`Unlink ${shortName(row.displayName)}`}
                         icon={<ACTION_ICONS.unlink size={16} />}

@@ -54,7 +54,7 @@ import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingI
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'
 import { registrableDomain, isFreeMailDomain } from '../src/dal/domains.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
 /** The F1 definition of done, run against the real database rather than asserted in
  *  a review. */
@@ -140,9 +140,13 @@ try {
 
   console.log('\n-- registry and views ------------------------------------------------')
 
-  await check('the registry exposes all three objects with their fields', async () => {
+  await check('the registry exposes the three built-in objects with their fields', async () => {
     const registry = await getRegistry(admin)
-    expect(registry.objects.length === 3, `saw ${registry.objects.length} objects`)
+    // By name, not by count: a custom object is creatable from Settings, so the
+    // total belongs to whoever has added one.
+    for (const key of ['contact', 'company', 'deal'] as const) {
+      expect(registry.objects.some((o) => o.key === key), `the registry has no ${key}`)
+    }
     const deal = objectOrThrow(registry, 'deal')
     const custom = deal.fields.filter((f) => f.storage === 'jsonb')
     // The two HubSpot properties the seed carries, checked by name. Not by count:
@@ -952,6 +956,30 @@ try {
     return `${all.total} linked, search and A-to-Z both hold`
   })
 
+  await check('B8. a company with three contacts returns none marked primary', async () => {
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const company = await createRecord(admin, 'company', { name: `Primaryco ${suffix}`, domain: `primaryco-${suffix}.test` })
+    for (const n of [1, 2, 3]) {
+      await createRecord(admin, 'contact', {
+        first_name: 'Primary',
+        last_name: `Check ${n}`,
+        email: `primary-${n}-${suffix}@primaryco-${suffix}.test`,
+        company_id: company.id,
+      })
+    }
+
+    const contacts = groupFor(await readAssociations(admin, { entityType: 'company', entityId: company.id }), 'contact')
+    expect(contacts?.records.length === 3, `the rail showed ${contacts?.records.length ?? 0} contacts`)
+    expect(contacts!.records.every((row) => !row.isPrimary), 'a company called its contacts primary')
+    expect(contacts!.records.every((row) => !row.canUnlink), 'a company offered to unlink a contact it does not link by row')
+
+    // The badge belongs on the one company a contact points at, which is the half
+    // of the pair that has to keep working.
+    const back = groupFor(await readAssociations(admin, { entityType: 'contact', entityId: contacts!.records[0]!.id }), 'company')
+    expect(back?.records.length === 1 && back.records[0]!.isPrimary, 'a contact lost Primary on its own company')
+    return 'Primary names one company, not three contacts'
+  })
+
   await check('B8. a list page reports its total alongside a capped page', async () => {
     const page = await listRecords(admin, { object: 'contact', limit: 2, count: true })
     expect(page.rows.length <= 2, `a limit of 2 returned ${page.rows.length} rows`)
@@ -1344,4 +1372,5 @@ try {
 } finally {
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }

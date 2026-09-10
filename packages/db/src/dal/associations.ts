@@ -9,9 +9,17 @@ export type AssociatedRecord = {
   objectKey: string
   displayName: string
   detail: string | null
-  /** True for the relationship the record itself stores, as opposed to a row in
-   *  the association table. A contact has one primary company. A4. */
+  /** True only where the record names one other record as its primary: a contact
+   *  or a deal, and the single company it points at. The reverse of that link is
+   *  not primary, because a company has no primary contact. A4. */
   isPrimary: boolean
+  /** Only an association row can be unlinked from here. What a record stores on
+   *  itself is changed on the record instead, so the rail offers no button that
+   *  would be refused. */
+  canUnlink: boolean
+  /** Only a contact has one. What the record page's Email action opens the
+   *  composer on when the record itself has no address. */
+  email: string | null
   label: string | null
   /** When the record itself was created, which is what "recent" orders by. */
   createdAt: string | null
@@ -53,7 +61,7 @@ const nameSelect = (object: RegistryObject): SQL => {
   }
   switch (object.key) {
     case 'contact':
-      return sql`id, coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email) as name, title as detail, created_at`
+      return sql`id, coalesce(nullif(trim(coalesce(first_name,'') || ' ' || coalesce(last_name,'')), ''), email) as name, title as detail, email, created_at`
     case 'company':
       return sql`id, coalesce(name, domain) as name, domain as detail, created_at`
     default:
@@ -61,14 +69,20 @@ const nameSelect = (object: RegistryObject): SQL => {
   }
 }
 
-type Row = { id: string; name: string | null; detail: string | null; created_at: string | Date | null }
+/** email is selected for a contact and left off every other object's select, so
+ *  it is absent rather than null on those rows. */
+type Row = { id: string; name: string | null; detail: string | null; email?: string | null; created_at: string | Date | null }
 
-const toRecord = (object: RegistryObject, row: Row, isPrimary: boolean, label: string | null): AssociatedRecord => ({
+type Kind = 'primary' | 'own' | 'linked'
+
+const toRecord = (object: RegistryObject, row: Row, kind: Kind, label: string | null): AssociatedRecord => ({
   id: row.id,
   objectKey: object.key,
   displayName: row.name?.trim() || `Unnamed ${object.nameSingular.toLowerCase()}`,
   detail: row.detail,
-  isPrimary,
+  isPrimary: kind === 'primary',
+  canUnlink: kind === 'linked',
+  email: row.email ?? null,
   label,
   createdAt: row.created_at === null ? null : new Date(row.created_at).toISOString(),
 })
@@ -131,7 +145,7 @@ export const readAssociations = async (
         const company = (await fetchByIds(tx, companyObject, [row.company_id])).get(row.company_id)
         // No label: isPrimary already renders the "Primary" badge, and setting both
         // printed the word twice on the same row.
-        if (company && keeps(company, needle)) push(own, 'company', toRecord(companyObject, company, true, null))
+        if (company && keeps(company, needle)) push(own, 'company', toRecord(companyObject, company, 'primary', null))
       }
     }
 
@@ -144,14 +158,14 @@ export const readAssociations = async (
           select ${nameSelect(contactObject)} from contact
            where company_id = ${entityId} and deleted_at is null ${matching(contactName)}
            ${orderedBy(contactName)} limit 100`)
-        for (const row of contacts) push(own, 'contact', toRecord(contactObject, row, true, null))
+        for (const row of contacts) push(own, 'contact', toRecord(contactObject, row, 'own', null))
       }
       if (dealObject) {
         const deals = await tx.execute<Row>(sql`
           select ${nameSelect(dealObject)} from deal
            where company_id = ${entityId} and deleted_at is null ${matching(`coalesce(name, '')`)}
            ${orderedBy('name')} limit 100`)
-        for (const row of deals) push(own, 'deal', toRecord(dealObject, row, true, null))
+        for (const row of deals) push(own, 'deal', toRecord(dealObject, row, 'own', null))
       }
 
       // Its own query, because both the cap and the search narrow the two above.
@@ -190,7 +204,7 @@ export const readAssociations = async (
         add(objectKey, 1)
         if (!keeps(row, needle)) continue
         const label = links.find((link) => link.other_id === id)?.label ?? null
-        push(linked, objectKey, toRecord(object, row, false, label))
+        push(linked, objectKey, toRecord(object, row, 'linked', label))
       }
     }
 

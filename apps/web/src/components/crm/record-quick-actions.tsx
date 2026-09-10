@@ -8,9 +8,13 @@ export type RecordQuickActionsProps = {
   account: string
   object: string
   recordId: string
-  /** Null when this record has no address to write to, which disables Email and
-   *  says why rather than offering a button that cannot do anything. */
-  email: string | null
+  /** Where the Email button goes, and what its tooltip says. A null href
+   *  disables it and the title is the reason, so there is never a button that
+   *  cannot do anything.
+   *
+   *  A company and a deal have no address of their own, so the href points at an
+   *  associated contact's page with the composer open. */
+  email: { href: string | null; title: string }
   canWrite: boolean
 }
 
@@ -36,7 +40,15 @@ export const RecordQuickActions = ({
 
   const actions = [
     { label: 'Note', icon: StickyNote, onClick: () => go({ log: 'note' }) },
-    { label: 'Email', icon: Mail, onClick: () => go({ compose: '1' }), disabled: !email, title: email ? `Email ${email}` : 'No email address on this record' },
+    {
+      label: 'Email',
+      icon: Mail,
+      onClick: () => {
+        if (email.href) navigate(email.href)
+      },
+      disabled: email.href === null,
+      title: email.title,
+    },
     { label: 'Call', icon: Phone, onClick: () => go({ log: 'call' }) },
     { label: 'Task', icon: CircleCheck, onClick: () => go({ task: 'new' }) },
     { label: 'Meeting', icon: CalendarCheck, onClick: () => go({ log: 'meeting' }) },

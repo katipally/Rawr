@@ -138,8 +138,11 @@ export const searchAll = async (
                       a.occurred_at
                  from activity a
                  -- An activity with no link is on nobody's timeline and has no
-                 -- page to open, so it is not a result. distinct on keeps the one
-                 -- most recently attached when it hangs on several records.
+                 -- page to open, so it is not a result. A call logged on a contact
+                 -- is linked to their company and their deals at the same instant,
+                 -- so distinct on takes the contact first and only then the most
+                 -- recent link: without that the tie is broken by whichever row
+                 -- Postgres reached first and the note opened the company.
                  join activity_link l on l.activity_id = a.id
                 where a.search @@ plainto_tsquery('simple', ${trimmed})
                   -- And the record it hangs on has to still be there. A note
@@ -152,7 +155,7 @@ export const searchAll = async (
                   -- 'task' is left out because a task is its own arm above, and
                   -- carrying both returns the same task twice under two headings.
                   and a.type in ('note', 'call', 'email', 'meeting')
-                order by a.id, l.occurred_at desc) h
+                order by a.id, (l.entity_type = 'contact') desc, l.occurred_at desc, l.entity_id) h
         order by h.rank desc, h.occurred_at desc
         limit ${limit})`)
 
