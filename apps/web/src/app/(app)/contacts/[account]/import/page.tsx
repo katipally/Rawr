@@ -2,7 +2,7 @@ import { canWrite, listImportRuns } from '@rawr/db'
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { formatDateTime } from '~/components/crm/value.tsx'
+import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MAX_BYTES, MAX_ROWS } from '~/server/spreadsheet.ts'
@@ -27,7 +27,7 @@ const ImportPage = async ({
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Data integration"
+        title="Import"
         lead="Records, and the shape around them."
         why={
           <>
@@ -87,7 +87,7 @@ const ImportPage = async ({
           <Field
             id="import-file"
             label="File"
-            hint={`CSV or XLSX, up to ${MAX_BYTES / 1024 / 1024}MB and ${MAX_ROWS.toLocaleString()} rows. Nothing is written until you have seen the preview.`}
+            hint={`CSV or XLSX, up to ${MAX_BYTES / 1024 / 1024}MB and ${formatNumber(MAX_ROWS)} rows. Nothing is written until you have seen the preview.`}
           >
             <input
               id="import-file"
@@ -156,12 +156,12 @@ const ImportPage = async ({
                       <Badge tone={run.state === 'done' ? 'ok' : run.state === 'failed' ? 'error' : 'neutral'}>{run.state}</Badge>
                     </td>
                     <td className="px-6 tabular-nums">
-                      {run.processedRows.toLocaleString()} / {run.totalRows.toLocaleString()}
+                      {formatNumber(run.processedRows)} / {formatNumber(run.totalRows)}
                     </td>
-                    <td className="px-6 tabular-nums">{run.created.toLocaleString()}</td>
-                    <td className="px-6 tabular-nums">{run.updated.toLocaleString()}</td>
-                    <td className="px-6 tabular-nums">{run.skipped.toLocaleString()}</td>
-                    <td className="px-6 tabular-nums">{run.errored.toLocaleString()}</td>
+                    <td className="px-6 tabular-nums">{formatNumber(run.created)}</td>
+                    <td className="px-6 tabular-nums">{formatNumber(run.updated)}</td>
+                    <td className="px-6 tabular-nums">{formatNumber(run.skipped)}</td>
+                    <td className="px-6 tabular-nums">{formatNumber(run.errored)}</td>
                     <td className="px-6 whitespace-nowrap text-secondary">{formatDateTime(run.createdAt, zone)}</td>
                   </tr>
                 ))}

@@ -39,4 +39,16 @@ export const proxy = (request: NextRequest): NextResponse => {
   return NextResponse.redirect(switchTo)
 }
 
-export const config = { matcher: ['/contacts/:path*', '/meetings/:path*'] }
+/** The upload path is excluded rather than returned early from, because the cost
+ *  is paid before this function runs: a matched request has its body buffered
+ *  against `experimental.proxyClientMaxBodySize`, which defaults to 10MB and
+ *  truncates rather than rejects. A 40MB export arrived cut in half with no error
+ *  anywhere. Nothing under /contacts/:account/import/upload needs an account
+ *  switch: the route checks the slug against the session itself.
+ *
+ *  Next compiles a `source` with path-to-regexp, where a parenthesised group is
+ *  passed through as raw regex, so the negative lookahead is applied to the whole
+ *  remainder of the path. */
+export const config = {
+  matcher: ['/contacts/((?!.*/import/upload$).*)', '/meetings/:path*'],
+}

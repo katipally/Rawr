@@ -13,10 +13,9 @@ import {
   deleteView,
   duplicateView,
   dissociate,
-  dryRun,
+  previewImportRun,
   findDuplicates,
   getRecord,
-  IMPORT_KINDS,
   getRegistry,
   isActivityType,
   listRecords,
@@ -33,6 +32,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   readAttachment,
   readBoard,
+  readBoardColumn,
   recordAttachment,
   removeAttachment,
   storageKeyFor,
@@ -43,7 +43,7 @@ import {
   readTimeline,
   recordOptions,
   cancelImportRun,
-  runImportChunk,
+  startImportRun,
   saveView,
   searchAll,
   setImportMapping,
@@ -383,6 +383,32 @@ export const crmRouter = router({
         ),
       ),
 
+    /** The next page of one column. The board's own read caps every column, so
+     *  this takes the same filters back and asks for what came after. */
+    more: protectedProcedure
+      .input(
+        z.object({
+          pipelineId: z.uuid().nullish(),
+          filters: z.array(filterGroup).max(5).optional(),
+          search: z.string().max(200).optional(),
+          groupBy: z.string().max(64).nullish(),
+          groupKey: z.string().min(1).max(200),
+          offset: z.number().int().min(0).max(100_000),
+        }),
+      )
+      .query(({ ctx, input }) =>
+        call(() =>
+          readBoardColumn(ctx.account, {
+            pipelineId: input.pipelineId ?? null,
+            filters: (input.filters ?? []) as never,
+            search: input.search ?? '',
+            groupBy: input.groupBy ?? null,
+            groupKey: input.groupKey,
+            offset: input.offset,
+          }),
+        ),
+      ),
+
     /** Dragging a card is an ordinary field write, so it goes through the same
      *  path and writes the same stage_change activity. The field comes from which
      *  board is on screen; the registry refuses anything it does not know, so
@@ -677,33 +703,18 @@ export const crmRouter = router({
       .input(z.object({ id: z.uuid(), mapping: z.record(z.string(), z.string().nullable()) }))
       .mutation(({ ctx, input }) => call(() => setImportMapping(ctx.account, input.id, input.mapping))),
 
+    /** A mutation carrying an id, not a query carrying the file. As a GET it put
+     *  up to 500 of somebody's rows in the URL, which is a request no browser
+     *  sends and the reason preview answered "Failed to fetch". */
     dryRun: protectedProcedure
-      .input(
-        z.object({
-          object: objectKey,
-          kind: z.enum(IMPORT_KINDS).default('records'),
-          source: z.string().max(60).nullable().default(null),
-          mapping: z.record(z.string(), z.string().nullable()),
-          rows: z.array(z.record(z.string(), z.string())).max(5000),
-        }),
-      )
-      .query(({ ctx, input }) =>
-        call(() =>
-          dryRun(ctx.account, {
-            objectKey: input.object,
-            kind: input.kind,
-            source: input.source,
-            mapping: input.mapping,
-            rows: input.rows,
-          }),
-        ),
-      ),
-
-    /** One chunk per call. The page polls, so closing the tab does not stop it and
-     *  reopening the page shows where it got to. */
-    runChunk: protectedProcedure
       .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => runImportChunk(ctx.account, input.id))),
+      .mutation(({ ctx, input }) => call(() => previewImportRun(ctx.account, input.id))),
+
+    /** The run starts here and finishes in the worker, so closing the tab stops
+     *  nothing. The page polls `read` for where it got to. */
+    start: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => startImportRun(ctx.account, input.id))),
 
     /** Stopping for real. Without this, "Stop after this chunk" only stopped the
      *  tab asking, and the run sat at 'running' for ever. */

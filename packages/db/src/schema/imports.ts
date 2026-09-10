@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { entityTypeEnum, importKindEnum, importStateEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
@@ -35,8 +35,6 @@ export const importRun = pgTable(
     updatedCount: integer('updated_count').notNull().default(0),
     skippedCount: integer('skipped_count').notNull().default(0),
     erroredCount: integer('errored_count').notNull().default(0),
-    /** Rows are held here for the duration of the run so a resume needs no re-upload. */
-    rows: jsonb('rows'),
     errors: jsonb('errors').notNull().default([]),
     /** B9. Owner names in the file that match nobody here. Those rows land
      *  unassigned rather than failing, so the migration is reconciled from this
@@ -52,4 +50,26 @@ export const importRun = pgTable(
     index('import_run_recent_idx').on(t.accountId, t.createdAt.desc()),
     index('import_run_signature_idx').on(t.accountId, t.fileSignature, t.createdAt.desc()),
   ],
+)
+
+/** The file itself, one row per line, kept only while the run can still resume.
+ *
+ *  Not a jsonb array on the run: Postgres rewrites a jsonb value whole, so an
+ *  88,000-row file re-serialised once per 200-row chunk is quadratic in the
+ *  length of the file. Here a chunk reads the slice it is about to write and
+ *  writes nothing back. */
+export const importRow = pgTable(
+  'import_row',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => importRun.id, { onDelete: 'cascade' }),
+    /** The row's place in the file, from zero, so `import_run.processed_rows` is
+     *  both the resume cursor and the position of the next row to read. */
+    position: integer('position').notNull(),
+    /** Header name to cell text, as the file had it, before any mapping. */
+    values: jsonb('values').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.position] })],
 )

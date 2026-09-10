@@ -23,6 +23,13 @@ const LOCALE = 'en-US'
 
 const numberFormat = new Intl.NumberFormat(LOCALE)
 
+/** A count, grouped the same way on the server and in the browser. `toLocaleString`
+ *  with no locale is whatever the runtime is set to, which is one thing in the
+ *  container and another in the reader's browser: React saw two different strings
+ *  for one node and threw the server's markup away (#418). */
+export const formatNumber = (value: number): string =>
+  Number.isFinite(value) ? numberFormat.format(value) : ''
+
 export const formatCurrency = (value: unknown, currency = 'USD'): string => {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return ''
@@ -114,6 +121,24 @@ export const formatDateTime = (value: unknown, zone: Zone): string => {
   return moment
     ? moment.date.toLocaleString(LOCALE, { timeZone: zoneFor(moment, zone), dateStyle: 'medium', timeStyle: 'short' })
     : ''
+}
+
+/** The calendar day it is right now where the reader is standing, as YYYY-MM-DD.
+ *
+ *  A stored day is a string and is compared as one, so "today" has to be a string
+ *  in the same shape. Taking it from the server's clock in UTC rings the wrong
+ *  square on a calendar and marks a task overdue hours early for anyone west of
+ *  Greenwich, which is most of the people using this. */
+export const todayIn = (zone: Zone): string => {
+  const parts = new Intl.DateTimeFormat(LOCALE, {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((entry) => entry.type === type)?.value ?? ''
+  return `${part('year')}-${part('month')}-${part('day')}`
 }
 
 /** "3 days ago", in the reader's language. Only for a timeline the reader scans

@@ -2,6 +2,7 @@ import {
   getRegistry,
   importShapeFor,
   objectOrThrow,
+  readImportRows,
   readImportRun,
   schema,
   suggestMapping,
@@ -17,7 +18,9 @@ import { ImportWizard } from '~/components/crm/import-wizard.tsx'
 import { importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
-const SAMPLE_ROWS = 500
+/** Enough to show what a column holds, and no more. Shipping 500 rows of somebody's
+ *  file into the HTML of a mapping screen is a payload nobody reads. */
+const SAMPLE_ROWS = 5
 
 const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id: string }> }) => {
   const session = await readSession()
@@ -37,12 +40,9 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
     )
   }
 
-  // The rows live on the run until it finishes, which is what makes a killed run
-  // resumable without a re-upload.
   const [detail] = await withAccount(ctx, (tx) =>
     tx
       .select({
-        rows: schema.importRun.rows,
         mapping: schema.importRun.mapping,
         fileSignature: schema.importRun.fileSignature,
       })
@@ -51,7 +51,9 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
       .limit(1),
   )
 
-  const rows = (detail?.rows as Record<string, string>[] | null) ?? []
+  // The rows live in import_row until the run finishes, which is what makes a
+  // killed run resumable without a re-upload. Only the examples come here.
+  const rows = await readImportRows(ctx, id, 0, SAMPLE_ROWS)
   // From the run, not from a row's key order: jsonb sorts its keys, and a mapper
   // that reorders a person's columns is a mapper they cannot trust.
   const headers = run.headers.length > 0 ? run.headers : Object.keys(rows[0] ?? {})
@@ -89,12 +91,9 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
       <ImportWizard
         account={account}
         runId={id}
-        object={run.objectType}
-        kind={run.importKind}
-        source={run.source}
         filename={run.filename}
         headers={headers}
-        sampleRows={rows.slice(0, SAMPLE_ROWS)}
+        sampleRows={rows}
         fields={object.fields
           .filter((field) => field.key !== 'created_at')
           .map((field) => ({ key: field.key, label: field.label, isRequired: field.isRequired }))}

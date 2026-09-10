@@ -2,7 +2,7 @@ import { createImportRun, isObjectKey, type ImportKind } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { importsPath } from '~/lib/links.ts'
-import { readSpreadsheet, SpreadsheetError } from '~/server/spreadsheet.ts'
+import { MAX_BYTES, readSpreadsheet, SpreadsheetError } from '~/server/spreadsheet.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Everything the picker offers that is not one of the three objects. */
@@ -33,6 +33,17 @@ export const POST = async (
     )
 
   if (account !== session.accountSlug) return back('That import belongs to another account.')
+
+  // Before the body is read, not after: parsing a 200MB multipart body to find
+  // out it is too big is the work the cap exists to avoid, and the browser has
+  // already spent the upload either way. Content-Length is the client's claim,
+  // so the row and byte caps inside the parser still stand behind it.
+  const declared = Number(request.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > MAX_BYTES) {
+    return back(
+      `That upload is ${(declared / 1024 / 1024).toFixed(1)}MB and the limit is ${MAX_BYTES / 1024 / 1024}MB. Split it and import the parts.`,
+    )
+  }
 
   const form = await request.formData()
   const file = form.get('file')

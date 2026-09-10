@@ -2,26 +2,19 @@
 
 import { Alert, Button, buttonClass, Select, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
-import type { ImportKind, ObjectKey } from '@rawr/db'
+import { useEffect, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { formatNumber } from './value.tsx'
 
-/** The loop runs in this tab, so it is bounded. Reaching it is reported, never
- *  dressed up as a finished import. */
-const MAX_CHUNKS = 10_000
+/** How often a running import is asked where it got to. Short enough that the bar
+ *  moves, long enough that a 90,000-row run is not thousands of requests. */
+const POLL_MS = 2_000
 
 export type MappableField = { key: string; label: string; isRequired: boolean }
 
 export type ImportWizardProps = {
   account: string
   runId: string
-  object: ObjectKey
-  /** Records fill columns; activities land on the timeline of the record they
-   *  name; the other four carry the shape around the records. */
-  kind: ImportKind
-  /** Which export the file came out of, so the dry run reads it the way the run
-   *  will. Without it a preview built its own preset and the run used another. */
-  source: string | null
   filename: string
   headers: string[]
   sampleRows: Record<string, string>[]
@@ -43,15 +36,14 @@ type Preview = {
   willUpdate: number
   willSkip: number
   willError: number
+  checked: number
+  total: number
   samples: { create: Record<string, string>[]; update: Record<string, string>[]; error: { row: number; reason: string; values: Record<string, string> }[] }
 }
 
 export const ImportWizard = ({
   account,
   runId,
-  object,
-  kind,
-  source,
   filename,
   headers,
   sampleRows,
@@ -71,24 +63,45 @@ export const ImportWizard = ({
   const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState(processedRows)
-  const [running, setRunning] = useState(false)
-  /** Set to stop the chunk loop between calls: by the Stop button, and by leaving
-   *  the page. Without it the loop kept sending chunks after this component was
-   *  gone, and its toast landed on whatever screen the person had moved to. */
-  const stopped = useRef(false)
+  /** Everything the run changes while nobody is editing it. The server owns the
+   *  run now, so the page reads it rather than driving it. */
+  const [live, setLive] = useState({ state, counts, processed: processedRows, unmatchedOwners })
 
-  useEffect(
-    () => () => {
-      stopped.current = true
-    },
-    [],
-  )
-
-  const finished = state === 'done'
+  const finished = live.state === 'done'
   /** Over, one way or another. A cancelled or failed run keeps its counts and
    *  its error list; what it must not keep is a Resume button. */
-  const stoppedForGood = state === 'cancelled' || state === 'failed'
+  const stoppedForGood = live.state === 'cancelled' || live.state === 'failed'
+
+  /** The tab watches; the worker works. Closing this page stops nothing, and
+   *  reopening it picks the run up wherever the worker has got to. A8. */
+  useEffect(() => {
+    if (live.state !== 'running') return
+    let dropped = false
+    const ask = async () => {
+      try {
+        const run = await api.crm.imports.read.query({ id: runId })
+        if (dropped || !run) return
+        setLive({
+          state: run.state,
+          counts: { created: run.created, updated: run.updated, skipped: run.skipped, errored: run.errored },
+          processed: run.processedRows,
+          unmatchedOwners: run.unmatchedOwners,
+        })
+        if (run.state === 'done') toast('success', 'Import finished.')
+        // The error list and the rest of the detail are the server component's;
+        // one refresh at the end beats shipping them every two seconds.
+        if (run.state !== 'running') router.refresh()
+      } catch {
+        // A poll that misses is a poll. The next one answers.
+      }
+    }
+    void ask()
+    const timer = setInterval(() => void ask(), POLL_MS)
+    return () => {
+      dropped = true
+      clearInterval(timer)
+    }
+  }, [live.state, runId, router, toast])
 
   // Two headers on one field is blocked in the mapper, before the dry run.
   const duplicates = Object.entries(mapping).reduce<Record<string, string[]>>((acc, [header, key]) => {
@@ -103,14 +116,7 @@ export const ImportWizard = ({
     setError(null)
     try {
       await api.crm.imports.setMapping.mutate({ id: runId, mapping })
-      const result = await api.crm.imports.dryRun.query({
-        object,
-        kind,
-        source,
-        mapping,
-        rows: sampleRows,
-      })
-      setPreview(result as Preview)
+      setPreview((await api.crm.imports.dryRun.mutate({ id: runId })) as Preview)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -118,48 +124,33 @@ export const ImportWizard = ({
     }
   }
 
-  /** One chunk per call, so the run survives a closed tab: the server holds the
-   *  cursor and reopening this page picks it back up with Resume. A8.
-   *
-   *  The tab still has to stay open for the loop itself, so a run that stops for
-   *  any reason says so plainly rather than claiming it finished. */
-  const run = async () => {
-    stopped.current = false
-    setRunning(true)
+  /** One click, then the worker. It marks the run running and returns; the chunks
+   *  are taken by the job that polls for them, which is what lets the person close
+   *  the tab. A8. */
+  const start = async () => {
+    setBusy(true)
     setError(null)
     try {
-      let done = false
-      let chunks = 0
-      while (!done && !stopped.current && chunks < MAX_CHUNKS) {
-        const result = await api.crm.imports.runChunk.mutate({ id: runId })
-        setProgress(result.processed)
-        done = result.done
-        chunks += 1
-      }
-      if (done) toast('success', 'Import finished.')
-      else if (stopped.current) toast('info', 'Import paused. Resume picks up where it stopped.')
-      else {
-        toast(
-          'info',
-          `Stopped after ${MAX_CHUNKS.toLocaleString()} chunks so this tab is not held open indefinitely. Resume continues from here.`,
-        )
-      }
-      router.refresh()
+      await api.crm.imports.start.mutate({ id: runId })
+      setLive((current) => ({ ...current, state: 'running' }))
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setRunning(false)
+      setBusy(false)
     }
   }
 
-  if (finished || stoppedForGood || state === 'running') {
-    const pct = totalRows === 0 ? 100 : Math.round((progress / totalRows) * 100)
-    const accounted = counts.created + counts.updated + counts.skipped + counts.errored
+  const running = live.state === 'running'
+
+  if (finished || stoppedForGood || running) {
+    const pct = totalRows === 0 ? 100 : Math.round((live.processed / totalRows) * 100)
+    const accounted =
+      live.counts.created + live.counts.updated + live.counts.skipped + live.counts.errored
     return (
       <div className="flex flex-col gap-3">
         <h2 className="font-medium">{filename}</h2>
         <p className="tabular-nums">
-          {progress.toLocaleString()} of {totalRows.toLocaleString()} rows ({pct}%)
+          {formatNumber(live.processed)} of {formatNumber(totalRows)} rows ({pct}%)
         </p>
         <div
           role="progressbar"
@@ -173,14 +164,14 @@ export const ImportWizard = ({
 
         <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
           {[
-            ['Created', counts.created],
-            ['Updated', counts.updated],
-            ['Skipped', counts.skipped],
-            ['With a problem', counts.errored],
+            ['Created', live.counts.created],
+            ['Updated', live.counts.updated],
+            ['Skipped', live.counts.skipped],
+            ['With a problem', live.counts.errored],
           ].map(([label, value]) => (
             <div key={String(label)}>
               <dt className="text-small text-secondary">{label}</dt>
-              <dd className="text-lg">{Number(value).toLocaleString()}</dd>
+              <dd className="text-lg">{formatNumber(Number(value))}</dd>
             </div>
           ))}
         </dl>
@@ -190,21 +181,21 @@ export const ImportWizard = ({
             first thing worth knowing. */}
         {finished && accounted !== totalRows ? (
           <Alert tone="warning">
-            {totalRows.toLocaleString()} rows went in and {accounted.toLocaleString()} are accounted
-            for. The {Math.abs(totalRows - accounted).toLocaleString()} in between are rows where
+            {formatNumber(totalRows)} rows went in and {formatNumber(accounted)} are accounted
+            for. The {formatNumber(Math.abs(totalRows - accounted))} in between are rows where
             every mapped column was empty.
           </Alert>
         ) : null}
 
-        {unmatchedOwners.length > 0 ? (
+        {live.unmatchedOwners.length > 0 ? (
           <section className="flex flex-col gap-2">
-            <h3 className="font-medium">Owners nobody here matches ({unmatchedOwners.length})</h3>
+            <h3 className="font-medium">Owners nobody here matches ({live.unmatchedOwners.length})</h3>
             <p className="text-secondary">
               Those records came in unassigned. Invite these people under Settings, Members and run
               the same file again to fill the owner in.
             </p>
             <ul className="flex flex-wrap gap-1.5">
-              {unmatchedOwners.map((owner) => (
+              {live.unmatchedOwners.map((owner) => (
                 <li key={owner} className="rounded-hs border border-line bg-fill px-2 py-0.5">
                   {owner}
                 </li>
@@ -215,7 +206,7 @@ export const ImportWizard = ({
 
         {stoppedForGood ? (
           <p className="text-secondary">
-            {state === 'cancelled'
+            {live.state === 'cancelled'
               ? 'Stopped. Everything imported before it stopped is in the CRM; upload the file again to bring in the rest.'
               : 'This import could not go on. The reason is in the errors below; fix it and upload the file again.'}
           </p>
@@ -223,31 +214,28 @@ export const ImportWizard = ({
 
         {!finished && !stoppedForGood ? (
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" busy={running} onClick={() => void run()}>
-              {running ? 'Importing' : 'Resume the import'}
-            </Button>
             {running ? (
               <Button
                 onClick={() => {
-                  // Both halves: stop asking for chunks, and tell the server the
-                  // run is over. Without the second the run stayed 'running'
-                  // for ever and the screen kept implying it was still going.
-                  stopped.current = true
                   void api.crm.imports.cancel.mutate({ id: runId }).then(
-                    () => router.refresh(),
+                    () => setLive((current) => ({ ...current, state: 'cancelled' })),
                     (cause: unknown) => setError(errorMessage(cause)),
                   )
                 }}
               >
                 Stop this import
               </Button>
-            ) : null}
+            ) : (
+              <Button variant="primary" busy={busy} onClick={() => void start()}>
+                Resume the import
+              </Button>
+            )}
           </div>
         ) : null}
 
         {errors.length > 0 ? (
           <section className="flex flex-col gap-2">
-            <h3 className="font-medium">Rows that need a person ({counts.errored.toLocaleString()})</h3>
+            <h3 className="font-medium">Rows that need a person ({formatNumber(live.counts.errored)})</h3>
             <p className="text-secondary">
               Everything else was imported. Fix these rows and upload just them again.
             </p>
@@ -270,7 +258,7 @@ export const ImportWizard = ({
             </ul>
             {errors.length > 25 ? (
               <p className="text-secondary">
-                Showing the first 25. The CSV has all {counts.errored.toLocaleString()}.
+                Showing the first 25. The CSV has all {formatNumber(live.counts.errored)}.
               </p>
             ) : null}
           </section>
@@ -284,7 +272,7 @@ export const ImportWizard = ({
       <div>
         <h2 className="font-medium">{filename}</h2>
         <p className="text-secondary tabular-nums">
-          {totalRows.toLocaleString()} rows, {headers.length} columns
+          {formatNumber(totalRows)} rows, {headers.length} columns
         </p>
       </div>
 
@@ -366,12 +354,9 @@ export const ImportWizard = ({
           Preview what will happen
         </Button>
         {preview ? (
-          <Button variant="primary" busy={running} onClick={() => void run()}>
-            Import {totalRows.toLocaleString()} rows
+          <Button variant="primary" busy={busy} onClick={() => void start()}>
+            Import {formatNumber(totalRows)} rows
           </Button>
-        ) : null}
-        {running ? (
-          <Button onClick={() => (stopped.current = true)}>Stop after this chunk</Button>
         ) : null}
       </div>
 
@@ -387,10 +372,20 @@ export const ImportWizard = ({
             ].map(([label, value]) => (
               <div key={String(label)}>
                 <dt className="text-small text-secondary">{label}</dt>
-                <dd className="text-lg">{Number(value).toLocaleString()}</dd>
+                <dd className="text-lg">{formatNumber(Number(value))}</dd>
               </div>
             ))}
           </dl>
+
+          {/* What the counts are worth. Every row past the checked window is
+              counted as a create, which is what a row nobody has looked at
+              usually is; a number that says so is worth more than one that does
+              not. */}
+          <p className="text-secondary">
+            {preview.checked >= preview.total
+              ? `Every one of the ${formatNumber(preview.total)} rows was checked against the CRM.`
+              : `The first ${formatNumber(preview.checked)} of ${formatNumber(preview.total)} rows were checked against the CRM. The other ${formatNumber(preview.total - preview.checked)} are counted as new; any that already exist will be updated instead when the run reaches them.`}
+          </p>
 
           {/* The counts say how many; these say which. A dry run whose only
               detail is the refusals tells you nothing about the 4,000 rows it

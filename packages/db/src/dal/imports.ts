@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
-import { importRun } from '../schema/imports.ts'
+import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm'
+import { importRow, importRun } from '../schema/imports.ts'
 import { activityLink } from '../schema/records.ts'
 import {
   ACTIVITY_IMPORT,
@@ -16,7 +16,7 @@ import {
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { isUuid, mutate, withAccount } from './index.ts'
+import { isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { linksForContacts } from './activity.ts'
 import { createField, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
@@ -463,6 +463,12 @@ export type DryRun = {
   willUpdate: number
   willSkip: number
   willError: number
+  /** How many rows were actually put through the mapper, out of how many the file
+   *  has. Everything past `checked` is counted as a create, which is what a row
+   *  nobody has seen usually is; saying so is the difference between a count and
+   *  a claim. */
+  checked: number
+  total: number
   samples: { create: ImportRow[]; update: ImportRow[]; error: RowError[] }
 }
 
@@ -475,6 +481,21 @@ const PREVIEW_ROWS = 500
 export const dryRun = async (
   ctx: AccountContext,
   input: { objectKey: string; mapping: Mapping; rows: ImportRow[]; kind?: ImportKind; source?: string | null },
+): Promise<DryRun> => preview(ctx, { ...input, rows: input.rows.slice(0, PREVIEW_ROWS), total: input.rows.length })
+
+/** The preview itself, over rows the caller has already narrowed to the window it
+ *  wants checked. `total` is the file's length, which is what the extrapolation
+ *  and the honesty about coverage are both written from. */
+const preview = async (
+  ctx: AccountContext,
+  input: {
+    objectKey: string
+    mapping: Mapping
+    rows: ImportRow[]
+    total: number
+    kind?: ImportKind
+    source?: string | null
+  },
 ): Promise<DryRun> => {
   const kind = input.kind ?? 'records'
   const object = await objectFor(ctx, kind, input.objectKey)
@@ -485,10 +506,12 @@ export const dryRun = async (
     willUpdate: 0,
     willSkip: 0,
     willError: 0,
+    checked: input.rows.length,
+    total: input.total,
     samples: { create: [], update: [], error: [] },
   }
 
-  const checked = input.rows.slice(0, PREVIEW_ROWS)
+  const checked = input.rows
   const resolve = relationResolver(ctx, { create: false })
   const findRecord = recordResolver(ctx)
   const writer = SHAPE_WRITER[kind]
@@ -557,9 +580,112 @@ export const dryRun = async (
 
   // Rows beyond the sampled window are reported as creates rather than left out of
   // the totals, and the run itself still updates whatever already exists.
-  const remaining = input.rows.length - checked.length
+  const remaining = input.total - checked.length
   if (remaining > 0) result.willCreate += remaining
   return result
+}
+
+/** The preview a person clicks for, read from the run rather than posted back up.
+ *
+ *  It used to travel as a GET query string carrying up to 500 rows of somebody's
+ *  file, which is a URL no browser or proxy will accept and the reason preview
+ *  answered "Failed to fetch". The rows are already on the server; only the id
+ *  has to make the trip. */
+export const previewImportRun = async (ctx: AccountContext, id: string): Promise<DryRun> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+
+  const [run] = await withAccount(ctx, (tx) =>
+    tx
+      .select({
+        objectType: importRun.objectType,
+        importKind: importRun.importKind,
+        source: importRun.source,
+        mapping: importRun.mapping,
+        totalRows: importRun.totalRows,
+        state: importRun.state,
+      })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .limit(1),
+  )
+  if (!run) throw new Error('That import no longer exists.')
+  if (run.state !== 'mapping' && run.state !== 'previewing') {
+    throw new Error('That import has already been started, so there is nothing left to preview.')
+  }
+
+  // Re-enterable from either state, and left in neither: a preview writes nothing,
+  // so a run whose preview was interrupted is back where it was rather than stuck
+  // in 'previewing' with no way out.
+  await withAccount(ctx, (tx) =>
+    tx.update(importRun).set({ state: 'previewing', updatedAt: new Date() }).where(eq(importRun.id, id)),
+  )
+  try {
+    return await preview(ctx, {
+      objectKey: run.objectType,
+      kind: run.importKind,
+      source: run.source,
+      mapping: run.mapping as Mapping,
+      rows: await readImportRows(ctx, id, 0, PREVIEW_ROWS),
+      total: run.totalRows,
+    })
+  } finally {
+    await withAccount(ctx, (tx) =>
+      tx.update(importRun).set({ state: 'mapping', updatedAt: new Date() }).where(eq(importRun.id, id)),
+    ).catch(() => {
+      // The preview is the answer; failing to put the state back must not replace
+      // it with an error about bookkeeping.
+    })
+  }
+}
+
+/** A window of the file, by position. The primary key is (run_id, position), so
+ *  this is an index range scan whatever the file's length. */
+export const readImportRows = async (
+  ctx: AccountContext,
+  id: string,
+  from: number,
+  count: number,
+): Promise<ImportRow[]> => {
+  if (!isUuid(id) || count <= 0) return []
+  const rows = await withAccount(ctx, (tx) =>
+    tx
+      .select({ values: importRow.values })
+      .from(importRow)
+      .where(
+        and(
+          eq(importRow.runId, id),
+          gte(importRow.position, from),
+          lt(importRow.position, from + count),
+        ),
+      )
+      .orderBy(asc(importRow.position)),
+  )
+  return rows.map((row) => row.values as ImportRow)
+}
+
+/** One multi-row insert per batch: 88,000 rows cost 88 statements, not 88,000
+ *  round trips. Batched rather than sent whole because a single statement binds
+ *  four parameters per row and Postgres takes 65,535 of them. */
+const ROWS_PER_INSERT = 1000
+
+const writeImportRows = async (tx: Tx, accountId: string, runId: string, rows: ImportRow[]): Promise<void> => {
+  for (let from = 0; from < rows.length; from += ROWS_PER_INSERT) {
+    await tx.insert(importRow).values(
+      rows.slice(from, from + ROWS_PER_INSERT).map((values, offset) => ({
+        accountId,
+        runId,
+        position: from + offset,
+        values,
+      })),
+    )
+  }
+}
+
+/** The rows of a run that is over, dropped. They exist to make a killed run
+ *  resumable, and a finished, failed or cancelled run is not resumed. */
+const dropImportRows = async (ctx: AccountContext, id: string): Promise<void> => {
+  await withAccount(ctx, (tx) => tx.delete(importRow).where(eq(importRow.runId, id)))
 }
 
 export const createImportRun = async (
@@ -607,13 +733,16 @@ export const createImportRun = async (
         // An empty mapping means "work it out": the caller has no view of the
         // preset, and re-deriving it in two places is how the two drift.
         mapping: Object.keys(input.mapping).length > 0 ? input.mapping : suggested,
-        rows: input.rows,
         totalRows: input.rows.length,
         state: 'mapping',
         createdBy: ctx.actorId,
       })
       .returning({ id: importRun.id })
     if (!row) throw new Error('The import could not be started.')
+
+    // Same transaction as the run: a run whose rows are half written is a run
+    // that would import half a file and call it done.
+    await writeImportRows(tx, ctx.accountId, row.id, input.rows)
 
     return {
       result: {
@@ -1065,7 +1194,6 @@ export const runImportChunk = async (
         importKind: importRun.importKind,
         source: importRun.source,
         mapping: importRun.mapping,
-        rows: importRun.rows,
         processedRows: importRun.processedRows,
         totalRows: importRun.totalRows,
         state: importRun.state,
@@ -1087,8 +1215,7 @@ export const runImportChunk = async (
     throw cause
   })
   const mapping = run.mapping as Mapping
-  const rows = (run.rows as ImportRow[] | null) ?? []
-  const slice = rows.slice(run.processedRows, run.processedRows + CHUNK)
+  const slice = await readImportRows(ctx, id, run.processedRows, CHUNK)
 
   let created = 0
   let updated = 0
@@ -1169,7 +1296,9 @@ export const runImportChunk = async (
   const unmatchedOwners = [...new Set([...previousUnmatched, ...resolve.unmatchedOwners])].slice(0, 200)
 
   const processed = run.processedRows + slice.length
-  const done = processed >= rows.length
+  // The file's length, not the slice's: a short slice on a run somebody cancelled
+  // mid-chunk must not read as a finished import.
+  const done = processed >= run.totalRows || slice.length === 0
   const previousErrors = (run.errors as RowError[] | null) ?? []
 
   try {
@@ -1188,18 +1317,35 @@ export const runImportChunk = async (
         unmatchedOwners,
         state: done ? 'done' : 'running',
         finishedAt: done ? new Date() : null,
-        // Rows are only useful while the run can still resume.
-        rows: done ? null : (rows as never),
         updatedAt: new Date(),
       })
-      .where(eq(importRun.id, id)),
+      // A run cancelled while this chunk was in flight stays cancelled. Without
+      // the state in the predicate the chunk that lost the race wrote 'done' over
+      // it and the screen claimed a stopped import had finished.
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running']))),
   )
   } catch (cause) {
     await failImportRun(ctx, id, cause)
     throw cause
   }
 
-  return { done, processed, total: rows.length }
+  if (done) await dropImportRows(ctx, id)
+  return { done, processed, total: run.totalRows }
+}
+
+/** The click that starts a run. Nothing but the state changes: the chunks are the
+ *  worker's, which is what lets the person close the tab. */
+export const startImportRun = async (ctx: AccountContext, id: string): Promise<void> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  const updated = await withAccount(ctx, (tx) =>
+    tx
+      .update(importRun)
+      .set({ state: 'running', finishedAt: null, updatedAt: new Date() })
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running'])))
+      .returning({ id: importRun.id }),
+  )
+  if (updated.length === 0) throw new Error('That import is already over, so there is nothing to start.')
 }
 
 /** A run that cannot go on. Written so the screen can say so and stop implying
@@ -1214,13 +1360,15 @@ const failImportRun = async (ctx: AccountContext, id: string, cause: unknown): P
         state: 'failed',
         errors: sql`coalesce(${importRun.errors}, '[]'::jsonb) || ${JSON.stringify([{ row: 0, reason, values: {} }])}::jsonb`,
         finishedAt: new Date(),
-        rows: null,
         updatedAt: new Date(),
       })
       .where(eq(importRun.id, id)),
   ).catch(() => {
     // The run is already unrecoverable; failing to record why must not replace
     // the original error with a second one.
+  })
+  await dropImportRows(ctx, id).catch(() => {
+    // Same reason: the rows are dead weight, not the failure worth reporting.
   })
 }
 
@@ -1233,9 +1381,10 @@ export const cancelImportRun = async (ctx: AccountContext, id: string): Promise<
   await withAccount(ctx, (tx) =>
     tx
       .update(importRun)
-      .set({ state: 'cancelled', finishedAt: new Date(), rows: null, updatedAt: new Date() })
+      .set({ state: 'cancelled', finishedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running']))),
   )
+  await dropImportRows(ctx, id)
 }
 
 export const readImportRun = async (
