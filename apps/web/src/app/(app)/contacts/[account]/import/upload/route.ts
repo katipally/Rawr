@@ -1,5 +1,6 @@
 import { createImportRun, isObjectKey, type ImportKind } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
+import { env } from '~/lib/env.ts'
 import { importsPath } from '~/lib/links.ts'
 import { readSpreadsheet, SpreadsheetError } from '~/server/spreadsheet.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -14,15 +15,20 @@ export const POST = async (
   { params }: { params: Promise<{ account: string }> },
 ): Promise<NextResponse> => {
   const session = await readSession()
-  if (!session) return NextResponse.redirect(new URL('/sign-in', request.nextUrl.origin), 303)
+  if (!session) return NextResponse.redirect(new URL('/sign-in', env.AUTH_URL), 303)
 
   const { account } = await params
-  // 303 on every path out of here. Next defaults a redirect to 307, which keeps
-  // the method, so the browser re-posts the upload to a page that only answers GET
-  // and the navigation dies with the form still on screen.
+  // 303 on every path out of here, against the public origin.
+  //
+  // Two things go wrong otherwise, and they hide each other. Next defaults a
+  // redirect to 307, which keeps the method, so the browser re-posts the upload to
+  // a page that only answers GET. And `request.nextUrl.origin` inside a container
+  // is the address the server bound to, so the Location read
+  // `https://0.0.0.0:10000/...` and the navigation died on a host that does not
+  // exist. Either one alone leaves the person staring at the form they just sent.
   const back = (error: string) =>
     NextResponse.redirect(
-      new URL(`${importsPath(account)}?error=${encodeURIComponent(error)}`, request.nextUrl.origin),
+      new URL(`${importsPath(account)}?error=${encodeURIComponent(error)}`, env.AUTH_URL),
       303,
     )
 
@@ -60,7 +66,7 @@ export const POST = async (
       mapping: {},
     })
 
-    return NextResponse.redirect(new URL(importsPath(account, run.id), request.nextUrl.origin), 303)
+    return NextResponse.redirect(new URL(importsPath(account, run.id), env.AUTH_URL), 303)
   } catch (cause) {
     if (cause instanceof SpreadsheetError) return back(cause.message)
     return back(cause instanceof Error ? cause.message : 'That file could not be read.')
