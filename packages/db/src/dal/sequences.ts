@@ -901,8 +901,17 @@ export type ClaimedRun = {
   rootInternetMessageId: string | null
   unsubscribeToken: string
   lastSentAt: Date | null
+  /** The last thing this mailbox sent, whatever enrollment it belonged to. The
+   *  minimum gap is a property of the mailbox: two enrollments on one mailbox
+   *  firing a second apart is what makes the account look like a machine. */
+  mailboxLastSentAt: Date | null
+  /** Who the step's task goes to. The enroller, or the sequence's owner when they
+   *  have left, rather than whoever the worker happens to be acting as. */
+  enrolledBy: string | null
+  sequenceOwnerId: string | null
   step: SequenceStep | null
-  /** How many this mailbox has already sent in the window's day. */
+  /** How many this mailbox has already sent in the window's day, counted in the
+   *  window's own timezone. */
   sentToday: number
   trackingDomain: string | null
   /** Resolved at claim time from the contact and the account, so the sender does
@@ -915,15 +924,32 @@ export type ClaimedRun = {
  *  before the recipient notices anything. */
 const LEASE_MINUTES = 10
 
-/** Takes the enrollment, or returns null because somebody else has it.
+/** Either the run, or why there is none. The reason is what the worker logs, so
+ *  an enrollment that can never send says so once instead of reappearing every
+ *  minute as "not due, or already being run". */
+export type ClaimOutcome = { claimed: ClaimedRun } | { claimed: null; reason: string }
+
+const NOT_DUE = 'Not due, or already being run.'
+
+const NO_MAILBOX =
+  'The mailbox this enrollment was sending from is gone. Nothing can go out from an enrollment with no sender, so it is stopped rather than claimed again every minute. Enroll the contact again from a connected mailbox.'
+
+const NO_ADDRESS =
+  'This contact has no email address any more. A step cannot be sent to nobody, so the enrollment is stopped rather than claimed again every minute. Put an address back on the record and enroll them again.'
+
+/** Takes the enrollment, or says why it could not.
  *
  *  `for update skip locked` is what makes two workers safe: the second one steps
  *  over the row rather than waiting for it, so a slow send never blocks the queue.
- *  The lease is the second guard, for the worker that dies holding the row. */
+ *  The lease is the second guard, for the worker that dies holding the row.
+ *
+ *  A claim that finds no mailbox or no address stops the enrollment here, in the
+ *  transaction that took the lease. Returning without doing that is what left
+ *  five enrollments in production claiming a lease a minute for ever. */
 export const claimEnrollmentRun = async (
   ctx: AccountContext,
   enrollmentId: string,
-): Promise<ClaimedRun | null> =>
+): Promise<ClaimOutcome> =>
   withAccount(ctx, async (tx) => {
     const claimed = await tx.execute<{ id: string }>(sql`
       update sequence_enrollment
@@ -939,7 +965,7 @@ export const claimEnrollmentRun = async (
        )
       returning id
     `)
-    if (claimed.length === 0) return null
+    if (claimed.length === 0) return { claimed: null, reason: NOT_DUE }
 
     const rows = await tx.execute<{
       enrollment_id: string
@@ -958,6 +984,9 @@ export const claimEnrollmentRun = async (
       daily_cap: number | null
       min_gap_seconds: number | null
       mailbox_window: SendWindow | null
+      mailbox_last_sent_at: Date | null
+      enrolled_by: string | null
+      sequence_owner_id: string | null
       current_step: number
       thread_id: string | null
       provider_thread_id: string | null
@@ -970,19 +999,29 @@ export const claimEnrollmentRun = async (
       tracking_requires_consent: boolean | null
     }>(sql`
       select e.id as enrollment_id, s.id as sequence_id, s.name as sequence_name, s.sender, s.settings,
+             s.owner_id as sequence_owner_id, e.enrolled_by,
              c.id as contact_id, c.email as contact_email, c.first_name, c.last_name,
              co.name as company_name,
              m.id as mailbox_id, m.email as mailbox_email, m.can_send, m.daily_cap,
              m.min_gap_seconds, m.send_window as mailbox_window,
              e.current_step, e.thread_id, t.provider_thread_id,
              e.root_internet_message_id, e.unsubscribe_token, e.last_sent_at,
-             -- Sequence sends only. A mail somebody wrote by hand also lands in
-             -- this table when it is tracked, and letting that eat the outreach
-             -- cap would make the cap depend on whether the recipient agreed to
-             -- a pixel.
+             -- The gap is the mailbox's, not the enrollment's: two enrollments on
+             -- one mailbox are still one person appearing to type.
+             (select max(d.sent_at) from sequence_send d
+               where d.mailbox_id = m.id and d.state <> 'failed') as mailbox_last_sent_at,
+             -- Sequence sends only, and only ones that went. A mail somebody wrote
+             -- by hand also lands in this table when it is tracked, and letting
+             -- that eat the outreach cap would make the cap depend on whether the
+             -- recipient agreed to a pixel. A send that failed reached nobody, so
+             -- it does not spend the day's allowance either.
+             --
+             -- Counted from midnight in the window's own zone. Midnight UTC would
+             -- let a London mailbox spend tomorrow's whole allowance at 1am.
              (select count(*) from sequence_send d
                where d.mailbox_id = m.id and d.enrollment_id is not null
-                 and d.sent_at >= date_trunc('day', now()))::int as sent_today,
+                 and d.state <> 'failed'
+                 and d.sent_at >= date_trunc('day', now() at time zone w.zone) at time zone w.zone)::int as sent_today,
              c.tracking_consent,
              (select a.tracking_domain from account a limit 1) as tracking_domain,
              (select a.tracking_requires_consent from account a limit 1) as tracking_requires_consent
@@ -992,10 +1031,27 @@ export const claimEnrollmentRun = async (
         left join company co on co.id = c.company_id
         left join mailbox m on m.id = e.mailbox_id
         left join message_thread t on t.id = e.thread_id
+        cross join lateral (
+          select coalesce(m.send_window ->> 'timezone', s.settings -> 'sendWindow' ->> 'timezone', 'UTC') as zone
+        ) w
        where e.id = ${enrollmentId}::uuid
     `)
     const row = rows[0]
-    if (!row || !row.contact_email || !row.mailbox_id || !row.mailbox_email) return null
+    if (!row) return { claimed: null, reason: NOT_DUE }
+    if (!row.mailbox_id || !row.mailbox_email || !row.contact_email) {
+      const reason = row.mailbox_id && row.mailbox_email ? NO_ADDRESS : NO_MAILBOX
+      await tx
+        .update(sequenceEnrollment)
+        .set({ state: 'failed', stopReason: reason, nextRunAt: null, finishedAt: new Date(), leaseUntil: null })
+        .where(eq(sequenceEnrollment.id, enrollmentId))
+      await tx.insert(sequenceEvent).values({
+        accountId: ctx.accountId,
+        enrollmentId,
+        kind: 'stopped',
+        detail: { state: 'failed', reason },
+      })
+      return { claimed: null, reason }
+    }
 
     const [step] = await tx
       .select({
@@ -1014,7 +1070,7 @@ export const claimEnrollmentRun = async (
       .from(sequenceStep)
       .where(and(eq(sequenceStep.sequenceId, row.sequence_id), eq(sequenceStep.position, row.current_step)))
 
-    return {
+    const run: ClaimedRun = {
       enrollmentId: row.enrollment_id,
       sequenceId: row.sequence_id,
       sequenceName: row.sequence_name,
@@ -1037,11 +1093,15 @@ export const claimEnrollmentRun = async (
       rootInternetMessageId: row.root_internet_message_id,
       unsubscribeToken: row.unsubscribe_token,
       lastSentAt: row.last_sent_at ? new Date(row.last_sent_at) : null,
+      mailboxLastSentAt: row.mailbox_last_sent_at ? new Date(row.mailbox_last_sent_at) : null,
+      enrolledBy: row.enrolled_by,
+      sequenceOwnerId: row.sequence_owner_id,
       step: step ?? null,
       sentToday: Number(row.sent_today),
       trackingDomain: row.tracking_domain,
       trackingAllowed: trackingAllowed(row.tracking_requires_consent ?? false, row.tracking_consent),
     }
+    return { claimed: run }
   })
 
 /** Puts a claimed enrollment back without advancing it: the window is shut, the
@@ -1095,8 +1155,25 @@ export const recordSend = async (
         messageId: input.messageId ?? null,
         token: input.token,
       })
+      // Gmail's own id for the message is the one thing only a real send can
+      // produce, so it is what makes this idempotent: a retry that got as far as
+      // sending records nothing a second time and does not advance the step
+      // again.
+      .onConflictDoNothing()
       .returning({ id: sequenceSend.id })
-    if (!send) throw new Error('The send could not be recorded.')
+    if (!send) {
+      const [already] = input.providerMessageId
+        ? await tx
+            .select({ id: sequenceSend.id, token: sequenceSend.token })
+            .from(sequenceSend)
+            .where(eq(sequenceSend.providerMessageId, input.providerMessageId))
+        : []
+      if (!already) throw new Error('The send could not be recorded.')
+      return {
+        result: { sendId: already.id, token: already.token },
+        audit: { entity: 'sequence_send', entityId: already.id, action: 'send', after: { subject: input.subject, repeated: true } },
+      }
+    }
 
     if (input.links.length > 0) {
       await tx.insert(sequenceLink).values(
@@ -1305,6 +1382,15 @@ export const onTaskDone = async (tx: Tx, ctx: AccountContext, taskId: string): P
 /** Addresses that mean "this is a delivery report, not a person". */
 const DAEMONS = /^(mailer-daemon|postmaster|no-?reply|bounce[s-]?)@/i
 
+/** A delivery report says so in its own Content-Type, whatever address it came
+ *  from. RFC 3464 puts the machine-readable part in a `message/delivery-status`
+ *  body part of a `multipart/report`, and providers that send bounces from an
+ *  ordinary-looking address are only caught by this. */
+export const isDeliveryReport = (
+  fromAddr: string,
+  headers?: Record<string, string | undefined>,
+): boolean => DAEMONS.test(fromAddr) || /delivery-status|report-type=delivery/i.test(headers?.['content-type'] ?? '')
+
 /** Headers an autoresponder sets. A holiday reply is not a reply, and treating it
  *  as one stops the sequence for somebody who never read it. */
 export const isAutoReply = (headers: Record<string, string | undefined>): boolean => {
@@ -1329,16 +1415,19 @@ export type InboundForDetection = {
 /** Called from `storeMessage` for every inbound message, so the sequence stops the
  *  moment the person answers, on the same sync that reads the answer.
  *
- *  Matched on the Message-ID a send actually set, falling back to the thread for
- *  rows stored before the headers were kept. Both are indexed, so this is two
- *  lookups whatever the mailbox holds. */
+ *  Three ways to match, and the third is wider than it looks: the Message-ID a
+ *  send actually set, the thread the enrollment is pinned to, and the contact
+ *  themselves. The last one means any mail from an enrolled contact stops their
+ *  live enrollments, not only a reply in that conversation, which is deliberate:
+ *  somebody who answers in a new thread has still answered. All three columns are
+ *  indexed, so this stays one lookup whatever the mailbox holds. */
 export const detectReply = async (
   tx: Tx,
   ctx: AccountContext,
   inbound: InboundForDetection,
 ): Promise<void> => {
   const from = inbound.fromAddr ?? ''
-  const bounced = DAEMONS.test(from)
+  const bounced = isDeliveryReport(from, inbound.headers)
   if (!bounced && inbound.headers && isAutoReply(inbound.headers)) return
 
   const ids = [inbound.inReplyTo, ...inbound.references].filter((id): id is string => Boolean(id))

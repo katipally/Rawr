@@ -46,3 +46,12 @@ export const accountIdOf = (value: unknown): string | null => {
   const candidate = (value as { accountId?: unknown } | null)?.accountId
   return typeof candidate === 'string' ? candidate : null
 }
+
+/** "sandbox 3, datasaur 1", for a sweep that crosses tenants. The rows are
+ *  already in hand from the sweep's own join, so attributing a log line costs a
+ *  pass over them rather than a query each. */
+export const bySlug = (rows: { slug: string }[]): string => {
+  const counts = new Map<string, number>()
+  for (const row of rows) counts.set(row.slug, (counts.get(row.slug) ?? 0) + 1)
+  return [...counts].map(([slug, count]) => `${slug} ${count}`).join(', ')
+}

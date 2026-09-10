@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { owner } from '../db.ts'
-import { INTERNAL_SECRET } from '../env.ts'
+import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
 import { boss } from '../boss.ts'
 import { defineJob } from './registry.ts'
 
@@ -27,7 +27,14 @@ const dispatch = defineJob({
        where state in ('connected', 'backfilling')`
 
     for (const row of rows) {
-      await boss().send('mail.sync', { accountId: row.account_id, mailboxId: row.id })
+      // One pass in flight per mailbox. A ten-minute tick landing while the
+      // previous sync is still reading history would otherwise queue the same
+      // mailbox again, and Gmail would be asked for the same page twice.
+      await boss().send(
+        'mail.sync',
+        { accountId: row.account_id, mailboxId: row.id },
+        { singletonKey: String(row.id) },
+      )
     }
   },
 })
@@ -38,9 +45,7 @@ const sync = defineJob({
   retryLimit: 4,
   retryDelaySeconds: 300,
   handle: async ({ accountId, mailboxId }) => {
-    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-
-    const response = await fetch(`${base}/api/internal/mail-sync`, {
+    const response = await fetch(`${APP_BASE}/api/internal/mail-sync`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
       body: JSON.stringify({ accountId, mailboxId }),
@@ -74,7 +79,7 @@ const sync = defineJob({
     // More history to read. Straight back on the queue rather than waiting for the
     // next scheduled tick, which would stretch a large archive over days.
     if (body.done === false) {
-      await boss().send('mail.sync', { accountId, mailboxId })
+      await boss().send('mail.sync', { accountId, mailboxId }, { singletonKey: mailboxId })
     }
   },
 })
@@ -99,7 +104,11 @@ const hydrateDispatch = defineJob({
        where m.body_state = 'pending' and b.state in ('connected', 'backfilling')`
 
     for (const row of rows) {
-      await boss().send('mail.hydrate', { accountId: row.account_id, mailboxId: row.id })
+      await boss().send(
+        'mail.hydrate',
+        { accountId: row.account_id, mailboxId: row.id },
+        { singletonKey: String(row.id) },
+      )
     }
   },
 })
@@ -110,9 +119,7 @@ const hydrate = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async ({ accountId, mailboxId }) => {
-    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-
-    const response = await fetch(`${base}/api/internal/mail-hydrate`, {
+    const response = await fetch(`${APP_BASE}/api/internal/mail-hydrate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
       body: JSON.stringify({ accountId, mailboxId }),
@@ -142,7 +149,7 @@ const hydrate = defineJob({
     // Straight back on the queue while there is a backlog, for the same reason
     // the sync does it: a large archive should take minutes, not days.
     if (body.remaining) {
-      await boss().send('mail.hydrate', { accountId, mailboxId })
+      await boss().send('mail.hydrate', { accountId, mailboxId }, { singletonKey: mailboxId })
     }
   },
 })

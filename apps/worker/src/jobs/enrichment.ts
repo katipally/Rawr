@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
-import { INTERNAL_SECRET } from '../env.ts'
+import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
 import { defineJob } from './registry.ts'
 
 /** The clock behind automatic enrichment.
@@ -81,8 +81,7 @@ const run = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async ({ accountId, entity, entityId }) => {
-    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-    const response = await fetch(`${base}/api/internal/enrich`, {
+    const response = await fetch(`${APP_BASE}/api/internal/enrich`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
       body: JSON.stringify({ accountId, entity, entityId }),

@@ -49,10 +49,12 @@ const mergeValues = (run: ClaimedRun): Record<string, string | null> => ({
 })
 
 export const runStep = async (ctx: AccountContext, enrollmentId: string): Promise<RunOutcome> => {
-  const run = await claimEnrollmentRun(ctx, enrollmentId)
-  // Somebody else has it, or it stopped between the dispatch and now. Neither is
-  // a failure worth retrying.
-  if (!run) return { ran: false, reason: 'Not due, or already being run.' }
+  const outcome = await claimEnrollmentRun(ctx, enrollmentId)
+  // Somebody else has it, it stopped between the dispatch and now, or it could
+  // never send and the claim has just stopped it for good. None is a failure
+  // worth retrying, and the claim's own sentence says which.
+  if (!outcome.claimed) return { ran: false, reason: outcome.reason }
+  const run = outcome.claimed
 
   // Woodpecker is not a transport Rawr drives step by step: its campaign owns the
   // steps, the delays and the sending accounts. So the enrollment's whole job is
@@ -104,7 +106,9 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
       contactId: run.contactId,
       title: rendered.text,
       body: run.step.taskBody ? renderMergeFields(run.step.taskBody, mergeValues(run)).text : null,
-      assigneeId: ctx.actorId,
+      // Whoever put the contact in the sequence owns the follow-up, falling back
+      // to whoever owns the sequence once they have left.
+      assigneeId: run.enrolledBy ?? run.sequenceOwnerId ?? ctx.actorId,
     })
     return { ran: true, kind: 'task', taskId: created.taskId }
   }
@@ -136,7 +140,7 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
     delayDays: 0,
     delayHours: 0,
     window,
-    lastSentAt: run.lastSentAt,
+    lastSentAt: run.mailboxLastSentAt,
     minGapSeconds: run.mailboxMinGapSeconds,
   })
   if (due.getTime() > now.getTime()) {

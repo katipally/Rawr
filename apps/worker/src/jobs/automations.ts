@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
-import { INTERNAL_SECRET } from '../env.ts'
-import { defineJob } from './registry.ts'
+import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
+import { bySlug, defineJob } from './registry.ts'
 
 /** The clock behind a rule that waits.
  *
@@ -25,13 +25,14 @@ const dispatch = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 60,
   handle: async () => {
-    const rows = await owner`
-      select id, account_id from automation_run
-       where state = 'waiting'
-         and resume_at is not null
-         and resume_at <= now()
-         and (lease_until is null or lease_until < now())
-       order by resume_at
+    const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
+      select r.id, r.account_id, a.slug from automation_run r
+        join account a on a.id = r.account_id
+       where r.state = 'waiting'
+         and r.resume_at is not null
+         and r.resume_at <= now()
+         and (r.lease_until is null or r.lease_until < now())
+       order by r.resume_at
        limit ${BATCH}`
 
     for (const row of rows) {
@@ -45,7 +46,7 @@ const dispatch = defineJob({
       )
     }
 
-    if (rows.length > 0) console.log(`[automation] ${rows.length} due`)
+    if (rows.length > 0) console.log(`[automation] ${rows.length} due: ${bySlug(rows)}`)
   },
 })
 
@@ -55,9 +56,7 @@ const resume = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async ({ accountId, runId }) => {
-    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-
-    const response = await fetch(`${base}/api/internal/automation-step`, {
+    const response = await fetch(`${APP_BASE}/api/internal/automation-step`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
       body: JSON.stringify({ accountId, runId }),

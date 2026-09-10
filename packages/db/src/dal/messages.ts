@@ -12,7 +12,7 @@ import {
 import { company, contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
-import { detectReply } from './sequences.ts'
+import { detectReply, isDeliveryReport } from './sequences.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { employerDomainFromEmail, registrableDomain } from './domains.ts'
@@ -246,6 +246,9 @@ export const recordMailboxFailure = async (
   })
 }
 
+const STOPPED_BY_DISCONNECT =
+  'The mailbox this enrollment was sending from was disconnected. Nothing can go out from an enrollment with no sender, so it is stopped rather than left in the queue. Enroll the contact again from a connected mailbox.'
+
 export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string): Promise<void> =>
   mutate(ctx, 'mailbox', async (tx) => {
     const [found] = await tx
@@ -258,6 +261,26 @@ export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string):
       throw new Error('That is somebody else’s mailbox. Only they, or an admin, can disconnect it.')
     }
 
+    // Before the mailbox goes: every live enrollment sending from it. The
+    // foreign key would only null the column, and an enrollment with no mailbox
+    // is one the scheduler picks up every minute and can never send. Same
+    // transaction, so there is no window in which one exists.
+    const [stopped] = await tx.execute<{ count: number }>(sql`
+      with ended as (
+        update sequence_enrollment
+           set state = 'failed', stop_reason = ${STOPPED_BY_DISCONNECT},
+               next_run_at = null, finished_at = now(), lease_until = null
+         where mailbox_id = ${mailboxId}::uuid
+           and state in ('active', 'waiting_task', 'paused')
+        returning id
+      ), noted as (
+        insert into sequence_event (account_id, enrollment_id, kind, detail)
+        select ${ctx.accountId}::uuid, id, 'stopped',
+               ${JSON.stringify({ state: 'failed', reason: STOPPED_BY_DISCONNECT })}::jsonb
+          from ended
+      )
+      select count(*)::int as count from ended`)
+
     // The messages already read stay. They are the history the feature exists for,
     // and disconnecting is "stop reading new mail", not "erase what you have read".
     await tx.delete(mailbox).where(eq(mailbox.id, mailboxId))
@@ -269,7 +292,7 @@ export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string):
         entityId: mailboxId,
         action: 'disconnect',
         before: { email: found.email },
-        after: { messagesKept: true },
+        after: { messagesKept: true, enrollmentsStopped: Number(stopped?.count ?? 0) },
       },
     }
   })
@@ -532,8 +555,6 @@ export const blockedPatterns = async (ctx: AccountContext, userId: string): Prom
  *  filtered out either, which is what nearly happened here: bounces arrive from
  *  mailer-daemon at the provider's own domain, and the rule that keeps personal
  *  mail out of the CRM was throwing them away before anything could read them. */
-const isDeliveryReport = (incoming: IncomingMessage): boolean =>
-  /^(mailer-daemon|postmaster)@/i.test(incoming.from.trim().toLowerCase())
 
 export const ingestMessage = async (
   ctx: AccountContext,
@@ -548,7 +569,7 @@ export const ingestMessage = async (
 ): Promise<IngestResult> => {
   assertCanWrite(ctx, 'mailbox')
 
-  if (isDeliveryReport(input.incoming)) {
+  if (isDeliveryReport(input.incoming.from.trim().toLowerCase(), input.incoming.headers)) {
     await withAccount(ctx, (tx) =>
       detectReply(tx, ctx, {
         messageId: '',
@@ -558,6 +579,7 @@ export const ingestMessage = async (
         references: input.incoming.references ?? [],
         threadId: NO_THREAD,
         subject: input.incoming.subject,
+        ...(input.incoming.headers ? { headers: input.incoming.headers } : {}),
       }),
     )
     return { stored: false, reason: 'A delivery report, read for the bounce and not stored.' }

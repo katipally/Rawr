@@ -134,6 +134,10 @@ export const sequenceEnrollment = pgTable(
     index('sequence_enrollment_due_idx')
       .on(t.accountId, t.nextRunAt)
       .where(sql`state = 'active'`),
+    // The worker's own sweep asks across every tenant at once, so it cannot use
+    // the index above: account_id leads it. Partial for the same reason, so this
+    // is the size of the queue rather than of every enrollment that ever ran.
+    index('sequence_enrollment_queue_idx').on(t.nextRunAt).where(sql`state = 'active'`),
     index('sequence_enrollment_contact_idx').on(t.accountId, t.contactId),
     index('sequence_enrollment_sequence_idx').on(t.accountId, t.sequenceId, t.state),
   ],
@@ -176,6 +180,12 @@ export const sequenceSend = pgTable(
     index('sequence_send_mailbox_idx').on(t.accountId, t.mailboxId, t.sentAt),
     index('sequence_send_enrollment_idx').on(t.accountId, t.enrollmentId),
     index('sequence_send_internet_id_idx').on(t.accountId, t.internetMessageId),
+    // One row per message the provider actually accepted. A retry that got as far
+    // as sending cannot record the same mail twice, and the report cannot count
+    // it twice either. Sequence sends only: a one-off has no step to repeat.
+    uniqueIndex('sequence_send_provider_key')
+      .on(t.accountId, t.providerMessageId)
+      .where(sql`enrollment_id is not null and provider_message_id is not null`),
     // The record timeline asks for one contact's tracked mail, newest first.
     index('sequence_send_contact_idx').on(t.accountId, t.contactId, t.sentAt.desc()),
   ],

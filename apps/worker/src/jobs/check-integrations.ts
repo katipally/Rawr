@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { owner } from '../db.ts'
-import { INTERNAL_SECRET } from '../env.ts'
+import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
 import { defineJob } from './registry.ts'
 
 /** F6 §1's health check on a schedule.
@@ -19,18 +19,17 @@ export const checkIntegrations = defineJob({
   retryLimit: 2,
   retryDelaySeconds: 300,
   handle: async () => {
-    const base = process.env.RAWR_INTERNAL_URL ?? 'http://localhost:3000'
-
     // Only integrations somebody has actually configured. Testing an unconfigured
     // one would turn "nobody has set this up" into "this is broken", which is a
     // different and less useful thing to see.
     const rows = await owner`
-      select i.kind, i.account_id
+      select i.kind, i.account_id, a.slug
         from integration i
+        join account a on a.id = i.account_id
        where i.secret_ref is not null`
 
     for (const row of rows) {
-      const response = await fetch(`${base}/api/internal/integration-health`, {
+      const response = await fetch(`${APP_BASE}/api/internal/integration-health`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
         body: JSON.stringify({ accountId: row.account_id, kind: row.kind }),
@@ -41,7 +40,7 @@ export const checkIntegrations = defineJob({
         // Logged, not thrown. The health state is already red in the database,
         // which is where somebody looks; failing the whole job because one
         // provider is down would stop the others being checked at all.
-        console.log(`[integrations] ${row.kind}: ${body.detail ?? `the app answered ${response.status}`}`)
+        console.log(`[integrations] ${row.slug} ${row.kind}: ${body.detail ?? `the app answered ${response.status}`}`)
       }
     }
   },

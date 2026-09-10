@@ -15,3 +15,13 @@ export const OWNER_URL = required('DATABASE_URL_OWNER')
  *  mail hydration, sequence steps, automation resumes, integration health and the
  *  Apollo sync. Failing here turns a silent outage into a start-up error. */
 export const INTERNAL_SECRET = required('RAWR_INTERNAL_SECRET')
+
+/** Where the worker reaches the web app. Both run in one container on Render, so
+ *  the loopback address and the port the app was told to listen on is the answer
+ *  whenever nobody has named an external one. An empty string is a variable
+ *  somebody set and then cleared, which has to fall back like an absent one, or
+ *  every internal call goes to `undefined/api/...`. */
+export const resolveAppBase = (env: { RAWR_INTERNAL_URL?: string; PORT?: string }): string =>
+  env.RAWR_INTERNAL_URL?.trim() || `http://127.0.0.1:${env.PORT ?? 3000}`
+
+export const APP_BASE = resolveAppBase(process.env)

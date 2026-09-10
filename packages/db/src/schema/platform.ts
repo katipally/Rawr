@@ -40,7 +40,10 @@ export const deadLetter = pgTable(
     jobName: text('job_name').notNull(),
     payload: jsonb('payload').notNull(),
     error: text('error').notNull(),
-    attempts: integer('attempts').notNull().default(0),
+    /** Null for a failure that was never a queued job: nothing was tried, so
+     *  nought attempts would be a lie. The failed-jobs table reads it as
+     *  "not queued". */
+    attempts: integer('attempts'),
     nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
     replayedAt: timestamp('replayed_at', { withTimezone: true }),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),

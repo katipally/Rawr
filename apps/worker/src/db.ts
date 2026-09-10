@@ -11,7 +11,9 @@ export const recordDeadLetter = async (input: {
   jobName: string
   payload: unknown
   error: string
-  attempts: number
+  /** Null for a failure that was never a queued job, so the failed-jobs table can
+   *  say "not queued" rather than claim it was tried nought times. */
+  attempts: number | null
 }): Promise<void> => {
   if (!input.accountId) {
     // Nothing can be scoped, so it cannot be written to a tenant table. Losing it

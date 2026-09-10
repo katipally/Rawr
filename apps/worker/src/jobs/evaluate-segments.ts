@@ -1,6 +1,6 @@
 import { evaluateAllSegments, type AccountContext } from '@rawr/db'
 import { z } from 'zod'
-import { owner } from '../db.ts'
+import { owner, recordDeadLetter } from '../db.ts'
 import { defineJob } from './registry.ts'
 
 /** A2: "membership recomputed on write and on a schedule". This is the schedule.
@@ -32,28 +32,31 @@ export const evaluateSegments = defineJob({
   handle: async () => {
     // Per account, so one tenant's slow query cannot stall another's. The only
     // query here that crosses tenants, and it reads nothing but ids.
-    const accounts = await owner`select id from account`
-    const broken: string[] = []
+    const accounts = await owner`select id, slug from account`
 
     for (const row of accounts) {
       const results = await evaluateAllSegments(jobContext(row.id))
       for (const result of results) {
         if (result.error !== null) {
-          broken.push(`${result.name}: ${result.error}`)
+          // One row per broken segment, not one failure for the pass. Throwing
+          // would retry every other account's segments three times over to
+          // record a query that will never start working on its own, and the
+          // dead letter names the segment rather than a list of them.
+          await recordDeadLetter({
+            accountId: row.id,
+            jobName: 'segments.evaluate',
+            payload: { segment: result.name, accountSlug: row.slug },
+            error: result.error,
+            attempts: null,
+          })
           continue
         }
         if (result.result && (result.result.entered > 0 || result.result.exited > 0)) {
           console.log(
-            `[segments] ${result.name}: ${result.result.entered} in, ${result.result.exited} out, ${result.result.members} now.`,
+            `[segments] ${row.slug} ${result.name}: ${result.result.entered} in, ${result.result.exited} out, ${result.result.members} now.`,
           )
         }
       }
-    }
-
-    // Thrown rather than logged: a broken segment is somebody's list silently
-    // going stale, and the retry-then-dead-letter path is what puts it on a screen.
-    if (broken.length > 0) {
-      throw new Error(`${broken.length} segment(s) could not be evaluated. ${broken.join(' | ')}`)
     }
   },
 })

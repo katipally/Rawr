@@ -10,7 +10,9 @@ export type DeadLetterRow = {
   id: string
   jobName: string
   error: string
-  attempts: number
+  /** Null when the failure was never a queued job, which the table renders as
+   *  "not queued" rather than as nought tries. */
+  attempts: number | null
   at: Date
   payload: unknown
 }
@@ -22,7 +24,7 @@ export type DeadLetterRow = {
  *  already been scoped by the time they get here. */
 export const recordDeadLetter = async (
   ctx: AccountContext,
-  entry: { jobName: string; payload: unknown; error: string; attempts: number },
+  entry: { jobName: string; payload: unknown; error: string; attempts: number | null },
 ): Promise<void> => {
   await withAccount(ctx, async (tx) => {
     await tx.insert(deadLetter).values({
