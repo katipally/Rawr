@@ -8,7 +8,7 @@ import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { usePagedRows } from '~/components/paged.tsx'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
-import { objectView, recordPath } from '~/lib/links.ts'
+import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -56,6 +56,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
   const [showBuilder, setShowBuilder] = useState(false)
 
   const [needle, setNeedle] = useState('')
+  const [kind, setKind] = useState<'all' | 'active' | 'static'>('all')
+  const [objectFilter, setObjectFilter] = useState<'all' | ObjectKey>('all')
+  const [creatingList, setCreatingList] = useState(false)
   const [viewing, setViewing] = useState<SegmentRow | null>(null)
   const [members, setMembers] = useState<{ id: string; displayName: string; enteredAt: Date }[] | null>(null)
 
@@ -131,8 +134,14 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     groups.reduce((sum, group) => sum + group.conditions.length, 0)
 
   const query = needle.trim().toLowerCase()
-  const shown = query ? rows.filter((row) => row.name.toLowerCase().includes(query)) : rows
+  const shown = rows.filter(
+    (row) =>
+      (!query || row.name.toLowerCase().includes(query)) &&
+      (kind === 'all' || (kind === 'static') === row.isStatic) &&
+      (objectFilter === 'all' || row.objectKey === objectFilter),
+  )
   const { page, pager } = usePagedRows(shown, 'segments')
+  const narrowed = query !== '' || kind !== 'all' || objectFilter !== 'all'
 
   const recompute = (row: SegmentRow) =>
     void run(async () => {
@@ -147,9 +156,15 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
       width: 320,
       render: (row) => (
         <span className="flex min-w-0 flex-col py-1">
-          <button type="button" onClick={() => void openMembers(row)} className="truncate text-left font-semibold text-link hover:underline">
-            {row.name}
-          </button>
+          {row.isStatic ? (
+            <Link href={segmentsPath(account, row.id)} className="truncate font-semibold text-link hover:underline">
+              {row.name}
+            </Link>
+          ) : (
+            <button type="button" onClick={() => void openMembers(row)} className="truncate text-left font-semibold text-link hover:underline">
+              {row.name}
+            </button>
+          )}
           {row.description ? <span className="truncate text-small text-secondary">{row.description}</span> : null}
         </span>
       ),
@@ -233,8 +248,8 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                       ? [
                           {
                             key: 'static',
-                            label: 'Imported list, nothing to recompute',
-                            disabled: true,
+                            label: 'Open the list',
+                            href: segmentsPath(account, row.id),
                           },
                         ]
                       : [
@@ -293,6 +308,16 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                   Recompute all
                 </Button>
               ) : null}
+              <Button
+                onClick={() => {
+                  setName('')
+                  setDescription('')
+                  setObject('contact')
+                  setCreatingList(true)
+                }}
+              >
+                Create list
+              </Button>
               <Button variant="primary" onClick={openNew}>
                 Create segment
               </Button>
@@ -308,6 +333,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         </p>
       )}
 
+      <div className="flex flex-wrap items-end gap-2">
       <label className="relative w-full min-w-0 sm:w-64">
         <span className="sr-only">Search segments</span>
         <input
@@ -320,6 +346,31 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
       </label>
 
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="text-small text-secondary">Type</span>
+          <Select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+            <option value="all">Active and static</option>
+            <option value="active">Active</option>
+            <option value="static">Static</option>
+          </Select>
+        </label>
+
+        <label className="flex min-w-0 flex-col gap-1">
+          <span className="text-small text-secondary">Records</span>
+          <Select
+            value={objectFilter}
+            onChange={(event) => setObjectFilter(event.target.value as 'all' | ObjectKey)}
+          >
+            <option value="all">Every object</option>
+            {(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => (
+              <option key={key} value={key}>
+                {OBJECT_LABEL[key]}
+              </option>
+            ))}
+          </Select>
+        </label>
+      </div>
+
       <DataTable
         columns={columns}
         rows={page}
@@ -329,7 +380,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         fill
         empty={
           <div className="flex flex-1 flex-col justify-center">
-          {query ? (
+          {narrowed ? (
             <EmptyState {...NOTHING_MATCHED} />
           ) : (
             <EmptyState
@@ -457,6 +508,66 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               Save segment
             </Button>
             <Button variant="tertiary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ----------------------------------------------------- static list */}
+      <Modal open={creatingList} title="Create list" onClose={() => setCreatingList(false)}>
+        <div className="flex flex-col gap-3">
+          <p className="text-secondary">
+            A static list holds whoever you put in it and nothing takes them out again but you.
+            Fill it from the bulk bar on any list of records, or from an imported file.
+          </p>
+          <Field id="list-name" label="Name">
+            <TextInput
+              id="list-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Autumn webinar invitees"
+              autoFocus
+            />
+          </Field>
+          <Field id="list-description" label="Description" hint="Optional. Why this list exists.">
+            <TextInput
+              id="list-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </Field>
+          <Field id="list-object" label="Records">
+            <Select id="list-object" value={object} onChange={(event) => setObject(event.target.value as ObjectKey)}>
+              {(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => (
+                <option key={key} value={key}>
+                  {OBJECT_LABEL[key]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              busy={busy}
+              disabled={!name.trim()}
+              onClick={() =>
+                void run(
+                  () =>
+                    api.segments.createList.mutate({
+                      object,
+                      name,
+                      description: description || null,
+                    }),
+                  'List created. Add records to it from the bulk bar.',
+                ).then((ok) => {
+                  if (ok) setCreatingList(false)
+                })
+              }
+            >
+              Create list
+            </Button>
+            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
               Cancel
             </Button>
           </div>

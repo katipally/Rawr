@@ -975,29 +975,7 @@ export const deleteRecord = async (
   mutate(ctx, objectKey, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
-    const before = await readForWrite(tx, object, id)
-    if (!before) throw new Error('That record has already been deleted.')
-
-    await tx.execute(
-      sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
-    )
-
-    // A question about a record nobody kept is not a question. Left behind it
-    // would inflate the number the consent prompt asks somebody to approve, and
-    // then fail against a record that is gone.
-    await tx.execute(
-      sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${id}`,
-    )
-
-    // Views are detached rather than deleted, so aggregate counts stay honest.
-    // Erasure is a separate, explicit action. F4's edge case table.
-    if (object.key === 'contact') {
-      for (const table of ['page_view', 'custom_event', 'visitor'] as const) {
-        await tx.execute(sql`
-          update ${sql.raw(table)} set contact_id = null
-           where account_id = ${ctx.accountId} and contact_id = ${id}`)
-      }
-    }
+    const name = await deleteRecordIn(tx, ctx, object, id)
 
     return {
       result: undefined,
@@ -1005,11 +983,115 @@ export const deleteRecord = async (
         entity: object.key,
         entityId: id,
         action: 'delete',
-        before: { deletedAt: null, name: displayName(object, before) },
+        before: { deletedAt: null, name },
         after: { deletedAt: 'now' },
       },
     }
   })
+
+/** The delete itself, without the transaction or the audit row, so a bulk delete
+ *  can run many of these under one transaction and still audit each one. Returns
+ *  the name the record had, which is what the audit entry records. */
+const deleteRecordIn = async (
+  tx: Tx,
+  ctx: AccountContext,
+  object: RegistryObject,
+  id: string,
+): Promise<string> => {
+  const before = await readForWrite(tx, object, id)
+  if (!before) throw new Error('That record has already been deleted.')
+
+  await tx.execute(
+    sql`update ${tableFor(object)} set deleted_at = now(), updated_at = now() where id = ${id} and deleted_at is null`,
+  )
+
+  // A question about a record nobody kept is not a question. Left behind it
+  // would inflate the number the consent prompt asks somebody to approve, and
+  // then fail against a record that is gone.
+  await tx.execute(
+    sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${id}`,
+  )
+
+  // Views are detached rather than deleted, so aggregate counts stay honest.
+  // Erasure is a separate, explicit action. F4's edge case table.
+  if (object.key === 'contact') {
+    for (const table of ['page_view', 'custom_event', 'visitor'] as const) {
+      await tx.execute(sql`
+        update ${sql.raw(table)} set contact_id = null
+         where account_id = ${ctx.accountId} and contact_id = ${id}`)
+    }
+  }
+
+  return displayName(object, before)
+}
+
+export type BulkDeleteResult = { deleted: number; failed: { id: string; reason: string }[] }
+
+/** A selection deleted in one transaction, a savepoint each, for the same reason
+ *  a bulk edit is: a record somebody has already deleted must not take the other
+ *  four hundred and ninety-nine with it. Every one still writes its own audit row.
+ *
+ *  O(n) statements in n ids, which is what a soft delete that also detaches
+ *  browsing history costs; the caller chunks so no one transaction is long. */
+export const bulkDeleteRecords = async (
+  ctx: AccountContext,
+  objectKey: string,
+  ids: string[],
+): Promise<BulkDeleteResult> => {
+  assertCanWrite(ctx, objectKey)
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) throw new Error('Nothing was selected.')
+
+  return withAccount(ctx, async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const object = objectOrThrow(registry, objectKey)
+    const result: BulkDeleteResult = { deleted: 0, failed: [] }
+
+    for (const id of unique) {
+      const point = `bulk_delete_${result.deleted + result.failed.length}`
+      await tx.execute(sql.raw(`savepoint "${point}"`))
+      try {
+        const name = await deleteRecordIn(tx, ctx, object, id)
+        await writeAudit(tx, ctx, {
+          entity: object.key,
+          entityId: id,
+          action: 'delete',
+          before: { deletedAt: null, name },
+          after: { deletedAt: 'now' },
+        })
+        await tx.execute(sql.raw(`release savepoint "${point}"`))
+        result.deleted += 1
+      } catch (cause) {
+        await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
+        result.failed.push({ id, reason: cause instanceof Error ? cause.message : String(cause) })
+      }
+    }
+
+    return result
+  })
+}
+
+/** Refuses a selection that names records this account cannot see, by count, so
+ *  a bulk action carrying an id from another tenant stops before it writes rather
+ *  than silently doing less than it was asked to. Row-level security is what makes
+ *  the count honest: another account's record is not visible to read either. */
+export const assertIdsBelong = async (
+  tx: Tx,
+  object: RegistryObject,
+  ids: string[],
+): Promise<void> => {
+  // A Postgres array literal, not a JavaScript array: drizzle expands the latter
+  // into one placeholder per element, which is a syntax error inside `any()`.
+  const [row] = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n from ${tableFor(object)}
+     where id = any(${`{${ids.join(',')}}`}::uuid[]) and ${NOT_DELETED(object)}`)
+  const found = Number(row?.n ?? 0)
+  if (found !== ids.length) {
+    throw new Error(
+      `${ids.length - found} of ${ids.length} selected ${object.namePlural.toLowerCase()} are not in this account, so nothing was changed.`,
+    )
+  }
+}
 
 export type MergeInput = {
   objectKey: string

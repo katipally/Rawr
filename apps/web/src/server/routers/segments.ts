@@ -1,11 +1,15 @@
 import {
+  addToList,
+  createStaticList,
   deleteSegment,
   evaluateAllSegments,
   evaluateSegment,
   listSegments,
   previewSegment,
   readMemberships,
+  readSegment,
   readSegmentMembers,
+  removeFromList,
   saveSegment,
 } from '@rawr/db'
 import { z } from 'zod'
@@ -57,6 +61,39 @@ export const segmentsRouter = router({
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) => call(() => deleteSegment(ctx.account, input.id))),
 
+  /** One list on its own, for its page. */
+  read: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .query(({ ctx, input }) => call(() => readSegment(ctx.account, input.id))),
+
+  /** A static list: members are put in and taken out by hand, so it is created
+   *  without conditions rather than with an empty set of them. */
+  createList: protectedProcedure
+    .input(
+      z.object({
+        object: objectKey,
+        name: z.string().trim().min(1).max(120),
+        description: z.string().max(500).nullish(),
+      }),
+    )
+    .mutation(({ ctx, input }) =>
+      call(() =>
+        createStaticList(ctx.account, {
+          objectKey: input.object,
+          name: input.name,
+          description: input.description ?? null,
+        }),
+      ),
+    ),
+
+  addMembers: protectedProcedure
+    .input(z.object({ id: z.uuid(), ids: z.array(z.uuid()).min(1).max(500) }))
+    .mutation(({ ctx, input }) => call(() => addToList(ctx.account, input.id, input.ids))),
+
+  removeMembers: protectedProcedure
+    .input(z.object({ id: z.uuid(), ids: z.array(z.uuid()).min(1).max(500) }))
+    .mutation(({ ctx, input }) => call(() => removeFromList(ctx.account, input.id, input.ids))),
+
   /** Recompute one now. The scheduled pass covers the rest; this is for somebody
    *  who has just changed the query and wants to see the effect. */
   evaluate: protectedProcedure
@@ -66,8 +103,16 @@ export const segmentsRouter = router({
   evaluateAll: protectedProcedure.mutation(({ ctx }) => call(() => evaluateAllSegments(ctx.account))),
 
   members: protectedProcedure
-    .input(z.object({ id: z.uuid(), limit: z.number().int().min(1).max(200).optional() }))
-    .query(({ ctx, input }) => call(() => readSegmentMembers(ctx.account, input.id, input.limit ?? 50))),
+    .input(
+      z.object({
+        id: z.uuid(),
+        limit: z.number().int().min(1).max(200).optional(),
+        offset: z.number().int().min(0).optional(),
+      }),
+    )
+    .query(({ ctx, input }) =>
+      call(() => readSegmentMembers(ctx.account, input.id, input.limit ?? 50, input.offset ?? 0)),
+    ),
 
   /** What the builder shows before anything is saved: the count and a handful of
    *  the records, so nobody saves a segment they have not seen. */

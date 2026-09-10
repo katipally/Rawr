@@ -1,4 +1,5 @@
 import type { AccountContext } from './context.ts'
+import { withAccount, writeAudit } from './index.ts'
 import { listRecords } from './records.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
 import { formatForCsv } from './values.ts'
@@ -31,33 +32,73 @@ export async function* exportCsv(
 
   let cursor: Cursor | null = null
   let emitted = 0
-  do {
-    const page = await listRecords(ctx, {
-      object: object.key,
-      columns: input.columns,
-      filters: input.filters,
-      sorts: input.sorts,
-      search: input.search ?? '',
-      limit: PAGE,
-      cursor,
-    })
-
-    for (const row of page.rows) {
-      const cells = fields.map((field) => {
-        // A relation exports as the name a person recognises, not as a uuid.
-        const label = row.labels[field.key]
-        return quoted(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
+  let stoppedAtCap = false
+  try {
+    do {
+      const page = await listRecords(ctx, {
+        object: object.key,
+        columns: input.columns,
+        filters: input.filters,
+        sorts: input.sorts,
+        search: input.search ?? '',
+        limit: PAGE,
+        cursor,
       })
-      yield `${cells.join(',')}\n`
-      emitted += 1
-    }
 
-    cursor = page.nextCursor
-    if (emitted >= MAX_ROWS) {
-      yield `\n"Stopped at ${MAX_ROWS.toLocaleString()} rows. Narrow the view's filters and export again."\n`
-      return
-    }
-  } while (cursor)
+      for (const row of page.rows) {
+        const cells = fields.map((field) => {
+          // A relation exports as the name a person recognises, not as a uuid.
+          const label = row.labels[field.key]
+          return quoted(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
+        })
+        yield `${cells.join(',')}\n`
+        emitted += 1
+      }
+
+      cursor = page.nextCursor
+      if (emitted >= MAX_ROWS) {
+        stoppedAtCap = true
+        yield `\n"Stopped at ${MAX_ROWS.toLocaleString()} rows. Narrow the view's filters and export again."\n`
+        return
+      }
+    } while (cursor)
+  } finally {
+    // In `finally` because a download the person cancels halfway is still an
+    // export of their data leaving the account, and a history that only records
+    // the ones that finished is a history somebody can walk around.
+    await withAccount(ctx, (tx) =>
+      writeAudit(tx, ctx, {
+        entity: 'export',
+        entityId: null,
+        action: 'export',
+        before: null,
+        after: {
+          object: object.key,
+          rows: emitted,
+          columns: fields.map((field) => field.key),
+          filters: summarise(input.filters, input.search ?? ''),
+          stoppedAtCap,
+        },
+      }),
+    )
+  }
+}
+
+/** What the export was narrowed to, in one line, because an audit row saying
+ *  "exported 40,000 contacts" without saying which forty thousand is not a
+ *  record of anything. */
+const summarise = (filters: FilterGroup[], search: string): string => {
+  const parts = filters.flatMap((group) =>
+    group.conditions.map((condition) =>
+      `${condition.field} ${condition.operator}${
+        condition.value === undefined || condition.value === null || condition.value === ''
+          ? ''
+          : ` ${Array.isArray(condition.value) ? condition.value.join(', ') : String(condition.value)}`
+      }`.trim(),
+    ),
+  )
+  if (search) parts.push(`matching "${search}"`)
+  return parts.length > 0 ? parts.join('; ') : 'no filters, the whole object'
 }
 
 /** The failed rows of an import, as a file the person can fix and re-upload. Every

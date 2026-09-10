@@ -50,6 +50,15 @@ import {
   setViewPinned } from '../src/dal/views.ts'
 import { readAssociations, groupFor } from '../src/dal/associations.ts'
 import { exportCsv } from '../src/dal/export.ts'
+import { readBulkOperation, runBulkChunk, startBulkOperation } from '../src/dal/bulk.ts'
+import {
+  addToList,
+  createStaticList,
+  evaluateAllSegments,
+  readSegment,
+  readSegmentMembers,
+  removeFromList,
+  saveSegment } from '../src/dal/segments.ts'
 import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingIsUsable } from '../src/dal/imports.ts'
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'
 import { registrableDomain, isFreeMailDomain } from '../src/dal/domains.ts'
@@ -657,6 +666,262 @@ try {
     return `${lines.length - 1} rows, columns: ${header.join(' | ')}`
   })
 
+  await check('every export leaves a line in the account history', async () => {
+    const before = new Date()
+    const columns = ['first_name', 'email']
+    const filters = [{ conjunction: 'and' as const, conditions: [{ field: 'lead_status', operator: 'is' as const, value: 'New' }] }]
+    let rows = 0
+    for await (const chunk of exportCsv(sales, { objectKey: 'contact', columns, filters, sorts: [] })) {
+      if (chunk.trim()) rows += 1
+    }
+
+    const [entry] = await db.execute<{ after: { object: string; rows: number; columns: string[]; filters: string } }>(sql`
+      select after from audit_log
+       where account_id = ${datasaur!.id} and entity = 'export' and at >= ${before.toISOString()}
+       order by at desc limit 1`)
+    expect(Boolean(entry), 'an export wrote no audit row')
+    expect(entry!.after.object === 'contact', `the row names ${entry!.after.object}`)
+    // The header line is counted above but not by the export, so the audit row is
+    // one behind what the file has lines for.
+    expect(entry!.after.rows === rows - 1, `the row claims ${entry!.after.rows} of ${rows - 1}`)
+    expect(entry!.after.columns.join() === columns.join(), `columns were ${entry!.after.columns.join()}`)
+    expect(entry!.after.filters.includes('lead_status'), `the filter summary read "${entry!.after.filters}"`)
+    return `${entry!.after.rows} rows, "${entry!.after.filters}"`
+  })
+
+  console.log('\n-- static lists ------------------------------------------------------')
+
+  const listStamp = Date.now()
+  let contactListId = ''
+
+  await check('a static list is filled and emptied by hand', async () => {
+    const created = await createStaticList(admin, {
+      objectKey: 'contact',
+      name: `Verify static ${listStamp}`,
+      description: 'Members are put in, not selected.',
+    })
+    contactListId = created.id
+
+    const people = await Promise.all(
+      [0, 1, 2].map((i) =>
+        createRecord(sales, 'contact', {
+          first_name: `Listed ${i}`,
+          email: `listed.${listStamp}.${i}@partner9.example`,
+        }),
+      ),
+    )
+    const ids = people.map((person) => person.id)
+
+    const added = await addToList(admin, contactListId, ids)
+    expect(added.added === 3, `added ${added.added} of 3`)
+
+    // Adding the same file twice must not give anybody a second spell.
+    const again = await addToList(admin, contactListId, ids)
+    expect(again.added === 0, `${again.added} joined a list they were already on`)
+
+    const removed = await removeFromList(admin, contactListId, [ids[0]!])
+    expect(removed.removed === 1, `removed ${removed.removed} of 1`)
+
+    const list = await readSegment(admin, contactListId)
+    expect(list?.memberCount === 2, `the list holds ${list?.memberCount}, not 2`)
+    expect(list?.isStatic === true, 'the list did not come back static')
+
+    const members = await readSegmentMembers(admin, contactListId, 50)
+    expect(members.length === 2, `${members.length} members listed`)
+    return `3 added, 1 removed, ${members.length} left`
+  })
+
+  await check('the scheduled pass leaves a static list alone', async () => {
+    const results = await evaluateAllSegments(admin)
+    const mine = results.find((row) => row.segmentId === contactListId)
+    expect(Boolean(mine), 'the list was not in the pass at all')
+    expect(mine!.error === null, `the pass failed on it: ${mine!.error}`)
+    expect(mine!.result?.members === 2, `the pass left ${mine!.result?.members} members, not 2`)
+    expect(mine!.result?.entered === 0 && mine!.result?.exited === 0, 'the pass moved somebody')
+    return 'reported as it stands, never recomputed'
+  })
+
+  await check('companies get lists too, and an active list refuses hand editing', async () => {
+    const company = await createRecord(sales, 'company', {
+      name: `Listed co ${listStamp}`,
+      domain: `listed${listStamp}.example`,
+    })
+    const companyList = await createStaticList(admin, {
+      objectKey: 'company',
+      name: `Verify company list ${listStamp}`,
+    })
+    const added = await addToList(admin, companyList.id, [company.id])
+    expect(added.added === 1, `added ${added.added} of 1`)
+
+    const active = await saveSegment(admin, {
+      objectKey: 'contact',
+      name: `Verify active ${listStamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'lead_status', operator: 'is', value: 'New' }] }],
+    })
+    const refused = await refuses('adding to an active list by hand', () =>
+      addToList(admin, active.id, [company.id]),
+    )
+    expect(refused.includes('active list'), refused)
+    return refused
+  })
+
+  console.log('\n-- bulk actions ------------------------------------------------------')
+
+  await check('a selection from another account is refused before anything is written', async () => {
+    const theirs = await createRecord(probeCtx, 'contact', {
+      first_name: 'Peer',
+      email: `peer.bulk.${listStamp}@peer9.example`,
+    })
+    const mine = await createRecord(sales, 'contact', {
+      first_name: 'Mine',
+      email: `mine.bulk.${listStamp}@partner9.example`,
+    })
+    const refused = await refuses('a bulk delete carrying a peer id', () =>
+      startBulkOperation(sales, { objectKey: 'contact', ids: [mine.id, theirs.id], action: { type: 'delete' } }),
+    )
+    expect(refused.includes('not in this account'), refused)
+
+    const still = await getRecord(sales, 'contact', mine.id)
+    expect(still !== null, 'the refusal still deleted the record it could see')
+
+    // The peer row exists only to be refused, and its address stands a company up
+    // beside it. Left behind, that company is a second row in a tenant the
+    // one-row check further down reads as having exactly one.
+    await db.execute(sql`delete from contact where id = ${theirs.id}::uuid`)
+    await db.execute(sql`
+      delete from company where account_id = ${probe.id}::uuid and domain = 'peer9.example'`)
+    return refused
+  })
+
+  await check('a small selection runs in the call; an owner lands on all of it', async () => {
+    const people = await Promise.all(
+      [0, 1, 2].map((i) =>
+        createRecord(sales, 'contact', {
+          first_name: `Assigned ${i}`,
+          email: `assigned.${listStamp}.${i}@partner9.example`,
+        }),
+      ),
+    )
+    const ids = people.map((person) => person.id)
+    const ownerId = ctxFor('sales').actorId!
+
+    const result = await startBulkOperation(sales, {
+      objectKey: 'contact',
+      ids,
+      action: { type: 'assign', ownerId },
+    })
+    expect(result.mode === 'inline', `it queued ${ids.length} records instead of running them`)
+    expect(result.mode === 'inline' && result.processed === 3, 'not every record took the owner')
+
+    const [row] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from contact
+       where account_id = ${datasaur!.id} and owner_id = ${ownerId}::uuid
+         and id = any(${`{${ids.join(',')}}`}::uuid[])`)
+    expect(Number(row?.n) === 3, `${row?.n} of 3 carry the owner`)
+    return 'three assigned in one call'
+  })
+
+  await check('a bulk add to list puts the selection on it', async () => {
+    const people = await Promise.all(
+      [0, 1].map((i) =>
+        createRecord(sales, 'contact', {
+          first_name: `Bulk listed ${i}`,
+          email: `bulklisted.${listStamp}.${i}@partner9.example`,
+        }),
+      ),
+    )
+    const before = (await readSegment(admin, contactListId))!.memberCount
+    const result = await startBulkOperation(admin, {
+      objectKey: 'contact',
+      ids: people.map((person) => person.id),
+      action: { type: 'add_to_list', listId: contactListId },
+    })
+    expect(result.mode === 'inline', 'two records became a job')
+    const after = (await readSegment(admin, contactListId))!.memberCount
+    expect(after === before + 2, `the list went from ${before} to ${after}`)
+    return `${before} to ${after}`
+  })
+
+  await check('merging from the bar takes exactly two and keeps the one chosen', async () => {
+    const keep = await createRecord(sales, 'contact', {
+      first_name: 'Bar keep',
+      email: `barkeep.${listStamp}@partner9.example`,
+    })
+    const absorb = await createRecord(sales, 'contact', {
+      first_name: 'Bar absorb',
+      email: `barabsorb.${listStamp}@partner9.example`,
+    })
+    const third = await createRecord(sales, 'contact', {
+      first_name: 'Bar third',
+      email: `barthird.${listStamp}@partner9.example`,
+    })
+
+    const refused = await refuses('merging three records', () =>
+      startBulkOperation(sales, {
+        objectKey: 'contact',
+        ids: [keep.id, absorb.id, third.id],
+        action: { type: 'merge', survivorId: keep.id },
+      }),
+    )
+    expect(refused.includes('exactly two'), refused)
+
+    const result = await startBulkOperation(sales, {
+      objectKey: 'contact',
+      ids: [keep.id, absorb.id],
+      action: { type: 'merge', survivorId: keep.id },
+    })
+    expect(result.mode === 'inline', 'a merge became a job')
+    expect((await getRecord(sales, 'contact', keep.id)) !== null, 'the record being kept is gone')
+    expect((await getRecord(sales, 'contact', absorb.id)) === null, 'the absorbed record survived')
+    return 'two merged, three refused'
+  })
+
+  await check('500 deleted across chunks leaves none, tab open or not', async () => {
+    // Written straight in: five hundred records through createRecord is five
+    // hundred transactions and this check is about the chunking, not the writer.
+    const values = Array.from(
+      { length: 500 },
+      (_, i) => `(gen_random_uuid(), '${datasaur!.id}', 'Bulk ${i}', 'bulk.${listStamp}.${i}@partner9.example')`,
+    ).join(',')
+    await owner.unsafe(
+      `insert into contact (id, account_id, first_name, email) values ${values}`,
+    )
+    const ids = (
+      await db.execute<{ id: string }>(sql`
+        select id from contact
+         where account_id = ${datasaur!.id} and email like ${`bulk.${listStamp}.%@partner9.example`}`)
+    ).map((row) => row.id)
+    expect(ids.length === 500, `${ids.length} records to delete, not 500`)
+
+    const started = await startBulkOperation(sales, {
+      objectKey: 'contact',
+      ids,
+      action: { type: 'delete' },
+    })
+    expect(started.mode === 'queued', 'five hundred records ran inline')
+    const operationId = started.mode === 'queued' ? started.operationId : ''
+
+    // What the worker does, minus the minute between ticks.
+    let chunks = 0
+    for (;;) {
+      const step = await runBulkChunk(sales, operationId)
+      chunks += 1
+      if (step.done) break
+      expect(chunks < 20, 'the run never finished')
+    }
+
+    const progress = await readBulkOperation(sales, operationId)
+    expect(progress?.state === 'done', `the run ended ${progress?.state}`)
+    expect(progress?.processed === 500, `it processed ${progress?.processed}`)
+
+    const [left] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from contact
+       where account_id = ${datasaur!.id} and deleted_at is null
+         and email like ${`bulk.${listStamp}.%@partner9.example`}`)
+    expect(Number(left?.n) === 0, `${left?.n} survived the delete`)
+    return `${chunks} chunks, none left`
+  })
+
   console.log('\n-- subscriptions -----------------------------------------------------')
 
   await check('a contact with no preference reads as exactly that', async () => {
@@ -1168,7 +1433,7 @@ try {
     })
     await finishAutomationRun(admin, runId, {
       state: 'skipped',
-      stepIndex: 0,
+      stepPath: [0],
       trail: [],
       detail: 'The conditions did not hold for this record.',
     })
@@ -1294,7 +1559,7 @@ try {
 
     // Parked into the future: the dispatcher must not pick this up yet.
     await parkAutomationRun(admin, runId, {
-      stepIndex: 1,
+      stepPath: [1],
       resumeAt: new Date(Date.now() + 3_600_000),
       trail: ['waited 1 hour'],
     })
@@ -1302,13 +1567,13 @@ try {
 
     // Now due.
     await parkAutomationRun(admin, runId, {
-      stepIndex: 1,
+      stepPath: [1],
       resumeAt: new Date(Date.now() - 1000),
       trail: ['waited 1 hour'],
     })
     const first = await claimAutomationRun(admin, runId)
     expect(first !== null, 'a due run was not claimed')
-    expect(first!.stepIndex === 1, `resumed at ${first!.stepIndex}, not where it parked`)
+    expect(first!.stepPath.join('.') === '1', `resumed at ${first!.stepPath.join('.')}, not where it parked`)
     expect(first!.trail.join() === 'waited 1 hour', 'the trail was lost across the wait')
 
     // The lease is the whole point: a second worker must get nothing.
@@ -1319,7 +1584,7 @@ try {
     const listed = await listAutomationRuns(admin, { automationId })
     expect(listed.some((run) => run.id === runId && run.state === 'waiting'), 'a parked run is invisible')
 
-    await finishAutomationRun(admin, runId, { state: 'done', stepIndex: 2, trail: ['waited 1 hour', 'created a task'] })
+    await finishAutomationRun(admin, runId, { state: 'done', stepPath: [2], trail: ['waited 1 hour', 'created a task'] })
     const after = await listAutomationRuns(admin, { automationId })
     expect(after.find((run) => run.id === runId)?.resumeAt === null, 'a finished run stayed in the queue')
     return 'claimed once, resumed where it parked, and out of the queue when done'

@@ -5,7 +5,7 @@ import { recordActivityFanout } from './activity.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
-import { displayName } from './records.ts'
+import { assertIdsBelong, displayName } from './records.ts'
 import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
 
 /** A segment is a saved query with remembered membership. D15 put it in F1 rather
@@ -350,6 +350,7 @@ export const readSegmentMembers = async (
   ctx: AccountContext,
   segmentId: string,
   limit = 50,
+  offset = 0,
 ): Promise<SegmentMember[]> =>
   withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
@@ -372,8 +373,8 @@ export const readSegmentMembers = async (
         from segment_membership m
         join ${sql.raw(`"${object.key}"`)} r on r.id = m.entity_id
        where m.segment_id = ${segmentId} and m.exited_at is null and r.deleted_at is null
-       order by m.entered_at desc
-       limit ${Math.min(Math.max(limit, 1), 200)}`)
+       order by m.entered_at desc, r.id
+       limit ${Math.min(Math.max(limit, 1), 200)} offset ${Math.max(offset, 0)}`)
 
     return rows.map((member) => ({
       id: String(member.id),
@@ -433,5 +434,196 @@ export const previewSegment = async (
     return {
       count: Number(countRow?.n ?? 0),
       sample: sample.map((row) => ({ id: String(row.id), displayName: displayName(object, row) })),
+    }
+  })
+
+/** One segment on its own, for the list detail page. */
+export const readSegment = async (ctx: AccountContext, id: string): Promise<SegmentRow | null> =>
+  withAccount(ctx, async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const [row] = await tx
+      .select({
+        id: segment.id,
+        name: segment.name,
+        objectId: segment.objectId,
+        description: segment.description,
+        query: segment.query,
+        isStatic: segment.isStatic,
+        lastEvaluatedAt: segment.lastEvaluatedAt,
+      })
+      .from(segment)
+      .where(eq(segment.id, id))
+      .limit(1)
+    if (!row) return null
+
+    const [count] = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from segment_membership
+           where segment_id = ${id} and exited_at is null`,
+    )
+    const objectById = new Map(registry.objects.map((object) => [object.id, object.key]))
+
+    return {
+      id: row.id,
+      name: row.name,
+      objectKey: toObjectKey(objectById.get(row.objectId) ?? 'contact'),
+      description: row.description,
+      filters: parseFilters(row.query),
+      memberCount: Number(count?.n ?? 0),
+      isStatic: row.isStatic,
+      lastEvaluatedAt: row.lastEvaluatedAt,
+    }
+  })
+
+/** A list somebody fills by hand rather than by query.
+ *
+ *  HubSpot's two kinds are the same object with one difference: an active list
+ *  joins and leaves as the records change, a static list holds whoever was put in
+ *  it and nothing takes them out again but a person. That is why this creates a
+ *  segment with an empty query and `is_static` set rather than a table of its own,
+ *  and why the evaluator refuses to touch one: a rebuild from an empty query would
+ *  empty it.
+ *
+ *  Contacts, companies and deals all take one, because a list of the accounts a
+ *  campaign is aimed at is as real a thing as a list of the people at them. */
+export const createStaticList = async (
+  ctx: AccountContext,
+  input: { objectKey: string; name: string; description?: string | null },
+): Promise<{ id: string }> =>
+  mutate(ctx, 'segment', async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const object = objectOrThrow(registry, input.objectKey)
+    const name = input.name.trim()
+    if (!name) throw new Error('A list needs a name.')
+
+    const [created] = await tx
+      .insert(segment)
+      .values({
+        accountId: ctx.accountId,
+        objectId: object.id,
+        name,
+        description: input.description?.trim() || null,
+        query: [],
+        isStatic: true,
+      })
+      .returning({ id: segment.id })
+    if (!created) throw new Error('The list could not be created.')
+
+    return {
+      result: { id: created.id },
+      audit: {
+        entity: 'segment',
+        entityId: created.id,
+        action: 'create',
+        before: null,
+        after: { name, isStatic: true, object: object.key },
+      },
+    }
+  })
+
+const staticListIn = async (tx: Tx, id: string): Promise<{ name: string; objectId: string }> => {
+  const [row] = await tx
+    .select({ name: segment.name, objectId: segment.objectId, isStatic: segment.isStatic })
+    .from(segment)
+    .where(eq(segment.id, id))
+    .limit(1)
+  if (!row) throw new Error('That list no longer exists.')
+  if (!row.isStatic) {
+    throw new Error(
+      `"${row.name}" is an active list, so who is in it is decided by its conditions. Change those instead.`,
+    )
+  }
+  return { name: row.name, objectId: row.objectId }
+}
+
+/** Adds a selection to a static list. Already-members are left alone rather than
+ *  given a second spell, so adding the same file twice does not double the joins
+ *  on anybody's timeline.
+ *
+ *  One insert and one fan-out however many ids there are; O(n) in the selection. */
+export const addToList = async (
+  ctx: AccountContext,
+  listId: string,
+  ids: string[],
+): Promise<{ added: number }> =>
+  mutate(ctx, 'segment', async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const list = await staticListIn(tx, listId)
+    const object = registry.objects.find((candidate) => candidate.id === list.objectId)
+    if (!object) throw new Error('The object this list is built on no longer exists.')
+
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) throw new Error('Nothing was selected.')
+    await assertIdsBelong(tx, object, unique)
+
+    const added = await tx.execute<{ entity_id: string }>(sql`
+      insert into segment_membership (account_id, segment_id, entity_id)
+      select ${ctx.accountId}::uuid, ${listId}::uuid, candidate
+        from unnest(${`{${unique.join(',')}}`}::uuid[]) as candidate
+       where not exists (
+         select 1 from segment_membership m
+          where m.segment_id = ${listId}::uuid and m.entity_id = candidate and m.exited_at is null)
+      returning entity_id`)
+
+    await recordActivityFanout(tx, ctx, {
+      type: 'segment_change',
+      subject: `entered ${list.name}`,
+      payload: { segmentId: listId, segmentName: list.name, direction: 'entered' },
+      entityType: object.key,
+      entityIds: added.map((row) => row.entity_id),
+    })
+
+    return {
+      result: { added: added.length },
+      audit: {
+        entity: 'segment',
+        entityId: listId,
+        action: 'add_members',
+        before: null,
+        after: { name: list.name, selected: unique.length, added: added.length },
+      },
+    }
+  })
+
+/** Ends the current spell rather than deleting the row: somebody who was on the
+ *  list in March still reads as having been on it, which is the whole reason
+ *  membership is stored. */
+export const removeFromList = async (
+  ctx: AccountContext,
+  listId: string,
+  ids: string[],
+): Promise<{ removed: number }> =>
+  mutate(ctx, 'segment', async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const list = await staticListIn(tx, listId)
+    const object = registry.objects.find((candidate) => candidate.id === list.objectId)
+    if (!object) throw new Error('The object this list is built on no longer exists.')
+
+    const unique = [...new Set(ids)]
+    if (unique.length === 0) throw new Error('Nothing was selected.')
+
+    const removed = await tx.execute<{ entity_id: string }>(sql`
+      update segment_membership
+         set exited_at = now()
+       where segment_id = ${listId}::uuid and exited_at is null
+         and entity_id = any(${`{${unique.join(',')}}`}::uuid[])
+      returning entity_id`)
+
+    await recordActivityFanout(tx, ctx, {
+      type: 'segment_change',
+      subject: `left ${list.name}`,
+      payload: { segmentId: listId, segmentName: list.name, direction: 'exited' },
+      entityType: object.key,
+      entityIds: removed.map((row) => row.entity_id),
+    })
+
+    return {
+      result: { removed: removed.length },
+      audit: {
+        entity: 'segment',
+        entityId: listId,
+        action: 'remove_members',
+        before: null,
+        after: { name: list.name, selected: unique.length, removed: removed.length },
+      },
     }
   })

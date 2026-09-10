@@ -505,6 +505,13 @@
       "when": 1790009634179,
       "tag": "0070_task_queues",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790096034179,
+      "tag": "0071_bulk_operation",
+      "breakpoints": true
     }
   ]
 }

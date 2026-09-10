@@ -1,5 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm'
-import { recordActivity, type EntityRef, type EntityType } from './activity.ts'
+import { recordActivity, recordActivityFanout, type EntityRef, type EntityType } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type Registry, type RegistryObject } from './registry.ts'
@@ -316,5 +316,79 @@ export const dissociate = async (ctx: AccountContext, a: EntityRef, b: EntityRef
     return {
       result: undefined,
       audit: { entity: 'association', entityId: to.entityId, action: 'dissociate', before: { from, to }, after: null },
+    }
+  })
+
+/** Many records linked to one, in a single insert.
+ *
+ *  The bulk bar's "Associate with" is one target and a selection, so calling
+ *  `associate` per id would be n transactions, n registry reads and n audit rows
+ *  for what is one decision a person made once. This is one statement plus one
+ *  audit row naming the count, and one activity on each record so the link still
+ *  shows up on the timeline where somebody looks for it.
+ *
+ *  O(n) in the size of the selection, in one round trip. */
+export const associateMany = async (
+  ctx: AccountContext,
+  objectKey: string,
+  ids: string[],
+  target: EntityRef,
+  label?: string | null,
+): Promise<{ linked: number }> =>
+  mutate(ctx, 'association', async (tx) => {
+    const registry = await getRegistryIn(tx)
+    objectOrThrow(registry, objectKey)
+    objectOrThrow(registry, target.entityType)
+
+    const others = ids.filter((id) => !(objectKey === target.entityType && id === target.entityId))
+    if (others.length === 0) throw new Error('A record cannot be associated with itself.')
+    // A Postgres array literal, not a JavaScript array: drizzle expands the
+    // latter into one placeholder per element, which turns `unnest` into a
+    // syntax error. The `::uuid[]` cast is what validates the contents.
+    const idArray = `{${others.join(',')}}`
+
+    // `orderedPair` decides the stored direction, and for two different object
+    // types that decision is the same for every id in the selection. Only a
+    // selection of the target's own kind has to compare id to id, so that is the
+    // only case that needs the two-way expression.
+    const selfPair = objectKey === target.entityType
+    const [fromType, toType] = selfPair
+      ? [objectKey, objectKey]
+      : orderedPair({ entityType: objectKey, entityId: others[0]! }, target).map(
+          (side) => side.entityType,
+        )
+    const targetId = sql`${target.entityId}::uuid`
+    const [fromId, toId] = selfPair
+      ? [sql`least(each_id, ${targetId})`, sql`greatest(each_id, ${targetId})`]
+      : fromType === objectKey
+        ? [sql`each_id`, targetId]
+        : [targetId, sql`each_id`]
+
+    const written = await tx.execute<{ to_id: string }>(sql`
+      insert into association (account_id, from_type, from_id, to_type, to_id, label)
+      select ${ctx.accountId}::uuid, ${fromType}::text, ${fromId}, ${toType}::text, ${toId},
+             ${label ?? null}::text
+        from unnest(${idArray}::uuid[]) as each_id
+      on conflict (account_id, from_type, from_id, to_type, to_id) do update set label = excluded.label
+      returning to_id`)
+
+    const targetName = await nameOf(tx, registry, target)
+    await recordActivityFanout(tx, ctx, {
+      type: 'association_change',
+      subject: `linked to ${targetName}`,
+      payload: { target, label: label ?? null },
+      entityType: objectKey as EntityType,
+      entityIds: others,
+    })
+
+    return {
+      result: { linked: written.length },
+      audit: {
+        entity: 'association',
+        entityId: target.entityId,
+        action: 'associate',
+        before: null,
+        after: { target, objectKey, count: written.length, label: label ?? null },
+      },
     }
   })

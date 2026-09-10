@@ -1,11 +1,12 @@
 'use client'
 
-import { Button, Select, useToast } from '@rawr/ui'
+import { Button, Combobox, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'
+import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 
 export type BulkBarProps = {
   object: string
@@ -17,13 +18,26 @@ export type BulkBarProps = {
   onClear: () => void
 }
 
+/** Which dialog is open. Each action asks for exactly the one thing it needs and
+ *  nothing else, so none of them is a form. */
+type Pending = 'delete' | 'assign' | 'associate' | 'merge' | 'list' | null
+
+type Progress = { id: string; processed: number; total: number }
+
+const POLL_MS = 2000
+
 /** One field, one value, applied to everything ticked. A5.
  *
  *  Deliberately one field at a time. A multi-field bulk editor reads as a record
  *  form and invites somebody to blank three properties across two hundred records
  *  by accident; one field with the count in the button says exactly what is about
  *  to happen. Rows that refuse the change come back named, because "12 of 50
- *  failed" is not something anybody can act on. */
+ *  failed" is not something anybody can act on.
+ *
+ *  The named actions beside it are the ones HubSpot puts on a selection: delete,
+ *  assign an owner, associate with a record, merge two, add to a list. A large
+ *  selection becomes a job rather than a request, and the toolbar shows how far
+ *  it has got, because closing the tab must not stop it. */
 export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: BulkBarProps) => {
   const router = useRouter()
   const toast = useToast()
@@ -33,8 +47,55 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
   const [failed, setFailed] = useState<{ id: string; displayName: string; reason: string }[]>([])
   const [showEnroll, setShowEnroll] = useState(false)
 
+  const [pending, setPending] = useState<Pending>(null)
+  const [ownerId, setOwnerId] = useState<string | null>(null)
+  const [owners, setOwners] = useState<{ id: string; name: string }[]>([])
+  const [target, setTarget] = useState<PickedRecord | null>(null)
+  const [targetObject, setTargetObject] = useState('company')
+  const [linkLabel, setLinkLabel] = useState('')
+  const [lists, setLists] = useState<{ id: string; name: string }[]>([])
+  const [listId, setListId] = useState<string | null>(null)
+  const [survivorId, setSurvivorId] = useState<string | null>(null)
+  const [pair, setPair] = useState<{ id: string; name: string }[]>([])
+  const [progress, setProgress] = useState<Progress | null>(null)
+
   const field = fields.find((candidate) => candidate.key === fieldKey)
   const noun = ids.length === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
+
+  /** A queued action reports itself. Polled rather than pushed for the same
+   *  reason the import wizard is: one screen watching one row does not earn a
+   *  socket, and the answer is a single indexed read. */
+  useEffect(() => {
+    if (!progress) return
+    let live = true
+    const timer = setInterval(() => {
+      api.crm.bulk.progress
+        .query({ id: progress.id })
+        .then((row) => {
+          if (!live || !row) return
+          setProgress({ id: row.id, processed: row.processed, total: row.total })
+          if (row.state === 'running') return
+          clearInterval(timer)
+          setProgress(null)
+          if (row.state === 'failed') toast('error', row.lastError ?? 'The action stopped part way.')
+          else {
+            toast(
+              'success',
+              row.failedCount > 0
+                ? `${row.processed} of ${row.total} done, ${row.failedCount} refused.`
+                : `All ${row.total} done.`,
+            )
+          }
+          onDone()
+          router.refresh()
+        })
+        .catch(() => {})
+    }, POLL_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [progress, onDone, router, toast])
 
   /** Puts a bulk edit back. Not a transaction and not pretending to be one: a
    *  record somebody else changed in between is reported by name rather than
@@ -100,6 +161,72 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
     }
   }
 
+  /** Every named action goes the same way: start it, and either it is finished
+   *  when the call answers or it hands back something to watch. */
+  const start = async (
+    action: Parameters<typeof api.crm.bulk.start.mutate>[0]['action'],
+    done: (processed: number) => string,
+  ) => {
+    setBusy(true)
+    try {
+      const result = await api.crm.bulk.start.mutate({ object, ids, action })
+      setPending(null)
+      if (result.mode === 'queued') {
+        setProgress({ id: result.operationId, processed: 0, total: result.total })
+        toast('info', `${result.total.toLocaleString()} ${noun} queued. You can close this page.`)
+        return
+      }
+      if (result.failed.length > 0) {
+        setFailed(result.failed.map((row) => ({ id: row.id, displayName: row.id, reason: row.reason })))
+      }
+      toast('success', done(result.processed))
+      onDone()
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const openAssign = async () => {
+    setPending('assign')
+    setOwnerId(null)
+    try {
+      const lookups = await api.crm.lookups.query()
+      setOwners(lookups.users.map((user) => ({ id: user.id, name: user.name })))
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
+  const openList = async () => {
+    setPending('list')
+    setListId(null)
+    try {
+      const rows = await api.segments.list.query({ object: object as 'contact' })
+      setLists(rows.filter((row) => row.isStatic).map((row) => ({ id: row.id, name: row.name })))
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
+  const openMerge = async () => {
+    setPending('merge')
+    setSurvivorId(ids[0] ?? null)
+    setPair([])
+    try {
+      const names = await Promise.all(
+        ids.map(async (id) => ({ id, name: (await api.crm.nameOf.query({ object, id })) ?? id })),
+      )
+      setPair(names)
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
+  const canMerge = ids.length === 2 && (object === 'contact' || object === 'company' || object === 'deal')
+
   return (
     <div className="flex flex-col gap-2 rounded-panel border border-line-interactive bg-accent-subtle p-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -113,6 +240,28 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             Add to a sequence
           </Button>
         ) : null}
+
+        <Button onClick={() => void openAssign()}>Assign owner</Button>
+        <Button
+          onClick={() => {
+            setPending('associate')
+            setTarget(null)
+            setLinkLabel('')
+          }}
+        >
+          Associate with
+        </Button>
+        <Button onClick={() => void openList()}>Add to list</Button>
+        <Button
+          disabled={!canMerge}
+          title={canMerge ? undefined : 'Merging takes exactly two records of the same kind.'}
+          onClick={() => void openMerge()}
+        >
+          Merge
+        </Button>
+        <Button variant="destructive" onClick={() => setPending('delete')}>
+          Delete
+        </Button>
 
         <label className="flex min-w-0 flex-col gap-1">
           <span className="text-small text-secondary">Change</span>
@@ -148,6 +297,13 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         </Button>
       </div>
 
+      {progress ? (
+        <p role="status" className="text-small text-secondary">
+          {progress.processed.toLocaleString()} of {progress.total.toLocaleString()} done. This
+          keeps running if you leave the page.
+        </p>
+      ) : null}
+
       {failed.length > 0 ? (
         <div role="alert" className="flex flex-col gap-1">
           <p className="text-error">
@@ -156,7 +312,7 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
           <ul className="flex flex-col gap-0.5">
             {failed.map((row) => (
               <li key={row.id} className="text-small text-secondary">
-                <span className="font-medium">{row.displayName}</span> — {row.reason}
+                <span className="font-medium">{row.displayName}</span> {row.reason}
               </li>
             ))}
           </ul>
@@ -174,6 +330,188 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
           }}
         />
       ) : null}
+
+      <Modal
+        open={pending === 'delete'}
+        title={`Delete ${ids.length} ${noun}?`}
+        onClose={() => setPending(null)}
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            They stop appearing in lists, reports and pickers. Their timelines are kept, so what
+            already happened is still on record; nothing here erases a person.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() =>
+                void start({ type: 'delete' }, (n) => `${n} ${n === 1 ? objectLabel.toLowerCase() : noun} deleted.`)
+              }
+            >
+              Delete {ids.length}
+            </Button>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={pending === 'assign'} title={`Assign ${ids.length} ${noun}`} onClose={() => setPending(null)}>
+        <div className="flex flex-col gap-3">
+          <Combobox
+            label="Owner"
+            value={ownerId}
+            onChange={setOwnerId}
+            options={owners.map((person) => ({ value: person.id, label: person.name }))}
+          />
+          <p className="text-small text-secondary">
+            Leaving it empty takes the owner off, which is what unassigning is.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              busy={busy}
+              onClick={() => void start({ type: 'assign', ownerId }, (n) => `Owner set on ${n} ${noun}.`)}
+            >
+              Assign {ids.length}
+            </Button>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={pending === 'associate'}
+        title={`Associate ${ids.length} ${noun} with`}
+        onClose={() => setPending(null)}
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-small text-secondary">Kind of record</span>
+            <Select
+              value={targetObject}
+              onChange={(event) => {
+                setTargetObject(event.target.value)
+                setTarget(null)
+              }}
+            >
+              <option value="company">Company</option>
+              <option value="contact">Contact</option>
+              <option value="deal">Deal</option>
+            </Select>
+          </label>
+          <RecordPicker object={targetObject} value={target} onChange={setTarget} label="Record" />
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-small text-secondary">Label, optional</span>
+            <TextInput
+              value={linkLabel}
+              onChange={(event) => setLinkLabel(event.target.value)}
+              placeholder="Decision maker"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              busy={busy}
+              disabled={!target}
+              onClick={() =>
+                void start(
+                  {
+                    type: 'associate',
+                    target: { entityType: targetObject, entityId: target!.id },
+                    label: linkLabel.trim() || null,
+                  },
+                  (n) => `${n} ${noun} linked to ${target!.label}.`,
+                )
+              }
+            >
+              Associate {ids.length}
+            </Button>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={pending === 'list'} title={`Add ${ids.length} ${noun} to a list`} onClose={() => setPending(null)}>
+        <div className="flex flex-col gap-3">
+          {lists.length === 0 ? (
+            <p className="text-secondary">
+              There is no static list for {objectLabel.toLowerCase()}s yet. Create one on the
+              Segments page; an active list decides its own membership from its conditions.
+            </p>
+          ) : (
+            <Combobox
+              label="List"
+              value={listId}
+              onChange={setListId}
+              options={lists.map((row) => ({ value: row.id, label: row.name }))}
+            />
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              busy={busy}
+              disabled={!listId}
+              onClick={() =>
+                void start({ type: 'add_to_list', listId: listId! }, (n) => `${n} ${noun} added.`)
+              }
+            >
+              Add {ids.length}
+            </Button>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={pending === 'merge'} title="Merge two records" onClose={() => setPending(null)}>
+        <div className="flex flex-col gap-3">
+          <p>
+            Not reversible. Everything the absorbed record carries moves across: its timeline, its
+            associations, its subscriptions, its list memberships and its tasks.
+          </p>
+          {pair.length < 2 ? (
+            <p className="text-secondary">Reading the two records…</p>
+          ) : (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-small text-secondary">Which one to keep</legend>
+              {pair.map((row) => (
+                <label key={row.id} className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulk-survivor"
+                    checked={survivorId === row.id}
+                    onChange={() => setSurvivorId(row.id)}
+                  />
+                  <span className="min-w-0 truncate">{row.name}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              busy={busy}
+              disabled={!survivorId || pair.length < 2}
+              onClick={() =>
+                void start({ type: 'merge', survivorId: survivorId! }, () => 'Merged.')
+              }
+            >
+              Merge
+            </Button>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

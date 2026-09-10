@@ -70,6 +70,12 @@ export const GET = async (
       if (next.done) controller.close()
       else controller.enqueue(encoder.encode(next.value))
     },
+    // A download somebody cancels halfway still took rows out of the account, and
+    // the audit entry is written as the generator unwinds. Without this the
+    // generator is simply abandoned and that entry is never written.
+    async cancel() {
+      await rows.return(undefined as never)
+    },
   })
 
   const stamp = new Date().toISOString().slice(0, 10)

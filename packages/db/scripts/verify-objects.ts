@@ -12,7 +12,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import * as s from '../src/schema/index.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
@@ -162,7 +162,13 @@ try {
   })
 
   await check('it associates with a contact, and the rail names both sides', async () => {
-    const [someone] = await db.select({ id: s.contact.id }).from(s.contact).where(eq(s.contact.accountId, ws!.id)).limit(1)
+    // Soft-deleted contacts are still rows, and readAssociations does not return
+    // them: picking one here would look exactly like a link that was never made.
+    const [someone] = await db
+      .select({ id: s.contact.id })
+      .from(s.contact)
+      .where(and(eq(s.contact.accountId, ws!.id), isNull(s.contact.deletedAt)))
+      .limit(1)
     await associate(ctx, { entityType: key, entityId: recordId }, { entityType: 'contact', entityId: someone!.id })
 
     const fromProject = groupFor(await readAssociations(ctx, { entityType: key, entityId: recordId }), 'contact')
