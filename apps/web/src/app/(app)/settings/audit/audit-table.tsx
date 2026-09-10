@@ -39,11 +39,18 @@ const IRREGULAR: Record<string, string> = {
   set: 'set',
   submit: 'submitted',
   status: 'changed the status of',
+  run: 'ran',
 }
 
 const pastTense = (verb: string): string =>
   IRREGULAR[verb] ??
-  (verb.endsWith('e') ? `${verb}d` : /[aeiou]l$/.test(verb) ? `${verb}led` : `${verb}ed`)
+  (verb.endsWith('e')
+    ? `${verb}d`
+    : /^[^aeiou]*[aeiou][bdgmnpt]$/.test(verb)
+      ? `${verb}${verb.at(-1)}ed`
+      : /[aeiou]l$/.test(verb)
+        ? `${verb}led`
+        : `${verb}ed`)
 
 /** A sentence rather than a row of columns: "who did what to which thing" reads
  *  faster than four cells the eye has to reassemble.
