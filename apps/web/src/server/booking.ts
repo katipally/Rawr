@@ -30,6 +30,8 @@ import {
 } from './calendar.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { bookingManagePath } from '~/lib/links.ts'
+import { inBackground } from './background.ts'
+import { sendBookingMail } from './booking-mail.ts'
 
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from './zoom.ts'
 import {
@@ -254,6 +256,35 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
         bookingId: result.bookingId,
       })
     }
+
+    // Same reason, and the same guarantee: the visitor is not waiting on Gmail,
+    // and a mail still in flight when the response is written must not be
+    // reclaimed with the invitation half sent.
+    if (page.confirmationEnabled) {
+      inBackground('booking confirmation', () =>
+        sendBookingMail({
+          accountId: page.accountId,
+          hostUserId: result.hostUserId,
+          contactId: result.contactId,
+          bookingId: result.bookingId,
+          kind: 'confirmation',
+          label: 'confirmation',
+          facts: {
+            page,
+            hostName: result.hostName,
+            hostEmail: result.hostEmail,
+            attendeeName: result.attendeeName,
+            attendeeEmail: result.attendeeEmail,
+            attendeeTimezone: result.attendeeTimezone,
+            startsAt: result.startsAt,
+            companyName: result.companyName,
+            conferenceUrl: result.conferenceUrl,
+            rescheduleToken: result.rescheduleToken,
+            cancelToken: result.cancelToken,
+          },
+        }),
+      )
+    }
     return { ok: true, booking: result }
   } catch (cause) {
     if (cause instanceof SlotGoneError) {
@@ -352,10 +383,9 @@ const provisioner =
         ? request.page.locationDetail
         : null
 
-    // Rawr does not send email: D7 rules out sending, and the provider that will
-    // arrives in F6. The calendar invitation Google sends on our behalf is
-    // therefore the only place the attendee receives their reschedule and cancel
-    // links, so they go in the description rather than waiting for an ESP.
+    // The confirmation mail carries these too, but it is sent from a mailbox that
+    // may not be connected, and the calendar invitation always exists. So they go
+    // in the description as well: two copies of a link beat none.
     const manage = [
       `Need a different time? ${publicBaseUrl}${bookingManagePath('reschedule', request.tokens.reschedule)}`,
       `Cannot make it? ${publicBaseUrl}${bookingManagePath('cancel', request.tokens.cancel)}`,

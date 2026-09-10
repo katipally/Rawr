@@ -65,6 +65,16 @@ export const bookingPage = pgTable(
     isActive: boolean('is_active').notNull().default(true),
     redirectUrl: text('redirect_url'),
     confirmationCopy: text('confirmation_copy'),
+    /** The mail the attendee gets the moment they book, as opposed to
+     *  `confirmationCopy`, which is the sentence on the page. On by default:
+     *  a calendar invitation reaches a calendar, not an inbox. */
+    confirmationEnabled: boolean('confirmation_enabled').notNull().default(true),
+    /** Null means the wording Rawr ships, so improving it reaches every page that
+     *  never customised it. */
+    confirmationSubject: text('confirmation_subject'),
+    confirmationBody: text('confirmation_body'),
+    reminderSubject: text('reminder_subject'),
+    reminderBody: text('reminder_body'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -300,4 +310,55 @@ export const calendarGrant = pgTable(
    *  read through the development provider while a real Google calendar sat next
    *  to it, which reports no commitments and so offers times somebody is busy. */
   (t) => [uniqueIndex('calendar_grant_user_key').on(t.accountId, t.userId)],
+)
+
+/** One pre-meeting reminder, as the number and unit somebody chose rather than as
+ *  minutes: "1 week before" has to read back as one week. Several per page. */
+export const bookingReminder = pgTable(
+  'booking_reminder',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    bookingPageId: uuid('booking_page_id')
+      .notNull()
+      .references(() => bookingPage.id, { onDelete: 'cascade' }),
+    amount: integer('amount').notNull(),
+    unit: text('unit').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('booking_reminder_page_key').on(t.accountId, t.bookingPageId, t.unit, t.amount)],
+)
+
+/** Which reminder has already gone for which meeting. The primary key is the whole
+ *  of the deduplication: a retry, a restart mid-tick and two workers racing all
+ *  land on the same row, so the attendee is reminded once. */
+export const bookingReminderSent = pgTable(
+  'booking_reminder_sent',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    bookingId: uuid('booking_id')
+      .notNull()
+      .references(() => booking.id, { onDelete: 'cascade' }),
+    reminderId: uuid('reminder_id')
+      .notNull()
+      .references(() => bookingReminder.id, { onDelete: 'cascade' }),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.bookingId, t.reminderId] })],
+)
+
+/** Views per page per day rather than one row per view: a link in a signature is
+ *  opened by every scanner that touches the mail, and a conversion rate only ever
+ *  needs the daily total. */
+export const bookingPageView = pgTable(
+  'booking_page_view',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    bookingPageId: uuid('booking_page_id')
+      .notNull()
+      .references(() => bookingPage.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+    views: integer('views').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.bookingPageId, t.day] })],
 )

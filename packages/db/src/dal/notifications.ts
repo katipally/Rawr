@@ -24,6 +24,7 @@ export type NotificationKind =
   | 'mailbox_revoked'
   | 'task_reminder'
   | 'task_assigned'
+  | 'email_opened'
 
 export type NotificationTab = 'unread' | 'all' | 'trash'
 
@@ -109,6 +110,48 @@ export const notify = async (tx: Tx, ctx: AccountContext, input: NotifyInput): P
            body = excluded.body,
            read_at = null,
            trashed_at = null`)
+}
+
+/** "Your mail was opened", for a mailbox that asked to be told.
+ *
+ *  Reached from the open pixel, which arrives from a stranger's mail client with
+ *  no session, so the account is pinned from the token before this is called and
+ *  the mailbox owner is read from the send rather than taken from the request.
+ *
+ *  Silent unless the mailbox opted in, and one notice per send: the pixel is
+ *  counted every time it is fetched, and Apple Mail Privacy Protection fetches it
+ *  on its own schedule, so a notice per fetch would be a stream of noise about
+ *  one mail. The dedupe key is the send, so later opens raise the count on the
+ *  notice already there. */
+export const notifyMailboxOpen = async (tx: Tx, ctx: AccountContext, token: string): Promise<void> => {
+  const [row] = await tx.execute<{
+    send_id: string
+    user_id: string
+    contact_id: string | null
+    who: string | null
+    subject: string | null
+  }>(sql`
+    select s.id as send_id, b.user_id, s.contact_id,
+           coalesce(nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), ''), c.email) as who,
+           t.subject
+      from sequence_send s
+      join mailbox b on b.id = s.mailbox_id and b.alert_on_open
+      left join contact c on c.id = s.contact_id and c.deleted_at is null
+      left join message m on m.id = s.message_id
+      left join message_thread t on t.id = m.thread_id
+     where s.token = ${token}
+     limit 1`)
+  if (!row) return
+
+  await notify(tx, ctx, {
+    kind: 'email_opened',
+    dedupeKey: `email_opened:${row.send_id}`,
+    title: `${row.who ?? 'Somebody'} opened your email`,
+    body: row.subject,
+    entity: row.contact_id ? 'contact' : null,
+    entityId: row.contact_id,
+    to: { userIds: [row.user_id] },
+  })
 }
 
 /** The half nobody remembers to build. A derived count is self-healing; a stored

@@ -156,6 +156,50 @@ export type BookingPageConfig = PublicBookingPage & {
   titleTpl: string
   descriptionTpl: string
   companyFallback: string
+  confirmationEnabled: boolean
+  /** Null means the wording Rawr ships. Kept as null rather than resolved here so
+   *  that improving the default reaches every page that never customised it. */
+  confirmationSubject: string | null
+  confirmationBody: string | null
+  reminderSubject: string | null
+  reminderBody: string | null
+  reminders: BookingReminder[]
+}
+
+export const REMINDER_UNITS = ['week', 'day', 'hour', 'minute'] as const
+export type ReminderUnit = (typeof REMINDER_UNITS)[number]
+
+export type BookingReminder = { id: string; amount: number; unit: ReminderUnit }
+
+const MINUTES_PER_UNIT: Record<ReminderUnit, number> = {
+  week: 10_080,
+  day: 1440,
+  hour: 60,
+  minute: 1,
+}
+
+/** How far ahead of the meeting a reminder goes out. The pair is stored, not this,
+ *  so "1 week before" reads back as one week. */
+export const reminderLeadMinutes = (reminder: { amount: number; unit: ReminderUnit }): number =>
+  reminder.amount * MINUTES_PER_UNIT[reminder.unit]
+
+export const reminderLabel = (reminder: { amount: number; unit: ReminderUnit }): string =>
+  `${reminder.amount} ${reminder.unit}${reminder.amount === 1 ? '' : 's'} before`
+
+const readReminders = (raw: unknown): BookingReminder[] => {
+  if (!Array.isArray(raw)) return []
+  const units = new Set<string>(REMINDER_UNITS)
+  return raw
+    .filter(
+      (row): row is BookingReminder =>
+        typeof row === 'object' &&
+        row !== null &&
+        typeof (row as BookingReminder).id === 'string' &&
+        Number.isFinite((row as BookingReminder).amount) &&
+        units.has((row as BookingReminder).unit),
+    )
+    .map((row) => ({ id: row.id, amount: Number(row.amount), unit: row.unit }))
+    .sort((a, b) => reminderLeadMinutes(b) - reminderLeadMinutes(a))
 }
 
 const PAGE_COLUMNS = sql`
@@ -164,6 +208,13 @@ const PAGE_COLUMNS = sql`
   p.buffer_after_minutes, p.min_notice_minutes, p.max_horizon_days, p.granularity_minutes,
   p.location, p.location_detail, p.title_tpl, p.description_tpl, p.company_fallback,
   p.questions, p.is_active, p.redirect_url, p.confirmation_copy,
+  p.confirmation_enabled, p.confirmation_subject, p.confirmation_body,
+  p.reminder_subject, p.reminder_body,
+  coalesce(
+    (select jsonb_agg(jsonb_build_object('id', r.id, 'amount', r.amount, 'unit', r.unit))
+       from booking_reminder r where r.booking_page_id = p.id),
+    '[]'::jsonb
+  ) as reminders,
   coalesce(
     (select array_agg(u.name order by u.name)
        from booking_host h join user_account u on u.id = h.user_id
@@ -176,6 +227,12 @@ type ConfigRow = PublicPageRow & {
   title_tpl: string
   description_tpl: string
   company_fallback: string
+  confirmation_enabled: boolean
+  confirmation_subject: string | null
+  confirmation_body: string | null
+  reminder_subject: string | null
+  reminder_body: string | null
+  reminders: unknown
 }
 
 const toConfig = (row: ConfigRow): BookingPageConfig => ({
@@ -203,6 +260,12 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
   isActive: row.is_active,
   redirectUrl: row.redirect_url,
   confirmationCopy: row.confirmation_copy,
+  confirmationEnabled: row.confirmation_enabled,
+  confirmationSubject: row.confirmation_subject,
+  confirmationBody: row.confirmation_body,
+  reminderSubject: row.reminder_subject,
+  reminderBody: row.reminder_body,
+  reminders: readReminders(row.reminders),
 })
 
 const readConfig = async (tx: Tx, pageId: string): Promise<BookingPageConfig | null> => {
@@ -719,6 +782,12 @@ export type ConfirmResult = {
   endsAt: Date
   contactId: string | null
   companyId: string | null
+  /** What the attendee gave, echoed back so the mail the caller sends does not
+   *  have to read the row it just wrote. */
+  attendeeName: string
+  attendeeEmail: string
+  attendeeTimezone: string
+  companyName: string | null
   conferenceUrl: string | null
   cancelToken: string
   rescheduleToken: string
@@ -1000,6 +1069,10 @@ export const confirmBooking = async (
       endsAt,
       contactId: linked.contactId,
       companyId: linked.companyId,
+      attendeeName: name,
+      attendeeEmail: email,
+      attendeeTimezone: input.attendeeTimezone,
+      companyName,
       conferenceUrl: provisioned.conferenceUrl,
       cancelToken,
       rescheduleToken,
@@ -1018,6 +1091,10 @@ const emptyResult = (input: ConfirmInput): ConfirmResult => ({
   endsAt: new Date(input.startsAt.getTime() + input.page.durationMinutes * 60_000),
   contactId: null,
   companyId: null,
+  attendeeName: '',
+  attendeeEmail: '',
+  attendeeTimezone: input.attendeeTimezone,
+  companyName: null,
   conferenceUrl: null,
   cancelToken: '',
   rescheduleToken: '',
@@ -1370,4 +1447,185 @@ export const listBookings = async (
       nextCursor: more ? { startsAt: more.startsAt, id: more.id } : null,
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// Views, and what a page is worth
+// ---------------------------------------------------------------------------
+
+/** One more look at a public page. Counted per day rather than per view, because
+ *  a link in an email signature is fetched by every scanner that touches the mail
+ *  and a conversion rate only ever needs the daily total.
+ *
+ *  Reached from the public edge, so it takes the account the slug already
+ *  resolved to and never one from the request. Best effort: a counter that
+ *  refuses must not stop somebody booking a meeting. */
+export const recordBookingPageView = async (accountId: string, pageId: string): Promise<void> => {
+  const ctx = publicEdgeContext(accountId)
+  await withAccount(ctx, (tx) =>
+    tx.execute(sql`
+      insert into booking_page_view (account_id, booking_page_id, day, views)
+      values (${accountId}, ${pageId}, (now() at time zone 'utc')::date, 1)
+      on conflict (account_id, booking_page_id, day)
+        do update set views = booking_page_view.views + 1`),
+  ).catch(() => undefined)
+}
+
+export type BookingPageStats = {
+  views: number
+  booked: number
+  cancelled: number
+  /** Bookings per hundred views. Null when nothing has been viewed, because zero
+   *  per cent and "nobody has looked yet" are different answers. */
+  conversion: number | null
+  sinceDays: number
+}
+
+/** What one link is worth over a window. Two indexed counts, no scan of a view
+ *  log: the counter is already daily. */
+export const bookingPageStats = async (
+  ctx: AccountContext,
+  pageId: string,
+  sinceDays = 30,
+): Promise<BookingPageStats> =>
+  withAccount(ctx, async (tx) => {
+    const days = Math.min(Math.max(Math.trunc(sinceDays) || 30, 1), 365)
+    const [row] = await tx.execute<{ views: string; booked: string; cancelled: string }>(sql`
+      select
+        coalesce((select sum(v.views) from booking_page_view v
+                   where v.booking_page_id = ${pageId}
+                     and v.day >= (now() at time zone 'utc')::date - ${days}::int), 0) as views,
+        (select count(*) from booking b
+          where b.booking_page_id = ${pageId}
+            and b.state <> 'rescheduled'
+            and b.created_at >= now() - ${`${days} days`}::interval) as booked,
+        (select count(*) from booking b
+          where b.booking_page_id = ${pageId}
+            and b.state = 'cancelled'
+            and b.created_at >= now() - ${`${days} days`}::interval) as cancelled`)
+
+    const views = Number(row?.views ?? 0)
+    const booked = Number(row?.booked ?? 0)
+    return {
+      views,
+      booked,
+      cancelled: Number(row?.cancelled ?? 0),
+      conversion: views > 0 ? Math.round((booked / views) * 1000) / 10 : null,
+      sinceDays: days,
+    }
+  })
+
+// ---------------------------------------------------------------------------
+// Reminders
+// ---------------------------------------------------------------------------
+
+/** Everything one reminder needs to be written and addressed, read after the
+ *  worker has already decided it is due. Null when the booking moved, was
+ *  cancelled, or the reminder was deleted between the two. */
+export type ReminderTarget = {
+  bookingId: string
+  page: BookingPageConfig
+  reminder: BookingReminder
+  hostUserId: string
+  hostName: string
+  hostEmail: string
+  contactId: string | null
+  attendeeName: string
+  attendeeEmail: string
+  attendeeTimezone: string
+  startsAt: Date
+  endsAt: Date
+  conferenceUrl: string | null
+  companyName: string | null
+  rescheduleToken: string
+  cancelToken: string
+}
+
+export const readReminderTarget = async (
+  ctx: AccountContext,
+  input: { bookingId: string; reminderId: string },
+): Promise<ReminderTarget | null> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{
+      booking_page_id: string
+      host_user_id: string
+      host_name: string
+      host_email: string
+      contact_id: string | null
+      attendee_name: string
+      attendee_email: string
+      attendee_timezone: string
+      starts_at: string
+      ends_at: string
+      conference_url: string | null
+      company_name: string | null
+      reschedule_token: string
+      cancel_token: string
+      amount: number
+      unit: ReminderUnit
+    }>(sql`
+      select b.booking_page_id, b.host_user_id, u.name as host_name, u.email as host_email,
+             b.contact_id, b.attendee_name, b.attendee_email, b.attendee_timezone,
+             b.starts_at, b.ends_at, b.conference_url, co.name as company_name,
+             b.reschedule_token, b.cancel_token, r.amount, r.unit
+        from booking b
+        join user_account u on u.id = b.host_user_id
+        join booking_reminder r on r.id = ${input.reminderId}
+        left join company co on co.id = b.company_id
+       where b.id = ${input.bookingId}
+         and b.state = 'confirmed'
+         and r.booking_page_id = b.booking_page_id
+       limit 1`)
+    if (!row) return null
+
+    const page = await readConfig(tx, row.booking_page_id)
+    if (!page) return null
+
+    return {
+      bookingId: input.bookingId,
+      page,
+      reminder: { id: input.reminderId, amount: Number(row.amount), unit: row.unit },
+      hostUserId: row.host_user_id,
+      hostName: row.host_name,
+      hostEmail: row.host_email,
+      contactId: row.contact_id,
+      attendeeName: row.attendee_name,
+      attendeeEmail: row.attendee_email,
+      attendeeTimezone: row.attendee_timezone,
+      startsAt: new Date(row.starts_at),
+      endsAt: new Date(row.ends_at),
+      conferenceUrl: row.conference_url,
+      companyName: row.company_name,
+      rescheduleToken: row.reschedule_token,
+      cancelToken: row.cancel_token,
+    }
+  })
+
+/** Claims the reminder before it is sent, not after: the primary key is what makes
+ *  two workers racing send one mail, and a row written afterwards leaves the gap
+ *  the key exists to close. False means somebody else has it. */
+export const claimReminder = async (
+  ctx: AccountContext,
+  input: { bookingId: string; reminderId: string },
+): Promise<boolean> =>
+  withAccount(ctx, async (tx) => {
+    const rows = await tx.execute<{ booking_id: string }>(sql`
+      insert into booking_reminder_sent (account_id, booking_id, reminder_id)
+      values (${ctx.accountId}, ${input.bookingId}, ${input.reminderId})
+      on conflict do nothing
+      returning booking_id`)
+    return rows.length > 0
+  })
+
+/** Undoes the claim when the send never happened, so the next tick tries again
+ *  rather than the meeting passing in silence. */
+export const releaseReminder = async (
+  ctx: AccountContext,
+  input: { bookingId: string; reminderId: string },
+): Promise<void> => {
+  await withAccount(ctx, (tx) =>
+    tx.execute(sql`
+      delete from booking_reminder_sent
+       where booking_id = ${input.bookingId} and reminder_id = ${input.reminderId}`),
+  )
 }

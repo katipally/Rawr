@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   index,
@@ -24,6 +25,9 @@ export const subscriptionType = pgTable(
     name: text('name').notNull(),
     description: text('description'),
     isInternal: boolean('is_internal').notNull().default(false),
+    /** When true a form opt-in only asks. The contact is subscribed by the link in
+     *  the confirmation mail, which is what proves the address is theirs. */
+    doubleOptIn: boolean('double_opt_in').notNull().default(false),
   },
   (t) => [uniqueIndex('subscription_type_name_key').on(t.accountId, t.name)],
 )
@@ -43,8 +47,19 @@ export const subscriptionState = pgTable(
     state: subscriptionStateEnum('state').notNull().default('unspecified'),
     changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
     source: text('source'),
+    /** When the link in the confirmation mail was clicked. Null on a type that
+     *  never asked for one, which is why it is evidence and not a state. */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    /** Set while a confirmation is outstanding and cleared the moment it is used,
+     *  so a link in an old mail stops working. Opaque and random, never derived. */
+    confirmToken: text('confirm_token'),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.contactId, t.subscriptionTypeId] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.contactId, t.subscriptionTypeId] }),
+    uniqueIndex('subscription_state_confirm_token_key')
+      .on(t.confirmToken)
+      .where(sql`confirm_token is not null`),
+  ],
 )
 
 export const segment = pgTable(

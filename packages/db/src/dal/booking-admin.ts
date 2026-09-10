@@ -5,9 +5,11 @@ import { assertSchemaIsUsable } from './form-schema.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import {
   readQuestions,
+  REMINDER_UNITS,
   type BookingKind,
   type BookingLocation,
   type BookingPageConfig,
+  type ReminderUnit,
 } from './bookings.ts'
 import { DEFAULT_WEEKLY, isKnownTimezone, readRanges, readWeekly, type TimeRange, type WeeklyRules } from './slots.ts'
 
@@ -142,7 +144,19 @@ export type SaveBookingPage = {
   /** Shared pages only. Left undefined the host list is untouched. `isRequired`
    *  is read on a collective and ignored elsewhere, where each host stands alone. */
   hosts?: { userId: string; weight: number; isRequired?: boolean }[] | undefined
+  confirmationEnabled?: boolean | undefined
+  /** Empty or absent means the wording Rawr ships. Stored as null so improving
+   *  that wording reaches every page that never customised it. */
+  confirmationSubject?: string | null | undefined
+  confirmationBody?: string | null | undefined
+  reminderSubject?: string | null | undefined
+  reminderBody?: string | null | undefined
+  /** Left undefined the reminder list is untouched; given, it is replaced whole. */
+  reminders?: { amount: number; unit: ReminderUnit }[] | undefined
 }
+
+const blankToNull = (value: string | null | undefined): string | null =>
+  value === undefined || value === null || value.trim() === '' ? null : value
 
 /** Creates or updates a page and, for a round robin, its host list in the same
  *  transaction. A page that cannot be published is refused here rather than
@@ -200,16 +214,16 @@ export const saveBookingPage = async (
     if (input.id) {
       if (!before) throw new Error('That booking page no longer exists.')
       assertOwnPageOrAdmin(ctx, before.owner_id)
-      // Changing a personal link into a shared one, or the reverse, would move it
-      // between two different permission models with live bookings attached.
-      // Personal and shared are two different permission models with live
-      // bookings attached, so that boundary is not crossed. Round robin and
-      // collective are both shared and differ only in how availability is
-      // combined, so switching between them is an ordinary edit.
-      if ((before.kind === 'one_on_one') !== (input.kind === 'one_on_one')) {
-        throw new Error(
-          'A personal link and a shared page are different kinds of page. Create the other kind rather than converting this one.',
-        )
+      // Turning a personal link into a shared one hands it to the account, and
+      // only somebody who can already change shared pages may do that. The check
+      // below covers the other direction, where the new owner is the one being
+      // handed a page nobody else can now edit. Live bookings survive either way:
+      // they name a host, not a kind.
+      if (before.kind === 'one_on_one' && input.kind !== 'one_on_one' && !isAdmin(ctx)) {
+        throw new ForbiddenError('account', 'turn a personal link into a shared page')
+      }
+      if (before.kind !== 'one_on_one' && input.kind === 'one_on_one' && !isAdmin(ctx)) {
+        throw new ForbiddenError('account', 'turn a shared page into a personal link')
       }
     }
 
@@ -227,7 +241,9 @@ export const saveBookingPage = async (
         id, account_id, slug, name, kind, owner_id, duration_minutes,
         buffer_before_minutes, buffer_after_minutes, min_notice_minutes, max_horizon_days,
         granularity_minutes, location, location_detail, title_tpl, description_tpl,
-        company_fallback, questions, is_active, redirect_url, confirmation_copy)
+        company_fallback, questions, is_active, redirect_url, confirmation_copy,
+        confirmation_enabled, confirmation_subject, confirmation_body,
+        reminder_subject, reminder_body)
       values (
         ${input.id ?? sql`gen_random_uuid()`}, ${ctx.accountId}, ${input.slug}, ${input.name.trim()},
         ${input.kind}, ${ownerId}, ${input.durationMinutes}, ${input.bufferBeforeMinutes},
@@ -235,9 +251,17 @@ export const saveBookingPage = async (
         ${input.granularityMinutes}, ${input.location}, ${input.locationDetail ?? null},
         ${input.titleTpl}, ${input.descriptionTpl}, ${input.companyFallback},
         ${JSON.stringify(questions)}::jsonb, ${input.isActive}, ${input.redirectUrl ?? null},
-        ${input.confirmationCopy ?? null})
+        ${input.confirmationCopy ?? null}, ${input.confirmationEnabled ?? true},
+        ${blankToNull(input.confirmationSubject)}, ${blankToNull(input.confirmationBody)},
+        ${blankToNull(input.reminderSubject)}, ${blankToNull(input.reminderBody)})
       on conflict (id) do update set
         slug = excluded.slug, name = excluded.name, duration_minutes = excluded.duration_minutes,
+        kind = excluded.kind, owner_id = excluded.owner_id,
+        confirmation_enabled = excluded.confirmation_enabled,
+        confirmation_subject = excluded.confirmation_subject,
+        confirmation_body = excluded.confirmation_body,
+        reminder_subject = excluded.reminder_subject,
+        reminder_body = excluded.reminder_body,
         buffer_before_minutes = excluded.buffer_before_minutes,
         buffer_after_minutes = excluded.buffer_after_minutes,
         min_notice_minutes = excluded.min_notice_minutes,
@@ -252,6 +276,7 @@ export const saveBookingPage = async (
 
     if (!row) throw new Error('The booking page could not be saved.')
     if (hosts) await replaceHosts(tx, ctx, row.id, hosts)
+    if (input.reminders) await replaceReminders(tx, ctx, row.id, input.reminders)
 
     return {
       result: row.id,
@@ -318,6 +343,51 @@ const replaceHosts = async (
       values (${ctx.accountId}, ${pageId}, ${host.userId}, ${weight}, ${isRequired}, true)
       on conflict (account_id, booking_page_id, user_id)
         do update set weight = excluded.weight, is_required = excluded.is_required, is_active = true`)
+  }
+}
+
+/** The reminder list, replaced by (unit, amount) rather than by row.
+ *
+ *  Deleting every row and reinserting would mint new ids, and the ledger that
+ *  says a reminder has already gone is keyed on the id. Every upcoming meeting
+ *  would then be reminded a second time the moment somebody renamed the page. So
+ *  a reminder that survives the edit keeps its row, and only the ones actually
+ *  removed are deleted. */
+const replaceReminders = async (
+  tx: Tx,
+  ctx: AccountContext,
+  pageId: string,
+  reminders: { amount: number; unit: ReminderUnit }[],
+): Promise<void> => {
+  const wanted = new Map<string, { amount: number; unit: ReminderUnit }>()
+  for (const reminder of reminders) {
+    const amount = Math.trunc(reminder.amount)
+    if (!Number.isFinite(amount) || amount < 1 || amount > 365) {
+      throw new Error('A reminder has to be between 1 and 365 of its unit before the meeting.')
+    }
+    if (!REMINDER_UNITS.includes(reminder.unit)) {
+      throw new Error(`"${reminder.unit}" is not a reminder unit.`)
+    }
+    wanted.set(`${reminder.unit}:${amount}`, { amount, unit: reminder.unit })
+  }
+
+  await tx.execute(sql`
+    delete from booking_reminder
+     where booking_page_id = ${pageId}
+       and ${
+         wanted.size
+           ? sql`(unit, amount) not in (${sql.join(
+               [...wanted.values()].map((row) => sql`(${row.unit}, ${row.amount})`),
+               sql`, `,
+             )})`
+           : sql`true`
+       }`)
+
+  for (const row of wanted.values()) {
+    await tx.execute(sql`
+      insert into booking_reminder (account_id, booking_page_id, amount, unit)
+      values (${ctx.accountId}, ${pageId}, ${row.amount}, ${row.unit})
+      on conflict (account_id, booking_page_id, unit, amount) do nothing`)
   }
 }
 

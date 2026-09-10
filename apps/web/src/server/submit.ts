@@ -9,6 +9,7 @@ import {
 import type { NextRequest } from 'next/server'
 import { ipHashOf } from './edge.ts'
 import { turnstileCredentials, verifyTurnstile } from './integrations/turnstile.ts'
+import { sendOptInConfirmation } from './opt-in-mail.ts'
 
 /** One capture path, shared by the JSON endpoint, the no-JS hosted page and the
  *  Webflow webhook, so the three cannot drift on scoring, attribution or the
@@ -91,14 +92,18 @@ export const runSubmission = async (
   options: SubmitOptions = {},
 ): Promise<RunResult> => {
   const first = await submitForm(inputFor(request, form, body, options, 'not-required'))
-  if (!first.challengeRequired) return { ...first, challengeSiteKey: null }
+  if (!first.challengeRequired) {
+    askForConfirmations(form.accountId, first)
+    return { ...first, challengeSiteKey: null }
+  }
 
   // Scored into the challenge band, and nothing was written. Settle it here.
   const creds = await turnstileCredentials(publicEdgeContext(form.accountId))
-  const settle = async (outcome: 'failed' | 'passed' | 'unavailable'): Promise<RunResult> => ({
-    ...(await submitForm(inputFor(request, form, body, options, outcome))),
-    challengeSiteKey: null,
-  })
+  const settle = async (outcome: 'failed' | 'passed' | 'unavailable'): Promise<RunResult> => {
+    const result = await submitForm(inputFor(request, form, body, options, outcome))
+    askForConfirmations(form.accountId, result)
+    return { ...result, challengeSiteKey: null }
+  }
 
   // Fail closed to quarantine: reviewable, not accepted, not lost.
   if (!creds) return settle('unavailable')
@@ -111,4 +116,22 @@ export const runSubmission = async (
   }
 
   return settle(await verifyTurnstile(creds, token, ip))
+}
+
+/** The confirmation mail for every opt-in on a type that asks for one.
+ *
+ *  Off the critical path, because the visitor is waiting for a thank-you and not
+ *  for Gmail, and never fatal: the request and its token are already written, so
+ *  a mail that fails is a mail somebody can be asked for again. */
+const askForConfirmations = (accountId: string, result: SubmitResult): void => {
+  const pending = result.confirmations ?? []
+  if (pending.length === 0) return
+  // Imported here rather than at the top: `after` comes from next/server, which
+  // plain Node cannot resolve, and this file's parser is covered by unit tests
+  // that run without a bundler.
+  void import('./background.ts').then(({ inBackground }) => {
+    for (const one of pending) {
+      inBackground('subscription confirmation', () => sendOptInConfirmation(accountId, one))
+    }
+  })
 }

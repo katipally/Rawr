@@ -4,6 +4,9 @@ import {
   canWrite,
   publicEdgeContext,
   systemContext,
+  bookingPageStats,
+  recordBookingPageView,
+  reminderLeadMinutes,
   assignHost,
   attachConference,
   bookingForToken,
@@ -194,7 +197,7 @@ const PAGE_SHAPE = {
  *  address it books with ends in one of these, and every page it creates is named
  *  here, so the cleanup is exact rather than a truncate. */
 const TEST_DOMAINS = ['acme-booking.test', 'race-booking.test']
-const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this']
+const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this', 'reminded-page']
 
 const cleanUp = async (ctx: AccountContext): Promise<void> => {
   await withAccount(ctx, async (tx) => {
@@ -1512,6 +1515,134 @@ try {
     wideWindow.length > 4000,
     `${wideWindow.length} slots`,
   )
+  // -----------------------------------------------------------------------
+  section('reminders, confirmation mail and what a link is worth')
+
+  const remindedId = await saveBookingPage(datasaur, {
+    slug: 'reminded-page',
+    name: 'Reminded',
+    ...PAGE_SHAPE,
+    kind: 'round_robin',
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+    hosts: [],
+    confirmationSubject: '   ',
+    reminders: [
+      { amount: 1, unit: 'hour' },
+      { amount: 1, unit: 'week' },
+      { amount: 2, unit: 'day' },
+      // The same reminder twice is one reminder, or the attendee is mailed twice.
+      { amount: 1, unit: 'hour' },
+    ],
+  })
+  const reminded = await readBookingPage(datasaur, remindedId)
+  check(
+    'a page keeps several reminders and drops a duplicate pair',
+    reminded?.reminders.length === 3,
+    `${reminded?.reminders.length ?? 0} reminders`,
+  )
+  check(
+    'and reads them back furthest from the meeting first',
+    reminded?.reminders.map((row) => `${row.amount}${row.unit}`).join(',') === '1week,2day,1hour',
+    reminded?.reminders.map((row) => `${row.amount}${row.unit}`).join(',') ?? 'none',
+  )
+  check(
+    'a reminder knows how far ahead of the meeting it goes',
+    reminderLeadMinutes({ amount: 1, unit: 'week' }) === 10_080 &&
+      reminderLeadMinutes({ amount: 2, unit: 'day' }) === 2880,
+  )
+  check(
+    'a confirmation subject of nothing but spaces is stored as no subject at all',
+    reminded?.confirmationSubject === null,
+    'so improving the shipped wording still reaches this page',
+  )
+  check('the confirmation email is on unless somebody turns it off', reminded?.confirmationEnabled === true)
+
+  const keptId = reminded?.reminders.find((row) => row.unit === 'week')?.id ?? ''
+  await saveBookingPage(datasaur, {
+    id: remindedId,
+    slug: 'reminded-page',
+    name: 'Reminded',
+    ...PAGE_SHAPE,
+    kind: 'round_robin',
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+    hosts: [],
+    reminders: [{ amount: 1, unit: 'week' }],
+  })
+  const trimmed = await readBookingPage(datasaur, remindedId)
+  check(
+    'a reminder that survives an edit keeps its row',
+    trimmed?.reminders.length === 1 && trimmed.reminders[0]?.id === keptId,
+    'or every upcoming meeting would be reminded a second time',
+  )
+
+  const beforeViews = await bookingPageStats(datasaur, remindedId)
+  check(
+    'a link nobody has opened reports no rate rather than nought per cent',
+    beforeViews.views === 0 ? beforeViews.conversion === null : true,
+    `${beforeViews.views} views`,
+  )
+  await recordBookingPageView(datasaur.accountId, remindedId)
+  await recordBookingPageView(datasaur.accountId, remindedId)
+  const afterViews = await bookingPageStats(datasaur, remindedId)
+  check(
+    'two looks at a page are two views on one daily row',
+    afterViews.views === beforeViews.views + 2,
+    `${afterViews.views} views`,
+  )
+
+  // A personal link and a shared page are the same row with a different owner, so
+  // the type is editable and the host list follows the owner.
+  const converted = await saveBookingPage(datasaur, {
+    id: remindedId,
+    slug: 'reminded-page',
+    name: 'Reminded',
+    ...PAGE_SHAPE,
+    kind: 'one_on_one',
+    ownerId: datasaur.actorId,
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+  })
+  const personal = await readBookingPage(datasaur, converted)
+  check(
+    'a shared page can be turned into somebody\'s personal link',
+    personal?.kind === 'one_on_one' && personal.ownerId === datasaur.actorId,
+    `${personal?.kind ?? 'gone'}`,
+  )
+  await saveBookingPage(datasaur, {
+    id: remindedId,
+    slug: 'reminded-page',
+    name: 'Reminded',
+    ...PAGE_SHAPE,
+    kind: 'round_robin',
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+    hosts: [],
+  })
+  const shared = await readBookingPage(datasaur, remindedId)
+  check(
+    'and back again, with the owner cleared',
+    shared?.kind === 'round_robin' && shared.ownerId === null,
+    `${shared?.kind ?? 'gone'}`,
+  )
+
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.stack : cause)

@@ -20,6 +20,7 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [isInternal, setIsInternal] = useState(false)
+  const [doubleOptIn, setDoubleOptIn] = useState(false)
   const [removing, setRemoving] = useState<SubscriptionTypeRow | null>(null)
   const [renaming, setRenaming] = useState<SubscriptionTypeRow | null>(null)
 
@@ -46,13 +47,20 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
           onSubmit={(event) => {
             event.preventDefault()
             void run(
-              () => api.admin.subscriptionTypes.create.mutate({ name, description: description || null, isInternal }),
+              () =>
+                api.admin.subscriptionTypes.create.mutate({
+                  name,
+                  description: description || null,
+                  isInternal,
+                  doubleOptIn,
+                }),
               'Subscription type created.',
             ).then((ok) => {
               if (ok) {
                 setName('')
                 setDescription('')
                 setIsInternal(false)
+                setDoubleOptIn(false)
               }
             })
           }}
@@ -77,6 +85,20 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
             <span>
               Internal
               <span className="block text-small text-secondary">Never offered on a public form.</span>
+            </span>
+          </label>
+          <label className="flex items-center gap-2 pb-1.5">
+            <input
+              type="checkbox"
+              checked={doubleOptIn}
+              onChange={(event) => setDoubleOptIn(event.target.checked)}
+            />
+            <span>
+              Confirmed opt-in
+              <span className="block text-small text-secondary">
+                A form tick only asks. Nothing is sent until the link in the confirmation mail is
+                clicked.
+              </span>
             </span>
           </label>
           <Button variant="primary" busy={busy} disabled={!name.trim()}>
@@ -113,7 +135,30 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
                 <p className="text-small text-secondary tabular-nums">
                   {row.subscribed.toLocaleString()} subscribed · {row.unsubscribed.toLocaleString()} opted out ·
                   everybody else has not specified
+                  {row.awaitingConfirmation > 0
+                    ? ` · ${row.awaitingConfirmation.toLocaleString()} waiting to confirm`
+                    : ''}
                 </p>
+                <label className="mt-1 flex flex-wrap items-center gap-2 text-small">
+                  <input
+                    type="checkbox"
+                    checked={row.doubleOptIn}
+                    disabled={!canWrite || busy}
+                    onChange={(event) =>
+                      void run(
+                        () =>
+                          api.admin.subscriptionTypes.update.mutate({
+                            id: row.id,
+                            doubleOptIn: event.target.checked,
+                          }),
+                        event.target.checked
+                          ? 'Opt-ins on this type now have to be confirmed.'
+                          : 'A tick on a form now subscribes straight away.',
+                      )
+                    }
+                  />
+                  Confirmed opt-in
+                </label>
               </div>
               {canWrite ? (
                 <span className="flex shrink-0 items-center gap-0.5">

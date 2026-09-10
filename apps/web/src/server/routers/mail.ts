@@ -11,6 +11,7 @@ import {
   readThread,
   removeBlocklistEntry,
   saveMailbox,
+  setMailboxOpenAlert,
   setMailboxVisibility,
   threadsForContact,
 } from '@rawr/db'
@@ -64,6 +65,12 @@ export const mailRouter = router({
   setVisibility: protectedProcedure
     .input(z.object({ mailboxId: z.uuid(), visibility: z.enum(['team', 'private']) }))
     .mutation(({ ctx, input }) => call(() => setMailboxVisibility(ctx.account, input))),
+
+  /** Opt in, per mailbox, to a bell entry when a mail this mailbox sent is
+   *  opened. One notice per message however many times the pixel is fetched. */
+  setOpenAlert: protectedProcedure
+    .input(z.object({ mailboxId: z.uuid(), alertOnOpen: z.boolean() }))
+    .mutation(({ ctx, input }) => call(() => setMailboxOpenAlert(ctx.account, input))),
 
   /** How much of the back-fill has had its body stored, so a long run is visible
    *  rather than mysterious. */

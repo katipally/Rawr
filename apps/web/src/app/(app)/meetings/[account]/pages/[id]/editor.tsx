@@ -1,9 +1,17 @@
 'use client'
 
-import type { BookingPageConfig, FormField, PageHostRow } from '@rawr/db'
+import type { BookingPageConfig, FormField, PageHostRow, ReminderUnit } from '@rawr/db'
 import { Badge, Button, Field, IconButton, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import {
+  BOOKING_MAIL_TOKENS,
+  DEFAULT_CONFIRMATION_BODY,
+  DEFAULT_CONFIRMATION_SUBJECT,
+  DEFAULT_REMINDER_BODY,
+  DEFAULT_REMINDER_SUBJECT,
+  REMINDER_UNITS,
+} from '~/lib/booking-tokens.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { availabilityPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -70,6 +78,12 @@ export const PageEditor = ({
       .filter((host) => host.isActive)
       .map((host) => ({ userId: host.userId, weight: host.weight, isRequired: host.isRequired })),
   )
+  const [reminders, setReminders] = useState(
+    // Keyed on a client-minted id rather than on the pair a person is editing:
+    // keying on "1 day" makes the row remount the moment the 1 becomes a 2, and
+    // the field loses focus mid-keystroke.
+    page.reminders.map((row) => ({ key: row.id, amount: row.amount, unit: row.unit })),
+  )
   const [saving, setSaving] = useState(false)
 
   const set = <K extends keyof BookingPageConfig>(key: K, value: BookingPageConfig[K]) =>
@@ -85,6 +99,9 @@ export const PageEditor = ({
   const available = members.filter(
     (member) => !hostRows.some((row) => row.userId === member.id),
   )
+
+  const duplicateReminder =
+    new Set(reminders.map((row) => `${row.unit}:${row.amount}`)).size !== reminders.length
 
   const save = async () => {
     setSaving(true)
@@ -110,6 +127,12 @@ export const PageEditor = ({
         isActive: form.isActive,
         redirectUrl: form.redirectUrl,
         confirmationCopy: form.confirmationCopy,
+        confirmationEnabled: form.confirmationEnabled,
+        confirmationSubject: form.confirmationSubject,
+        confirmationBody: form.confirmationBody,
+        reminderSubject: form.reminderSubject,
+        reminderBody: form.reminderBody,
+        reminders: reminders.map((row) => ({ amount: row.amount, unit: row.unit })),
         ...(form.kind === 'one_on_one' ? {} : { hosts: hostRows }),
       })
       show('success', 'Saved.')
@@ -124,13 +147,29 @@ export const PageEditor = ({
     <div className="flex flex-col gap-4">
       <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="font-medium">
-            {form.kind === 'one_on_one'
-              ? 'Personal link'
-              : form.kind === 'collective'
-                ? 'Shared collective'
-                : 'Shared round robin'}
-          </h2>
+          <h2 className="font-medium">This link</h2>
+          <Select
+            id="page-kind"
+            aria-label="What kind of link this is"
+            value={form.kind}
+            className="w-44"
+            disabled={!editable || !canPublishShared}
+            onChange={(event) => {
+              const kind = event.target.value as BookingPageConfig['kind']
+              setForm((current) => ({
+                ...current,
+                kind,
+                // A personal link has exactly one host and that host is its owner,
+                // so the two move together rather than leaving a page owned by one
+                // person and hosted by another.
+                ownerId: kind === 'one_on_one' ? (current.ownerId ?? hostRows[0]?.userId ?? null) : null,
+              }))
+            }}
+          >
+            <option value="one_on_one">Personal link</option>
+            <option value="round_robin">Shared round robin</option>
+            <option value="collective">Shared collective</option>
+          </Select>
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -307,23 +346,34 @@ export const PageEditor = ({
         </div>
       </section>
 
+      {form.kind === 'one_on_one' ? (
+        <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
+          <h2 className="mb-1 font-medium">Whose link this is</h2>
+          <p className="mb-3 text-xs text-secondary">
+            A personal link has one host, and that host is its owner. Only they and an admin can
+            see or change it.
+          </p>
+          <Field id="page-owner" label="Owner">
+            <Select
+              id="page-owner"
+              value={form.ownerId ?? ''}
+              disabled={!editable || !canPublishShared}
+              onChange={(event) => set('ownerId', event.target.value || null)}
+            >
+              <option value="">Whoever saves this</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </section>
+      ) : null}
+
       {form.kind !== 'one_on_one' ? (
         <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-medium">Hosts</h2>
-            {editable ? (
-              <Select
-                id="page-kind"
-                aria-label="How hosts are combined"
-                value={form.kind}
-                className="w-36"
-                onChange={(event) => set('kind', event.target.value as BookingPageConfig['kind'])}
-              >
-                <option value="round_robin">Round robin</option>
-                <option value="collective">Collective</option>
-              </Select>
-            ) : null}
-          </div>
+          <h2 className="mb-3 font-medium">Hosts</h2>
 
           <p className="mb-3 text-xs text-secondary">
             {collective
@@ -522,6 +572,171 @@ export const PageEditor = ({
           editable={editable}
           targets={targets}
         />
+      </section>
+
+      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
+        <h2 className="mb-1 font-medium">What the attendee is sent</h2>
+        <p className="mb-3 text-xs text-secondary">
+          Sent from the host&apos;s connected mailbox, falling back to the first mailbox in the
+          account that can send. With none connected nothing goes out and the host is told.
+        </p>
+
+        <label className="mb-3 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.confirmationEnabled}
+            disabled={!editable}
+            onChange={(event) => set('confirmationEnabled', event.target.checked)}
+          />
+          Send a confirmation email as soon as the meeting is booked
+        </label>
+
+        {form.confirmationEnabled ? (
+          <div className="mb-4 grid gap-3">
+            <Field id="page-confirmation-subject" label="Confirmation subject">
+              <TextInput
+                id="page-confirmation-subject"
+                value={form.confirmationSubject ?? ''}
+                placeholder={DEFAULT_CONFIRMATION_SUBJECT}
+                disabled={!editable}
+                onChange={(event) => set('confirmationSubject', event.target.value)}
+              />
+            </Field>
+            <Field
+              id="page-confirmation-body"
+              label="Confirmation email"
+              hint="Left empty, the wording below the fields is used."
+            >
+              <TextArea
+                id="page-confirmation-body"
+                rows={8}
+                value={form.confirmationBody ?? ''}
+                placeholder={DEFAULT_CONFIRMATION_BODY}
+                disabled={!editable}
+                onChange={(event) => set('confirmationBody', event.target.value)}
+              />
+            </Field>
+          </div>
+        ) : null}
+
+        <h3 className="mb-1 font-medium">Reminders before the meeting</h3>
+        <p className="mb-2 text-xs text-secondary">
+          Each one is sent once per meeting. A reminder added after somebody booked still reaches
+          them, as long as the meeting has not started.
+        </p>
+
+        {reminders.length === 0 ? (
+          <p className="mb-2 text-sm text-secondary">No reminders. Nothing is sent before the call.</p>
+        ) : (
+          <ul className="mb-2 flex flex-col gap-2">
+            {reminders.map((row) => (
+              <li key={row.key} className="flex flex-wrap items-center gap-2 text-sm">
+                <TextInput
+                  type="number"
+                  min={1}
+                  max={365}
+                  aria-label="How many"
+                  className="w-20"
+                  value={row.amount}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    setReminders((current) =>
+                      current.map((each) =>
+                        each.key === row.key
+                          ? { ...each, amount: numeric(event.target.value, 1) }
+                          : each,
+                      ),
+                    )
+                  }
+                />
+                <Select
+                  aria-label="Unit"
+                  className="w-36"
+                  value={row.unit}
+                  disabled={!editable}
+                  onChange={(event) =>
+                    setReminders((current) =>
+                      current.map((each) =>
+                        each.key === row.key
+                          ? { ...each, unit: event.target.value as ReminderUnit }
+                          : each,
+                      ),
+                    )
+                  }
+                >
+                  {REMINDER_UNITS.map((unit) => (
+                    <option key={unit} value={unit}>
+                      {unit}
+                      {row.amount === 1 ? '' : 's'} before
+                    </option>
+                  ))}
+                </Select>
+                <IconButton
+                  label={`Remove the ${row.amount} ${row.unit} reminder`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  disabled={!editable}
+                  onClick={() =>
+                    setReminders((current) => current.filter((each) => each.key !== row.key))
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {editable ? (
+          <Button
+            type="button"
+            onClick={() =>
+              setReminders((current) => [
+                ...current,
+                { key: crypto.randomUUID(), amount: 1, unit: 'day' as ReminderUnit },
+              ])
+            }
+          >
+            + Add reminder
+          </Button>
+        ) : null}
+
+        {duplicateReminder ? (
+          <p className="mt-2 text-sm text-error">
+            Two reminders at the same moment would send the same mail twice. Change one of them.
+          </p>
+        ) : null}
+
+        {reminders.length > 0 ? (
+          <div className="mt-3 grid gap-3">
+            <Field id="page-reminder-subject" label="Reminder subject">
+              <TextInput
+                id="page-reminder-subject"
+                value={form.reminderSubject ?? ''}
+                placeholder={DEFAULT_REMINDER_SUBJECT}
+                disabled={!editable}
+                onChange={(event) => set('reminderSubject', event.target.value)}
+              />
+            </Field>
+            <Field
+              id="page-reminder-body"
+              label="Reminder email"
+              hint="Left empty, the wording below the fields is used."
+            >
+              <TextArea
+                id="page-reminder-body"
+                rows={8}
+                value={form.reminderBody ?? ''}
+                placeholder={DEFAULT_REMINDER_BODY}
+                disabled={!editable}
+                onChange={(event) => set('reminderBody', event.target.value)}
+              />
+            </Field>
+          </div>
+        ) : null}
+
+        <p className="mt-3 text-xs text-secondary">
+          Anything that resolves to nothing is left out rather than printed. Available:{' '}
+          {BOOKING_MAIL_TOKENS.map((token) => `{{ ${token} }}`).join(' · ')}
+        </p>
       </section>
 
       <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">

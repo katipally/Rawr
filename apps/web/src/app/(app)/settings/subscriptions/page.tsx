@@ -1,5 +1,7 @@
 import { PageHeader } from '@rawr/ui'
 import { listSubscriptionTypes } from '@rawr/db'
+import { LinkButton } from '~/components/link-button.tsx'
+import { consentRecordsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { SubscriptionTypes } from './subscription-types.tsx'
 
@@ -18,6 +20,7 @@ const SubscriptionsPage = async () => {
         as="h2"
         title="Subscription types"
         lead="What somebody can opt in or out of."
+        action={<LinkButton href={consentRecordsPath()}>Consent records</LinkButton>}
         why={
           <p>
             Every contact holds one of three states per type, and the third, never specified, is

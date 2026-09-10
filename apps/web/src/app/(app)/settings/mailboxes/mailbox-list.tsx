@@ -24,6 +24,7 @@ export type MailboxSummary = {
   visibility: 'team' | 'private'
   canSend: boolean
   dailyCap: number
+  alertOnOpen: boolean
   /** How much of what this mailbox read has had its body stored. */
   pendingBodies: number
   storedBodies: number
@@ -213,6 +214,24 @@ export const MailboxList = ({
                               event.target.checked
                                 ? 'The team can read these threads.'
                                 : 'These threads are yours and an admin’s to read.',
+                            )
+                          }
+                        />
+                        <Switch
+                          label="Tell me when a mail I sent is opened"
+                          hint="One notice per message, not per open: the pixel is fetched every time the mail is displayed, and Apple fetches it on the recipient's behalf, so a notice per fetch would be noise about one mail."
+                          checked={row.alertOnOpen}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void run(
+                              () =>
+                                api.mail.setOpenAlert.mutate({
+                                  mailboxId: row.id,
+                                  alertOnOpen: event.target.checked,
+                                }),
+                              event.target.checked
+                                ? 'You will hear when a mail from here is opened.'
+                                : 'Opens no longer reach your bell.',
                             )
                           }
                         />

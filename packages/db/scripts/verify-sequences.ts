@@ -13,6 +13,7 @@ import {
   directTracking,
   enroll,
   listEnrollments,
+  listSends,
   listSequences,
   readSequence,
   recordClick,
@@ -622,6 +623,35 @@ try {
     repeated === null && Number(sendRows?.n) === 1,
     'recording the same provider message twice leaves one row',
     `${sendRows?.n} row(s)${repeated ? `, refused: ${repeated}` : ''}`,
+  )
+
+  console.log('')
+  console.log('-- what one sequence actually sent ---------------------------------')
+
+  const sent = await listSends(sales, { sequenceId: created.id })
+  const mine = sent.rows.find((row) => row.contactId === person.id)
+  check(!!mine, 'the drill-down lists the send by contact', `${sent.rows.length} row(s)`)
+  check(
+    mine?.openCount === 2 && mine.clickCount === 1,
+    'with the opens and clicks that were counted against it',
+    `${mine?.openCount ?? 0} open(s), ${mine?.clickCount ?? 0} click(s)`,
+  )
+  check(
+    mine?.stepPosition === 0 && mine.state === 'sent' && !mine.bounced,
+    'and the step it belongs to',
+    `step ${mine?.stepPosition ?? -1}, ${mine?.state ?? 'gone'}`,
+  )
+  const bouncedOnly = await listSends(sales, { sequenceId: created.id, state: 'bounced' })
+  check(
+    !bouncedOnly.rows.some((row) => row.state !== 'bounced'),
+    'the state filter returns only that state',
+    `${bouncedOnly.rows.length} row(s)`,
+  )
+  const firstOnly = await listSends(sales, { sequenceId: created.id, limit: 1 })
+  check(
+    firstOnly.rows.length <= 1,
+    'and the page is bounded rather than reading every send in the account',
+    `${firstOnly.rows.length} row(s), more: ${firstOnly.hasMore}`,
   )
 
   console.log('')

@@ -1,11 +1,48 @@
 'use client'
 
-import type { ThreadMessage } from '@rawr/db'
+import type { MessageEngagement, ThreadMessage } from '@rawr/db'
 import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { formatDateTime } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
+
+/** Item 16. What this mail did after it left, for the ones that carried tracking.
+ *
+ *  Opens are counted every fetch and never deduplicated, which is deliberate and
+ *  also why the sentence says what it says: Apple Mail Privacy Protection fetches
+ *  the pixel on the recipient's behalf, so an open is weaker evidence than a
+ *  click. The strip says both numbers and lets the reader weigh them rather than
+ *  presenting one confident figure. */
+const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone: string }) => (
+  <div className="mt-2 flex flex-col gap-1 rounded-hs bg-fill px-3 py-2 text-small">
+    <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      <span className="font-medium">
+        {engagement.opens === 0
+          ? 'Not opened yet'
+          : `Opened ${engagement.opens.toLocaleString()} time${engagement.opens === 1 ? '' : 's'}`}
+      </span>
+      {engagement.firstOpenedAt ? (
+        <span className="text-secondary">First {formatDateTime(engagement.firstOpenedAt, zone)}</span>
+      ) : null}
+      {engagement.lastOpenedAt && engagement.opens > 1 ? (
+        <span className="text-secondary">Last {formatDateTime(engagement.lastOpenedAt, zone)}</span>
+      ) : null}
+    </p>
+    {engagement.links.length > 0 ? (
+      <ul className="flex flex-col gap-0.5">
+        {engagement.links.map((link) => (
+          <li key={link.url} className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <span className="min-w-0 break-all text-secondary">{link.url}</span>
+            <span className="shrink-0 tabular-nums">
+              {link.clicks.toLocaleString()} click{link.clicks === 1 ? '' : 's'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    ) : null}
+  </div>
+)
 
 /** One message, with its stored body.
  *
@@ -94,6 +131,8 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
             : ''}
         </pre>
       )}
+
+      {message.engagement ? <Engagement engagement={message.engagement} zone={zone} /> : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-small">
         {html !== null ? (

@@ -5,6 +5,7 @@ import {
   saveEmailTemplate,
   deleteEmailTemplate,
   listEnrollments,
+  listSends,
   listSequences,
   pauseEnrollment,
   readSequence,
@@ -115,6 +116,19 @@ export const sequencesRouter = router({
         ),
     )
     .mutation(({ ctx, input }) => call(() => enroll(ctx.account, input))),
+
+  /** Every mail one sequence actually sent. Paged at the database, because a
+   *  sequence over the whole list has one row here per contact per step. */
+  sends: protectedProcedure
+    .input(
+      z.object({
+        sequenceId: z.uuid(),
+        state: z.enum(['sent', 'failed', 'bounced']).nullable().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+        offset: z.number().int().min(0).optional(),
+      }),
+    )
+    .query(({ ctx, input }) => call(() => listSends(ctx.account, input))),
 
   enrollments: router({
     list: protectedProcedure

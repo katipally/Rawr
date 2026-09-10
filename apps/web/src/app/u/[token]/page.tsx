@@ -1,6 +1,13 @@
-import { enrollmentAccountForToken, publicEdgeContext, unsubscribeTarget, withAccount } from '@rawr/db'
+import {
+  confirmTarget,
+  enrollmentAccountForToken,
+  publicEdgeContext,
+  subscriptionAccountForToken,
+  unsubscribeTarget,
+  withAccount,
+} from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
-import { unsubscribeAction } from './actions.ts'
+import { confirmAction, unsubscribeAction } from './actions.ts'
 
 /** The page an unsubscribe link opens.
  *
@@ -17,6 +24,53 @@ const UnsubscribePage = async ({
 }) => {
   const { token } = await params
   const { done } = await searchParams
+
+  // Two kinds of link land here, both opaque and both from a mail: one asks to
+  // stop, one asks to start. The token's own kind decides which, rather than a
+  // query parameter somebody could flip.
+  const confirmAccountId = await subscriptionAccountForToken(token)
+  if (confirmAccountId) {
+    const scope = { ...publicEdgeContext(confirmAccountId), actorKind: 'public' as const }
+    const subscription = done === '1' ? null : await confirmTarget(scope, token)
+
+    if (done === '1') {
+      return (
+        <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
+          <div className="rounded-panel border border-line bg-surface p-4">
+            <h1 className="text-base font-medium">You are subscribed</h1>
+            <p className="mt-1 text-secondary">
+              Thank you for confirming. There is an unsubscribe link at the bottom of everything we
+              send, and it works the moment you use it.
+            </p>
+          </div>
+        </main>
+      )
+    }
+
+    if (subscription) {
+      return (
+        <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
+          <div className="rounded-panel border border-line bg-surface p-4">
+            <h1 className="text-base font-medium">Confirm your subscription</h1>
+            <p className="mt-1 text-secondary">
+              Press the button to start receiving{' '}
+              <strong className="text-body">{subscription.typeName}</strong> at{' '}
+              {subscription.contactEmail}. Nothing is sent until you do.
+            </p>
+            <form action={confirmAction} className="mt-4">
+              <input type="hidden" name="token" value={token} />
+              <button
+                type="submit"
+                className="inline-flex min-h-9 items-center rounded-hs bg-cta px-3 font-medium text-white hover:bg-cta-hover"
+              >
+                Confirm
+              </button>
+            </form>
+          </div>
+        </main>
+      )
+    }
+  }
 
   const accountId = await enrollmentAccountForToken(token)
   const target = accountId

@@ -2,9 +2,11 @@ import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
 import { owner, recordDeadLetter } from './db.ts'
 import { automationJobs, dispatchAutomations, scanAutomationRules } from './jobs/automations.ts'
+import { bookingReminderJobs, dispatchBookingReminders } from './jobs/booking-reminders.ts'
 import { bulkJobs, dispatchBulk } from './jobs/bulk.ts'
 import { checkIntegrations } from './jobs/check-integrations.ts'
 import { createFieldIndex } from './jobs/create-field-index.ts'
+import { scoreDeals } from './jobs/deal-score.ts'
 import { dispatchFieldIndexes } from './jobs/dispatch-field-indexes.ts'
 import { dispatchEnrichment, enrichmentJobs } from './jobs/enrichment.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
@@ -29,9 +31,11 @@ const JOBS: Job[] = [
   notificationReminders,
   evaluateSegments,
   fillFieldRates,
+  scoreDeals,
   ...mailJobs,
   ...importJobs,
   ...bulkJobs,
+  ...bookingReminderJobs,
   ...sequenceJobs,
   ...automationJobs,
   ...enrichmentJobs,
@@ -110,6 +114,9 @@ const DAILY: { job: Job; at: DailyAt }[] = [
   // Before the sweep and after the roll-up, so the numbers a person sees when
   // they open settings in the morning were taken while nothing else was scanning.
   { job: fillFieldRates, at: { hourUtc: 4, minuteUtc: 15 } },
+  // After the fill rates and before the sweep, for the same reason: the board a
+  // rep opens in the morning was scored while nothing else was scanning.
+  { job: scoreDeals, at: { hourUtc: 4, minuteUtc: 45 } },
 ]
 for (const daily of DAILY) await boss.schedule(daily.job.name, cronFor(daily.at), {})
 // Hourly, which is the bound on how stale a segment's membership can be. A2 asks
@@ -135,6 +142,11 @@ await boss.schedule(dispatchImports.name, '* * * * *', {})
 // started before a deploy picks itself up again, and one that finishes its chunk
 // queues the next one itself.
 await boss.schedule(dispatchBulk.name, '* * * * *', {})
+
+// Every five minutes. A reminder is due at an instant, and five minutes is the
+// bound on how late one arrives; finer than that only costs a scan of the same
+// upcoming meetings for nothing.
+await boss.schedule(dispatchBookingReminders.name, '*/5 * * * *', {})
 
 // Every minute: a step whose delay says "two hours" should not wait until the top
 // of the next hour, and the scan is one indexed range over the due queue.

@@ -6,6 +6,8 @@ import {
   listBookings,
   listGrants,
   pagesHostedBy,
+  bookingPageStats,
+  REMINDER_UNITS,
   readBooking,
   readBookingPage,
   readPageHostList,
@@ -63,6 +65,11 @@ export const bookingRouter = router({
     .input(z.object({ pageId: z.uuid() }))
     .query(({ ctx, input }) => call(() => readPageHostList(ctx.account, input.pageId))),
 
+  /** Views, meetings and the rate between them, for one link over a window. */
+  stats: protectedProcedure
+    .input(z.object({ pageId: z.uuid(), sinceDays: z.number().int().min(1).max(365).default(30) }))
+    .query(({ ctx, input }) => call(() => bookingPageStats(ctx.account, input.pageId, input.sinceDays))),
+
   savePage: protectedProcedure
     .input(
       z.object({
@@ -86,6 +93,20 @@ export const bookingRouter = router({
         isActive: z.boolean(),
         redirectUrl: z.string().max(2000).nullish(),
         confirmationCopy: z.string().max(2000).nullish(),
+        confirmationEnabled: z.boolean().optional(),
+        confirmationSubject: z.string().max(500).nullish(),
+        confirmationBody: z.string().max(10_000).nullish(),
+        reminderSubject: z.string().max(500).nullish(),
+        reminderBody: z.string().max(10_000).nullish(),
+        reminders: z
+          .array(
+            z.object({
+              amount: z.number().int().min(1).max(365),
+              unit: z.enum(REMINDER_UNITS),
+            }),
+          )
+          .max(20)
+          .optional(),
         hosts: z
           .array(
             z.object({

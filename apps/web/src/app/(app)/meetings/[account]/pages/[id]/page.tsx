@@ -1,4 +1,4 @@
-import { getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
+import { bookingPageStats, getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
 import { Alert, Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
@@ -50,11 +50,12 @@ const BookingPageEditorScreen = async ({
     )
   }
 
-  const [hosts, lookups, registry, zoom] = await Promise.all([
+  const [hosts, lookups, registry, zoom, stats] = await Promise.all([
     readPageHostList(ctx, id),
     readLookups(ctx),
     getRegistry(ctx),
     zoomReady(ctx),
+    bookingPageStats(ctx, id),
   ])
 
   // Straight from the registry, so a custom field marketing added is available to
@@ -88,6 +89,24 @@ const BookingPageEditorScreen = async ({
           </>
         }
       />
+
+      <dl className="mb-4 grid gap-2 sm:grid-cols-3">
+        {[
+          { label: `Views, last ${stats.sinceDays} days`, value: stats.views.toLocaleString() },
+          { label: 'Meetings booked', value: stats.booked.toLocaleString() },
+          {
+            label: 'Booked per view',
+            // Zero per cent and "nobody has opened the link yet" are different
+            // answers, and only one of them is a reason to change the page.
+            value: stats.conversion === null ? 'no views yet' : `${stats.conversion}%`,
+          },
+        ].map((tile) => (
+          <div key={tile.label} className="min-w-0 rounded-panel border border-line bg-surface p-3">
+            <dt className="text-xs text-secondary">{tile.label}</dt>
+            <dd className="truncate text-lg font-medium tabular-nums">{tile.value}</dd>
+          </div>
+        ))}
+      </dl>
 
       {!editable ? (
         <Alert tone="warning" className="mb-4">

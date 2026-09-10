@@ -54,6 +54,8 @@ export type MailboxRow = {
   canSend: boolean
   dailyCap: number
   minGapSeconds: number
+  /** Whether the owner asked to be told when a mail they sent is opened. */
+  alertOnOpen: boolean
 }
 
 export const listMailboxes = async (ctx: AccountContext): Promise<MailboxRow[]> =>
@@ -69,6 +71,7 @@ export const listMailboxes = async (ctx: AccountContext): Promise<MailboxRow[]> 
         canSend: mailbox.canSend,
         dailyCap: mailbox.dailyCap,
         minGapSeconds: mailbox.minGapSeconds,
+        alertOnOpen: mailbox.alertOnOpen,
         historyId: mailbox.historyId,
         accessToken: mailbox.accessToken,
         backfillDone: mailbox.backfillDone,
@@ -941,6 +944,18 @@ export type ThreadMessage = {
   html: string | null
   truncated: boolean
   attachments: { id: string; filename: string; mimeType: string | null; sizeBytes: number }[]
+  /** Null for anything that went out untracked, which is every inbound message
+   *  and every outbound one sent before tracking was on or to somebody who may
+   *  not be measured. Zero opens and null are different facts and read that way. */
+  engagement: MessageEngagement | null
+}
+
+export type MessageEngagement = {
+  opens: number
+  firstOpenedAt: Date | null
+  lastOpenedAt: Date | null
+  clicks: number
+  links: { url: string; clicks: number }[]
 }
 
 export type BodyState = 'pending' | 'stored' | 'too_large' | 'failed'
@@ -1029,6 +1044,29 @@ export const readThread = async (
         ),
       )
 
+    // What each tracked message did after it left: opens off the send row, and
+    // clicks per link off the tokens that were rewritten into its body. One query
+    // for the thread, O(links on this thread's sends), so a fifty-message thread
+    // is one round trip rather than fifty.
+    const tracked = await tx.execute<{
+      message_id: string
+      open_count: number
+      click_count: number
+      first_opened_at: string | null
+      last_opened_at: string | null
+      links: { url: string; clicks: number }[] | null
+    }>(sql`
+      select s.message_id, s.open_count, s.click_count, s.first_opened_at, s.last_opened_at,
+             (select coalesce(jsonb_agg(jsonb_build_object('url', l.url, 'clicks', l.click_count)
+                                        order by l.click_count desc, l.url), '[]'::jsonb)
+                from sequence_link l where l.send_id = s.id) as links
+        from sequence_send s
+       where s.message_id in (${sql.join(
+         rows.map((row) => sql`${row.id}::uuid`),
+         sql`, `,
+       )})`)
+    const engagementOf = new Map(tracked.map((row) => [row.message_id, row]))
+
     // Which of the addresses on this thread are people in the CRM. The join
     // table is already written on ingest and already read by the list; the
     // thread itself was the one place showing raw addresses with nothing behind
@@ -1052,13 +1090,117 @@ export const readThread = async (
         name: person.name,
         email: person.email,
       })),
-      messages: rows.map((row) => ({
-        ...row,
-        truncated: row.truncated ?? false,
-        attachments: attachments
-          .filter((file) => file.messageId === row.id)
-          .map(({ messageId: _messageId, ...file }) => file),
+      messages: rows.map((row) => {
+        const sent = engagementOf.get(row.id)
+        return {
+          ...row,
+          truncated: row.truncated ?? false,
+          attachments: attachments
+            .filter((file) => file.messageId === row.id)
+            .map(({ messageId: _messageId, ...file }) => file),
+          engagement: sent
+            ? {
+                opens: Number(sent.open_count),
+                firstOpenedAt: sent.first_opened_at ? new Date(sent.first_opened_at) : null,
+                lastOpenedAt: sent.last_opened_at ? new Date(sent.last_opened_at) : null,
+                clicks: Number(sent.click_count),
+                links: (sent.links ?? []).map((link) => ({ url: link.url, clicks: Number(link.clicks) })),
+              }
+            : null,
+        }
+      }),
+    }
+  })
+
+export type TrackedMessageRow = {
+  sendId: string
+  threadId: string | null
+  subject: string | null
+  to: string | null
+  contactId: string | null
+  contactName: string | null
+  mailbox: string
+  sentAt: Date
+  opens: number
+  clicks: number
+  firstOpenedAt: Date | null
+}
+
+export type TrackedMessagePage = { rows: TrackedMessageRow[]; total: number }
+
+/** Every tracked mail sent in the range, one row each.
+ *
+ *  The email report already says how much mail moved and how long answers take.
+ *  This is the other half of the same question, and the one somebody acts on: not
+ *  "the team sent 400 mails" but "this mail to this person has been opened six
+ *  times and nobody has replied". Paged rather than capped at 200 like the charts,
+ *  because it is a list to work through and not a shape to read.
+ *
+ *  Keyset would be better and is not available: the useful orders here are by
+ *  opens and by clicks, neither unique. Offset paging over one index range scan
+ *  is what the range clamp makes affordable. */
+export const trackedMessages = async (
+  ctx: AccountContext,
+  range: { from: Date; to: Date },
+  input: { limit?: number; offset?: number; sort?: 'recent' | 'opens' | 'clicks' } = {},
+): Promise<TrackedMessagePage> =>
+  withAccount(ctx, async (tx) => {
+    const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
+    const offset = Math.max(input.offset ?? 0, 0)
+    const order =
+      input.sort === 'opens'
+        ? sql`s.open_count desc, s.sent_at desc`
+        : input.sort === 'clicks'
+          ? sql`s.click_count desc, s.sent_at desc`
+          : sql`s.sent_at desc`
+
+    const rows = await tx.execute<{
+      send_id: string
+      thread_id: string | null
+      subject: string | null
+      to_addr: string | null
+      contact_id: string | null
+      contact_name: string | null
+      mailbox: string | null
+      sent_at: string
+      open_count: number
+      click_count: number
+      first_opened_at: string | null
+      total: number
+    }>(sql`
+      select s.id as send_id, m.thread_id, t.subject,
+             coalesce(c.email, m.to_addrs[1]) as to_addr,
+             s.contact_id,
+             coalesce(nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), ''), c.email) as contact_name,
+             coalesce(b.email, 'A disconnected mailbox') as mailbox,
+             s.sent_at, s.open_count, s.click_count, s.first_opened_at,
+             count(*) over ()::int as total
+        from sequence_send s
+        left join mailbox b on b.id = s.mailbox_id
+        left join message m on m.id = s.message_id
+        left join message_thread t on t.id = m.thread_id
+        left join contact c on c.id = s.contact_id and c.deleted_at is null
+       where s.sent_at >= ${range.from.toISOString()}::timestamptz
+         and s.sent_at < ${range.to.toISOString()}::timestamptz
+         and s.state <> 'failed'
+       order by ${order}
+       limit ${limit} offset ${offset}`)
+
+    return {
+      rows: rows.map((row) => ({
+        sendId: row.send_id,
+        threadId: row.thread_id,
+        subject: row.subject,
+        to: row.to_addr,
+        contactId: row.contact_id,
+        contactName: row.contact_name,
+        mailbox: row.mailbox ?? 'A disconnected mailbox',
+        sentAt: new Date(row.sent_at),
+        opens: Number(row.open_count),
+        clicks: Number(row.click_count),
+        firstOpenedAt: row.first_opened_at ? new Date(row.first_opened_at) : null,
       })),
+      total: Number(rows[0]?.total ?? 0),
     }
   })
 
@@ -1317,6 +1459,34 @@ export const setMailboxVisibility = async (
         action: 'set_visibility',
         before: { visibility: box.visibility },
         after: { visibility: input.visibility },
+      },
+    }
+  })
+
+/** "Tell me when a mail I sent is opened". Theirs to set, or an admin's, the same
+ *  test visibility uses: the bell it fills is the owner's. */
+export const setMailboxOpenAlert = async (
+  ctx: AccountContext,
+  input: { mailboxId: string; alertOnOpen: boolean },
+): Promise<void> =>
+  mutate(ctx, 'mailbox', async (tx) => {
+    const [box] = await tx
+      .select({ userId: mailbox.userId, alertOnOpen: mailbox.alertOnOpen })
+      .from(mailbox)
+      .where(eq(mailbox.id, input.mailboxId))
+    if (!box) throw new Error('That mailbox is not in this account.')
+    if (box.userId !== ctx.actorId && !isAdmin(ctx)) {
+      throw new Error('That is somebody else\'s mailbox. Only they or an admin can change what it alerts on.')
+    }
+    await tx.update(mailbox).set({ alertOnOpen: input.alertOnOpen }).where(eq(mailbox.id, input.mailboxId))
+    return {
+      result: undefined,
+      audit: {
+        entity: 'mailbox',
+        entityId: input.mailboxId,
+        action: 'set_open_alert',
+        before: { alertOnOpen: box.alertOnOpen },
+        after: { alertOnOpen: input.alertOnOpen },
       },
     }
   })

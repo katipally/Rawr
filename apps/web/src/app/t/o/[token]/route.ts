@@ -1,4 +1,11 @@
-import { isBot, publicEdgeContext, recordOpen, sendAccountForToken } from '@rawr/db'
+import {
+  isBot,
+  notifyMailboxOpen,
+  publicEdgeContext,
+  recordOpen,
+  sendAccountForToken,
+  withAccount,
+} from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { inBackground } from '~/server/background.ts'
 import { clientIp, rateLimit } from '~/server/edge.ts'
@@ -48,7 +55,12 @@ export const GET = async (
   inBackground('sequence open', async () => {
     const accountId = await sendAccountForToken(token)
     if (!accountId) return
-    await recordOpen({ ...publicEdgeContext(accountId), actorKind: 'public' }, token, { userAgent: agent })
+    const ctx = { ...publicEdgeContext(accountId), actorKind: 'public' as const }
+    if (!(await recordOpen(ctx, token, { userAgent: agent }))) return
+    // Silent unless the mailbox that sent it asked to be told, and deduplicated
+    // on the send, so Apple's repeated fetches raise a count rather than filling
+    // a bell. Still inside the background block: the pixel never waits on it.
+    await withAccount(ctx, (tx) => notifyMailboxOpen(tx, ctx, token))
   })
 
   return image()

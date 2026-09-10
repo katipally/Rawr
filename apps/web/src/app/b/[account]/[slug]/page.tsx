@@ -5,6 +5,7 @@ import {
   publicBookingPage,
   publicEdgeContext,
   readBookingPage,
+  recordBookingPageView,
   zonedTimeToUtc,
   type PublicBookingPage,
 } from '@rawr/db'
@@ -16,6 +17,7 @@ import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
 import { BOOKING_COPY } from '~/lib/edge-copy.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { bookingIcsPath } from '~/lib/links.ts'
+import { inBackground } from '~/server/background.ts'
 import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
 
 /** The public booking page. F2 §4 and §7.
@@ -76,6 +78,16 @@ const BookingPublicPage = async ({
   // and by this point the slug has named one.
   const page = await readBookingPage(publicEdgeContext(summary.accountId), summary.bookingPageId)
   if (!page) notFound()
+
+  // One look at the page, for the conversion rate on the link. Not on the
+  // confirmation view below, which is the same visitor arriving back after
+  // booking and would count them twice. Never awaited: the counter is a daily
+  // upsert and the visitor is waiting for a calendar.
+  if (single('confirmed') !== '1') {
+    inBackground('booking page view', () =>
+      recordBookingPageView(summary.accountId, summary.bookingPageId),
+    )
+  }
 
   // A booking confirmed through the JSON endpoint by a script that then failed
   // lands here. Rare, and the one moment somebody needs to be told the meeting is

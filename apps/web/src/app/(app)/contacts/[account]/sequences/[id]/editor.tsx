@@ -22,7 +22,7 @@ import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { enrollmentsPath, sequencesPath } from '~/lib/links.ts'
+import { enrollmentsPath, sequenceSendsPath, sequencesPath } from '~/lib/links.ts'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -212,6 +212,9 @@ export const SequenceEditor = ({
         <div className="flex flex-wrap items-center gap-2">
           <Link href={enrollmentsPath(account, sequence.id)} className="font-medium">
             {sequence.stats.active} in flight
+          </Link>
+          <Link href={sequenceSendsPath(account, sequence.id)} className="font-medium">
+            What it sent
           </Link>
           {canWrite ? (
             <>

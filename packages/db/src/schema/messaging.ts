@@ -63,6 +63,9 @@ export const mailbox = pgTable(
      *  their own mail sent on their own hours. */
     sendWindow: jsonb('send_window').$type<{ days: number[]; start: string; end: string; timezone: string }>(),
     minGapSeconds: integer('min_gap_seconds').notNull().default(45),
+    /** Off by default: a sequence of two hundred sends would otherwise fill one
+     *  person's bell with two hundred notices they never asked for. */
+    alertOnOpen: boolean('alert_on_open').notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [

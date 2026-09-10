@@ -16,6 +16,18 @@ export const hubEnum = pgEnum('rawr_hub', [
   'account',
 ])
 
+/** The acts HubSpot marks Critical: irreversible, or a lever on the whole database
+ *  rather than on one record. Held per seat on top of the hub grid, because
+ *  holding a hub at edit says somebody may work in it, not that they may empty it. */
+export const criticalActionEnum = pgEnum('rawr_critical_action', [
+  'delete',
+  'merge',
+  'bulk_delete',
+  'import',
+  'export',
+  'purge',
+])
+
 /** `invited` is a seat held for an address that has not signed in yet;
  *  `deactivated` keeps the row so the audit trail still names a person, while
  *  every membership it carries stops answering. */
@@ -311,4 +323,5 @@ export const notificationKindEnum = pgEnum('rawr_notification_kind', [
   'mailbox_revoked',
   'task_reminder',
   'task_assigned',
+  'email_opened',
 ])

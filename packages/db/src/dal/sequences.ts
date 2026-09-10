@@ -1932,3 +1932,117 @@ export const deleteEmailTemplate = async (ctx: AccountContext, id: string): Prom
       audit: { entity: 'email_template', entityId: id, action: 'delete', before: { name: before.name }, after: null },
     }
   })
+
+// ------------------------------------------------------------------ sends
+
+/** Deliberately smaller than the enrollment list: a send row carries five numbers
+ *  and a link, and a hundred of them is a wall. */
+export const SENDS_PAGE = 50
+
+export type SendState = 'sent' | 'failed' | 'bounced'
+
+export type SequenceSendRow = {
+  id: string
+  sentAt: Date
+  stepPosition: number | null
+  stepSubject: string | null
+  /** Which of the two subjects went out, when the step was testing a pair. */
+  variant: string | null
+  state: SendState
+  error: string | null
+  openCount: number
+  clickCount: number
+  replied: boolean
+  bounced: boolean
+  contactId: string | null
+  contactName: string
+  contactEmail: string | null
+  /** The stored copy of the conversation, once the sync has read it back. Null
+   *  until then, so the row links to nothing rather than to a 404. */
+  threadId: string | null
+}
+
+/** Every mail one sequence actually put on the wire, newest first.
+ *
+ *  Offset paged rather than keyset: this is a drill-down somebody walks a page or
+ *  two of, the ordering is a single indexed column, and a filter that changes the
+ *  row count would strand a keyset cursor. Bounded either way, so a sequence with
+ *  eighty thousand sends reads one page.
+ *
+ *  `replied` is a lateral over the page, not over the table: one existence check
+ *  per rendered row, which is O(page) rather than a join across every event in the
+ *  account. */
+export const listSends = async (
+  ctx: AccountContext,
+  input: {
+    sequenceId: string
+    state?: SendState | null | undefined
+    limit?: number | undefined
+    offset?: number | undefined
+  },
+): Promise<{ rows: SequenceSendRow[]; hasMore: boolean }> =>
+  withAccount(ctx, async (tx) => {
+    const limit = Math.min(Math.max(input.limit ?? SENDS_PAGE, 1), 200)
+    const offset = Math.max(input.offset ?? 0, 0)
+
+    const rows = await tx.execute<{
+      id: string
+      sent_at: Date
+      position: number | null
+      subject: string | null
+      variant: string | null
+      state: SendState
+      error: string | null
+      open_count: number
+      click_count: number
+      replied: boolean
+      contact_id: string | null
+      contact_name: string
+      contact_email: string | null
+      thread_id: string | null
+    }>(sql`
+      select d.id, d.sent_at, s.position, s.subject, d.variant, d.state, d.error,
+             d.open_count, d.click_count,
+             exists (
+               select 1 from sequence_event v
+                where v.enrollment_id = d.enrollment_id
+                  and v.kind = 'reply'
+                  and v.at >= d.sent_at
+             ) as replied,
+             c.id as contact_id,
+             coalesce(
+               nullif(trim(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')), ''),
+               c.email, 'Unnamed'
+             ) as contact_name,
+             c.email as contact_email,
+             m.thread_id
+        from sequence_send d
+        join sequence_enrollment e on e.id = d.enrollment_id
+        left join sequence_step s on s.id = d.step_id
+        left join contact c on c.id = e.contact_id and c.deleted_at is null
+        left join message m on m.id = d.message_id
+       where e.sequence_id = ${input.sequenceId}
+         and (${input.state ?? null}::text is null or d.state::text = ${input.state ?? null})
+       order by d.sent_at desc, d.id desc
+       limit ${limit + 1} offset ${offset}`)
+
+    const page = rows.slice(0, limit).map((row) => ({
+      id: row.id,
+      sentAt: new Date(row.sent_at),
+      stepPosition: row.position === null ? null : Number(row.position),
+      stepSubject: row.subject,
+      variant: row.variant,
+      state: row.state,
+      error: row.error,
+      openCount: Number(row.open_count),
+      clickCount: Number(row.click_count),
+      replied: row.replied,
+      bounced: row.state === 'bounced',
+      contactId: row.contact_id,
+      contactName: row.contact_name,
+      contactEmail: row.contact_email,
+      threadId: row.thread_id,
+    }))
+
+    return { rows: page, hasMore: rows.length > limit }
+  })
