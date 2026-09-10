@@ -57,7 +57,7 @@ import { listFields } from '../src/dal/admin-fields.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
 import { recordDeadLetter } from '../src/dal/jobs.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
 /** F6's definition of done, plus F1 phase B, run against the real database.
  *
@@ -1613,4 +1613,5 @@ try {
 } finally {
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }

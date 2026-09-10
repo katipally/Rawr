@@ -15,7 +15,7 @@ import {
   saveReportDashboard,
 } from '../src/dal/report-dashboards.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { PEER, SANDBOX, seatFor } from './fixture.ts'
+import { PEER, SANDBOX, seatFor, cleanup } from './fixture.ts'
 
 /** B7 against the real database.
  *
@@ -415,4 +415,5 @@ try {
 } finally {
   await owner.end({ timeout: 5 })
   await closeAppPool()
+  await cleanup()
 }

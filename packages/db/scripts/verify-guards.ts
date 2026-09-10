@@ -8,7 +8,7 @@ import { rematchInbound } from '../src/dal/integrations.ts'
 import { listRecords } from '../src/dal/records.ts'
 import { setMemberGrants } from '../src/dal/members.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX } from './fixture.ts'
+import { SANDBOX, cleanup } from './fixture.ts'
 
 /** Proves the hub matrix and the audit trail by calling the mutation directly,
  *  not by checking that a button is hidden. */
@@ -325,6 +325,7 @@ try {
   // connections to give back, not one. Leaving the second open is what made
   // `pnpm verify` hang here on an unsettled top-level await.
   await Promise.all([owner.end(), closeAppPool()])
+  await cleanup()
 }
 
 if (failures.length) {

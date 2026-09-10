@@ -4,6 +4,8 @@ import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
 import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
 import { provisionAccount } from '../src/dal/provision.ts'
+import { DEFAULT_SETTINGS } from '../src/dal/form-schema.ts'
+import { encryptToken } from '../src/internal/crypto.ts'
 import { SEED_FORMS } from '../src/registry/forms.ts'
 import * as s from '../src/schema/index.ts'
 import { SANDBOX, PEER } from './fixture.ts'
@@ -81,6 +83,17 @@ const SEED_SOURCES = [
 ]
 
 const dayAgo = (n: number) => new Date(Date.UTC(2026, 7, 23) - n * 86_400_000)
+
+/** Provider secrets are encrypted with a key held outside this database, so a dump
+ *  of it is not a set of live credentials. Without the key the seed still builds
+ *  every row and leaves the secret out, which is the state a fresh checkout is in
+ *  and which every screen already has to survive. */
+const encrypting = Boolean(process.env.TOKEN_ENCRYPTION_KEY)
+if (!encrypting) {
+  console.log('TOKEN_ENCRYPTION_KEY is not set: mailbox and app credentials are seeded without a secret.')
+}
+const NO_SECRET = 'seed-placeholder-not-encrypted'
+const secret = (plaintext: string): string => (encrypting ? encryptToken(plaintext) : NO_SECRET)
 
 try {
   // Idempotent: the whole account goes, cascades take every record in it.
@@ -743,6 +756,669 @@ try {
     }
   }
 
+  // F2. The half of the product the seed never reached: sequences, templates,
+  // automations, imports, a dashboard, segments, a mailbox with correspondence on
+  // it, notifications, files, an invented object and three connected apps.
+  //
+  // Sandbox only. The peer tenant exists so a cross-tenant check has something
+  // real to fail against, and the rows above already give it that.
+  {
+    const contacts = await db
+      .select({ id: s.contact.id, email: s.contact.email, firstName: s.contact.firstName })
+      .from(s.contact)
+      .where(eq(s.contact.accountId, sandbox))
+      .orderBy(s.contact.createdAt)
+    const deals = await db
+      .select({ id: s.deal.id, name: s.deal.name })
+      .from(s.deal)
+      .where(eq(s.deal.accountId, sandbox))
+      .orderBy(s.deal.createdAt)
+    const objects = await db
+      .select({ id: s.objectDef.id, key: s.objectDef.key })
+      .from(s.objectDef)
+      .where(eq(s.objectDef.accountId, sandbox))
+    const objectId = (key: string) => {
+      const found = objects.find((o) => o.key === key)
+      if (!found) throw new Error(`object_def ${key} was not provisioned`)
+      return found.id
+    }
+    const adminId = userId('admin@sandbox.test')
+    const salesId = userId('sales@sandbox.test')
+    const marketingId = userId('marketing@sandbox.test')
+    const emailed = contacts.filter((c) => c.email !== null)
+    if (emailed.length < 6) throw new Error('the seed needs six contacts with an address')
+
+    // Marketing's rather than sales': verify-mail and verify-sequences both take
+    // over the sales mailbox and verify-mail disconnects it, which would leave the
+    // enrollments below pointing at nothing.
+    //
+    // Nothing here can send: the mailbox holds a placeholder where a Google grant
+    // would be, and RAWR_DEV_GMAIL is what makes the sync exercisable without one.
+    const [box] = await db
+      .insert(s.mailbox)
+      .values({
+        accountId: sandbox,
+        userId: marketingId,
+        email: 'marketing@sandbox.test',
+        state: 'connected' as const,
+        visibility: 'team' as const,
+        accessToken: secret('dev-access-token'),
+        refreshToken: secret('dev-refresh-token'),
+        accessTokenExpiresAt: dayAgo(-1),
+        historyId: '1',
+        backfillDone: true,
+        lastSyncAt: dayAgo(0),
+        canSend: true,
+      })
+      .returning({ id: s.mailbox.id })
+    if (!box) throw new Error('the mailbox was not created')
+
+    // Twenty conversations, so the inbox pages and the record timeline has mail on
+    // it. Half inbound, so "who spoke last" is not the same answer everywhere.
+    const threads = await db
+      .insert(s.messageThread)
+      .values(
+        Array.from({ length: 20 }, (_, i) => ({
+          accountId: sandbox,
+          providerThreadId: `seed-thread-${i + 1}`,
+          subject: i === 4 ? null : `${['Trial questions', 'Security review', 'Pricing', 'Renewal'][i % 4]} ${i + 1}`,
+          firstAt: dayAgo(20 - i),
+          lastAt: dayAgo(20 - i),
+          messageCount: 1,
+        })),
+      )
+      .returning({ id: s.messageThread.id })
+
+    const messages = await db
+      .insert(s.message)
+      .values(
+        threads.map((thread, i) => {
+          const contact = emailed[i % emailed.length]!
+          const inbound = i % 2 === 0
+          return {
+            accountId: sandbox,
+            threadId: thread.id,
+            providerMessageId: `seed-message-${i + 1}`,
+            direction: inbound ? ('inbound' as const) : ('outbound' as const),
+            fromAddr: inbound ? contact.email! : 'marketing@sandbox.test',
+            toAddrs: inbound ? ['marketing@sandbox.test'] : [contact.email!],
+            sentAt: dayAgo(20 - i),
+            snippet: 'Only the first line is stored on the message itself.',
+            internetMessageId: `<seed-message-${i + 1}@sandbox.test>`,
+            bodyState: 'stored' as const,
+            mailboxId: box.id,
+          }
+        }),
+      )
+      .returning({ id: s.message.id })
+
+    await db.insert(s.messageBody).values(
+      messages.map((message, i) => {
+        const textBody = `Thanks for the note.\n\nThis is seeded conversation ${i + 1}.`
+        return {
+          accountId: sandbox,
+          messageId: message.id,
+          textBody,
+          htmlBody: `<p>Thanks for the note.</p><p>This is seeded conversation ${i + 1}.</p>`,
+          textBytes: Buffer.byteLength(textBody),
+          htmlBytes: 96,
+        }
+      }),
+    )
+
+    await db.insert(s.messageParticipant).values(
+      messages.flatMap((message, i) => {
+        const contact = emailed[i % emailed.length]!
+        const inbound = i % 2 === 0
+        return [
+          {
+            accountId: sandbox,
+            messageId: message.id,
+            address: inbound ? contact.email! : 'marketing@sandbox.test',
+            contactId: inbound ? contact.id : null,
+            role: 'from' as const,
+          },
+          {
+            accountId: sandbox,
+            messageId: message.id,
+            address: inbound ? 'marketing@sandbox.test' : contact.email!,
+            contactId: inbound ? null : contact.id,
+            role: 'to' as const,
+          },
+        ]
+      }),
+    )
+
+    const sendWindow = { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', timezone: 'Asia/Jakarta' }
+    const settings = {
+      sendWindow,
+      stopOnReply: true,
+      stopOnBounce: true,
+      stopOnUnsubscribe: true,
+      trackOpens: true,
+      trackClicks: true,
+      subscriptionTypeId: null,
+      replyInThread: true,
+      woodpeckerCampaignId: null,
+    }
+
+    const sequences = await db
+      .insert(s.sequence)
+      .values([
+        {
+          accountId: sandbox,
+          name: 'Inbound follow-up',
+          description: 'Four touches over a fortnight after somebody asks for a demo.',
+          state: 'active' as const,
+          ownerId: salesId,
+          settings,
+          createdBy: salesId,
+        },
+        {
+          accountId: sandbox,
+          name: 'Renewal nudge',
+          description: 'Written, not yet sending.',
+          state: 'draft' as const,
+          ownerId: salesId,
+          settings,
+          createdBy: salesId,
+        },
+      ])
+      .returning({ id: s.sequence.id, name: s.sequence.name })
+
+    // The third step is a task rather than a mail, so the waiting_task state below
+    // is one an enrollment can actually be in.
+    const STEPS = [
+      { kind: 'email' as const, delayDays: 0, subject: 'Following up on your demo request' },
+      { kind: 'email' as const, delayDays: 3, subject: 'A couple of things you might have missed' },
+      { kind: 'task' as const, delayDays: 4, subject: null },
+      { kind: 'email' as const, delayDays: 7, subject: 'Closing the loop' },
+    ]
+    await db.insert(s.sequenceStep).values(
+      sequences.flatMap((sequence) =>
+        STEPS.map((step, position) => ({
+          accountId: sandbox,
+          sequenceId: sequence.id,
+          position,
+          kind: step.kind,
+          delayDays: step.delayDays,
+          subject: step.subject,
+          bodyHtml: step.kind === 'email' ? '<p>Hello {{contact.first_name}},</p><p>Worth a look?</p>' : null,
+          bodyText: step.kind === 'email' ? 'Hello {{contact.first_name}},\n\nWorth a look?' : null,
+          taskTitle: step.kind === 'task' ? 'Call {{contact.first_name}}' : null,
+          taskBody: step.kind === 'task' ? 'They have had two mails and not replied.' : null,
+        })),
+      ),
+    )
+
+    // Six enrollments, one per state a screen has to render. The live one is due
+    // tomorrow rather than now: a seeded enrollment that is already due starts a
+    // real send attempt the next time a worker runs.
+    const live = sequences[0]!
+    const ENROLLMENTS = [
+      { state: 'active' as const, currentStep: 1, nextRunAt: dayAgo(-1), stopReason: null },
+      { state: 'waiting_task' as const, currentStep: 3, nextRunAt: null, stopReason: null },
+      { state: 'replied' as const, currentStep: 2, nextRunAt: null, stopReason: 'They replied on the thread.' },
+      { state: 'bounced' as const, currentStep: 1, nextRunAt: null, stopReason: 'The address bounced permanently.' },
+      { state: 'unsubscribed' as const, currentStep: 2, nextRunAt: null, stopReason: 'They asked to stop hearing from us.' },
+      { state: 'finished' as const, currentStep: 4, nextRunAt: null, stopReason: null },
+    ]
+    await db.insert(s.sequenceEnrollment).values(
+      ENROLLMENTS.map((enrollment, i) => ({
+        accountId: sandbox,
+        sequenceId: live.id,
+        contactId: emailed[i]!.id,
+        mailboxId: box.id,
+        enrolledBy: marketingId,
+        state: enrollment.state,
+        currentStep: enrollment.currentStep,
+        nextRunAt: enrollment.nextRunAt,
+        lastSentAt: enrollment.currentStep > 0 ? dayAgo(i + 1) : null,
+        finishedAt: enrollment.nextRunAt === null ? dayAgo(i) : null,
+        stopReason: enrollment.stopReason,
+        unsubscribeToken: `seed-unsubscribe-${i}`.padEnd(28, '0'),
+        createdAt: dayAgo(i + 5),
+      })),
+    )
+
+    await db.insert(s.emailTemplate).values([
+      {
+        accountId: sandbox,
+        name: 'Demo follow-up',
+        subject: 'Following up on your demo',
+        bodyText: 'Hello {{contact.first_name}},\n\nHere are the notes from our call.',
+        createdBy: salesId,
+      },
+      {
+        accountId: sandbox,
+        name: 'Security review pack',
+        subject: 'Our security documentation',
+        bodyText: 'Attached is the SOC 2 report and the DPA.',
+        createdBy: salesId,
+      },
+      {
+        accountId: sandbox,
+        name: 'Renewal reminder',
+        subject: 'Your renewal is coming up',
+        bodyText: 'Your term ends on {{deal.close_date}}. Shall we talk?',
+        createdBy: marketingId,
+      },
+    ])
+
+    await db.insert(s.automation).values([
+      {
+        accountId: sandbox,
+        name: 'New form fill becomes a lead',
+        isActive: true,
+        trigger: 'form_submitted' as const,
+        triggerConfig: { object: 'contact' },
+        conditions: [],
+        steps: [{ kind: 'action', type: 'set_lifecycle', config: { stage: 'Lead' } }],
+        createdBy: adminId,
+      },
+      {
+        accountId: sandbox,
+        name: 'Proposal stage creates a task',
+        isActive: true,
+        trigger: 'stage_changed' as const,
+        triggerConfig: { object: 'deal' },
+        conditions: [{ conjunction: 'and', conditions: [{ field: 'amount', operator: 'gte', value: 50000 }] }],
+        steps: [
+          { kind: 'delay', minutes: 60 },
+          { kind: 'action', type: 'create_task', config: { title: 'Send the revised pricing' } },
+        ],
+        createdBy: adminId,
+      },
+      // Parked: written, reviewed and deliberately not armed. The list has to say
+      // that differently from an active rule that never matches.
+      {
+        accountId: sandbox,
+        name: 'Enterprise leads to the EMEA pool',
+        isActive: false,
+        trigger: 'record_created' as const,
+        triggerConfig: { object: 'contact' },
+        conditions: [{ conjunction: 'and', conditions: [{ field: 'country', operator: 'is', value: 'Germany' }] }],
+        steps: [{ kind: 'action', type: 'assign_owner', config: { mode: 'round_robin', pool: [salesId] } }],
+        createdBy: adminId,
+      },
+    ])
+
+    const contactObject = objectId('contact')
+    const segments = await db
+      .insert(s.segment)
+      .values([
+        {
+          accountId: sandbox,
+          name: 'Marketing contacts',
+          description: 'Everybody who may be mailed.',
+          objectId: contactObject,
+          query: [
+            { conjunction: 'and', conditions: [{ field: 'marketing_status', operator: 'is', value: 'Marketing contact' }] },
+          ],
+          lastEvaluatedAt: dayAgo(0),
+        },
+        {
+          accountId: sandbox,
+          name: 'Unowned contacts',
+          description: 'Nobody is working these.',
+          objectId: contactObject,
+          query: [{ conjunction: 'and', conditions: [{ field: 'owner_id', operator: 'is_empty' }] }],
+          lastEvaluatedAt: dayAgo(0),
+        },
+        // Static: the members are the file's, not a query's, so the evaluator has
+        // to leave both of these alone.
+        {
+          accountId: sandbox,
+          name: 'Webinar March attendees',
+          description: 'Uploaded from the webinar platform.',
+          objectId: contactObject,
+          query: [],
+          isStatic: true,
+        },
+        {
+          accountId: sandbox,
+          name: 'Imported from HubSpot',
+          description: 'The first migration batch.',
+          objectId: contactObject,
+          query: [],
+          isStatic: true,
+        },
+      ])
+      .returning({ id: s.segment.id, isStatic: s.segment.isStatic })
+
+    await db.insert(s.segmentMembership).values(
+      segments
+        .filter((segment) => segment.isStatic)
+        .flatMap((segment, list) =>
+          contacts.slice(list * 3, list * 3 + 5).map((contact) => ({
+            accountId: sandbox,
+            segmentId: segment.id,
+            entityId: contact.id,
+            enteredAt: dayAgo(10),
+          })),
+        ),
+    )
+
+    await db.insert(s.reportDashboard).values({
+      accountId: sandbox,
+      name: 'Monday morning',
+      ownerId: adminId,
+      isShared: true,
+      cards: ['deals_created', 'deals_won_amount', 'pipeline_funnel', 'form_fills', 'sequence_sent', 'traffic_channels'],
+    })
+
+    // Two finished and one still on the mapping screen, which is the state a person
+    // lands back on when they close the tab before choosing their columns.
+    const HUBSPOT_HEADERS = [
+      'First Name',
+      'Last Name',
+      'Email',
+      'Phone Number',
+      'Company Name',
+      'Lifecycle Stage',
+      'Contact owner',
+      'Original Source',
+    ]
+    const importRuns = await db
+      .insert(s.importRun)
+      .values([
+        {
+          accountId: sandbox,
+          objectType: 'contact' as const,
+          importKind: 'records' as const,
+          source: 'hubspot',
+          filename: 'hubspot-contacts-2026-08-01.csv',
+          fileSignature: 'seed-contacts-8',
+          headers: HUBSPOT_HEADERS,
+          mapping: {
+            'First Name': 'contact.first_name',
+            'Last Name': 'contact.last_name',
+            Email: 'contact.email',
+            'Phone Number': 'contact.phone',
+            'Company Name': 'company.name',
+            'Lifecycle Stage': 'contact.lifecycle_stage_id',
+            'Contact owner': 'contact.owner_id',
+            'Original Source': null,
+          },
+          state: 'done' as const,
+          totalRows: 1200,
+          processedRows: 1200,
+          createdCount: 1150,
+          updatedCount: 42,
+          skippedCount: 5,
+          erroredCount: 3,
+          errors: [
+            { position: 17, message: 'Email is not an address: "n/a"' },
+            { position: 402, message: 'Email is not an address: "-"' },
+            { position: 998, message: 'Lifecycle Stage "Evangelist" matches no stage here' },
+          ],
+          unmatchedOwners: ['dana@oldportal.example', 'rob@oldportal.example'],
+          createdBy: adminId,
+          createdAt: dayAgo(12),
+          finishedAt: dayAgo(12),
+        },
+        {
+          accountId: sandbox,
+          objectType: 'company' as const,
+          importKind: 'records' as const,
+          source: 'hubspot',
+          filename: 'hubspot-companies-2026-08-01.csv',
+          fileSignature: 'seed-companies-4',
+          headers: ['Company name', 'Company domain name', 'Industry', 'Country/Region'],
+          mapping: {
+            'Company name': 'company.name',
+            'Company domain name': 'company.domain',
+            Industry: 'company.industry',
+            'Country/Region': 'company.country',
+          },
+          state: 'done' as const,
+          totalRows: 340,
+          processedRows: 340,
+          createdCount: 340,
+          createdBy: adminId,
+          createdAt: dayAgo(11),
+          finishedAt: dayAgo(11),
+        },
+        {
+          accountId: sandbox,
+          objectType: 'contact' as const,
+          importKind: 'records' as const,
+          source: 'hubspot',
+          filename: 'hubspot-contacts-2026-09-01.csv',
+          fileSignature: 'seed-contacts-8',
+          headers: HUBSPOT_HEADERS,
+          mapping: {},
+          state: 'mapping' as const,
+          totalRows: 3,
+          createdBy: adminId,
+          createdAt: dayAgo(1),
+        },
+      ])
+      .returning({ id: s.importRun.id, state: s.importRun.state })
+
+    // Only the unfinished run keeps its file: a done run has nothing left to
+    // resume, and the rows are the largest thing an import stores.
+    const unmapped = importRuns.find((run) => run.state === 'mapping')
+    if (unmapped) {
+      await db.insert(s.importRow).values(
+        Array.from({ length: 3 }, (_, position) => ({
+          accountId: sandbox,
+          runId: unmapped.id,
+          position,
+          values: {
+            'First Name': `Imported${position + 1}`,
+            'Last Name': `Row${position + 1}`,
+            Email: `imported${position + 1}@partner${position + 1}.example`,
+            'Phone Number': '',
+            'Company Name': `Partner ${position + 1}`,
+            'Lifecycle Stage': 'Lead',
+            'Contact owner': 'dana@oldportal.example',
+            'Original Source': 'Organic search',
+          },
+        })),
+      )
+    }
+
+    // Thirty, because the drawer pages at twenty-five and "read" and "trashed" are
+    // states, not filters over one list.
+    const NOTIFICATION_KINDS = [
+      'task_overdue',
+      'form_submission',
+      'form_quarantined',
+      'deal_stage_change',
+      'dead_letter',
+      'integration_error',
+    ] as const
+    await db.insert(s.notification).values(
+      Array.from({ length: 30 }, (_, i) => ({
+        accountId: sandbox,
+        userId: i % 3 === 0 ? salesId : adminId,
+        kind: NOTIFICATION_KINDS[i % NOTIFICATION_KINDS.length]!,
+        dedupeKey: `seed:${i}`,
+        title: `${['A task is overdue', 'A form was filled in', 'A submission was held', 'A deal moved', 'A job could not be delivered', 'An app needs attention'][i % 6]}`,
+        body: i % 4 === 0 ? null : 'Seeded so the drawer is never an empty screen in development.',
+        entity: i % 6 === 3 ? 'deal' : null,
+        entityId: i % 6 === 3 ? (deals[i % Math.max(deals.length, 1)]?.id ?? null) : null,
+        actorId: i % 5 === 0 ? marketingId : null,
+        count: i === 7 ? 40 : 1,
+        readAt: i % 3 === 1 ? dayAgo(i % 5) : null,
+        trashedAt: i % 9 === 4 ? dayAgo(1) : null,
+        at: dayAgo(i % 14),
+      })),
+    )
+
+    // The bucket holds no bytes for these. The Files panel lists what a record has
+    // and signs a link per read, so a row with no object behind it renders the list
+    // correctly and fails only if somebody clicks it.
+    await db.insert(s.attachment).values([
+      {
+        accountId: sandbox,
+        entityType: 'deal',
+        entityId: deals[0]!.id,
+        storageKey: `${sandbox}/seed/proposal.pdf`,
+        filename: 'Proposal v3.pdf',
+        bytes: 284_120,
+        mime: 'application/pdf',
+        uploadedBy: salesId,
+        at: dayAgo(6),
+      },
+      {
+        accountId: sandbox,
+        entityType: 'contact',
+        entityId: contacts[0]!.id,
+        storageKey: `${sandbox}/seed/security-questionnaire.xlsx`,
+        filename: 'Security questionnaire.xlsx',
+        bytes: 41_984,
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        uploadedBy: salesId,
+        at: dayAgo(4),
+      },
+    ])
+
+    // An object an admin invented, with its own fields and five rows in the shared
+    // table. Not "Project": verify-objects invents that one and asserts it gets the
+    // key unclaimed.
+    const [assetObject] = await db
+      .insert(s.objectDef)
+      .values({
+        accountId: sandbox,
+        key: 'asset',
+        nameSingular: 'Asset',
+        namePlural: 'Assets',
+        isCustom: true,
+        icon: 'file',
+      })
+      .returning({ id: s.objectDef.id })
+    if (!assetObject) throw new Error('the custom object was not created')
+
+    const assetFields = await db
+      .insert(s.fieldDef)
+      .values([
+        { accountId: sandbox, objectId: assetObject.id, key: 'name', label: 'Asset name', type: 'text' as const, storage: 'jsonb' as const, isRequired: true, position: 0 },
+        { accountId: sandbox, objectId: assetObject.id, key: 'format', label: 'Format', type: 'select' as const, storage: 'jsonb' as const, options: ['Whitepaper', 'Case study', 'Webinar'], position: 1 },
+        { accountId: sandbox, objectId: assetObject.id, key: 'published_on', label: 'Published on', type: 'date' as const, storage: 'jsonb' as const, position: 2 },
+      ])
+      .returning({ id: s.fieldDef.id, key: s.fieldDef.key })
+
+    const nameField = assetFields.find((field) => field.key === 'name')
+    if (nameField) {
+      await db.update(s.objectDef).set({ labelFieldId: nameField.id }).where(eq(s.objectDef.id, assetObject.id))
+    }
+
+    const FORMATS = ['Whitepaper', 'Case study', 'Webinar']
+    await db.insert(s.customRecord).values(
+      Array.from({ length: 5 }, (_, i) => ({
+        accountId: sandbox,
+        objectId: assetObject.id,
+        custom: {
+          name: `${FORMATS[i % FORMATS.length]} ${i + 1}`,
+          format: FORMATS[i % FORMATS.length]!,
+          published_on: dayAgo(30 - i * 5).toISOString().slice(0, 10),
+        },
+        ownerId: marketingId,
+        createdAt: dayAgo(30 - i * 5),
+      })),
+    )
+
+    // Three apps in three states, because the Connected Apps table's whole job is
+    // telling them apart and one healthy row proves none of it.
+    await db.insert(s.integration).values([
+      {
+        accountId: sandbox,
+        kind: 'slack',
+        config: { channel: '#sales-leads-2026', mode: 'bot' },
+        secretRef: secret('xoxb-seed-not-a-real-token'),
+        state: 'connected' as const,
+        lastOkAt: dayAgo(0),
+        installedBy: adminId,
+      },
+      {
+        accountId: sandbox,
+        kind: 'apollo',
+        config: { plan: 'basic' },
+        secretRef: secret('seed-apollo-key'),
+        state: 'degraded' as const,
+        lastOkAt: dayAgo(2),
+        lastError: 'Rate limited: 429 from /v1/people/match',
+        lastErrorAt: dayAgo(0),
+        installedBy: adminId,
+      },
+      {
+        accountId: sandbox,
+        kind: 'woodpecker',
+        config: {},
+        secretRef: secret('seed-woodpecker-key'),
+        state: 'revoked' as const,
+        lastOkAt: dayAgo(9),
+        lastError: 'Unauthorized: the API key was revoked at the provider',
+        lastErrorAt: dayAgo(1),
+        installedBy: adminId,
+      },
+    ])
+
+    // Everything the builder can put on a form and the seed forms do not: four
+    // steps, a question that only appears on one answer, a file, a consent tick and
+    // a value the embed sets from the page it sits on.
+    await db.insert(s.form).values({
+      accountId: sandbox,
+      name: 'Partner application',
+      slug: 'partner-application',
+      schema: [
+        { key: 'about_you', type: 'heading', label: 'About you', required: false, step: 0 },
+        { key: 'first_name', type: 'text', label: 'First name', required: true, mapsTo: 'contact.first_name', step: 0 },
+        { key: 'last_name', type: 'text', label: 'Last name', required: true, mapsTo: 'contact.last_name', step: 0 },
+        { key: 'email', type: 'email', label: 'Work email', required: true, mapsTo: 'contact.email', step: 0 },
+        { key: 'company', type: 'text', label: 'Company', required: true, mapsTo: 'company.name', step: 1 },
+        {
+          key: 'partner_type',
+          type: 'select',
+          label: 'What kind of partner?',
+          required: true,
+          options: [
+            { value: 'reseller', label: 'Reseller' },
+            { value: 'agency', label: 'Agency' },
+            { value: 'technology', label: 'Technology' },
+          ],
+          mapsTo: null,
+          step: 1,
+        },
+        {
+          key: 'reseller_regions',
+          type: 'multi_select',
+          label: 'Which regions do you resell in?',
+          required: false,
+          options: [
+            { value: 'emea', label: 'EMEA' },
+            { value: 'apac', label: 'APAC' },
+            { value: 'amer', label: 'Americas' },
+          ],
+          visibleIf: { field: 'partner_type', equals: 'reseller' },
+          mapsTo: null,
+          step: 1,
+        },
+        { key: 'deck', type: 'file', label: 'Company deck', required: false, mapsTo: null, step: 2,
+          help: 'PDF, up to 10MB.' },
+        { key: 'notes', type: 'long_text', label: 'Anything else?', required: false, mapsTo: null, step: 2,
+          validation: { maxLength: 2000 } },
+        { key: 'consent', type: 'consent', label: 'I agree to be contacted about this application.',
+          required: true, mapsTo: null, step: 3 },
+        { key: 'source_page', type: 'hidden', label: 'Source page', required: false, mapsTo: null, step: 3,
+          defaultValue: '/partners' },
+      ],
+      settings: {
+        ...DEFAULT_SETTINGS,
+        submitLabel: 'Send application',
+        successValue: 'Thanks. The partnerships team reads every one of these.',
+        lifecycleStageOnSubmit: 'Lead',
+        notifySlack: true,
+        slackChannel: '#partners',
+        steps: ['About you', 'Your company', 'Supporting material', 'Consent'],
+        assignOwner: { mode: 'user', userId: marketingId, pool: [] },
+      },
+      isActive: true,
+    })
+  }
+
   const counts = await client`
     select 'company' as t, count(*)::int as n from company
     union all select 'contact', count(*)::int from contact
@@ -762,6 +1438,18 @@ try {
     union all select 'booking_host', count(*)::int from booking_host
     union all select 'availability', count(*)::int from availability
     union all select 'integration', count(*)::int from integration
+    union all select 'mailbox', count(*)::int from mailbox
+    union all select 'message_thread', count(*)::int from message_thread
+    union all select 'sequence', count(*)::int from sequence
+    union all select 'sequence_enrollment', count(*)::int from sequence_enrollment
+    union all select 'email_template', count(*)::int from email_template
+    union all select 'automation', count(*)::int from automation
+    union all select 'segment', count(*)::int from segment
+    union all select 'import_run', count(*)::int from import_run
+    union all select 'report_dashboard', count(*)::int from report_dashboard
+    union all select 'notification', count(*)::int from notification
+    union all select 'attachment', count(*)::int from attachment
+    union all select 'custom_record', count(*)::int from custom_record
     order by t`
   console.log('seeded:')
   for (const row of counts) console.log(`  ${row.t}: ${row.n}`)

@@ -1,4 +1,5 @@
 import postgres from 'postgres'
+import { cleanup } from './fixture.ts'
 
 /** Proves the three isolation claims against the real database rather than
  *  asserting them. Exits non-zero on any failure, so it can gate a build. */
@@ -96,6 +97,7 @@ try {
 } finally {
   await owner.end()
   await app.end()
+  await cleanup()
 }
 
 if (failures.length) {

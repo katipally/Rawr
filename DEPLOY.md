@@ -186,30 +186,40 @@ wake itself.
 Run `node scripts/both.mjs` there, so the job daemon lives in the one process the
 host gives you.
 
-**Wake on cron, not on an interval.** Two schedules run at a fixed time of day:
+**Keep it up, and catch up on boot.** UptimeRobot calls
+
+```
+ https://rawr-qutv.onrender.com/healthz    every 5 minutes
+```
+
+which is well inside Render's 15-minute idle window, so the service never
+suspends and Postgres never reaches its own inactivity pause.
+
+That is belt, and the worker carries braces. Two schedules run at a fixed time of
+day:
 
 ```
  30 3 * * *   activity roll-up
  0 7 * * *    the notification sweep
 ```
 
-A service asleep at 03:30 does not run that day's roll-up — pg-boss creates the
-job when the clock strikes, and nothing is there to strike it. An interval pinger
-("every 6 hours") lands wherever it happens to land, so aim the wakes instead.
-Anything that speaks cron does this; cron-job.org and a GitHub Actions schedule
-are both free:
+pg-boss creates those jobs when the clock strikes, so a service asleep at 03:30
+misses that day's roll-up entirely and an interval pinger cannot be aimed finely
+enough to guarantee otherwise. On boot the worker looks for a completed run since
+each schedule's last due time and sends the missed one itself, keyed on the job
+name and the day so a restart loop cannot run it twice.
 
-```
- 25 3 * * *    wakes it before the roll-up
- 55 6 * * *    wakes it before the sweep
- 0 12,18 * * * two more, so the day never goes quiet
-```
+**750 instance hours per workspace per month, not per service.** Staying up costs
+744 of them in a 31-day month, so exactly one always-on free service fits in a
+workspace. The other two Render services stay suspended; resuming a second one
+exhausts the grant part way through the month and Render then suspends every free
+service in the workspace, this one included.
 
-Four wakes a day, each holding the service up for its 15-minute idle window, is
-about 31 instance hours a month against a 750-hour grant, and it keeps Postgres
-from its own inactivity pause. Staying awake around the clock costs 744 of those
-750 hours in a 31-day month, which leaves no room for a second free service.
+**`RAWR_INTERNAL_URL` is not set on Render.** App and worker are one container, so
+the worker reaches the app at `127.0.0.1:$PORT` and going out through the public
+hostname would leave the box, pay for TLS and the proxy, and count against the
+same instance. Set it only where the two run on separate hosts.
 
-Everything on `* * * * *` — sequence steps, automations, enrichment, visitor
-stitching — simply runs while the service is up and waits while it is not. A
-visitor arriving cold waits about a minute for the first page.
+Everything on `* * * * *`, which is sequence steps, automations, enrichment and
+visitor stitching, runs while the service is up and waits while it is not. Drop
+the pinger and a visitor arriving cold waits about a minute for the first page.

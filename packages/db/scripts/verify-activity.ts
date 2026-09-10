@@ -26,7 +26,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
-import { PEER, SANDBOX, seatFor } from './fixture.ts'
+import { PEER, SANDBOX, seatFor, cleanup } from './fixture.ts'
 
 /** F4's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-forms.ts. */
@@ -630,6 +630,7 @@ try {
   // Given back before exiting, so the next suite in `pnpm verify` does not start
   // against a pooler this one is still holding connections on.
   await closeAppPool()
+  await cleanup()
   process.exit(failures === 0 ? 0 : 1)
 }
 

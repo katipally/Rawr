@@ -14,7 +14,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { eq } from 'drizzle-orm'
 import * as s from '../src/schema/index.ts'
-import { SANDBOX } from './fixture.ts'
+import { SANDBOX, cleanup } from './fixture.ts'
 
 const owner = postgres(process.env.DATABASE_URL_OWNER!, { max: 1, onnotice: () => {} })
 const db = drizzle(owner, { schema: s })
@@ -259,8 +259,11 @@ try {
   console.log(failures > 0 ? `${failures} check(s) failed.` : 'all custom object checks passed.')
   if (failures > 0) process.exitCode = 1
 } finally {
-  // Leave nothing behind, whatever happened above.
-  await db.execute(`delete from object_def where is_custom = true and account_id = '${ws!.id}'` as never)
+  // Leave nothing behind, whatever happened above. By key rather than by
+  // is_custom: the seed invents one of its own, and taking every custom object
+  // emptied it out from under the next suite.
+  await db.execute(`delete from object_def where key = 'project' and is_custom = true and account_id = '${ws!.id}'` as never)
   await closeAppPool()
   await owner.end()
+  await cleanup()
 }

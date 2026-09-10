@@ -10,7 +10,7 @@ import { evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { findDuplicates } from '../src/dal/duplicates.ts'
 import { attributionReport, formsReport, pipelineReport } from '../src/dal/reporting.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { PEER } from './fixture.ts'
+import { PEER, cleanup } from './fixture.ts'
 
 /** B9. Whether any of this holds at the size of the portal it has to replace.
  *
@@ -294,4 +294,5 @@ try {
   }
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }

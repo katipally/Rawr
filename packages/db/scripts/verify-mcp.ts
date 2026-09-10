@@ -13,7 +13,7 @@ import {
   withAccount,
   type AccountContext,
 } from '../src/index.ts'
-import { PEER, SANDBOX, seatFor } from './fixture.ts'
+import { PEER, SANDBOX, seatFor, cleanup } from './fixture.ts'
 
 /** F5's definition of done, run against the real endpoint over HTTP.
  *
@@ -1164,6 +1164,7 @@ try {
     })
   }
   await closeAppPool()
+  await cleanup()
 }
 
 console.log(

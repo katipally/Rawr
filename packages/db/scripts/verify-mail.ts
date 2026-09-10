@@ -19,7 +19,7 @@ import {
   TEXT_LIMIT_BYTES,
   type IncomingMessage,
 } from '../src/dal/messages.ts'
-import { SANDBOX } from './fixture.ts'
+import { SANDBOX, cleanup } from './fixture.ts'
 
 /** What B3 added: bodies kept here rather than fetched from somebody's mailbox,
  *  a sharing rule enforced in SQL, and a shared inbox.
@@ -262,6 +262,7 @@ try {
   await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
+  await cleanup()
 }
 
 if (failures.length) {

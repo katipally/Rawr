@@ -16,7 +16,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
 import { addMember, listMembers, setMemberGrants } from '../src/dal/members.ts'
 import { membershipsForUser } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
-import { SANDBOX } from './fixture.ts'
+import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
 
 /** The account layer: seats, invitations, grants, teams and the history of those
  *  decisions. Every check calls the data access layer directly, so hiding a button
@@ -45,6 +45,17 @@ try {
   const [row] = await owner`select id from account where slug = ${SANDBOX.slug}`
   if (!row) throw new Error('Seed the database first: pnpm db:seed')
   const accountId = row.id as string
+
+  // Before anything is written. Every suite empties its residue in `finally`, so
+  // rows here are a suite that died, or one whose cleanup no longer covers a table
+  // the schema has since gained. Either way the next suite is reading somebody
+  // else's leftovers.
+  const held = await residueCounts(owner)
+  check(
+    Object.keys(held).length === 0,
+    'the fixture accounts start with no residue from an earlier suite',
+    Object.entries(held).map(([table, n]) => `${table}=${n}`).join(' '),
+  )
 
   const seat = async (email: string) => {
     const [found] = await owner`select id from user_account where email = ${email}`
@@ -191,6 +202,7 @@ try {
 } finally {
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }
 
 if (failures.length > 0) process.exit(1)

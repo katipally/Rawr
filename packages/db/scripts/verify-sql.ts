@@ -1,6 +1,7 @@
 import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import postgres from 'postgres'
+import { cleanup } from './fixture.ts'
 
 /** Every table, column and function named in a raw SQL template, resolved
  *  against the live catalog.
@@ -27,9 +28,10 @@ const fail = (where: string, what: string, line: string) => {
   failures.push(`${where} ${what}`)
 }
 
-/** Postgres's own catalogs. Named by plenty of the admin queries here, and never
- *  in `information_schema.columns`, so they would read as missing. */
-const CATALOG = /^(pg_|information_schema)/
+/** Schemas the catalogue read above does not cover: Postgres's own, named by
+ *  plenty of the admin queries here and never in `information_schema.columns`,
+ *  and `pgboss`, which pg-boss creates on the worker's first boot and owns. */
+const CATALOG = /^(pg_|information_schema|pgboss)/
 
 /** SQL that reads like `<keyword> <identifier>` but is not naming a relation. */
 const NOT_A_TABLE = new Set([
@@ -193,6 +195,7 @@ try {
   console.log(`\nread ${templates} SQL templates across ${files.length} files.`)
 } finally {
   await owner.end()
+  await cleanup()
 }
 
 if (failures.length) {

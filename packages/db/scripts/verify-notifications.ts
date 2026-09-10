@@ -12,7 +12,7 @@ import {
   unreadCount,
 } from '../src/dal/notifications.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { SANDBOX, PEER } from './fixture.ts'
+import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
 /** The stored notification model, proved by writing and reading it rather than by
  *  looking at a bell.
@@ -254,6 +254,7 @@ try {
 } finally {
   await owner.end()
   await closeAppPool()
+  await cleanup()
 }
 
 console.log(failures.length === 0 ? '\nAll notification checks passed.' : `\n${failures.length} failed.`)
