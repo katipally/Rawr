@@ -23,7 +23,10 @@ const dispatch = defineJob({
       select r.id, r.account_id, a.slug
         from import_run r
         join account a on a.id = r.account_id
-       where r.state = 'running'`
+       where r.state = 'running'
+         -- The verify suites drive their own runs against this same database, one
+         -- chunk at a time, and would race a worker that picked those runs up.
+         and a.google_hosted_domain not like '%.test'`
 
     for (const row of rows) {
       // One chunk in flight per run. Without it the tick that lands while a chunk

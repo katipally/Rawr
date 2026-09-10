@@ -8,7 +8,10 @@ import {
   assertMappingIsUsable,
   cancelImportRun,
   createImportRun,
+  createProposedProperties,
   importShapeFor,
+  isNewProperty,
+  proposeProperty,
   IMPORT_KINDS,
   previewImportRun,
   readImportRows,
@@ -17,12 +20,13 @@ import {
   startImportRun,
   suggestMapping,
   type ImportKind,
+  type NewProperty,
   type ImportRow,
   type Mapping,
 } from '../src/dal/imports.ts'
 import { errorCsv } from '../src/dal/export.ts'
 import { hubspotPreset, looksLikeHubspot } from '../src/registry/hubspot.ts'
-import { getRegistry, objectOrThrow } from '../src/dal/registry.ts'
+import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { cleanup, PEER, SANDBOX } from './fixture.ts'
 
@@ -74,6 +78,97 @@ const HUBSPOT_CONTACT_HEADERS = [
   'Country/Region',
   'LinkedIn URL',
 ]
+
+/** The rest of a real contact export. Fifteen columns Rawr has fields for plus
+ *  these is sixty-eight, which is the shape of the file the migration is actually
+ *  about: most of it is properties this account has never heard of. */
+const HUBSPOT_EXTRA_HEADERS = [
+  'Annual Revenue',
+  'Became a Lead Date',
+  'Became a Customer Date',
+  'Became an Opportunity Date',
+  'Persona',
+  'Buying Role',
+  'Preferred Language',
+  'Time Zone',
+  'Number of Employees',
+  'Number of Sessions',
+  'Number of Pageviews',
+  'Number of Form Submissions',
+  'Days to Close',
+  'Marketing Contact Status',
+  'Email Hard Bounce Reason',
+  'Recent Conversion',
+  'First Conversion',
+  'Original Source Drill-Down 1',
+  'Original Source Drill-Down 2',
+  'Latest Source',
+  'Latest Source Drill-Down 1',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'Facebook Click Id',
+  'Google Click Id',
+  'IP City',
+  'IP State',
+  'IP Country',
+  'Postal Code',
+  'State/Region',
+  'Street Address',
+  'Fax Number',
+  'Twitter Handle',
+  'Salutation',
+  'Middle Name',
+  'Degree',
+  'School',
+  'Field of Study',
+  'Graduation Date',
+  'Work Email',
+  'Relationship Status',
+  'Military Status',
+  'Seniority',
+  'Start Date',
+  'Membership Notes',
+  'Notes Last Updated',
+  'Currently in Sequence',
+  'Last Sequence Ended Date',
+  'Marketing Emails Opened',
+  'Marketing Emails Clicked',
+]
+
+const PERSONAS = ['Buyer', 'Champion', 'Blocker']
+
+/** One row of the wide file: enough real values in each column for the type
+ *  inference to have something to read. */
+const hubspotWideRow = (stamp: string, i: number): ImportRow => ({
+  'Record ID': String(1000 + i),
+  'First Name': `Wide${i}`,
+  'Last Name': `Row${i}`,
+  Email: `verify.wide.${stamp}.${i}@partner7.example`,
+  'Phone Number': '+441234567890',
+  'Job Title': 'Analyst',
+  'Associated Company': '',
+  'Contact owner': '',
+  'Lifecycle Stage': 'Lead',
+  'Lead Status': 'New',
+  'Create Date': '2026-01-02',
+  'Last Activity Date': '2026-02-03',
+  City: 'Leeds',
+  'Country/Region': 'United Kingdom',
+  'LinkedIn URL': '',
+  'Annual Revenue': String(100000 + i * 1000),
+  'Became a Lead Date': '2026-01-05',
+  Persona: PERSONAS[i % PERSONAS.length]!,
+  utm_source: `source-${i}`,
+  utm_medium: 'cpc',
+  ...Object.fromEntries(
+    HUBSPOT_EXTRA_HEADERS.filter(
+      (header) => !['Annual Revenue', 'Became a Lead Date', 'Persona', 'utm_source', 'utm_medium'].includes(header),
+    ).map((header) => [header, `${header} ${i}`]),
+  ),
+})
 
 /** A plausible file per kind, so every one of the six is put through the mapper and
  *  the run rather than only the one people demo. */
@@ -311,6 +406,148 @@ try {
       )
     }
     return summary.join('; ')
+  })
+
+  console.log('\n-- properties the file needs -----------------------------------------')
+
+  await check('a wide HubSpot export proposes a property per column nothing matches', async () => {
+    const stamp = String(Date.now())
+    const headers = [...HUBSPOT_CONTACT_HEADERS, ...HUBSPOT_EXTRA_HEADERS]
+    expect(headers.length === 68, `the header list is ${headers.length} columns, expected 68`)
+
+    const rows = Array.from({ length: 20 }, (_, i) => hubspotWideRow(stamp, i))
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      kind: 'records',
+      source: 'hubspot',
+      filename: `wide-${stamp}.csv`,
+      headers,
+      rows,
+      mapping: {},
+    })
+    created.push(run.id)
+
+    const proposals = Object.entries(run.suggested).flatMap(([header, target]) =>
+      isNewProperty(target) ? [[header, target] as [string, NewProperty]] : [],
+    )
+    expect(proposals.length > 0, 'not one column was proposed as a property')
+
+    const typeOf = (header: string) => proposals.find(([name]) => name === header)?.[1]?.type
+    expect(typeOf('Annual Revenue') === 'number', `Annual Revenue proposed as ${String(typeOf('Annual Revenue'))}`)
+    expect(typeOf('Became a Lead Date') === 'date', `Became a Lead Date proposed as ${String(typeOf('Became a Lead Date'))}`)
+    expect(typeOf('Persona') === 'select', `Persona proposed as ${String(typeOf('Persona'))}`)
+    expect(typeOf('utm_source') === 'text', `utm_source proposed as ${String(typeOf('utm_source'))}`)
+    const persona = proposals.find(([name]) => name === 'Persona')?.[1]
+    expect((persona?.options?.length ?? 0) === 3, `Persona offered ${persona?.options?.length ?? 0} choices, expected 3`)
+
+    // A column the account already has a field for is mapped, never proposed.
+    expect(run.suggested.Email === 'email', `Email went to ${JSON.stringify(run.suggested.Email)}`)
+    return `${proposals.length} of ${headers.length} columns proposed`
+  })
+
+  await check('starting the run creates them once, and a second file creates none', async () => {
+    const stamp = String(Date.now())
+    const headers = [...HUBSPOT_CONTACT_HEADERS, ...HUBSPOT_EXTRA_HEADERS]
+    const rows = Array.from({ length: 20 }, (_, i) => hubspotWideRow(stamp, i))
+    const file = {
+      objectKey: 'contact',
+      kind: 'records' as const,
+      source: 'hubspot',
+      headers,
+      rows,
+      mapping: {},
+    }
+
+    const first = await createImportRun(admin, { ...file, filename: `wide-a-${stamp}.csv` })
+    created.push(first.id)
+    const wanted = Object.values(first.suggested).filter(isNewProperty).length
+    const madeFirst = await createProposedProperties(admin, first.id)
+    expect(madeFirst.created === wanted, `made ${madeFirst.created} of ${wanted} proposed properties`)
+
+    // Idempotent within one run: starting it twice must not make a second copy.
+    const again = await createProposedProperties(admin, first.id)
+    expect(again.created === 0, `a second start made ${again.created} more`)
+
+    forgetRegistry(sandbox.id)
+    const second = await createImportRun(admin, { ...file, filename: `wide-b-${stamp}.csv` })
+    created.push(second.id)
+    const madeSecond = await createProposedProperties(admin, second.id)
+    expect(madeSecond.created === 0, `the same file made ${madeSecond.created} properties a second time`)
+
+    const [grouped] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from field_def
+       where account_id = ${sandbox.id}::uuid and group_name = 'Imported from HubSpot'`)
+    expect(Number(grouped?.n ?? 0) >= wanted, `only ${grouped?.n} landed in the import group`)
+
+    await db.execute(sql`
+      delete from field_def where account_id = ${sandbox.id}::uuid and group_name = 'Imported from HubSpot'`)
+    forgetRegistry(sandbox.id)
+    return `${wanted} created once, nothing the second time`
+  })
+
+  await check('a proposal is inferred from the samples, not the header alone', async () => {
+    const numeric = proposeProperty('Deal Weight', ['1', '2', '3.5'])
+    expect(numeric?.type === 'number', `numeric samples gave ${String(numeric?.type)}`)
+    const dated = proposeProperty('Renewal', ['2026-01-02', '2026-04-05'])
+    expect(dated?.type === 'date', `date samples gave ${String(dated?.type)}`)
+    const free = proposeProperty('Notes', ['one', 'two', 'three', 'four'])
+    expect(free?.type === 'text', `four distinct values in four rows gave ${String(free?.type)}`)
+    const utm = proposeProperty('utm_medium', ['cpc', 'cpc', 'email'])
+    expect(utm?.type === 'text', `a tracking column gave ${String(utm?.type)}`)
+    expect(proposeProperty('   ', []) === null, 'a header with no letters produced a property')
+    return 'number, date, text, utm and the unusable header'
+  })
+
+  console.log('\n-- a custom object ---------------------------------------------------')
+
+  await check('a file can be imported into an object an admin invented', async () => {
+    const stamp = String(Date.now())
+    const object = objectOrThrow(await getRegistry(admin), 'asset')
+    const headers = ['Asset name', 'Format']
+    const run = await createImportRun(admin, {
+      objectKey: 'asset',
+      kind: 'records',
+      filename: `asset-${stamp}.csv`,
+      headers,
+      rows: Array.from({ length: 4 }, (_, i) => ({
+        'Asset name': `Verify asset ${stamp} ${i}`,
+        Format: 'Whitepaper',
+      })),
+      mapping: { 'Asset name': 'name', Format: 'format' },
+    })
+    created.push(run.id)
+
+    const before = await readImportRun(admin, run.id)
+    expect(before?.objectType === 'asset', `the run recorded object_type ${String(before?.objectType)}`)
+    assertMappingIsUsable(object, { 'Asset name': 'name', Format: 'format' })
+
+    await runToEnd(admin, run.id)
+    const done = (await readImportRun(admin, run.id))!
+    expect(done.state === 'done', `the run ended ${done.state}: ${done.lastError ?? 'no reason given'}`)
+    expect(done.created === 4, `it created ${done.created} of 4 asset records`)
+
+    // Twice is an update, not eight rows: a custom object dedupes on whatever it
+    // is called by, the same way a contact dedupes on its address.
+    const second = await createImportRun(admin, {
+      objectKey: 'asset',
+      kind: 'records',
+      filename: `asset-again-${stamp}.csv`,
+      headers,
+      rows: Array.from({ length: 4 }, (_, i) => ({
+        'Asset name': `Verify asset ${stamp} ${i}`,
+        Format: 'Case study',
+      })),
+      mapping: { 'Asset name': 'name', Format: 'format' },
+    })
+    created.push(second.id)
+    await runToEnd(admin, second.id)
+    const rerun = (await readImportRun(admin, second.id))!
+    expect(rerun.updated === 4, `the second file created ${rerun.created} and updated ${rerun.updated}`)
+
+    await db.execute(sql`
+      delete from custom_record where account_id = ${sandbox.id}::uuid
+        and custom ->> 'name' like ${`Verify asset ${stamp}%`}`)
+    return 'four created, then four updated, object_type held "asset"'
   })
 
   console.log('\n-- rows at scale -----------------------------------------------------')

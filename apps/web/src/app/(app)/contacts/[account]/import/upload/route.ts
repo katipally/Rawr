@@ -1,4 +1,4 @@
-import { createImportRun, isObjectKey, type ImportKind } from '@rawr/db'
+import { createImportRun, getRegistry, type ImportKind } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { importsPath } from '~/lib/links.ts'
@@ -58,9 +58,12 @@ export const POST = async (
   const source = String(form.get('source') ?? '') || null
 
   if (!(file instanceof File) || file.size === 0) return back('Pick a file to import.')
-  if (!isObjectKey(objectKey)) return back(`"${what}" is not something Rawr can import into.`)
 
   const ctx = contextFrom(session)
+  // The registry says which keys exist, which is how an invented object can be
+  // imported into and a typo still cannot.
+  const registry = await getRegistry(ctx)
+  if (!registry.byKey.has(objectKey)) return back(`"${what}" is not something Rawr can import into.`)
 
   try {
     const sheet = await readSpreadsheet(file)

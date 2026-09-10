@@ -14,14 +14,17 @@ import {
   PROPERTY_IMPORT,
   SUBMISSION_IMPORT } from '../registry/hubspot.ts'
 import type { ObjectKey } from '../registry/core.ts'
+import type { FieldType } from '../registry/types.ts'
+import { isNewProperty, type Mapping, type NewProperty } from '../registry/mapping.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { linksForContacts } from './activity.ts'
-import { createField, updateField } from './admin-fields.ts'
+import { createField, createFields, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
-import { assertCore, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { assertUsableFieldKey } from './fields.ts'
 import { coerce, ValueError } from './values.ts'
 
 /** An import does not queue its rows for enrichment. A file of ninety thousand
@@ -32,8 +35,8 @@ import { coerce, ValueError } from './values.ts'
 const NO_ENRICH = { enrich: false } as const
 
 export type ImportRow = Record<string, string>
-/** csv header -> field key, or null for a column the person chose to ignore. */
-export type Mapping = Record<string, string | null>
+
+export { isNewProperty, type Mapping, type NewProperty }
 
 export type RowError = { row: number; reason: string; values: ImportRow }
 
@@ -61,8 +64,15 @@ const DEDUPE_KEY: Partial<Record<ImportKind, string>> = {
   submissions: 'contact_email',
 }
 
-const dedupeKeyOf = (kind: ImportKind, objectKey: string): string =>
-  DEDUPE_KEY[kind] ?? (objectKey === 'contact' ? 'email' : objectKey === 'company' ? 'domain' : 'name')
+const dedupeKeyOf = (kind: ImportKind, object: RegistryObject): string => {
+  const fixed = DEDUPE_KEY[kind]
+  if (fixed) return fixed
+  if (object.key === 'contact') return 'email'
+  if (object.key === 'company') return 'domain'
+  // An invented object is matched on whatever it is called by, which is the only
+  // field of it every row is guaranteed to carry.
+  return object.isCustom ? (object.labelFieldKey ?? 'name') : 'name'
+}
 
 /** What the mapper must carry beyond the dedupe key, and the sentence to say when
  *  it does not. One entry rather than a branch, because the reason differs per
@@ -79,7 +89,8 @@ export type ImportSummary = {
   id: string
   filename: string
   headers: string[]
-  objectType: ObjectKey
+  /** The object's key. Since 0066 this may be one an admin invented. */
+  objectType: string
   importKind: ImportKind
   source: string | null
   state: 'mapping' | 'previewing' | 'running' | 'done' | 'failed' | 'cancelled'
@@ -179,22 +190,26 @@ export const assertMappingIsUsable = (
   kind: ImportKind = 'records',
 ): void => {
   const seen = new Map<string, string>()
-  for (const [header, key] of Object.entries(mapping)) {
-    if (!key) continue
-    if (!object.byKey.has(key)) {
+  for (const [header, target] of Object.entries(mapping)) {
+    if (!target) continue
+    // A proposed property takes its key the moment the run starts, so it clashes
+    // with an existing field and with another proposal exactly as a mapped
+    // column does. Its key not being in the registry yet is the point of it.
+    const key = isNewProperty(target) ? target.key : target
+    if (!isNewProperty(target) && !object.byKey.has(key)) {
       throw new Error(`${object.namePlural} has no field called "${key}".`)
     }
     const previous = seen.get(key)
     if (previous) {
       throw new Error(
-        `"${previous}" and "${header}" are both mapped to ${object.byKey.get(key)?.label}. Pick one.`,
+        `"${previous}" and "${header}" are both mapped to ${object.byKey.get(key)?.label ?? key}. Pick one.`,
       )
     }
     seen.set(key, header)
   }
   if (seen.size === 0) throw new Error('Map at least one column before importing.')
 
-  const dedupeKey = dedupeKeyOf(kind, object.key)
+  const dedupeKey = dedupeKeyOf(kind, object)
   if (!seen.has(dedupeKey)) {
     throw new Error(
       kind === 'activities'
@@ -307,9 +322,13 @@ export const planRow = async (
 ): Promise<{ values: Record<string, unknown>; warnings: string[]; error?: string }> => {
   const values: Record<string, unknown> = {}
   const warnings: string[] = []
-  const dedupeKey = dedupeKeyOf(kind, object.key)
-  for (const [header, key] of Object.entries(mapping)) {
-    if (!key) continue
+  const dedupeKey = dedupeKeyOf(kind, object)
+  for (const [header, target] of Object.entries(mapping)) {
+    if (!target) continue
+    // A proposal is skipped rather than resolved: the field does not exist until
+    // the run makes it, and until then a preview of that column is a guess about
+    // a definition nobody has confirmed.
+    const key = isNewProperty(target) ? target.key : target
     const raw = row[header]
     if (raw === undefined || raw === null || String(raw).trim() === '') continue
     const field = object.byKey.get(key)
@@ -343,6 +362,20 @@ const dedupeLookup = async (
   object: RegistryObject,
   values: Record<string, unknown>,
 ): Promise<string | null> => {
+  if (object.isCustom) {
+    const labelKey = object.labelFieldKey
+    const named = labelKey ? values[labelKey] : null
+    if (!labelKey || typeof named !== 'string' || !named) return null
+    assertUsableFieldKey(labelKey)
+    return withAccount(ctx, async (tx) => {
+      const [found] = await tx.execute<{ id: string }>(
+        sql`select id from custom_record
+             where object_id = ${object.id}::uuid and deleted_at is null
+               and lower(custom ->> ${labelKey}) = lower(${named}) limit 1`,
+      )
+      return found?.id ?? null
+    })
+  }
   const key = object.key === 'contact' ? 'email' : object.key === 'company' ? 'domain' : null
   const value = key ? values[key] : null
   if (!key || typeof value !== 'string' || !value) return null
@@ -469,6 +502,9 @@ export type DryRun = {
    *  a claim. */
   checked: number
   total: number
+  /** Columns with nowhere to go that the run will make a property for, and what
+   *  each would be. Nothing here is created until the run starts. */
+  newProperties: { header: string; label: string; type: FieldType; options?: string[] }[]
   samples: { create: ImportRow[]; update: ImportRow[]; error: RowError[] }
 }
 
@@ -508,6 +544,11 @@ const preview = async (
     willError: 0,
     checked: input.rows.length,
     total: input.total,
+    newProperties: Object.entries(input.mapping).flatMap(([header, target]) =>
+      isNewProperty(target) && !object.byKey.has(target.key)
+        ? [{ header, label: target.label, type: target.type, ...(target.options ? { options: target.options } : {}) }]
+        : [],
+    ),
     samples: { create: [], update: [], error: [] },
   }
 
@@ -688,6 +729,123 @@ const dropImportRows = async (ctx: AccountContext, id: string): Promise<void> =>
   await withAccount(ctx, (tx) => tx.delete(importRow).where(eq(importRow.runId, id)))
 }
 
+/** How many rows of the file are looked at to decide what a column holds. Enough
+ *  that "twelve distinct values" means something, few enough that the guess costs
+ *  a pass over a slice rather than over ninety thousand rows. */
+const TYPE_SAMPLE_ROWS = 200
+
+/** A tracking parameter is text whatever it looks like. utm_source has four
+ *  values today and forty next quarter, and a select would refuse the other
+ *  thirty-six at the point somebody most needs them recorded. */
+const UTM_COLUMN = /^utm[_ -]/i
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]|$)/
+/** Above this a column is a name, an id or a note, not a set of choices. */
+const MAX_INFERRED_OPTIONS = 12
+
+const inferType = (label: string, values: string[]): { type: FieldType; options?: string[] } => {
+  if (values.length === 0 || UTM_COLUMN.test(label)) return { type: 'text' }
+  if (values.every((value) => Number.isFinite(Number(value)))) return { type: 'number' }
+  if (values.every((value) => ISO_DATE.test(value) && !Number.isNaN(Date.parse(value)))) {
+    return { type: 'date' }
+  }
+  const distinct = [...new Set(values)]
+  // Fewer distinct values than rows, or every row is its own value and the column
+  // is a name rather than a choice.
+  if (distinct.length <= MAX_INFERRED_OPTIONS && distinct.length < values.length) {
+    return { type: 'select', options: distinct.sort() }
+  }
+  return { type: 'text' }
+}
+
+/** The property a column with nowhere to go would become. Null when the header
+ *  yields no usable key, which is a column that can only be ignored. */
+export const proposeProperty = (header: string, samples: string[]): NewProperty | null => {
+  const label = header.trim()
+  const key = keyFromLabel(label)
+  if (!key) return null
+  const values = samples.map((value) => String(value ?? '').trim()).filter(Boolean)
+  const { type, options } = inferType(label, values)
+  return { create: true, key, label, type, ...(options ? { options } : {}) }
+}
+
+/** Every unmapped column turned into a property to create, unless its key is one
+ *  the object already has, in which case the column is mapped to it. Only for
+ *  record files: the other five kinds are read against a fixed shape, and a
+ *  column that shape has no place for is a column with no meaning. */
+const withProposals = (
+  object: RegistryObject,
+  mapping: Mapping,
+  rows: ImportRow[],
+  kind: ImportKind,
+): Mapping => {
+  if (kind !== 'records') return mapping
+  const samples = rows.slice(0, TYPE_SAMPLE_ROWS)
+  const taken = new Set(
+    Object.values(mapping).map((target) => (isNewProperty(target) ? target.key : target)).filter(Boolean) as string[],
+  )
+  const next: Mapping = { ...mapping }
+  for (const [header, target] of Object.entries(mapping)) {
+    if (target) continue
+    const proposal = proposeProperty(header, samples.map((row) => row[header] ?? ''))
+    if (!proposal || taken.has(proposal.key)) continue
+    // A key the object already has is a column that was only unmapped because the
+    // header did not read like the label. Mapping to it beats a second field
+    // holding the same thing under a name one character different.
+    next[header] = object.byKey.has(proposal.key) ? proposal.key : proposal
+    taken.add(proposal.key)
+  }
+  return next
+}
+
+/** The proposals a run still has to make, once and in one transaction, under the
+ *  group the migration puts everything it invented. Idempotent: a key that exists
+ *  by the time this runs is mapped rather than created, which is what makes a
+ *  second run of the same file create nothing. */
+const IMPORTED_GROUP = 'Imported from HubSpot'
+
+export const createProposedProperties = async (
+  ctx: AccountContext,
+  id: string,
+): Promise<{ created: number }> => {
+  const [run] = await withAccount(ctx, (tx) =>
+    tx
+      .select({ objectType: importRun.objectType, importKind: importRun.importKind, mapping: importRun.mapping })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .limit(1),
+  )
+  if (!run) throw new Error('That import no longer exists.')
+
+  const mapping = run.mapping as Mapping
+  const proposals = Object.entries(mapping).flatMap(([header, target]) =>
+    isNewProperty(target) ? [[header, target] as const] : [],
+  )
+  if (proposals.length === 0) return { created: 0 }
+
+  const { created } = await createFields(
+    ctx,
+    proposals.map(([, proposal]) => ({
+      objectKey: run.objectType,
+      key: proposal.key,
+      label: proposal.label,
+      type: proposal.type,
+      ...(proposal.options ? { options: proposal.options } : {}),
+      groupName: IMPORTED_GROUP,
+      source: 'import',
+    })),
+  )
+
+  // The mapping stops carrying proposals the moment the fields exist, so every
+  // chunk after this reads plain keys and starting the run twice creates nothing.
+  const settled: Mapping = { ...mapping }
+  for (const [header, proposal] of proposals) settled[header] = proposal.key
+  await withAccount(ctx, (tx) =>
+    tx.update(importRun).set({ mapping: settled, updatedAt: new Date() }).where(eq(importRun.id, id)),
+  )
+
+  return { created: created.length }
+}
+
 export const createImportRun = async (
   ctx: AccountContext,
   input: {
@@ -712,19 +870,20 @@ export const createImportRun = async (
       .orderBy(desc(importRun.createdAt))
       .limit(1)
 
-    const suggested = suggestMapping(
+    const suggested = withProposals(
       object,
-      input.headers,
-      presetFor(kind, object.key, input.source ?? null, input.headers),
+      suggestMapping(object, input.headers, presetFor(kind, object.key, input.source ?? null, input.headers)),
+      input.rows,
+      kind,
     )
 
     const [row] = await tx
       .insert(importRun)
       .values({
         accountId: ctx.accountId,
-        // Importing into a custom object comes with the import surface itself,
-        // in a later pass; object_type is an enum of the core three.
-        objectType: kind === 'activities' ? 'contact' : assertCore(object, 'be imported into'),
+        // A shape file is matched against contacts whatever it names; a record
+        // file carries its own object, which since 0066 may be an invented one.
+        objectType: kind === 'activities' ? 'contact' : object.key,
         importKind: kind,
         source: input.source ?? null,
         filename: input.filename,
@@ -912,15 +1071,18 @@ const splitOptions = (raw: string): string[] =>
     .filter(Boolean)
     .slice(0, 500)
 
-const IMPORT_OBJECTS = ['contact', 'company', 'deal']
-
 /** One property definition. This is the file that has to land before any record
  *  file does: three hundred and seventy-two columns cannot be imported into fields
  *  that do not exist. */
 const writeProperty = async (deps: ShapeDeps, values: Record<string, unknown>): Promise<RowOutcome> => {
   const objectKey = textOf(values, 'object_key').toLowerCase() || 'contact'
-  if (!IMPORT_OBJECTS.includes(objectKey)) {
-    return { error: `"${objectKey}" is not an object here. Applies to has to be contact, company or deal.` }
+  // From the registry, not a list of three: an invented object has properties
+  // like any other, and a property file is how a portal's arrive.
+  const registry = await getRegistry(deps.ctx)
+  if (!registry.byKey.has(objectKey)) {
+    return {
+      error: `"${objectKey}" is not an object here. Applies to has to be one of: ${registry.objects.map((entry) => entry.key).join(', ')}.`,
+    }
   }
   const label = textOf(values, 'label')
   if (!label) return { error: 'A property with no name cannot be created.' }
@@ -1338,6 +1500,9 @@ export const runImportChunk = async (
 export const startImportRun = async (ctx: AccountContext, id: string): Promise<void> => {
   assertCanWrite(ctx, 'import_run')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
+  // Before the first chunk, not during it: a column whose field appears halfway
+  // through the file is a column that imported nothing for the rows above it.
+  await createProposedProperties(ctx, id)
   const updated = await withAccount(ctx, (tx) =>
     tx
       .update(importRun)

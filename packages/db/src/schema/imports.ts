@@ -1,6 +1,6 @@
 import { index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, accountId } from './columns.ts'
-import { entityTypeEnum, importKindEnum, importStateEnum } from './enums.ts'
+import { importKindEnum, importStateEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
 
 /** A8. The run outlives the browser tab: an import of 90,000 rows is a server-side
@@ -10,7 +10,9 @@ export const importRun = pgTable(
   {
     id: pk(),
     accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
-    objectType: entityTypeEnum('object_type').notNull(),
+    /** The object's key, not one of three: `object_def` is what says which keys
+     *  exist, so a custom object can be imported into. */
+    objectType: text('object_type').notNull(),
     /** Records fill columns; activities land on the timeline of the record they
      *  name. An activity run still carries an object type, because the rows are
      *  matched to contacts or companies before they are written. */

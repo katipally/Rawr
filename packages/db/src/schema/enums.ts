@@ -274,13 +274,17 @@ export const fieldSourceEnum = pgEnum('rawr_field_source', [
   'product',
 ])
 
-/** B11. What starts an automation. Every one of these is an event Rawr already
- *  emits on a write, which is why none of them needs a scheduler. */
+/** B11. What starts an automation. The first four are events Rawr already emits
+ *  on a write, which is why none of them needs a scheduler. The last two are
+ *  absences that no write can announce, and an hourly scan finds them: a date
+ *  arriving, and a record that has gone quiet. */
 export const automationTriggerEnum = pgEnum('rawr_automation_trigger', [
   'record_created',
   'stage_changed',
   'lifecycle_changed',
   'form_submitted',
+  'date_reached',
+  'no_activity',
 ])
 
 /** `skipped` is the interesting one: the automation was armed, the event
@@ -305,4 +309,6 @@ export const notificationKindEnum = pgEnum('rawr_notification_kind', [
   'dead_letter',
   'integration_error',
   'mailbox_revoked',
+  'task_reminder',
+  'task_assigned',
 ])

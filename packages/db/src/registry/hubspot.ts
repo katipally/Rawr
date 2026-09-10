@@ -130,6 +130,7 @@ const fieldIn = (shape: string) => (
   helpText: null,
   position: 0,
   operators: operatorsFor(type),
+  conditional: null,
   ...extra,
 })
 

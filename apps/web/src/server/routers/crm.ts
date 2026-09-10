@@ -1,14 +1,19 @@
 import {
   ACTIVITY_GROUPS,
+  FIELD_TYPES,
   associate,
   bulkUpdateRecords,
+  readBulkOperation,
+  startBulkOperation,
   logByHand,
   LOGGABLE_TYPES,
   createRecord,
   createTask,
+  createTaskQueue,
   deleteLoggedEntry,
   deleteRecord,
   deleteTask,
+  deleteTaskQueue,
   editLoggedEntry,
   deleteView,
   duplicateView,
@@ -20,10 +25,12 @@ import {
   isActivityType,
   listRecords,
   listTasks,
+  listTaskQueues,
   listViews,
   mergeRecords,
   overdueNextSteps,
   readAssociations,
+  renameTaskQueue,
   renameView,
   reorderViews,
   setViewPinned,
@@ -51,6 +58,7 @@ import {
   setTaskStatus,
   timelineCounts,
   updateRecord,
+  updateTask,
   withAccount,
   schema,
   type UpdateResult,
@@ -627,6 +635,45 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) => call(() => dissociate(ctx.account, input.a, input.b))),
   }),
 
+  /** The bulk bar. One selection, one action, and the same DAL a single edit
+   *  goes through, so a bulk delete is the same soft delete with the same audit
+   *  row. Past the DAL's inline threshold the action is written down and the
+   *  worker runs it in chunks, because a person who has selected eighty thousand
+   *  records is not going to sit and watch. */
+  bulk: router({
+    start: protectedProcedure
+      .input(
+        z.object({
+          object: anyObject,
+          ids: z.array(z.uuid()).min(1).max(50_000),
+          action: z.discriminatedUnion('type', [
+            z.object({ type: z.literal('delete') }),
+            z.object({ type: z.literal('assign'), ownerId: z.uuid().nullable() }),
+            z.object({
+              type: z.literal('associate'),
+              target: entityRef,
+              label: z.string().max(80).nullish(),
+            }),
+            z.object({ type: z.literal('add_to_list'), listId: z.uuid() }),
+            z.object({ type: z.literal('merge'), survivorId: z.uuid() }),
+          ]),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() =>
+          startBulkOperation(ctx.account, {
+            objectKey: input.object,
+            ids: input.ids,
+            action: input.action as never,
+          }),
+        ),
+      ),
+
+    progress: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .query(({ ctx, input }) => call(() => readBulkOperation(ctx.account, input.id))),
+  }),
+
   tasks: router({
     list: protectedProcedure
       .input(
@@ -636,6 +683,8 @@ export const crmRouter = router({
           overdueOnly: z.boolean().optional(),
           due: z.enum(['today', 'upcoming']).optional(),
           entity: entityRef.optional(),
+          type: z.enum(schema.TASK_TYPES).optional(),
+          queueId: z.union([z.uuid(), z.literal('none')]).optional(),
         }),
       )
       .query(({ ctx, input }) => call(() => listTasks(ctx.account, input))),
@@ -645,12 +694,48 @@ export const crmRouter = router({
         z.object({
           title: z.string().trim().min(1).max(300),
           body: z.string().max(20_000).nullish(),
+          type: z.enum(schema.TASK_TYPES).optional(),
+          priority: z.enum(schema.TASK_PRIORITIES).optional(),
           dueDate: z.iso.date().nullish(),
+          remindAt: z.coerce.date().nullish(),
+          queueId: z.uuid().nullish(),
           assigneeId: z.uuid().nullish(),
           entity: entityRef.nullish(),
         }),
       )
       .mutation(({ ctx, input }) => call(() => createTask(ctx.account, input))),
+
+    update: protectedProcedure
+      .input(
+        z.object({
+          id: z.uuid(),
+          title: z.string().trim().min(1).max(300).optional(),
+          body: z.string().max(20_000).nullish(),
+          type: z.enum(schema.TASK_TYPES).optional(),
+          priority: z.enum(schema.TASK_PRIORITIES).optional(),
+          dueDate: z.iso.date().nullish(),
+          remindAt: z.coerce.date().nullish(),
+          queueId: z.uuid().nullish(),
+          assigneeId: z.uuid().nullish(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => updateTask(ctx.account, input))),
+
+    queues: router({
+      list: protectedProcedure.query(({ ctx }) => call(() => listTaskQueues(ctx.account))),
+
+      create: protectedProcedure
+        .input(z.object({ name: z.string().trim().min(1).max(120) }))
+        .mutation(({ ctx, input }) => call(() => createTaskQueue(ctx.account, input.name))),
+
+      rename: protectedProcedure
+        .input(z.object({ id: z.uuid(), name: z.string().trim().min(1).max(120) }))
+        .mutation(({ ctx, input }) => call(() => renameTaskQueue(ctx.account, input.id, input.name))),
+
+      remove: protectedProcedure
+        .input(z.object({ id: z.uuid() }))
+        .mutation(({ ctx, input }) => call(() => deleteTaskQueue(ctx.account, input.id))),
+    }),
 
     setStatus: protectedProcedure
       .input(z.object({ id: z.uuid(), status: z.enum(['open', 'done']) }))
@@ -700,7 +785,28 @@ export const crmRouter = router({
       .query(({ ctx, input }) => call(() => readImportRun(ctx.account, input.id))),
 
     setMapping: protectedProcedure
-      .input(z.object({ id: z.uuid(), mapping: z.record(z.string(), z.string().nullable()) }))
+      .input(
+        z.object({
+          id: z.uuid(),
+          // A column goes into a field, into a property the run will make, or
+          // nowhere. The third shape is what a migration spends most of its
+          // mapping on: three hundred and seventy-two columns, most of them new.
+          mapping: z.record(
+            z.string(),
+            z.union([
+              z.string(),
+              z.object({
+                create: z.literal(true),
+                key: z.string().trim().min(1).max(59),
+                label: z.string().trim().min(1).max(120),
+                type: z.enum(FIELD_TYPES),
+                options: z.array(z.string().max(120)).max(500).optional(),
+              }),
+              z.null(),
+            ]),
+          ),
+        }),
+      )
       .mutation(({ ctx, input }) => call(() => setImportMapping(ctx.account, input.id, input.mapping))),
 
     /** A mutation carrying an id, not a query carrying the file. As a GET it put

@@ -1,4 +1,4 @@
-import { canWrite, listImportRuns } from '@rawr/db'
+import { canWrite, getRegistry, listImportRuns } from '@rawr/db'
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -22,6 +22,9 @@ const ImportPage = async ({
   const { error } = await searchParams
   const ctx = contextFrom(session)
   const runs = await listImportRuns(ctx)
+  // From the registry rather than a list of three: an object an admin invented
+  // has records, and a migration arrives as a file of them like anything else.
+  const registry = await getRegistry(ctx)
   const allowed = canWrite(contextFrom(session), 'contact')
 
   return (
@@ -62,9 +65,11 @@ const ImportPage = async ({
           <p className="text-secondary">One-time import from a file, directly into the CRM.</p>
           <Field id="import-object" label="What is in the file">
             <Select id="import-object" name="object" defaultValue="contact">
-              <option value="contact">Contacts</option>
-              <option value="company">Companies</option>
-              <option value="deal">Deals</option>
+              {registry.objects.map((entry) => (
+                <option key={entry.key} value={entry.key}>
+                  {entry.namePlural}
+                </option>
+              ))}
               <option value="activities">Notes and logged emails</option>
               <option value="properties">Property definitions</option>
               <option value="associations">Deal contacts and companies</option>

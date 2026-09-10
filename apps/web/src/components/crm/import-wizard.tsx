@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, Button, buttonClass, Select, useToast } from '@rawr/ui'
+import { FIELD_TYPES, isNewProperty, type FieldType, type Mapping, type NewProperty } from '@rawr/db/registry'
+import { Alert, Button, buttonClass, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -9,6 +10,10 @@ import { formatNumber } from './value.tsx'
 /** How often a running import is asked where it got to. Short enough that the bar
  *  moves, long enough that a 90,000-row run is not thousands of requests. */
 const POLL_MS = 2_000
+
+/** The value the "Goes into" select carries for a column that has no field yet.
+ *  Not a field key, so it can never collide with one. */
+const CREATE = '\u0000create'
 
 export type MappableField = { key: string; label: string; isRequired: boolean }
 
@@ -19,8 +24,8 @@ export type ImportWizardProps = {
   headers: string[]
   sampleRows: Record<string, string>[]
   fields: MappableField[]
-  initialMapping: Record<string, string | null>
-  previousMapping: Record<string, string | null> | null
+  initialMapping: Mapping
+  previousMapping: Mapping | null
   totalRows: number
   state: string
   processedRows: number
@@ -38,6 +43,7 @@ type Preview = {
   willError: number
   checked: number
   total: number
+  newProperties: { header: string; label: string; type: string; options?: string[] }[]
   samples: { create: Record<string, string>[]; update: Record<string, string>[]; error: { row: number; reason: string; values: Record<string, string> }[] }
 }
 
@@ -59,7 +65,7 @@ export const ImportWizard = ({
 }: ImportWizardProps) => {
   const router = useRouter()
   const toast = useToast()
-  const [mapping, setMapping] = useState(initialMapping)
+  const [mapping, setMapping] = useState<Mapping>(initialMapping)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -103,9 +109,24 @@ export const ImportWizard = ({
     }
   }, [live.state, runId, router, toast])
 
-  // Two headers on one field is blocked in the mapper, before the dry run.
-  const duplicates = Object.entries(mapping).reduce<Record<string, string[]>>((acc, [header, key]) => {
-    if (!key) return acc
+  /** What the mapper opened with, so switching a column back to "Create
+   *  property" offers the same inferred name and type rather than an empty one. */
+  const proposalFor = (header: string): NewProperty | null => {
+    const initial = initialMapping[header]
+    return isNewProperty(initial) ? initial : null
+  }
+
+  const patchProposal = (header: string, patch: Partial<NewProperty>) =>
+    setMapping((current) => {
+      const target = current[header]
+      return isNewProperty(target) ? { ...current, [header]: { ...target, ...patch } } : current
+    })
+
+  // Two headers on one field is blocked in the mapper, before the dry run. A
+  // proposed property takes its key the moment the run starts, so it counts.
+  const duplicates = Object.entries(mapping).reduce<Record<string, string[]>>((acc, [header, target]) => {
+    if (!target) return acc
+    const key = isNewProperty(target) ? target.key : target
     acc[key] = [...(acc[key] ?? []), header]
     return acc
   }, {})
@@ -302,8 +323,11 @@ export const ImportWizard = ({
         </thead>
         <tbody>
           {headers.map((header) => {
-            const target = mapping[header] ?? ''
-            const clashing = target !== '' && (duplicates[target]?.length ?? 0) > 1
+            const target = mapping[header] ?? null
+            const proposal = isNewProperty(target) ? target : null
+            const mapped = typeof target === 'string' ? target : ''
+            const key = proposal ? proposal.key : mapped
+            const clashing = key !== '' && (duplicates[key]?.length ?? 0) > 1
             return (
               <tr key={header} className="border-b border-divider last:border-0">
                 <td className="px-3 py-1.5 align-middle break-words">{header}</td>
@@ -311,22 +335,61 @@ export const ImportWizard = ({
                   {sampleRows[0]?.[header] || <span className="text-secondary">empty</span>}
                 </td>
                 <td className="px-3 py-1.5 align-middle">
-                  <Select
-                    aria-label={`Field for ${header}`}
-                    aria-invalid={clashing}
-                    value={target}
-                    onChange={(event) =>
-                      setMapping((current) => ({ ...current, [header]: event.target.value || null }))
-                    }
-                  >
-                    <option value="">Do not import</option>
-                    {fields.map((field) => (
-                      <option key={field.key} value={field.key}>
-                        {field.label}
-                        {field.isRequired ? ' (required)' : ''}
-                      </option>
-                    ))}
-                  </Select>
+                  <div className="flex flex-col gap-1.5">
+                    <Select
+                      aria-label={`Field for ${header}`}
+                      aria-invalid={clashing}
+                      value={proposal ? CREATE : mapped}
+                      onChange={(event) =>
+                        setMapping((current) => ({
+                          ...current,
+                          [header]:
+                            event.target.value === CREATE
+                              ? (proposalFor(header) ?? null)
+                              : event.target.value || null,
+                        }))
+                      }
+                    >
+                      <option value="">Do not import</option>
+                      <option value={CREATE}>Create property</option>
+                      {fields.map((field) => (
+                        <option key={field.key} value={field.key}>
+                          {field.label}
+                          {field.isRequired ? ' (required)' : ''}
+                        </option>
+                      ))}
+                    </Select>
+
+                    {/* The proposal, editable where it stands. A migration is
+                        sixty-eight of these; a modal each is sixty-eight modals. */}
+                    {proposal ? (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <TextInput
+                          aria-label={`Name of the new property for ${header}`}
+                          value={proposal.label}
+                          onChange={(event) => patchProposal(header, { label: event.target.value })}
+                          className="w-auto min-w-32 flex-1"
+                        />
+                        <Select
+                          aria-label={`Type of the new property for ${header}`}
+                          value={proposal.type}
+                          onChange={(event) => patchProposal(header, { type: event.target.value as FieldType })}
+                          className="w-auto min-w-28 flex-1"
+                        >
+                          {FIELD_TYPES.map((candidate) => (
+                            <option key={candidate} value={candidate}>
+                              {candidate}
+                            </option>
+                          ))}
+                        </Select>
+                        {proposal.options && proposal.options.length > 0 ? (
+                          <span className="text-small text-secondary">
+                            {proposal.options.length} choice{proposal.options.length === 1 ? '' : 's'} from the file
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             )
@@ -376,6 +439,31 @@ export const ImportWizard = ({
               </div>
             ))}
           </dl>
+
+          {/* Properties are made once, before the first row, so this is a
+              separate promise from the row counts and worth saying on its own. */}
+          {preview.newProperties.length > 0 ? (
+            <div>
+              <p className="font-medium">
+                Creates {formatNumber(preview.newProperties.length)} propert
+                {preview.newProperties.length === 1 ? 'y' : 'ies'}
+              </p>
+              <p className="text-secondary">
+                Under the group "Imported from HubSpot", before the first row is written. A property
+                whose name is already taken is used rather than made again.
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {preview.newProperties.map((property) => (
+                  <li
+                    key={property.header}
+                    className="rounded-hs border border-line bg-fill px-2 py-0.5"
+                  >
+                    {property.label} <span className="text-secondary">{property.type}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           {/* What the counts are worth. Every row past the checked window is
               counted as a create, which is what a row nobody has looked at
