@@ -10,6 +10,7 @@ import { setTaskStatus } from '../src/dal/tasks.ts'
 import {
   claimEnrollmentRun,
   createStepTask,
+  directTracking,
   enroll,
   listEnrollments,
   listSequences,
@@ -20,6 +21,8 @@ import {
   saveSequence,
   saveSteps,
   setSequenceState,
+  setTrackingConsentRequired,
+  trackingAllowed,
   unsubscribeByToken,
 } from '../src/dal/sequences.ts'
 import { SANDBOX } from './fixture.ts'
@@ -194,6 +197,35 @@ try {
   const clicked = await recordClick(sales, linkToken, {})
   check(clicked === 'https://datasaur.ai/pricing', 'a click returns the stored URL, never one from the request', clicked ?? '')
   check((await recordClick(sales, `nope-${stamp}`, {})) === null, 'an unknown token redirects nowhere')
+
+  console.log('')
+  console.log('-- who may be measured --------------------------------------------')
+
+  // The rule itself, both ways round, because everything below rests on it.
+  check(trackingAllowed(false, null), 'silence is measurable when the account does not ask')
+  check(!trackingAllowed(true, null), 'and is not, when it does')
+  check(trackingAllowed(true, 'Allowed'), 'agreeing is enough even when the account asks')
+  check(!trackingAllowed(false, 'Never'), 'and refusing wins even when it does not')
+
+  check((await directTracking(sales, person.id)).allowed, 'a contact nobody asked is tracked by default')
+
+  await owner`update contact set tracking_consent = 'Never' where id = ${person.id}`
+  check(!(await directTracking(sales, person.id)).allowed, 'until they say never')
+
+  await owner`update contact set tracking_consent = 'Allowed' where id = ${person.id}`
+  await setTrackingConsentRequired(admin, true)
+  check((await directTracking(sales, person.id)).allowed, 'agreeing survives the account asking')
+
+  await owner`update contact set tracking_consent = null where id = ${person.id}`
+  check(!(await directTracking(sales, person.id)).allowed, 'and silence does not')
+
+  // No contact means nobody to have asked, so nothing is carried.
+  check(!(await directTracking(sales, null)).allowed, 'mail to a bare address is never tracked')
+
+  const gated = await claimEnrollmentRun(sales, enrollment!.id)
+  check(gated === null || gated.trackingAllowed === false, 'the worker is handed the refusal, not the rule')
+
+  await setTrackingConsentRequired(admin, false)
 
   console.log('')
   console.log('-- how it stops ---------------------------------------------------')

@@ -118,6 +118,17 @@ export const subscriptionStateEnum = pgEnum('rawr_subscription_state', [
   'unspecified',
 ])
 
+/** Whether a contact may be measured: pixel, click redirect, or neither.
+ *
+ *  Separate from `subscription_state` on purpose. Agreeing to hear from a company
+ *  is not agreeing to be counted, and ePrivacy treats the pixel as a device
+ *  access needing its own basis.
+ *
+ *  Only the two answers somebody can give. Nobody having asked is null, the same
+ *  as every other property left blank, and it resolves against the account's
+ *  `tracking_requires_consent`. */
+export const trackingConsentEnum = pgEnum('rawr_tracking_consent', ['Allowed', 'Never'])
+
 export const viewKindEnum = pgEnum('rawr_view_kind', [
   'table',
   'board',

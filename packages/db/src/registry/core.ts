@@ -31,6 +31,11 @@ export type CoreObject = {
 const LEAD_STATUS = ['New', 'Open', 'In Progress', 'Open Deal', 'Unqualified', 'Attempted to Contact', 'Connected', 'Bad Timing']
 const LEAD_SOURCE = ['Organic Search', 'Paid Search', 'Email Marketing', 'Social Media', 'Referrals', 'Other Campaigns', 'Direct Traffic', 'Offline Sources']
 const MARKETING_STATUS = ['Marketing contact', 'Non-marketing contact']
+// Matches the rawr_tracking_consent enum exactly: a select stores its own label,
+// so a value here that the type does not have is a failed write, not a bad label.
+// "Not set" is the editor's own empty option and writes null, which is what
+// nobody having been asked is.
+const TRACKING_CONSENT = ['Allowed', 'Never']
 const DEAL_TYPE = ['New Business', 'Existing Business', 'Renewal']
 const PRODUCT_OF_INTEREST = ['NLP Labeling', 'LLM Labs', 'Data Studio', 'Audio', 'OCR', 'Professional Services']
 
@@ -100,6 +105,7 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'country', label: 'Country/Region', type: 'text', columnName: 'country', position: 20 },
       { key: 'seniority', label: 'Seniority', type: 'text', columnName: 'seniority', position: 21 },
       { key: 'department', label: 'Department', type: 'text', columnName: 'department', position: 22 },
+      { key: 'tracking_consent', label: 'Email tracking', type: 'select', columnName: 'tracking_consent', options: TRACKING_CONSENT, trackChanges: true, position: 23 },
     ],
   },
   {

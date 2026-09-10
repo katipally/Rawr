@@ -26,6 +26,12 @@ export const account = pgTable('account', {
   seatLimit: integer('seat_limit'),
   /** Months of raw page views. A data-protection decision, so the company owns it. */
   activityRetentionMonths: integer('activity_retention_months').notNull().default(25),
+  /** Whether a contact must positively agree before mail to them carries a pixel
+   *  or a rewritten link. Off is the US default, where measurement is lawful
+   *  without asking; on is what ePrivacy expects, and makes an `unspecified`
+   *  contact untracked rather than tracked. A data-protection decision, so the
+   *  company owns it, like `activityRetentionMonths`. */
+  trackingRequiresConsent: boolean('tracking_requires_consent').notNull().default(false),
   /** Where sequence pixels and click redirects are served from. A dedicated host
    *  keeps sequence mail from carrying links on the app's own domain, which is
    *  what gets an app domain classified as bulk mail. */

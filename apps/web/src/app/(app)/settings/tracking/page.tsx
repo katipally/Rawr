@@ -1,4 +1,4 @@
-import { readTrackingDomain } from '@rawr/db'
+import { readTrackingConsentRequired, readTrackingDomain } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TrackingPanel } from './tracking-panel.tsx'
@@ -17,7 +17,11 @@ const TrackingPage = async () => {
     )
   }
 
-  const domain = await readTrackingDomain(contextFrom(session))
+  const ctx = contextFrom(session)
+  const [domain, consentRequired] = await Promise.all([
+    readTrackingDomain(ctx),
+    readTrackingConsentRequired(ctx),
+  ])
 
   return (
     <div className="flex flex-col gap-4">
@@ -28,12 +32,13 @@ const TrackingPage = async () => {
         why={
           <p>
             Sequence mail carries three: a one-pixel image that counts opens, a redirect that counts
-            clicks, and an unsubscribe link.
+            clicks, and an unsubscribe link. A mail written by hand to a contact carries the first
+            two, and only when that contact may be measured.
           </p>
         }
       />
 
-      <TrackingPanel domain={domain} />
+      <TrackingPanel domain={domain} consentRequired={consentRequired} />
     </div>
   )
 }

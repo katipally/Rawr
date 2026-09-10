@@ -144,9 +144,13 @@ export const sequenceSend = pgTable(
   {
     id: pk(),
     accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
-    enrollmentId: uuid('enrollment_id')
-      .notNull()
-      .references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
+    /** Null for a one-off mail sent by hand from a record. Every sequence report
+     *  joins through this column, so those rows fall out of sequence numbers
+     *  without a single query needing a filter. */
+    enrollmentId: uuid('enrollment_id').references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
+    /** Who it went to. Redundant for a sequence send, which reaches the contact
+     *  through its enrollment, and the only route to one for a one-off. */
+    contactId: uuid('contact_id').references(() => contact.id, { onDelete: 'set null' }),
     stepId: uuid('step_id').references(() => sequenceStep.id, { onDelete: 'set null' }),
     mailboxId: uuid('mailbox_id').references(() => mailbox.id, { onDelete: 'set null' }),
     /** The stored copy of what was sent, once the sync reads it back. */
@@ -172,6 +176,8 @@ export const sequenceSend = pgTable(
     index('sequence_send_mailbox_idx').on(t.accountId, t.mailboxId, t.sentAt),
     index('sequence_send_enrollment_idx').on(t.accountId, t.enrollmentId),
     index('sequence_send_internet_id_idx').on(t.accountId, t.internetMessageId),
+    // The record timeline asks for one contact's tracked mail, newest first.
+    index('sequence_send_contact_idx').on(t.accountId, t.contactId, t.sentAt.desc()),
   ],
 )
 
@@ -198,9 +204,8 @@ export const sequenceEvent = pgTable(
   {
     id: pk(),
     accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
-    enrollmentId: uuid('enrollment_id')
-      .notNull()
-      .references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
+    /** Null when the send it describes was a one-off rather than a step. */
+    enrollmentId: uuid('enrollment_id').references(() => sequenceEnrollment.id, { onDelete: 'cascade' }),
     sendId: uuid('send_id').references(() => sequenceSend.id, { onDelete: 'set null' }),
     kind: sequenceEventEnum('kind').notNull(),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),

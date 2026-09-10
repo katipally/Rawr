@@ -905,6 +905,9 @@ export type ClaimedRun = {
   /** How many this mailbox has already sent in the window's day. */
   sentToday: number
   trackingDomain: string | null
+  /** Resolved at claim time from the contact and the account, so the sender does
+   *  not repeat the rule and cannot reach a different answer. */
+  trackingAllowed: boolean
 }
 
 /** How long a claim is held. Long enough for a slow Gmail call and a token
@@ -963,6 +966,8 @@ export const claimEnrollmentRun = async (
       last_sent_at: Date | null
       sent_today: number
       tracking_domain: string | null
+      tracking_consent: TrackingConsent
+      tracking_requires_consent: boolean | null
     }>(sql`
       select e.id as enrollment_id, s.id as sequence_id, s.name as sequence_name, s.sender, s.settings,
              c.id as contact_id, c.email as contact_email, c.first_name, c.last_name,
@@ -971,9 +976,16 @@ export const claimEnrollmentRun = async (
              m.min_gap_seconds, m.send_window as mailbox_window,
              e.current_step, e.thread_id, t.provider_thread_id,
              e.root_internet_message_id, e.unsubscribe_token, e.last_sent_at,
+             -- Sequence sends only. A mail somebody wrote by hand also lands in
+             -- this table when it is tracked, and letting that eat the outreach
+             -- cap would make the cap depend on whether the recipient agreed to
+             -- a pixel.
              (select count(*) from sequence_send d
-               where d.mailbox_id = m.id and d.sent_at >= date_trunc('day', now()))::int as sent_today,
-             (select a.tracking_domain from account a limit 1) as tracking_domain
+               where d.mailbox_id = m.id and d.enrollment_id is not null
+                 and d.sent_at >= date_trunc('day', now()))::int as sent_today,
+             c.tracking_consent,
+             (select a.tracking_domain from account a limit 1) as tracking_domain,
+             (select a.tracking_requires_consent from account a limit 1) as tracking_requires_consent
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
         join contact c on c.id = e.contact_id
@@ -1028,6 +1040,7 @@ export const claimEnrollmentRun = async (
       step: step ?? null,
       sentToday: Number(row.sent_today),
       trackingDomain: row.tracking_domain,
+      trackingAllowed: trackingAllowed(row.tracking_requires_consent ?? false, row.tracking_consent),
     }
   })
 
@@ -1073,6 +1086,7 @@ export const recordSend = async (
       .values({
         accountId: ctx.accountId,
         enrollmentId: input.enrollmentId,
+        contactId: input.contactId,
         stepId: input.stepId,
         mailboxId: input.mailboxId,
         providerMessageId: input.providerMessageId,
@@ -1429,6 +1443,100 @@ export const onUnsubscribe = async (
 
 // ------------------------------------------------------------------ tracking
 
+export type TrackingConsent = 'Allowed' | 'Never' | null
+
+/** Whether this contact's mail may carry a pixel and rewritten links.
+ *
+ *  One rule, called on both send paths, because a gate that two callers each
+ *  decide for themselves is a gate that eventually disagrees with itself. A
+ *  refusal is absolute; silence means whatever the account says silence means. */
+export const trackingAllowed = (requiresConsent: boolean, consent: TrackingConsent): boolean =>
+  consent === 'Never' ? false : consent === 'Allowed' ? true : !requiresConsent
+
+export type DirectTracking = { allowed: boolean; trackingDomain: string | null }
+
+/** What a mail composed by hand may carry, answered before it is built.
+ *
+ *  A contact the sender did not name cannot be measured: with nobody to ask, the
+ *  answer is no. That is the same reasoning as `unspecified` under a consent
+ *  requirement, applied to a missing row rather than a silent one. */
+export const directTracking = async (
+  ctx: AccountContext,
+  contactId: string | null | undefined,
+): Promise<DirectTracking> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{
+      contact_id: string | null
+      tracking_consent: TrackingConsent
+      tracking_requires_consent: boolean | null
+      tracking_domain: string | null
+    }>(sql`
+      select c.id as contact_id,
+             c.tracking_consent,
+             a.tracking_requires_consent,
+             a.tracking_domain
+        from account a
+        left join contact c on c.id = ${contactId ?? null}::uuid
+       limit 1
+    `)
+    return {
+      // The contact's own id, not its consent, is what says a contact was found:
+      // a row that exists with nothing recorded is silence, which the account
+      // flag answers, and that is a different thing from having nobody to ask.
+      allowed: row?.contact_id
+        ? trackingAllowed(row.tracking_requires_consent ?? false, row.tracking_consent)
+        : false,
+      trackingDomain: row?.tracking_domain ?? null,
+    }
+  })
+
+/** The send row a one-off mail's pixel and links point back to.
+ *
+ *  The same table a sequence step writes, so the pixel route, the click redirect,
+ *  the dedup and the retention all keep working untouched. No enrollment, which
+ *  is what keeps these rows out of every sequence rollup: they all inner join
+ *  through it. */
+export const recordDirectSend = async (
+  ctx: AccountContext,
+  input: {
+    contactId: string
+    mailboxId: string
+    providerMessageId: string | null
+    internetMessageId: string | null
+    messageId?: string | null | undefined
+    token: string
+    links: { token: string; url: string }[]
+  },
+): Promise<string | null> =>
+  withAccount(ctx, async (tx) => {
+    const [send] = await tx
+      .insert(sequenceSend)
+      .values({
+        accountId: ctx.accountId,
+        enrollmentId: null,
+        contactId: input.contactId,
+        mailboxId: input.mailboxId,
+        providerMessageId: input.providerMessageId,
+        internetMessageId: input.internetMessageId,
+        messageId: input.messageId ?? null,
+        token: input.token,
+      })
+      .returning({ id: sequenceSend.id })
+    if (!send) return null
+
+    if (input.links.length > 0) {
+      await tx.insert(sequenceLink).values(
+        input.links.map((link) => ({
+          accountId: ctx.accountId,
+          sendId: send.id,
+          token: link.token,
+          url: link.url,
+        })),
+      )
+    }
+    return send.id
+  })
+
 export type OpenMeta = { userAgent?: string | null | undefined; ip?: string | null | undefined }
 
 /** A pixel fetch. Counted, never deduplicated: "opened four times" is a real
@@ -1574,7 +1682,7 @@ export const windowFor = (run: ClaimedRun): SendWindow => run.mailboxWindow ?? r
 /** Where a pixel, a click and an unsubscribe link point. The tracking domain when
  *  one is set, because sequence mail carrying links on the app's own domain is
  *  how an app domain gets classified as bulk. */
-export const trackingBase = (run: ClaimedRun, fallback: string): string =>
+export const trackingBase = (run: { trackingDomain: string | null }, fallback: string): string =>
   run.trackingDomain ? `https://${run.trackingDomain}` : fallback
 
 export const setTrackingDomain = async (ctx: AccountContext, domain: string | null): Promise<void> =>
@@ -1593,6 +1701,32 @@ export const readTrackingDomain = async (ctx: AccountContext): Promise<string | 
       sql`select tracking_domain from account limit 1`,
     )
     return row?.tracking_domain ?? null
+  })
+
+export const readTrackingConsentRequired = async (ctx: AccountContext): Promise<boolean> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx.execute<{ tracking_requires_consent: boolean }>(
+      sql`select tracking_requires_consent from account limit 1`,
+    )
+    return row?.tracking_requires_consent ?? false
+  })
+
+/** Turning this on stops measuring everybody who has not been asked. It does not
+ *  touch what is already recorded: an open counted last week was lawful when it
+ *  was counted, and deleting it would be rewriting a record rather than
+ *  respecting a preference. */
+export const setTrackingConsentRequired = async (ctx: AccountContext, required: boolean): Promise<void> =>
+  mutate(ctx, 'account', async (tx) => {
+    await tx.execute(sql`update account set tracking_requires_consent = ${required}`)
+    return {
+      result: undefined,
+      audit: {
+        entity: 'account',
+        entityId: ctx.accountId,
+        action: 'set_tracking_consent_required',
+        after: { required },
+      },
+    }
   })
 
 /** Which account a tracking token belongs to.

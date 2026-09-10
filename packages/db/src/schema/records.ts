@@ -15,7 +15,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { createdAt, pk, searchVector, tsvector, updatedAt, accountId } from './columns.ts'
-import { activityTypeEnum, actorKindEnum, taskStatusEnum } from './enums.ts'
+import { activityTypeEnum, actorKindEnum, taskStatusEnum, trackingConsentEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
 
 export const lifecycleStage = pgTable(
@@ -107,6 +107,12 @@ export const contact = pgTable(
     leadSource: text('lead_source'),
     /** HubSpot's Marketing Contact Status. Shape parity is a design constraint, D9. */
     marketingStatus: text('marketing_status'),
+    /** Whether this person may be measured. Null is nobody having asked, and
+     *  defers to the account's `trackingRequiresConsent`, so one row can override
+     *  a company default in either direction without the default being copied
+     *  onto every contact. Readable values because this is a CRM property people
+     *  pick from a list, the same as `marketingStatus`. */
+    trackingConsent: trackingConsentEnum('tracking_consent'),
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),

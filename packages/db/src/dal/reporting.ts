@@ -328,6 +328,10 @@ export const sequencesReport = async (ctx: AccountContext, range: Range): Promis
         from sequence_send d
         left join mailbox m on m.id = d.mailbox_id
        where ${bounds(range, 'd.sent_at')}
+         -- The sequence rollup above joins enrollment and so excludes one-off
+         -- mail already; this one has to say it, or a tracked reply somebody
+         -- typed by hand would count as outreach from that mailbox.
+         and d.enrollment_id is not null
        group by 1
        order by 2 desc
        limit ${MAX_ROWS}`)

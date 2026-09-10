@@ -8,12 +8,14 @@ import {
   listSequences,
   pauseEnrollment,
   readSequence,
+  readTrackingConsentRequired,
   readTrackingDomain,
   removeEnrollment,
   resumeEnrollment,
   saveSequence,
   saveSteps,
   setSequenceState,
+  setTrackingConsentRequired,
   setTrackingDomain,
 } from '@rawr/db'
 import { z } from 'zod'
@@ -169,5 +171,9 @@ export const sequencesRouter = router({
     set: adminProcedure
       .input(z.object({ domain: z.string().trim().max(200).nullable() }))
       .mutation(({ ctx, input }) => call(() => setTrackingDomain(ctx.account, input.domain))),
+    consentRequired: protectedProcedure.query(({ ctx }) => call(() => readTrackingConsentRequired(ctx.account))),
+    setConsentRequired: adminProcedure
+      .input(z.object({ required: z.boolean() }))
+      .mutation(({ ctx, input }) => call(() => setTrackingConsentRequired(ctx.account, input.required))),
   }),
 })

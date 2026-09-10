@@ -27,8 +27,10 @@ export const gmailSender: Sender = {
       trackingBase: base,
       unsubscribeToken: run.unsubscribeToken,
       sendToken,
-      trackOpens: run.settings.trackOpens,
-      trackClicks: run.settings.trackClicks,
+      // The sequence says whether to measure; the recipient says whether they may
+      // be measured. Both have to agree, and the recipient is the one who can veto.
+      trackOpens: run.settings.trackOpens && run.trackingAllowed,
+      trackClicks: run.settings.trackClicks && run.trackingAllowed,
     })
 
     const fetcher = await gmailFetcherFor(ctx, run.mailboxId)

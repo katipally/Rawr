@@ -61,7 +61,7 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'About this contact', fieldKeys: ['first_name', 'last_name', 'email', 'phone', 'title', 'seniority', 'department', 'linkedin_url', 'city', 'country'] },
     { title: 'Ownership and status', fieldKeys: ['owner_id', 'company_id', 'lifecycle_stage_id', 'lead_status'] },
     { title: 'Where they came from', fieldKeys: ['lead_source', 'marketing_status', 'original_source', 'latest_source'] },
-    { title: 'Email engagement', fieldKeys: ['last_contacted_at', 'last_replied_at', 'emails_sent', 'emails_received'] },
+    { title: 'Email engagement', fieldKeys: ['tracking_consent', 'last_contacted_at', 'last_replied_at', 'emails_sent', 'emails_received'] },
     { title: 'Record', fieldKeys: ['created_at'] },
   ],
   company: [

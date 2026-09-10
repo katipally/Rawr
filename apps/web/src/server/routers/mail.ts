@@ -137,8 +137,10 @@ export const mailRouter = router({
     )
     .query(({ ctx, input }) => call(() => listInboxThreads(ctx.account, input ?? {}))),
 
-  /** One email, by hand, from the caller's own mailbox. No pixel and no rewritten
-   *  links: a person writing to one person is correspondence, not a campaign. */
+  /** One email, by hand, from the caller's own mailbox. Tracked only when it is
+   *  addressed to a contact who may be tracked; to a bare address it carries
+   *  nothing. Never an unsubscribe footer: this is correspondence, not a
+   *  campaign. */
   compose: protectedProcedure
     .input(
       z.object({
