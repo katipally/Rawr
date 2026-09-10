@@ -1,11 +1,16 @@
 import {
+  cloneForm,
   confirmSpam,
+  deleteFormFolder,
   FORM_FIELD_TYPES,
   getForm,
+  listFormFolders,
   listForms,
   listSubmissions,
+  moveFormToFolder,
   releaseSubmission,
   saveForm,
+  saveFormFolder,
   type FormField,
   deleteForm,
   readSettings,
@@ -97,6 +102,26 @@ export const formsRouter = router({
   remove: protectedProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) => call(() => deleteForm(ctx.account, input.id))),
+
+  clone: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => cloneForm(ctx.account, input.id))),
+
+  folders: protectedProcedure.query(({ ctx }) => call(() => listFormFolders(ctx.account))),
+
+  saveFolder: protectedProcedure
+    .input(z.object({ id: z.uuid().nullable().optional(), name: z.string().max(120) }))
+    .mutation(({ ctx, input }) =>
+      call(() => saveFormFolder(ctx.account, { id: input.id ?? null, name: input.name })),
+    ),
+
+  removeFolder: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => deleteFormFolder(ctx.account, input.id))),
+
+  moveToFolder: protectedProcedure
+    .input(z.object({ formId: z.uuid(), folderId: z.uuid().nullable() }))
+    .mutation(({ ctx, input }) => call(() => moveFormToFolder(ctx.account, input))),
 
   submissions: protectedProcedure
     .input(

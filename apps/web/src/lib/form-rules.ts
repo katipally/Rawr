@@ -113,7 +113,105 @@ export function clientFieldError(field: ClientField, value: unknown): string | n
   return null
 }
 
-/** The function's own source, for inlining into the embed script. Taking it from
+/** Whether one conditional rule matches, given the sibling values it names.
+ *
+ *  Mirrors `matchesConditional` in packages/db/src/registry/conditional.ts, which
+ *  is what the submit path re-runs. Same invariant as the check above: the
+ *  browser must never hide a field the server would have asked for, or somebody
+ *  is refused for leaving blank a question they were never shown. */
+export function clientRuleMatches(
+  rule: { conjunction?: string; conditions?: { field: string; operator: string; value?: unknown }[] },
+  values: Record<string, unknown>,
+): boolean {
+  var conditions = (rule && rule.conditions) || []
+  if (conditions.length === 0) return true
+
+  function text(value: unknown): string {
+    return String(value == null ? '' : value).replace(/^\s+|\s+$/g, '')
+  }
+
+  function comparable(value: string): number | null {
+    if (value === '') return null
+    var asNumber = Number(value)
+    if (isFinite(asNumber) && value !== '') return asNumber
+    var asTime = Date.parse(value)
+    return isNaN(asTime) ? null : asTime
+  }
+
+  function one(condition: { field: string; operator: string; value?: unknown }): boolean {
+    var actual = values[condition.field]
+    var held: string[] = []
+    if (Object.prototype.toString.call(actual) === '[object Array]') {
+      for (var i = 0; i < (actual as unknown[]).length; i++) held.push(text((actual as unknown[])[i]))
+    } else {
+      held.push(text(actual))
+    }
+
+    var empty = true
+    for (var e = 0; e < held.length; e++) if (held[e] !== '') empty = false
+    if (condition.operator === 'is_empty') return empty
+    if (condition.operator === 'is_not_empty') return !empty
+    if (empty) return false
+
+    var wanted: string[] = []
+    if (Object.prototype.toString.call(condition.value) === '[object Array]') {
+      var list = condition.value as unknown[]
+      for (var w = 0; w < list.length; w++) wanted.push(text(list[w]))
+    } else {
+      wanted.push(text(condition.value))
+    }
+
+    var lower: string[] = []
+    for (var l = 0; l < held.length; l++) lower.push(String(held[l]).toLowerCase())
+    var first = (wanted[0] || '').toLowerCase()
+
+    function includes(value: string): boolean {
+      for (var n = 0; n < lower.length; n++) if (lower[n] === value) return true
+      return false
+    }
+
+    if (condition.operator === 'is') return includes(first)
+    if (condition.operator === 'is_not') return !includes(first)
+    if (condition.operator === 'contains' || condition.operator === 'not_contains') {
+      var found = false
+      for (var c = 0; c < lower.length; c++) if (String(lower[c]).indexOf(first) !== -1) found = true
+      return condition.operator === 'contains' ? found : !found
+    }
+    if (condition.operator === 'starts_with') {
+      for (var s = 0; s < lower.length; s++) if (String(lower[s]).indexOf(first) === 0) return true
+      return false
+    }
+    if (condition.operator === 'in' || condition.operator === 'not_in') {
+      var any = false
+      for (var v = 0; v < wanted.length; v++) if (includes(String(wanted[v]).toLowerCase())) any = true
+      return condition.operator === 'in' ? any : !any
+    }
+    if (condition.operator === 'between') {
+      var n0 = Number(held[0])
+      return isFinite(n0) && n0 >= Number(wanted[0]) && n0 <= Number(wanted[1] || '')
+    }
+
+    var left = comparable(held[0] || '')
+    var right = comparable(wanted[0] || '')
+    if (left === null || right === null) return false
+    if (condition.operator === 'gt' || condition.operator === 'after') return left > right
+    if (condition.operator === 'gte' || condition.operator === 'on_or_after') return left >= right
+    if (condition.operator === 'lt' || condition.operator === 'before') return left < right
+    return left <= right
+  }
+
+  var or = rule.conjunction === 'or'
+  for (var index = 0; index < conditions.length; index++) {
+    var matched = one(conditions[index] as { field: string; operator: string; value?: unknown })
+    if (or && matched) return true
+    if (!or && !matched) return false
+  }
+  return !or
+}
+
+/** The functions' own source, for inlining into the embed script. Taking it from
  *  the function rather than repeating it is the whole point: there is one
  *  implementation, and the browser runs the one the tests ran. */
 export const clientFieldErrorSource = (): string => clientFieldError.toString()
+
+export const clientRuleMatchesSource = (): string => clientRuleMatches.toString()

@@ -1,3 +1,4 @@
+import { matchesConditional, readConditional, type Conditional } from '../registry/conditional.ts'
 import type { ObjectKey } from '../registry/core.ts'
 
 /** The field types a form can offer. A subset of the registry's nineteen: a form
@@ -375,4 +376,60 @@ export const isVisible = (field: FormField, answers: Record<string, unknown>): b
   const actual = answers[condition.field]
   if (Array.isArray(actual)) return actual.map(String).includes(condition.equals)
   return String(actual ?? '') === condition.equals
+}
+
+/** The conditional rules on the properties this form writes to, keyed the way a
+ *  field names its target: "contact.industry".
+ *
+ *  Resolved with the form rather than stored on it. A rule belongs to the
+ *  property, so a marketer who changes it in settings changes every form that
+ *  asks for that property, which is the whole point of the rule living there. */
+export type PropertyRules = Record<string, Conditional>
+
+export const readPropertyRules = (raw: unknown): PropertyRules => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const rules: PropertyRules = {}
+  for (const [target, value] of Object.entries(raw as Record<string, unknown>)) {
+    const rule = readConditional(value)
+    if (rule) rules[target] = rule
+  }
+  return rules
+}
+
+/** A rule names sibling properties, not form fields, so the answers have to be
+ *  re-keyed before it can be evaluated: one map per object, keyed by property. */
+const byProperty = (
+  fields: FormField[],
+  answers: Record<string, unknown>,
+): Record<string, Record<string, unknown>> => {
+  const objects: Record<string, Record<string, unknown>> = {}
+  for (const field of fields) {
+    const target = field.mapsTo?.split('.')
+    if (!target || target.length !== 2) continue
+    const [object, property] = target as [string, string]
+    objects[object] ??= {}
+    ;(objects[object] as Record<string, unknown>)[property] = answers[field.key]
+  }
+  return objects
+}
+
+/** Whether a form asks this field at all, given the answers so far.
+ *
+ *  Two rules, both re-run on the server rather than trusted: the form's own
+ *  `visibleIf`, and the conditional logic on the property the answer becomes.
+ *  A property whose rule references something this form never asks is compared
+ *  against an empty answer, which is what it is: the form did not collect it. */
+export const askedFields = (
+  fields: FormField[],
+  answers: Record<string, unknown>,
+  rules: PropertyRules,
+): FormField[] => {
+  const values = Object.keys(rules).length > 0 ? byProperty(fields, answers) : {}
+  return fields.filter((field) => {
+    if (!isVisible(field, answers)) return false
+    const rule = field.mapsTo ? rules[field.mapsTo] : undefined
+    if (!rule) return true
+    const [object = ''] = field.mapsTo?.split('.') ?? []
+    return matchesConditional(rule, values[object] ?? {})
+  })
 }

@@ -83,6 +83,7 @@ const BuilderPage = async ({
         .map((field) => ({
           value: `${object.key}.${field.key}`,
           label: `${object.nameSingular} · ${field.label}`,
+          conditional: field.conditional !== null,
         })),
     )
 
@@ -95,7 +96,7 @@ const BuilderPage = async ({
       subscriptions={subscriptions.map((type) => ({ name: type.name, isInternal: type.isInternal }))}
       baseUrl={publicBaseUrl}
       canEdit={canEdit}
-      slackIsWebhook={slack?.webhookUrl != null}
+      slack={slack === null ? 'none' : slack.webhookUrl != null ? 'webhook' : 'bot'}
     />
   )
 }

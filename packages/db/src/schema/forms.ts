@@ -2,10 +2,12 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -16,11 +18,27 @@ import { spamStateEnum } from './enums.ts'
 import { account } from './identity.ts'
 import { company, contact } from './records.ts'
 
+/** Where a marketer files a form. A folder is a place, not a filter: a form sits
+ *  in at most one, so it is a column on the form rather than a join table, and
+ *  deleting a folder empties it rather than deleting the forms inside it. */
+export const formFolder = pgTable(
+  'form_folder',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('form_folder_name_idx').on(t.accountId, sql`lower(${t.name})`)],
+)
+
 export const form = pgTable(
   'form',
   {
     id: pk(),
     accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    folderId: uuid('folder_id').references(() => formFolder.id, { onDelete: 'set null' }),
     name: text('name').notNull(),
     /** The public address is /f/:slug, so the slug is the identity a marketer
      *  pastes into Webflow, not the uuid. */
@@ -33,7 +51,40 @@ export const form = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('form_slug_key').on(t.accountId, t.slug)],
+  (t) => [
+    uniqueIndex('form_slug_key').on(t.accountId, t.slug),
+    index('form_folder_member_idx').on(t.accountId, t.folderId),
+  ],
+)
+
+/** What a form did on one page on one day, as three counters rather than three
+ *  logs. Upserted by the embed beacon and by the hosted page, so a form seen ten
+ *  thousand times is ten thousand increments of one row.
+ *
+ *  `views` is the hosted page's own count: the collector never runs there, so a
+ *  page view of /form has nowhere else to be recorded. An embedded form takes
+ *  that step of the funnel from `page_view` on these paths instead.
+ *
+ *  Names no visitor and carries no id, which is why it is not consent gated and
+ *  why the conversion rate it produces is not quietly missing the people who
+ *  declined analytics. */
+export const formView = pgTable(
+  'form_view',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    formId: uuid('form_id')
+      .notNull()
+      .references(() => form.id, { onDelete: 'cascade' }),
+    day: date('day').notNull(),
+    pagePath: text('page_path').notNull(),
+    views: integer('views').notNull().default(0),
+    renders: integer('renders').notNull().default(0),
+    interactions: integer('interactions').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.formId, t.day, t.pagePath] }),
+    index('form_view_day_idx').on(t.accountId, t.day, t.formId),
+  ],
 )
 
 export const formSubmission = pgTable(

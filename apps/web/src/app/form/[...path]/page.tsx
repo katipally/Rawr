@@ -1,4 +1,5 @@
 import {
+  countFormView,
   HONEYPOT_FIELD,
   publicFormById,
   publicFormBySlug,
@@ -10,6 +11,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 import { PendingButton } from '~/components/pending-button.tsx'
+import { inBackground } from '~/server/background.ts'
 import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
 import { presetOf, themeCss } from '~/lib/embed-themes.ts'
@@ -78,6 +80,21 @@ const HostedFormPage = async ({
   const errors = parseErrors(single('e'))
   const sent = single('sent') === '1'
   const held = single('held') === '1'
+
+  // The collector never runs here, so this is the only place a load of the
+  // hosted page can be counted. Both steps at once: the page is the form, so
+  // there is no gap between loading one and seeing the other. Not awaited, and
+  // never allowed to fail the page: a counter is not worth a blank form.
+  if (!sent) {
+    inBackground(`form view ${form.formId}`, () =>
+      countFormView({
+        accountId: form.accountId,
+        formId: form.formId,
+        pagePath: `/form/${path.join('/')}`,
+        kinds: ['view', 'render'],
+      }),
+    )
+  }
 
   // Rendered inside the app's root layout, which already provides the document
   // and the font. Only the page's own styles are injected here.

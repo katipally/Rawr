@@ -13,6 +13,15 @@ import {
   publicEdgeContext,
   publicFormById,
   publicFormBySlug,
+  cloneForm,
+  countFormView,
+  deleteFormFolder,
+  formPerformance,
+  getForm,
+  listFormFolders,
+  moveFormToFolder,
+  saveFormFolder,
+  type FormField,
   QUARANTINE_AT,
   readAttribution,
   readSchema,
@@ -446,6 +455,97 @@ try {
   // The hosted page's rate limiter reads the right end of x-forwarded-for, which
   // is web-layer code this suite cannot import. Covered by
   // apps/web/src/server/edge.test.ts, with a forged left entry.
+
+
+  // ------------------------------------------------- folders, clone, counters
+  section('folders, clone and the performance counters')
+
+  // Everything in this section reads columns and a function that 0075 adds. Until
+  // the orchestrator applies it these fail, and they are the checks that prove it
+  // landed.
+  const folderId = await saveFormFolder(admin, { name: `Campaigns ${stamp}` })
+  check('a folder is created', /^[0-9a-f-]{36}$/i.test(folderId), folderId.slice(0, 8))
+  check('two folders cannot share a name, whatever the case',
+    await refusesAsync(() => saveFormFolder(admin, { name: `campaigns ${stamp}` })),
+    'refused by name, case-insensitively')
+
+  const announcedId = (await publicFormBySlug(SANDBOX.slug, `announced-${stamp}`))!.formId
+  await moveFormToFolder(admin, { formId: announcedId, folderId })
+  const filed = (await listFormFolders(admin)).find((entry) => entry.id === folderId)
+  check('the folder counts the form filed into it', filed?.forms === 1, `${filed?.forms ?? 0} forms`)
+
+  await deleteFormFolder(admin, folderId)
+  const orphaned = (await listForms(admin)).find((row) => row.id === announcedId)
+  check('deleting a folder empties it and leaves the form alone',
+    orphaned !== undefined && orphaned.folderId === null, 'form kept, folder reference cleared')
+
+  const copyId = await cloneForm(admin, announcedId)
+  const copy = await getForm(admin, copyId)
+  const original = await getForm(admin, announcedId)
+  check('a clone copies the questions and the settings',
+    copy !== null && original !== null &&
+      JSON.stringify(copy.fields) === JSON.stringify(original.fields) &&
+      copy.settings.slackChannel === original.settings.slackChannel,
+    `${copy?.fields.length ?? 0} fields copied`)
+  check('a clone takes a free address and starts turned off',
+    copy !== null && copy.slug !== original?.slug && copy.isActive === false,
+    `${copy?.slug ?? 'no slug'}, published ${copy?.isActive ?? 'unknown'}`)
+
+  await countFormView({ accountId: datasaur.accountId, formId: announcedId, pagePath: '/pricing', kinds: ['view', 'render'] })
+  await countFormView({ accountId: datasaur.accountId, formId: announcedId, pagePath: '/pricing', kinds: ['render'] })
+  await countFormView({ accountId: datasaur.accountId, formId: announcedId, pagePath: '/pricing', kinds: ['interaction'] })
+  await countFormView({ accountId: datasaur.accountId, formId: announcedId, pagePath: '/contact', kinds: ['render'] })
+
+  const counted = await scoped<{ rows: number; views: number; renders: number; interactions: number }>(datasaur, sql`
+    select count(*)::int as rows,
+           coalesce(sum(views), 0)::int as views,
+           coalesce(sum(renders), 0)::int as renders,
+           coalesce(sum(interactions), 0)::int as interactions
+      from form_view where form_id = ${announcedId}`)
+  check('four beacons over two paths are two rows, not four',
+    counted[0]?.rows === 2, `${counted[0]?.rows ?? 0} rows`)
+  check('the three counters add up rather than overwrite each other',
+    counted[0]?.views === 1 && counted[0]?.renders === 3 && counted[0]?.interactions === 1,
+    `${counted[0]?.views} views, ${counted[0]?.renders} renders, ${counted[0]?.interactions} interactions`)
+
+  const today = new Date().toISOString().slice(0, 10)
+  const performance = await formPerformance(admin, { formId: announcedId, from: today, to: today })
+  check('the performance tab counts the views the beacons reported',
+    performance?.totals.renders === 3, `${performance?.totals.renders ?? 0} renders`)
+  check('"appears on" is the distinct paths the form rendered on',
+    performance?.appearsOn.length === 2, (performance?.appearsOn ?? []).join(', ') || 'none')
+  check('the submission this form already took is counted, and its contact was new',
+    (performance?.totals.submissions ?? 0) >= 1 && (performance?.contactType.created ?? 0) >= 1,
+    `${performance?.totals.submissions ?? 0} submissions, ${performance?.contactType.created ?? 0} new contacts`)
+  check('a form nobody else can see is refused a performance read',
+    (await formPerformance(probe, { formId: announcedId, from: today, to: today })) === null,
+    'the other tenant sees no such form')
+
+  // ------------------------------------------------- conditional properties
+  section('conditional property logic on the public form')
+
+  const conditioned = await publicFormBySlug(SANDBOX.slug, 'contact-us')
+  check('the public resolver ships the rules alongside the schema',
+    conditioned !== null && typeof conditioned.rules === 'object',
+    `${Object.keys(conditioned?.rules ?? {}).length} rules on this form`)
+
+  const ruled: FormField[] = [
+    { key: 'email', label: 'Email', type: 'email', required: true, mapsTo: 'contact.email' },
+    { key: 'industry', label: 'Industry', type: 'text', required: false, mapsTo: 'contact.industry' },
+    { key: 'seats', label: 'Seats', type: 'number', required: true, mapsTo: 'contact.seats' },
+  ]
+  const seatsRule = {
+    'contact.seats': { conjunction: 'and' as const, conditions: [{ field: 'industry', operator: 'is' as const, value: 'SaaS' }] },
+  }
+  const notAsked = validateAnswers(ruled, { email: 'a@verify-corp.example', industry: 'Retail' }, seatsRule)
+  check('a required question the property rule hides is not demanded',
+    notAsked.errors.length === 0, `${notAsked.errors.length} errors`)
+  const asked = validateAnswers(ruled, { email: 'a@verify-corp.example', industry: 'SaaS' }, seatsRule)
+  check('the same question is required once the rule matches',
+    asked.errors[0]?.key === 'seats', asked.errors[0]?.message ?? 'nothing refused')
+  const forced = validateAnswers(ruled, { email: 'a@verify-corp.example', industry: 'Retail', seats: '40' }, seatsRule)
+  check('an answer posted past a hidden question is discarded, not written',
+    forced.answers.seats === undefined, JSON.stringify(forced.answers))
 
   // ---------------------------------------------------------------- roles
   section('roles and tenancy')

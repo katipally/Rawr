@@ -37,6 +37,10 @@ export const GET = async (
     {
       name: form.name,
       fields: form.fields,
+      // Conditional logic on the properties the answers become. The submit path
+      // re-runs these, so this is only so a visitor is not asked a question the
+      // rule would have discarded the answer to.
+      rules: form.rules,
       settings: {
         submitLabel: form.settings.submitLabel,
         steps: form.settings.steps ?? null,

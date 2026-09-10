@@ -1,5 +1,11 @@
 import { normaliseEmail } from './domains.ts'
-import { DISPLAY_TYPES, FORM_RESERVED_KEYS, isVisible, type FormField } from './form-schema.ts'
+import {
+  askedFields,
+  DISPLAY_TYPES,
+  FORM_RESERVED_KEYS,
+  type FormField,
+  type PropertyRules,
+} from './form-schema.ts'
 
 export type FieldError = { key: string; message: string }
 
@@ -33,8 +39,16 @@ const asList = (raw: unknown): string[] => {
  *  rather than stored, so a bot cannot append fields of its own. And visibility
  *  is recomputed here rather than trusted, so a required field hidden by a
  *  condition is not demanded, and an answer to a field that should not have been
- *  on screen is discarded instead of written. */
-export const validateAnswers = (fields: FormField[], body: Record<string, unknown>): Validated => {
+ *  on screen is discarded instead of written.
+ *
+ *  Visibility is both the form's own `visibleIf` and the conditional rule on the
+ *  property the answer becomes: a property the record panel would not show for
+ *  these values is not one a stranger can fill in by posting directly. */
+export const validateAnswers = (
+  fields: FormField[],
+  body: Record<string, unknown>,
+  rules: PropertyRules = {},
+): Validated => {
   const errors: FieldError[] = []
   const answers: Record<string, unknown> = {}
   const known = new Map(fields.map((field) => [field.key, field]))
@@ -56,9 +70,8 @@ export const validateAnswers = (fields: FormField[], body: Record<string, unknow
     else raw[field.key] = asString(body[field.key] ?? field.defaultValue ?? '')
   }
 
-  for (const field of fields) {
+  for (const field of askedFields(fields, raw, rules)) {
     if (DISPLAY_TYPES.has(field.type)) continue
-    if (!isVisible(field, raw)) continue
     const value = raw[field.key]
     const error = checkField(field, value)
     if (error) {

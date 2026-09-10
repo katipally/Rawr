@@ -1,4 +1,4 @@
-import { listForms } from '@rawr/db'
+import { listFormFolders, listForms } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Button, EmptyState, PageHeader } from '@rawr/ui'
@@ -16,7 +16,8 @@ const FormsPage = async ({ params }: { params: Promise<{ account: string }> }) =
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
-  const forms = await listForms(contextFrom(session))
+  const ctx = contextFrom(session)
+  const [forms, folders] = await Promise.all([listForms(ctx), listFormFolders(ctx)])
   const held = forms.reduce((total, form) => total + form.quarantined, 0)
   const canCreate = sessionCanEdit(session, 'marketing')
   const newForm = canCreate ? (
@@ -59,14 +60,20 @@ const FormsPage = async ({ params }: { params: Promise<{ account: string }> }) =
         <FormsTable
           account={account}
           baseUrl={publicBaseUrl}
+          folders={folders}
+          canEdit={canCreate}
           rows={forms.map((form) => ({
             id: form.id,
             name: form.name,
             slug: form.slug,
             isActive: form.isActive,
+            folderId: form.folderId,
             fieldCount: form.fieldCount,
             submissions: form.submissions,
             quarantined: form.quarantined,
+            spam: form.spam,
+            pageViews: form.pageViews,
+            appearsOn: form.appearsOn,
             lastSubmissionAt: form.lastSubmissionAt?.toISOString() ?? null,
           }))}
         />

@@ -1,16 +1,18 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
-import { consentRecord, form, formSubmission, formUpload } from '../schema/forms.ts'
+import { consentRecord, form, formFolder, formSubmission, formUpload } from '../schema/forms.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type Attribution, type AttributionInput } from './attribution.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
 import {
   assertSchemaIsUsable,
   FORM_SLUG,
+  readPropertyRules,
   readSchema,
   readSettings,
   type FormField,
   type FormSettings,
+  type PropertyRules,
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
@@ -18,7 +20,7 @@ import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
 import { notify, resolveNotifications } from './notifications.ts'
 import { aliasVisitor } from './stitch.ts'
-import { listSubscriptionTypes, setSubscription } from './subscriptions.ts'
+import { listSubscriptionTypes, requestOptIn } from './subscriptions.ts'
 
 /** The public edge acts with marketing's ceiling: it may create and update
  *  contacts and companies, and it may not touch deals, pipelines, the field
@@ -36,6 +38,7 @@ export const publicEdgeContext = (accountId: string): AccountContext => ({
   isSuperAdmin: false,
   viewHubs: [],
   editHubs: ['contacts', 'marketing'],
+  criticalGrants: [],
 })
 
 export type PublicForm = {
@@ -49,6 +52,10 @@ export type PublicForm = {
   fields: FormField[]
   settings: FormSettings
   isActive: boolean
+  /** Conditional logic on the properties this form writes to, resolved with the
+   *  form because the edge holds no account scope of its own and cannot read the
+   *  registry itself. */
+  rules: PropertyRules
 }
 
 type PublicFormRow = {
@@ -60,6 +67,7 @@ type PublicFormRow = {
   schema: unknown
   settings: unknown
   is_active: boolean
+  rules: unknown
 }
 
 const toPublicForm = (row: PublicFormRow): PublicForm => ({
@@ -71,6 +79,7 @@ const toPublicForm = (row: PublicFormRow): PublicForm => ({
   fields: readSchema(row.schema),
   settings: readSettings(row.settings),
   isActive: row.is_active,
+  rules: readPropertyRules(row.rules),
 })
 
 /** The one question the public edge has to ask before it has an account. Goes
@@ -127,6 +136,12 @@ export type SubmitResult = {
   success?: { mode: 'message' | 'redirect'; value: string } | undefined
   /** Set when the caller must render a challenge and re-post. */
   challengeRequired?: boolean | undefined
+  /** Opt-ins on types that ask for confirmation, for the caller to mail. Outside
+   *  this transaction for the reason the Slack notice is: nothing here talks to a
+   *  provider, and a form fill must not fail because Gmail was slow. */
+  confirmations?:
+    | { token: string; typeName: string; contactEmail: string; contactFirstName: string | null }[]
+    | undefined
   /** For the Slack job, which runs outside this transaction. */
   notify?:
     | {
@@ -248,7 +263,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
   assertCanWrite(ctx, 'company')
   const { fields, settings } = input.form
 
-  const { answers, errors } = validateAnswers(fields, input.body)
+  const { answers, errors } = validateAnswers(fields, input.body, input.form.rules)
   if (errors.length > 0) {
     return { submissionId: '', state: 'clean', contactId: null, companyId: null, errors }
   }
@@ -370,8 +385,9 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
       to: { hubs: ['contacts', 'sales', 'marketing'] },
     })
 
+    let confirmations: SubmitResult['confirmations'] = []
     if (linked.contactId) {
-      await applyOptIns(ctx, linked.contactId, settings.subscriptionOptIns ?? [])
+      confirmations = await applyOptIns(ctx, linked.contactId, settings.subscriptionOptIns ?? [])
 
       // F4 §3, T1. Written here, inside the transaction that created the contact,
       // and nothing more: a visitor with 5,000 views must not make a form response
@@ -415,6 +431,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
       state: verdict.state,
       contactId: linked.contactId,
       companyId: linked.companyId,
+      confirmations,
       success: { mode: settings.successMode, value: settings.successValue },
       notify:
         verdict.state === 'clean' && settings.notifySlack && linked.contactId
@@ -495,15 +512,31 @@ const capturePerson = async (
  *  An unsubscribed contact who fills the form again is resubscribing, which is
  *  what the act means. Types the account does not have are skipped rather than
  *  refused, so a renamed type never costs a lead. */
-const applyOptIns = async (ctx: AccountContext, contactId: string, names: string[]): Promise<void> => {
-  if (names.length === 0) return
+const applyOptIns = async (
+  ctx: AccountContext,
+  contactId: string,
+  names: string[],
+): Promise<SubmitResult['confirmations']> => {
+  if (names.length === 0) return []
   const wanted = new Set(names.map((name) => name.trim().toLowerCase()).filter((name) => name !== ''))
-  if (wanted.size === 0) return
+  if (wanted.size === 0) return []
   const types = await listSubscriptionTypes(ctx)
+  const asked: NonNullable<SubmitResult['confirmations']> = []
   for (const type of types) {
     if (!wanted.has(type.name.trim().toLowerCase())) continue
-    await setSubscription(ctx, { contactId, typeId: type.id, state: 'subscribed', source: 'form' })
+    // Which of the two this is, subscribing or only asking, is the type's to
+    // decide and not the form's.
+    const outcome = await requestOptIn(ctx, { contactId, typeId: type.id, source: 'form' })
+    if (outcome.pending) {
+      asked.push({
+        token: outcome.token,
+        typeName: outcome.typeName,
+        contactEmail: outcome.contactEmail,
+        contactFirstName: outcome.contactFirstName,
+      })
+    }
   }
+  return asked
 }
 
 /** A consent choice, appended never updated: prior data stays under the consent
@@ -589,9 +622,19 @@ export type FormSummary = {
   name: string
   slug: string
   isActive: boolean
+  folderId: string | null
   fieldCount: number
   submissions: number
   quarantined: number
+  /** Confirmed spam, kept apart from what is merely held: the first number is a
+   *  judgement somebody made, the second is a queue waiting for one. */
+  spam: number
+  /** Times the form was painted, on any page. HubSpot calls this Page Views;
+   *  what is actually countable is the form appearing, and a page that loaded
+   *  without the form is not a view of the form. */
+  pageViews: number
+  /** Distinct page paths the form has rendered on. */
+  appearsOn: number
   lastSubmissionAt: Date | null
 }
 
@@ -602,28 +645,45 @@ export const listForms = async (ctx: AccountContext): Promise<FormSummary[]> =>
       name: string
       slug: string
       is_active: boolean
+      folder_id: string | null
       schema: unknown
       submissions: string
       quarantined: string
+      spam: string
       last_at: string | Date | null
     }>(sql`
-      select f.id, f.name, f.slug, f.is_active, f.schema,
+      select f.id, f.name, f.slug, f.is_active, f.folder_id, f.schema,
              count(s.id) filter (where s.spam_state in ('clean','released')) as submissions,
              count(s.id) filter (where s.spam_state = 'quarantined') as quarantined,
+             count(s.id) filter (where s.spam_state = 'confirmed_spam') as spam,
              max(s.at) as last_at
         from form f
         left join form_submission s on s.form_id = f.id
        group by f.id
        order by f.name`)
 
+    // Its own grouped scan rather than a join: joining a per-page counter to a
+    // per-submission one multiplies both counts, which is how a conversion rate
+    // ends up over a hundred percent.
+    const counters = await tx.execute<{ form_id: string; views: string; pages: string }>(sql`
+      select v.form_id, sum(v.renders) as views, count(*) filter (where v.renders > 0) as pages
+        from (select form_id, page_path, sum(renders) as renders
+                from form_view group by form_id, page_path) v
+       group by v.form_id`)
+    const seen = new Map(counters.map((row) => [row.form_id, row]))
+
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       slug: row.slug,
       isActive: row.is_active,
+      folderId: row.folder_id,
       fieldCount: readSchema(row.schema).length,
       submissions: Number(row.submissions),
       quarantined: Number(row.quarantined),
+      spam: Number(row.spam),
+      pageViews: Number(seen.get(row.id)?.views ?? 0),
+      appearsOn: Number(seen.get(row.id)?.pages ?? 0),
       // max() comes back from the raw driver as a string, not a Date, so it is
       // coerced here rather than at each place that formats it.
       lastSubmissionAt: row.last_at ? new Date(row.last_at) : null,
@@ -959,3 +1019,389 @@ export const confirmSpam = async (ctx: AccountContext, id: string): Promise<void
       },
     }
   })
+
+// ---------------------------------------------------------------------------
+// Folders
+// ---------------------------------------------------------------------------
+
+export type FormFolderRow = { id: string; name: string; forms: number }
+
+export const listFormFolders = async (ctx: AccountContext): Promise<FormFolderRow[]> =>
+  withAccount(ctx, async (tx) => {
+    const rows = await tx.execute<{ id: string; name: string; forms: string }>(sql`
+      select d.id, d.name, count(f.id) as forms
+        from form_folder d
+        left join form f on f.folder_id = d.id
+       group by d.id
+       order by lower(d.name)`)
+    return rows.map((row) => ({ id: row.id, name: row.name, forms: Number(row.forms) }))
+  })
+
+export const saveFormFolder = async (
+  ctx: AccountContext,
+  input: { id?: string | null; name: string },
+): Promise<string> =>
+  mutate(ctx, 'form', async (tx) => {
+    const name = input.name.trim()
+    if (!name) throw new Error('A folder needs a name.')
+
+    // The unique index would catch this as a constraint violation. Two folders
+    // called "Campaigns" is a mistake worth one query to say in words.
+    const [clash] = await tx
+      .select({ id: formFolder.id })
+      .from(formFolder)
+      .where(sql`lower(${formFolder.name}) = lower(${name})`)
+      .limit(1)
+    if (clash && clash.id !== input.id) throw new Error(`A folder called "${name}" already exists.`)
+
+    if (input.id) {
+      await tx
+        .update(formFolder)
+        .set({ name, updatedAt: new Date() })
+        .where(eq(formFolder.id, input.id))
+      return {
+        result: input.id,
+        audit: { entity: 'form_folder', entityId: input.id, action: 'update', before: null, after: { name } },
+      }
+    }
+
+    const [created] = await tx
+      .insert(formFolder)
+      .values({ accountId: ctx.accountId, name })
+      .returning({ id: formFolder.id })
+    if (!created) throw new Error('The folder could not be created.')
+    return {
+      result: created.id,
+      audit: { entity: 'form_folder', entityId: created.id, action: 'create', before: null, after: { name } },
+    }
+  })
+
+/** Deleting a folder empties it. The forms inside are somebody's live capture
+ *  path; a filing decision must never be able to take them down with it. */
+export const deleteFormFolder = async (ctx: AccountContext, id: string): Promise<void> =>
+  mutate(ctx, 'form', async (tx) => {
+    const [row] = await tx
+      .select({ name: formFolder.name })
+      .from(formFolder)
+      .where(eq(formFolder.id, id))
+      .limit(1)
+    if (!row) throw new Error('That folder no longer exists.')
+    await tx.delete(formFolder).where(eq(formFolder.id, id))
+    return {
+      result: undefined,
+      audit: { entity: 'form_folder', entityId: id, action: 'delete', before: { name: row.name }, after: null },
+    }
+  })
+
+export const moveFormToFolder = async (
+  ctx: AccountContext,
+  input: { formId: string; folderId: string | null },
+): Promise<void> =>
+  mutate(ctx, 'form', async (tx) => {
+    const [before] = await tx
+      .select({ folderId: form.folderId })
+      .from(form)
+      .where(eq(form.id, input.formId))
+      .limit(1)
+    if (!before) throw new Error('That form no longer exists.')
+
+    await tx
+      .update(form)
+      .set({ folderId: input.folderId, updatedAt: new Date() })
+      .where(eq(form.id, input.formId))
+    return {
+      result: undefined,
+      audit: {
+        entity: 'form',
+        entityId: input.formId,
+        action: 'move',
+        before: { folderId: before.folderId },
+        after: { folderId: input.folderId },
+      },
+    }
+  })
+
+/** A copy of everything that makes the form, and none of what it collected.
+ *
+ *  The address cannot be copied: it is the identity somebody pasted into their
+ *  site, so the clone takes the first free "<slug>-2". It starts turned off,
+ *  because a second form answering the same address on the same page is how one
+ *  campaign's leads end up split across two records nobody reconciles. */
+export const cloneForm = async (ctx: AccountContext, id: string): Promise<string> =>
+  mutate(ctx, 'form', async (tx) => {
+    const [source] = await tx.select().from(form).where(eq(form.id, id)).limit(1)
+    if (!source) throw new Error('That form no longer exists.')
+
+    const taken = await tx
+      .select({ slug: form.slug })
+      .from(form)
+      .where(sql`${form.slug} like ${`${source.slug}%`}`)
+    const used = new Set(taken.map((row) => row.slug))
+    let slug = ''
+    for (let n = 2; ; n++) {
+      const candidate = `${source.slug}-${n}`.slice(0, 63)
+      if (!used.has(candidate)) {
+        slug = candidate
+        break
+      }
+    }
+
+    const [created] = await tx
+      .insert(form)
+      .values({
+        accountId: ctx.accountId,
+        folderId: source.folderId,
+        name: `${source.name} (copy)`.slice(0, 200),
+        slug,
+        schema: source.schema,
+        settings: source.settings,
+        isActive: false,
+      })
+      .returning({ id: form.id })
+    if (!created) throw new Error('The form could not be copied.')
+
+    return {
+      result: created.id,
+      audit: {
+        entity: 'form',
+        entityId: created.id,
+        action: 'clone',
+        before: { formId: id, slug: source.slug },
+        after: { name: `${source.name} (copy)`, slug },
+      },
+    }
+  })
+
+// ---------------------------------------------------------------------------
+// Performance
+// ---------------------------------------------------------------------------
+
+/** One beacon: a page carrying the form loaded, the form painted, or somebody
+ *  touched it. Three counters on one row, upserted in a single statement so a
+ *  beacon costs one round trip and never a read.
+ *
+ *  The day is UTC, like every other daily counter here. A window that starts on
+ *  the reader's own today therefore includes a beacon their clock calls
+ *  yesterday evening; the alternative is storing a timezone per beacon, which a
+ *  counter cannot afford. */
+export const countFormView = async (input: {
+  accountId: string
+  formId: string
+  pagePath: string
+  /** More than one where a caller settles more than one step at once: on the
+   *  hosted page the load and the render are the same event, because the page is
+   *  the form. */
+  kinds: ('view' | 'render' | 'interaction')[]
+}): Promise<void> => {
+  const path = input.pagePath.slice(0, 500) || '/'
+  const views = input.kinds.includes('view') ? 1 : 0
+  const renders = input.kinds.includes('render') ? 1 : 0
+  const interactions = input.kinds.includes('interaction') ? 1 : 0
+  if (views + renders + interactions === 0) return
+  await withAccount(publicEdgeContext(input.accountId), async (tx) => {
+    await tx.execute(sql`
+      insert into form_view (account_id, form_id, day, page_path, views, renders, interactions)
+      values (${input.accountId}, ${input.formId}, current_date, ${path}, ${views}, ${renders}, ${interactions})
+      on conflict (account_id, form_id, day, page_path) do update
+         set views = form_view.views + excluded.views,
+             renders = form_view.renders + excluded.renders,
+             interactions = form_view.interactions + excluded.interactions`)
+  })
+}
+
+export type FormPerformance = {
+  /** Inclusive day bounds, as they were asked for. */
+  from: string
+  to: string
+  totals: { views: number; renders: number; interactions: number; submissions: number; pageVisits: number }
+  /** Views over the window of equal length immediately before this one, so the
+   *  tile can say which way it went rather than only how big it is. */
+  previousViews: number
+  days: { day: string; views: number; submissions: number }[]
+  contactType: { existing: number; created: number }
+  pages: { path: string; views: number; submissions: number }[]
+  sources: { channel: string; views: number; submissions: number }[]
+  /** Distinct page paths the form rendered on in the window. */
+  appearsOn: string[]
+}
+
+/** How many rows a breakdown table will show. A form on ten thousand paths is a
+ *  tracking mistake, and rendering ten thousand rows would hide it rather than
+ *  surface it: the top slice plus the totals above says the same thing. */
+const PERFORMANCE_ROWS = 100
+
+export const formPerformance = async (
+  ctx: AccountContext,
+  input: { formId: string; from: string; to: string },
+): Promise<FormPerformance | null> => {
+  if (!isUuid(input.formId)) return null
+  const from = input.from
+  const to = input.to
+  return withAccount(ctx, async (tx) => {
+    const [exists] = await tx
+      .select({ id: form.id })
+      .from(form)
+      .where(eq(form.id, input.formId))
+      .limit(1)
+    if (!exists) return null
+
+    const counters = await tx.execute<{
+      day: string
+      views: number
+      renders: number
+      interactions: number
+      page_path: string
+    }>(sql`
+      select v.day::text as day, v.views, v.renders, v.interactions, v.page_path
+        from form_view v
+       where v.form_id = ${input.formId}
+         and v.day between ${from}::date and ${to}::date`)
+
+    const submissions = await tx.execute<{ day: string; path: string | null; state: string; created: boolean }>(sql`
+      select s.at::date::text as day,
+             s.attribution ->> 'pagePath' as path,
+             s.spam_state::text as state,
+             (c.id is not null and c.created_at >= s.at - interval '5 seconds') as created
+        from form_submission s
+        left join contact c on c.id = s.contact_id
+       where s.form_id = ${input.formId}
+         and s.at >= ${from}::date
+         and s.at < (${to}::date + 1)`)
+
+    // Page visits for an embedded form come from the collector, not from here:
+    // the beacon knows the form painted, and the page view next to it is what
+    // the page did. Counted over the paths this form actually rendered on, in
+    // one grouped scan rather than a join, so a path seen by two forms is not
+    // multiplied.
+    const paths = [...new Set(counters.filter((row) => row.renders > 0).map((row) => row.page_path))]
+    const visits = paths.length
+      ? await tx.execute<{ path: string; visits: number; channel: string | null }>(sql`
+          select p.path, count(*)::int as visits, e.channel
+            from page_view p
+            left join visitor_session e on e.id = p.session_id
+           where p.path = any(array[${sql.join(paths.map((path) => sql`${path}::text`), sql`, `)}])
+             and p.at >= ${from}::date
+             and p.at < (${to}::date + 1)
+           group by p.path, e.channel`)
+      : []
+
+    const submissionChannels = await tx.execute<{ channel: string | null; n: number }>(sql`
+      select e.channel, count(*)::int as n
+        from form_submission s
+        left join lateral (
+              select v.channel
+                from visitor_session v
+               where v.visitor_id = s.visitor_id and v.started_at <= s.at
+               order by v.started_at desc
+               limit 1
+             ) e on true
+       where s.form_id = ${input.formId}
+         and s.spam_state in ('clean', 'released')
+         and s.at >= ${from}::date
+         and s.at < (${to}::date + 1)
+       group by e.channel`)
+
+    const [previous] = await tx.execute<{ views: number }>(sql`
+      select coalesce(sum(v.renders), 0)::int as views
+        from form_view v
+       where v.form_id = ${input.formId}
+         and v.day >= ${from}::date - (${to}::date - ${from}::date + 1)
+         and v.day < ${from}::date`)
+
+    const kept = submissions.filter((row) => row.state === 'clean' || row.state === 'released')
+
+    const byDay = new Map<string, { views: number; submissions: number }>()
+    for (const day of eachDay(from, to)) byDay.set(day, { views: 0, submissions: 0 })
+    for (const row of counters) {
+      const entry = byDay.get(row.day)
+      if (entry) entry.views += Number(row.renders)
+    }
+    for (const row of kept) {
+      const entry = byDay.get(row.day)
+      if (entry) entry.submissions += 1
+    }
+
+    const pageViews = new Map<string, number>()
+    for (const row of counters) {
+      pageViews.set(row.page_path, (pageViews.get(row.page_path) ?? 0) + Number(row.renders))
+    }
+    const pageSubmissions = new Map<string, number>()
+    for (const row of kept) {
+      const path = row.path ?? 'Unknown'
+      pageSubmissions.set(path, (pageSubmissions.get(path) ?? 0) + 1)
+    }
+    const pages = [...new Set([...pageViews.keys(), ...pageSubmissions.keys()])]
+      .map((path) => ({
+        path,
+        views: pageViews.get(path) ?? 0,
+        submissions: pageSubmissions.get(path) ?? 0,
+      }))
+      .sort((a, b) => b.views - a.views || b.submissions - a.submissions)
+      .slice(0, PERFORMANCE_ROWS)
+
+    const sourceViews = new Map<string, number>()
+    for (const row of visits) {
+      const channel = row.channel ?? UNKNOWN_CHANNEL
+      sourceViews.set(channel, (sourceViews.get(channel) ?? 0) + Number(row.visits))
+    }
+    const sourceSubmissions = new Map<string, number>()
+    for (const row of submissionChannels) {
+      const channel = row.channel ?? UNKNOWN_CHANNEL
+      sourceSubmissions.set(channel, (sourceSubmissions.get(channel) ?? 0) + Number(row.n))
+    }
+    const sources = [...new Set([...sourceViews.keys(), ...sourceSubmissions.keys()])]
+      .map((channel) => ({
+        channel,
+        views: sourceViews.get(channel) ?? 0,
+        submissions: sourceSubmissions.get(channel) ?? 0,
+      }))
+      .sort((a, b) => b.submissions - a.submissions || b.views - a.views)
+      .slice(0, PERFORMANCE_ROWS)
+
+    const sum = (pick: (row: (typeof counters)[number]) => number): number =>
+      counters.reduce((total, row) => total + Number(pick(row)), 0)
+
+    return {
+      from,
+      to,
+      totals: {
+        views: sum((row) => row.renders),
+        renders: sum((row) => row.renders),
+        interactions: sum((row) => row.interactions),
+        submissions: kept.length,
+        // The hosted page counts its own loads; an embedded page's are the
+        // collector's. Neither counts the other, so they add rather than overlap.
+        pageVisits:
+          sum((row) => row.views) + visits.reduce((total, row) => total + Number(row.visits), 0),
+      },
+      previousViews: Number(previous?.views ?? 0),
+      days: [...byDay.entries()].map(([day, entry]) => ({ day, ...entry })),
+      contactType: {
+        existing: kept.filter((row) => row.created === false).length,
+        created: kept.filter((row) => row.created === true).length,
+      },
+      pages,
+      sources,
+      appearsOn: paths.sort(),
+    }
+  })
+}
+
+/** A submission whose visitor never had a session, because they declined
+ *  analytics or arrived without the collector, has no channel. Named rather than
+ *  folded into Direct traffic, which would be a claim nobody can support. */
+const UNKNOWN_CHANNEL = 'Unknown'
+
+/** Every day in an inclusive range, so a chart has a bar for a day nothing
+ *  happened rather than closing the gap and implying it did. */
+const eachDay = (from: string, to: string): string[] => {
+  const days: string[] = []
+  const cursor = new Date(`${from}T00:00:00Z`)
+  const end = new Date(`${to}T00:00:00Z`)
+  // Bounded by the range the caller asked for, which the router caps.
+  while (cursor <= end) {
+    days.push(cursor.toISOString().slice(0, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return days
+}

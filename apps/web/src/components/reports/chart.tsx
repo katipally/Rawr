@@ -241,3 +241,84 @@ export const Funnel = ({
     </figure>
   )
 }
+
+export type Slice = { id: string; label: string; value: number; tone: Tone }
+
+/** A ring, for a split of one whole into two or three parts.
+ *
+ *  The only shape here that encodes a value as an angle, and it earns that on one
+ *  condition: the parts add up to something, and there are few enough of them
+ *  that nobody has to compare two arcs by eye. The numbers are beside it, in the
+ *  legend, for the times somebody does. */
+export const Donut = ({
+  title,
+  slices,
+  format = nice,
+  className,
+}: {
+  title: string
+  slices: Slice[]
+  format?: (value: number) => string
+  className?: string
+}) => {
+  const total = slices.reduce((sum, slice) => sum + slice.value, 0)
+  // A unit circle: the radius the ring is drawn at, and the circumference the
+  // dash offsets are measured in. Everything else scales with the container.
+  const radius = 40
+  const circumference = 2 * Math.PI * radius
+  let offset = 0
+
+  return (
+    <figure className={cn('flex min-w-0 flex-col gap-2', className)}>
+      <figcaption className="font-medium">{title}</figcaption>
+      {total === 0 ? (
+        <p className="py-6 text-center text-secondary">Nothing in this range.</p>
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-4">
+          <svg
+            role="img"
+            aria-label={`${title}. The same numbers are in the legend beside it.`}
+            viewBox="0 0 100 100"
+            className="h-32 w-32 shrink-0 -rotate-90"
+          >
+            {slices.map((slice) => {
+              const length = (slice.value / total) * circumference
+              const start = offset
+              offset += length
+              return (
+                <circle
+                  key={slice.id}
+                  cx={50}
+                  cy={50}
+                  r={radius}
+                  fill="none"
+                  stroke={STROKE[slice.tone]}
+                  strokeWidth={16}
+                  strokeDasharray={`${length} ${circumference - length}`}
+                  strokeDashoffset={-start}
+                >
+                  <title>{`${slice.label}: ${format(slice.value)}`}</title>
+                </circle>
+              )
+            })}
+          </svg>
+          <ul className="flex min-w-0 flex-col gap-1">
+            {slices.map((slice) => (
+              <li key={slice.id} className="flex min-w-0 items-baseline gap-2 text-small">
+                <span
+                  aria-hidden="true"
+                  className="size-2.5 shrink-0 rounded-full"
+                  style={{ background: STROKE[slice.tone] }}
+                />
+                <span className="min-w-0 break-words">{slice.label}</span>
+                <span className="ml-auto shrink-0 text-secondary tabular-nums">
+                  {format(slice.value)} · {Math.round((slice.value / total) * 100)}%
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </figure>
+  )
+}

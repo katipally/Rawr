@@ -13,12 +13,12 @@ import {
   type FormThemeToken,
 } from '@rawr/db/forms'
 import type { FormDetail } from '@rawr/db'
-import { Code2, Inbox } from 'lucide-react'
+import { Code2, Inbox, TrendingUp } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useEffect, useState } from 'react'
 import { Alert, Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
-import { formsPath, submissionsPath } from '~/lib/links.ts'
+import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useRowIds } from '~/lib/row-ids.ts'
@@ -31,7 +31,14 @@ import { sameWords } from '~/lib/same-words.ts'
  *  The preview beside it renders the real embed markup rather than an
  *  approximation, so what a marketer signs off is what a visitor gets. */
 
-type Target = { value: string; label: string }
+type Target = {
+  value: string
+  label: string
+  /** The property carries conditional logic, so the question is only asked when
+   *  the rule matches. Worth saying here: otherwise a field that never appears on
+   *  the live form looks like a bug in the form rather than a rule in settings. */
+  conditional: boolean
+}
 
 const TYPE_LABELS: Record<FormFieldType, string> = {
   text: 'Single line text',
@@ -59,7 +66,7 @@ export const FormBuilder = ({
   subscriptions,
   baseUrl,
   canEdit,
-  slackIsWebhook,
+  slack,
 }: {
   account: string
   form: FormDetail
@@ -71,9 +78,10 @@ export const FormBuilder = ({
   subscriptions: { name: string; isInternal: boolean }[]
   baseUrl: string
   canEdit: boolean
-  /** The account's Slack is an incoming webhook rather than a bot token, so the
-   *  channel is fixed by the URL and nothing this form asks for can change it. */
-  slackIsWebhook: boolean
+  /** What the account's Slack actually is. 'none' means nothing is connected, so
+   *  naming a channel here changes nothing at all; 'webhook' means the channel is
+   *  fixed by the URL and nothing this form asks for can change it. */
+  slack: 'none' | 'webhook' | 'bot'
 }) => {
   const router = useRouter()
   const toast = useToast()
@@ -231,6 +239,14 @@ export const FormBuilder = ({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="text-lg font-medium">{form.id ? form.name : 'New form'}</h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {form.id ? (
+              <LinkButton
+                href={formPerformancePath(account, form.id)}
+                icon={<TrendingUp aria-hidden="true" className="size-4" />}
+              >
+                Performance
+              </LinkButton>
+            ) : null}
             {form.id ? (
               <LinkButton
                 href={submissionsPath(account, { form: form.id, state: 'clean' })}
@@ -457,7 +473,11 @@ export const FormBuilder = ({
                     <Field
                       id={`maps-${index}`}
                       label="Saves to"
-                      hint="Unmapped answers are still stored on the submission."
+                      hint={
+                        targets.find((target) => target.value === field.mapsTo)?.conditional
+                          ? 'This property has conditional logic, so the question is only asked when its rule matches the other answers.'
+                          : 'Unmapped answers are still stored on the submission.'
+                      }
                     >
                       <Select
                         id={`maps-${index}`}
@@ -621,16 +641,12 @@ export const FormBuilder = ({
               <Field
                 id="slack-channel"
                 label="Slack channel"
-                hint={
-                  slackIsWebhook
-                    ? 'This account connects Slack with an incoming webhook, and a webhook posts to the one channel it was created for.'
-                    : 'Blank uses the account default.'
-                }
+                hint={SLACK_CHANNEL_HINT[slack]}
               >
                 <TextInput
                   id="slack-channel"
                   value={settings.slackChannel ?? ''}
-                  disabled={!canEdit || slackIsWebhook}
+                  disabled={!canEdit || slack !== 'bot'}
                   onChange={(event) =>
                     setSettings({ ...settings, slackChannel: event.target.value || null })
                   }
@@ -763,6 +779,15 @@ export const FormBuilder = ({
       </div>
     </div>
   )
+}
+
+/** Why the channel input is or is not usable. Said in the hint rather than left
+ *  to be discovered: an enabled input that changes nothing is worse than a
+ *  disabled one that says why. */
+const SLACK_CHANNEL_HINT: Record<'none' | 'webhook' | 'bot', string> = {
+  none: 'Slack is not connected, so nothing is posted anywhere yet. Connect it under Connected apps and this channel starts working.',
+  webhook: 'This account connects Slack with an incoming webhook, and a webhook posts to the one channel it was created for.',
+  bot: 'Blank uses the account default.',
 }
 
 /** Types whose answer is free text, so a length rule or a pattern means
