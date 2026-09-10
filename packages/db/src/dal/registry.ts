@@ -27,6 +27,7 @@ export const SYSTEM_FIELD_KEYS: ReadonlySet<string> = new Set([
   'last_replied_at',
   'emails_sent',
   'emails_received',
+  'score',
 ])
 
 export type RegistryField = {

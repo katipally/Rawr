@@ -2,6 +2,7 @@ import { calendarFields, listRecords, listViews, parseFilters, resolveView, with
 import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
+import { KpiStrip } from '~/components/crm/kpi-strip.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
@@ -228,6 +229,15 @@ const ListPage = async ({
         openCreate={search.new === '1'}
         openView={search.view === 'new'}
         allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
+      />
+
+      <KpiStrip
+        account={account}
+        object={objectParam}
+        view={resolved.view.slug}
+        params={listParams}
+        filters={filters as never}
+        hasRecords={(page?.total ?? page?.rows.length ?? 0) > 0}
       />
 
       {queryError ? (

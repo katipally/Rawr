@@ -23,6 +23,7 @@ import {
   getRecord,
   getRegistry,
   isActivityType,
+  listKpis,
   listRecords,
   listTasks,
   listTaskQueues,
@@ -369,6 +370,14 @@ export const crmRouter = router({
       .input(z.object({ id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteView(ctx.account, input.id))),
   }),
+
+  /** The strip above a list: four counts of what is missing, each a link back to
+   *  this view with one more filter on it. Its own round trip rather than part of
+   *  the page, so four counts over eighty-eight thousand rows never hold up the
+   *  rows themselves. */
+  kpis: protectedProcedure
+    .input(z.object({ object: anyObject }))
+    .query(({ ctx, input }) => call(() => listKpis(ctx.account, input.object))),
 
   board: router({
     read: protectedProcedure
@@ -767,7 +776,9 @@ export const crmRouter = router({
         call(async () => {
           await setSubscription(ctx.account, input)
           // After the write, never before: Brevo being down must not block a
-          // person from recording an opt-out. A failure dead-letters and replays.
+          // person from recording an opt-out. Every failure inside is already a
+          // dead letter with a replay path, so the throw is caught here and the
+          // choice still lands rather than being lost with the request.
           await propagateSubscriptionToBrevo(ctx.account, input).catch(() => undefined)
         }),
       ),

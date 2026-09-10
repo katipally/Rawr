@@ -21,6 +21,19 @@ export type BoardCard = {
   daysInStage: number
   /** When anything last happened on it, in days. Null when nothing ever has. */
   daysSinceActivity: number | null
+  /** 0 to 100, computed by the nightly job and on a stage change. Null until it
+   *  has been computed once. */
+  score: number | null
+  /** The next open task on the deal, which is what the card's activity chip
+   *  offers to change. Null when there is none, and the chip offers to make one. */
+  nextTask: { title: string; dueDate: string | null } | null
+  /** Up to three associated contacts by name, plus how many there are in total,
+   *  so a deal with forty shows three faces and "+37" rather than forty. */
+  contacts: string[]
+  contactCount: number
+  /** The first associated contact with an address, for the card's Email action.
+   *  A deal has no address of its own, exactly as on the record page. */
+  emailContactId: string | null
 }
 
 export type BoardColumn = {
@@ -114,6 +127,12 @@ type CardRow = {
   company_name: string | null
   days_in_stage: number
   days_since_activity: number | null
+  score: number | null
+  next_task_title: string | null
+  next_task_due: string | null
+  contact_names: string[] | null
+  contact_count: number
+  email_contact_id: string | null
 }
 
 /** One window of cards per column. row_number is over the same partition the
@@ -122,7 +141,8 @@ type CardRow = {
 const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: number, upTo: number) =>
   withAccount(ctx, (tx) => tx.execute<CardRow>(sql`
     select id, group_key, name, amount, currency, close_date, next_step, next_step_date,
-           owner_name, company_name, days_in_stage, days_since_activity
+           owner_name, company_name, days_in_stage, days_since_activity, score,
+           next_task_title, next_task_due, contact_names, contact_count, email_contact_id
       from (
         select "deal"."id" as id,
                ${groupExpr} as group_key,
@@ -140,13 +160,18 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
                -- multiply every row of the board.
                extract(day from now() - coalesce((
                  select max(l."occurred_at") from "activity_link" l
-                   join "activity" a on a.id = l."activity_id"
                   where l."entity_type" = 'deal' and l."entity_id" = "deal"."id"
-                    and a."type" = 'stage_change'
+                    and l."type" = 'stage_change'
                ), "deal"."created_at"))::int as days_in_stage,
                (select extract(day from now() - max(l."occurred_at"))::int
                   from "activity_link" l
                  where l."entity_type" = 'deal' and l."entity_id" = "deal"."id") as days_since_activity,
+               "deal"."score" as score,
+               task."title" as next_task_title,
+               task."due_date"::text as next_task_due,
+               people."names" as contact_names,
+               coalesce(people."n", 0) as contact_count,
+               people."email_contact_id" as email_contact_id,
                row_number() over (
                  partition by ${groupExpr}
                  order by "deal"."close_date" asc nulls last, "deal"."id" desc
@@ -154,6 +179,38 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
           from "deal"
           left join user_account u on u.id = "deal"."owner_id"
           left join company c on c.id = "deal"."company_id"
+          -- Two more lateral reads per visible card, both over an index that
+          -- already exists, and both bounded by the window below. A join would
+          -- multiply the row instead: a deal with nine tasks and forty contacts
+          -- is one card, not three hundred and sixty.
+          left join lateral (
+            select t."title", t."due_date"
+              from "task" t
+             where t."entity_type" = 'deal' and t."entity_id" = "deal"."id" and t."status" = 'open'
+             order by t."due_date" asc nulls last, t."id" asc
+             limit 1
+          ) task on true
+          left join lateral (
+            select count(*)::int as n,
+                   (array_agg(named."name" order by named."name"))[1:3] as names,
+                   (array_agg(named."id"::text order by named."name")
+                      filter (where named."email" is not null))[1] as email_contact_id
+              from (
+                select p."id", p."email",
+                       coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact') as name
+                  from "association" a
+                  join "contact" p on p.id = a."to_id"
+                 where a."from_type" = 'deal' and a."from_id" = "deal"."id" and a."to_type" = 'contact'
+                   and p."deleted_at" is null
+                union
+                select p."id", p."email",
+                       coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact')
+                  from "association" a
+                  join "contact" p on p.id = a."from_id"
+                 where a."to_type" = 'deal' and a."to_id" = "deal"."id" and a."from_type" = 'contact'
+                   and p."deleted_at" is null
+              ) named
+          ) people on true
          where ${predicate}
       ) ranked
      where rank > ${after} and rank <= ${upTo}`))
@@ -173,6 +230,11 @@ const toCard = (object: RegistryObject, card: CardRow): BoardCard => ({
     card.days_since_activity === null || card.days_since_activity === undefined
       ? null
       : Number(card.days_since_activity),
+  score: card.score === null || card.score === undefined ? null : Number(card.score),
+  nextTask: card.next_task_title ? { title: card.next_task_title, dueDate: card.next_task_due } : null,
+  contacts: card.contact_names ?? [],
+  contactCount: Number(card.contact_count ?? 0),
+  emailContactId: card.email_contact_id,
 })
 
 /** Two queries for the whole board, whatever the column count: one grouped

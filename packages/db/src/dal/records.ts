@@ -4,7 +4,8 @@ import { moveActivityLinks, recordActivity, type EntityType } from './activity.t
 import { notify } from './notifications.ts'
 import { moveVisitorHistory } from './stitch.ts'
 import type { AccountContext } from './context.ts'
-import { assertCanWrite } from './context.ts'
+import { assertCanDo, assertCanWrite } from './context.ts'
+import { scoreDeal } from './deal-score.ts'
 import { companyNameFromDomain, employerDomainFromEmail } from './domains.ts'
 import { requestEnrichment } from './enrichment.ts'
 import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
@@ -757,6 +758,10 @@ const updateRecordIn = async (
     after: written,
   })
   const changes = await writeChangeActivities(tx, ctx, object, id, before, written)
+  // Stage probability is the heaviest rule in the score, so a card that lands in
+  // a new column must not carry the number it had in the old one. Every other
+  // input moves on its own and waits for the nightly pass.
+  if (changes.stageChange) await scoreDeal(tx, id)
 
   return {
     updatedAt: asDate(row.updated_at),
@@ -971,8 +976,9 @@ export const deleteRecord = async (
   ctx: AccountContext,
   objectKey: string,
   id: string,
-): Promise<void> =>
-  mutate(ctx, objectKey, async (tx) => {
+): Promise<void> => {
+  assertCanDo(ctx, 'delete')
+  return mutate(ctx, objectKey, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
     const name = await deleteRecordIn(tx, ctx, object, id)
@@ -988,6 +994,7 @@ export const deleteRecord = async (
       },
     }
   })
+}
 
 /** The delete itself, without the transaction or the audit row, so a bulk delete
  *  can run many of these under one transaction and still audit each one. Returns
@@ -1039,6 +1046,7 @@ export const bulkDeleteRecords = async (
   ids: string[],
 ): Promise<BulkDeleteResult> => {
   assertCanWrite(ctx, objectKey)
+  assertCanDo(ctx, 'bulk_delete')
   const unique = [...new Set(ids)]
   if (unique.length === 0) throw new Error('Nothing was selected.')
 
@@ -1112,6 +1120,7 @@ export const mergeRecords = async (
   input: MergeInput,
 ): Promise<MergeResult> => {
   assertCanWrite(ctx, input.objectKey)
+  assertCanDo(ctx, 'merge')
   if (input.survivorId === input.absorbedId) {
     throw new Error('A record cannot be merged into itself.')
   }

@@ -115,6 +115,12 @@ export const contact = pgTable(
     trackingConsent: trackingConsentEnum('tracking_consent'),
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
+    /** Resolved from the `utm_campaign` in the two sources above. No drizzle
+     *  reference on either: `campaign` is declared in the analytics schema file,
+     *  which already imports this one, so the foreign key is declared in SQL
+     *  (0074) where there is no import cycle to create. */
+    firstCampaignId: uuid('first_campaign_id'),
+    lastCampaignId: uuid('last_campaign_id'),
     custom: jsonb('custom').notNull().default({}),
     /** F6. The provider's own id for this record, keyed by provider, so a sync
      *  is incremental rather than a full re-push and an opt-out can be sent to
@@ -190,6 +196,12 @@ export const deal = pgTable(
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     companyId: uuid('company_id').references(() => company.id, { onDelete: 'set null' }),
     dealType: text('deal_type'),
+    /** 0 to 100, recomputed nightly and on a stage change. Null until it has been
+     *  computed once. `scoreDetail` holds what each weighted rule contributed, so
+     *  the record can show the arithmetic rather than a bare number. */
+    score: integer('score'),
+    scoreAt: timestamp('score_at', { withTimezone: true }),
+    scoreDetail: jsonb('score_detail'),
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
@@ -204,6 +216,7 @@ export const deal = pgTable(
     index('deal_stage_idx').on(t.accountId, t.stageId, t.closeDate),
     index('deal_owner_idx').on(t.accountId, t.ownerId),
     index('deal_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
+    index('deal_score_idx').on(t.accountId, t.score.desc().nullsLast()),
   ],
 )
 

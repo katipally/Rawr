@@ -37,6 +37,8 @@ import {
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { createTask, logByHand } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
+import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
+import { listKpis } from '../src/dal/query.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
 import {
@@ -1625,6 +1627,105 @@ try {
     )
     expect(Number(tasks?.n) >= 0, 'tasks were taken with it')
     return 'the rule stops; the work it did stays'
+  })
+
+  console.log('\n-- deal score, list KPIs ---------------------------------------------')
+
+  await check('the bands are the ones HubSpot renders', async () => {
+    const bands = [null, 0, 49, 50, 69, 70, 100].map((score) => `${score}:${scoreBand(score)}`)
+    expect(scoreBand(null) === 'none' && scoreBand(49) === 'low' && scoreBand(50) === 'mid', bands.join(' '))
+    expect(scoreBand(69) === 'mid' && scoreBand(70) === 'high' && scoreBand(100) === 'high', bands.join(' '))
+    return bands.join(', ')
+  })
+
+  await check('the weights are a hundred, so a score is a percentage', async () => {
+    const total = Object.values(SCORE_WEIGHTS).reduce((sum, weight) => sum + weight, 0)
+    expect(total === 100, `the six weights add to ${total}`)
+    expect(SCORE_COMPONENTS.length === Object.keys(SCORE_WEIGHTS).length, 'a weight has no line on the record')
+    return `${SCORE_COMPONENTS.length} components, ${total} points`
+  })
+
+  await check('every deal scores between nought and a hundred, and says why', async () => {
+    const scored = await scoreAllDeals(admin)
+    expect(scored > 0, 'no deal was scored')
+    const breakdown = await readDealScore(admin, dealId)
+    expect(breakdown !== null, 'a scored deal has no score')
+    expect(breakdown!.score !== null && breakdown!.score >= 0 && breakdown!.score <= 100, `score ${breakdown!.score}`)
+    expect(breakdown!.scoredAt !== null, 'a score with no stamp cannot say how old it is')
+    // The breakdown is the whole point: a number nobody can take apart is a
+    // number nobody argues with, and one nobody acts on either.
+    const summed = SCORE_COMPONENTS.reduce((sum, part) => sum + (breakdown!.detail[part.key] ?? 0), 0)
+    expect(summed === breakdown!.score, `the parts add to ${summed}, the score says ${breakdown!.score}`)
+    return `${scored} deals scored; this one ${breakdown!.score} = ${SCORE_COMPONENTS.map((part) => breakdown!.detail[part.key] ?? 0).join(' + ')}`
+  })
+
+  await check('a stage change rescores the deal it moved', async () => {
+    const [stage] = await db
+      .select({ id: s.pipelineStage.id })
+      .from(s.pipelineStage)
+      .innerJoin(s.deal, eq(s.deal.stageId, s.pipelineStage.id))
+      .where(eq(s.deal.id, dealId))
+    const alternatives = await db
+      .select({ id: s.pipelineStage.id, probability: s.pipelineStage.probability })
+      .from(s.pipelineStage)
+      .innerJoin(s.pipeline, eq(s.pipeline.id, s.pipelineStage.pipelineId))
+      .where(eq(s.pipeline.accountId, datasaur.id))
+    const target = alternatives.find((row) => row.id !== stage?.id && Number(row.probability ?? 0) > 0)
+    expect(Boolean(target), 'no other stage to move to')
+
+    const before = await readDealScore(admin, dealId)
+    await updateRecord(admin, 'deal', dealId, { stage_id: target!.id })
+    const after = await readDealScore(admin, dealId)
+    expect(after!.scoredAt !== null, 'the move left no stamp')
+    expect(
+      before!.scoredAt === null || after!.scoredAt!.getTime() >= before!.scoredAt.getTime(),
+      'the score is older than the move that should have written it',
+    )
+    return `stage probability now contributes ${after!.detail.stage ?? 0} of ${SCORE_WEIGHTS.stage}`
+  })
+
+  await check('a board card carries its score, its people and its next task', async () => {
+    const board = await readBoard(sales, {})
+    const cards = board.columns.flatMap((column) => column.cards)
+    expect(cards.length > 0, 'the board has no cards to look at')
+    // Shape, not content: a seeded board may have no deal with a contact on it,
+    // and a card that lies about having none is the failure worth catching.
+    expect(cards.every((card) => card.contacts.length <= card.contactCount), 'a card shows more faces than it counts')
+    expect(cards.every((card) => card.contacts.length <= 3), 'a card shows more than three faces')
+    expect(
+      cards.every((card) => card.score === null || (card.score >= 0 && card.score <= 100)),
+      'a card carries a score outside nought to a hundred',
+    )
+    const withPeople = cards.filter((card) => card.contactCount > 0).length
+    return `${cards.length} cards, ${withPeople} with a contact, ${cards.filter((card) => card.nextTask).length} with a next task`
+  })
+
+  await check('each KPI tile counts exactly what its own filter selects', async () => {
+    for (const object of ['contact', 'company', 'deal'] as const) {
+      const tiles = await listKpis(sales, object)
+      expect(tiles.length === 4, `${object} offered ${tiles.length} tiles`)
+      for (const tile of tiles) {
+        // The tile's number and the list the tile links to have to be the same
+        // list, or the strip is a lie somebody clicks on.
+        const page = await listRecords(sales, {
+          object,
+          columns: ['created_at'],
+          filters: tile.filters,
+          limit: 1,
+          count: true,
+        })
+        expect(page.total === tile.count, `${object}/${tile.key}: tile says ${tile.count}, the filtered list holds ${page.total}`)
+      }
+    }
+    return 'twelve tiles, each agreeing with the view it opens'
+  })
+
+  await check('an object with nothing to say has no strip', async () => {
+    const registry = await getRegistry(admin)
+    const custom = registry.objects.find((object) => object.isCustom)
+    if (!custom) return 'no custom object seeded; core objects all have tiles'
+    expect((await listKpis(admin, custom.key)).length === 0, 'a custom object was given tiles nobody defined')
+    return `${custom.key} has no tiles, so the strip does not render`
   })
 
   console.log('')

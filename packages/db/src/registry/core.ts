@@ -129,6 +129,7 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'original_source', label: 'Original source', type: 'json', columnName: 'original_source', position: 11 },
       { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 12 },
       { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 13 },
+      { key: 'score', label: 'Deal score', type: 'number', columnName: 'score', position: 16 },
       // Custom HubSpot properties. No column, so they migrate straight into custom
       // jsonb and prove the registry's custom path on day one. A1.
       { key: 'uttr_pipeline', label: 'UTTR pipeline', type: 'boolean', position: 14 },

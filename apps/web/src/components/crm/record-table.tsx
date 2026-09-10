@@ -11,6 +11,7 @@ import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
 import { Value, isPast } from './value.tsx'
+import { ScoreRing } from './score-ring.tsx'
 import { useZone } from '~/components/zone.tsx'
 
 export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
@@ -98,6 +99,13 @@ export const RecordTable = ({
             {text}
           </Link>
         )
+      }
+
+      // The deal score reads as a ring, not as a number in a column of numbers:
+      // the whole point of it is being scannable down a list.
+      if (object === 'deal' && column.key === 'score') {
+        const score = typeof value === 'number' ? value : null
+        return <ScoreRing score={score} className="text-small" />
       }
 
       // Truncated with the full value on hover: a 500-character name must not

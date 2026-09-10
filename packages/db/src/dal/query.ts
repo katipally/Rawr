@@ -5,7 +5,17 @@ import {
   TYPE_META,
   type Operator,
 } from '../registry/types.ts'
-import { fieldOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import type { AccountContext } from './context.ts'
+import { withAccount } from './index.ts'
+import {
+  fieldOrThrow,
+  getRegistry,
+  objectOrThrow,
+  rowsOf,
+  tableFor,
+  type RegistryField,
+  type RegistryObject,
+} from './registry.ts'
 
 export type Condition = { field: string; operator: Operator; value?: unknown }
 /** One level deep, deliberately. A tree of arbitrary depth is a query builder
@@ -222,4 +232,96 @@ export const orderPlan = (object: RegistryObject, sorts: Sort[]): OrderPlan => {
     },
     cursorValue: field.key,
   }
+}
+
+/** One tile on a list's KPI strip: a name, how many records are in that state,
+ *  and the filter that shows them. The filter is the same shape the URL carries,
+ *  so the tile is a link to this view with one more filter on it rather than a
+ *  screen of its own. */
+export type Kpi = { key: string; label: string; count: number; filters: FilterGroup[] }
+
+/** How long a contact has to have been quiet before the strip says so. The same
+ *  sales month the deal board's stale badge uses. */
+const QUIET_DAYS = 30
+
+const isEmpty = (field: string): FilterGroup => ({
+  conjunction: 'and',
+  conditions: [{ field, operator: 'is_empty' }],
+})
+
+/** The four questions worth asking about each object's data, all of them "what
+ *  is missing" rather than "how much": a list already shows how much.
+ *
+ *  Contacts are HubSpot's own four. A company has no last-contacted stamp and a
+ *  deal has no address, so each gets the four gaps that actually break work on
+ *  it: nobody owning it, no way to reach it, no state, and for a deal a close
+ *  date that has already gone by. */
+const TILES: Record<string, (quietBefore: string) => Omit<Kpi, 'count'>[]> = {
+  contact: (quietBefore) => [
+    { key: 'no_owner', label: 'No owner', filters: [isEmpty('owner_id')] },
+    { key: 'no_email', label: 'No email', filters: [isEmpty('email')] },
+    { key: 'no_lead_status', label: 'No lead status', filters: [isEmpty('lead_status')] },
+    {
+      key: 'quiet',
+      label: `No activity in ${QUIET_DAYS} days`,
+      // Never contacted counts as quiet. A `before` on its own drops every null,
+      // which is the half of the answer somebody opening this tile most wants.
+      filters: [
+        {
+          conjunction: 'or',
+          conditions: [
+            { field: 'last_contacted_at', operator: 'is_empty' },
+            { field: 'last_contacted_at', operator: 'before', value: quietBefore },
+          ],
+        },
+      ],
+    },
+  ],
+  company: () => [
+    { key: 'no_owner', label: 'No owner', filters: [isEmpty('owner_id')] },
+    { key: 'no_domain', label: 'No domain', filters: [isEmpty('domain')] },
+    { key: 'no_industry', label: 'No industry', filters: [isEmpty('industry')] },
+    { key: 'no_lifecycle', label: 'No lifecycle stage', filters: [isEmpty('lifecycle_stage_id')] },
+  ],
+  deal: () => [
+    { key: 'no_owner', label: 'No owner', filters: [isEmpty('owner_id')] },
+    { key: 'no_close_date', label: 'No close date', filters: [isEmpty('close_date')] },
+    { key: 'no_next_step', label: 'No next step', filters: [isEmpty('next_step')] },
+    {
+      key: 'past_close',
+      label: 'Close date passed',
+      filters: [{ conjunction: 'and', conditions: [{ field: 'close_date', operator: 'before', value: '@today' }] }],
+    },
+  ],
+}
+
+/** Every tile in one pass over the table, because four counts are four scans and
+ *  a list of eighty-eight thousand contacts cannot afford three of them. A custom
+ *  object has no tiles: nothing here knows what is missing from one. */
+export const listKpis = async (ctx: AccountContext, objectKey: string): Promise<Kpi[]> => {
+  const registry = await getRegistry(ctx)
+  const object = objectOrThrow(registry, objectKey)
+  const scope = scopeFor(ctx.actorId)
+  const quietBefore = new Date(Date.now() - QUIET_DAYS * 86_400_000).toISOString().slice(0, 10)
+
+  // A field an admin deleted takes its tile with it rather than throwing the
+  // whole strip away.
+  const tiles = (TILES[objectKey]?.(quietBefore) ?? []).filter((tile) =>
+    tile.filters.every((group) => group.conditions.every((condition) => object.byKey.has(condition.field))),
+  )
+  if (tiles.length === 0) return []
+
+  const aggregates = tiles.map((tile, index) => {
+    const where = compileFilters(object, tile.filters, scope)
+    return sql`count(*) filter (where ${where ?? sql`false`})::int as ${sql.raw(`k${index}`)}`
+  })
+
+  const [row] = await withAccount(ctx, (tx) =>
+    tx.execute<Record<string, number>>(sql`
+      select ${sql.join(aggregates, sql`, `)}
+        from ${tableFor(object)}
+       where ${rowsOf(object)} and ${sql.raw(`"${object.key}"."deleted_at"`)} is null`),
+  )
+
+  return tiles.map((tile, index) => ({ ...tile, count: Number(row?.[`k${index}`] ?? 0) }))
 }

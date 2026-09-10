@@ -1,15 +1,17 @@
 'use client'
 
-import { Avatar, Badge, DropdownMenu, EmptyState, cn, useToast } from '@rawr/ui'
-import { ChevronDown, MoreHorizontal } from 'lucide-react'
+import { Avatar, Badge, DropdownMenu, EmptyState, Modal, Spinner, cn, useToast } from '@rawr/ui'
+import { CalendarPlus, ChevronDown, CircleCheck, Mail, MoreHorizontal, StickyNote } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import type { Group } from './filter-builder.tsx'
+import { ScoreRing } from './score-ring.tsx'
+import { TaskForm } from './task-form.tsx'
 import { formatCurrency, formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -25,7 +27,22 @@ export type BoardCard = {
   nextStepDate: string | null
   daysInStage: number
   daysSinceActivity: number | null
+  score: number | null
+  nextTask: { title: string; dueDate: string | null } | null
+  contacts: string[]
+  contactCount: number
+  emailContactId: string | null
 }
+
+/** How many faces fit on a card before the rest become a number. Three is what
+ *  HubSpot shows and what stays legible at the card's narrowest. */
+const AVATARS_SHOWN = 3
+
+/** What the inline scheduler needs before it can show the real task form: the
+ *  people a task can be assigned to and the queues it can go in. Fetched once,
+ *  the first time somebody opens it, because a board that nobody schedules from
+ *  should not pay for two lists on every render. */
+type TaskLookups = { assignees: { id: string; label: string }[]; queues: { id: string; name: string }[] }
 
 /** When a card starts reading as stuck. Thirty days is a sales month: shorter
  *  and every board is amber, longer and nobody notices in time. Not configurable
@@ -103,6 +120,29 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
    *  reread, because a card that moved would otherwise be on two columns. */
   const [pages, setPages] = useState<Record<string, { cards: BoardCard[]; hasMore: boolean }>>({})
   const [loadingMore, setLoadingMore] = useState<string | null>(null)
+  /** The card whose next activity is being scheduled, and the two lists the real
+   *  task form needs. Null until somebody asks for one. */
+  const [scheduling, setScheduling] = useState<BoardCard | null>(null)
+  const [lookups, setLookups] = useState<TaskLookups | null>(null)
+
+  useEffect(() => {
+    if (!scheduling || lookups) return
+    let live = true
+    Promise.all([api.crm.lookups.query(), api.crm.tasks.queues.list.query()])
+      .then(([crm, queues]) => {
+        if (!live) return
+        setLookups({
+          assignees: crm.users.map((user) => ({ id: user.id, label: user.name || user.email })),
+          queues: queues.map((queue) => ({ id: queue.id, name: queue.name })),
+        })
+      })
+      .catch((cause) => {
+        if (live) toast('error', errorMessage(cause))
+      })
+    return () => {
+      live = false
+    }
+  }, [scheduling, lookups, toast])
 
   const shownCards = (column: BoardColumn): BoardCard[] => {
     const page = pages[column.key]
@@ -204,7 +244,8 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
   }
 
   return (
-    // The board scrolls inside its own box; the page never scrolls sideways.
+    <>
+    {/* The board scrolls inside its own box; the page never scrolls sideways. */}
     <div className="flex min-h-0 w-full flex-1 overflow-x-auto pb-2">
       {/* Stretch, not start: a column that sizes to its own cards leaves an empty
           stage as a header-high drop target, which is the one stage somebody most
@@ -318,11 +359,50 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                         )}
                       </p>
                       {card.ownerName ? <p className="truncate">Deal owner: {card.ownerName}</p> : null}
+                      {/* Under the amount block, where HubSpot puts its own. The
+                          ring is sized in em, so it follows the card's text
+                          rather than a pixel count. */}
+                      <p className="mt-1 flex items-center gap-1.5">
+                        <ScoreRing score={card.score} />
+                        <span className="text-secondary">Deal score</span>
+                      </p>
                       {card.companyName ? (
                         <p className="mt-2 flex items-center gap-1.5 truncate border-t border-line pt-2 text-body" title={card.companyName}>
                           <Avatar name={card.companyName} size="sm" />
                           <span className="truncate">{card.companyName}</span>
                         </p>
+                      ) : null}
+                      {card.contactCount > 0 ? (
+                        // Three faces and a count. Forty contacts is a number, not
+                        // forty avatars wrapping down the card.
+                        <p className="mt-2 flex flex-wrap items-center gap-1" title={card.contacts.join(', ')}>
+                          {card.contacts.slice(0, AVATARS_SHOWN).map((name) => (
+                            <Avatar key={name} name={name} size="sm" />
+                          ))}
+                          {card.contactCount > AVATARS_SHOWN ? (
+                            <span className="text-secondary tabular-nums">+{card.contactCount - AVATARS_SHOWN}</span>
+                          ) : null}
+                        </p>
+                      ) : null}
+                      {canWrite ? (
+                        // The next open task, or an offer to make one. Either way
+                        // it opens the same task form the record page uses, filed
+                        // against this deal, without leaving the board.
+                        <button
+                          type="button"
+                          onClick={() => setScheduling(card)}
+                          className={cn(
+                            'mt-2 flex w-full items-center gap-1.5 rounded-pill border border-line-strong px-2 py-1 text-left hover:bg-fill',
+                            isPast(card.nextTask?.dueDate) && 'border-error text-error',
+                          )}
+                        >
+                          <CalendarPlus aria-hidden="true" className="size-3.5 shrink-0" />
+                          <span className="min-w-0 flex-1 truncate">
+                            {card.nextTask
+                              ? `${card.nextTask.dueDate ? `${formatDate(card.nextTask.dueDate, zone)}: ` : ''}${card.nextTask.title}`
+                              : 'Schedule next activity'}
+                          </span>
+                        </button>
                       ) : null}
                       {card.nextStep ? (
                         <p className="mt-1 break-words text-small text-secondary">
@@ -348,6 +428,63 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                               : `${card.daysSinceActivity}d quiet`}
                         </span>
                       </p>
+                      {canWrite ? (
+                        // The record page's quick actions, on the card. Each is a
+                        // link into the address that opens the panel already on
+                        // that page, so there is still one composer and one note
+                        // editor. Shown on hover and whenever one holds focus, so
+                        // the keyboard reaches what the pointer does.
+                        <div className="mt-2 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                          {[
+                            {
+                              key: 'note',
+                              label: 'Add a note',
+                              icon: StickyNote,
+                              href: recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note' }),
+                            },
+                            {
+                              key: 'task',
+                              label: 'Create a task',
+                              icon: CircleCheck,
+                              href: recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new' }),
+                            },
+                            {
+                              key: 'email',
+                              // A deal has no address of its own, so the composer
+                              // opens on the first contact linked to it that has
+                              // one. With none, the button says why rather than
+                              // going nowhere.
+                              label: card.emailContactId ? 'Email a contact on this deal' : 'No contact on this deal has an email address',
+                              icon: Mail,
+                              href: card.emailContactId
+                                ? recordPath(account, 'contact', card.emailContactId, { tab: 'activities', compose: '1' })
+                                : null,
+                            },
+                          ].map((action) =>
+                            action.href ? (
+                              <Link
+                                key={action.key}
+                                href={action.href}
+                                title={action.label}
+                                className="grid size-7 place-items-center rounded-pill border border-line-strong text-body hover:bg-fill"
+                              >
+                                <action.icon aria-hidden="true" className="size-3.5" />
+                                <span className="sr-only">{action.label}</span>
+                              </Link>
+                            ) : (
+                              <span
+                                key={action.key}
+                                title={action.label}
+                                aria-disabled="true"
+                                className="grid size-7 place-items-center rounded-pill border border-line text-secondary opacity-60"
+                              >
+                                <action.icon aria-hidden="true" className="size-3.5" />
+                                <span className="sr-only">{action.label}</span>
+                              </span>
+                            ),
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                 ))
@@ -399,5 +536,34 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
         ))}
       </div>
     </div>
+
+    {/* The record page's own task form, on the board, filed against the card it
+        was opened from. One form, so a task scheduled here carries the type, the
+        priority, the queue and the reminder a task scheduled anywhere else does. */}
+    <Modal
+      open={scheduling !== null}
+      onClose={() => setScheduling(null)}
+      title={scheduling ? `Next activity on ${shortName(scheduling.displayName)}` : 'Next activity'}
+      size="sm"
+    >
+      {scheduling && lookups ? (
+        <TaskForm
+          autoFocus
+          assignees={lookups.assignees}
+          queues={lookups.queues}
+          entity={{ entityType: 'deal', entityId: scheduling.id }}
+          onCreated={() => {
+            setScheduling(null)
+            setPages({})
+            router.refresh()
+          }}
+        />
+      ) : (
+        <div className="flex justify-center p-4">
+          <Spinner />
+        </div>
+      )}
+    </Modal>
+    </>
   )
 }

@@ -12,6 +12,8 @@ import {
   listTaskQueues,
   listTasks,
   readAssociations,
+  readDealScore,
+  SCORE_COMPONENTS,
   readEmailEngagement,
   readMemberships,
   readSubscriptions,
@@ -43,7 +45,8 @@ import { AttachmentsPanel } from '~/components/crm/attachments-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
-import { Value } from '~/components/crm/value.tsx'
+import { Value, formatDateTime } from '~/components/crm/value.tsx'
+import { ScoreRing } from '~/components/crm/score-ring.tsx'
 import { objectView, recordPath } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
@@ -157,7 +160,7 @@ const RecordPage = async ({
     const enrichable = objectParam === 'contact' || objectParam === 'company'
     // The record itself is fetched alongside its panels, not before them: the
     // panels only need the id, and a missing record just discards their answers.
-    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments] = await Promise.all([
+    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore] = await Promise.all([
       loadCrmContext(ctx, objectParam),
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
@@ -178,9 +181,10 @@ const RecordPage = async ({
       storageConfigured ? listAttachments(ctx, entity) : Promise.resolve([]),
       enrichable ? enrichmentQueued(ctx, objectParam, id) : Promise.resolve(null),
       objectParam === 'contact' ? enrollmentsForContact(ctx, id) : Promise.resolve([]),
+      objectParam === 'deal' ? readDealScore(ctx, id) : Promise.resolve(null),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments }
+    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore }
   })
 
   if (!screen) {
@@ -194,7 +198,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments } = screen
+  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore } = screen
 
   const health = (kind: 'apollo' | 'lusha' | 'clay') => {
     const row = integrations.find((i) => i.kind === kind)
@@ -361,6 +365,39 @@ const RecordPage = async ({
             </div>
           </div>
         </div>
+
+          {dealScore ? (
+            // The number and the arithmetic behind it. HubSpot's own deal score
+            // is an AI figure with no explanation, which is why nobody argues
+            // with it and nobody acts on it either.
+            <section className="rounded-panel border border-line bg-surface p-4 shadow-panel">
+              <div className="flex items-center gap-3">
+                <ScoreRing score={dealScore.score} className="text-base" />
+                <div className="min-w-0">
+                  <h2 className="font-medium">Deal score</h2>
+                  <p className="text-small text-secondary">
+                    {dealScore.scoredAt
+                      ? `Out of 100, worked out ${formatDateTime(dealScore.scoredAt.toISOString(), zone)}.`
+                      : 'Not worked out yet. It is computed nightly and whenever the stage changes.'}
+                  </p>
+                </div>
+              </div>
+              {dealScore.score === null ? null : (
+                <dl className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3 text-small">
+                  {SCORE_COMPONENTS.map((component) => (
+                    <div key={component.key} className="flex items-baseline justify-between gap-3">
+                      <dt className="min-w-0" title={component.why}>
+                        {component.label}
+                      </dt>
+                      <dd className="shrink-0 tabular-nums">
+                        {dealScore.detail[component.key] ?? 0} / {component.max}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </section>
+          ) : null}
 
           <PropertyPanel
             object={objectParam}
