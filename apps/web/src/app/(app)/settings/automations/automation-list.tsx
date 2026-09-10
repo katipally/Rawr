@@ -1,17 +1,34 @@
 'use client'
 
 import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
+import { automationRunsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
-type Trigger = 'record_created' | 'stage_changed' | 'lifecycle_changed' | 'form_submitted'
-type ActionType = 'set_field' | 'set_lifecycle' | 'assign_owner' | 'create_task' | 'notify_slack'
+type Trigger =
+  | 'record_created'
+  | 'stage_changed'
+  | 'lifecycle_changed'
+  | 'form_submitted'
+  | 'date_reached'
+  | 'no_activity'
+
+type ActionType =
+  | 'set_field'
+  | 'set_lifecycle'
+  | 'assign_owner'
+  | 'create_task'
+  | 'notify_slack'
+  | 'send_email'
+  | 'enroll_in_sequence'
+  | 'webhook'
 
 /** What the editor holds. Config values are strings here and coerced on save:
  *  every one of them comes out of an input, and a half-typed number is a string
@@ -20,6 +37,7 @@ export type StepView =
   | { kind: 'action'; type: ActionType; config: Record<string, string> }
   | { kind: 'delay'; minutes: number }
   | { kind: 'guard'; conditions: Group[] }
+  | { kind: 'branch'; conditions: Group[]; matched: StepView[]; otherwise: StepView[] }
 
 export type AutomationRowView = {
   id: string
@@ -27,6 +45,10 @@ export type AutomationRowView = {
   isActive: boolean
   trigger: Trigger
   objectKey: string
+  /** What the trigger needs beyond the object: which date field and how many
+   *  days either side, or how many days of silence count. Strings, because every
+   *  one of them came out of an input. */
+  triggerConfig: Record<string, string>
   /** The rule's own conditions. A guard step with none of its own re-checks
    *  these, which is why an empty list made "and if it still matches" a no-op. */
   conditions: Group[]
@@ -57,9 +79,14 @@ export type AutomationListProps = {
    *  invented, so this cannot be written out here. */
   objects: { key: string; label: string }[]
   fieldsByObject: Record<string, string[]>
+  /** Only the date fields, for the trigger that waits for one to arrive. */
+  dateFieldsByObject: Record<string, { key: string; label: string }[]>
   /** The same shape segments pass their builder. Keyed by object because a rule
    *  can be repointed at another one while the editor is open. */
   filterFieldsByObject: Record<string, FilterField[]>
+  templates: { id: string; name: string }[]
+  mailboxes: { id: string; email: string }[]
+  sequences: { id: string; name: string }[]
 }
 
 /** The words a person uses, against the words the enum uses. `objects: null` means
@@ -70,7 +97,13 @@ const TRIGGERS: { key: Trigger; label: string; objects: string[] | null }[] = [
   { key: 'stage_changed', label: 'a deal changes stage', objects: ['deal'] },
   { key: 'lifecycle_changed', label: 'a lifecycle stage changes', objects: ['contact', 'company'] },
   { key: 'form_submitted', label: 'a form is submitted', objects: ['contact'] },
+  { key: 'date_reached', label: 'a date arrives', objects: null },
+  { key: 'no_activity', label: 'nothing has happened for a while', objects: ['contact', 'company', 'deal'] },
 ]
+
+/** The two nothing announces. Rawr looks for them once an hour instead, and a
+ *  rule fires at most once a day per record, which is what the copy says. */
+const SCANNED: Trigger[] = ['date_reached', 'no_activity']
 
 const ACTIONS: { key: ActionType; label: string }[] = [
   { key: 'set_field', label: 'Set a field' },
@@ -78,7 +111,14 @@ const ACTIONS: { key: ActionType; label: string }[] = [
   { key: 'assign_owner', label: 'Assign an owner' },
   { key: 'create_task', label: 'Create a task' },
   { key: 'notify_slack', label: 'Post to Slack' },
+  { key: 'send_email', label: 'Send an email' },
+  { key: 'enroll_in_sequence', label: 'Enrol in a sequence' },
+  { key: 'webhook', label: 'Call a webhook' },
 ]
+
+/** The two that write to a person. A rule watching a company or a deal cannot
+ *  offer them: only a contact has an inbox. */
+const CONTACT_ONLY: ActionType[] = ['send_email', 'enroll_in_sequence']
 
 const STATE_TONE = { waiting: 'accent', done: 'ok', skipped: 'neutral', failed: 'error' } as const
 
@@ -107,6 +147,7 @@ const describeDelay = (minutes: number): string =>
 const summarise = (step: StepView): string => {
   if (step.kind === 'delay') return `wait ${describeDelay(step.minutes)}`
   if (step.kind === 'guard') return 'check it still matches'
+  if (step.kind === 'branch') return `if it matches: ${step.matched.map(summarise).join(', then ') || 'nothing'}`
   return ACTIONS.find((entry) => entry.key === step.type)?.label.toLowerCase() ?? step.type
 }
 
@@ -124,7 +165,14 @@ const kindFrom = (value: string): StepView =>
     ? { kind: 'delay', minutes: 60 * 24 }
     : value === 'guard'
       ? { kind: 'guard', conditions: [] }
-      : { kind: 'action', type: value as ActionType, config: {} }
+      : value === 'branch'
+        ? { kind: 'branch', conditions: [], matched: [], otherwise: [] }
+        : { kind: 'action', type: value as ActionType, config: {} }
+
+/** How deep a branch may sit inside a branch, matching what the layer will
+ *  accept. Past this the dropdown stops offering one rather than saving a rule
+ *  whose inner arms are silently dropped. */
+const MAX_BRANCH_DEPTH = 3
 
 /** The fields one action needs, which differ per action and per object.
  *
@@ -132,26 +180,36 @@ const kindFrom = (value: string): StepView =>
  *  has steps, each with its own config, and inlining them meant one `config`
  *  state for the whole form. Ids carry the step number so two "Task title" labels
  *  in one dialog still point at their own input. */
-const ActionFields = ({
-  index,
-  type,
-  config,
-  object,
-  people,
-  stages,
-  fieldsByObject,
-  onChange,
-}: {
-  index: number
-  type: ActionType
-  config: Record<string, string>
+/** Everything an arm of the editor needs that does not change as it recurses.
+ *  One object rather than nine props threaded through a branch and its arms. */
+type EditorContext = {
   object: string
   people: { id: string; name: string }[]
   stages: string[]
   fieldsByObject: Record<string, string[]>
+  filterFields: FilterField[]
+  templates: { id: string; name: string }[]
+  mailboxes: { id: string; email: string }[]
+  sequences: { id: string; name: string }[]
+}
+
+const ActionFields = ({
+  path,
+  type,
+  config,
+  ctx,
+  onChange,
+}: {
+  /** Where this step sits, so two "Task title" labels in one dialog still point
+   *  at their own input however deep inside a branch they are. */
+  path: string
+  type: ActionType
+  config: Record<string, string>
+  ctx: EditorContext
   onChange: (config: Record<string, string>) => void
 }) => {
-  const id = (part: string) => `automation-${index}-${part}`
+  const { object, people, stages, fieldsByObject, templates, mailboxes, sequences } = ctx
+  const id = (part: string) => `automation-${path}-${part}`
   const set = (key: string, value: string) => onChange({ ...config, [key]: value })
 
   if (type === 'set_field') {
@@ -227,6 +285,79 @@ const ActionFields = ({
     )
   }
 
+  if (type === 'send_email') {
+    return (
+      <div className="grid gap-2 @md:grid-cols-2">
+        <Field id={id('template')} label="Template">
+          <Select id={id('template')} value={config.templateId ?? ''} onChange={(e) => set('templateId', e.target.value)}>
+            <option value="">Pick one</option>
+            {templates.map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field id={id('from')} label="From" hint="Sends from this mailbox, and stops if they have opted out.">
+          <Select id={id('from')} value={config.mailboxId ?? ''} onChange={(e) => set('mailboxId', e.target.value)}>
+            <option value="">Pick one</option>
+            {mailboxes.map((box) => (
+              <option key={box.id} value={box.id}>
+                {box.email}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+    )
+  }
+
+  if (type === 'enroll_in_sequence') {
+    return (
+      <div className="grid gap-2 @md:grid-cols-2">
+        <Field id={id('sequence')} label="Sequence">
+          <Select id={id('sequence')} value={config.sequenceId ?? ''} onChange={(e) => set('sequenceId', e.target.value)}>
+            <option value="">Pick one</option>
+            {sequences.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field id={id('sender')} label="From">
+          <Select id={id('sender')} value={config.mailboxId ?? ''} onChange={(e) => set('mailboxId', e.target.value)}>
+            <option value="">Pick one</option>
+            {mailboxes.map((box) => (
+              <option key={box.id} value={box.id}>
+                {box.email}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+    )
+  }
+
+  if (type === 'webhook') {
+    return (
+      <div className="grid gap-2 @md:grid-cols-2">
+        <Field id={id('url')} label="Address" hint="https only. Five seconds to answer, then one retry.">
+          <TextInput
+            id={id('url')}
+            inputMode="url"
+            value={config.url ?? ''}
+            placeholder="https://example.com/hooks/rawr"
+            onChange={(e) => set('url', e.target.value)}
+          />
+        </Field>
+        <Field id={id('secret')} label="Secret" hint="Signs the call, so the receiver can prove it came from Rawr.">
+          <TextInput id={id('secret')} value={config.secret ?? ''} onChange={(e) => set('secret', e.target.value)} />
+        </Field>
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-2 @md:grid-cols-2">
       <Field id={id('message')} label="Message" hint="{{name}} becomes the record's name.">
@@ -244,6 +375,179 @@ const ActionFields = ({
   )
 }
 
+/** One list of steps, and the arms of any branch inside it.
+ *
+ *  Recursive because a branch holds two lists of exactly these steps. `path`
+ *  makes every label and every key unique down the tree, and `depth` is what
+ *  stops the dropdown offering a branch deeper than the layer will accept. */
+const StepList = ({
+  steps,
+  onChange,
+  path,
+  depth,
+  ctx,
+}: {
+  steps: StepView[]
+  onChange: (steps: StepView[]) => void
+  path: string
+  depth: number
+  ctx: EditorContext
+}) => {
+  const canBranch = depth < MAX_BRANCH_DEPTH - 1
+  const actions = ACTIONS.filter((entry) => ctx.object === 'contact' || !CONTACT_ONLY.includes(entry.key))
+
+  return (
+    <div className="flex flex-col gap-2">
+      <ol className="flex flex-col gap-2">
+        {steps.map((step, index) => (
+          <li
+            key={`${path}-${index}`}
+            className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-small text-secondary tabular-nums">{index + 1}</span>
+              <Select
+                aria-label={`Step ${index + 1}`}
+                className="w-auto"
+                value={step.kind === 'action' ? step.type : step.kind}
+                onChange={(event) => onChange(replace(steps, index, kindFrom(event.target.value)))}
+              >
+                <optgroup label="Do">
+                  {actions.map((entry) => (
+                    <option key={entry.key} value={entry.key}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Then">
+                  <option value="delay">Wait</option>
+                  <option value="guard">Check it still matches</option>
+                  {canBranch || step.kind === 'branch' ? <option value="branch">If it matches, otherwise</option> : null}
+                </optgroup>
+              </Select>
+
+              {step.kind === 'delay' ? (
+                <Select
+                  aria-label={`How long step ${index + 1} waits`}
+                  className="w-auto"
+                  value={String(step.minutes)}
+                  onChange={(event) =>
+                    onChange(replace(steps, index, { kind: 'delay', minutes: Number(event.target.value) }))
+                  }
+                >
+                  {DELAYS.map((entry) => (
+                    <option key={entry.minutes} value={entry.minutes}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+
+              <span className="ml-auto flex items-center gap-0.5">
+                <IconButton
+                  label={`Move step ${index + 1} up`}
+                  icon={<ACTION_ICONS.moveUp size={16} />}
+                  disabled={index === 0}
+                  onClick={() => onChange(swap(steps, index, index - 1))}
+                />
+                <IconButton
+                  label={`Move step ${index + 1} down`}
+                  icon={<ACTION_ICONS.moveDown size={16} />}
+                  disabled={index === steps.length - 1}
+                  onClick={() => onChange(swap(steps, index, index + 1))}
+                />
+                <IconButton
+                  label={`Remove step ${index + 1}`}
+                  tone="destructive"
+                  icon={<ACTION_ICONS.delete size={16} />}
+                  // An arm is allowed to be empty while it is being written. The
+                  // rule itself is not: a rule with no steps does nothing.
+                  disabled={depth === 0 && steps.length === 1}
+                  onClick={() => onChange(steps.filter((_, at) => at !== index))}
+                />
+              </span>
+            </div>
+
+            {step.kind === 'guard' ? (
+              <div className="flex flex-col gap-2">
+                <p className="text-small text-secondary">
+                  Looks at the record again, as it is now, and stops the rule here unless it still
+                  matches. This is how a rule waits and then changes its mind. With nothing of its
+                  own below, it re-checks the rule&apos;s own conditions.
+                </p>
+                <FilterBuilder
+                  key={`${ctx.object}-${path}-${index}-guard`}
+                  fields={ctx.filterFields}
+                  value={step.conditions}
+                  onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
+                />
+              </div>
+            ) : null}
+
+            {step.kind === 'branch' ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-small text-secondary">
+                  Looks at the record now and takes one of two roads. Unlike a check, both roads
+                  carry on: whichever arm runs, the steps after this one still follow.
+                </p>
+                <FilterBuilder
+                  key={`${ctx.object}-${path}-${index}-branch`}
+                  fields={ctx.filterFields}
+                  value={step.conditions}
+                  onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
+                />
+                <div className="flex flex-col gap-2 border-l-2 border-divider pl-3">
+                  <p className="font-medium">If it matches</p>
+                  <StepList
+                    steps={step.matched}
+                    onChange={(next) => onChange(replace(steps, index, { ...step, matched: next }))}
+                    path={`${path}-${index}t`}
+                    depth={depth + 1}
+                    ctx={ctx}
+                  />
+                </div>
+                <div className="flex flex-col gap-2 border-l-2 border-divider pl-3">
+                  <p className="font-medium">Otherwise</p>
+                  <StepList
+                    steps={step.otherwise}
+                    onChange={(next) => onChange(replace(steps, index, { ...step, otherwise: next }))}
+                    path={`${path}-${index}e`}
+                    depth={depth + 1}
+                    ctx={ctx}
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {step.kind === 'action' ? (
+              <ActionFields
+                path={`${path}-${index}`}
+                type={step.type}
+                config={step.config}
+                ctx={ctx}
+                onChange={(config) => onChange(replace(steps, index, { ...step, config }))}
+              />
+            ) : null}
+          </li>
+        ))}
+      </ol>
+
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => onChange([...steps, { kind: 'action', type: 'create_task', config: {} }])}>
+          Add an action
+        </Button>
+        <Button onClick={() => onChange([...steps, { kind: 'delay', minutes: 60 * 24 }])}>Add a wait</Button>
+        <Button onClick={() => onChange([...steps, { kind: 'guard', conditions: [] }])}>Add a check</Button>
+        {canBranch ? (
+          <Button onClick={() => onChange([...steps, { kind: 'branch', conditions: [], matched: [], otherwise: [] }])}>
+            Add an if/then
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export const AutomationList = ({
   rows,
   runs,
@@ -251,7 +555,11 @@ export const AutomationList = ({
   stages,
   objects,
   fieldsByObject,
+  dateFieldsByObject,
   filterFieldsByObject,
+  templates,
+  mailboxes,
+  sequences,
 }: AutomationListProps) => {
   const zone = useZone()
   const router = useRouter()
@@ -266,16 +574,30 @@ export const AutomationList = ({
   const [object, setObject] = useState<string>('contact')
   const [steps, setSteps] = useState<StepView[]>([])
   const [conditions, setConditions] = useState<Group[]>([])
+  const [triggerConfig, setTriggerConfig] = useState<Record<string, string>>({})
 
   const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
   const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
   const labelOf = (key: string): string => objects.find((entry) => entry.key === key)?.label ?? key
+  const setTrigger_ = (key: string, value: string) => setTriggerConfig({ ...triggerConfig, [key]: value })
+
+  const editor: EditorContext = {
+    object,
+    people,
+    stages,
+    fieldsByObject,
+    filterFields: filterFieldsByObject[object] ?? [],
+    templates,
+    mailboxes,
+    sequences,
+  }
 
   const openNew = () => {
     setName('')
     setTrigger('record_created')
     setObject('contact')
     setConditions([])
+    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30' })
     setSteps([{ kind: 'action', type: 'create_task', config: {} }])
     setEditing('new')
   }
@@ -285,6 +607,7 @@ export const AutomationList = ({
     setTrigger(row.trigger)
     setObject(row.objectKey)
     setConditions(row.conditions)
+    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...row.triggerConfig })
     setSteps(row.steps.length > 0 ? row.steps : [{ kind: 'action', type: 'create_task', config: {} }])
     setEditing(row)
   }
@@ -312,17 +635,12 @@ export const AutomationList = ({
           name,
           trigger,
           object,
+          triggerConfig,
           conditions,
-          steps: steps.map((step) =>
-            step.kind === 'action'
-              ? { kind: 'action' as const, type: step.type, config: step.config }
-              : step.kind === 'delay'
-                ? { kind: 'delay' as const, minutes: step.minutes }
-                : // A guard with no conditions of its own re-checks the rule's,
-                  // which is the reading somebody means by "and if it still
-                  // matches".
-                  { kind: 'guard' as const, conditions: step.conditions },
-          ),
+          // A guard with no conditions of its own re-checks the rule's, which is
+          // the reading somebody means by "and if it still matches". The shape
+          // the editor holds is already the shape the layer parses.
+          steps,
         }),
       'Saved. Turn it on when you are ready.',
     )
@@ -375,6 +693,9 @@ export const AutomationList = ({
                     )
                   }}
                 />
+                <Link href={automationRunsPath(row.id)} className="text-small">
+                  Runs
+                </Link>
                 <IconButton
                   label={`Edit ${row.name}`}
                   icon={<ACTION_ICONS.edit size={16} />}
@@ -471,6 +792,66 @@ export const AutomationList = ({
             </Select>
           </Field>
 
+          {trigger === 'date_reached' ? (
+            <div className="grid gap-2 @md:grid-cols-3">
+              <Field id="automation-datefield" label="Date">
+                <Select
+                  id="automation-datefield"
+                  value={triggerConfig.fieldKey ?? ''}
+                  onChange={(event) => setTrigger_('fieldKey', event.target.value)}
+                >
+                  <option value="">Pick one</option>
+                  {(dateFieldsByObject[object] ?? []).map((field) => (
+                    <option key={field.key} value={field.key}>
+                      {field.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field id="automation-offset" label="Days" hint="0 fires on the day itself.">
+                <TextInput
+                  id="automation-offset"
+                  inputMode="numeric"
+                  value={triggerConfig.offsetDays ?? ''}
+                  onChange={(event) => setTrigger_('offsetDays', event.target.value)}
+                />
+              </Field>
+              <Field id="automation-direction" label="Which side">
+                <Select
+                  id="automation-direction"
+                  value={triggerConfig.direction ?? 'before'}
+                  onChange={(event) => setTrigger_('direction', event.target.value)}
+                >
+                  <option value="before">before the date</option>
+                  <option value="after">after the date</option>
+                </Select>
+              </Field>
+            </div>
+          ) : null}
+
+          {trigger === 'no_activity' ? (
+            <Field
+              id="automation-quiet"
+              label="Days of silence"
+              hint="Counted from the last thing on the timeline, or from when the record was created if there is nothing on it."
+            >
+              <TextInput
+                id="automation-quiet"
+                inputMode="numeric"
+                value={triggerConfig.days ?? ''}
+                onChange={(event) => setTrigger_('days', event.target.value)}
+              />
+            </Field>
+          ) : null}
+
+          {SCANNED.includes(trigger) ? (
+            <Alert tone="info">
+              Nothing announces this one, so Rawr looks for it once an hour. A rule fires at most
+              once a day for any one record, and a silence rule fires on the day the record goes
+              quiet rather than every day after it.
+            </Alert>
+          ) : null}
+
           <div className="flex flex-col gap-2">
             <p className="font-medium">Only if</p>
             <p className="text-small text-secondary">
@@ -487,114 +868,7 @@ export const AutomationList = ({
 
           <div className="flex flex-col gap-2">
             <p className="font-medium">Then, in order</p>
-            <ol className="flex flex-col gap-2">
-              {steps.map((step, index) => (
-                <li
-                  key={index}
-                  className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-small text-secondary tabular-nums">{index + 1}</span>
-                    <Select
-                      aria-label={`Step ${index + 1}`}
-                      className="w-auto"
-                      value={step.kind === 'action' ? step.type : step.kind}
-                      onChange={(event) => setSteps(replace(steps, index, kindFrom(event.target.value)))}
-                    >
-                      <optgroup label="Do">
-                        {ACTIONS.map((entry) => (
-                          <option key={entry.key} value={entry.key}>
-                            {entry.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Then">
-                        <option value="delay">Wait</option>
-                        <option value="guard">Check it still matches</option>
-                      </optgroup>
-                    </Select>
-
-                    {step.kind === 'delay' ? (
-                      <Select
-                        aria-label={`How long step ${index + 1} waits`}
-                        className="w-auto"
-                        value={String(step.minutes)}
-                        onChange={(event) =>
-                          setSteps(replace(steps, index, { kind: 'delay', minutes: Number(event.target.value) }))
-                        }
-                      >
-                        {DELAYS.map((entry) => (
-                          <option key={entry.minutes} value={entry.minutes}>
-                            {entry.label}
-                          </option>
-                        ))}
-                      </Select>
-                    ) : null}
-
-                    <span className="ml-auto flex items-center gap-0.5">
-                      <IconButton
-                        label={`Move step ${index + 1} up`}
-                        icon={<ACTION_ICONS.moveUp size={16} />}
-                        disabled={index === 0}
-                        onClick={() => setSteps(swap(steps, index, index - 1))}
-                      />
-                      <IconButton
-                        label={`Move step ${index + 1} down`}
-                        icon={<ACTION_ICONS.moveDown size={16} />}
-                        disabled={index === steps.length - 1}
-                        onClick={() => setSteps(swap(steps, index, index + 1))}
-                      />
-                      <IconButton
-                        label={`Remove step ${index + 1}`}
-                        tone="destructive"
-                        icon={<ACTION_ICONS.delete size={16} />}
-                        disabled={steps.length === 1}
-                        onClick={() => setSteps(steps.filter((_, at) => at !== index))}
-                      />
-                    </span>
-                  </div>
-
-                  {step.kind === 'guard' ? (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-small text-secondary">
-                        Looks at the record again, as it is now, and stops the rule here unless it
-                        still matches. This is how a rule waits and then changes its mind. With
-                        nothing of its own below, it re-checks the rule&apos;s own conditions.
-                      </p>
-                      <FilterBuilder
-                        key={`${object}-guard-${index}`}
-                        fields={filterFieldsByObject[object] ?? []}
-                        value={step.conditions}
-                        onApply={(next) => setSteps(replace(steps, index, { kind: 'guard', conditions: next }))}
-                      />
-                    </div>
-                  ) : null}
-
-                  {step.kind === 'action' ? (
-                    <ActionFields
-                      index={index}
-                      type={step.type}
-                      config={step.config}
-                      object={object}
-                      people={people}
-                      stages={stages}
-                      fieldsByObject={fieldsByObject}
-                      onChange={(config) => setSteps(replace(steps, index, { ...step, config }))}
-                    />
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setSteps([...steps, { kind: 'action', type: 'create_task', config: {} }])}>
-                Add an action
-              </Button>
-              <Button onClick={() => setSteps([...steps, { kind: 'delay', minutes: 60 * 24 }])}>
-                Add a wait
-              </Button>
-              <Button onClick={() => setSteps([...steps, { kind: 'guard', conditions: [] }])}>Add a check</Button>
-            </div>
+            <StepList steps={steps} onChange={setSteps} path="s" depth={0} ctx={editor} />
           </div>
 
           <Alert tone="info">

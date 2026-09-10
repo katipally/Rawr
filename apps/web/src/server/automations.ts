@@ -1,22 +1,32 @@
 import {
   armedFor,
+  armedScans,
+  automationEmailTemplate,
   claimAutomationRun,
   conditionsHold,
   createTask,
+  enroll,
   finishAutomationRun,
   getRecord,
   listLifecycleStages,
   openAutomationRun,
+  openScannedRun,
   readAutomation,
   parkAutomationRun,
+  readSubscriptions,
+  renderMergeFields,
+  scanTargets,
   updateRecord,
   type AutomationAction,
   type AutomationRow,
+  type AutomationStep,
   type AutomationTrigger,
   type AccountContext,
+  type StepPath,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
-import { notifySubscribers } from './webhooks.ts'
+import { compose } from './sequences/compose.ts'
+import { notifySubscribers, signPayload } from './webhooks.ts'
 import { queueHostAlert } from './notify.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
 
@@ -119,69 +129,238 @@ const runAction = async (
       })
       return 'posted to Slack'
     }
+
+    case 'send_email': {
+      const to = await contactAddress(ctx, event, name)
+      const template = await automationEmailTemplate(ctx, text(action.config, 'templateId'))
+      if (!template) throw new Error('That template no longer exists.')
+
+      const record = await getRecord(ctx, 'contact', event.entityId)
+      const values = {
+        first_name: asText(record?.values.first_name),
+        last_name: asText(record?.values.last_name),
+        full_name: name,
+        email: to,
+      }
+      const subject = renderMergeFields(template.subject, values)
+      const body = renderMergeFields(template.bodyText, values)
+      const missing = [...new Set([...subject.missing, ...body.missing])]
+      if (missing.length > 0) {
+        // The sequence engine's rule, for the sequence engine's reason: better a
+        // stopped run somebody can see than "Hi ," in a stranger's inbox.
+        throw new Error(
+          `Nothing to put in ${missing.join(', ')} for this contact. Give the field a fallback, like {{first_name|there}}.`,
+        )
+      }
+
+      await compose(ctx, {
+        mailboxId: text(action.config, 'mailboxId'),
+        to,
+        subject: subject.text,
+        text: body.text,
+        contactId: event.entityId,
+      })
+      return `emailed ${to}`
+    }
+
+    case 'enroll_in_sequence': {
+      await contactAddress(ctx, event, name)
+      const [outcome] = await enroll(ctx, {
+        sequenceId: text(action.config, 'sequenceId'),
+        contactIds: [event.entityId],
+        mailboxId: text(action.config, 'mailboxId'),
+      })
+      // Opted out, already in it, no address: every one of those comes back as a
+      // sentence, and the run log is where somebody reads it.
+      if (!outcome?.enrolled) throw new Error(outcome?.reason ?? 'That contact could not be enrolled.')
+      return 'enrolled in the sequence'
+    }
+
+    case 'webhook': {
+      const url = text(action.config, 'url')
+      const body = JSON.stringify({
+        automation: ruleId,
+        at: new Date().toISOString(),
+        account: event.accountSlug,
+        object: event.objectKey,
+        id: event.entityId,
+        name,
+      })
+      await postWebhook(url, text(action.config, 'secret'), body)
+      return `called ${new URL(url).host}`
+    }
   }
 }
 
-/** Walks the steps from `from`, and returns when it either finishes or parks.
+const asText = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null)
+
+/** Where a rule writes to a person rather than to a record. Both refusals are the
+ *  sentences the rest of Rawr already uses for them, because the run log is read
+ *  by whoever wrote the rule and not by whoever wrote the code. */
+const contactAddress = async (ctx: AccountContext, event: AutomationEvent, name: string): Promise<string> => {
+  if (event.objectKey !== 'contact') throw new Error(`Only a contact can be written to, not a ${event.objectKey}.`)
+  const record = await getRecord(ctx, 'contact', event.entityId)
+  const to = asText(record?.values.email)
+  if (!to) throw new Error(`${name} has no email address.`)
+  // No subscription type is named on a template, so any opt-out counts. An
+  // internal type is not mail to the person and is left out of the question.
+  const rows = await readSubscriptions(ctx, event.entityId)
+  if (rows.some((row) => !row.isInternal && row.state === 'unsubscribed')) {
+    throw new Error('They have opted out of this kind of mail.')
+  }
+  return to
+}
+
+/** One POST, one retry, and five seconds either way.
  *
- *  The one function both entry points use: the trigger runs it from step zero,
- *  and the dispatcher runs it from wherever a delay left it. A run that never
- *  waits does the whole list in one pass, which is exactly what a rule did before
- *  delays existed.
+ *  Short because a run holds nothing open while it waits and the next step is
+ *  behind it: a receiver slower than five seconds is one whose answer this rule
+ *  cannot use. One retry, because the failure worth retrying is the connection
+ *  that dropped, and a receiver answering 500 twice is not going to answer 200
+ *  on the third. */
+const postWebhook = async (url: string, secret: string, body: string): Promise<void> => {
+  const once = async (): Promise<void> => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'Rawr-Automations/1',
+        'rawr-signature': signPayload(secret, body),
+      },
+      body,
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) throw new Error(`${url} answered ${response.status}.`)
+  }
+  try {
+    await once()
+  } catch {
+    await once()
+  }
+}
+
+/** What one level of the walk decided. `continue` means the level above carries
+ *  on at its own next step; the other two mean the run is over or asleep and
+ *  nothing further should happen. */
+type Walked = 'continue' | 'parked' | 'stopped'
+
+/** One list of steps, which may be the rule's or one arm of a branch inside it.
+ *
+ *  `prefix` is where this list sits in the rule and `resume` is what is left of
+ *  the path a parked run was holding, so a run that slept inside the else arm of
+ *  a branch wakes inside that arm rather than at the top. Recursion depth is the
+ *  branch depth, which the save path caps.
  *
  *  A failure stops the rest, unchanged: an automation half-applied leaves a
  *  record in a state no rule describes, which is worse than one that did not run.
- *  The trail says how far it got. */
+ *  The trail says how far it got, arms included. */
+const walkList = async (
+  ctx: AccountContext,
+  event: AutomationEvent,
+  rule: AutomationRow,
+  runId: string,
+  steps: AutomationStep[],
+  prefix: StepPath,
+  resume: StepPath,
+  done: string[],
+  name: string,
+): Promise<Walked> => {
+  const head = resume[0]
+  const start = typeof head === 'number' ? head : 0
+
+  for (let i = start; i < steps.length; i += 1) {
+    const step = steps[i]
+    if (!step) continue
+    const here: StepPath = [...prefix, i]
+    // Only the step the run was parked at inherits the rest of the path; every
+    // step after it starts fresh.
+    const inner = i === start ? resume.slice(1) : []
+
+    if (step.kind === 'delay') {
+      await parkAutomationRun(ctx, runId, {
+        stepPath: [...prefix, i + 1],
+        resumeAt: new Date(Date.now() + step.minutes * 60_000),
+        trail: [...done, `waited ${describeDelay(step.minutes)}`],
+      })
+      return 'parked'
+    }
+
+    if (step.kind === 'guard') {
+      // Judged against the record as it is now, which after a delay is the
+      // whole point: three days later it may have been won, reassigned or
+      // deleted, and a guard reading a copy from before the wait would be a
+      // guard that lies.
+      if (!(await conditionsHold(ctx, event.objectKey, event.entityId, step.conditions))) {
+        await finishAutomationRun(ctx, runId, {
+          state: 'skipped',
+          stepPath: here,
+          trail: done,
+          detail: [...done, 'stopped: the record no longer matches'].join(', '),
+        })
+        return 'stopped'
+      }
+      done.push('checked the record still matches')
+      continue
+    }
+
+    if (step.kind === 'branch') {
+      // A resumed run takes the arm it already took. Asking again would let a
+      // record that changed during the wait finish an arm it never started.
+      const arm =
+        inner[0] === 'matched' || inner[0] === 'otherwise'
+          ? inner[0]
+          : (await conditionsHold(ctx, event.objectKey, event.entityId, step.conditions))
+            ? 'matched'
+            : 'otherwise'
+      if (inner.length === 0) {
+        done.push(arm === 'matched' ? 'it matched, so took the first road' : 'it did not match, so took the other road')
+      }
+      const outcome = await walkList(
+        ctx,
+        event,
+        rule,
+        runId,
+        arm === 'matched' ? step.matched : step.otherwise,
+        [...here, arm],
+        inner.slice(1),
+        done,
+        name,
+      )
+      if (outcome !== 'continue') return outcome
+      continue
+    }
+
+    done.push(await runAction(ctx, event, step, rule.id, name))
+  }
+
+  return 'continue'
+}
+
+/** Walks the rule from `from`, and returns when it either finishes or parks.
+ *
+ *  The one function both entry points use: the trigger runs it from the start,
+ *  and the dispatcher runs it from wherever a delay left it. A run that never
+ *  waits does the whole tree in one pass, which is exactly what a rule did before
+ *  delays existed. */
 export const walkSteps = async (
   ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
   runId: string,
-  from: number,
+  from: StepPath,
   trail: string[],
   name: string,
 ): Promise<void> => {
   const done = [...trail]
   try {
-    for (let i = from; i < rule.steps.length; i += 1) {
-      const step = rule.steps[i]
-      if (!step) continue
-
-      if (step.kind === 'delay') {
-        await parkAutomationRun(ctx, runId, {
-          stepIndex: i + 1,
-          resumeAt: new Date(Date.now() + step.minutes * 60_000),
-          trail: [...done, `waited ${describeDelay(step.minutes)}`],
-        })
-        return
-      }
-
-      if (step.kind === 'guard') {
-        // Judged against the record as it is now, which after a delay is the
-        // whole point: three days later it may have been won, reassigned or
-        // deleted, and a guard reading a copy from before the wait would be a
-        // guard that lies.
-        if (!(await conditionsHold(ctx, event.objectKey, event.entityId, step.conditions))) {
-          await finishAutomationRun(ctx, runId, {
-            state: 'skipped',
-            stepIndex: i,
-            trail: done,
-            detail: [...done, 'stopped: the record no longer matches'].join(', '),
-          })
-          return
-        }
-        done.push('checked the record still matches')
-        continue
-      }
-
-      done.push(await runAction(ctx, event, step, rule.id, name))
+    const outcome = await walkList(ctx, event, rule, runId, rule.steps, [], from, done, name)
+    if (outcome === 'continue') {
+      await finishAutomationRun(ctx, runId, { state: 'done', stepPath: [rule.steps.length], trail: done })
     }
-
-    await finishAutomationRun(ctx, runId, { state: 'done', stepIndex: rule.steps.length, trail: done })
   } catch (cause) {
     await finishAutomationRun(ctx, runId, {
       state: 'failed',
-      stepIndex: from,
+      stepPath: from,
       trail: done,
       detail: cause instanceof Error ? cause.message : String(cause),
     }).catch(() => {
@@ -205,30 +384,45 @@ const describeDelay = (minutes: number): string => {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`
 }
 
-const runOne = async (
+/** One firing, from an already-opened run. The scan opens its runs differently
+ *  from the trigger path, and everything after that is the same. */
+const runFrom = async (
   ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
+  runId: string,
   name: string,
 ): Promise<void> => {
-  const runId = await openAutomationRun(ctx, {
-    automationId: rule.id,
-    entityType: event.objectKey,
-    entityId: event.entityId,
-  })
-
   if (!(await conditionsHold(ctx, event.objectKey, event.entityId, rule.conditions))) {
     await finishAutomationRun(ctx, runId, {
       state: 'skipped',
-      stepIndex: 0,
+      stepPath: [],
       trail: [],
       detail: 'The conditions did not hold for this record.',
     })
     return
   }
 
-  await walkSteps(ctx, event, rule, runId, 0, [], name)
+  await walkSteps(ctx, event, rule, runId, [], [], name)
 }
+
+const runOne = async (
+  ctx: AccountContext,
+  event: AutomationEvent,
+  rule: AutomationRow,
+  name: string,
+): Promise<void> =>
+  runFrom(
+    ctx,
+    event,
+    rule,
+    await openAutomationRun(ctx, {
+      automationId: rule.id,
+      entityType: event.objectKey,
+      entityId: event.entityId,
+    }),
+    name,
+  )
 
 /** Pick a parked run back up. Called by the worker through the internal route,
  *  never by a request.
@@ -250,7 +444,7 @@ export const resumeAutomation = async (
   if (!rule || !rule.isActive) {
     await finishAutomationRun(ctx, runId, {
       state: 'skipped',
-      stepIndex: claimed.stepIndex,
+      stepPath: claimed.stepPath,
       trail: claimed.trail,
       detail: [...claimed.trail, rule ? 'stopped: the rule was switched off' : 'stopped: the rule was deleted'].join(', '),
     })
@@ -261,7 +455,7 @@ export const resumeAutomation = async (
   if (!record) {
     await finishAutomationRun(ctx, runId, {
       state: 'skipped',
-      stepIndex: claimed.stepIndex,
+      stepPath: claimed.stepPath,
       trail: claimed.trail,
       detail: [...claimed.trail, 'stopped: the record was deleted while it waited'].join(', '),
     })
@@ -279,7 +473,7 @@ export const resumeAutomation = async (
     },
     rule,
     runId,
-    claimed.stepIndex,
+    claimed.stepPath,
     claimed.trail,
     record.displayName,
   )
@@ -328,4 +522,61 @@ export const runAutomations = (ctx: AccountContext, event: AutomationEvent | und
       await runOne(ctx, event, rule, name)
     }
   })
+}
+
+/** The hourly sweep for the two triggers no write announces.
+ *
+ *  Awaited by the internal route rather than fired into the background, because
+ *  the worker is the caller and it is entitled to know how many runs it caused.
+ *
+ *  Each rule is asked for the records it matches today and each match opens a run
+ *  keyed on the day, so the twelve scans between one midnight and the next fire a
+ *  rule once. A rule that throws is one rule: the next one still runs, because a
+ *  broken date field must not stop every other tenant's silence rule with it.
+ *
+ *  O(rules x SCAN_LIMIT) records per account per tick, each a sequential scan of
+ *  the one object the rule watches. */
+export const scanAutomations = async (
+  ctx: AccountContext,
+  accountSlug: string,
+): Promise<{ scanned: number; fired: number }> => {
+  const rules = await armedScans(ctx)
+  const day = new Date().toISOString().slice(0, 10)
+  let fired = 0
+
+  for (const rule of rules) {
+    try {
+      for (const entityId of await scanTargets(ctx, rule, day)) {
+        const runId = await openScannedRun(ctx, {
+          automationId: rule.id,
+          entityType: rule.objectKey,
+          entityId,
+          scanDay: day,
+        })
+        // Already fired for this record today. The unique index said so, which is
+        // the only answer two workers scanning the same hour can both trust.
+        if (!runId) continue
+        const record = await getRecord(ctx, rule.objectKey, entityId)
+        if (!record) continue
+        fired += 1
+        await runFrom(
+          ctx,
+          {
+            trigger: rule.trigger,
+            objectKey: rule.objectKey,
+            entityId,
+            displayName: record.displayName,
+            accountSlug,
+          },
+          rule,
+          runId,
+          record.displayName,
+        )
+      }
+    } catch (cause) {
+      console.error(`[automations] scan of "${rule.name}" failed:`, cause)
+    }
+  }
+
+  return { scanned: rules.length, fired }
 }

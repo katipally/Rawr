@@ -171,6 +171,9 @@ export const lifecyclePath = (): string => '/settings/lifecycle'
 
 export const automationsPath = (): string => '/settings/automations'
 
+export const automationRunsPath = (automationId: string): string =>
+  `/settings/automations/${automationId}/runs`
+
 export const subscriptionsPath = (): string => '/settings/subscriptions'
 
 /** Outgoing webhooks and unmatched inbound events. Connecting a provider is an
@@ -195,7 +198,17 @@ export const segmentsPath = (account: string, id?: string): string =>
 export type TaskView = 'all' | 'today' | 'overdue' | 'upcoming' | 'done'
 export const tasksPath = (
   account: string,
-  params: { view?: TaskView; mine?: '1'; q?: string; new?: '1' } = {},
+  // Each one takes undefined explicitly: a link that drops a filter says so by
+  // passing undefined over the spread it inherited it from.
+  params: {
+    view?: TaskView | undefined
+    mine?: '1' | undefined
+    q?: string | undefined
+    new?: '1' | undefined
+    /** A queue id, or 'none' for the tasks in no queue. */
+    queue?: string | undefined
+    type?: string | undefined
+  } = {},
 ): string =>
   `/${CRM_ROOT}/${account}/tasks${query(params)}`
 

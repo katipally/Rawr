@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, date, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { automationStateEnum, automationTriggerEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
@@ -12,10 +12,11 @@ import { userAccount, account } from './identity.ts'
  *  a deal reaching Proposal creates a task for its owner, a new contact from paid
  *  search goes to whoever is on rotation — needed a deploy.
  *
- *  Triggers are the events Rawr already emits rather than a scheduler, so an
- *  automation fires on the write that caused it and nothing polls. That is also
- *  why "no activity for thirty days" is not here: it is the one useful trigger
- *  that is not an event, and it needs a scan the others do not. */
+ *  Most triggers are events Rawr already emits, so an automation fires on the
+ *  write that caused it and nothing polls. Two are not: a date arriving and a
+ *  record going quiet are both absences, and no write announces either. Those two
+ *  are found by an hourly scan instead, and `automation_run.scan_day` below is
+ *  what keeps twelve scans in a day from firing one rule twelve times. */
 export const automation = pgTable(
   'automation',
   {
@@ -70,9 +71,13 @@ export const automationRun = pgTable(
     /** What happened, in the words the screen shows: which actions ran, or the
      *  condition that was false, or the error verbatim. */
     detail: text('detail'),
-    /** The next step to run. Left where it stopped, so a failure says how far it
-     *  got and not only that it failed. */
-    stepIndex: integer('step_index').notNull().default(0),
+    /** The next step to run, as a path from the root: `[2]` is the third step,
+     *  `[2, 'else', 1]` is the second step of that step's else arm. Left where it
+     *  stopped, so a failure says how far it got and not only that it failed.
+     *
+     *  A path rather than an index because a branch makes the steps a tree, and
+     *  an integer can only describe a list. */
+    stepPath: jsonb('step_path').notNull().default([]),
     /** When to pick this run up again. Null unless it is waiting, which is what
      *  makes the index below the queue rather than the history. */
     resumeAt: timestamp('resume_at', { withTimezone: true }),
@@ -82,6 +87,10 @@ export const automationRun = pgTable(
     /** What each finished step did, in order. `detail` is one string and a run
      *  spanning three days is written in three pieces. */
     trail: jsonb('trail').notNull().default([]),
+    /** The day the scan fired this, for a trigger nothing announced. Null on
+     *  every run a write caused, which is what keeps the index below off them:
+     *  an event may legitimately happen to one record twice in an afternoon. */
+    scanDay: date('scan_day'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -90,5 +99,11 @@ export const automationRun = pgTable(
     index('automation_run_due_idx')
       .on(t.accountId, t.resumeAt)
       .where(sql`resume_at is not null`),
+    /** Once per rule, per record, per day, enforced here rather than by the
+     *  scan asking first: two workers scanning the same hour would both find the
+     *  record and both find no run. */
+    uniqueIndex('automation_run_scan_idx')
+      .on(t.accountId, t.automationId, t.entityId, t.scanDay)
+      .where(sql`scan_day is not null`),
   ],
 )

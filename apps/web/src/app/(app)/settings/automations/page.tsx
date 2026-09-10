@@ -2,14 +2,39 @@ import {
   listAssignable,
   listAutomationRuns,
   listAutomations,
+  listEmailTemplates,
   listFields,
   listLifecycleStages,
+  listMailboxes,
+  listSequences,
   getRegistry,
+  type AutomationStep,
 } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
-import { AutomationList } from './automation-list.tsx'
+import { AutomationList, type StepView } from './automation-list.tsx'
 import { toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
+
+/** The editor holds every config value as a string, because each one came out of
+ *  an input. The server coerces on the way back in. Recursive, because a branch
+ *  holds two arms of exactly these steps. */
+const asStepView = (step: AutomationStep): StepView => {
+  if (step.kind === 'delay') return { kind: 'delay', minutes: step.minutes }
+  if (step.kind === 'guard') return { kind: 'guard', conditions: step.conditions }
+  if (step.kind === 'branch') {
+    return {
+      kind: 'branch',
+      conditions: step.conditions,
+      matched: step.matched.map(asStepView),
+      otherwise: step.otherwise.map(asStepView),
+    }
+  }
+  return {
+    kind: 'action',
+    type: step.type,
+    config: Object.fromEntries(Object.entries(step.config).map(([key, value]) => [key, String(value ?? '')])),
+  }
+}
 
 /** B11. When this happens, do that.
  *
@@ -29,13 +54,16 @@ const AutomationsPage = async () => {
   }
 
   const ctx = contextFrom(session)
-  const [rows, runs, people, stages, fields, registry] = await Promise.all([
+  const [rows, runs, people, stages, fields, registry, templates, mailboxes, sequences] = await Promise.all([
     listAutomations(ctx),
-    listAutomationRuns(ctx),
+    listAutomationRuns(ctx, { limit: 50 }),
     listAssignable(ctx),
     listLifecycleStages(ctx),
     listFields(ctx),
     getRegistry(ctx),
+    listEmailTemplates(ctx),
+    listMailboxes(ctx),
+    listSequences(ctx),
   ])
 
   // Every object in the account, not the three written out: "a record is
@@ -46,6 +74,17 @@ const AutomationsPage = async () => {
     registry.objects.map((object) => [
       object.key,
       fields.filter((field) => field.objectKey === object.key).map((field) => field.key),
+    ]),
+  )
+  // Only the date fields, for the trigger that waits for one to arrive. A rule
+  // pointed at an object with none of them has nothing to pick, which the empty
+  // dropdown says on its own.
+  const dateFieldsByObject = Object.fromEntries(
+    registry.objects.map((object) => [
+      object.key,
+      fields
+        .filter((field) => field.objectKey === object.key && (field.type === 'date' || field.type === 'datetime'))
+        .map((field) => ({ key: field.key, label: field.label })),
     ]),
   )
   // The same shape segments use, because the conditions are the same filter
@@ -63,9 +102,9 @@ const AutomationsPage = async () => {
         why={
           <>
             <p>
-              A rule fires on the write that triggered it, so nothing polls and nothing runs on a
-              schedule. That is also why there is no &ldquo;nothing has happened for thirty
-              days&rdquo; trigger: it is the one useful rule that is not an event.
+              Most rules fire on the write that triggered them, so nothing polls. Two do not: a date
+              arriving and a record going quiet are absences, and no write announces either. Rawr
+              looks for those once an hour, and fires each rule at most once a day per record.
             </p>
             <p>
               Conditions use the same filter language segments do. Steps run in order and a
@@ -85,21 +124,10 @@ const AutomationsPage = async () => {
       <AutomationList
         rows={rows.map((row) => ({
           ...row,
-          // The editor holds every config value as a string, because each one came
-          // out of an input. The server coerces on the way back in.
-          steps: row.steps.map((step) =>
-            step.kind === 'action'
-              ? {
-                  kind: 'action' as const,
-                  type: step.type,
-                  config: Object.fromEntries(
-                    Object.entries(step.config).map(([key, value]) => [key, String(value ?? '')]),
-                  ),
-                }
-              : step.kind === 'delay'
-                ? { kind: 'delay' as const, minutes: step.minutes }
-                : { kind: 'guard' as const, conditions: step.conditions },
+          triggerConfig: Object.fromEntries(
+            Object.entries(row.triggerConfig).map(([key, value]) => [key, String(value ?? '')]),
           ),
+          steps: row.steps.map(asStepView),
           createdAt: row.createdAt.toISOString(),
           lastRunAt: row.lastRunAt?.toISOString() ?? null,
         }))}
@@ -112,7 +140,11 @@ const AutomationsPage = async () => {
         stages={stages.map((stage) => stage.name)}
         objects={objects}
         fieldsByObject={fieldsByObject}
+        dateFieldsByObject={dateFieldsByObject}
         filterFieldsByObject={filterFieldsByObject}
+        templates={templates.map((template) => ({ id: template.id, name: template.name }))}
+        mailboxes={mailboxes.map((box) => ({ id: box.id, email: box.email }))}
+        sequences={sequences.map((entry) => ({ id: entry.id, name: entry.name }))}
       />
     </div>
   )
