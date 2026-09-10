@@ -1,6 +1,10 @@
 import {
   attributionReport,
+  campaignPerformance,
   clampRange,
+  listCampaigns,
+  saveCampaign,
+  trackedMessages,
   deleteReportDashboard,
   listReportDashboards,
   readReportDashboard,
@@ -56,6 +60,61 @@ export const reportingRouter = router({
   attribution: protectedProcedure
     .input(range)
     .query(({ ctx, input }) => call(() => attributionReport(ctx.account, within(input)))),
+
+  /** Item 14. What each campaign bought, and what it cost per contact and per
+   *  deal. Reading it is open like every other report; the spend behind it is
+   *  edited under Settings. */
+  campaigns: router({
+    performance: protectedProcedure
+      .input(range)
+      .query(({ ctx, input }) => call(() => campaignPerformance(ctx.account, within(input)))),
+
+    list: protectedProcedure
+      .input(
+        z.object({
+          search: z.string().trim().max(120).nullish(),
+          limit: z.number().int().min(1).max(100).optional(),
+          offset: z.number().int().min(0).optional(),
+        }).optional(),
+      )
+      .query(({ ctx, input }) => call(() => listCampaigns(ctx.account, input ?? {}))),
+
+    save: protectedProcedure
+      .input(
+        z.object({
+          id: z.uuid().nullish(),
+          name: z.string().trim().min(1).max(160),
+          source: z.string().trim().max(120).nullish(),
+          medium: z.string().trim().max(120).nullish(),
+          utmCampaign: z.string().trim().min(1).max(160),
+          spend: z.number().min(0).max(1_000_000_000),
+          currency: z.string().trim().length(3),
+          startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+          endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => saveCampaign(ctx.account, input))),
+  }),
+
+  /** Item 16. One row per tracked mail, paged: the email charts say how much
+   *  moved, this says which mail somebody should follow up. */
+  messages: protectedProcedure
+    .input(
+      range.extend({
+        limit: z.number().int().min(1).max(100).optional(),
+        offset: z.number().int().min(0).optional(),
+        sort: z.enum(['recent', 'opens', 'clicks']).optional(),
+      }),
+    )
+    .query(({ ctx, input }) =>
+      call(() =>
+        trackedMessages(ctx.account, within(input), {
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+          ...(input.offset === undefined ? {} : { offset: input.offset }),
+          ...(input.sort === undefined ? {} : { sort: input.sort }),
+        }),
+      ),
+    ),
 
   /** B11. A dashboard is a saved arrangement of the figures above. Reading one is
    *  open to anybody signed in for the same reason the reports are; writing one is

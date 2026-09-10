@@ -1,4 +1,4 @@
-import { attributionReport } from '@rawr/db'
+import { attributionReport, campaignPerformance, type CampaignPerformance } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { BarChart } from '~/components/reports/chart.tsx'
@@ -52,6 +52,64 @@ const Touch = ({
   </Card>
 )
 
+/** Item 14. What each campaign bought, and what it cost.
+ *
+ *  Visits and submissions are matched on the utm value that arrived, so anonymous
+ *  traffic counts too. Contacts and deals go through first touch, which credits
+ *  the campaign that found somebody rather than the one they last clicked. A
+ *  cost-per is blank rather than zero when the campaign has no spend against it
+ *  or reached nobody: dividing by nobody is not a cost of nothing. */
+const Campaigns = ({ rows }: { rows: CampaignPerformance[] }) => (
+  <Card title="Campaigns">
+    {rows.length === 0 ? (
+      <p className="max-w-prose text-secondary">
+        No campaigns yet. Every utm_campaign the tracker sees is listed under Settings, Tracking,
+        Campaigns; type the spend against one and its cost per contact and per deal appear here.
+      </p>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="w-full text-small">
+          <thead>
+            <tr className="border-b border-divider text-left text-secondary">
+              <th scope="col" className="py-1 pr-3 font-medium">Campaign</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Spend</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Visits</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Submissions</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Contacts</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Deals</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Won</th>
+              <th scope="col" className="py-1 pr-3 text-right font-medium">Per contact</th>
+              <th scope="col" className="py-1 text-right font-medium">Per deal</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id} className="border-b border-divider last:border-0">
+                <th scope="row" className="py-1 pr-3 text-left font-normal">
+                  <span className="break-words font-medium">{row.name}</span>
+                  <span className="ml-2 break-all text-secondary">{row.utmCampaign}</span>
+                </th>
+                <td className="py-1 pr-3 text-right tabular-nums">{formatCurrency(row.spend, row.currency)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{row.visits.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{row.submissions.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{row.contacts.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{row.deals.toLocaleString()}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{formatCurrency(row.wonAmount, row.currency)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">
+                  {row.costPerContact === null ? 'Not yet' : formatCurrency(row.costPerContact, row.currency)}
+                </td>
+                <td className="py-1 text-right tabular-nums">
+                  {row.costPerDeal === null ? 'Not yet' : formatCurrency(row.costPerDeal, row.currency)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </Card>
+)
+
 const AttributionReport = async ({
   params,
   searchParams,
@@ -64,7 +122,11 @@ const AttributionReport = async ({
   const { account } = await params
 
   const range = await reportRange(session, await searchParams)
-  const report = await attributionReport(contextFrom(session), range)
+  const ctx = contextFrom(session)
+  const [report, campaigns] = await Promise.all([
+    attributionReport(ctx, range),
+    campaignPerformance(ctx, range),
+  ])
   const unattributed = report.first.find((row) => row.channel === 'Not attributed')
 
   return (
@@ -93,6 +155,8 @@ const AttributionReport = async ({
             rows={report.last}
           />
         </div>
+
+        <Campaigns rows={campaigns} />
       </div>
     </div>
   )

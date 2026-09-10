@@ -2,6 +2,7 @@ import { readTrackingConsentRequired, readTrackingDomain } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TrackingPanel } from './tracking-panel.tsx'
+import { TrackingTabs } from './tabs.tsx'
 
 /** Where the pixel, the click redirect and the unsubscribe link live. */
 const TrackingPage = async () => {
@@ -37,6 +38,8 @@ const TrackingPage = async () => {
           </p>
         }
       />
+
+      <TrackingTabs />
 
       <TrackingPanel domain={domain} consentRequired={consentRequired} />
     </div>

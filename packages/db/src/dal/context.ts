@@ -16,6 +16,32 @@ export type Scope = (typeof SCOPES)[number]
  *  AccountContext: one enforcement point, and no way for a caller to forget it. */
 export type HubScopes = Partial<Record<Hub, Scope>>
 
+/** The acts HubSpot marks Critical, in its own per-user editor: each one is either
+ *  irreversible or a lever on the whole database rather than on one record, so
+ *  each is granted on its own rather than falling out of an edit grant.
+ *
+ *  `purge` is HubSpot's "Permanently delete", deliberately narrower than `delete`:
+ *  a soft delete is somebody's mistake to undo, a purge is not. */
+export const CRITICAL_ACTIONS = ['delete', 'merge', 'bulk_delete', 'import', 'export', 'purge'] as const
+export type CriticalAction = (typeof CRITICAL_ACTIONS)[number]
+
+/** Reads into "You cannot ...", so it is a verb phrase and not a label. */
+const CRITICAL_PHRASE: Record<CriticalAction, string> = {
+  delete: 'delete records',
+  merge: 'merge records',
+  bulk_delete: 'delete records in bulk',
+  import: 'import records',
+  export: 'export records',
+  purge: 'permanently delete data',
+}
+
+export const assertCriticalActions = (raw: readonly string[] | undefined): CriticalAction[] => {
+  for (const action of raw ?? []) {
+    if (!(CRITICAL_ACTIONS as readonly string[]).includes(action)) throw new Error(`"${action}" is not a critical action.`)
+  }
+  return [...new Set(raw ?? [])] as CriticalAction[]
+}
+
 /** Everything the data access layer needs to answer "who is asking, on behalf of
  *  which account". A request without one of these never reaches the database.
  *
@@ -29,6 +55,11 @@ export type AccountContext = {
   isSuperAdmin: boolean
   viewHubs: readonly Hub[]
   editHubs: readonly Hub[]
+  /** Absent means not narrowed, the same way a hub left out of `HubScopes` reaches
+   *  everything: a context Rawr mints for its own work is not a seat somebody was
+   *  granted. Every context built from a membership sets it, so an empty array is
+   *  a real answer and means none of them. */
+  criticalGrants?: readonly CriticalAction[] | undefined
 }
 
 /** A hub the seat does not hold, or one set to reach everything, is dropped
@@ -59,6 +90,7 @@ export const systemContext = (accountId: string): AccountContext => ({
   isSuperAdmin: false,
   viewHubs: HUBS,
   editHubs: HUBS,
+  criticalGrants: CRITICAL_ACTIONS,
 })
 
 export class ForbiddenError extends Error {
@@ -80,6 +112,15 @@ export const canView = (ctx: AccountContext, hub: Hub): boolean =>
 
 export const canEdit = (ctx: AccountContext, hub: Hub): boolean =>
   ctx.isSuperAdmin || ctx.editHubs.includes(hub)
+
+/** The second question, asked on top of the hub: may this seat do the thing that
+ *  cannot be undone. A super admin holds every one of them, as it holds every hub. */
+export const canDo = (ctx: AccountContext, action: CriticalAction): boolean =>
+  ctx.isSuperAdmin || ctx.criticalGrants === undefined || ctx.criticalGrants.includes(action)
+
+export const assertCanDo = (ctx: AccountContext, action: CriticalAction): void => {
+  if (!canDo(ctx, action)) throw new ForbiddenError(null, CRITICAL_PHRASE[action])
+}
 
 /** May act on rows that are somebody else's: another person's booking page, their
  *  mailbox, their agent token, their dashboard. Holding the account hub is what
@@ -104,6 +145,10 @@ const WRITE_HUB: Record<string, Hub> = {
   subscription_type: 'marketing',
   subscription_state: 'marketing',
   segment: 'marketing',
+  /** What a site's events are called and what a campaign cost: the vocabulary
+   *  and the spend behind the marketing reports, not a lever on the account. */
+  custom_event_def: 'marketing',
+  campaign: 'marketing',
   report_dashboard: 'reports',
   object_def: 'account',
   field_def: 'account',

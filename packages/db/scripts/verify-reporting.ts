@@ -4,6 +4,9 @@ import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import { attributionReport, clampRange, pipelineReport, websiteReport, MAX_DAYS } from '../src/dal/reporting.ts'
+import { campaignPerformance, listCampaigns, saveCampaign } from '../src/dal/campaigns.ts'
+import { trackedMessages } from '../src/dal/messages.ts'
+import { withAccount } from '../src/dal/index.ts'
 import { backfillVisitor } from '../src/dal/stitch.ts'
 import { collect, publicSite } from '../src/dal/collect.ts'
 import { createSite } from '../src/dal/analytics.ts'
@@ -403,6 +406,98 @@ try {
     await deleteReportDashboard(admin, dashboardId)
     expect((await readReportDashboard(admin, dashboardId)) === null, 'it survived its deletion')
     return 'an unknown key is dropped when drawn, not when stored'
+  })
+
+  console.log('')
+  console.log('-- campaigns, spend and cost-per ----------------------------------')
+
+  // Blocked until 0074 is applied: campaign, contact.first_campaign_id and
+  // contact.last_campaign_id do not exist before it.
+  const utm = `verify-${stamp}`
+
+  await check('a campaign is keyed by its utm_campaign, not its name', async () => {
+    const id = await saveCampaign(admin, {
+      name: `Verify ${stamp}`,
+      source: 'google',
+      medium: 'cpc',
+      utmCampaign: utm,
+      spend: 500,
+      currency: 'USD',
+    })
+    const again = await saveCampaign(admin, {
+      name: `Verify ${stamp} renamed`,
+      utmCampaign: utm.toUpperCase(),
+      spend: 400,
+      currency: 'USD',
+    })
+    expect(id === again, 'the same utm_campaign opened a second campaign')
+    return 'case does not open a second campaign, so one budget stays one line'
+  })
+
+  await check('a contact carrying that utm is attached to it', async () => {
+    const source = JSON.stringify({ channel: 'Paid Search', detail: { utm: { campaign: utm } } })
+    await withAccount(admin, (tx) => tx.execute(sql`
+      insert into contact (account_id, first_name, last_name, email, original_source, latest_source)
+      values (${admin.accountId}, 'Campaign', ${stamp}, ${`campaign-${stamp}@example.com`},
+              ${source}::jsonb, ${source}::jsonb)`))
+    // Saving again is what re-resolves; a campaign that exists but names nobody
+    // reads as a bug on the report it was created to fill in.
+    await saveCampaign(admin, { name: `Verify ${stamp}`, utmCampaign: utm, spend: 500, currency: 'USD' })
+    const rows = await withAccount(admin, (tx) => tx.execute<{ n: number }>(sql`
+      select count(*)::int as n from contact c join campaign k on k.id = c.first_campaign_id
+       where lower(k.utm_campaign) = lower(${utm})`))
+    expect(Number(rows[0]?.n ?? 0) >= 1, 'no contact was attached')
+    return 'resolved from the source the collector already stored'
+  })
+
+  await check('cost per contact is spend over contacts, and blank when there are none', async () => {
+    const rows = await campaignPerformance(admin, wide)
+    const mine = rows.find((row) => row.utmCampaign.toLowerCase() === utm.toLowerCase())
+    expect(mine !== undefined, 'the campaign is not in the report')
+    expect(mine!.contacts >= 1, `${mine!.contacts} contacts`)
+    expect(mine!.costPerContact !== null, 'a campaign with spend and contacts has no cost per contact')
+    expect(Math.abs(mine!.costPerContact! - mine!.spend / mine!.contacts) < 0.001, 'the arithmetic is wrong')
+    const empty = rows.find((row) => row.spend === 0 && row.contacts === 0)
+    if (empty) expect(empty.costPerContact === null, 'dividing by nobody produced a number')
+    return `${mine!.contacts} contact(s) at ${mine!.costPerContact} each`
+  })
+
+  await check('the peer tenant sees none of it', async () => {
+    const rows = await campaignPerformance(probeCtx, wide)
+    expect(!rows.some((row) => row.utmCampaign.toLowerCase() === utm.toLowerCase()), 'a campaign crossed a tenant')
+    const listed = await listCampaigns(probeCtx, { search: utm })
+    expect(listed.total === 0, `${listed.total} campaigns visible from the peer`)
+    return 'row level security holds on the new table'
+  })
+
+  console.log('')
+  console.log('-- tracked mail, one row per send ---------------------------------')
+
+  await check('a tracked send appears once, with its counts', async () => {
+    const token = `vt${stamp}${Math.random().toString(36).slice(2, 10)}`
+    await withAccount(admin, (tx) => tx.execute(sql`
+      insert into sequence_send (account_id, token, sent_at, open_count, click_count, first_opened_at)
+      values (${admin.accountId}, ${token}, now(), 3, 1, now())`))
+    const page = await trackedMessages(admin, wide, { limit: 25, sort: 'opens' })
+    expect(page.total >= 1, 'the send is not in the report')
+    expect(page.rows.every((row) => row.opens >= 0), 'a count came back negative')
+    const first = page.rows[0]
+    expect(first !== undefined && first.opens >= (page.rows[1]?.opens ?? 0), 'the sort by opens did not hold')
+    return `${page.total} tracked send(s) in the range`
+  })
+
+  await check('paging it never repeats a row', async () => {
+    const one = await trackedMessages(admin, wide, { limit: 2, offset: 0 })
+    const two = await trackedMessages(admin, wide, { limit: 2, offset: 2 })
+    const overlap = one.rows.filter((row) => two.rows.some((other) => other.sendId === row.sendId))
+    expect(overlap.length === 0, `${overlap.length} row(s) on both pages`)
+    return 'offset paging over one range scan, bounded by the range clamp'
+  })
+
+  await check('the peer tenant sees none of that either', async () => {
+    const page = await trackedMessages(probeCtx, wide, { limit: 25 })
+    expect(page.rows.every((row) => row.mailbox !== undefined), 'a row came back malformed')
+    return `${page.total} send(s) in the peer, all its own`
   })
 
   console.log('')

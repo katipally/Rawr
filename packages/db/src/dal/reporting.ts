@@ -223,17 +223,19 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
        group by c.bucket
        order by c.bucket`)
 
-    // Views come from their own grouped scan rather than a join: joining a
-    // per-view table to a per-submission one multiplies both counts, which is how
-    // a conversion rate ends up over a hundred percent.
+    // Views come from the form's own counter, which names no visitor and is
+    // therefore not consent gated: a conversion rate built from the tracked
+    // event alone would quietly omit everybody who declined analytics.
+    //
+    // Its own grouped scan rather than a join: joining a per-view table to a
+    // per-submission one multiplies both counts, which is how a conversion rate
+    // ends up over a hundred percent.
     const views = await tx.execute<{ form_id: string; views: number; pages: number }>(sql`
-      select e.properties ->> 'form_id' as form_id,
-             count(*)::int as views,
-             count(distinct e.properties ->> 'page')::int as pages
-        from custom_event e
-       where e.name = 'form_view'
-         and e.properties ->> 'form_id' is not null
-         and ${bounds(range, 'e.at')}
+      select v.form_id::text as form_id,
+             sum(v.views)::int as views,
+             count(distinct v.page_path)::int as pages
+        from form_view v
+       where ${bounds(range, 'v.day')}
        group by 1
        limit ${MAX_ROWS}`)
     const viewsByForm = new Map(views.map((row) => [String(row.form_id), row]))

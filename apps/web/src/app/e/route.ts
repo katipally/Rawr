@@ -1,4 +1,13 @@
-import { collect, isBot, isVisitorId, latestConsent, publicEdgeContext, publicSite } from '@rawr/db'
+import {
+  collect,
+  countFormView,
+  isBot,
+  isVisitorId,
+  latestConsent,
+  publicEdgeContext,
+  publicFormById,
+  publicSite,
+} from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { inBackground } from '~/server/background.ts'
@@ -73,6 +82,38 @@ const properties = (raw: unknown): Record<string, unknown> => {
   return Object.fromEntries(Object.entries(raw as Record<string, unknown>).slice(0, 50))
 }
 
+/** A form counter, not a page view: it names a form and a path and nothing else.
+ *
+ *  Handled here rather than at its own endpoint because it travels the same three
+ *  ways for the same reason, and one 204 is easier to reason about than two. It
+ *  passes no consent gate on purpose: the row it writes carries no visitor and
+ *  cannot be joined to a person, and gating it would make every conversion rate
+ *  silently exclude the visitors who declined. */
+const countForm = async (request: NextRequest, payload: Record<string, unknown>): Promise<void> => {
+  const formId = typeof payload.form === 'string' ? payload.form : ''
+  const kind = payload.kind === 'render' ? 'render' : payload.kind === 'interaction' ? 'interaction' : null
+  if (!kind) return
+
+  const ip = clientIp(request)
+  // Bounded per form and per IP, like every other beacon: a counter with no
+  // ceiling is a table anybody can inflate.
+  if (!rateLimit(`e:f:${formId}`, 600, 60).allowed) return
+  if (!rateLimit(`e:fi:${ip ?? 'unknown'}`, 600, 60).allowed) return
+
+  const form = await publicFormById(formId)
+  if (!form || !form.isActive) return
+
+  const raw = typeof payload.page === 'string' ? payload.page : '/'
+  await countFormView({
+    accountId: form.accountId,
+    formId: form.formId,
+    // Path only. A URL, an origin or a query string here is a different row per
+    // campaign parameter, which is a counter that never aggregates.
+    pagePath: raw.startsWith('/') ? raw.split('?')[0] ?? '/' : '/',
+    kinds: [kind],
+  })
+}
+
 const handle = async (
   request: NextRequest,
   payload: Record<string, unknown>,
@@ -81,6 +122,14 @@ const handle = async (
   // Before a visitor row can exist. A bot that creates one has already moved every
   // count on the panel, and no later filter can take that back.
   if (isBot(userAgent)) return done()
+
+  if (payload.form !== undefined) {
+    // Swallowed like every other failure here: a counter that could not be
+    // written is a lost row, and one that surfaces a database error at a visitor
+    // is a broken website.
+    await countForm(request, payload).catch(() => {})
+    return done()
+  }
 
   const siteKey = typeof payload.site === 'string' ? payload.site : null
   const visitorId = payload.vid

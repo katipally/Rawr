@@ -464,6 +464,9 @@ const noteLatestTouch = async (
     update contact
        set latest_source = ${payload}::jsonb,
            original_source = coalesce(original_source, ${payload}::jsonb),
+           last_campaign_id = (select k.id from campaign k
+                                where k.account_id = ${accountId}
+                                  and lower(k.utm_campaign) = lower(${payload}::jsonb #>> '{detail,utm,campaign}')),
            updated_at = now()
      where id = ${contactId} and account_id = ${accountId}`)
 }

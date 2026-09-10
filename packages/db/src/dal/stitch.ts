@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { visitor, visitorAlias } from '../schema/analytics.ts'
 import { sourceFromSession } from './attribution.ts'
+import { resolveContactCampaigns } from './campaigns.ts'
 import type { AccountContext } from './context.ts'
 import { publicEdgeContext } from './forms.ts'
 import { withAccount, type Tx } from './index.ts'
@@ -74,7 +75,12 @@ export const backfillVisitor = async (
     const done = pageViews < BACKFILL_CHUNK && events < BACKFILL_CHUNK
     // Once every chunk has moved, the visitor's whole history belongs to this
     // contact, and their first session may well predate the form that named them.
-    if (done) await moveFirstTouchEarlier(tx, ctx, input)
+    if (done) {
+      await moveFirstTouchEarlier(tx, ctx, input)
+      // After the first touch moves, the campaign it names may have moved with
+      // it, so the two columns are resolved from the sources as they now stand.
+      await resolveContactCampaigns(tx, ctx, [input.contactId])
+    }
     return { pageViews, events, done }
   })
 

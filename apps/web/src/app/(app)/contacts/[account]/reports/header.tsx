@@ -15,6 +15,7 @@ const TABS = [
   { key: 'sequences', label: 'Sequences' },
   { key: 'email', label: 'Email' },
   { key: 'website', label: 'Website' },
+  { key: 'events', label: 'Events' },
   { key: 'attribution', label: 'Attribution' },
   { key: 'dashboards', label: 'Dashboards' },
 ]

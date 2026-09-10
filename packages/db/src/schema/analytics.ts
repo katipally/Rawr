@@ -5,6 +5,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   text,
@@ -12,7 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, accountId } from './columns.ts'
+import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { aliasViaEnum } from './enums.ts'
 import { account } from './identity.ts'
 import { contact } from './records.ts'
@@ -179,6 +180,56 @@ export const customEvent = pgTable(
       .where(sql`contact_id is null`),
     index('custom_event_visitor_idx').on(t.accountId, t.visitorId, t.at.desc()),
     index('custom_event_contact_idx').on(t.accountId, t.contactId, t.at.desc()),
+  ],
+)
+
+/** A label and a property schema laid over a name the collector already stores.
+ *  Never a gate: an event with no definition here is still recorded, because
+ *  refusing one is how a new release starts firing into silence. `discovered` is
+ *  true for a name that arrived before anybody described it. */
+export const customEventDef = pgTable(
+  'custom_event_def',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    label: text('label'),
+    properties: jsonb('properties').notNull().default({}),
+    discovered: boolean('discovered').notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('custom_event_def_name_idx').on(t.accountId, sql`lower(${t.name})`),
+    index('custom_event_def_listing_idx').on(t.accountId, t.discovered, sql`lower(${t.name})`),
+  ],
+)
+
+/** D17's SEM container: one campaign, keyed by the `utm_campaign` value the ad
+ *  platform appends, holding the one number no query string can carry.
+ *
+ *  Channels are derived from what arrived and cost is not, which is the whole
+ *  reason this is a table rather than another `group by` over `visitor_session`. */
+export const campaign = pgTable(
+  'campaign',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    source: text('source'),
+    medium: text('medium'),
+    utmCampaign: text('utm_campaign').notNull(),
+    spend: numeric('spend', { precision: 14, scale: 2 }).notNull().default('0'),
+    currency: text('currency').notNull().default('USD'),
+    startsOn: date('starts_on'),
+    endsOn: date('ends_on'),
+    createdBy: uuid('created_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('campaign_utm_idx').on(t.accountId, sql`lower(${t.utmCampaign})`),
+    index('campaign_listing_idx').on(t.accountId, sql`lower(${t.name})`),
   ],
 )
 

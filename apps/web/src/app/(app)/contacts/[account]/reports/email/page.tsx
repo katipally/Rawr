@@ -5,6 +5,7 @@ import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
+import { MessageTable } from './message-table.tsx'
 
 const hours = (value: number | null): string => {
   if (value === null) return '—'
@@ -83,6 +84,8 @@ const EmailReport = async ({
             </>
           )}
         </Card>
+
+        <MessageTable account={account} from={range.from.toISOString()} to={range.to.toISOString()} />
       </div>
     </div>
   )

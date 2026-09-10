@@ -1,6 +1,6 @@
 import { ATTRIBUTION_FIELDS, HONEYPOT_FIELD, TIMING_FIELD } from '@rawr/db'
 import { FORM_COPY, formatterSource } from '~/lib/edge-copy.ts'
-import { clientFieldErrorSource } from '~/lib/form-rules.ts'
+import { clientFieldErrorSource, clientRuleMatchesSource } from '~/lib/form-rules.ts'
 
 /** The browser half of F3, served as one file from /embed.js.
  *
@@ -39,6 +39,8 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
   // ~/lib/form-rules.ts and ~/lib/edge-copy.ts so the browser cannot drift from
   // the server's rules or from the other three surfaces' wording.
   ${clientFieldErrorSource()}
+
+  ${clientRuleMatchesSource()}
 
   ${formatterSource()}
 
@@ -270,7 +272,12 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     payload.t = Date.now();
     payload.url = location.href;
     payload.ref = document.referrer || '';
+    deliver(payload);
+  }
 
+  // The collector's transport, shared by the page-view beacon above and the form
+  // counters below. The two differ in what they may send, not in how it travels.
+  function deliver(payload) {
     var body = JSON.stringify(payload);
     var url = BASE + '/e';
 
@@ -352,6 +359,15 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     beacon({ name: String(name).slice(0, 120), props: props || {} });
   }
 
+  // The form counters, and the one thing here that is not consent gated: a
+  // count of a page carries no visitor, no id and nothing that can be joined to
+  // a person. Gating it would make every conversion rate quietly exclude the
+  // people who declined, which reads as a form nobody fills in rather than as a
+  // measurement we chose not to take.
+  function countForm(formId, kind) {
+    deliver({ form: formId, kind: kind, page: location.pathname });
+  }
+
   // -------------------------------------------------------------------- forms
 
   function attribution() {
@@ -388,6 +404,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
         // event does, which means a visitor who declined analytics is not
         // counted. The conversion rate says so rather than pretending otherwise.
         trackEvent('form_view', { form_id: formId, page: location.pathname });
+        countForm(formId, 'render');
       })
       .catch(function () {
         // Degrade to the hosted page rather than leaving a dead container. The
@@ -478,22 +495,58 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       applyConditions();
     }
 
+    // A property rule names sibling properties, not form fields, so the answers
+    // are re-keyed per object before it can be read. Rebuilt on each pass rather
+    // than cached: the answers are what changed.
+    function byProperty(answers) {
+      var objects = {};
+      form.fields.forEach(function (field) {
+        var target = field.mapsTo ? String(field.mapsTo).split('.') : null;
+        if (!target || target.length !== 2) return;
+        if (!objects[target[0]]) objects[target[0]] = {};
+        objects[target[0]][target[1]] = answers[field.key];
+      });
+      return objects;
+    }
+
     function applyConditions() {
       var answers = collect(node);
+      var rules = form.rules || {};
+      var mapped = byProperty(answers);
       form.fields.forEach(function (field) {
-        if (!field.visibleIf) return;
+        var rule = field.mapsTo ? rules[field.mapsTo] : null;
+        if (!field.visibleIf && !rule) return;
         var wrapper = node.querySelector('[data-field="' + field.key + '"]');
         if (!wrapper) return;
-        var actual = answers[field.visibleIf.field];
-        var shown = Array.isArray(actual)
-          ? actual.indexOf(field.visibleIf.equals) !== -1
-          : String(actual == null ? '' : actual) === field.visibleIf.equals;
+
+        var shown = true;
+        if (field.visibleIf) {
+          var actual = answers[field.visibleIf.field];
+          shown = Array.isArray(actual)
+            ? actual.indexOf(field.visibleIf.equals) !== -1
+            : String(actual == null ? '' : actual) === field.visibleIf.equals;
+        }
+        if (shown && rule) {
+          shown = clientRuleMatches(rule, mapped[String(field.mapsTo).split('.')[0]] || {});
+        }
         wrapper.hidden = !shown;
       });
     }
 
     node.addEventListener('input', applyConditions);
     node.addEventListener('change', applyConditions);
+
+    // Once per painted form, on the first event only. The funnel step is intent,
+    // and counting keystrokes would make a long answer look like engagement a
+    // short one did not have.
+    var touched = false;
+    function firstTouch() {
+      if (touched) return;
+      touched = true;
+      countForm(formId, 'interaction');
+    }
+    node.addEventListener('input', firstTouch);
+    node.addEventListener('change', firstTouch);
     back.addEventListener('click', function () { showStep(current - 1); });
     next.addEventListener('click', function () {
       if (validateStep(node, form, steps[current])) showStep(current + 1);

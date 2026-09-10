@@ -7,10 +7,13 @@ import {
   createSite,
   eraseContactActivity,
   EVENT_NAME_CAP,
+  eventCountsByDay,
+  eventFunnel,
   exportContactActivity,
   isBot,
   isVisitorId,
   listCollectorNotices,
+  listEventDefs,
   listSites,
   mergeRecords,
   OVERFLOW_EVENT,
@@ -20,6 +23,7 @@ import {
   readTimeline,
   refreshContactActivity,
   rollUpExpired,
+  saveEventDef,
   setSiteActive,
   timelineCounts,
   websiteActivity,
@@ -309,6 +313,14 @@ try {
     sql`select name from custom_event where id = ${overflowed.id}`,
   )
   check('and it lands under the overflow name', bucketed[0]?.name === OVERFLOW_EVENT)
+
+  // Given back immediately: the budget above is this suite's own, and leaving it
+  // full buckets every event any later section fires under the same day.
+  await scoped(
+    datasaur,
+    sql`delete from event_name_day
+         where account_id = ${datasaur.accountId} and name like ${`fill_${stamp}_%`}`,
+  )
 
   // -------------------------------------------------------------------------
   section('identity stitching')
@@ -618,6 +630,94 @@ try {
     userAgent: CHROME,
   })
   check('a visitor with exactly one view reads back correctly', (await readPageView(datasaur, noConsent.id)) !== null)
+
+  // -------------------------------------------------------------------------
+  section('event definitions and the funnel')
+
+  // Blocked until 0073 is applied: custom_event_def does not exist before it.
+  const defs = await listEventDefs(datasaur, { search: 'trial_started' })
+  check(
+    'a name the collector saw registers itself',
+    defs.rows.some((row) => row.name === 'trial_started' && row.discovered),
+    'the settings tab lists what the sites actually fire',
+  )
+
+  await saveEventDef(datasaur, {
+    name: 'trial_started',
+    label: 'Trial started',
+    properties: { plan: { type: 'string' } },
+  })
+  const described = await listEventDefs(datasaur, { search: 'trial_started' })
+  check(
+    'describing one stops it reading as discovered',
+    described.rows.some((row) => row.name === 'trial_started' && !row.discovered && row.label === 'Trial started'),
+  )
+  check(
+    'the overflow bucket is never offered as an event',
+    !(await listEventDefs(datasaur, { search: OVERFLOW_EVENT })).rows.some((row) => row.name === OVERFLOW_EVENT),
+    'it is the cardinality bucket, not something a site fired',
+  )
+
+  const listed = await listEventDefs(datasaur, { limit: 1 })
+  check('the list pages rather than returning everything', listed.rows.length <= 1 && listed.total >= 1)
+
+  const walker = vid('funnel')
+  for (const [index, name] of ['step_one', 'step_two', 'step_three'].entries()) {
+    await collect({
+      site,
+      visitorId: walker,
+      at: minutesAgo(30 - index),
+      url: 'https://datasaur.ai/app',
+      path: '/app',
+      userAgent: CHROME,
+      event: { name: `${name}_${stamp}`, properties: {} },
+    })
+  }
+  // Fires the last step only, and before anybody else did: it must not count as
+  // having walked the path.
+  const skipper = vid('skipper')
+  await collect({
+    site,
+    visitorId: skipper,
+    at: minutesAgo(40),
+    url: 'https://datasaur.ai/app',
+    path: '/app',
+    userAgent: CHROME,
+    event: { name: `step_three_${stamp}`, properties: {} },
+  })
+
+  const window_ = { from: new Date(Date.now() - 2 * 60 * 60_000), to: new Date(Date.now() + 60_000) }
+  const funnel = await eventFunnel(datasaur, {
+    steps: [`step_one_${stamp}`, `step_two_${stamp}`, `step_three_${stamp}`],
+    range: window_,
+  })
+  check('a funnel answers one row per step, in the order asked for', funnel.length === 3)
+  check('the visitor who walked it is counted at every step', (funnel[2]?.visitors ?? 0) >= 1)
+  check(
+    'somebody who fired the last step first is not counted as having walked it',
+    funnel[2]?.visitors === funnel[0]?.visitors,
+    'order is what makes it a funnel rather than three counts',
+  )
+
+  const backwards = await eventFunnel(datasaur, {
+    steps: [`step_three_${stamp}`, `step_one_${stamp}`],
+    range: window_,
+  })
+  check('and reversing the steps reverses the answer', (backwards[1]?.visitors ?? 1) === 0)
+
+  check(
+    'one step is not a funnel',
+    (await eventFunnel(datasaur, { steps: [`step_one_${stamp}`], range: window_ })).length === 0,
+  )
+
+  const peerFunnel = await eventFunnel(probe, {
+    steps: [`step_one_${stamp}`, `step_two_${stamp}`],
+    range: window_,
+  })
+  check('the peer tenant counts none of it', peerFunnel.every((step) => step.visitors === 0))
+
+  const counted = await eventCountsByDay(datasaur, window_, [`step_one_${stamp}`])
+  check('per-name daily counts come back grouped', counted.every((row) => row.name === `step_one_${stamp}`))
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.message : cause)
