@@ -1,7 +1,9 @@
 import {
+  CRITICAL_ACTIONS,
   HUBS,
   SCOPES,
   acceptInvitation,
+  copyMemberGrants,
   deactivateMember,
   invite,
   listAudit,
@@ -36,6 +38,9 @@ const grants = {
   editHubs: z.array(hub).optional(),
   viewScopes: scopes,
   editScopes: scopes,
+  /** HubSpot's Critical column: delete, merge, bulk delete, import, export and
+   *  permanently delete, each granted on its own rather than by holding a hub. */
+  criticalGrants: z.array(z.enum(CRITICAL_ACTIONS)).optional(),
 }
 
 export const accountRouter = router({
@@ -71,6 +76,11 @@ export const accountRouter = router({
     revoke: superAdminProcedure
       .input(z.object({ invitationId: z.string().uuid() }))
       .mutation(({ ctx, input }) => call(() => revokeInvitation(ctx.account, input.invitationId))),
+
+    /** HubSpot's "copy another user's permissions", as one audited act. */
+    copyGrants: superAdminProcedure
+      .input(z.object({ fromUserId: z.string().uuid(), toUserId: z.string().uuid() }))
+      .mutation(({ ctx, input }) => call(() => copyMemberGrants(ctx.account, input))),
 
     setGrants: superAdminProcedure
       .input(z.object({ userId: z.string().uuid(), ...grants }))

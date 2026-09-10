@@ -1,4 +1,11 @@
-import { displayTimezone, membershipsForUser, type AccountContext, type Hub, type Membership } from '@rawr/db'
+import {
+  displayTimezone,
+  membershipsForUser,
+  type AccountContext,
+  type CriticalAction,
+  type Hub,
+  type Membership,
+} from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
 import { cookies } from 'next/headers'
 import { cache } from 'react'
@@ -26,6 +33,7 @@ export type Session = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  criticalGrants: CriticalAction[]
   /** The IANA zone every timestamp on screen is written in: the one Settings
    *  promises under "Times are shown to you in".
    *
@@ -48,6 +56,7 @@ export const sessionFromMembership = (m: Membership): Session => ({
   isSuperAdmin: m.isSuperAdmin,
   viewHubs: m.viewHubs,
   editHubs: m.editHubs,
+  criticalGrants: m.criticalGrants,
   // Overwritten by readSession, which knows the account context to read it in.
   // The sign-in path writes the cookie before that row can be looked up.
   timezone: 'UTC',
@@ -117,12 +126,18 @@ export const contextFrom = (session: Session): AccountContext => ({
   isSuperAdmin: session.isSuperAdmin,
   viewHubs: session.viewHubs,
   editHubs: session.editHubs,
+  criticalGrants: session.criticalGrants,
 })
 
 /** The same two questions the data access layer asks, for screens deciding what to
  *  render. Never the only gate: every write is checked again in the layer. */
 export const sessionCanEdit = (session: Session, hub: Hub): boolean =>
   session.isSuperAdmin || session.editHubs.includes(hub)
+
+/** The critical acts, for screens deciding whether to offer the button. Never the
+ *  only gate: the data access layer asks the same question again. */
+export const sessionCanDo = (session: Session, action: CriticalAction): boolean =>
+  session.isSuperAdmin || session.criticalGrants.includes(action)
 
 /** Holds the account hub: may act on rows that are somebody else's, and open the
  *  settings that shape the account. */

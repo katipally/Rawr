@@ -1,12 +1,25 @@
 'use client'
 
-import { Avatar, Badge, Button, Card, Checkbox, DropdownMenu, EmptyState, Field, IconButton, Modal, TextInput, useToast } from '@rawr/ui'
+import { Avatar, Badge, Button, Card, Checkbox, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { invitePath } from '~/lib/links.ts'
-import { HUBS, HUBS_WITHOUT_SCREENS, HUBS_WITH_RECORDS, HUB_HINT, SCOPES, SCOPE_LABEL, type Hub, type Scope } from '~/lib/hubs.ts'
+import {
+  CRITICAL_ACTIONS,
+  CRITICAL_HINT,
+  CRITICAL_LABEL,
+  HUBS,
+  HUBS_WITHOUT_SCREENS,
+  HUBS_WITH_RECORDS,
+  HUB_HINT,
+  SCOPES,
+  SCOPE_LABEL,
+  type CriticalAction,
+  type Hub,
+  type Scope,
+} from '~/lib/hubs.ts'
 import { formatDate } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -22,6 +35,7 @@ export type MemberListRow = {
   editHubs: Hub[]
   viewScopes: HubScopes
   editScopes: HubScopes
+  criticalGrants: CriticalAction[]
   state: 'active' | 'invited' | 'deactivated'
   linked: boolean
   joinedAt: string
@@ -35,14 +49,20 @@ export type InvitationRow = {
   editHubs: Hub[]
   viewScopes: HubScopes
   editScopes: HubScopes
+  criticalGrants: CriticalAction[]
   invitedByName: string | null
   expiresAt: string
   createdAt: string
 }
 
+/** The suggested sets, handed down from the data access layer so the client keeps
+ *  no second copy of them. */
+export type RoleTemplate = { key: string; label: string; description: string; grants: Grants }
+
 type Props = {
   rows: MemberListRow[]
   invitations: InvitationRow[]
+  templates: RoleTemplate[]
   selfId: string
   isSuperAdmin: boolean
 }
@@ -53,11 +73,21 @@ type Grants = {
   editHubs: Hub[]
   viewScopes: HubScopes
   editScopes: HubScopes
+  criticalGrants: CriticalAction[]
 }
 type Level = 'none' | 'view' | 'edit'
 type Tab = 'active' | 'pending' | 'deactivated'
 
-const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [], viewScopes: {}, editScopes: {} }
+const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [], viewScopes: {}, editScopes: {}, criticalGrants: [] }
+
+const grantsOf = (row: MemberListRow | InvitationRow): Grants => ({
+  isSuperAdmin: row.isSuperAdmin,
+  viewHubs: row.viewHubs,
+  editHubs: row.editHubs,
+  viewScopes: row.viewScopes,
+  editScopes: row.editScopes,
+  criticalGrants: row.criticalGrants,
+})
 
 const levelOf = (grants: Grants, hub: Hub): Level =>
   grants.editHubs.includes(hub) ? 'edit' : grants.viewHubs.includes(hub) ? 'view' : 'none'
@@ -74,7 +104,7 @@ const withScope = (map: HubScopes, hub: Hub, scope: Scope): HubScopes => {
 const scopeOf = (grants: Grants, hub: Hub): Scope => grants.viewScopes[hub] ?? 'everything'
 
 const withLevel = (grants: Grants, hub: Hub, level: Level): Grants => ({
-  isSuperAdmin: grants.isSuperAdmin,
+  ...grants,
   viewHubs: level === 'view' ? [...new Set([...grants.viewHubs, hub])] : grants.viewHubs.filter((h) => h !== hub),
   editHubs: level === 'edit' ? [...new Set([...grants.editHubs, hub])] : grants.editHubs.filter((h) => h !== hub),
   // Dropping a hub drops its scope with it, so granting it again starts open
@@ -97,20 +127,67 @@ const withRecordScope = (grants: Grants, hub: Hub, scope: Scope): Grants => ({
 const summarise = (grants: Grants): string => {
   if (grants.isSuperAdmin) return 'Super Admin'
   const held = HUBS.filter((hub) => levelOf(grants, hub) !== 'none')
-  if (held.length === 0) return 'No access'
-  return held
-    .map((hub) => {
-      const level = levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`
-      const scope = scopeOf(grants, hub)
-      return scope === 'everything' ? level : `${level} · ${SCOPE_LABEL[scope].toLowerCase()}`
-    })
-    .join(' · ')
+  if (held.length === 0 && grants.criticalGrants.length === 0) return 'No access'
+  const parts = held.map((hub) => {
+    const level = levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`
+    const scope = scopeOf(grants, hub)
+    return scope === 'everything' ? level : `${level} · ${SCOPE_LABEL[scope].toLowerCase()}`
+  })
+  const critical = CRITICAL_ACTIONS.filter((action) => grants.criticalGrants.includes(action))
+  if (critical.length > 0) parts.push(critical.map((action) => CRITICAL_LABEL[action].toLowerCase()).join(', '))
+  return parts.join(' · ')
 }
+
+const withCritical = (grants: Grants, action: CriticalAction, on: boolean): Grants => ({
+  ...grants,
+  criticalGrants: on
+    ? CRITICAL_ACTIONS.filter((key) => key === action || grants.criticalGrants.includes(key))
+    : grants.criticalGrants.filter((key) => key !== action),
+})
 
 /** The grid itself: one row per hub, three exclusive levels. Super admin sits
  *  above it and greys it out, because holding everything is not six choices. */
-const GrantGrid = ({ value, onChange }: { value: Grants; onChange: (next: Grants) => void }) => (
+const GrantGrid = ({
+  value,
+  onChange,
+  templates,
+  copyFrom,
+}: {
+  value: Grants
+  onChange: (next: Grants) => void
+  templates: RoleTemplate[]
+  copyFrom: MemberListRow[]
+}) => (
   <div className="flex flex-col gap-3">
+    {/* HubSpot's "Choose how to set access": start from a suggested set or from
+        somebody who already has the right one, then adjust. Neither commits
+        anything, so a wrong pick is a second click rather than a mistake. */}
+    <fieldset className="flex flex-wrap items-center gap-2 border-0 p-0">
+      <legend className="sr-only">start from an existing set of permissions</legend>
+      <span className="text-small text-secondary">Start from</span>
+      {templates.map((template) => (
+        <Button key={template.key} type="button" variant="secondary" title={template.description} onClick={() => onChange(template.grants)}>
+          {template.label}
+        </Button>
+      ))}
+      {copyFrom.length > 0 ? (
+        <Select
+          aria-label="Copy permissions from another member"
+          value=""
+          onChange={(e) => {
+            const source = copyFrom.find((row) => row.userId === e.target.value)
+            if (source) onChange(grantsOf(source))
+          }}
+        >
+          <option value="">Copy from another member</option>
+          {copyFrom.map((row) => (
+            <option key={row.userId} value={row.userId}>
+              {row.name}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+    </fieldset>
     <Checkbox
       label="Super Admin"
       hint="Every hub, plus seating people and ending their access."
@@ -174,16 +251,51 @@ const GrantGrid = ({ value, onChange }: { value: Grants; onChange: (next: Grants
         )
       })}
     </div>
+    {/* HubSpot's Critical column, as its own group for the same reason it is one
+        there: each of these is irreversible or reaches the whole database, and
+        none of them falls out of holding a hub. */}
+    <div className="flex flex-col gap-1 rounded-hs border border-line">
+      <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-line px-3 py-2 text-small text-secondary">
+        <span>Critical</span>
+        <span>Off · On</span>
+      </div>
+      {CRITICAL_ACTIONS.map((action) => {
+        const on = value.isSuperAdmin || value.criticalGrants.includes(action)
+        return (
+          <div key={action} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
+            <div>
+              <p className="text-body">{CRITICAL_LABEL[action]}</p>
+              <p className="text-small text-secondary">{CRITICAL_HINT[action]}</p>
+            </div>
+            <fieldset className="flex gap-1 border-0 p-0">
+              <legend className="sr-only">may {CRITICAL_LABEL[action].toLowerCase()}</legend>
+              {([false, true] as const).map((option) => (
+                <Button
+                  key={String(option)}
+                  type="button"
+                  variant={on === option ? 'primary' : 'secondary'}
+                  disabled={value.isSuperAdmin}
+                  onClick={() => onChange(withCritical(value, action, option))}
+                >
+                  {option ? 'On' : 'Off'}
+                </Button>
+              ))}
+            </fieldset>
+          </div>
+        )
+      })}
+    </div>
   </div>
 )
 
-export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) => {
+export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin }: Props) => {
   const zone = useZone()
   const toast = useToast()
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('active')
   const [editing, setEditing] = useState<{ userId: string; name: string; grants: Grants } | null>(null)
   const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
+  const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -308,17 +420,7 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                       key: 'edit',
                       label: 'Edit permissions',
                       onSelect: () =>
-                        setEditing({
-                          userId: row.userId,
-                          name: row.name,
-                          grants: {
-                            isSuperAdmin: row.isSuperAdmin,
-                            viewHubs: row.viewHubs,
-                            editHubs: row.editHubs,
-                            viewScopes: row.viewScopes,
-                            editScopes: row.editScopes,
-                          },
-                        }),
+                        setEditing({ userId: row.userId, name: row.name, grants: grantsOf(row) }),
                     },
                     row.state === 'deactivated'
                       ? {
@@ -333,6 +435,11 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                           onSelect: () =>
                             run(() => api.account.members.deactivate.mutate({ userId: row.userId }), 'Access ended.'),
                         },
+                    {
+                      key: 'copy',
+                      label: 'Copy permissions from...',
+                      onSelect: () => setCopying({ toUserId: row.userId, name: row.name, fromUserId: '' }),
+                    },
                     {
                       key: 'remove',
                       label: 'Remove from account',
@@ -350,7 +457,12 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
       <Modal open={editing !== null} onClose={() => setEditing(null)} title={`Permissions for ${editing?.name ?? ''}`}>
         {editing ? (
           <div className="flex flex-col gap-4">
-            <GrantGrid value={editing.grants} onChange={(grants) => setEditing({ ...editing, grants })} />
+            <GrantGrid
+              value={editing.grants}
+              onChange={(grants) => setEditing({ ...editing, grants })}
+              templates={templates}
+              copyFrom={[]}
+            />
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEditing(null)}>
                 Cancel
@@ -383,7 +495,12 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                 placeholder="someone@example.com"
               />
             </Field>
-            <GrantGrid value={inviting.grants} onChange={(grants) => setInviting({ ...inviting, grants })} />
+            <GrantGrid
+              value={inviting.grants}
+              onChange={(grants) => setInviting({ ...inviting, grants })}
+              templates={templates}
+              copyFrom={rows}
+            />
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setInviting(null)}>
                 Cancel
@@ -402,6 +519,48 @@ export const MemberList = ({ rows, invitations, selfId, isSuperAdmin }: Props) =
                 }
               >
                 Send invitation
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal open={copying !== null} onClose={() => setCopying(null)} title={`Copy permissions to ${copying?.name ?? ''}`}>
+        {copying ? (
+          <div className="flex flex-col gap-4">
+            <Field id="copy-from" label="Copy from" hint="They end up holding exactly what this person holds now.">
+              <Select
+                id="copy-from"
+                value={copying.fromUserId}
+                onChange={(e) => setCopying({ ...copying, fromUserId: e.target.value })}
+              >
+                <option value="">Pick somebody</option>
+                {rows
+                  .filter((row) => row.userId !== copying.toUserId)
+                  .map((row) => (
+                    <option key={row.userId} value={row.userId}>
+                      {row.name} - {summarise(row)}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setCopying(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={busy || copying.fromUserId === ''}
+                onClick={() =>
+                  run(async () => {
+                    await api.account.members.copyGrants.mutate({
+                      fromUserId: copying.fromUserId,
+                      toUserId: copying.toUserId,
+                    })
+                    setCopying(null)
+                  }, 'Permissions copied.')
+                }
+              >
+                Copy
               </Button>
             </div>
           </div>

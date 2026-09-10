@@ -260,37 +260,45 @@ export const handleBrevoWebhook = async (
   return { handled: outcome.stored, detail: outcome.reason ?? 'Recorded on the contact timeline.' }
 }
 
+/** The job name a failed propagation is dead-lettered and replayed under. */
+export const BLOCKLIST_JOB = 'brevo.blocklist'
+
 /** The other direction of "unsubscribe is authoritative in Rawr": a choice made
  *  here reaches Brevo's blocklist, so nobody opted out in the CRM is mailed by a
- *  campaign. Fails into the dead letter, never into the person's screen. */
+ *  campaign.
+ *
+ *  Everything is inside `attempt`, the credential read and the contact read
+ *  included. A propagation that never reached Brevo because the registry was
+ *  briefly unreachable is exactly as lost as one Brevo refused, and only the work
+ *  inside `attempt` leaves a dead letter behind to replay. Throws after recording
+ *  it, so the caller decides whether the person on the screen hears about it. */
 export const propagateSubscriptionToBrevo = async (
   ctx: AccountContext,
   input: { contactId: string; typeId: string; state: 'subscribed' | 'unsubscribed' | 'unspecified' },
 ): Promise<void> => {
   if (input.state === 'unspecified' || devIntegrationsEnabled) return
-  const found = await readCredentials(ctx, 'brevo')
-  if (!found?.secret) return
-  // Only the type Brevo is mapped to, when one is named: opting out of sales
-  // one-to-ones is not a reason to block the newsletter, or the reverse.
-  const mapped = (found.config as BrevoConfig).subscriptionType?.trim().toLowerCase()
-  if (mapped) {
-    const type = (await listSubscriptionTypes(ctx)).find((row) => row.id === input.typeId)
-    if (!type || type.name.toLowerCase() !== mapped) return
-  }
-  const record = await getRecord(ctx, 'contact', input.contactId)
-  const email = typeof record?.values.email === 'string' ? record.values.email : ''
-  if (!email) return
 
-  await attempt(
-    { ctx, kind: 'brevo', jobName: 'brevo.blocklist', payload: { contactId: input.contactId, state: input.state } },
-    () =>
-      json<null>({
-        url: `${API}/contacts/${encodeURIComponent(email)}?identifierType=email_id`,
-        method: 'PUT',
-        headers: headers(found.secret as string),
-        body: { emailBlacklisted: input.state === 'unsubscribed' },
-      }),
-  )
+  await attempt({ ctx, kind: 'brevo', jobName: BLOCKLIST_JOB, payload: { ...input } }, async () => {
+    const found = await readCredentials(ctx, 'brevo')
+    if (!found?.secret) return
+    // Only the type Brevo is mapped to, when one is named: opting out of sales
+    // one-to-ones is not a reason to block the newsletter, or the reverse.
+    const mapped = (found.config as BrevoConfig).subscriptionType?.trim().toLowerCase()
+    if (mapped) {
+      const type = (await listSubscriptionTypes(ctx)).find((row) => row.id === input.typeId)
+      if (!type || type.name.toLowerCase() !== mapped) return
+    }
+    const record = await getRecord(ctx, 'contact', input.contactId)
+    const email = typeof record?.values.email === 'string' ? record.values.email : ''
+    if (!email) return
+
+    await json<null>({
+      url: `${API}/contacts/${encodeURIComponent(email)}?identifierType=email_id`,
+      method: 'PUT',
+      headers: headers(found.secret as string),
+      body: { emailBlacklisted: input.state === 'unsubscribed' },
+    })
+  })
 }
 
 /* -- B12: the campaign, aimed and measured from here ----------------------- */

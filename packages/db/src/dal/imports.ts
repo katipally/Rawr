@@ -17,7 +17,7 @@ import type { ObjectKey } from '../registry/core.ts'
 import type { FieldType } from '../registry/types.ts'
 import { isNewProperty, type Mapping, type NewProperty } from '../registry/mapping.ts'
 import type { AccountContext } from './context.ts'
-import { assertCanWrite } from './context.ts'
+import { assertCanDo, assertCanWrite } from './context.ts'
 import { isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { linksForContacts } from './activity.ts'
 import { createField, createFields, updateField } from './admin-fields.ts'
@@ -1499,6 +1499,7 @@ export const runImportChunk = async (
  *  worker's, which is what lets the person close the tab. */
 export const startImportRun = async (ctx: AccountContext, id: string): Promise<void> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
   // Before the first chunk, not during it: a column whose field appears halfway
   // through the file is a column that imported nothing for the rows above it.

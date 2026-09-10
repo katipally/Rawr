@@ -1,8 +1,10 @@
+import { sql } from 'drizzle-orm'
 import {
   assertCanWrite,
   clearEnrichmentRequest,
   getRecord,
   listIntegrations,
+  withAccount,
   type IntegrationKind,
   type IntegrationRow,
   type AccountContext,
@@ -673,3 +675,53 @@ export const enrichRecord = async (
 
   return run
 }
+
+export type TrafficRow = { label: string; calls: number; lastAt: Date | null }
+
+/** What one app has actually done in this account, read from Rawr's own ledgers
+ *  rather than asked of the provider: the calls `once` keyed going out, the
+ *  webhook deliveries `claimInbound` accepted coming in, and for an enricher the
+ *  fields its answers are still standing in.
+ *
+ *  Bounded on both axes so a provider firing thousands of events a day still
+ *  renders: thirty days, and the twelve busiest kinds. O(rows in window) with an
+ *  index on `at`, grouped in the database rather than in the page. */
+export const integrationTraffic = async (
+  ctx: AccountContext,
+  kind: IntegrationKind,
+  integrationId: string | null,
+): Promise<{ outbound: TrafficRow[]; inbound: TrafficRow[]; unmatched: number; enriched: number }> =>
+  withAccount(ctx, async (tx) => {
+    const prefix = `${kind}.%`
+    const [outbound, inbound, unmatched, enriched] = await Promise.all([
+      // Either link: `operation` is always named for the kind, and reconnecting an
+      // app nulls the foreign key of everything it did under the old row.
+      tx.execute<{ label: string; calls: number; last_at: Date | null }>(sql`
+        select operation as label, count(*)::int as calls, max(at) as last_at
+          from outbound_call
+         where at > now() - interval '30 days'
+           and (operation like ${prefix} or (${integrationId}::uuid is not null and integration_id = ${integrationId}::uuid))
+         group by operation
+         order by count(*) desc, operation
+         limit 12`),
+      tx.execute<{ label: string; calls: number; last_at: Date | null }>(sql`
+        select kind as label, count(*)::int as calls, max(at) as last_at
+          from inbound_event
+         where source = ${kind} and at > now() - interval '30 days'
+         group by kind
+         order by count(*) desc, kind
+         limit 12`),
+      tx.execute<{ n: number }>(sql`
+        select count(*)::int as n from inbound_event where source = ${kind} and not matched`),
+      tx.execute<{ n: number }>(sql`
+        select count(*)::int as n from field_source where provider = ${kind}`),
+    ])
+    const toRows = (rows: { label: string; calls: number; last_at: Date | null }[]): TrafficRow[] =>
+      rows.map((row) => ({ label: row.label, calls: Number(row.calls), lastAt: row.last_at }))
+    return {
+      outbound: toRows(outbound),
+      inbound: toRows(inbound),
+      unmatched: Number(unmatched[0]?.n ?? 0),
+      enriched: Number(enriched[0]?.n ?? 0),
+    }
+  })

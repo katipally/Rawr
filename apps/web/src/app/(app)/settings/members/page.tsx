@@ -1,5 +1,5 @@
 import { PageHeader } from '@rawr/ui'
-import { listInvitations, listMembers } from '@rawr/db'
+import { ROLE_TEMPLATES, listInvitations, listMembers } from '@rawr/db'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MemberList } from './member-list.tsx'
 
@@ -42,6 +42,19 @@ const MembersPage = async () => {
           ...row,
           expiresAt: row.expiresAt.toISOString(),
           createdAt: row.createdAt.toISOString(),
+        }))}
+        templates={Object.entries(ROLE_TEMPLATES).map(([key, template]) => ({
+          key,
+          label: template.label,
+          description: template.description,
+          grants: {
+            isSuperAdmin: template.grants.isSuperAdmin,
+            viewHubs: [...template.grants.viewHubs],
+            editHubs: [...template.grants.editHubs],
+            viewScopes: template.grants.viewScopes,
+            editScopes: template.grants.editScopes,
+            criticalGrants: [...template.grants.criticalGrants],
+          },
         }))}
         selfId={session.userId}
         isSuperAdmin={session.isSuperAdmin}

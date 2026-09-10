@@ -1,7 +1,16 @@
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { account, invitation, membership, userAccount } from '../schema/identity.ts'
-import { HUBS, assertScopes, type AccountContext, type Hub, type HubScopes, assertSuperAdmin } from './context.ts'
+import {
+  HUBS,
+  assertCriticalActions,
+  assertScopes,
+  assertSuperAdmin,
+  type AccountContext,
+  type CriticalAction,
+  type Hub,
+  type HubScopes,
+} from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { provisionAccount } from './provision.ts'
 
@@ -114,6 +123,7 @@ export type PendingInvitation = {
   editHubs: Hub[]
   viewScopes: HubScopes
   editScopes: HubScopes
+  criticalGrants: CriticalAction[]
   invitedByName: string | null
   expiresAt: Date
   createdAt: Date
@@ -130,6 +140,7 @@ export const listInvitations = async (ctx: AccountContext): Promise<PendingInvit
         editHubs: invitation.editHubs,
         viewScopes: invitation.viewScopes,
         editScopes: invitation.editScopes,
+        criticalGrants: invitation.criticalGrants,
         invitedByName: userAccount.name,
         expiresAt: invitation.expiresAt,
         createdAt: invitation.createdAt,
@@ -168,6 +179,7 @@ export const invite = async (
     editHubs?: readonly string[] | undefined
     viewScopes?: Record<string, string> | undefined
     editScopes?: Record<string, string> | undefined
+    criticalGrants?: readonly string[] | undefined
   },
 ): Promise<{ token: string; id: string }> =>
   mutate(ctx, 'invitation', async (tx) => {
@@ -195,6 +207,7 @@ export const invite = async (
         // remembers to narrow it.
         viewScopes: assertScopes(input.viewScopes, [...viewHubs, ...editHubs]),
         editScopes: assertScopes(input.editScopes, editHubs),
+        criticalGrants: assertCriticalActions(input.criticalGrants),
         tokenHash: await hashToken(token),
         invitedBy: ctx.actorId,
         expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000),

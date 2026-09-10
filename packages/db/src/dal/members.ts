@@ -1,6 +1,15 @@
 import { asc, eq, sql } from 'drizzle-orm'
 import { membership, userAccount } from '../schema/identity.ts'
-import { HUBS, assertScopes, type AccountContext, type Hub, type HubScopes, assertSuperAdmin } from './context.ts'
+import {
+  HUBS,
+  assertCriticalActions,
+  assertScopes,
+  assertSuperAdmin,
+  type AccountContext,
+  type CriticalAction,
+  type Hub,
+  type HubScopes,
+} from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 
 /** Who is in this account and what they hold, as HubSpot's grid puts it: a hub at
@@ -19,6 +28,7 @@ export type MemberRow = {
   editHubs: Hub[]
   viewScopes: HubScopes
   editScopes: HubScopes
+  criticalGrants: CriticalAction[]
   state: 'active' | 'invited' | 'deactivated'
   /** False until the person has signed in with Google at least once. */
   linked: boolean
@@ -39,6 +49,7 @@ export const listMembers = async (ctx: AccountContext): Promise<MemberRow[]> =>
         editHubs: membership.editHubs,
         viewScopes: membership.viewScopes,
         editScopes: membership.editScopes,
+        criticalGrants: membership.criticalGrants,
         state: membership.state,
         joinedAt: membership.createdAt,
       })
@@ -71,6 +82,7 @@ export type Grants = {
   editHubs?: readonly string[] | undefined
   viewScopes?: Record<string, string> | undefined
   editScopes?: Record<string, string> | undefined
+  criticalGrants?: readonly string[] | undefined
 }
 
 const toGrants = (input: Grants) => {
@@ -83,6 +95,7 @@ const toGrants = (input: Grants) => {
     // A view scope covers what edit grants too, because canView unions the two.
     viewScopes: assertScopes(input.viewScopes, [...viewHubs, ...editHubs]),
     editScopes: assertScopes(input.editScopes, editHubs),
+    criticalGrants: assertCriticalActions(input.criticalGrants),
   }
 }
 
@@ -103,12 +116,15 @@ export const addMember = async (
     if (!row) throw new Error('The member was not added.')
     // rawr.add_member seats the person and hands back the id; the rest of the
     // grant is applied here rather than widening that function's signature.
-    if (grants.isSuperAdmin || Object.keys(grants.viewScopes).length > 0 || Object.keys(grants.editScopes).length > 0) {
-      await tx
-        .update(membership)
-        .set({ isSuperAdmin: grants.isSuperAdmin, viewScopes: grants.viewScopes, editScopes: grants.editScopes })
-        .where(eq(membership.userId, row.id))
-    }
+    await tx
+      .update(membership)
+      .set({
+        isSuperAdmin: grants.isSuperAdmin,
+        viewScopes: grants.viewScopes,
+        editScopes: grants.editScopes,
+        criticalGrants: grants.criticalGrants,
+      })
+      .where(eq(membership.userId, row.id))
     return {
       result: { userId: row.id },
       audit: { entity: 'membership', entityId: row.id, action: 'add', after: { email, ...grants } },
@@ -129,6 +145,7 @@ export const setMemberGrants = async (
         editHubs: membership.editHubs,
         viewScopes: membership.viewScopes,
         editScopes: membership.editScopes,
+        criticalGrants: membership.criticalGrants,
       })
       .from(membership)
       .where(eq(membership.userId, input.userId))
@@ -167,5 +184,114 @@ export const removeMember = async (ctx: AccountContext, userId: string): Promise
     return {
       result: undefined,
       audit: { entity: 'membership', entityId: userId, action: 'remove', before: current },
+    }
+  })
+
+/** HubSpot's "Start with a template": a suggested set somebody adjusts before
+ *  saving, not a role they are locked into. Applied by writing the grants out, so
+ *  changing a template later never silently changes anybody's access.
+ *
+ *  Every template leaves `purge` out. Permanently deleting data is answered to a
+ *  regulator, so it is granted to a named person rather than handed out with a job
+ *  title. */
+export const ROLE_TEMPLATES = {
+  sales_rep: {
+    label: 'Sales rep',
+    description: 'Works contacts and deals, and reads the numbers.',
+    grants: {
+      isSuperAdmin: false,
+      viewHubs: ['reports'],
+      editHubs: ['contacts', 'sales'],
+      viewScopes: {},
+      editScopes: {},
+      criticalGrants: ['delete', 'merge', 'export'],
+    },
+  },
+  marketer: {
+    label: 'Marketer',
+    description: 'Runs forms, segments and the newsletter, and loads lists.',
+    grants: {
+      isSuperAdmin: false,
+      viewHubs: ['sales', 'reports'],
+      editHubs: ['contacts', 'marketing'],
+      viewScopes: {},
+      editScopes: {},
+      criticalGrants: ['merge', 'import', 'export'],
+    },
+  },
+  viewer: {
+    label: 'Viewer',
+    description: 'Reads everything the account has. Changes nothing.',
+    grants: {
+      isSuperAdmin: false,
+      viewHubs: ['contacts', 'sales', 'marketing', 'reports'],
+      editHubs: [],
+      viewScopes: {},
+      editScopes: {},
+      criticalGrants: [],
+    },
+  },
+} as const satisfies Record<
+  string,
+  {
+    label: string
+    description: string
+    grants: {
+      isSuperAdmin: boolean
+      viewHubs: readonly Hub[]
+      editHubs: readonly Hub[]
+      viewScopes: HubScopes
+      editScopes: HubScopes
+      criticalGrants: readonly CriticalAction[]
+    }
+  }
+>
+
+export type RoleTemplateKey = keyof typeof ROLE_TEMPLATES
+
+/** HubSpot's "copy another user's permissions". Read and written in one
+ *  transaction so the copy is of what the source held at that instant, and audited
+ *  on the person who changed rather than on the person copied from. */
+export const copyMemberGrants = async (
+  ctx: AccountContext,
+  input: { fromUserId: string; toUserId: string },
+): Promise<void> =>
+  mutate(ctx, 'membership', async (tx) => {
+    assertSuperAdmin(ctx, "change somebody's access")
+    if (input.fromUserId === input.toUserId) throw new Error('That is the same person.')
+    const [source, target] = await Promise.all([
+      tx
+        .select({
+          isSuperAdmin: membership.isSuperAdmin,
+          viewHubs: membership.viewHubs,
+          editHubs: membership.editHubs,
+          viewScopes: membership.viewScopes,
+          editScopes: membership.editScopes,
+          criticalGrants: membership.criticalGrants,
+        })
+        .from(membership)
+        .where(eq(membership.userId, input.fromUserId)),
+      tx
+        .select({ isSuperAdmin: membership.isSuperAdmin })
+        .from(membership)
+        .where(eq(membership.userId, input.toUserId)),
+    ])
+    const from = source[0]
+    const to = target[0]
+    if (!from) throw new Error('The person you are copying from is not a member of this account.')
+    if (!to) throw new Error('That person is not a member of this account.')
+    if (to.isSuperAdmin && !from.isSuperAdmin && (await superAdminCount(tx)) <= 1) {
+      throw new Error('This is the only super admin. Make somebody else one first.')
+    }
+    await tx.update(membership).set(from).where(eq(membership.userId, input.toUserId))
+    return {
+      result: undefined,
+      audit: {
+        entity: 'membership',
+        entityId: input.toUserId,
+        action: 'copy_grants',
+        before: to,
+        after: { ...from, copiedFrom: input.fromUserId },
+      },
     }
   })

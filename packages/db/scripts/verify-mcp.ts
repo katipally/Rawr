@@ -439,11 +439,12 @@ try {
     generated.text,
   )
   const generatedRefusal = await call(viewerToken, 'crm_records_remove', { object: 'deal', id: mggId })
-  // The refusal names the hub that was missing, so the assistant relaying it tells
-  // the person what to ask for rather than which role they are not.
+  // A viewer holds neither the delete grant nor the sales hub, and the grant is the
+  // one asked first, so the sentence relayed to the assistant names the act that is
+  // missing rather than which role they are not.
   check(
     'and a generated write is refused by grant in the layer, in a sentence',
-    generatedRefusal.isError && /sales access/i.test(generatedRefusal.text),
+    generatedRefusal.isError && /delete records/i.test(generatedRefusal.text),
     generatedRefusal.text,
   )
 

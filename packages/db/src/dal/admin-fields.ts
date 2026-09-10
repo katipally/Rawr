@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
 import { conditionalBlocker, readConditional, type Conditional } from '../registry/conditional.ts'
 import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
-import type { AccountContext } from './context.ts'
+import { assertCanDo, type AccountContext } from './context.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { forgetRegistry, getRegistry, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
@@ -728,8 +728,9 @@ export type PurgeResult = { stripped: number }
 /** Phase two. Strips the key out of every record and removes the definition. This
  *  is the only irreversible half, and it is a separate, explicit action for exactly
  *  that reason. F0 §4. */
-export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<PurgeResult> =>
-  mutate(ctx, 'field_def', async (tx) => {
+export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<PurgeResult> => {
+  assertCanDo(ctx, 'purge')
+  return mutate(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({
         key: fieldDef.key,
@@ -773,3 +774,4 @@ export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<
       },
     }
   })
+}

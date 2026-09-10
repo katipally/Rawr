@@ -35,3 +35,26 @@ export const SCOPE_LABEL: Record<Scope, string> = {
   team: "Team's",
   own: 'Mine',
 }
+
+/** The acts HubSpot marks Critical. Mirrors CRITICAL_ACTIONS in the data access
+ *  layer; hubs.test.ts asserts the two agree. */
+export const CRITICAL_ACTIONS = ['delete', 'merge', 'bulk_delete', 'import', 'export', 'purge'] as const
+export type CriticalAction = (typeof CRITICAL_ACTIONS)[number]
+
+export const CRITICAL_LABEL: Record<CriticalAction, string> = {
+  delete: 'Delete',
+  merge: 'Merge',
+  bulk_delete: 'Bulk delete',
+  import: 'Import',
+  export: 'Export',
+  purge: 'Permanently delete',
+}
+
+export const CRITICAL_HINT: Record<CriticalAction, string> = {
+  delete: 'Send one record to the bin. Somebody can still get it back.',
+  merge: 'Fold two records into one. Nothing undoes it.',
+  bulk_delete: 'Bin a whole selection at once.',
+  import: 'Load a file into the database, creating properties it needs.',
+  export: 'Download a view as a file that leaves the account.',
+  purge: 'Erase data for good, including a deleted property and everything in it.',
+}

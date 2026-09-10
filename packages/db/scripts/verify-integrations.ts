@@ -8,6 +8,7 @@ import {
   claimForReplay,
   claimInbound,
   INTEGRATION_KINDS,
+  PERSONAL_KINDS,
   disconnectIntegration,
   listIntegrations,
   listUnmatchedEvents,
@@ -1598,10 +1599,68 @@ try {
     await db.execute(sql`update ${sql.raw(entity)} set deleted_at = now() where id = ${id}`)
   }
 
+  console.log('\n-- every provider connects, reports and disconnects --------------')
+
+  // The provider modules live in the web app, so what is provable here is the
+  // half every one of them shares: a credential is stored, decrypts for the call
+  // about to be made, records health both ways, and leaves nothing behind when it
+  // is disconnected. Run for each shared kind rather than for the two that
+  // happened to have checks, so a provider added to the catalogue is covered the
+  // day it is added. O(kinds) round trips, one connect and one disconnect each.
+  const shared = INTEGRATION_KINDS.filter((kind) => !PERSONAL_KINDS.has(kind))
+  for (const kind of shared) {
+    await check(`${kind} connects, records health both ways and disconnects clean`, async () => {
+      // From nothing, so the row carries no earlier success: a kind an earlier
+      // section already proved would otherwise start this one green.
+      await disconnectIntegration(accountAdmin, kind).catch(() => undefined)
+      await saveIntegration(accountAdmin, { kind, secret: `verify-${kind}-${stamp}`, config: { probe: stamp } })
+
+      const connected = (await listIntegrations(accountAdmin)).find((row) => row.kind === kind)
+      expect(connected?.hasSecret === true, `${kind} did not report holding a secret`)
+      // Storing a credential is not the provider answering. Until one has, the
+      // card reads "needs attention" rather than green, which is the honest state
+      // for a key nobody has proved yet.
+      expect(connected?.state === 'degraded', `${kind} read as ${connected?.state} before anything succeeded`)
+      expect(
+        !JSON.stringify(connected).includes(`verify-${kind}-${stamp}`),
+        `${kind} returned its own credential in the list`,
+      )
+
+      const decrypted = await readCredentials(accountAdmin, kind)
+      expect(decrypted?.secret === `verify-${kind}-${stamp}`, `${kind} did not decrypt for the call`)
+
+      await recordHealth(accountAdmin, kind, { ok: false, error: 'Rejected by the verify suite.', disconnected: true })
+      const rejected = (await listIntegrations(accountAdmin)).find((row) => row.kind === kind)
+      expect(rejected?.state === 'disconnected', `${kind} read as ${rejected?.state} after a rejected credential`)
+
+      await recordHealth(accountAdmin, kind, { ok: true })
+      const green = (await listIntegrations(accountAdmin)).find((row) => row.kind === kind)
+      expect(green?.state === 'connected', `${kind} did not go green after a success`)
+      expect(green?.lastError === null, `${kind} kept its last error after a success`)
+
+      await disconnectIntegration(accountAdmin, kind)
+      const gone = (await listIntegrations(accountAdmin)).find((row) => row.kind === kind)
+      expect(gone?.state === 'not_configured', `${kind} still reads as ${gone?.state} after disconnecting`)
+      expect(gone?.hasSecret === false, `${kind} still holds a secret after disconnecting`)
+      return `${kind}: connected, rejected, recovered, disconnected`
+    })
+  }
+
+  await check('a personal app is never a shared credential', async () => {
+    for (const kind of PERSONAL_KINDS) {
+      const row = (await listIntegrations(accountAdmin)).find((entry) => entry.kind === kind)
+      expect(row !== undefined, `${kind} is missing from the catalogue`)
+      expect(row?.hasSecret === false, `${kind} holds an account-wide secret, and it is granted per person`)
+    }
+    return `${[...PERSONAL_KINDS].join(', ')} fold from their own tables`
+  })
+
   // Leave the account as it was found: every row saved above was created here,
   // and one left behind reads as a real connection on the Connected apps page.
-  await disconnectIntegration(accountAdmin, 'brevo')
-  await disconnectIntegration(accountAdmin, 'woodpecker')
+  // Tolerant because the per-provider sweep above already disconnects every
+  // shared kind; this stays as the guarantee for a run that stopped before it.
+  await disconnectIntegration(accountAdmin, 'brevo').catch(() => undefined)
+  await disconnectIntegration(accountAdmin, 'woodpecker').catch(() => undefined)
 
   console.log('')
   if (failures > 0) {

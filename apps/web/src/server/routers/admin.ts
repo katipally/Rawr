@@ -507,13 +507,21 @@ export const adminRouter = router({
     list: protectedProcedure.query(({ ctx }) => call(() => listSubscriptionTypes(ctx.account))),
 
     create: adminProcedure
-      .input(z.object({ name, description: z.string().max(500).nullish(), isInternal: z.boolean().optional() }))
+      .input(
+        z.object({
+          name,
+          description: z.string().max(500).nullish(),
+          isInternal: z.boolean().optional(),
+          doubleOptIn: z.boolean().optional(),
+        }),
+      )
       .mutation(({ ctx, input }) =>
         call(() =>
           createSubscriptionType(ctx.account, {
             name: input.name,
             ...(input.description !== undefined ? { description: input.description } : {}),
             ...(input.isInternal !== undefined ? { isInternal: input.isInternal } : {}),
+            ...(input.doubleOptIn !== undefined ? { doubleOptIn: input.doubleOptIn } : {}),
           }),
         ),
       ),
@@ -525,6 +533,7 @@ export const adminRouter = router({
           name: name.optional(),
           description: z.string().max(500).nullish(),
           isInternal: z.boolean().optional(),
+          doubleOptIn: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx, input }) =>
@@ -534,6 +543,7 @@ export const adminRouter = router({
             ...(input.name !== undefined ? { name: input.name } : {}),
             ...(input.description !== undefined ? { description: input.description } : {}),
             ...(input.isInternal !== undefined ? { isInternal: input.isInternal } : {}),
+            ...(input.doubleOptIn !== undefined ? { doubleOptIn: input.doubleOptIn } : {}),
           }),
         ),
       ),

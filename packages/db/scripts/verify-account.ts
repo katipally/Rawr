@@ -13,7 +13,7 @@ import {
 } from '../src/dal/account.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
-import { addMember, listMembers, setMemberGrants } from '../src/dal/members.ts'
+import { ROLE_TEMPLATES, addMember, copyMemberGrants, listMembers, setMemberGrants } from '../src/dal/members.ts'
 import { membershipsForUser } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
 import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
@@ -143,6 +143,73 @@ try {
   const raised = (await listMembers(superAdmin)).find((m) => m.userId === probeId)
   check(raised?.editHubs.sort().join() === 'contacts,marketing', 'grants can be raised', raised?.editHubs.join())
   check(raised?.viewHubs.join() === 'reports', 'and view and edit are kept apart', raised?.viewHubs.join())
+
+  console.log('\n-- critical grants ---------------------------------------------')
+
+  check(
+    seated?.criticalGrants.length === 0,
+    'a new seat holds none of the critical acts until somebody grants them',
+    seated?.criticalGrants.join(),
+  )
+
+  await setMemberGrants(superAdmin, {
+    userId: probeId,
+    editHubs: ['contacts'],
+    criticalGrants: ['delete', 'export'],
+  })
+  const critical = (await listMembers(superAdmin)).find((m) => m.userId === probeId)
+  check(
+    critical?.criticalGrants.sort().join() === 'delete,export',
+    'critical acts are granted one at a time',
+    critical?.criticalGrants.join(),
+  )
+  check(
+    (await refused(() => setMemberGrants(superAdmin, { userId: probeId, criticalGrants: ['launch_rockets'] }))) !== null,
+    'an act nobody has heard of is refused rather than stored',
+  )
+
+  console.log('\n-- role templates and copying ----------------------------------')
+
+  const template = ROLE_TEMPLATES.sales_rep
+  await setMemberGrants(superAdmin, { userId: probeId, ...template.grants })
+  const templated = (await listMembers(superAdmin)).find((m) => m.userId === probeId)
+  check(
+    templated?.editHubs.sort().join() === [...template.grants.editHubs].sort().join() &&
+      templated?.criticalGrants.sort().join() === [...template.grants.criticalGrants].sort().join(),
+    'a role template writes exactly the grants it names',
+    `${templated?.editHubs.join()} + ${templated?.criticalGrants.join()}`,
+  )
+  check(
+    Object.values(ROLE_TEMPLATES).every((t) => !(t.grants.criticalGrants as readonly string[]).includes('purge')),
+    'no template hands out permanent deletion',
+  )
+
+  const copyEmail = `copy-${Date.now()}@sandbox.test`
+  const { userId: copyId } = await addMember(superAdmin, { email: copyEmail })
+  await copyMemberGrants(superAdmin, { fromUserId: probeId, toUserId: copyId })
+  const copied = (await listMembers(superAdmin)).find((m) => m.userId === copyId)
+  check(
+    copied?.editHubs.sort().join() === templated?.editHubs.sort().join() &&
+      copied?.viewHubs.sort().join() === templated?.viewHubs.sort().join() &&
+      copied?.criticalGrants.sort().join() === templated?.criticalGrants.sort().join(),
+    'copying somebody makes the two seats hold the same thing',
+    `${copied?.editHubs.join()} + ${copied?.criticalGrants.join()}`,
+  )
+  check(
+    (await refused(() => copyMemberGrants(superAdmin, { fromUserId: copyId, toUserId: copyId }))) !== null,
+    'copying somebody onto themselves is refused',
+  )
+  check(
+    (await refused(() => copyMemberGrants(hubAdmin, { fromUserId: probeId, toUserId: copyId }))) !== null,
+    'and holding every hub is not enough to copy anybody',
+  )
+  const copyAudit = await listAudit(superAdmin, { limit: 20 })
+  check(
+    copyAudit.rows.some((r) => r.entity === 'membership' && r.action === 'copy_grants'),
+    'the copy is recorded as its own act',
+  )
+  await owner`delete from membership where user_id = ${copyId}`
+  await owner`delete from user_account where id = ${copyId}`
 
   console.log('\n-- the last super admin ----------------------------------------')
 

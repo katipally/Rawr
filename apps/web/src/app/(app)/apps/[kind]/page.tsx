@@ -7,14 +7,27 @@ import { AppLogo } from '~/components/app-logo.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { appPath, appsPath, availableAppsPath, failedJobsPath, importsPath, type AppTab } from '~/lib/links.ts'
-import { listEmailAccounts } from '~/server/integrations/apollo.ts'
-import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
+import { listEmailAccounts, listSequences } from '~/server/integrations/apollo.ts'
+import { clayDegraded } from '~/server/integrations/clay.ts'
+import { connectPathFor, integrationTraffic, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppActions } from '../app-actions.tsx'
 import { HEALTH } from '../health.ts'
 import { ConnectForm } from './connect-form.tsx'
 
 const TABS: AppTab[] = ['overview', 'settings', 'insights']
+
+/** The six files a portal exports, in the order the importer offers them. Named
+ *  here rather than left to "pick the HubSpot importer", because the question
+ *  somebody has in front of the export screen is which files are worth taking. */
+const HUBSPOT_EXPORTS = [
+  'Contacts, companies, deals and any custom object, as records.',
+  'Notes, calls, emails and meetings, onto the timeline of the record they name.',
+  'A property export, which creates the fields those records need.',
+  'An association export, which puts the people on the deals.',
+  'A list export, which becomes a static segment holding the same people.',
+  'A form submission export, which lands against the form it was sent to.',
+]
 
 /** One app, framed the way HubSpot frames an installed one: who installed it and
  *  what it may reach on Overview, how it is connected on Settings, and what it
@@ -54,6 +67,17 @@ const AppPage = async ({
   // sends as turns that into something an admin can check by looking.
   const sendingAs =
     row.kind === 'apollo' && connected ? await listEmailAccounts(ctx).catch(() => null) : null
+  // The other half of the same question: a key pointed at the wrong workspace
+  // answers with somebody else's sequences, which is visible here and nowhere
+  // else, because Rawr never enrolls into one itself.
+  const apolloSequences =
+    row.kind === 'apollo' && connected ? await listSequences(ctx).catch(() => null) : null
+  // Read only for the tab that shows it: two grouped counts is cheap, but not on
+  // every visit to Overview.
+  const traffic = tab === 'insights' ? await integrationTraffic(ctx, row.kind, row.id) : null
+  // Said on every tab of the card, not only when somebody presses Test: on Launch
+  // the connection is real and every enrichment through it still refuses.
+  const clayLimit = row.kind === 'clay' ? clayDegraded(row.config as { tier?: 'launch' | 'growth' }) : null
   const connectPath = connectPathFor(row.kind, session.accountSlug)
   // The webhook URL names the account through a tracked site's key; the first
   // active one is the account's public identity for that purpose.
@@ -125,6 +149,8 @@ const AppPage = async ({
           {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt.toISOString(), zone)})` : ''}
         </Alert>
       ) : null}
+
+      {clayLimit ? <Alert tone="warning">{clayLimit}</Alert> : null}
 
       {tab === 'overview' ? (
         <div className="grid gap-4 @3xl:grid-cols-[20rem_1fr]">
@@ -207,6 +233,14 @@ const AppPage = async ({
                 ))}
               </ol>
               <div>
+                <p className="text-small text-secondary">Exports the importer reads:</p>
+                <ul className="flex list-disc flex-col gap-1 pl-5 text-secondary">
+                  {HUBSPOT_EXPORTS.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
                 <LinkButton href={importsPath(session.accountSlug)}>
                   Open Import
                 </LinkButton>
@@ -257,6 +291,83 @@ const AppPage = async ({
           <Card title="When it is down">
             <p className="text-secondary">{meta.failureMode}</p>
           </Card>
+          {traffic ? (
+            <Card title="Calls out" action={<Badge>Last 30 days</Badge>}>
+              {traffic.outbound.length === 0 ? (
+                <p className="text-secondary">
+                  Rawr has not called {meta.name} in the last thirty days.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {traffic.outbound.map((op) => (
+                    <li key={op.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="min-w-0 break-words">{op.label}</span>
+                      <span className="text-small text-secondary tabular-nums">
+                        {op.calls.toLocaleString()}
+                        {op.lastAt ? ` · ${formatDateTime(op.lastAt.toISOString(), zone)}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          ) : null}
+          {traffic ? (
+            <Card title="Deliveries in" action={<Badge>Last 30 days</Badge>}>
+              {traffic.inbound.length === 0 ? (
+                <p className="text-secondary">
+                  {meta.name} has sent Rawr nothing in the last thirty days.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {traffic.inbound.map((event) => (
+                    <li key={event.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <span className="min-w-0 break-words">{event.label}</span>
+                      <span className="text-small text-secondary tabular-nums">
+                        {event.calls.toLocaleString()}
+                        {event.lastAt ? ` · ${formatDateTime(event.lastAt.toISOString(), zone)}` : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {traffic.unmatched > 0 ? (
+                <p className="pt-2 text-small text-secondary">
+                  {traffic.unmatched.toLocaleString()} matched nobody here and are kept rather than dropped.
+                </p>
+              ) : null}
+            </Card>
+          ) : null}
+          {traffic && traffic.enriched > 0 ? (
+            <Card title="Fields it filled">
+              <p className="text-secondary">
+                {traffic.enriched.toLocaleString()} value
+                {traffic.enriched === 1 ? '' : 's'} on records here came from {meta.name} and no human has
+                overwritten them.
+              </p>
+            </Card>
+          ) : null}
+          {apolloSequences ? (
+            <Card title="Sequences it can see">
+              {apolloSequences.length === 0 ? (
+                <p className="text-secondary">
+                  This key reaches Apollo, but that workspace has no sequences, so the activity sync
+                  reads nothing back.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {apolloSequences.map((sequence) => (
+                    <li key={sequence.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 truncate">{sequence.name}</span>
+                      <Badge tone={sequence.active ? 'ok' : 'neutral'} dot>
+                        {sequence.active ? 'Active' : 'Paused'}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          ) : null}
           {sendingAs ? (
             <Card title="Sends as">
               {sendingAs.length === 0 ? (

@@ -1,11 +1,21 @@
 import postgres from 'postgres'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import { replayDeadLetter } from '../src/dal/jobs.ts'
-import { ForbiddenError, type AccountContext, type Hub } from '../src/dal/context.ts'
+import {
+  CRITICAL_ACTIONS,
+  ForbiddenError,
+  canDo,
+  type AccountContext,
+  type CriticalAction,
+  type Hub,
+} from '../src/dal/context.ts'
+import { purgeField } from '../src/dal/admin-fields.ts'
+import { exportCsv } from '../src/dal/export.ts'
+import { startImportRun } from '../src/dal/imports.ts'
 import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
-import { listRecords } from '../src/dal/records.ts'
+import { bulkDeleteRecords, deleteRecord, listRecords, mergeRecords } from '../src/dal/records.ts'
 import { setMemberGrants } from '../src/dal/members.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
@@ -223,6 +233,121 @@ try {
     (await outcomeOf(() => rematchInbound(contextFor(accountId, actorId, 'admin')))) === 'allowed',
     'admin can rematch inbound provider events',
   )
+
+  // ------------------------------------------------------- critical actions
+  // HubSpot's Critical column: each act is either irreversible or reaches the
+  // whole database, so none of them falls out of holding a hub at edit. Proved by
+  // calling each one twice with the same hubs and only the grant differing.
+  const criticalCtx = (grants: readonly CriticalAction[]): AccountContext => ({
+    accountId,
+    actorId,
+    actorKind: 'user',
+    isSuperAdmin: false,
+    viewHubs: [],
+    editHubs: [...SEATS.admin],
+    criticalGrants: grants,
+  })
+  const none = criticalCtx([])
+
+  const criticalStamp = Date.now()
+  const probeContacts = await owner<{ id: string }[]>`
+    insert into contact (account_id, first_name, last_name, email) values
+      (${accountId}, 'Critical', 'One', ${`critical.1.${criticalStamp}@guard.test`}),
+      (${accountId}, 'Critical', 'Two', ${`critical.2.${criticalStamp}@guard.test`}),
+      (${accountId}, 'Critical', 'Three', ${`critical.3.${criticalStamp}@guard.test`}),
+      (${accountId}, 'Critical', 'Four', ${`critical.4.${criticalStamp}@guard.test`})
+    returning id`
+
+  const forbidden = async (fn: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await fn()
+      return false
+    } catch (cause) {
+      return cause instanceof ForbiddenError
+    }
+  }
+
+  check(
+    await forbidden(() => deleteRecord(none, 'contact', probeContacts[0]!.id)),
+    'a full set of hubs is refused when deleting a record',
+  )
+  check(
+    (await outcomeOf(() => deleteRecord(criticalCtx(['delete']), 'contact', probeContacts[0]!.id))) === 'allowed',
+    'and the delete grant allows it',
+  )
+
+  check(
+    await forbidden(() =>
+      mergeRecords(none, {
+        objectKey: 'contact',
+        survivorId: probeContacts[1]!.id,
+        absorbedId: probeContacts[2]!.id,
+        picks: {},
+      }),
+    ),
+    'merging is refused without the merge grant',
+  )
+  check(
+    (await outcomeOf(() =>
+      mergeRecords(criticalCtx(['merge']), {
+        objectKey: 'contact',
+        survivorId: probeContacts[1]!.id,
+        absorbedId: probeContacts[2]!.id,
+        picks: {},
+      }),
+    )) === 'allowed',
+    'and the merge grant allows it',
+  )
+
+  check(
+    await forbidden(() => bulkDeleteRecords(none, 'contact', [probeContacts[3]!.id])),
+    'a bulk delete is refused without its own grant, even holding delete',
+  )
+  check(
+    await forbidden(() => bulkDeleteRecords(criticalCtx(['delete']), 'contact', [probeContacts[3]!.id])),
+    'the single-record delete grant does not carry the bulk one',
+  )
+  check(
+    (await outcomeOf(() => bulkDeleteRecords(criticalCtx(['bulk_delete']), 'contact', [probeContacts[3]!.id]))) ===
+      'allowed',
+    'and the bulk delete grant allows it',
+  )
+
+  // Guarded before the row is looked up, so a missing id proves the order: no
+  // grant is a refusal, the grant is the ordinary "it is not there" error.
+  const missing = '00000000-0000-0000-0000-000000000000'
+  check(await forbidden(() => startImportRun(none, missing)), 'starting an import is refused without the import grant')
+  check(
+    !(await forbidden(() => startImportRun(criticalCtx(['import']), missing))),
+    'and the import grant gets past the guard',
+  )
+  check(await forbidden(() => purgeField(none, missing)), 'purging a field is refused without the purge grant')
+  check(
+    !(await forbidden(() => purgeField(criticalCtx(['purge']), missing))),
+    'and the purge grant gets past the guard',
+  )
+
+  const firstChunk = async (ctx: AccountContext): Promise<string> => {
+    for await (const chunk of exportCsv(ctx, {
+      objectKey: 'contact',
+      columns: ['email'],
+      filters: [],
+      sorts: [],
+    })) {
+      return chunk
+    }
+    return ''
+  }
+  check(await forbidden(() => firstChunk(none)), 'exporting a view is refused without the export grant')
+  check((await firstChunk(criticalCtx(['export']))).startsWith('Email'), 'and the export grant streams the file')
+
+  check(
+    CRITICAL_ACTIONS.every((action) => !canDo(none, action)) &&
+      CRITICAL_ACTIONS.every((action) => canDo(criticalCtx(CRITICAL_ACTIONS), action)),
+    'an empty grant list holds none of the critical acts, and a full one holds all six',
+  )
+
+  await owner`delete from contact where account_id = ${accountId} and email like ${`critical.%.${criticalStamp}@guard.test`}`
 
   // ---------------------------------------------------------- record scope
   // The third axis, and the only one enforced in the policy rather than in a

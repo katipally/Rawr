@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
-import type { Hub } from './context.ts'
+import type { CriticalAction, Hub } from './context.ts'
 
 export type Membership = {
   accountId: string
@@ -14,6 +14,7 @@ export type Membership = {
   isSuperAdmin: boolean
   viewHubs: Hub[]
   editHubs: Hub[]
+  criticalGrants: CriticalAction[]
   joinedAt: Date
   /** Sessions issued before this are dead. Null means nobody has signed out everywhere. */
   sessionsValidAfter: Date | null
@@ -31,6 +32,7 @@ type MembershipRow = {
   is_super_admin: boolean
   view_hubs: Hub[]
   edit_hubs: Hub[]
+  critical_grants: CriticalAction[]
   joined_at: Date | string
   sessions_valid_after: Date | string | null
 }
@@ -47,6 +49,7 @@ const toMembership = (r: MembershipRow): Membership => ({
   isSuperAdmin: r.is_super_admin,
   viewHubs: r.view_hubs ?? [],
   editHubs: r.edit_hubs ?? [],
+  criticalGrants: r.critical_grants ?? [],
   joinedAt: new Date(r.joined_at),
   sessionsValidAfter: r.sessions_valid_after ? new Date(r.sessions_valid_after) : null,
 })

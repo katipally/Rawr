@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { bulkOperation } from '../schema/bulk.ts'
 import type { EntityRef } from './activity.ts'
 import { associateMany } from './associations.ts'
-import type { AccountContext } from './context.ts'
+import { assertCanDo, type AccountContext } from './context.ts'
 import { isUuid, withAccount, type Tx } from './index.ts'
 import { assertIdsBelong, bulkDeleteRecords, bulkUpdateRecords, mergeRecords } from './records.ts'
 import { getRegistryIn, objectOrThrow } from './registry.ts'
@@ -116,6 +116,12 @@ export const startBulkOperation = async (
   ctx: AccountContext,
   input: { objectKey: string; ids: string[]; action: BulkAction },
 ): Promise<BulkStart> => {
+  // Asked here as well as in the delete and merge layers, because a selection
+  // above the inline limit is written down for the worker and never passes
+  // through either of them.
+  if (input.action.type === 'delete') assertCanDo(ctx, 'bulk_delete')
+  if (input.action.type === 'merge') assertCanDo(ctx, 'merge')
+
   const ids = [...new Set(input.ids)]
   if (ids.length === 0) throw new Error('Nothing was selected.')
   if (ids.some((id) => !isUuid(id))) throw new Error('That selection holds something that is not a record.')

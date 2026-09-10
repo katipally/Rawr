@@ -2,12 +2,14 @@ import {
   endpointsFor,
   listWebhookEndpoints,
   promoteFieldToHot,
+  readSubscriptions,
   type Replayable,
   type AccountContext,
 } from '@rawr/db'
 import { syncMailbox } from '../gmail.ts'
 import { enrichRecord, enrichCompanyRecord } from './index.ts'
 import { postToSlack } from './slack.ts'
+import { BLOCKLIST_JOB, propagateSubscriptionToBrevo } from './brevo.ts'
 import { addProspect } from './woodpecker.ts'
 import { deliverWebhook, WEBHOOK_JOB } from '../webhooks.ts'
 
@@ -129,6 +131,25 @@ export const replayJob = async (
       throw new Error(
         'Reading the campaign list is not work to replay: open a Woodpecker sequence and the list is fetched again.',
       )
+    }
+
+    case BLOCKLIST_JOB: {
+      const contactId = typeof payload.contactId === 'string' ? payload.contactId : null
+      const typeId = typeof payload.typeId === 'string' ? payload.typeId : null
+      if (!contactId || !typeId) throw new Error('That failure names no contact and subscription to re-send.')
+      // Read again rather than replayed from the payload, for the same reason a
+      // webhook delivery is: somebody may have changed their mind since it
+      // failed, and pushing the old answer would undo the new one.
+      const current = (await readSubscriptions(ctx, contactId)).find((row) => row.typeId === typeId)
+      if (!current) throw new Error('That subscription type has since been deleted.')
+      if (current.state === 'unspecified') {
+        throw new Error('That contact no longer has an answer to send, so there is nothing to propagate.')
+      }
+      await propagateSubscriptionToBrevo(ctx, { contactId, typeId, state: current.state })
+      return {
+        replayed: true,
+        detail: `Brevo was told they are ${current.state === 'unsubscribed' ? 'blocked' : 'mailable'}.`,
+      }
     }
 
     case 'brevo.upsert_contact':

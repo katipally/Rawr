@@ -33,6 +33,15 @@ export type CampaignPanelProps = {
   hub: string
 }
 
+/** Brevo publishes no deep link that opens the composer on a given campaign or
+ *  preselects a list: neither developers.brevo.com nor the campaign object (whose
+ *  only URL, `shareLink`, is a public share of an already-sent campaign) offers
+ *  one, checked Sep 2026. So the hand-off is the app itself plus the list to pick,
+ *  which is the one thing somebody landing there has to know. */
+const BREVO_APP = 'https://app.brevo.com/'
+
+type Handoff = { name: string; listId: string; scheduled: boolean }
+
 const rate = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`
 
@@ -56,6 +65,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
   const [error, setError] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [handoff, setHandoff] = useState<Handoff | null>(null)
 
   const [segmentId, setSegmentId] = useState(segments[0]?.id ?? '')
   const [listId, setListId] = useState(defaultListId)
@@ -102,6 +112,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
           scheduledAt ? 'The campaign is scheduled.' : 'The campaign is a draft in Brevo.'
         }`,
       )
+      setHandoff({ name, listId, scheduled: scheduledAt !== '' })
       setComposing(false)
       await load()
       router.refresh()
@@ -156,6 +167,20 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
       ) : null}
 
       {error ? <Alert>{error}</Alert> : null}
+
+      {handoff ? (
+        <Alert tone="info">
+          <span className="break-words">
+            {handoff.name} is {handoff.scheduled ? 'scheduled' : 'a draft'} in Brevo, aimed at list{' '}
+            {handoff.listId}.{' '}
+            <a href={BREVO_APP} target="_blank" rel="noreferrer noopener">
+              Open Brevo
+            </a>
+            , go to Campaigns and pick {handoff.name}. Its recipients are already list {handoff.listId};
+            changing that there sends to somebody else.
+          </span>
+        </Alert>
+      ) : null}
 
       {campaigns === null ? (
         <p className="text-secondary">

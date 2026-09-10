@@ -1,4 +1,4 @@
-import type { AccountContext } from './context.ts'
+import { assertCanDo, type AccountContext } from './context.ts'
 import { withAccount, writeAudit } from './index.ts'
 import { listRecords } from './records.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
@@ -20,6 +20,7 @@ export async function* exportCsv(
   ctx: AccountContext,
   input: { objectKey: string; columns: string[]; filters: FilterGroup[]; sorts: Sort[]; search?: string },
 ): AsyncGenerator<string> {
+  assertCanDo(ctx, 'export')
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, input.objectKey)
   const fields = input.columns.flatMap((key) => {

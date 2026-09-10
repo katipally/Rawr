@@ -1,4 +1,4 @@
-import type { Hub } from '@rawr/db'
+import type { CriticalAction, Hub } from '@rawr/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { appRouter } from '~/server/routers/_app.ts'
@@ -77,7 +77,13 @@ export const sessionFor = (caller: {
   userName: string
   accountSlug: string
   accountName: string
-  ctx: { accountId: string; isSuperAdmin: boolean; viewHubs: readonly Hub[]; editHubs: readonly Hub[] }
+  ctx: {
+    accountId: string
+    isSuperAdmin: boolean
+    viewHubs: readonly Hub[]
+    editHubs: readonly Hub[]
+    criticalGrants?: readonly CriticalAction[] | undefined
+  }
 }): Session => ({
   userId: caller.userId,
   email: caller.userEmail,
@@ -90,6 +96,7 @@ export const sessionFor = (caller: {
   isSuperAdmin: caller.ctx.isSuperAdmin,
   viewHubs: [...caller.ctx.viewHubs],
   editHubs: [...caller.ctx.editHubs],
+  criticalGrants: [...(caller.ctx.criticalGrants ?? [])],
   // Nothing here renders a screen: a procedure answers with data and the client
   // writes the sentence. The curated tools resolve dates in the caller's own zone
   // through `todayFor`, which reads it where it is needed.

@@ -74,6 +74,16 @@ export const testWoodpecker = async (ctx: AccountContext): Promise<ConnectionTes
       await recordHealth(ctx, 'woodpecker', { ok: true })
       return { ok: true, detail: 'Development provider. No key is being used and nothing leaves this machine.' }
     }
+    // Asked before the call, so an account nobody has connected reads as "no key
+    // entered" rather than as Woodpecker rejecting one. A 401 on this card used to
+    // mean an empty integration row, which sent people looking for a revoked key
+    // that had never existed.
+    const stored = await readCredentials(ctx, 'woodpecker')
+    if (!stored?.secret) {
+      const detail = 'No key entered yet. Paste a Woodpecker API key below and test again.'
+      await recordHealth(ctx, 'woodpecker', { ok: false, error: detail })
+      return { ok: false, detail }
+    }
     const campaigns = await listWoodpeckerCampaigns(ctx)
     return {
       ok: true,

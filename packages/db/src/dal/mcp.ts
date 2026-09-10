@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { hashToken, randomToken } from '../internal/crypto.ts'
 import { appDb } from '../internal/pool.ts'
-import { ForbiddenError, isAdmin, type Hub, type AccountContext } from './context.ts'
+import { ForbiddenError, isAdmin, type CriticalAction, type Hub, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 
 /** F5 §1. Tokens, and the lookup that turns one into an account context.
@@ -173,6 +173,7 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
     is_super_admin: boolean
     view_hubs: Hub[]
     edit_hubs: Hub[]
+    critical_grants: CriticalAction[]
   }>(sql`select * from rawr.mcp_token_owner(${hashToken(plaintext)})`)
 
   const found = rows[0]
@@ -189,6 +190,7 @@ export const callerForToken = async (plaintext: string): Promise<McpCaller | nul
       isSuperAdmin: found.is_super_admin,
       viewHubs: found.view_hubs ?? [],
       editHubs: found.edit_hubs ?? [],
+      criticalGrants: found.critical_grants ?? [],
     },
     accountSlug: found.account_slug,
     accountName: found.account_name,
@@ -387,6 +389,7 @@ const oauthContext = (accountId: string, userId: string): AccountContext => ({
   isSuperAdmin: false,
   viewHubs: [],
   editHubs: [],
+  criticalGrants: [],
 })
 
 /** A token the consent flow issues. It is an mcp_token like any other, named
