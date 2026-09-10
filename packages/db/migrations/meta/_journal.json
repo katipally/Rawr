@@ -512,6 +512,62 @@
       "when": 1790096034179,
       "tag": "0071_bulk_operation",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790182434179,
+      "tag": "0072_deal_score",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790268834179,
+      "tag": "0073_custom_event_def",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790355234179,
+      "tag": "0074_campaign",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790441634179,
+      "tag": "0075_form_performance",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790528034179,
+      "tag": "0076_mailbox_open_alert",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790614434179,
+      "tag": "0077_booking_reminders",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1790700834179,
+      "tag": "0078_permission_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1790787234179,
+      "tag": "0079_double_opt_in",
+      "breakpoints": true
     }
   ]
 }
