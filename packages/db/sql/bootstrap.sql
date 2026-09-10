@@ -30,3 +30,26 @@ BEGIN
 END $$;
 
 GRANT USAGE ON SCHEMA public TO rawr_app;
+
+-- The queue's own tables, read only. /settings/jobs shows failed jobs, and with
+-- nothing else to go on "no failed jobs" and "the worker has been dead since
+-- Tuesday" render identically. The one fact that separates them is when the
+-- dispatcher last finished anything, and it lives in pg-boss's schema.
+--
+-- Conditional because pg-boss creates its own schema on the worker's first boot,
+-- which on a fresh database is after this runs. Bootstrap runs on every migrate,
+-- so the grant lands on the next one. Read only, and on job_common alone: the
+-- app never enqueues or completes through this role.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgboss') THEN
+    GRANT USAGE ON SCHEMA pgboss TO rawr_app;
+    IF EXISTS (
+      SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'pgboss' AND c.relname = 'job_common'
+    ) THEN
+      GRANT SELECT ON pgboss.job_common TO rawr_app;
+    END IF;
+  END IF;
+END $$;
