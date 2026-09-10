@@ -44,6 +44,8 @@ export const TextArea = ({ className, ...rest }: ComponentProps<'textarea'>) => 
   <textarea {...rest} className={cn(control, 'min-h-20 resize-y', className)} />
 )
 
+// pr-8 reserves the strip the native chevron is painted over; the shared control
+// padding is sized for a text input, so a long option ran under the arrow.
 export const Select = ({ className, ...rest }: ComponentProps<'select'>) => (
-  <select {...rest} className={cn(control, 'min-h-9', className)} />
+  <select {...rest} className={cn(control, 'min-h-9 pr-8', className)} />
 )

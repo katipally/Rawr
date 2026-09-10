@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
 import { useOverlay } from './overlay.ts'
 
@@ -30,9 +31,12 @@ export const Drawer = ({ open, onClose, title, action, children, className }: Dr
   const dialog = useRef<HTMLElement>(null)
   useOverlay(open, onClose, dialog)
 
-  if (!open) return null
+  // Portalled for the reason the modal is: a fixed panel inside the shell's
+  // content card, which is a size container, would run the height of the card
+  // rather than the window.
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <aside
       ref={dialog}
       role="dialog"
@@ -60,6 +64,7 @@ export const Drawer = ({ open, onClose, title, action, children, className }: Dr
         </button>
       </header>
       {children}
-    </aside>
+    </aside>,
+    document.body,
   )
 }

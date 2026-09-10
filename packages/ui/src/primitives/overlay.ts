@@ -37,8 +37,10 @@ export const useOverlay = (
     ;(asked ?? first ?? box)?.focus()
 
     const onKey = (event: KeyboardEvent) => {
+      // An inner control that handles Escape itself (a combobox closing its list)
+      // calls preventDefault; closing the dialog too would throw away the edit.
       if (event.key === 'Escape') {
-        close.current()
+        if (!event.defaultPrevented) close.current()
         return
       }
       if (event.key !== 'Tab' || !box) return

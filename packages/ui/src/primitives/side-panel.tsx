@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useOverlay } from './overlay.ts'
 
 export type SidePanelProps = {
@@ -15,9 +16,13 @@ export const SidePanel = ({ open, onClose, title, children, footer }: SidePanelP
   const dialog = useRef<HTMLElement>(null)
   useOverlay(open, onClose, dialog)
 
-  if (!open) return null
+  // Portalled to the body for the same reason the modal is: `position: fixed` is
+  // measured against the app shell's content card, which establishes a containing
+  // block with `container-type: inline-size`, so in place the scrim covered the
+  // card rather than the window.
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-40 flex justify-end">
       <div aria-hidden="true" onClick={onClose} className="flex-1 bg-scrim" />
       <aside
@@ -47,6 +52,7 @@ export const SidePanel = ({ open, onClose, title, children, footer }: SidePanelP
           </footer>
         ) : null}
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }

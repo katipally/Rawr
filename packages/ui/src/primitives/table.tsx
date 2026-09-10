@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { cn } from '../cn.ts'
 import { Checkbox } from './choice.tsx'
+import { MIN_WIDTH, parseWidths, widthFor, widthsKey } from './table-widths.ts'
 
 export type Column<Row> = {
   key: string
@@ -40,16 +41,13 @@ export type DataTableProps<Row> = {
   fill?: boolean
 }
 
-const MIN_WIDTH = 64
-const DEFAULT_WIDTH = 180
 const SELECT_WIDTH = 45
 const KEY_STEP = 16
 
 const readWidths = (storageKey: string | undefined): Record<string, number> => {
   if (!storageKey) return {}
   try {
-    const raw = window.localStorage.getItem(`rawr.widths.${storageKey}`)
-    return raw ? (JSON.parse(raw) as Record<string, number>) : {}
+    return parseWidths(window.localStorage.getItem(widthsKey(storageKey)))
   } catch {
     // Private windows and blocked site data are normal, not an error.
     return {}
@@ -82,7 +80,7 @@ export const DataTable = <Row,>({
     (next: Record<string, number>) => {
       if (!storageKey) return
       try {
-        window.localStorage.setItem(`rawr.widths.${storageKey}`, JSON.stringify(next))
+        window.localStorage.setItem(widthsKey(storageKey), JSON.stringify(next))
       } catch {
         // The resize still holds for this page view.
       }
@@ -111,8 +109,7 @@ export const DataTable = <Row,>({
 
   if (rows.length === 0 && empty) return <>{empty}</>
 
-  const widthOf = (column: Column<Row>): number =>
-    widths[column.key] ?? column.width ?? DEFAULT_WIDTH
+  const widthOf = (column: Column<Row>): number => widthFor(widths, column)
 
   const startResize = (key: string, startX: number, startWidth: number) => {
     drag.current = { key, startX, startWidth }
@@ -167,11 +164,25 @@ export const DataTable = <Row,>({
         style={{ minWidth: (selection ? SELECT_WIDTH : 0) + columns.reduce((sum, column) => sum + widthOf(column), 0) }}
       >
         <caption className="sr-only">{caption}</caption>
+        {/*  Every column but the last is given its width; the last is left to the
+             browser on purpose. Fixed layout shares whatever the table is wider
+             than its columns ask for between the columns that named no width, so
+             naming all of them means none of them renders at the width it was
+             dragged to: a table in a box wider than its columns scales all of
+             them, a saved width is never the width that appears, and the handle
+             does not follow the pointer. The slack lands in the last column
+             instead, which is the one nobody sizes to the pixel. A table with one
+             column has no other column to put it in, so that one keeps its own
+             width and the slack is left to fixed layout. */}
         <colgroup>
           {selection ? <col style={{ width: SELECT_WIDTH }} /> : null}
-          {columns.map((column) => (
-            <col key={column.key} style={{ width: widthOf(column) }} />
-          ))}
+          {columns.map((column, index) =>
+            index === columns.length - 1 && columns.length > 1 ? (
+              <col key={column.key} />
+            ) : (
+              <col key={column.key} style={{ width: widthOf(column) }} />
+            ),
+          )}
         </colgroup>
         <thead>
           <tr>

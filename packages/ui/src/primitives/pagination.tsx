@@ -64,7 +64,7 @@ export const Pagination = ({
             onChange={(event) => onPerPage(Number(event.target.value))}
             className="min-h-8 rounded-pill bg-transparent pl-3 font-semibold text-body hover:bg-fill"
           >
-            {SIZES.map((size) => (
+            {(SIZES.includes(perPage) ? SIZES : [...SIZES, perPage].sort((a, b) => a - b)).map((size) => (
               <option key={size} value={size}>
                 {size} per page
               </option>

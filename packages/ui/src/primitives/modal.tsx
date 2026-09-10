@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
 import { useOverlay } from './overlay.ts'
 
@@ -34,9 +35,13 @@ export const Modal = ({ open, onClose, title, size = 'md', children, footer }: M
   const dialog = useRef<HTMLDivElement>(null)
   useOverlay(open, onClose, dialog)
 
-  if (!open) return null
+  // Portalled to the body because `position: fixed` is measured against the
+  // nearest ancestor that establishes a containing block, and the app shell's
+  // content card is one: it carries `container-type: inline-size`. Rendered in
+  // place, the scrim covered the card rather than the window.
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
       {/* The scrim is a token: black at 30% over a dark canvas is invisible. */}
       <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-scrim" />
@@ -73,6 +78,7 @@ export const Modal = ({ open, onClose, title, size = 'md', children, footer }: M
           </footer>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

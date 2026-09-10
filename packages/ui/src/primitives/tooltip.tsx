@@ -1,7 +1,16 @@
 'use client'
 
-import { cloneElement, useId, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { anchor, type Side } from './position.ts'
+import {
+  cloneElement,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react'
+import { createPortal } from 'react-dom'
+import { anchor, type Box, type Side } from './position.ts'
 
 const DELAY_MS = 350
 
@@ -19,10 +28,19 @@ export type TooltipProps = {
  *  person needs in order to act: a tooltip cannot be reached by touch. */
 export const Tooltip = ({ label, side = 'bottom', children }: TooltipProps) => {
   const id = useId()
+  const [around, setAround] = useState<Box | null>(null)
   const [box, setBox] = useState<{ top: number; left: number } | null>(null)
   const layer = useRef<HTMLDivElement>(null)
   const timer = useRef<number | null>(null)
-  const trigger = useRef<HTMLElement | null>(null)
+
+  // Measured in a layout effect, after the offscreen render has committed and the
+  // layer has a real width: a bare rAF fires before the commit, so the tooltip was
+  // placed as if it were zero wide and could not flip honestly.
+  useLayoutEffect(() => {
+    if (!around || !layer.current) return
+    const size = layer.current.getBoundingClientRect()
+    setBox(anchor(around, { top: 0, left: 0, width: size.width, height: size.height }, { side }))
+  }, [around, side])
 
   const cancel = () => {
     if (timer.current !== null) window.clearTimeout(timer.current)
@@ -30,27 +48,19 @@ export const Tooltip = ({ label, side = 'bottom', children }: TooltipProps) => {
   }
   const hide = () => {
     cancel()
+    setAround(null)
     setBox(null)
   }
   const show = (target: HTMLElement, delay: number) => {
     cancel()
-    trigger.current = target
     timer.current = window.setTimeout(() => {
       const rect = target.getBoundingClientRect()
-      // Measured after the layer is in the DOM: it renders at 0,0 invisible for
-      // one frame, which is what makes flipping possible without a guess.
-      setBox({ top: -9999, left: -9999 })
-      requestAnimationFrame(() => {
-        const size = layer.current?.getBoundingClientRect()
-        setBox(
-          anchor(rect, { top: 0, left: 0, width: size?.width ?? 0, height: size?.height ?? 0 }, { side }),
-        )
-      })
+      setAround({ top: rect.top, left: rect.left, width: rect.width, height: rect.height })
     }, delay)
   }
 
   const child = cloneElement(children, {
-    'aria-describedby': box ? id : undefined,
+    'aria-describedby': around ? id : undefined,
     onMouseEnter: (event: React.MouseEvent<HTMLElement>) => {
       show(event.currentTarget, DELAY_MS)
       ;(children.props.onMouseEnter as ((e: React.MouseEvent<HTMLElement>) => void) | undefined)?.(event)
@@ -59,9 +69,11 @@ export const Tooltip = ({ label, side = 'bottom', children }: TooltipProps) => {
       hide()
       ;(children.props.onMouseLeave as ((e: React.MouseEvent<HTMLElement>) => void) | undefined)?.(event)
     },
-    // Focus shows it with no delay: a keyboard user has already committed.
+    // Focus shows it with no delay: a keyboard user has already committed. Only
+    // keyboard focus, though: returning focus from a closed dialog refocuses the
+    // control that opened it, and a tooltip left hanging there was never asked for.
     onFocus: (event: React.FocusEvent<HTMLElement>) => {
-      show(event.currentTarget, 0)
+      if (event.currentTarget.matches(':focus-visible')) show(event.currentTarget, 0)
       ;(children.props.onFocus as ((e: React.FocusEvent<HTMLElement>) => void) | undefined)?.(event)
     },
     onBlur: (event: React.FocusEvent<HTMLElement>) => {
@@ -81,20 +93,29 @@ export const Tooltip = ({ label, side = 'bottom', children }: TooltipProps) => {
     },
   })
 
+  // The layer is portalled to the body: its coordinates are viewport coordinates,
+  // and a fixed element inside the shell's content card is placed against the
+  // card, which carries `container-type: inline-size`.
+  const layerNode =
+    around && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            ref={layer}
+            id={id}
+            role="tooltip"
+            style={box ? { top: box.top, left: box.left } : { top: -9999, left: -9999 }}
+            className="pointer-events-none fixed z-overlay max-w-64 rounded-hs bg-nav px-2 py-1 text-small text-nav-text shadow-overlay"
+          >
+            {label}
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
     <>
       {child}
-      {box ? (
-        <div
-          ref={layer}
-          id={id}
-          role="tooltip"
-          style={{ top: box.top, left: box.left }}
-          className="pointer-events-none fixed z-overlay max-w-64 rounded-hs bg-nav px-2 py-1 text-small text-nav-text shadow-overlay"
-        >
-          {label}
-        </div>
-      ) : null}
+      {layerNode}
     </>
   )
 }

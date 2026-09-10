@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
 import { anchor, type Align, type Side } from './position.ts'
 
@@ -81,9 +82,12 @@ export const Popover = ({
     }
   }, [open, anchorRef, autoFocus, reposition])
 
-  if (!open) return null
+  // Portalled to the body: the coordinates come from getBoundingClientRect, which
+  // is relative to the viewport, and a fixed element inside the shell's content
+  // card is placed against the card instead.
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <div
       ref={panel}
       role="dialog"
@@ -96,6 +100,7 @@ export const Popover = ({
       )}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   )
 }

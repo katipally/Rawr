@@ -55,3 +55,18 @@ test('a viewport smaller than the layer still returns a positive position', () =
   assert.equal(placed.top, 8)
   assert.equal(placed.left, 8)
 })
+
+/** Why the tooltip measures its layer after the offscreen render has committed
+ *  rather than in a bare requestAnimationFrame: an unmeasured layer is zero wide,
+ *  and every rule here reads its size. Placed that way it sits half a layer to
+ *  the right of where it belongs, and it never flips, because nothing that has no
+ *  size can overflow anything. */
+test('a layer measured as zero wide is placed somewhere else entirely', () => {
+  const unmeasured: Box = { top: 0, left: 0, width: 0, height: 0 }
+  assert.equal(anchor(at(200, 400), unmeasured, { viewport }).left, 450)
+  assert.equal(anchor(at(200, 400), layer, { viewport }).left, 350)
+
+  const nearBottom = anchor(at(750, 400), unmeasured, { viewport })
+  assert.equal(nearBottom.side, 'bottom')
+  assert.equal(anchor(at(750, 400), layer, { viewport }).side, 'top')
+})
