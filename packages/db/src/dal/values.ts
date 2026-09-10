@@ -78,7 +78,13 @@ export const coerce = (field: RegistryField, input: unknown): Coerced => {
   }
 
   switch (field.type) {
+    // A single line is stored as a single line. A name pasted out of a spreadsheet
+    // arrives with tabs in it, which render as spaces, so the record then reads one
+    // way and compares another -- and a delete that asks you to type the name back
+    // can never be satisfied.
     case 'text':
+      return truncate(field, String(input).replace(/\s+/g, ' ').trim())
+
     case 'long_text':
     case 'address':
       return truncate(field, String(input).trim())

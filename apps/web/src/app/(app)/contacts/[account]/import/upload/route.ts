@@ -14,12 +14,16 @@ export const POST = async (
   { params }: { params: Promise<{ account: string }> },
 ): Promise<NextResponse> => {
   const session = await readSession()
-  if (!session) return NextResponse.redirect(new URL('/sign-in', request.nextUrl.origin))
+  if (!session) return NextResponse.redirect(new URL('/sign-in', request.nextUrl.origin), 303)
 
   const { account } = await params
+  // 303 on every path out of here. Next defaults a redirect to 307, which keeps
+  // the method, so the browser re-posts the upload to a page that only answers GET
+  // and the navigation dies with the form still on screen.
   const back = (error: string) =>
     NextResponse.redirect(
       new URL(`${importsPath(account)}?error=${encodeURIComponent(error)}`, request.nextUrl.origin),
+      303,
     )
 
   if (account !== session.accountSlug) return back('That import belongs to another account.')
@@ -56,7 +60,7 @@ export const POST = async (
       mapping: {},
     })
 
-    return NextResponse.redirect(new URL(importsPath(account, run.id), request.nextUrl.origin))
+    return NextResponse.redirect(new URL(importsPath(account, run.id), request.nextUrl.origin), 303)
   } catch (cause) {
     if (cause instanceof SpreadsheetError) return back(cause.message)
     return back(cause instanceof Error ? cause.message : 'That file could not be read.')

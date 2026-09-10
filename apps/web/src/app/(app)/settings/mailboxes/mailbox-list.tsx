@@ -217,6 +217,15 @@ export const MailboxList = ({
                           }
                         />
                         <div className="flex flex-wrap gap-2">
+                        {isMine && googleReady && !row.standIn && !row.canSend ? (
+                          <Button
+                            onClick={() => {
+                              window.location.href = '/api/auth/google/gmail?send=1'
+                            }}
+                          >
+                            Let Rawr send from here
+                          </Button>
+                        ) : null}
                         <Button
                           busy={busy}
                           disabled={row.state === 'revoked'}

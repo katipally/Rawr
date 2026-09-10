@@ -1,4 +1,4 @@
-import { publicEdgeContext, recordDeadLetter, type Attribution, type AccountContext } from '@rawr/db'
+import { recordDeadLetter, systemContext, type Attribution, type AccountContext } from '@rawr/db'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { inBackground } from './background.ts'
 import { postToSlack, type SlackBody } from './integrations/slack.ts'
@@ -38,7 +38,7 @@ export const queueSlackNotification = (notification: SlackNotification): void =>
 }
 
 const deliver = async (notification: SlackNotification): Promise<void> => {
-  const ctx = publicEdgeContext(notification.accountId)
+  const ctx = systemContext(notification.accountId)
   const body = message(notification)
   // Keyed on the submission, so a retry, a replay, or both announce the lead once.
   const key = `slack:submission:${notification.submissionId}`
@@ -92,7 +92,7 @@ export const queueHostAlert = (alert: {
     blocks: [{ type: 'section', text: { type: 'mrkdwn', text: alert.text } }],
   }
   inBackground(alert.idempotencyKey, () =>
-    send(publicEdgeContext(alert.accountId), {
+    send(systemContext(alert.accountId), {
       key: alert.idempotencyKey,
       jobName: alert.jobName,
       body,

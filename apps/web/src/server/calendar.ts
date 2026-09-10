@@ -1,5 +1,6 @@
 import {
   readGrant,
+  systemContext,
   recordGrantFailure,
   saveGrant,
   type HostAvailability,
@@ -8,7 +9,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
-import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
+import { googleRefresher, OAuth2RequestError, GoogleTokens } from './auth/google.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.
@@ -50,6 +51,11 @@ const accessTokenFor = async (
   ctx: AccountContext,
   grant: StoredGrant,
 ): Promise<string> => {
+  // Keeping a grant current is Rawr's own bookkeeping, whoever happened to ask
+  // for a slot. The visitor on a public booking page holds no hub, and the state
+  // of the host's connection must not depend on that.
+  const system = systemContext(ctx.accountId)
+
   const fresh =
     grant.accessToken &&
     grant.accessTokenExpiresAt &&
@@ -57,7 +63,7 @@ const accessTokenFor = async (
   if (fresh && grant.accessToken) return grant.accessToken
 
   if (!grant.refreshToken) {
-    await recordGrantFailure(ctx, {
+    await recordGrantFailure(system, {
       userId: grant.userId,
       error: 'No refresh token is stored, so this calendar cannot be reconnected without consent.',
       revoked: true,
@@ -65,25 +71,17 @@ const accessTokenFor = async (
     throw new CalendarUnavailable(grant.userId, 'That calendar connection has to be re-authorised.')
   }
 
+  // Only Google's refusal is caught: a failure writing the row is not a calendar
+  // problem, and recording it as one puts the wrong diagnosis in front of a host.
+  let tokens: GoogleTokens
   try {
-    const tokens = await googleRefresher().refreshAccessToken(grant.refreshToken)
-    const accessToken = tokens.accessToken()
-    await saveGrant(ctx, {
-      userId: grant.userId,
-      provider: 'google',
-      accessToken,
-      // Google returns a refresh token on first consent and usually not on a
-      // refresh. saveGrant keeps the stored one when this is null.
-      refreshToken: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
-      accessTokenExpiresAt: tokens.accessTokenExpiresAt(),
-    })
-    return accessToken
+    tokens = await googleRefresher().refreshAccessToken(grant.refreshToken)
   } catch (cause) {
     // invalid_grant means the person revoked access or changed their password.
     // Retrying that forever is the loop a revoked grant must never become.
     const revoked = cause instanceof OAuth2RequestError && cause.code === 'invalid_grant'
     const message = cause instanceof Error ? cause.message : String(cause)
-    await recordGrantFailure(ctx, { userId: grant.userId, error: message, revoked })
+    await recordGrantFailure(system, { userId: grant.userId, error: message, revoked })
     throw new CalendarUnavailable(
       grant.userId,
       revoked
@@ -91,6 +89,18 @@ const accessTokenFor = async (
         : `That calendar could not be reached: ${message}`,
     )
   }
+
+  const accessToken = tokens.accessToken()
+  await saveGrant(system, {
+    userId: grant.userId,
+    provider: 'google',
+    accessToken,
+    // Google returns a refresh token on first consent and usually not on a
+    // refresh. saveGrant keeps the stored one when this is null.
+    refreshToken: tokens.hasRefreshToken() ? tokens.refreshToken() : null,
+    accessTokenExpiresAt: tokens.accessTokenExpiresAt(),
+  })
+  return accessToken
 }
 
 // ---------------------------------------------------------------------------

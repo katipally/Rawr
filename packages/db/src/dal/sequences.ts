@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { mailbox } from '../schema/messaging.ts'
@@ -292,6 +292,7 @@ export const saveSequence = async (
           updatedAt: new Date(),
         })
         .where(eq(sequence.id, input.id))
+      await resnapWaiting(tx, input.id, before.settings.sendWindow, settings.sendWindow)
       return {
         result: { id: input.id },
         audit: { entity: 'sequence', entityId: input.id, action: 'update', before, after: { name, settings } },
@@ -319,6 +320,47 @@ export const saveSequence = async (
       audit: { entity: 'sequence', entityId: row.id, action: 'create', after: { name } },
     }
   })
+
+/** A waiting enrollment holds a time worked out against the window in force when
+ *  it was enrolled. Widening the window has to move it, or the person who just
+ *  opened up Saturday watches everybody already enrolled keep waiting for Monday
+ *  while anybody enrolled a minute later goes out at once. Narrowing has to move
+ *  it too, the other way, or a send lands outside the window that forbids it.
+ *
+ *  Snapped from whichever is earlier, now or the time it was already holding: the
+ *  moment it became due is not stored, and an enrollment that was due an hour ago
+ *  is due now, not a day from now.
+ *
+ *  Rows only, no lease: an enrollment a worker is holding is left alone and picks
+ *  up the new window on its next step. */
+const resnapWaiting = async (
+  tx: Tx,
+  sequenceId: string,
+  before: SendWindow,
+  after: SendWindow,
+): Promise<void> => {
+  if (JSON.stringify(before) === JSON.stringify(after)) return
+  const rows = await tx
+    .select({ id: sequenceEnrollment.id, nextRunAt: sequenceEnrollment.nextRunAt })
+    .from(sequenceEnrollment)
+    .where(
+      and(
+        eq(sequenceEnrollment.sequenceId, sequenceId),
+        eq(sequenceEnrollment.state, 'active'),
+        isNull(sequenceEnrollment.leaseUntil),
+        isNotNull(sequenceEnrollment.nextRunAt),
+      ),
+    )
+
+  const now = new Date()
+  for (const row of rows) {
+    if (!row.nextRunAt) continue
+    const from = row.nextRunAt < now ? row.nextRunAt : now
+    const next = nextSendAt({ after: from, delayDays: 0, delayHours: 0, window: after })
+    if (next.getTime() === row.nextRunAt.getTime()) continue
+    await tx.update(sequenceEnrollment).set({ nextRunAt: next }).where(eq(sequenceEnrollment.id, row.id))
+  }
+}
 
 type SettingsPatch = {
   [K in keyof SequenceSettings]?: SequenceSettings[K] | undefined

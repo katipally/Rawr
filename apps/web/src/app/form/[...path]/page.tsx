@@ -106,6 +106,7 @@ const HostedFormPage = async ({
                 : form.settings.successValue}
             </div>
           ) : (
+            <>
             <form className="rawr-form" action={submitHostedForm}>
               <input type="hidden" name="rawr_form_id" value={form.formId} />
               <input type="hidden" name="rawr_path" value={path.join('/')} />
@@ -135,6 +136,8 @@ const HostedFormPage = async ({
                 </PendingButton>
               </div>
             </form>
+            <script dangerouslySetInnerHTML={{ __html: KEEP_TYPING }} />
+            </>
         )}
       </main>
     </>
@@ -316,6 +319,79 @@ const parseErrors = (raw: string | null): { form: string | null; byKey: Record<s
 
 /** Only what the hosted page needs on top of the shared embed styles: this is a
  *  standalone document rather than something dropped into Webflow's page. */
+/** Typing survives hydration.
+ *
+ *  This page is server-rendered HTML, so somebody on a slow connection can fill
+ *  it in before React's bundle arrives. When the bundle does arrive it commits
+ *  the markup's own defaults over what they typed, and the form empties under
+ *  their hands with nothing on screen to explain it.
+ *
+ *  Inline rather than a component, because it has to be running before the
+ *  bundle it is repairing. It records every keystroke, then puts back anything
+ *  that went empty without the person emptying it. Session storage, so a back
+ *  button returns to a filled form and a new tab starts clean; cleared on
+ *  submit, so the next visitor to a shared machine sees nothing.
+ *
+ *  Written as a plain string: this never goes through the bundler, and nothing
+ *  in it may depend on anything that does. */
+const KEEP_TYPING = `
+(function () {
+  var form = document.querySelector('form.rawr-form')
+  if (!form || !window.sessionStorage) return
+  var key = 'rawr:draft:' + (form.elements['rawr_form_id'] || {}).value
+  var skip = { rawr_form_id: 1, rawr_path: 1 }
+  var saved = {}
+  try { saved = JSON.parse(sessionStorage.getItem(key) || '{}') } catch (e) { saved = {} }
+
+  var fields = function () {
+    return Array.prototype.filter.call(form.elements, function (el) {
+      return el.name && !skip[el.name] && el.type !== 'hidden' && el.type !== 'submit'
+    })
+  }
+
+  var save = function () {
+    var next = {}
+    fields().forEach(function (el) {
+      next[el.name] = el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value
+    })
+    saved = next
+    try { sessionStorage.setItem(key, JSON.stringify(next)) } catch (e) {}
+  }
+
+  // Only ever fills a blank. Overwriting something the person has since retyped
+  // would be the same bug from the other direction.
+  var restore = function () {
+    fields().forEach(function (el) {
+      var was = saved[el.name]
+      if (was === undefined) return
+      if (el.type === 'checkbox' || el.type === 'radio') {
+        if (was && !el.checked) el.checked = true
+      } else if (was !== '' && el.value === '') {
+        el.value = was
+      }
+    })
+  }
+
+  form.addEventListener('input', save)
+  form.addEventListener('change', save)
+  form.addEventListener('submit', function () {
+    try { sessionStorage.removeItem(key) } catch (e) {}
+  })
+
+  restore()
+  // Hydration lands after this script and can land more than once while the page
+  // streams, so the repair watches for a while rather than running once. Two
+  // seconds covers a slow bundle; after that the form is React's and stays put.
+  var until = Date.now() + 2000
+  var tick = function () {
+    restore()
+    if (Date.now() < until) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  window.addEventListener('pageshow', restore)
+})()
+`
+
 const PAGE_STYLES = `
   *, *::before, *::after { box-sizing: border-box; }
   body {

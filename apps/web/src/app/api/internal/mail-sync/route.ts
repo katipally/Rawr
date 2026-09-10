@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { RevokedError, syncMailbox } from '~/server/gmail.ts'
@@ -30,7 +30,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     const outcome = await syncMailbox(
       // A job's context: no actor, marketing's ceiling, which is what reading mail
       // onto contacts needs and nothing more.
-      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
+      systemContext(body.accountId),
       body.mailboxId,
     )
     return NextResponse.json(outcome)

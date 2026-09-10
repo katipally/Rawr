@@ -9,7 +9,7 @@ import {
   messageThread,
   messageThreadRead,
 } from '../schema/messaging.ts'
-import { contact } from '../schema/records.ts'
+import { company, contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
 import { detectReply } from './sequences.ts'
@@ -570,7 +570,60 @@ export const ingestMessage = async (
   })
   if (skip) return { stored: false, reason: skip }
 
-  return withAccount(ctx, async (tx) => storeMessage(tx, ctx, input))
+  return withAccount(ctx, async (tx) => {
+    if (!(await touchesARecord(tx, addressesOf(input.incoming), input.internalDomain, input.ownerEmail))) {
+      return { stored: false, reason: 'Nobody on this thread is a contact or at a company here.' }
+    }
+    return storeMessage(tx, ctx, input)
+  })
+}
+
+/** The rule the Gmail app page promises: a thread is filed on the contact, company
+ *  or deal it is about, and mail that is about none of them is not the CRM's to
+ *  hold. Without it a back-fill reads an entire personal mailbox -- eleven thousand
+ *  threads, one of them linked to anybody -- and stores the bodies.
+ *
+ *  Two lookups, both indexed, and only for the handful of addresses on one message.
+ *  The owner's own address is not a match: every message has it, so counting it
+ *  would let everything through.
+ *
+ *  The cost is deliberate and worth naming: a first mail from a prospect who is not
+ *  a contact yet, at a company that is not a record yet, is not stored. Making them
+ *  a record is what files their mail, which is the same order HubSpot works in. */
+const touchesARecord = async (
+  tx: Tx,
+  addresses: string[],
+  internalDomain: string,
+  ownerEmail: string,
+): Promise<boolean> => {
+  const owner = lower(ownerEmail)
+  const theirs = addresses.filter((address) => address !== owner)
+  if (theirs.length === 0) return false
+
+  const [known] = await tx
+    .select({ id: contact.id })
+    .from(contact)
+    .where(and(inArray(sql`lower(${contact.email})`, theirs), isNull(contact.deletedAt)))
+    .limit(1)
+  if (known) return true
+
+  // employerDomainFromEmail refuses free and disposable providers, so a company
+  // cannot be matched by gmail.com.
+  const domains = [
+    ...new Set(
+      theirs
+        .map((address) => employerDomainFromEmail(address))
+        .filter((domain): domain is string => Boolean(domain) && domain !== internalDomain),
+    ),
+  ]
+  if (domains.length === 0) return false
+
+  const [matched] = await tx
+    .select({ id: company.id })
+    .from(company)
+    .where(and(inArray(company.domain, domains), isNull(company.deletedAt)))
+    .limit(1)
+  return Boolean(matched)
 }
 
 /** A uuid that can never be a thread id, so the thread arm of the reply match is

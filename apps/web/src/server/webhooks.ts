@@ -3,7 +3,7 @@ import {
   endpointsFor,
   eventNameFor,
   getRecord,
-  publicEdgeContext,
+  systemContext,
   recordDeadLetter,
   recordDelivery,
   type AccountContext,
@@ -86,7 +86,7 @@ export const WEBHOOK_JOB = 'webhook.deliver'
  *  failing for two days" is the question a subscriber's owner actually has, and a
  *  dead letter in an admin's list does not answer it. */
 export const deliverWebhook = async (job: WebhookJob): Promise<void> => {
-  const ctx = publicEdgeContext(job.accountId)
+  const ctx = systemContext(job.accountId)
   const failed = async (status: number | null, error: string) => {
     await recordDelivery(ctx, job.endpointId, { ok: false, status, error }).catch(() => {})
     await recordDeadLetter(ctx, {

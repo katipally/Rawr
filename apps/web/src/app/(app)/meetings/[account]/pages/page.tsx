@@ -50,7 +50,7 @@ const BookingPagesScreen = async ({
             ) : null}
           </>
         }
-        why="A shared round robin spreads inbound meetings across a team; a personal link is one person's own, for an email signature. A host with no working calendar is treated as unavailable rather than free, which is why the count above is worth chasing."
+        why="A shared round robin spreads inbound meetings across a team; a personal link is one person's own, for an email signature. A host with no working calendar is treated as unavailable rather than free, which is why the count above is worth chasing. There is no delete: a page that has taken meetings is what those meetings point at, so turning it off is how it ends. It stops offering times and the link stops working, and every meeting already booked on it keeps its history."
         action={
           sessionIsReadOnly(session) ? null : (
             <NewPageButton

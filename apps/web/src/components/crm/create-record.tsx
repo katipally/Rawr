@@ -3,7 +3,7 @@
 import { Button, Field, Modal, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
@@ -24,6 +24,16 @@ export type CreateRecordDialogProps = {
   onCreated?: (id: string) => Promise<void> | void
 }
 
+const readDraft = (key: string): Record<string, unknown> => {
+  try {
+    const raw = sessionStorage.getItem(key)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
 export const CreateRecordDialog = ({
   account,
   object,
@@ -36,6 +46,7 @@ export const CreateRecordDialog = ({
   const { navigate } = useNavigation()
   const toast = useToast()
   const prefix = useId()
+  const draftKey = `rawr:create:${account}:${object}`
   // A deal starts on the first pipeline's first stage, the way HubSpot opens the
   // form, rather than on "Not set" twice.
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -45,18 +56,67 @@ export const CreateRecordDialog = ({
   // HubSpot's create-deal form asks for a contact and a company. The company is
   // a field on the deal; the contact is an association, made once the deal exists.
   const [contact, setContact] = useState<PickedRecord | null>(null)
+  /** The page under this dialog refreshes on its own -- the enrichment banner's
+   *  count changes behind it -- and a refresh that remounts the toolbar takes this
+   *  component's state with it, emptying a half-filled form under somebody's hands.
+   *  Session storage outlives the mount, so the draft comes back.
+   *
+   *  Restored after mount rather than in the initialiser: the initialiser also runs
+   *  on the server, where there is no storage, and a client that started from a
+   *  different value would be a hydration mismatch. */
+  const restored = useRef(false)
+  useEffect(() => {
+    const draft = readDraft(draftKey)
+    if (Object.keys(draft).length > 0) setValues((current) => ({ ...current, ...draft }))
+    restored.current = true
+  }, [draftKey])
+
+  useEffect(() => {
+    if (!restored.current) return
+    try {
+      sessionStorage.setItem(draftKey, JSON.stringify(values))
+    } catch {
+      // A private window with storage denied still gets a working form.
+    }
+  }, [draftKey, values])
+
   const [error, setError] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  const forget = () => {
+    try {
+      sessionStorage.removeItem(draftKey)
+    } catch {
+      // Nothing was stored, so nothing to forget.
+    }
+  }
+
+  const close = () => {
+    forget()
+    onClose()
+  }
+
   const submit = async () => {
+    const filled = Object.fromEntries(
+      Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined),
+    )
+    // Nothing at all is a mis-click, not a record. Without this the dialog writes
+    // a row with every column null, which reads as "Unnamed company" in the list
+    // and can only be found by whoever notices it.
+    const missing = fields.filter((field) => field.isRequired && filled[field.key] === undefined)
+    if (missing.length > 0 || Object.keys(filled).length === 0) {
+      setError(
+        missing.length > 0
+          ? `${missing.map((field) => field.label).join(', ')} ${missing.length === 1 ? 'is' : 'are'} needed.`
+          : `Fill in something before creating a ${objectLabel.toLowerCase()}.`,
+      )
+      return
+    }
     setSaving(true)
     setError(null)
     setDuplicateId(null)
     try {
-      const filled = Object.fromEntries(
-        Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined),
-      )
       const created = await api.crm.records.create.mutate({ object, values: filled })
       if (contact) {
         await api.crm.associations.add.mutate({
@@ -70,7 +130,7 @@ export const CreateRecordDialog = ({
         toast('info', 'Filed under the company that matches the email domain.')
       }
       toast('success', `${objectLabel} created.`)
-      onClose()
+      close()
       if (onCreated) await onCreated(created.id)
       else navigate(recordPath(account, object, created.id))
     } catch (cause) {
@@ -85,7 +145,7 @@ export const CreateRecordDialog = ({
   }
 
   return (
-    <Modal open title={`Create ${objectLabel.toLowerCase()}`} onClose={onClose}>
+    <Modal open title={`Create ${objectLabel.toLowerCase()}`} onClose={close}>
       <form
         className="flex flex-col gap-3"
         onSubmit={(event) => {
@@ -148,7 +208,7 @@ export const CreateRecordDialog = ({
           <Button type="submit" variant="primary" busy={saving}>
             Create {objectLabel.toLowerCase()}
           </Button>
-          <Button type="button" variant="tertiary" onClick={onClose}>
+          <Button type="button" variant="tertiary" onClick={close}>
             Cancel
           </Button>
         </div>

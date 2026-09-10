@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { hydrateMailboxBodies, RevokedError } from '~/server/gmail.ts'
@@ -26,7 +26,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
 
   try {
     const outcome = await hydrateMailboxBodies(
-      { ...publicEdgeContext(body.accountId), actorKind: 'job' },
+      systemContext(body.accountId),
       body.mailboxId,
       body.limit ?? 50,
     )

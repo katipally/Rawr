@@ -10,6 +10,11 @@ export type PopoverProps = {
   /** The element the panel hangs off. Kept as a ref rather than wrapping the
    *  trigger, so a trigger already inside a toolbar keeps its own layout. */
   anchorRef: React.RefObject<HTMLElement | null>
+  /** Whether the panel takes focus when it opens. True for a menu, where the panel
+   *  is what you are now using. False where the anchor is still the thing being
+   *  typed into, such as a combobox: taking focus there stops the typing that
+   *  opened the panel in the first place. */
+  autoFocus?: boolean | undefined
   side?: Side
   align?: Align
   label: string
@@ -24,6 +29,7 @@ export const Popover = ({
   open,
   onClose,
   anchorRef,
+  autoFocus = true,
   side = 'bottom',
   align = 'end',
   label,
@@ -52,7 +58,7 @@ export const Popover = ({
 
   useEffect(() => {
     if (!open) return
-    panel.current?.focus()
+    if (autoFocus) panel.current?.focus()
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') close.current()
@@ -73,7 +79,7 @@ export const Popover = ({
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }
-  }, [open, anchorRef, reposition])
+  }, [open, anchorRef, autoFocus, reposition])
 
   if (!open) return null
 

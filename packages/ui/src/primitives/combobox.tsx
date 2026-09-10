@@ -155,7 +155,10 @@ export const Combobox = (props: ComboboxProps) => {
             setOpen(true)
             onSearch?.(event.target.value)
           }}
-          onFocus={() => setOpen(true)}
+          // Opened by a click, by typing, or by the down arrow -- never by focus
+          // alone. Focus comes back to this input whenever the list closes, and a
+          // list that reopens on focus can therefore never be closed.
+          onClick={() => setOpen(true)}
           onKeyDown={onKeyDown}
           className="min-w-24 flex-1 bg-transparent outline-none placeholder:text-secondary"
         />
@@ -174,7 +177,18 @@ export const Combobox = (props: ComboboxProps) => {
             <X aria-hidden="true" className="size-4" />
           </button>
         ) : null}
-        <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-secondary" />
+        <button
+          type="button"
+          aria-label={open ? `Close ${label}` : `Open ${label}`}
+          disabled={disabled}
+          onClick={() => {
+            setOpen(!open)
+            input.current?.focus()
+          }}
+          className="shrink-0 text-secondary hover:text-body"
+        >
+          <ChevronDown aria-hidden="true" className="size-4" />
+        </button>
       </div>
       {error || hint ? (
         <p id={`${id}-note`} className={cn('text-small', error ? 'text-error' : 'text-secondary')}>
@@ -186,6 +200,7 @@ export const Combobox = (props: ComboboxProps) => {
         open={open && !disabled}
         onClose={() => setOpen(false)}
         anchorRef={box}
+        autoFocus={false}
         side="bottom"
         align="start"
         label={label}

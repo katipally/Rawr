@@ -1,4 +1,4 @@
-import { publicEdgeContext } from '@rawr/db'
+import { systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { enrichCompanyRecord, enrichRecord } from '~/server/integrations/index.ts'
@@ -20,7 +20,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   try {
-    const ctx = { ...publicEdgeContext(body.accountId), actorKind: 'job' as const }
+    const ctx = systemContext(body.accountId)
     const run = body.entity === 'contact' ? await enrichRecord(ctx, body.entityId) : await enrichCompanyRecord(ctx, body.entityId)
     return NextResponse.json(run)
   } catch (cause) {
