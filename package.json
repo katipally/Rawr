@@ -17,7 +17,7 @@
     "db:verify:sql": "pnpm --filter @rawr/db verify:sql",
     "db:verify:guards": "pnpm --filter @rawr/db verify:guards",
     "lint": "biome lint .",
-    "lint:ci": "biome ci . --diagnostic-level=error",
+    "lint:ci": "biome ci . --diagnostic-level=error && node apps/web/scripts/check-client-imports.ts",
     "test": "pnpm -r --if-present test",
     "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify:sql && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:account && pnpm db:verify:crm && pnpm db:verify:automations && pnpm db:verify:imports && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:verify:notifications",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",

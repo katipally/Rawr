@@ -220,6 +220,13 @@ the worker reaches the app at `127.0.0.1:$PORT` and going out through the public
 hostname would leave the box, pay for TLS and the proxy, and count against the
 same instance. Set it only where the two run on separate hosts.
 
+**`RAWR_WORKER_SKIPS_FIXTURES` is `1` on Render, and nowhere else.** The verify
+suites share this database and drive their own import and bulk runs a chunk at a
+time, so the worker has to leave the fixture tenants — the ones whose domain ends
+`.test` — alone here. On a laptop those fixtures are the only tenants there are to
+test an import against, and a worker that steps over them looks exactly like a
+worker that is not running.
+
 Everything on `* * * * *`, which is sequence steps, automations, enrichment and
 visitor stitching, runs while the service is up and waits while it is not. Drop
 the pinger and a visitor arriving cold waits about a minute for the first page.

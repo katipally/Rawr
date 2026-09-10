@@ -396,6 +396,28 @@ export const attachment = pgTable(
   ],
 )
 
+/** Two records somebody looked at and said are not the same.
+ *
+ *  The duplicate queue re-derives its pairs from the records on every visit, so
+ *  without a row here a dismissal lasts until the page is reloaded and the same
+ *  pair is proposed for ever. The pair is stored ordered, smaller id first, so
+ *  the two records are one row however they were shown. */
+export const duplicateDismissal = pgTable(
+  'duplicate_dismissal',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    /** An object key: 'contact' or 'company'. Not a foreign key, for the reason
+     *  attachment gives above. */
+    entityType: text('entity_type').notNull(),
+    leftId: uuid('left_id').notNull(),
+    rightId: uuid('right_id').notNull(),
+    dismissedBy: uuid('dismissed_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('duplicate_dismissal_pair_idx').on(t.accountId, t.entityType, t.leftId, t.rightId)],
+)
+
 /** A row of an object an admin invented.
  *
  *  One table for every custom object rather than a table each, keyed by which

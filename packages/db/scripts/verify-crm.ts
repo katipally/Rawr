@@ -13,7 +13,7 @@ import {
   listRecords,
   mergeRecords,
   updateRecord } from '../src/dal/records.ts'
-import { findDuplicates } from '../src/dal/duplicates.ts'
+import { dismissDuplicate, findDuplicates } from '../src/dal/duplicates.ts'
 import {
   armedFor,
   conditionsHold,
@@ -1335,8 +1335,41 @@ try {
     return 'the longer timeline survives by default'
   })
 
+  await check('a pair called not the same stays out of the queue', async () => {
+    const before = await findDuplicates(admin, 'contact')
+    const mine = before.find((pair) => pair.because.includes(`dupe-${stamp}`))
+    expect(Boolean(mine), 'the pair went away before it could be dismissed')
+
+    await dismissDuplicate(admin, 'contact', { leftId: mine!.keep.id, rightId: mine!.absorb.id })
+    const after = await findDuplicates(admin, 'contact')
+    expect(
+      after.every((pair) => !pair.because.includes(`dupe-${stamp}`)),
+      'the dismissed pair came back',
+    )
+
+    // The screen lets the reviewer swap the two sides, so the same pair arrives
+    // from either direction and must still be one row.
+    await dismissDuplicate(admin, 'contact', { leftId: mine!.absorb.id, rightId: mine!.keep.id })
+    const rows = await db.execute(sql`
+      select count(*)::int as n from duplicate_dismissal
+       where account_id = ${datasaur!.id}
+         and entity_type = 'contact'
+         and least(left_id::text, right_id::text) = ${[mine!.keep.id, mine!.absorb.id].sort()[0]}`)
+    expect(Number(rows[0]!.n) === 1, `${rows[0]!.n} rows for one dismissed pair`)
+    return 'dismissed once, from either side, and gone from the queue for good'
+  })
+
   await check('a viewer cannot open the queue at all', async () =>
     refuses('a viewer reading likely duplicates', () => findDuplicates(viewer, 'contact')),
+  )
+
+  await check('a viewer cannot set a pair aside either', async () =>
+    refuses('a viewer dismissing a pair', () =>
+      dismissDuplicate(viewer, 'contact', {
+        leftId: '00000000-0000-4000-8000-000000000001',
+        rightId: '00000000-0000-4000-8000-000000000002',
+      }),
+    ),
   )
 
   console.log('')

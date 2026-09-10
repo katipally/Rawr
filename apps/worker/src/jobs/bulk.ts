@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
-import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
+import { APP_BASE, INTERNAL_SECRET, SKIPS_FIXTURES } from '../env.ts'
 import { bySlug, defineJob } from './registry.ts'
 
 /** A bulk bar action that outlives the browser tab.
@@ -23,9 +23,7 @@ const dispatch = defineJob({
         from bulk_operation o
         join account a on a.id = o.account_id
        where o.state = 'running'
-         -- The verify suites drive their own runs against this same database, one
-         -- chunk at a time, and would race a worker that picked those runs up.
-         and a.google_hosted_domain not like '%.test'`
+         ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
 
     for (const row of rows) {
       // One chunk in flight per operation. Without it the tick that lands while a

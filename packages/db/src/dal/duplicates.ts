@@ -1,7 +1,8 @@
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
+import { duplicateDismissal } from '../schema/records.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
-import { withAccount } from './index.ts'
+import { mutate, withAccount } from './index.ts'
 
 /** B11. The queue that feeds the merge dialog.
  *
@@ -183,6 +184,40 @@ const REASON: Record<DuplicateRule, (because: string) => string> = {
   same_name_ignoring_suffix: (value) => `The same name once the company form is ignored: ${value}`,
 }
 
+/** The same two records however the screen showed them. The queue puts the older
+ *  one first and the reviewer may swap them, so the pair is keyed on the ids in
+ *  a fixed order rather than on which side each was on. */
+const ordered = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a])
+
+/** Somebody decided these two are two people. Idempotent: a second click, or the
+ *  same pair proposed again later by a different rule, writes nothing new.
+ *
+ *  Nothing is taught to the finder by this. A rule that adjusts itself out of a
+ *  dismissal is a rule nobody can predict, and the action at the other end of
+ *  this queue cannot be undone. */
+export const dismissDuplicate = async (
+  ctx: AccountContext,
+  objectKey: 'contact' | 'company',
+  pair: { leftId: string; rightId: string },
+): Promise<void> =>
+  mutate(ctx, objectKey, async (tx) => {
+    const [leftId, rightId] = ordered(pair.leftId, pair.rightId)
+    await tx
+      .insert(duplicateDismissal)
+      .values({ accountId: ctx.accountId, entityType: objectKey, leftId, rightId, dismissedBy: ctx.actorId })
+      .onConflictDoNothing()
+    return {
+      result: undefined,
+      audit: {
+        entity: 'duplicate_dismissal',
+        entityId: leftId,
+        action: 'create',
+        before: null,
+        after: { object: objectKey, notTheSameAs: rightId },
+      },
+    }
+  })
+
 /** Likely duplicate pairs, newest rule first, capped.
  *
  *  Read-only, but gated on write: this is the queue for an irreversible action
@@ -198,7 +233,13 @@ export const findDuplicates = async (
   const rules = objectKey === 'contact' ? CONTACT_RULES : COMPANY_RULES
 
   return withAccount(ctx, async (tx) => {
-    const seen = new Set<string>()
+    // Every pair already set aside, read once and used as the skip set the rules
+    // fill in beside it: one bounded query rather than a lookup per proposal.
+    const dismissed = await tx
+      .select({ leftId: duplicateDismissal.leftId, rightId: duplicateDismissal.rightId })
+      .from(duplicateDismissal)
+      .where(eq(duplicateDismissal.entityType, objectKey))
+    const seen = new Set(dismissed.map((row) => `${row.leftId}:${row.rightId}`))
     const out: DuplicatePair[] = []
 
     for (const { rule } of rules) {

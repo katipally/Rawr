@@ -206,6 +206,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.8
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.8(react@19.2.8)
       tailwind-merge:
         specifier: 'catalog:'
         version: 3.6.0
@@ -216,6 +219,9 @@ importers:
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.18
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.5(@types/react@19.2.18)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

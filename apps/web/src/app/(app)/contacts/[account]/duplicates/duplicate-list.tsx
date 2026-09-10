@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Button, EmptyState, useToast } from '@rawr/ui'
+import { Alert, Button, EmptyState, Field, Modal, Select, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -35,7 +35,8 @@ const MAX = 200
  *  because two pairs with the same sentence can come from different rules, and
  *  which rule fired is what tells you whether to trust it. */
 const RULES: Record<string, string> = {
-  same_email: 'Same email',
+  same_address: 'Same email',
+  same_person_at_company: 'Same email once dots and plus tags are ignored',
   same_name_and_company: 'Same name at the same company',
   same_phone: 'Same phone',
   same_domain: 'Same domain',
@@ -61,14 +62,18 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
   const [busy, setBusy] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [swapped, setSwapped] = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState<Pair | null>(null)
 
   const keyOf = (pair: Pair) => `${pair.keep.id}:${pair.absorb.id}`
 
+  const sideOf = (pair: Pair) => {
+    const flip = swapped.has(keyOf(pair))
+    return { survivor: flip ? pair.absorb : pair.keep, absorbed: flip ? pair.keep : pair.absorb }
+  }
+
   const merge = async (pair: Pair) => {
     const key = keyOf(pair)
-    const flip = swapped.has(key)
-    const survivor = flip ? pair.absorb : pair.keep
-    const absorbed = flip ? pair.keep : pair.absorb
+    const { survivor, absorbed } = sideOf(pair)
     setBusy(key)
     try {
       await api.crm.records.merge.mutate({
@@ -79,12 +84,36 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
         // means. Field-by-field picking lives on the record.
         picks: {},
       })
+      setConfirming(null)
       toast('success', `${absorbed.displayName} was merged into ${survivor.displayName}.`)
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
       setBusy(null)
+    }
+  }
+
+  /** Hidden here the moment it is clicked and written behind that. The queue is
+   *  re-derived from the records on every visit, so a dismissal that failed to
+   *  save would come back on the next one; putting the row back on screen is
+   *  what says so while the person is still looking at it. */
+  const dismiss = async (pair: Pair) => {
+    const key = keyOf(pair)
+    setDismissed((all) => new Set(all).add(key))
+    try {
+      await api.crm.records.dismissDuplicate.mutate({
+        object,
+        leftId: pair.keep.id,
+        rightId: pair.absorb.id,
+      })
+    } catch (cause) {
+      setDismissed((all) => {
+        const next = new Set(all)
+        next.delete(key)
+        return next
+      })
+      toast('error', errorMessage(cause))
     }
   }
 
@@ -172,11 +201,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="primary"
-                  busy={busy === key}
-                  onClick={() => void merge(pair)}
-                >
+                <Button variant="primary" busy={busy === key} onClick={() => setConfirming(pair)}>
                   Merge into {shortName(survivor.displayName)}
                 </Button>
                 <Button
@@ -191,10 +216,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                 >
                   Keep the other one instead
                 </Button>
-                <Button
-                  variant="tertiary"
-                  onClick={() => setDismissed((all) => new Set(all).add(key))}
-                >
+                <Button variant="tertiary" onClick={() => void dismiss(pair)}>
                   Not the same
                 </Button>
               </div>
@@ -211,9 +233,65 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
 
       <Alert tone="info">
         Merging cannot be undone. Everything the other record holds moves across: its timeline, its
-        links, its subscriptions and its tasks. &ldquo;Not the same&rdquo; only hides the pair until
-        you reload, because a rule that learns from a dismissal is a rule nobody can predict.
+        links, its subscriptions and its tasks. &ldquo;Not the same&rdquo; keeps the pair out of this
+        queue for good and changes no rule, because a rule that learns from a dismissal is a rule
+        nobody can predict.
       </Alert>
+
+      <Modal
+        open={confirming !== null}
+        size="sm"
+        title="Merge these two?"
+        onClose={() => setConfirming(null)}
+      >
+        {confirming ? (
+          <div className="flex flex-col gap-3">
+            <Alert tone="warning">
+              This cannot be undone. Everything the other record holds moves across: its timeline,
+              its links, its subscriptions and its tasks. The other record is then deleted.
+            </Alert>
+
+            {/* The choice is repeated here rather than only on the row: the row's
+                own swap is two clicks away from the merge, and this is the last
+                screen before an irreversible write. */}
+            <Field id="duplicate-survivor" label="Which one is kept">
+              <Select
+                id="duplicate-survivor"
+                value={swapped.has(keyOf(confirming)) ? 'absorb' : 'keep'}
+                onChange={(event) =>
+                  setSwapped((all) => {
+                    const next = new Set(all)
+                    if (event.target.value === 'absorb') next.add(keyOf(confirming))
+                    else next.delete(keyOf(confirming))
+                    return next
+                  })
+                }
+              >
+                <option value="keep">{confirming.keep.displayName}</option>
+                <option value="absorb">{confirming.absorb.displayName}</option>
+              </Select>
+            </Field>
+
+            <p className="text-secondary break-words">
+              {sideOf(confirming).absorbed.displayName} is merged into{' '}
+              {sideOf(confirming).survivor.displayName}.
+            </p>
+
+            <div className="flex flex-wrap gap-2">
+              <Button variant="tertiary" onClick={() => setConfirming(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                busy={busy === keyOf(confirming)}
+                onClick={() => void merge(confirming)}
+              >
+                Merge into {shortName(sideOf(confirming).survivor.displayName)}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   )
 }

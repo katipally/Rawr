@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { resolveAppBase } from './env.ts'
+import { resolveAppBase, skipsFixtures } from './env.ts'
 
 /** Where the worker points its internal calls. An empty variable resolving to
  *  "undefined/api/..." is how six job families dead-lettered quietly. */
@@ -20,4 +20,19 @@ test('the port the app was told to listen on is the one used', () => {
 test('a variable set and then cleared falls back like an absent one', () => {
   assert.equal(resolveAppBase({ RAWR_INTERNAL_URL: '', PORT: '10000' }), 'http://127.0.0.1:10000')
   assert.equal(resolveAppBase({ RAWR_INTERNAL_URL: '   ', PORT: '10000' }), 'http://127.0.0.1:10000')
+})
+
+/** Whether the dispatchers step over the fixture tenants. Unset, they do not:
+ *  local import testing has no tenants but the fixtures. */
+
+test('the switch is on only when it is set to exactly 1', () => {
+  assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: '1' }), true)
+  assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: ' 1 ' }), true)
+})
+
+test('unset, empty, or any other value leaves every tenant in', () => {
+  assert.equal(skipsFixtures({}), false)
+  assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: '' }), false)
+  assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: '0' }), false)
+  assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: 'true' }), false)
 })

@@ -125,14 +125,22 @@ const localNames = (body: string): Set<string> => {
  *  references are skipped rather than guessed at. */
 const aliases = (body: string, tables: Set<string>): Map<string, string> => {
   const bound = new Map<string, string>()
+  const ambiguous = new Set<string>()
   const re = /\b(?:from|join|update|into)\s+(?:public\.|rawr\.)?"?([a-z_][a-z0-9_]*)"?\s+(?:as\s+)?"?([a-z_][a-z0-9_]*)"?/gi
   for (const m of body.matchAll(re)) {
     const table = m[1]!.toLowerCase()
     const alias = m[2]!.toLowerCase()
     if (!tables.has(table)) continue
     if (['on', 'set', 'where', 'using', 'select', 'values', 'left', 'right', 'inner', 'full', 'cross', 'join', 'group', 'order', 'limit', 'returning'].includes(alias)) continue
+    // The same letter can stand for two tables in one statement: two lateral
+    // subqueries each calling their own relation `a` is correct SQL, and which
+    // one a reference means needs the scope this does not track. Last one wins
+    // would report every reference to the other as a missing column, so an alias
+    // that is bound twice is dropped and its references are skipped.
+    if (bound.has(alias) && bound.get(alias) !== table) ambiguous.add(alias)
     bound.set(alias, table)
   }
+  for (const alias of ambiguous) bound.delete(alias)
   return bound
 }
 
@@ -164,6 +172,15 @@ try {
         m[1]!.toLowerCase(),
       ),
     )
+    // Every CTE named anywhere in this file, for the same reason: a statement
+    // assembled from fragments defines its `with` clause in one template and
+    // reads the name from another, so per-template scope reports the reads as
+    // relations that do not exist.
+    const cte = new Set(
+      [...text.matchAll(/\b([a-z_][a-z0-9_]*)\s+as\s*\(\s*(?:select|insert|update|delete|with)\b/gi)].map((m) =>
+        m[1]!.toLowerCase(),
+      ),
+    )
     for (const match of text.matchAll(TEMPLATES)) {
       const body = strip(match[1]!)
       // A template with no SQL verb in it is a fragment or an unrelated tag.
@@ -174,9 +191,12 @@ try {
       const local = localNames(body)
       const bound = aliases(body, cat.tables)
 
-      for (const r of body.matchAll(/(?<!\bdo\s)(?<!\bfor\s)\b(?:from|join|into|update|delete\s+from)\s+(?:public\.|rawr\.)?"?([a-z_][a-z0-9_]*)"?/gi)) {
+      // `is distinct from x.id` spells a comparison with the word that introduces
+      // a relation, the same trap `do` and `for` are held off for above.
+      for (const r of body.matchAll(/(?<!\bdo\s)(?<!\bfor\s)(?<!\bdistinct\s)\b(?:from|join|into|update|delete\s+from)\s+(?:public\.|rawr\.)?"?([a-z_][a-z0-9_]*)"?/gi)) {
         const name = r[1]!.toLowerCase()
         if (NOT_A_TABLE.has(name) || CATALOG.test(name) || local.has(name) || temporary.has(name)) continue
+        if (cte.has(name)) continue
         if (cat.tables.has(name) || cat.functions.has(name)) continue
         fail(`${where}:${line()}`, `no table or function named "${name}"`, r[0]!.trim())
       }

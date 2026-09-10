@@ -25,3 +25,16 @@ export const resolveAppBase = (env: { RAWR_INTERNAL_URL?: string; PORT?: string 
   env.RAWR_INTERNAL_URL?.trim() || `http://127.0.0.1:${env.PORT ?? 3000}`
 
 export const APP_BASE = resolveAppBase(process.env)
+
+/** Whether the import and bulk dispatchers step over the fixture tenants, the
+ *  ones whose domain ends `.test`.
+ *
+ *  On the deployment that shares its database with those fixtures they have to be
+ *  stepped over: the verify suites drive their own runs there, one chunk at a
+ *  time, and a worker picking the same run up races them. Anywhere else the
+ *  fixtures are the only tenants there are to test an import against, and a
+ *  worker that ignores them looks exactly like a worker that is not running. */
+export const skipsFixtures = (env: { RAWR_WORKER_SKIPS_FIXTURES?: string }): boolean =>
+  env.RAWR_WORKER_SKIPS_FIXTURES?.trim() === '1'
+
+export const SKIPS_FIXTURES = skipsFixtures(process.env)

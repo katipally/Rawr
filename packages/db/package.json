@@ -8,7 +8,8 @@
     "./schema": "./src/schema/index.ts",
     "./registry": "./src/registry/index.ts",
     "./forms": "./src/dal/form-schema.ts",
-    "./templates": "./src/dal/templates.ts"
+    "./templates": "./src/dal/templates.ts",
+    "./sequence-rules": "./src/dal/sequence-rules.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
