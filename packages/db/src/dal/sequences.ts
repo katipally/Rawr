@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { mailbox } from '../schema/messaging.ts'
@@ -322,14 +322,16 @@ export const saveSequence = async (
   })
 
 /** A waiting enrollment holds a time worked out against the window in force when
- *  it was enrolled. Widening the window has to move it, or the person who just
- *  opened up Saturday watches everybody already enrolled keep waiting for Monday
- *  while anybody enrolled a minute later goes out at once. Narrowing has to move
- *  it too, the other way, or a send lands outside the window that forbids it.
+ *  it was scheduled, so changing the window has to move it. Widening it and
+ *  leaving everybody already enrolled waiting for Monday, while anybody enrolled a
+ *  minute later goes out at once, is two schedules in one sequence. Narrowing it
+ *  and leaving them is a send outside the window that forbids it.
  *
- *  Snapped from whichever is earlier, now or the time it was already holding: the
- *  moment it became due is not stored, and an enrollment that was due an hour ago
- *  is due now, not a day from now.
+ *  Worked out from when the step actually became due -- the previous send, or the
+ *  enrolment for the first step, plus that step's own wait -- rather than from the
+ *  time currently stored. The stored time is an answer to the old window and says
+ *  nothing about the question. Reading it as the question is how a two-day wait
+ *  between steps gets thrown away by an unrelated change to Saturdays.
  *
  *  Rows only, no lease: an enrollment a worker is holding is left alone and picks
  *  up the new window on its next step. */
@@ -340,24 +342,34 @@ const resnapWaiting = async (
   after: SendWindow,
 ): Promise<void> => {
   if (JSON.stringify(before) === JSON.stringify(after)) return
-  const rows = await tx
-    .select({ id: sequenceEnrollment.id, nextRunAt: sequenceEnrollment.nextRunAt })
-    .from(sequenceEnrollment)
-    .where(
-      and(
-        eq(sequenceEnrollment.sequenceId, sequenceId),
-        eq(sequenceEnrollment.state, 'active'),
-        isNull(sequenceEnrollment.leaseUntil),
-        isNotNull(sequenceEnrollment.nextRunAt),
-      ),
-    )
 
-  const now = new Date()
+  const rows = await tx.execute<{
+    id: string
+    next_run_at: Date
+    since: Date
+    delay_days: number
+    delay_hours: number
+  }>(sql`
+    select e.id, e.next_run_at,
+           coalesce(e.last_sent_at, e.created_at) as since,
+           coalesce(s.delay_days, 0) as delay_days,
+           coalesce(s.delay_hours, 0) as delay_hours
+      from sequence_enrollment e
+      left join sequence_step s
+        on s.sequence_id = e.sequence_id and s.position = e.current_step
+     where e.sequence_id = ${sequenceId}
+       and e.state = 'active'
+       and e.lease_until is null
+       and e.next_run_at is not null`)
+
   for (const row of rows) {
-    if (!row.nextRunAt) continue
-    const from = row.nextRunAt < now ? row.nextRunAt : now
-    const next = nextSendAt({ after: from, delayDays: 0, delayHours: 0, window: after })
-    if (next.getTime() === row.nextRunAt.getTime()) continue
+    const next = nextSendAt({
+      after: new Date(row.since),
+      delayDays: Number(row.delay_days),
+      delayHours: Number(row.delay_hours),
+      window: after,
+    })
+    if (next.getTime() === new Date(row.next_run_at).getTime()) continue
     await tx.update(sequenceEnrollment).set({ nextRunAt: next }).where(eq(sequenceEnrollment.id, row.id))
   }
 }

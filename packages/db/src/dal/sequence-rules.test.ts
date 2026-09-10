@@ -109,3 +109,43 @@ test('text with no fields is returned unchanged', () => {
   assert.equal(rendered.text, 'No fields here.')
   assert.deepEqual(rendered.missing, [])
 })
+
+/** Changing a sequence's sending window moves everybody already waiting, and
+ *  `resnapWaiting` works the new time out by calling this again from the moment
+ *  the step actually became due: the previous send, or the enrolment for the first
+ *  step, plus that step's own wait.
+ *
+ *  These pin the two cases that pull against each other. Reading the stored
+ *  next_run_at as the question instead satisfies the first and breaks the second,
+ *  which is a two-day gap between steps thrown away by a change to Saturdays. */
+
+const always: SendWindow = { days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '23:59', timezone: 'UTC' }
+const utcOffice: SendWindow = { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', timezone: 'UTC' }
+
+test('widening the window releases somebody the old one had held back', () => {
+  // Enrolled 01:31 on a Thursday, first step, no wait. The office window pushed
+  // them to 09:00; the round-the-clock one has no reason to.
+  const due = at('2026-09-10T01:31:00Z')
+  assert.equal(
+    nextSendAt({ after: due, delayDays: 0, delayHours: 0, window: utcOffice }).toISOString(),
+    '2026-09-10T09:00:00.000Z',
+  )
+  assert.equal(
+    nextSendAt({ after: due, delayDays: 0, delayHours: 0, window: always }).toISOString(),
+    due.toISOString(),
+  )
+})
+
+test('narrowing it keeps the wait between steps rather than pulling the send forward', () => {
+  // Step one sent 01:32 on Thursday; step two waits two days, so it is due
+  // Saturday 01:32. A weekdays-only window moves it to Monday, never to today.
+  const sentAt = at('2026-09-10T01:32:00Z')
+  assert.equal(
+    nextSendAt({ after: sentAt, delayDays: 2, delayHours: 0, window: always }).toISOString(),
+    '2026-09-12T01:32:00.000Z',
+  )
+  assert.equal(
+    nextSendAt({ after: sentAt, delayDays: 2, delayHours: 0, window: utcOffice }).toISOString(),
+    '2026-09-14T09:00:00.000Z',
+  )
+})
