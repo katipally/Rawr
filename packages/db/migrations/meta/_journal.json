@@ -463,6 +463,48 @@
       "when": 1789491234179,
       "tag": "0064_import_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1789577634179,
+      "tag": "0065_property_groups_fill",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789664034179,
+      "tag": "0066_import_object_type_text",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789750434179,
+      "tag": "0067_automation_trigger_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1789836834179,
+      "tag": "0068_automation_step_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1789923234179,
+      "tag": "0069_notification_task_kinds",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1790009634179,
+      "tag": "0070_task_queues",
+      "breakpoints": true
     }
   ]
 }
