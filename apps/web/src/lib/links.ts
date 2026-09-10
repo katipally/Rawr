@@ -139,6 +139,10 @@ export const importsPath = (account: string, id?: string): string =>
 export const formsPath = (account: string, id?: string): string =>
   id ? `/${CRM_ROOT}/${account}/forms/${id}` : `/${CRM_ROOT}/${account}/forms`
 
+/** What one form did, as opposed to what it asks. */
+export const formPerformancePath = (account: string, id: string): string =>
+  `${formsPath(account, id)}/performance`
+
 export const submissionsPath = (
   account: string,
   params: { state?: string; form?: string; before?: string } = {},
@@ -175,6 +179,10 @@ export const automationRunsPath = (automationId: string): string =>
   `/settings/automations/${automationId}/runs`
 
 export const subscriptionsPath = (): string => '/settings/subscriptions'
+
+/** The cookie choices strangers made, as evidence rather than a setting. */
+export const consentRecordsPath = (params: { skip?: string | undefined } = {}): string =>
+  `/settings/subscriptions/consent${query(params)}`
 
 /** Outgoing webhooks and unmatched inbound events. Connecting a provider is an
  *  app's own settings tab, so a "connect X" link lands there. */
@@ -262,8 +270,18 @@ export const sequencePath = (account: string, id: string): string =>
 export const enrollmentsPath = (account: string, id: string, params: { state?: string | undefined } = {}): string =>
   `/${CRM_ROOT}/${account}/sequences/${id}/enrollments${query(params)}`
 
-/** Where sequence pixels and click redirects are served from. */
-export const trackingPath = (): string => '/settings/tracking'
+/** Every mail one sequence sent, as opposed to who is in it. */
+export const sequenceSendsPath = (
+  account: string,
+  id: string,
+  params: { state?: string | undefined; skip?: string | undefined } = {},
+): string => `/${CRM_ROOT}/${account}/sequences/${id}/sends${query(params)}`
+
+/** Where sequence pixels and click redirects are served from, plus the two things
+ *  measured through them: the events sites fire, and the campaigns spend is
+ *  keyed against. */
+export const trackingPath = (tab?: 'events' | 'campaigns'): string =>
+  `/settings/tracking${tab ? `/${tab}` : ''}`
 
 /** Booking sits under its own root, the way HubSpot puts scheduling pages under
  *  /meetings/:portalId rather than inside the contacts app. Same rule as everything
