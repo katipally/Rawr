@@ -8,6 +8,9 @@ import {
   createField,
   deleteField,
   fieldUsage,
+  moveFieldsToGroup,
+  refreshFillRates,
+  renameFieldGroup,
   listDeletedFields,
   listFields,
   purgeField,
@@ -15,6 +18,7 @@ import {
   restoreField,
   updateField,
 } from '../src/dal/admin-fields.ts'
+import { matchesConditional } from '../src/registry/conditional.ts'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import {
   listAutomations,
@@ -283,6 +287,126 @@ try {
   )
 
   console.log('')
+  console.log('-- groups, fill rate and conditional logic ----------------------')
+
+  const groupA = `Verify group A ${stamp}`
+  const groupB = `Verify group B ${stamp}`
+  let groupedId = ''
+
+  await check('a group exists once a property names it, and renames on every one', async () => {
+    const first = await createField(admin, {
+      objectKey: 'contact',
+      key: `grp_a_${stamp}`,
+      label: `Grouped A ${stamp}`,
+      type: 'text',
+      groupName: groupA,
+    })
+    groupedId = first.id
+    const second = await createField(admin, {
+      objectKey: 'contact',
+      key: `grp_b_${stamp}`,
+      label: `Grouped B ${stamp}`,
+      type: 'text',
+      groupName: groupA,
+    })
+
+    const renamed = await renameFieldGroup(admin, 'contact', groupA, groupB)
+    expect(renamed.moved === 2, `the rename moved ${renamed.moved} properties, expected 2`)
+    const after = await listFields(admin, 'contact')
+    expect(
+      after.filter((field) => field.groupName === groupB).length === 2,
+      'the properties did not follow the rename',
+    )
+
+    const moved = await moveFieldsToGroup(admin, 'contact', [second.id], null)
+    expect(moved.moved === 1, `the move touched ${moved.moved} properties`)
+    const ungrouped = (await listFields(admin, 'contact')).find((field) => field.id === second.id)
+    expect(ungrouped?.groupName === null, `it landed in ${String(ungrouped?.groupName)}`)
+
+    await deleteField(admin, second.id)
+    return 'named into being, renamed on every property, moved out again'
+  })
+
+  await check('a property outside the object cannot be moved into its groups', async () =>
+    refuses('a deal property moved on the contact object', () =>
+      moveFieldsToGroup(admin, 'contact', [randomUUID()], groupB),
+    ),
+  )
+
+  await check('the fill rate is a stored count with the time it was taken', async () => {
+    const before = (await listFields(admin, 'contact')).find((field) => field.id === groupedId)
+    expect(before?.filledCount === null, `it started at ${String(before?.filledCount)}`)
+
+    const { fields } = await refreshFillRates(admin)
+    expect(fields > 0, 'the sweep counted nothing')
+
+    const after = (await listFields(admin, 'contact')).find((field) => field.id === groupedId)
+    expect(after?.filledCount === 0, `nothing holds a value and it read ${String(after?.filledCount)}`)
+    expect(after?.filledAt !== null, 'the count carries no time')
+
+    const email = (await listFields(admin, 'contact')).find((field) => field.key === 'email')
+    expect((email?.filledCount ?? 0) > 0, `every seeded contact has an address and email read ${String(email?.filledCount)}`)
+    return `${fields} propert(ies) counted in one pass per object`
+  })
+
+  await check('a conditional rule is stored, read back and refused when it cannot match', async () => {
+    await updateField(admin, {
+      id: groupedId,
+      conditional: { conjunction: 'and', conditions: [{ field: 'lead_status', operator: 'is', value: 'New' }] },
+    })
+    const saved = (await listFields(admin, 'contact')).find((field) => field.id === groupedId)
+    expect(saved?.conditional?.conditions.length === 1, 'the rule did not come back')
+    expect(saved?.conditional?.conditions[0]?.field === 'lead_status', 'the rule came back naming another field')
+
+    await refuses('a property conditioned on itself', () =>
+      updateField(admin, {
+        id: groupedId,
+        conditional: { conjunction: 'and', conditions: [{ field: `grp_a_${stamp}`, operator: 'is', value: 'x' }] },
+      }),
+    )
+    await refuses('a property conditioned on a field that is not there', () =>
+      updateField(admin, {
+        id: groupedId,
+        conditional: { conjunction: 'and', conditions: [{ field: 'no_such_field', operator: 'is', value: 'x' }] },
+      }),
+    )
+
+    await updateField(admin, { id: groupedId, conditional: null })
+    const cleared = (await listFields(admin, 'contact')).find((field) => field.id === groupedId)
+    expect(cleared?.conditional === null, 'the rule could not be cleared')
+    return 'stored, refused on itself and on a field that is not there, cleared'
+  })
+
+  await check('the rule decides visibility the same way everywhere', async () => {
+    const rule = { conjunction: 'and' as const, conditions: [{ field: 'lead_status', operator: 'is' as const, value: 'New' }] }
+    expect(matchesConditional(rule, { lead_status: 'New' }), 'a matching value hid the property')
+    expect(!matchesConditional(rule, { lead_status: 'Open' }), 'a different value showed it')
+    expect(!matchesConditional(rule, {}), 'an empty record showed it')
+    expect(matchesConditional(null, {}), 'a property with no rule was hidden')
+    const any = { conjunction: 'or' as const, conditions: [{ field: 'stage', operator: 'in' as const, value: ['a', 'b'] }] }
+    expect(matchesConditional(any, { stage: 'b' }), '"is any of" missed a member')
+    expect(!matchesConditional(any, { stage: 'c' }), '"is any of" matched a non-member')
+    return 'is, is any of, empty and no rule'
+  })
+
+  await check('used in names the assets that would break', async () => {
+    const use = await fieldUsage(admin, groupedId)
+    expect(Array.isArray(use.usedIn), 'usage did not report what uses it')
+    const email = (await listFields(admin, 'contact')).find((field) => field.key === 'email')!
+    const emailUse = await fieldUsage(admin, email.id)
+    expect(emailUse.usedIn.length > 0, 'the seeded forms and segments name no field')
+    return `a brand new property is used in ${use.usedIn.length}; email in ${emailUse.usedIn.length}`
+  })
+
+  await check('a property in a group can still be deleted and purged', async () => {
+    await deleteField(admin, groupedId)
+    await purgeField(admin, groupedId)
+    const gone = (await listFields(admin, 'contact')).find((field) => field.id === groupedId)
+    expect(gone === undefined, 'it is still on the list')
+    return 'the group is a name on a property and goes with it'
+  })
+
+  console.log('')
   console.log('-- pipelines and stages ----------------------------------------')
 
   let pipelineId = ''
@@ -545,7 +669,11 @@ try {
     // member, which is the difference between a second and seventeen minutes on a
     // segment the size of the portal. What that rewrite could get wrong is the
     // chunk boundary, so the count is the check.
-    const members = await readSegmentMembers(marketing, segmentId, 1000)
+    // Counted in SQL rather than through readSegmentMembers, which pages at 200:
+    // the boundary being checked is the evaluator's, not the reader's.
+    const [held] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from segment_membership
+       where segment_id = ${segmentId} and exited_at is null`)
     const [written] = await db.execute<{ n: number }>(sql`
       select count(distinct l.entity_id)::int as n
         from activity a
@@ -554,10 +682,10 @@ try {
          and a.type = 'segment_change'
          and a.subject = ${`entered Verify partners ${stamp}`}`)
     expect(
-      Number(written?.n) === members.length,
-      `${members.length} members, ${written?.n} timelines say so`,
+      Number(written?.n) === Number(held?.n),
+      `${held?.n} members, ${written?.n} timelines say so`,
     )
-    return `${members.length} members, ${written?.n} timeline entries`
+    return `${held?.n} members, ${written?.n} timeline entries`
   })
 
   await check('leaving writes another, and the spell is kept', async () => {

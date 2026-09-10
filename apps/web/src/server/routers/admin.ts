@@ -7,10 +7,13 @@ import {
   MAX_DELAY_MINUTES,
   AUTOMATION_TRIGGERS,
   FIELD_TYPES,
+  OPERATORS,
   HUBS,
   listAutomationRuns,
   listAutomations,
   parseFilters,
+  parseSteps,
+  RUN_PAGE,
   readAutomation,
   removeAutomation,
   saveAutomation,
@@ -24,6 +27,7 @@ import {
   saveTeam,
   setTeamMembers,
   createField,
+  moveFieldsToGroup,
   createLifecycleStage,
   createPipeline,
   createStage,
@@ -47,6 +51,7 @@ import {
   reorderLifecycleStages,
   reorderStages,
   restoreField,
+  renameFieldGroup,
   updateField,
   updateStage,
   updateSubscriptionType,
@@ -68,12 +73,60 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
  *  of inventing one. Shaped-like-a-key only; the registry decides the rest. */
 const objectKey = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
 
+/** One rule's steps.
+ *
+ *  A discriminated union so a delay cannot arrive without its minutes and a
+ *  branch cannot arrive without its arms. Twenty steps per list is more than any
+ *  readable rule and well short of anything that could make the runner slow.
+ *
+ *  Written out level by level rather than declared recursive: the nesting the
+ *  editor offers is bounded anyway, and three explicit levels type themselves
+ *  where a lazy schema needs a cast to do the same job.
+ *
+ *  Filters arrive unknown and are parsed by the layer, which walks the arms once
+ *  and refuses a condition no object can answer. */
+const leafStep = [
+  z.object({
+    kind: z.literal('action'),
+    type: z.enum(ACTION_TYPES),
+    config: z.record(z.string().max(64), z.unknown()),
+  }),
+  z.object({ kind: z.literal('delay'), minutes: z.number().int().min(1).max(MAX_DELAY_MINUTES) }),
+  z.object({ kind: z.literal('guard'), conditions: z.array(z.unknown()).max(10) }),
+] as const
+
+const branchOver = <T extends z.ZodType>(arm: T) =>
+  z.object({
+    kind: z.literal('branch'),
+    conditions: z.array(z.unknown()).max(10),
+    matched: z.array(arm).max(20),
+    otherwise: z.array(arm).max(20),
+  })
+
+const deepest = z.discriminatedUnion('kind', [...leafStep])
+const nested = z.discriminatedUnion('kind', [...leafStep, branchOver(deepest)])
+const automationSteps = z
+  .array(z.discriminatedUnion('kind', [...leafStep, branchOver(nested)]))
+  .min(1)
+  .max(20)
+
 /** Where one of the three is genuinely required. An automation's triggers are
  *  record created, stage changed, lifecycle changed and form submitted — all
  *  four are things that only happen to a core object, and its run log names an
  *  entity type that is an enum of exactly them. */
 const name = z.string().trim().min(1).max(120)
 const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
+
+/** Conditional property logic: one group of conditions over sibling properties,
+ *  in the shape the filter builder produces. Null clears the rule. */
+const conditional = z
+  .object({
+    conjunction: z.enum(['and', 'or']),
+    conditions: z
+      .array(z.object({ field: z.string().max(59), operator: z.enum(OPERATORS), value: z.unknown().optional() }))
+      .max(10),
+  })
+  .nullable()
 
 export const adminRouter = router({
   members: router({
@@ -179,6 +232,7 @@ export const adminRouter = router({
           options: z.array(z.string().max(120)).max(200).optional(),
           helpText: z.string().max(500).nullish(),
           groupName: z.string().trim().max(80).nullish(),
+          conditional: conditional.optional(),
           isRequired: z.boolean().optional(),
           trackChanges: z.boolean().optional(),
         }),
@@ -193,6 +247,7 @@ export const adminRouter = router({
             ...(input.options ? { options: input.options } : {}),
             ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
             ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
+            ...(input.conditional !== undefined ? { conditional: input.conditional } : {}),
             ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
             ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
           }),
@@ -207,6 +262,7 @@ export const adminRouter = router({
           options: z.array(z.string().max(120)).max(200).optional(),
           helpText: z.string().max(500).nullish(),
           groupName: z.string().trim().max(80).nullish(),
+          conditional: conditional.optional(),
           isRequired: z.boolean().optional(),
           trackChanges: z.boolean().optional(),
         }),
@@ -219,6 +275,7 @@ export const adminRouter = router({
             ...(input.options !== undefined ? { options: input.options } : {}),
             ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
             ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
+            ...(input.conditional !== undefined ? { conditional: input.conditional } : {}),
             ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
             ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
           }),
@@ -228,6 +285,26 @@ export const adminRouter = router({
     reorder: adminProcedure
       .input(z.object({ object: objectKey, orderedIds: z.array(z.uuid()).max(400) }))
       .mutation(({ ctx, input }) => call(() => reorderFields(ctx.account, input.object, input.orderedIds))),
+
+    /** A group is its name and nothing else, so renaming one is renaming it on
+     *  every property that sits under it. */
+    renameGroup: adminProcedure
+      .input(z.object({ object: objectKey, from: z.string().trim().min(1).max(80), to: z.string().trim().min(1).max(80) }))
+      .mutation(({ ctx, input }) => call(() => renameFieldGroup(ctx.account, input.object, input.from, input.to))),
+
+    /** Properties into a group, which is also how a group is created: naming one
+     *  on the properties that belong to it is what makes it exist. */
+    moveToGroup: adminProcedure
+      .input(
+        z.object({
+          object: objectKey,
+          fieldIds: z.array(z.uuid()).min(1).max(400),
+          groupName: z.string().trim().max(80).nullable(),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() => moveFieldsToGroup(ctx.account, input.object, input.fieldIds, input.groupName)),
+      ),
 
     /** What a delete would hide, so the confirmation can say it out loud. */
     usage: protectedProcedure
@@ -369,27 +446,11 @@ export const adminRouter = router({
           trigger: z.enum(AUTOMATION_TRIGGERS),
           object: objectKey,
           conditions: z.array(z.unknown()).max(10),
-          /** A discriminated union so a delay cannot arrive without its minutes
-           *  and a guard cannot arrive without its conditions. Twenty steps is
-           *  more than any readable rule and well short of anything that could
-           *  make the runner slow. */
-          steps: z
-            .array(
-              z.discriminatedUnion('kind', [
-                z.object({
-                  kind: z.literal('action'),
-                  type: z.enum(ACTION_TYPES),
-                  config: z.record(z.string().max(64), z.unknown()),
-                }),
-                z.object({
-                  kind: z.literal('delay'),
-                  minutes: z.number().int().min(1).max(MAX_DELAY_MINUTES),
-                }),
-                z.object({ kind: z.literal('guard'), conditions: z.array(z.unknown()).max(10) }),
-              ]),
-            )
-            .min(1)
-            .max(20),
+          /** What the trigger needs beyond the object: the date field and its
+           *  offset, or the days of silence. Checked against the object at save,
+           *  where the field can be named. */
+          triggerConfig: z.record(z.string().max(32), z.unknown()).optional(),
+          steps: automationSteps,
           isActive: z.boolean().optional(),
         }),
       )
@@ -400,12 +461,12 @@ export const adminRouter = router({
             name: input.name,
             trigger: input.trigger,
             objectKey: input.object,
+            ...(input.triggerConfig ? { triggerConfig: input.triggerConfig } : {}),
             conditions: parseFilters(input.conditions),
-            steps: input.steps.map((step) =>
-              step.kind === 'guard'
-                ? { kind: 'guard' as const, conditions: parseFilters(step.conditions) }
-                : step,
-            ),
+            // The shape is the schema's business and the filters are the layer's:
+            // a branch holds arms of steps holding guards holding conditions, and
+            // parsing that on the way past is one recursion, not two.
+            steps: parseSteps(input.steps),
             ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
           }),
         ),
@@ -420,9 +481,25 @@ export const adminRouter = router({
       .mutation(({ ctx, input }) => call(() => removeAutomation(ctx.account, input.id))),
 
     runs: protectedProcedure
-      .input(z.object({ automationId: z.uuid().optional() }).optional())
+      .input(
+        z
+          .object({
+            automationId: z.uuid().optional(),
+            state: z.enum(['waiting', 'done', 'skipped', 'failed']).optional(),
+            limit: z.number().int().min(1).max(RUN_PAGE).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
       .query(({ ctx, input }) =>
-        call(() => listAutomationRuns(ctx.account, input?.automationId ? { automationId: input.automationId } : {})),
+        call(() =>
+          listAutomationRuns(ctx.account, {
+            ...(input?.automationId ? { automationId: input.automationId } : {}),
+            ...(input?.state ? { state: input.state } : {}),
+            ...(input?.limit ? { limit: input.limit } : {}),
+            ...(input?.offset ? { offset: input.offset } : {}),
+          }),
+        ),
       ),
   }),
 

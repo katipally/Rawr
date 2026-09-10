@@ -1,7 +1,7 @@
 'use client'
 
 import { Select, TextArea, TextInput } from '@rawr/ui'
-import type { FieldType, ObjectKey } from '@rawr/db'
+import type { Conditional, FieldType, ObjectKey } from '@rawr/db'
 import { useState } from 'react'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { RichTextInput } from './rich-text-input.tsx'
@@ -32,6 +32,9 @@ export type EditableField = {
   /** Relations whose target is too large for a list: searched, not enumerated. */
   pickObject?: ObjectKey
   readOnly?: boolean
+  /** Conditional property logic. While this does not match the record's other
+   *  values, the field is not on the record. */
+  conditional?: Conditional | null
 }
 
 const numericTypes = new Set(['number', 'currency', 'percent', 'rating'])

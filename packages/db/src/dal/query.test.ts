@@ -23,6 +23,7 @@ const field = (over: Partial<RegistryField> & Pick<RegistryField, 'key' | 'type'
   storage: 'column',
   columnName: over.key,
   isRequired: false,
+  conditional: null,
   isCustom: false,
   isSystem: false,
   trackChanges: false,

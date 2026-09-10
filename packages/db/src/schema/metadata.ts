@@ -62,6 +62,14 @@ export const fieldDef = pgTable(
     /** Which import wrote this definition, so a property that arrived from a
      *  portal reads differently from one somebody added here. Null for both. */
     source: text('source'),
+    /** One group of conditions over sibling fields, in the shape the filter
+     *  builder produces. While it does not match, the property is not on the
+     *  record. Null means always shown, which is what a property is. */
+    conditional: jsonb('conditional'),
+    /** How many records hold a value, as of `filledAt`. Cached because the answer
+     *  costs a scan and the screen asks it for every property at once. */
+    filledCount: integer('filled_count'),
+    filledAt: timestamp('filled_at', { withTimezone: true }),
     position: integer('position').notNull().default(0),
     /** Has a dedicated expression index, created by a job and recorded in field_index. */
     isHot: boolean('is_hot').notNull().default(false),

@@ -1,10 +1,11 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
+import { conditionalBlocker, readConditional, type Conditional } from '../registry/conditional.ts'
 import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import type { AccountContext } from './context.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { forgetRegistry, SYSTEM_FIELD_KEYS } from './registry.ts'
+import { forgetRegistry, getRegistry, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
 
 /** The write side of the metadata registry. D4's whole premise is that marketing
  *  can add a property without a deploy, and that only holds if there is somewhere
@@ -38,6 +39,12 @@ export type AdminField = {
   indexState: string | null
   /** How many records currently hold a value, so a delete can say what is at stake. */
   filledCount: number | null
+  /** When that count was taken. A number with no date behind it reads as live,
+   *  and this one is a night old. */
+  filledAt: Date | null
+  /** While this does not match the record's other values, the property is not on
+   *  the record. Null is a property that is always there. */
+  conditional: Conditional | null
 }
 
 const OPTION_TYPES = new Set<FieldType>(['select', 'multi_select'])
@@ -61,6 +68,9 @@ export const listFields = async (ctx: AccountContext, objectKey?: string): Promi
         trackChanges: fieldDef.trackChanges,
         groupName: fieldDef.groupName,
         source: fieldDef.source,
+        conditional: fieldDef.conditional,
+        filledCount: fieldDef.filledCount,
+        filledAt: fieldDef.filledAt,
         indexState: fieldIndex.state,
       })
       .from(fieldDef)
@@ -92,7 +102,9 @@ export const listFields = async (ctx: AccountContext, objectKey?: string): Promi
       position: row.position,
       trackChanges: row.trackChanges,
       indexState: row.indexState ?? null,
-      filledCount: null,
+      filledCount: row.filledCount,
+      filledAt: row.filledAt,
+      conditional: readConditional(row.conditional),
     }))
   })
 
@@ -131,94 +143,179 @@ export type CreateFieldInput = {
   groupName?: string | null
   /** Which import wrote it, or null for a field somebody added here. */
   source?: string | null
+  /** Conditional property logic. The property is off the record until it matches. */
+  conditional?: Conditional | null
+}
+
+/** A rule over fields that exist, and never over the field it governs. Checked
+ *  here rather than at the editor, because an import and the agent tools reach
+ *  the same write path. */
+const checkedConditional = async (
+  tx: Tx,
+  objectId: string,
+  ownKey: string,
+  raw: Conditional | null | undefined,
+): Promise<Conditional | null> => {
+  const rule = readConditional(raw)
+  if (!rule) return null
+  const keys = await tx
+    .select({ key: fieldDef.key })
+    .from(fieldDef)
+    .where(and(eq(fieldDef.objectId, objectId), isNull(fieldDef.deletedAt)))
+  const blocker = conditionalBlocker(rule, ownKey, new Set(keys.map((row) => row.key)))
+  if (blocker) throw new Error(blocker)
+  return rule
+}
+
+/** The insert itself, shared by the one-at-a-time create and the bulk one an
+ *  import runs. Both have to validate identically: a property that arrives from a
+ *  file is the same property as one somebody typed. */
+const insertField = async (
+  tx: Tx,
+  ctx: AccountContext,
+  input: CreateFieldInput,
+): Promise<AdminField> => {
+  const object = await objectRow(tx, input.objectKey)
+  const key = input.key.trim().toLowerCase()
+  assertUsableFieldKey(key)
+  if (SYSTEM_FIELD_KEYS.has(key)) {
+    throw new Error(`"${key}" is a name Rawr uses for itself. Pick another.`)
+  }
+  if (!FIELD_TYPES.includes(input.type)) {
+    throw new Error(`"${input.type}" is not a field type. Pick one of: ${FIELD_TYPES.join(', ')}.`)
+  }
+  const label = input.label.trim()
+  if (label === '') throw new Error('A field needs a label.')
+
+  // Including soft-deleted rows: the key is still occupied until it is purged,
+  // and reusing it would resurrect old values under a new definition.
+  const [clash] = await tx
+    .select({ id: fieldDef.id, deletedAt: fieldDef.deletedAt })
+    .from(fieldDef)
+    .where(and(eq(fieldDef.objectId, object.id), eq(fieldDef.key, key)))
+    .limit(1)
+  if (clash) {
+    throw new Error(
+      clash.deletedAt
+        ? `${object.key} had a field called "${key}" that was deleted but not purged. Purge it first, or pick another name.`
+        : `${object.key} already has a field called "${key}".`,
+    )
+  }
+
+  const conditional = await checkedConditional(tx, object.id, key, input.conditional)
+
+  const [{ next = 0 } = { next: 0 }] = await tx.execute<{ next: number }>(
+    sql`select coalesce(max(position), -1) + 1 as next from field_def where object_id = ${object.id}`,
+  )
+
+  const options = validateOptions(input.type, input.options ?? [])
+  const [created] = await tx
+    .insert(fieldDef)
+    .values({
+      accountId: ctx.accountId,
+      objectId: object.id,
+      key,
+      label,
+      type: input.type,
+      storage: 'jsonb',
+      columnName: null,
+      isCustom: true,
+      isRequired: input.isRequired ?? false,
+      trackChanges: input.trackChanges ?? false,
+      options,
+      helpText: input.helpText?.trim() || null,
+      groupName: input.groupName?.trim() || null,
+      source: input.source ?? null,
+      conditional,
+      position: Number(next),
+    })
+    .returning({ id: fieldDef.id })
+  if (!created) throw new Error('The field could not be created.')
+
+  return {
+    id: created.id,
+    objectKey: object.key,
+    key,
+    label,
+    type: input.type,
+    storage: 'jsonb' as const,
+    isRequired: input.isRequired ?? false,
+    isCustom: true,
+    isSystem: false,
+    isHot: false,
+    options,
+    helpText: input.helpText?.trim() || null,
+    position: Number(next),
+    trackChanges: input.trackChanges ?? false,
+    groupName: input.groupName?.trim() || null,
+    source: input.source ?? null,
+    indexState: null,
+    filledCount: null,
+    filledAt: null,
+    conditional,
+  }
 }
 
 /** A new field is always jsonb-stored and always custom. The key is generated once
  *  and never changes, because renaming a label must never touch data. F0 §4. */
 export const createField = async (ctx: AccountContext, input: CreateFieldInput): Promise<AdminField> =>
   mutate(ctx, 'field_def', async (tx) => {
-    const object = await objectRow(tx, input.objectKey)
-    const key = input.key.trim().toLowerCase()
-    assertUsableFieldKey(key)
-    if (SYSTEM_FIELD_KEYS.has(key)) {
-      throw new Error(`"${key}" is a name Rawr uses for itself. Pick another.`)
+    const result = await insertField(tx, ctx, input)
+    forgetRegistry(ctx.accountId)
+    return {
+      result,
+      audit: {
+        entity: 'field_def',
+        entityId: result.id,
+        action: 'create',
+        before: null,
+        after: { objectKey: result.objectKey, key: result.key, label: result.label, type: input.type },
+      },
     }
-    if (!FIELD_TYPES.includes(input.type)) {
-      throw new Error(`"${input.type}" is not a field type. Pick one of: ${FIELD_TYPES.join(', ')}.`)
+  })
+
+/** Every property a file needs, in one transaction. An import that creates
+ *  sixty-eight of them one at a time can stop after forty and leave a mapping
+ *  pointing at fields half of which exist; this either creates all of them or
+ *  none. A key that is already taken is left alone and reported, because the
+ *  caller maps to it rather than making a second one. */
+export const createFields = async (
+  ctx: AccountContext,
+  inputs: CreateFieldInput[],
+): Promise<{ created: AdminField[]; alreadyThere: string[] }> =>
+  mutate(ctx, 'field_def', async (tx) => {
+    const created: AdminField[] = []
+    const alreadyThere: string[] = []
+    for (const input of inputs) {
+      const object = await objectRow(tx, input.objectKey)
+      const key = input.key.trim().toLowerCase()
+      const [taken] = await tx
+        .select({ id: fieldDef.id })
+        .from(fieldDef)
+        .where(and(eq(fieldDef.objectId, object.id), eq(fieldDef.key, key), isNull(fieldDef.deletedAt)))
+        .limit(1)
+      if (taken) {
+        alreadyThere.push(key)
+        continue
+      }
+      created.push(await insertField(tx, ctx, input))
     }
-    const label = input.label.trim()
-    if (label === '') throw new Error('A field needs a label.')
-
-    // Including soft-deleted rows: the key is still occupied until it is purged,
-    // and reusing it would resurrect old values under a new definition.
-    const [clash] = await tx
-      .select({ id: fieldDef.id, deletedAt: fieldDef.deletedAt })
-      .from(fieldDef)
-      .where(and(eq(fieldDef.objectId, object.id), eq(fieldDef.key, key)))
-      .limit(1)
-    if (clash) {
-      throw new Error(
-        clash.deletedAt
-          ? `${object.key} had a field called "${key}" that was deleted but not purged. Purge it first, or pick another name.`
-          : `${object.key} already has a field called "${key}".`,
-      )
-    }
-
-    const [{ next = 0 } = { next: 0 }] = await tx.execute<{ next: number }>(
-      sql`select coalesce(max(position), -1) + 1 as next from field_def where object_id = ${object.id}`,
-    )
-
-    const [created] = await tx
-      .insert(fieldDef)
-      .values({
-        accountId: ctx.accountId,
-        objectId: object.id,
-        key,
-        label,
-        type: input.type,
-        storage: 'jsonb',
-        columnName: null,
-        isCustom: true,
-        isRequired: input.isRequired ?? false,
-        trackChanges: input.trackChanges ?? false,
-        options: validateOptions(input.type, input.options ?? []),
-        helpText: input.helpText?.trim() || null,
-        groupName: input.groupName?.trim() || null,
-        source: input.source ?? null,
-        position: Number(next),
-      })
-      .returning({ id: fieldDef.id })
-    if (!created) throw new Error('The field could not be created.')
 
     forgetRegistry(ctx.accountId)
 
     return {
-      result: {
-        id: created.id,
-        objectKey: object.key,
-        key,
-        label,
-        type: input.type,
-        storage: 'jsonb' as const,
-        isRequired: input.isRequired ?? false,
-        isCustom: true,
-        isSystem: false,
-        isHot: false,
-        options: validateOptions(input.type, input.options ?? []),
-        helpText: input.helpText?.trim() || null,
-        position: Number(next),
-        trackChanges: input.trackChanges ?? false,
-        groupName: input.groupName?.trim() || null,
-        source: input.source ?? null,
-        indexState: null,
-        filledCount: null,
-      },
+      result: { created, alreadyThere },
       audit: {
         entity: 'field_def',
-        entityId: created.id,
+        entityId: created[0]?.id ?? null,
         action: 'create',
         before: null,
-        after: { objectKey: object.key, key, label, type: input.type },
+        after: {
+          objectKey: inputs[0]?.objectKey ?? null,
+          groupName: inputs[0]?.groupName ?? null,
+          created: created.map((field) => field.key),
+          alreadyThere,
+        },
       },
     }
   })
@@ -231,6 +328,8 @@ export type UpdateFieldInput = {
   isRequired?: boolean
   trackChanges?: boolean
   groupName?: string | null
+  /** Undefined leaves the rule alone; null clears it. */
+  conditional?: Conditional | null
 }
 
 /** Label, help text, choices and the two flags. The key and the type are not here
@@ -240,6 +339,7 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
   mutate(ctx, 'field_def', async (tx) => {
     const [before] = await tx
       .select({
+        objectId: fieldDef.objectId,
         key: fieldDef.key,
         label: fieldDef.label,
         type: fieldDef.type,
@@ -248,6 +348,7 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
         isRequired: fieldDef.isRequired,
         trackChanges: fieldDef.trackChanges,
         groupName: fieldDef.groupName,
+        conditional: fieldDef.conditional,
       })
       .from(fieldDef)
       .where(and(eq(fieldDef.id, input.id), isNull(fieldDef.deletedAt)))
@@ -260,6 +361,11 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
     const label = input.label?.trim()
     if (input.label !== undefined && !label) throw new Error('A field needs a label.')
 
+    const conditional =
+      input.conditional === undefined
+        ? undefined
+        : await checkedConditional(tx, before.objectId, before.key, input.conditional)
+
     await tx
       .update(fieldDef)
       .set({
@@ -269,6 +375,7 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
         ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
         ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),
         ...(input.groupName !== undefined ? { groupName: input.groupName?.trim() || null } : {}),
+        ...(conditional !== undefined ? { conditional } : {}),
       })
       .where(eq(fieldDef.id, input.id))
 
@@ -329,10 +436,20 @@ export const reorderFields = async (
     }
   })
 
-export type FieldUsage = { filled: number; label: string; key: string; objectKey: string }
+/** Where a property is spoken for. HubSpot calls this "Used in", and it is the
+ *  difference between deleting a property and breaking a form nobody remembered. */
+export type FieldUse = { kind: 'form' | 'segment' | 'view' | 'automation'; name: string }
 
-/** How many records hold a value, so a delete confirmation can say what is at stake
- *  rather than asking somebody to guess. */
+export type FieldUsage = {
+  filled: number
+  label: string
+  key: string
+  objectKey: string
+  usedIn: FieldUse[]
+}
+
+/** How many records hold a value and what refers to it, so a delete confirmation
+ *  can say what is at stake rather than asking somebody to guess. */
 export const fieldUsage = async (ctx: AccountContext, fieldId: string): Promise<FieldUsage> =>
   withAccount(ctx, async (tx) => {
     const [found] = await tx
@@ -360,8 +477,150 @@ export const fieldUsage = async (ctx: AccountContext, fieldId: string): Promise<
     const [row] = await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from ${table} where deleted_at is null and ${predicate}`,
     )
-    return { filled: Number(row?.n ?? 0), key: found.key, label: found.label, objectKey: found.objectKey }
+
+    // A form stores the field as "contact.email" and everything else as the bare
+    // key. Both are matched against the serialised jsonb: the key alphabet is
+    // [a-z0-9_], so a quoted key cannot match half of a longer one, and these
+    // four tables hold tens of rows rather than tens of thousands.
+    const quoted = `%"${found.key}"%`
+    const mapped = `%"${found.objectKey}.${found.key}"%`
+    const usedIn = await tx.execute<{ kind: FieldUse['kind']; name: string }>(sql`
+        select 'form' as kind, name from form where schema::text like ${mapped}
+        union all
+        select 'segment', s.name from segment s join object_def o on o.id = s.object_id
+         where o.key = ${found.objectKey} and s.query::text like ${quoted}
+        union all
+        select 'view', v.name from saved_view v join object_def o on o.id = v.object_id
+         where o.key = ${found.objectKey}
+           and (v.filters::text like ${quoted} or v.sorts::text like ${quoted} or v.columns::text like ${quoted})
+        union all
+        select 'automation', name from automation
+         where conditions::text like ${quoted} or steps::text like ${quoted}
+        limit 50`)
+
+    return {
+      filled: Number(row?.n ?? 0),
+      key: found.key,
+      label: found.label,
+      objectKey: found.objectKey,
+      usedIn: usedIn.map((use) => ({ kind: use.kind, name: use.name })),
+    }
   })
+
+/** Renaming a group is renaming it on every property that names one, because the
+ *  group is the name and nothing else holds it. HubSpot's Groups tab does the
+ *  same thing from the other end. */
+export const renameFieldGroup = async (
+  ctx: AccountContext,
+  objectKey: string,
+  from: string,
+  to: string,
+): Promise<{ moved: number }> =>
+  mutate(ctx, 'field_def', async (tx) => {
+    const object = await objectRow(tx, objectKey)
+    const name = to.trim()
+    if (!name) throw new Error('A group needs a name.')
+    const moved = await tx
+      .update(fieldDef)
+      .set({ groupName: name })
+      .where(and(eq(fieldDef.objectId, object.id), eq(fieldDef.groupName, from)))
+      .returning({ id: fieldDef.id })
+
+    forgetRegistry(ctx.accountId)
+
+    return {
+      result: { moved: moved.length },
+      audit: {
+        entity: 'field_def',
+        entityId: object.id,
+        action: 'update',
+        before: { groupName: from },
+        after: { groupName: name, moved: moved.length },
+      },
+    }
+  })
+
+/** Properties into a group, which is also how one is made: a group exists once
+ *  something is in it. Null empties them out of every group. */
+export const moveFieldsToGroup = async (
+  ctx: AccountContext,
+  objectKey: string,
+  fieldIds: string[],
+  groupName: string | null,
+): Promise<{ moved: number }> =>
+  mutate(ctx, 'field_def', async (tx) => {
+    const object = await objectRow(tx, objectKey)
+    if (fieldIds.length === 0) throw new Error('Pick at least one property to move.')
+    const name = groupName?.trim() || null
+    const moved = await tx
+      .update(fieldDef)
+      .set({ groupName: name })
+      .where(and(eq(fieldDef.objectId, object.id), inArray(fieldDef.id, fieldIds)))
+      .returning({ id: fieldDef.id })
+    if (moved.length !== fieldIds.length) {
+      throw new Error(`${fieldIds.length - moved.length} of those properties are not on ${object.key}.`)
+    }
+
+    forgetRegistry(ctx.accountId)
+
+    return {
+      result: { moved: moved.length },
+      audit: {
+        entity: 'field_def',
+        entityId: object.id,
+        action: 'update',
+        before: null,
+        after: { groupName: name, fieldIds },
+      },
+    }
+  })
+
+/** The fill rate for every property in the account, recomputed.
+ *
+ *  One statement per object rather than one per property: the answer for all
+ *  three hundred and seventy-two contact properties is three hundred and
+ *  seventy-two filtered aggregates over a single scan of `contact`, and the
+ *  alternative is three hundred and seventy-two scans. Run nightly, which is why
+ *  the count carries the time it was taken. */
+export const refreshFillRates = async (
+  ctx: AccountContext,
+): Promise<{ objects: number; fields: number }> => {
+  const registry = await getRegistry(ctx)
+  let counted = 0
+  for (const object of registry.objects) {
+    const fields = object.fields.filter((field) => !field.isSystem)
+    if (fields.length === 0) continue
+
+    const aggregates = fields.map((field, index) => {
+      assertUsableFieldKey(field.key)
+      const alias = sql.raw(`f${index}`)
+      if (field.storage === 'column' && field.columnName) {
+        assertUsableFieldKey(field.columnName)
+        return sql`count(*) filter (where ${sql.raw(`"${object.key}"."${field.columnName}"`)} is not null) as ${alias}`
+      }
+      const path = sql.raw(`"${object.key}"."custom" ->> '${field.key}'`)
+      return sql`count(*) filter (where ${path} is not null and ${path} <> '') as ${alias}`
+    })
+
+    const [row] = await withAccount(ctx, (tx) =>
+      tx.execute<Record<string, number>>(sql`
+        select ${sql.join(aggregates, sql`, `)}
+          from ${tableFor(object)}
+         where ${rowsOf(object)} and ${sql.raw(`"${object.key}"."deleted_at"`)} is null`),
+    )
+    if (!row) continue
+
+    const pairs = fields.map((field, index) => sql`(${field.id}::uuid, ${Number(row[`f${index}`] ?? 0)}::int)`)
+    await withAccount(ctx, (tx) =>
+      tx.execute(sql`
+        update field_def f set filled_count = v.n, filled_at = now()
+          from (values ${sql.join(pairs, sql`, `)}) as v(id, n)
+         where f.id = v.id`),
+    )
+    counted += fields.length
+  }
+  return { objects: registry.objects.length, fields: counted }
+}
 
 /** Phase one of two. The field disappears from every surface immediately and the
  *  data stays exactly where it was, so a misclick costs nothing. F0 §4. */
@@ -459,6 +718,8 @@ export const listDeletedFields = async (ctx: AccountContext): Promise<AdminField
       source: null,
       indexState: null,
       filledCount: null,
+      filledAt: null,
+      conditional: null,
     }))
   })
 

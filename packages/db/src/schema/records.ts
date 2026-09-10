@@ -289,6 +289,30 @@ export const activityLink = pgTable(
   ],
 )
 
+/** What a task is. HubSpot offers Call, Email and To-do; an integration adds its
+ *  own, which is why this is text with a check rather than an enum. */
+export const TASK_TYPES = ['todo', 'call', 'email'] as const
+export type TaskType = (typeof TASK_TYPES)[number]
+
+export const TASK_PRIORITIES = ['low', 'medium', 'high'] as const
+export type TaskPriority = (typeof TASK_PRIORITIES)[number]
+
+/** A named list of tasks, worked top to bottom. One task sits in at most one, so
+ *  the link is a column on the task; deleting a queue empties it and keeps the
+ *  work. */
+export const taskQueue = pgTable(
+  'task_queue',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    createdBy: uuid('created_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('task_queue_name_idx').on(t.accountId, sql`lower(${t.name})`)],
+)
+
 /** A9. One task hangs on at most one record, which is how HubSpot's task queue
  *  behaves and is all Trevor's Monday chase needs. */
 export const task = pgTable(
@@ -298,7 +322,13 @@ export const task = pgTable(
     accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     body: text('body'),
+    type: text('type').$type<TaskType>().notNull().default('todo'),
+    priority: text('priority').$type<TaskPriority>().notNull().default('medium'),
     dueDate: date('due_date'),
+    /** When the person asked to be told, which is before the due date rather than
+     *  after it. Null is the common case and carries no notice. */
+    remindAt: timestamp('remind_at', { withTimezone: true }),
+    queueId: uuid('queue_id').references(() => taskQueue.id, { onDelete: 'set null' }),
     status: taskStatusEnum('status').notNull().default('open'),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     assigneeId: uuid('assignee_id').references(() => userAccount.id, { onDelete: 'set null' }),
@@ -312,6 +342,10 @@ export const task = pgTable(
     index('task_queue_idx').on(t.accountId, t.status, t.dueDate, t.id),
     index('task_assignee_idx').on(t.accountId, t.assigneeId, t.status, t.dueDate),
     index('task_entity_idx').on(t.accountId, t.entityType, t.entityId),
+    index('task_in_queue_idx').on(t.accountId, t.queueId, t.status, t.dueDate),
+    index('task_remind_idx')
+      .on(t.remindAt)
+      .where(sql`status = 'open' and remind_at is not null`),
   ],
 )
 

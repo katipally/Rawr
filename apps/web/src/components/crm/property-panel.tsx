@@ -1,5 +1,6 @@
 'use client'
 
+import { matchesConditional } from '@rawr/db/registry'
 import { Button, IconButton, cn, useToast } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -108,9 +109,14 @@ export const PropertyPanel = ({
     <div className="flex flex-col gap-3">
       {sections.map((section) => {
         const isCollapsed = collapsed[section.title] === true
+        // Conditional property logic, applied in the one place the panel decides
+        // what to draw. A property whose rule does not match the values on screen
+        // is not on the record; it comes back the moment the rule matches, and
+        // whatever it already held is untouched either way.
         const sectionFields = section.fieldKeys.flatMap((key) => {
           const field = byKey.get(key)
-          return field ? [field] : []
+          if (!field) return []
+          return matchesConditional(field.conditional, local) ? [field] : []
         })
         if (sectionFields.length === 0) return null
 

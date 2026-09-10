@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, sql, type Column, type SQL } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
+import { readConditional, type Conditional } from '../registry/conditional.ts'
 import { TYPE_META, type FieldType, type Operator } from '../registry/types.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
@@ -44,6 +45,9 @@ export type RegistryField = {
   helpText: string | null
   position: number
   operators: readonly Operator[]
+  /** While this does not match the record's other values, the field is not on the
+   *  record. Null is a field that is always there. */
+  conditional: Conditional | null
 }
 
 export type RegistryObject = {
@@ -114,6 +118,7 @@ const load = async (tx: Tx): Promise<Registry> => {
       options: fieldDef.options,
       helpText: fieldDef.helpText,
       position: fieldDef.position,
+      conditional: fieldDef.conditional,
     })
     .from(objectDef)
     .leftJoin(
@@ -164,6 +169,7 @@ const load = async (tx: Tx): Promise<Registry> => {
       helpText: row.helpText,
       position: row.position ?? 0,
       operators: TYPE_META[row.type as FieldType].operators,
+      conditional: readConditional(row.conditional),
     }
     object.fields.push(field)
     object.byKey.set(field.key, field)

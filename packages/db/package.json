@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
+    "./registry": "./src/registry/index.ts",
     "./forms": "./src/dal/form-schema.ts",
     "./templates": "./src/dal/templates.ts"
   },
@@ -19,6 +20,7 @@
     "test": "DATABASE_URL=postgres://unit:test@127.0.0.1:5432/none DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none node --test \"src/**/*.test.ts\"",
     "verify:guards": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-guards.ts",
     "verify:crm": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-crm.ts",
+    "verify:automations": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-automations.ts",
     "verify:imports": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-imports.ts",
     "verify:forms": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-forms.ts",
     "verify:booking": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-booking.ts",

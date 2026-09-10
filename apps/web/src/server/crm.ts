@@ -143,6 +143,7 @@ export const toEditableFields = (
         helpText: field.helpText,
         options: field.options,
         readOnly: isReadOnly(field),
+        conditional: field.conditional,
         ...(choices ? { choices } : {}),
         ...(pickObject ? { pickObject } : {}),
       }
