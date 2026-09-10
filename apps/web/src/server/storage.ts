@@ -5,10 +5,14 @@ import { env } from '~/lib/env.ts'
 /** Object storage over the S3 protocol, so the host is an endpoint rather than a
  *  rewrite: Supabase, R2, MinIO, S3 and B2 all speak it.
  *
- *  Nothing about a file passes through this app. The browser is handed a signed
- *  URL and uploads straight to storage, and reads are links that expire, so a
- *  forty megabyte PDF never occupies a request worker and the bucket is never
- *  public. */
+ *  Reads never pass through this app: a link is signed per click and expires, so
+ *  the bucket is never public and a forty megabyte PDF is fetched by the browser
+ *  from storage directly.
+ *
+ *  Writes do pass through, because the browser cannot reach storage: this app's
+ *  content security policy allows connections to its own origin only, so a PUT
+ *  from a page to a bucket on another host never leaves the browser. See
+ *  server/uploads.ts. */
 
 export const storageConfigured = Boolean(
   env.S3_ENDPOINT && env.S3_ACCESS_KEY_ID && env.S3_SECRET_ACCESS_KEY && env.S3_BUCKET,
@@ -67,6 +71,20 @@ export const signedDownload = async (
     }),
     { expiresIn: seconds },
   )
+
+/** The bytes, forwarded. Length is given rather than discovered so storage can
+ *  refuse a truncated upload instead of keeping one. */
+export const putObject = async (key: string, body: Uint8Array, contentType: string): Promise<void> => {
+  await client().send(
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      ContentLength: body.byteLength,
+    }),
+  )
+}
 
 export const removeObject = async (key: string): Promise<void> => {
   await client().send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))

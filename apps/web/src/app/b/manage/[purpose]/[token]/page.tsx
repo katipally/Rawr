@@ -99,6 +99,14 @@ const ManageBookingPage = async ({
       {booking.state === 'confirmed' ? (
         <p style={{ marginBlockStart: '0.5rem' }}>
           <a href={bookingIcsPath(booking.rescheduleToken)}>{BOOKING_COPY.addToCalendar}</a>
+          {/* The move issued fresh tokens and the old links are spent, so the
+              confirmation is the only place the new cancel link exists. */}
+          {purpose === 'reschedule' && done ? (
+            <>
+              {' · '}
+              <a href={`/b/manage/cancel/${booking.cancelToken}`}>Cancel this meeting</a>
+            </>
+          ) : null}
         </p>
       ) : null}
     </div>

@@ -21,6 +21,7 @@ import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateT
 import {
   bookedPath,
   calendarsPath,
+  encodeFilters,
   formsPath,
   importsPath,
   integrationsPath,
@@ -221,12 +222,15 @@ const HomePage = async ({
   )
   const pipelines = withDeals.length > 0 ? withDeals : allPipelines.slice(0, 1)
 
+  // The same window readDashboard counted in, so the tile opens the rows it counted.
+  const newContactsSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+
   const tiles: Tile[] = [
     { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
     { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(account, 'deal', 'all', 'board') },
     { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
     { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(account, { mine: '1' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
-    { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at' }) },
+    { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at', filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'on_or_after', value: newContactsSince }] }]) }) },
     { label: 'Submissions to review', value: board.quarantined.toLocaleString(), href: submissionsPath(account, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) },
   ]
 
@@ -318,7 +322,17 @@ const HomePage = async ({
                       .map((stage) => (
                         <tr key={stage.stageId} className="border-t border-divider">
                           <td className="w-full max-w-0 truncate py-1.5 pr-3">
-                            <Link href={objectView(account, 'deal', 'all', 'board', { pipeline: pipelineId })}>{stage.stageName}</Link>
+                            {/* The board has no stage address, so the row opens the list
+                                filtered to exactly the deals it counted. */}
+                            <Link
+                              href={objectView(account, 'deal', 'all', 'list', {
+                                filters: encodeFilters([
+                                  { conjunction: 'and', conditions: [{ field: 'stage_id', operator: 'is', value: stage.stageId }] },
+                                ]),
+                              })}
+                            >
+                              {stage.stageName}
+                            </Link>
                             {stage.probability !== null ? <span className="ml-1 text-small text-secondary">{stage.probability}%</span> : null}
                           </td>
                           <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>

@@ -6,6 +6,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import type { Lookups } from '~/server/crm.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { resolveDate } from './dates.ts'
 
 /** F5 §4. What an agent says, turned into what the registry accepts, or refused.
@@ -55,7 +56,7 @@ export const prepareFields = async (
     // The valid list comes back with the refusal so the next attempt succeeds,
     // rather than making the agent guess a second time. §Edge cases.
     throw new FieldError(
-      `${unknown.join(', ')} ${unknown.length === 1 ? 'is not a field' : 'are not fields'} on ${object.nameSingular.toLowerCase()}. Valid keys: ${object.fields.map((f) => f.key).join(', ')}.`,
+      `${unknown.join(', ')} ${unknown.length === 1 ? 'is not a field' : 'are not fields'} on ${inSentence(object.nameSingular)}. Valid keys: ${object.fields.map((f) => f.key).join(', ')}.`,
     )
   }
 

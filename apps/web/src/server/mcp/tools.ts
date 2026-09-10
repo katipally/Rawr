@@ -25,6 +25,7 @@ import {
   type Registry,
   type RegistryObject } from '@rawr/db'
 import { readLookups, type Lookups } from '~/server/crm.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { resolveDate, todayFor } from './dates.ts'
 import { FieldError, objectFromArg, prepareFields } from './fields.ts'
 
@@ -120,7 +121,7 @@ const searchRecords: ToolDefinition = {
   title: 'Search records',
   writes: false,
   description: ({ registry }) =>
-    `Find records by name, email or domain across every object in this account (${registry.objects.map((entry) => entry.namePlural.toLowerCase()).join(', ')}), and also tasks by title and timeline entries by what they say. Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. A task or a timeline entry is not a record: each carries \`on\`, the record it hangs on, and that is what get_record and the write tools take. Omit \`object\` to search everything.`,
+    `Find records by name, email or domain across every object in this account (${registry.objects.map((entry) => inSentence(entry.namePlural)).join(', ')}), and also tasks by title and timeline entries by what they say. Full text plus fuzzy, so a misspelling still lands. Returns ids to pass to the other tools. A task or a timeline entry is not a record: each carries \`on\`, the record it hangs on, and that is what get_record and the write tools take. Omit \`object\` to search everything.`,
   inputSchema: ({ registry }) => ({
     type: 'object',
     properties: {
@@ -532,7 +533,7 @@ const createRecordTool: ToolDefinition = {
 
     return {
       text: [
-        `Created ${object.nameSingular.toLowerCase()} ${record?.displayName ?? ''} (id ${created.id}).`,
+        `Created ${inSentence(object.nameSingular)} ${record?.displayName ?? ''} (id ${created.id}).`,
         ...prepared.notes,
         ...created.warnings,
         ...(created.autoCompanyId ? ['Associated to its company by email domain.'] : []),
@@ -744,7 +745,7 @@ const resolveOrExplain = async (
 ): Promise<{ id: string; displayName: string } | { problem: ToolResult }> => {
   const names = { singular: object.nameSingular, plural: object.namePlural }
   if (!query.trim()) {
-    return { problem: { text: `Which ${names.singular.toLowerCase()}? Give a name or an id.`, isError: true } }
+    return { problem: { text: `Which ${inSentence(names.singular)}? Give a name or an id.`, isError: true } }
   }
   const resolution = await resolveRecord(context.caller.ctx, object.key, query)
   if (resolution.kind === 'one') {

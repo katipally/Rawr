@@ -204,8 +204,8 @@ const GrantGrid = ({
         return (
           <div key={hub} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
             <div>
-              <p className="capitalize text-body">
-                {hub}
+              <p className="text-body">
+                <span className="capitalize">{hub}</span>
                 {HUBS_WITHOUT_SCREENS.has(hub) ? <span className="ml-2 text-small text-secondary">no screens yet</span> : null}
               </p>
               <p className="text-small text-secondary">{HUB_HINT[hub]}</p>
@@ -297,22 +297,37 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  const [ending, setEnding] = useState<{ userId: string; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  /** What a member looks like after a change this browser has made but the server
+   *  has not sent back yet. router.refresh takes a round trip, and a permission
+   *  row that still reads the old way for that long looks like the save failed.
+   *  Dropped on failure, so the server rows are what is left. */
+  const [pending, setPending] = useState<Record<string, Partial<MemberListRow>>>({})
 
-  const run = async (what: () => Promise<unknown>, done: string) => {
+  const run = async (what: () => Promise<unknown>, done: string, ahead?: { userId: string; patch: Partial<MemberListRow> }) => {
     setBusy(true)
+    if (ahead) setPending((current) => ({ ...current, [ahead.userId]: { ...current[ahead.userId], ...ahead.patch } }))
     try {
       await what()
       toast('success', done)
       router.refresh()
     } catch (error) {
+      if (ahead) {
+        setPending((current) => {
+          const next = { ...current }
+          delete next[ahead.userId]
+          return next
+        })
+      }
       toast('error', errorMessage(error))
     } finally {
       setBusy(false)
     }
   }
 
-  const shown = rows.filter((row) =>
+  const members = rows.map((row) => (pending[row.userId] ? { ...row, ...pending[row.userId] } : row))
+  const shown = members.filter((row) =>
     tab === 'active' ? row.state === 'active' : tab === 'deactivated' ? row.state === 'deactivated' : false,
   )
 
@@ -327,10 +342,10 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               onClick={() => setTab(key)}
             >
               {key === 'active'
-                ? `Active (${rows.filter((r) => r.state === 'active').length})`
+                ? `Active (${members.filter((r) => r.state === 'active').length})`
                 : key === 'pending'
                   ? `Pending (${invitations.length})`
-                  : `Deactivated (${rows.filter((r) => r.state === 'deactivated').length})`}
+                  : `Deactivated (${members.filter((r) => r.state === 'deactivated').length})`}
             </Button>
           ))}
         </div>
@@ -427,13 +442,16 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                           key: 'reactivate',
                           label: 'Restore access',
                           onSelect: () =>
-                            run(() => api.account.members.reactivate.mutate({ userId: row.userId }), 'Access restored.'),
+                            run(
+                              () => api.account.members.reactivate.mutate({ userId: row.userId }),
+                              'Access restored.',
+                              { userId: row.userId, patch: { state: 'active' } },
+                            ),
                         }
                       : {
                           key: 'deactivate',
                           label: 'End access',
-                          onSelect: () =>
-                            run(() => api.account.members.deactivate.mutate({ userId: row.userId }), 'Access ended.'),
+                          onSelect: () => setEnding({ userId: row.userId, name: row.name }),
                         },
                     {
                       key: 'copy',
@@ -470,10 +488,14 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               <Button
                 disabled={busy}
                 onClick={() =>
-                  run(async () => {
-                    await api.account.members.setGrants.mutate({ userId: editing.userId, ...editing.grants })
-                    setEditing(null)
-                  }, 'Permissions saved.')
+                  run(
+                    async () => {
+                      await api.account.members.setGrants.mutate({ userId: editing.userId, ...editing.grants })
+                      setEditing(null)
+                    },
+                    'Permissions saved.',
+                    { userId: editing.userId, patch: editing.grants },
+                  )
                 }
               >
                 Save
@@ -550,21 +572,61 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               </Button>
               <Button
                 disabled={busy || copying.fromUserId === ''}
-                onClick={() =>
-                  run(async () => {
-                    await api.account.members.copyGrants.mutate({
-                      fromUserId: copying.fromUserId,
-                      toUserId: copying.toUserId,
-                    })
-                    setCopying(null)
-                  }, 'Permissions copied.')
-                }
+                onClick={() => {
+                  const source = members.find((row) => row.userId === copying.fromUserId)
+                  run(
+                    async () => {
+                      await api.account.members.copyGrants.mutate({
+                        fromUserId: copying.fromUserId,
+                        toUserId: copying.toUserId,
+                      })
+                      setCopying(null)
+                    },
+                    'Permissions copied.',
+                    source ? { userId: copying.toUserId, patch: grantsOf(source) } : undefined,
+                  )
+                }}
               >
                 Copy
               </Button>
             </div>
           </div>
         ) : null}
+      </Modal>
+
+      {/* Ending access is the one action here that logs somebody out of their work,
+          so it is confirmed like every other destructive action in Rawr. */}
+      <Modal
+        open={ending !== null}
+        onClose={() => setEnding(null)}
+        title={`End access for ${ending?.name ?? ''}?`}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" disabled={busy} onClick={() => setEnding(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() => {
+                const target = ending!
+                setEnding(null)
+                run(() => api.account.members.deactivate.mutate({ userId: target.userId }), 'Access ended.', {
+                  userId: target.userId,
+                  patch: { state: 'deactivated' },
+                })
+              }}
+            >
+              End access
+            </Button>
+          </>
+        }
+      >
+        <p>
+          They are signed out and cannot get back in. Their records, notes and emails stay where
+          they are, and restoring access puts back exactly what they held.
+        </p>
       </Modal>
 
       {/* The link is shown once and stored nowhere, so a lost one is resent rather

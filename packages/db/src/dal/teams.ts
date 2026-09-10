@@ -102,7 +102,8 @@ export const setTeamMembers = async (
     }
   })
 
-/** Who can be put on a team: everybody seated in this account. */
+/** Who can be put on a team: everybody still seated in this account. A
+ *  deactivated member keeps the row but must not take a turn in the rotation. */
 export const listAssignable = async (
   ctx: AccountContext,
 ): Promise<{ userId: string; name: string; email: string }[]> =>
@@ -110,6 +111,7 @@ export const listAssignable = async (
     const rows = await tx.execute<{ user_id: string; name: string; email: string }>(sql`
       select u.id as user_id, u.name, u.email
         from membership m join user_account u on u.id = m.user_id
+       where m.state <> 'deactivated'
        order by lower(u.name)
     `)
     return rows.map((row) => ({ userId: row.user_id, name: row.name, email: row.email }))

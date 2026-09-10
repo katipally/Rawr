@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, DataTable, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
+import { Button, DataTable, EmptyState, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
@@ -63,6 +63,7 @@ export const FormsTable = ({
   const [embedding, setEmbedding] = useState<FormRow | null>(null)
   const [moving, setMoving] = useState<FormRow | null>(null)
   const [naming, setNaming] = useState<{ id: string | null; name: string } | null>(null)
+  const [removingFolder, setRemovingFolder] = useState<FolderRow | null>(null)
   const [busy, setBusy] = useState(false)
 
   const folder = params.get('folder')
@@ -225,12 +226,10 @@ export const FormsTable = ({
                 </Chip>
                 <Chip
                   current={false}
-                  onClick={() =>
-                    run(async () => {
-                      await api.forms.removeFolder.mutate({ id: folder })
-                      go(null)
-                    })
-                  }
+                  onClick={() => {
+                    const current = folders.find((entry) => entry.id === folder)
+                    if (current) setRemovingFolder(current)
+                  }}
                 >
                   Delete folder
                 </Chip>
@@ -246,6 +245,13 @@ export const FormsTable = ({
         rowKey={(row) => row.id}
         caption="Forms in this account"
         onRowClick={(row) => router.push(formsPath(account, row.id))}
+        empty={
+          folder === null ? (
+            <EmptyState title="No forms yet" description="Create a form to start collecting submissions." />
+          ) : (
+            <EmptyState title="No forms here" description="Nothing is filed under this chip yet." />
+          )
+        }
       />
       {pager}
 
@@ -279,6 +285,41 @@ export const FormsTable = ({
             ))}
           </Select>
         </Field>
+      </Modal>
+
+      <Modal
+        open={removingFolder !== null}
+        size="sm"
+        title={removingFolder ? `Delete “${removingFolder.name}”?` : 'Delete folder'}
+        onClose={() => setRemovingFolder(null)}
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            {removingFolder && removingFolder.forms > 0
+              ? `Deleting a folder empties it: the ${removingFolder.forms.toLocaleString()} ${removingFolder.forms === 1 ? 'form' : 'forms'} filed here move to Unfiled and keep collecting. A filing decision never takes a live capture path down with it.`
+              : 'The folder is empty, so nothing else changes.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setRemovingFolder(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() => {
+                const target = removingFolder
+                if (!target) return
+                setRemovingFolder(null)
+                void run(async () => {
+                  await api.forms.removeFolder.mutate({ id: target.id })
+                  go(null)
+                })
+              }}
+            >
+              Delete folder
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal

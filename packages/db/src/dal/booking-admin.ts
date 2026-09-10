@@ -187,7 +187,7 @@ export const saveBookingPage = async (
   // any: a page with no extra questions is the normal case, because the name and
   // the address are asked regardless.
   const questions = readQuestions(input.questions)
-  if (questions.length > 0) assertSchemaIsUsable(questions)
+  if (questions.length > 0) assertSchemaIsUsable(questions, true)
 
   const ownerId =
     input.kind === 'one_on_one'

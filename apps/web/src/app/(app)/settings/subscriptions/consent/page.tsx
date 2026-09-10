@@ -1,4 +1,4 @@
-import { CONSENT_PAGE, listConsentRecords } from '@rawr/db'
+import { CONSENT_FILTERS, CONSENT_PAGE, listConsentRecords, type ConsentFilter } from '@rawr/db'
 import { PageHeader } from '@rawr/ui'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ConsentTable } from './consent-table.tsx'
@@ -12,14 +12,21 @@ import { ConsentTable } from './consent-table.tsx'
 const ConsentRecordsPage = async ({
   searchParams,
 }: {
-  searchParams: Promise<{ skip?: string }>
+  searchParams: Promise<{ skip?: string; q?: string; cat?: string }>
 }) => {
   const session = await readSession()
   if (!session) return null
 
-  const { skip } = await searchParams
+  const { skip, q, cat } = await searchParams
   const offset = Math.max(0, Number(skip) || 0)
-  const page = await listConsentRecords(contextFrom(session), { limit: CONSENT_PAGE, offset })
+  const search = q?.trim() ?? ''
+  const category = CONSENT_FILTERS.includes(cat as ConsentFilter) ? (cat as ConsentFilter) : null
+  const page = await listConsentRecords(contextFrom(session), {
+    limit: CONSENT_PAGE,
+    offset,
+    search: search || null,
+    category,
+  })
 
   return (
     <div className="flex flex-col gap-4">
@@ -40,6 +47,9 @@ const ConsentRecordsPage = async ({
         offset={offset}
         perPage={CONSENT_PAGE}
         hasMore={page.hasMore}
+        search={search}
+        category={category}
+        account={session.accountSlug}
       />
     </div>
   )

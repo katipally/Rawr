@@ -276,6 +276,9 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
               </>
             )}
             <div className="flex flex-wrap gap-2">
+              <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
               <Button
                 variant="destructive"
                 busy={busy}
@@ -291,9 +294,6 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                 }
               >
                 Delete stage
-              </Button>
-              <Button variant="tertiary" onClick={() => setRemoving(null)}>
-                Cancel
               </Button>
             </div>
           </div>
@@ -314,6 +314,9 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
               so nothing is lost either way — but a board somebody had open stops existing.
             </p>
             <div className="flex flex-wrap gap-2">
+              <Button variant="tertiary" onClick={() => setDeleting(null)}>
+                Cancel
+              </Button>
               <Button
                 variant="destructive"
                 busy={busy}
@@ -325,9 +328,6 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                 }
               >
                 Delete pipeline
-              </Button>
-              <Button variant="tertiary" onClick={() => setDeleting(null)}>
-                Cancel
               </Button>
             </div>
           </div>

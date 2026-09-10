@@ -76,6 +76,17 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
   const [templateId, setTemplateId] = useState('')
   const [scheduledAt, setScheduledAt] = useState('')
 
+  /** The first thing still missing, named, so a primary button that will not
+   *  press says why instead of looking broken. */
+  const missing =
+    !segmentId ? 'an audience'
+    : !listId ? 'a Brevo list'
+    : !name.trim() ? 'a campaign name'
+    : !subject.trim() ? 'a subject line'
+    : !templateId ? 'a design'
+    : !senderEmail ? 'a from address'
+    : null
+
   const load = async () => {
     setLoading(true)
     setError(null)
@@ -250,16 +261,19 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
         onClose={() => setComposing(false)}
         title="Aim a campaign"
         footer={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {missing ? <p className="text-small text-secondary">Still needs {missing}.</p> : null}
+            <Button variant="tertiary" onClick={() => setComposing(false)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
-              disabled={!segmentId || !listId || !name.trim() || !subject.trim() || !senderEmail || !templateId}
+              disabled={missing !== null}
               onClick={() => void schedule()}
             >
               {scheduledAt ? 'Push and schedule' : 'Push and create the draft'}
             </Button>
-            <Button onClick={() => setComposing(false)}>Cancel</Button>
           </div>
         }
       >

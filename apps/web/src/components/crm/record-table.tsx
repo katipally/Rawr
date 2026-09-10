@@ -156,6 +156,7 @@ export const RecordTable = ({
         <BulkBar
           object={object}
           objectLabel={objectLabel}
+          objectPlural={objectPlural}
           ids={live}
           fields={bulkFields}
           onDone={() => setSelected(new Set())}
@@ -180,7 +181,9 @@ export const RecordTable = ({
             description={
               params.q
                 ? `No record matches “${params.q}”. Clear the search, or widen the filters.`
-                : 'This view has no records yet. Import a file, or create one.'
+                : params.filters
+                  ? 'No record matches these filters. Widen them, or clear them.'
+                  : 'This view has no records yet. Import a file, or create one.'
             }
           />
         }

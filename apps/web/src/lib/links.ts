@@ -181,7 +181,9 @@ export const automationRunsPath = (automationId: string): string =>
 export const subscriptionsPath = (): string => '/settings/subscriptions'
 
 /** The cookie choices strangers made, as evidence rather than a setting. */
-export const consentRecordsPath = (params: { skip?: string | undefined } = {}): string =>
+export const consentRecordsPath = (
+  params: { skip?: string | undefined; q?: string | undefined; cat?: string | undefined } = {},
+): string =>
   `/settings/subscriptions/consent${query(params)}`
 
 /** Outgoing webhooks and unmatched inbound events. Connecting a provider is an

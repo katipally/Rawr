@@ -1,7 +1,7 @@
 import { readSegment, readSegmentMembers } from '@rawr/db'
 import { notFound, redirect } from 'next/navigation'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
-import { ListMembers, PAGE_SIZE } from './list-members.tsx'
+import { ListMembers } from './list-members.tsx'
 
 /** One list, and who is in it.
  *
@@ -9,6 +9,11 @@ import { ListMembers, PAGE_SIZE } from './list-members.tsx'
  *  it is the only kind with a page of its own. An active list opens as a filtered
  *  view instead, because its membership is its conditions and editing it here
  *  would be editing a number rather than the rule behind it. */
+/** One screenful, defined here rather than in the client module beside it: a
+ *  value exported across the 'use client' boundary arrives as a module reference
+ *  and reached the query as NaN. */
+const PAGE_SIZE = 50
+
 const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: string }> }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -32,6 +37,7 @@ const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: 
         memberCount: list.memberCount,
       }}
       initial={members.map((member) => ({ ...member, enteredAt: member.enteredAt.toISOString() }))}
+      pageSize={PAGE_SIZE}
       canWrite={sessionCanEdit(session, 'marketing')}
     />
   )

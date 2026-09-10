@@ -2,7 +2,7 @@
 
 import { Alert, Button, Field, IconButton, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AdminField, Conditional, FieldType } from '@rawr/db'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
@@ -101,6 +101,14 @@ export const PropertyList = ({
     setTrackChanges(false)
     setConditional(null)
   }
+
+  const [renamed, setRenamed] = useState<{ from: string; to: string } | null>(null)
+
+  // Dropped the moment the server's own rows agree, so the overlay can never
+  // outlive the answer it was standing in for.
+  useEffect(() => {
+    if (renamed && !rows.some((field) => field.groupName === renamed.from)) setRenamed(null)
+  }, [rows, renamed])
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -204,10 +212,16 @@ export const PropertyList = ({
    *  buttons that can only ever answer with a red toast. */
   const canEdit = canWrite
 
-  const groups = [...new Set(rows.map((field) => field.groupName).filter((name): name is string => Boolean(name)))].sort()
+  /** A rename the server has been told about and has not been read back yet.
+   *  Without it the list beside the table keeps the old name until the refresh
+   *  lands, with the group just renamed selected and not in it. */
+  const groupOf = (field: AdminField): string | null =>
+    field.groupName && renamed?.from === field.groupName ? renamed.to : field.groupName
+
+  const groups = [...new Set(rows.map(groupOf).filter((name): name is string => Boolean(name)))].sort()
   const countIn = (name: string) =>
-    rows.filter((field) => (name === 'ungrouped' ? !field.groupName : field.groupName === name)).length
-  const ungrouped = rows.filter((field) => !field.groupName).length
+    rows.filter((field) => (name === 'ungrouped' ? !groupOf(field) : groupOf(field) === name)).length
+  const ungrouped = rows.filter((field) => !groupOf(field)).length
 
   const openUses = async (field: AdminField) => {
     if (openUse === field.id) {
@@ -235,7 +249,7 @@ export const PropertyList = ({
   const needle = query.trim().toLowerCase()
   const visible = rows.filter(
     (field) =>
-      (group === '' || (group === 'ungrouped' ? !field.groupName : field.groupName === group)) &&
+      (group === '' || (group === 'ungrouped' ? !groupOf(field) : groupOf(field) === group)) &&
       (needle === '' ||
         field.label.toLowerCase().includes(needle) ||
         field.key.includes(needle) ||
@@ -392,7 +406,7 @@ export const PropertyList = ({
                 {!field.isCustom && !field.isSystem ? <Badge tone="muted">Core</Badge> : null}
                 {field.isHot ? <Badge tone="ok">Indexed{field.indexState ? ` · ${field.indexState}` : ''}</Badge> : null}
                 {field.trackChanges ? <Badge tone="muted">On the timeline</Badge> : null}
-                {field.groupName ? <Badge tone="muted">{field.groupName}</Badge> : null}
+                {groupOf(field) ? <Badge tone="muted">{groupOf(field)}</Badge> : null}
                 {field.source ? <Badge tone="muted">from {field.source}</Badge> : null}
                 {field.conditional ? <Badge tone="muted">Conditional</Badge> : null}
               </p>
@@ -623,11 +637,11 @@ export const PropertyList = ({
           />
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void create()}>
-              Create property
-            </Button>
             <Button variant="tertiary" onClick={() => setCreating(false)}>
               Cancel
+            </Button>
+            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void create()}>
+              Create property
             </Button>
           </div>
         </div>
@@ -685,11 +699,11 @@ export const PropertyList = ({
           />
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void saveEdit()}>
-              Save
-            </Button>
             <Button variant="tertiary" onClick={() => setEditing(null)}>
               Cancel
+            </Button>
+            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void saveEdit()}>
+              Save
             </Button>
           </div>
         </div>
@@ -711,6 +725,9 @@ export const PropertyList = ({
             what actually removes the data.
           </p>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -724,9 +741,6 @@ export const PropertyList = ({
             >
               Delete property
             </Button>
-            <Button variant="tertiary" onClick={() => setRemoving(null)}>
-              Cancel
-            </Button>
           </div>
         </div>
       </Modal>
@@ -739,6 +753,9 @@ export const PropertyList = ({
             the definition. It cannot be undone and there is no copy anywhere else.
           </Alert>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPurging(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -752,9 +769,6 @@ export const PropertyList = ({
               }}
             >
               Purge permanently
-            </Button>
-            <Button variant="tertiary" onClick={() => setPurging(null)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -783,6 +797,9 @@ export const PropertyList = ({
             </p>
           )}
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setGrouping(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -803,6 +820,7 @@ export const PropertyList = ({
                   target.rename ? 'Group renamed.' : 'Group created.',
                 ).then((ok) => {
                   if (!ok) return
+                  if (target.rename) setRenamed({ from: target.name, to: name })
                   setGrouping(null)
                   setPicked(new Set())
                   setGroup(name)
@@ -810,9 +828,6 @@ export const PropertyList = ({
               }}
             >
               {grouping?.rename ? 'Rename group' : 'Create group'}
-            </Button>
-            <Button variant="tertiary" onClick={() => setGrouping(null)}>
-              Cancel
             </Button>
           </div>
           {grouping && !grouping.rename && picked.size === 0 ? (

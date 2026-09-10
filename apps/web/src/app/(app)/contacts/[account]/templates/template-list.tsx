@@ -4,6 +4,7 @@ import { Button, Card, EmptyState, Field, Modal, PageHeader, TextInput, useToast
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { Markdown } from '~/components/crm/markdown.tsx'
+import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
@@ -173,6 +174,9 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
                 onChange={(next) => setDraft({ ...draft, bodyText: next })}
               />
             </Field>
+            <MergeFieldPicker
+              onInsert={(token) => setDraft({ ...draft, bodyText: `${draft.bodyText}${token}` })}
+            />
             <div className="flex justify-end gap-2">
               <Button variant="tertiary" onClick={() => setDraft(null)}>
                 Cancel

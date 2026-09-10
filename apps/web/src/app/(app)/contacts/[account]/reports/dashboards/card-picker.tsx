@@ -69,7 +69,10 @@ export const CardPicker = ({
       size="lg"
       title={title}
       footer={
-        <div className="flex gap-2">
+        <>
+          <Button variant="tertiary" onClick={onClose}>
+            Cancel
+          </Button>
           <Button
             variant="primary"
             busy={busy}
@@ -78,8 +81,7 @@ export const CardPicker = ({
           >
             Save
           </Button>
-          <Button onClick={onClose}>Cancel</Button>
-        </div>
+        </>
       }
     >
       <div className="flex flex-col gap-3">

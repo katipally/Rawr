@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { shortName } from '~/components/crm/value.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { encodeFilters, objectView, recordPath } from '~/lib/links.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -117,7 +118,7 @@ export const AssociationRail = ({
         const rows = shown(card)
         const searchable = card.records.length >= SEARCHABLE_FROM
         const needle = needles[card.objectKey] ?? ''
-        const plural = card.namePlural.toLowerCase()
+        const plural = inSentence(card.namePlural)
 
         return (
           <Card
@@ -130,7 +131,7 @@ export const AssociationRail = ({
                 <>
                   {createFields[card.objectKey] ? (
                     <IconButton
-                      label={`New ${card.nameSingular.toLowerCase()}`}
+                      label={`New ${inSentence(card.nameSingular)}`}
                       icon={<Plus aria-hidden="true" className="size-3.5" />}
                       className="size-6"
                       onClick={() => setCreating(card)}
@@ -192,7 +193,7 @@ export const AssociationRail = ({
               <div className="flex flex-col gap-2 px-6 pb-4">
                 <RecordPicker
                   object={card.objectKey}
-                  label={`Pick a ${card.nameSingular.toLowerCase()} to link`}
+                  label={`Pick a ${inSentence(card.nameSingular)} to link`}
                   placeholder={`Search ${plural}`}
                   excludeId={card.objectKey === object ? recordId : null}
                   value={choice}

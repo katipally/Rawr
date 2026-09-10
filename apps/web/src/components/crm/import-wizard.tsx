@@ -12,8 +12,9 @@ import { formatNumber } from './value.tsx'
 const POLL_MS = 2_000
 
 /** The value the "Goes into" select carries for a column that has no field yet.
- *  Not a field key, so it can never collide with one. */
-const CREATE = '\u0000create'
+ *  Punctuation keeps it out of the field-key namespace, and unlike a NUL it
+ *  survives being written into an HTML attribute and parsed back. */
+const CREATE = '!create'
 
 export type MappableField = { key: string; label: string; isRequired: boolean }
 
@@ -306,6 +307,7 @@ export const ImportWizard = ({
         </div>
       ) : null}
 
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-left">
         <caption className="sr-only">Map each column in the file to a field</caption>
         <thead>
@@ -396,6 +398,7 @@ export const ImportWizard = ({
           })}
         </tbody>
       </table>
+      </div>
 
       {clashes.length > 0 ? (
         <p role="alert" className="text-error">

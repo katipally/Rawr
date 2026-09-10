@@ -159,7 +159,9 @@ export const checkSubmitLimits = (formId: string, ip: string | null): RateLimit 
  *  site and the staging domain without protecting anything. */
 export const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'POST, OPTIONS',
+  // PUT is the file endpoint's; every other edge route exports no such handler
+  // and answers one with 405, so advertising it here costs nothing.
+  'access-control-allow-methods': 'POST, PUT, OPTIONS',
   'access-control-allow-headers': 'content-type',
   'access-control-max-age': '86400',
 }

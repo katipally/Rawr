@@ -23,6 +23,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { enrollmentsPath, sequenceSendsPath, sequencesPath } from '~/lib/links.ts'
+import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -36,18 +37,6 @@ const KIND_LABEL: Record<StepKind, string> = {
   linkedin: 'Message on LinkedIn',
   task: 'Do something else',
 }
-
-/** Every merge field a template may use. Deliberately short: a template that could
- *  read any field would be a way to put anything in the CRM into a stranger's
- *  inbox. */
-const MERGE_FIELDS = [
-  { value: '{{first_name|there}}', label: 'First name, or “there”' },
-  { value: '{{last_name}}', label: 'Last name' },
-  { value: '{{full_name}}', label: 'Full name' },
-  { value: '{{company}}', label: 'Company' },
-  { value: '{{email}}', label: 'Their email' },
-  { value: '{{sender_email}}', label: 'Your email' },
-]
 
 const DAYS = [
   { value: 1, label: 'Mon' },
@@ -409,17 +398,9 @@ export const SequenceEditor = ({
                     />
                   </Field>
                   {canWrite ? (
-                    <div className="flex flex-wrap gap-1">
-                      {MERGE_FIELDS.map((field) => (
-                        <Button
-                          key={field.value}
-                          variant="tertiary"
-                          onClick={() => patch(step.key, { bodyText: `${step.bodyText ?? ''}${field.value}` })}
-                        >
-                          {field.label}
-                        </Button>
-                      ))}
-                    </div>
+                    <MergeFieldPicker
+                      onInsert={(token) => patch(step.key, { bodyText: `${step.bodyText ?? ''}${token}` })}
+                    />
                   ) : null}
                 </>
               ) : (

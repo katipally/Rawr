@@ -10,7 +10,7 @@ import { CampaignList } from './campaign-list.tsx'
  *  not in any query string and never will be, so this is the one screen where a
  *  number has to be typed in by a person for the attribution report to be able to
  *  answer "what did a contact from this campaign cost". */
-const TrackingCampaignsPage = async () => {
+const TrackingCampaignsPage = async ({ searchParams }: { searchParams: Promise<{ q?: string }> }) => {
   const session = await readSession()
   if (!session) return null
 
@@ -23,7 +23,9 @@ const TrackingCampaignsPage = async () => {
     )
   }
 
-  const first = await listCampaigns(contextFrom(session), {})
+  const { q } = await searchParams
+  const search = q?.trim() ?? ''
+  const first = await listCampaigns(contextFrom(session), { search: search || null })
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,6 +45,7 @@ const TrackingCampaignsPage = async () => {
       <TrackingTabs />
 
       <CampaignList
+        search={search}
         initial={{
           rows: first.rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })),
           total: first.total,

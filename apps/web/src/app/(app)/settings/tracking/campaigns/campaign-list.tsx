@@ -1,6 +1,7 @@
 'use client'
 
 import { Button, Card, DataTable, Field, Modal, Pagination, TextInput, useToast } from '@rawr/ui'
+import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { formatCurrency } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -35,10 +36,12 @@ const BLANK: CampaignView = {
   updatedAt: '',
 }
 
-export const CampaignList = ({ initial }: { initial: Page }) => {
+export const CampaignList = ({ initial, search: initialSearch }: { initial: Page; search: string }) => {
   const toast = useToast()
+  const router = useRouter()
+  const pathname = usePathname()
   const [page, setPage] = useState<Page>(initial)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialSearch)
   const [offset, setOffset] = useState(0)
   const [editing, setEditing] = useState<CampaignView | null>(null)
 
@@ -57,13 +60,25 @@ export const CampaignList = ({ initial }: { initial: Page }) => {
     [toast],
   )
 
+  // One request after the typing stops, and the address follows it so a search
+  // can be linked to or reloaded. The query is read at the moment the timer
+  // fires rather than tracked as a dependency, which would run this again on the
+  // replace it just made.
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const needle = search.trim()
       setOffset(0)
-      load(0, search.trim())
+      load(0, needle)
+      const query = new URLSearchParams(window.location.search)
+      if (needle) query.set('q', needle)
+      else query.delete('q')
+      const next = query.toString()
+      if (next !== window.location.search.replace(/^\?/, '')) {
+        router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false })
+      }
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [search, load])
+  }, [search, load, pathname, router])
 
   const move = (next: number) => {
     setOffset(next)

@@ -11,6 +11,7 @@ import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 export type BulkBarProps = {
   object: string
   objectLabel: string
+  objectPlural: string
   /** Ids ticked in the table. The bar only exists while this is non-empty. */
   ids: string[]
   fields: EditableField[]
@@ -38,7 +39,7 @@ const POLL_MS = 2000
  *  assign an owner, associate with a record, merge two, add to a list. A large
  *  selection becomes a job rather than a request, and the toolbar shows how far
  *  it has got, because closing the tab must not stop it. */
-export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: BulkBarProps) => {
+export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone, onClear }: BulkBarProps) => {
   const router = useRouter()
   const toast = useToast()
   const [fieldKey, setFieldKey] = useState('')
@@ -60,7 +61,10 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
   const [progress, setProgress] = useState<Progress | null>(null)
 
   const field = fields.find((candidate) => candidate.key === fieldKey)
-  const noun = ids.length === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
+  /** The registry's own plural. Appending an "s" turns Company into "companys". */
+  const nounFor = (count: number): string =>
+    (count === 1 ? objectLabel : objectPlural).toLowerCase()
+  const noun = nounFor(ids.length)
 
   /** A queued action reports itself. Polled rather than pushed for the same
    *  reason the import wizard is: one screen watching one row does not earn a
@@ -119,7 +123,7 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         })
         restored += result.updated
       }
-      toast('success', `Put back on ${restored} ${restored === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`}.`)
+      toast('success', `Put back on ${restored} ${nounFor(restored)}.`)
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -138,8 +142,7 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
       })
       setFailed(result.failed)
       if (result.updated > 0) {
-        const noun = result.updated === 1 ? objectLabel.toLowerCase() : `${objectLabel.toLowerCase()}s`
-        toast('success', `${field.label} changed on ${result.updated} ${noun}.`, {
+        toast('success', `${field.label} changed on ${result.updated} ${nounFor(result.updated)}.`, {
           label: 'Undo',
           // Grouped by the value each record held, so putting two hundred records
           // back costs one call per distinct old value rather than two hundred.
@@ -339,20 +342,20 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         <div className="flex flex-col gap-3">
           <p>
             They stop appearing in lists, reports and pickers. Their timelines are kept, so what
-            already happened is still on record; nothing here erases a person.
+            already happened is still on record; nothing here erases {ids.length === 1 ? 'a record' : 'records'}.
           </p>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
               onClick={() =>
-                void start({ type: 'delete' }, (n) => `${n} ${n === 1 ? objectLabel.toLowerCase() : noun} deleted.`)
+                void start({ type: 'delete' }, (n) => `${n} ${nounFor(n)} deleted.`)
               }
             >
               Delete {ids.length}
-            </Button>
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -370,15 +373,15 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             Leaving it empty takes the owner off, which is what unassigning is.
           </p>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
               onClick={() => void start({ type: 'assign', ownerId }, (n) => `Owner set on ${n} ${noun}.`)}
             >
               Assign {ids.length}
-            </Button>
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -414,6 +417,9 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             />
           </label>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -431,9 +437,6 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             >
               Associate {ids.length}
             </Button>
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
-            </Button>
           </div>
         </div>
       </Modal>
@@ -442,7 +445,7 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
         <div className="flex flex-col gap-3">
           {lists.length === 0 ? (
             <p className="text-secondary">
-              There is no static list for {objectLabel.toLowerCase()}s yet. Create one on the
+              There is no static list for {objectPlural.toLowerCase()} yet. Create one on the
               Segments page; an active list decides its own membership from its conditions.
             </p>
           ) : (
@@ -454,6 +457,9 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             />
           )}
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -463,9 +469,6 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
               }
             >
               Add {ids.length}
-            </Button>
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -496,6 +499,9 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
             </fieldset>
           )}
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -505,9 +511,6 @@ export const BulkBar = ({ object, objectLabel, ids, fields, onDone, onClear }: B
               }
             >
               Merge
-            </Button>
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
             </Button>
           </div>
         </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { Badge, Button, Card, Combobox, EmptyState, NOTHING_MATCHED, Spinner, useToast } from '@rawr/ui'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Fragment, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -70,19 +71,37 @@ export const AuditTable = ({
   cursor: initialCursor,
   entities,
   people,
+  entity: initialEntity,
+  actorId: initialActorId,
 }: {
   initial: Row[]
   cursor: Cursor
   entities: string[]
   people: { userId: string; name: string }[]
+  entity: string | null
+  actorId: string | null
 }) => {
   const zone = useZone()
   const toast = useToast()
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
   const [rows, setRows] = useState(initial)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
-  const [entity, setEntity] = useState<string | null>(null)
-  const [actorId, setActorId] = useState<string | null>(null)
+  const [entity, setEntity] = useState<string | null>(initialEntity)
+  const [actorId, setActorId] = useState<string | null>(initialActorId)
   const [busy, setBusy] = useState(false)
+
+  /** The filter is the address, so a history somebody is reading can be sent to
+   *  the person who has to answer for it. Replaced rather than pushed: narrowing
+   *  a filter twice should not need Back pressed twice to leave. */
+  const go = (key: 'entity' | 'actor', value: string | null) => {
+    const query = new URLSearchParams(params)
+    if (value === null) query.delete(key)
+    else query.set(key, value)
+    const search = query.toString()
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false })
+  }
 
   const load = async (next: { entity?: string | null; actorId?: string | null; more?: boolean }) => {
     setBusy(true)
@@ -113,6 +132,7 @@ export const AuditTable = ({
           value={entity}
           onChange={(value) => {
             setEntity(value)
+            go('entity', value)
             void load({ entity: value })
           }}
           options={entities.map((each) => ({ value: each, label: each.replaceAll('_', ' ') }))}
@@ -122,6 +142,7 @@ export const AuditTable = ({
           value={actorId}
           onChange={(value) => {
             setActorId(value)
+            go('actor', value)
             void load({ actorId: value })
           }}
           options={people.map((person) => ({ value: person.userId, label: person.name }))}

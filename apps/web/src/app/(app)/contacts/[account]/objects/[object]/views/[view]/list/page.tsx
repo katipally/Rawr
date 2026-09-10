@@ -8,6 +8,7 @@ import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeCursor, decodeFilters, decodeSort, duplicatesPath, encodeCursor, exportCsvPath, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 const PAGE_SIZE = 50
@@ -175,11 +176,11 @@ const ListPage = async ({
         title={object.namePlural}
         currentObject={objectParam}
         objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(account, other.key, 'all') }))}
-        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        addLabel={`Add ${inSentence(object.namePlural)}`}
         add={
           canWrite
             ? [
-                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(account, objectParam, resolved.view.slug, 'list', { ...listParams, new: '1' } as ListParams) },
+                { label: `Create ${inSentence(object.nameSingular)}`, href: objectView(account, objectParam, resolved.view.slug, 'list', { ...listParams, new: '1' } as ListParams) },
                 { label: 'Import', href: importsPath(account) },
               ]
             : []

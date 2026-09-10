@@ -698,9 +698,9 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
   /** A file picker and the hidden input that carries what it produced.
    *
    *  The bytes never touch the form's own POST. On pick, the endpoint issues an
-   *  id and a one-shot URL, the browser PUTs straight to storage, and the id is
-   *  what the submission posts. So the answer to a file field is a claim ticket,
-   *  and the server decides whether it is honoured.
+   *  id, the file is PUT under that id, and the id is what the submission posts.
+   *  So the answer to a file field is a claim ticket, and the server decides
+   *  whether it is honoured.
    *
    *  The picker itself is left unnamed on purpose: only the hidden input carries
    *  a name, so collect never sees a File object it cannot serialise. */
@@ -728,8 +728,9 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
       })
         .then(function (r) { return r.json().then(function (b) { return { status: r.status, body: b }; }); })
         .then(function (issued) {
-          if (!issued.body || !issued.body.url) throw new Error(issued.body && issued.body.error);
-          return fetch(issued.body.url, { method: 'PUT', body: file }).then(function (put) {
+          if (!issued.body || !issued.body.id) throw new Error(issued.body && issued.body.error);
+          var to = BASE + '/f/' + encodeURIComponent(formId) + '/upload?id=' + encodeURIComponent(issued.body.id);
+          return fetch(to, { method: 'PUT', body: file, mode: 'cors' }).then(function (put) {
             if (!put.ok) throw new Error('');
             token.value = issued.body.id;
             note.textContent = file.name;

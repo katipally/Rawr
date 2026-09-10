@@ -305,8 +305,11 @@ export const formBlockers = (input: {
   return [...blockers, ...schemaBlockers(input.fields)]
 }
 
-/** The schema half of the same list: what the submit path could not honour. */
-export const schemaBlockers = (fields: FormField[]): string[] => {
+/** The schema half of the same list: what the submit path could not honour.
+ *
+ *  `asksEmail` says the caller already collects an address of its own: a booking
+ *  page always asks for a name and a work email beside its extra questions. */
+export const schemaBlockers = (fields: FormField[], asksEmail = false): string[] => {
   if (fields.length === 0) return ['A form needs at least one field.']
 
   const blockers: string[] = []
@@ -352,7 +355,7 @@ export const schemaBlockers = (fields: FormField[]): string[] => {
 
   /** Without an email there is nothing to dedupe a contact on, so every submission
    *  would create a new person. F1 A4 makes lower(email) the contact key. */
-  if (!fields.some((f) => f.type === 'email')) {
+  if (!asksEmail && !fields.some((f) => f.type === 'email')) {
     blockers.push(
       'A form needs an email field. Without one, every submission creates a new contact instead of updating one.',
     )
@@ -362,8 +365,8 @@ export const schemaBlockers = (fields: FormField[]): string[] => {
 
 /** Refuses a schema a person could build but the submit path could not honour.
  *  Called on save, so a broken form never reaches the public edge. */
-export const assertSchemaIsUsable = (fields: FormField[]): void => {
-  const [first] = schemaBlockers(fields)
+export const assertSchemaIsUsable = (fields: FormField[], asksEmail = false): void => {
+  const [first] = schemaBlockers(fields, asksEmail)
   if (first) throw new FormSchemaError(first)
 }
 

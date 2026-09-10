@@ -298,7 +298,12 @@ const TILES: Record<string, (quietBefore: string) => Omit<Kpi, 'count'>[]> = {
 /** Every tile in one pass over the table, because four counts are four scans and
  *  a list of eighty-eight thousand contacts cannot afford three of them. A custom
  *  object has no tiles: nothing here knows what is missing from one. */
-export const listKpis = async (ctx: AccountContext, objectKey: string): Promise<Kpi[]> => {
+export const listKpis = async (
+  ctx: AccountContext,
+  objectKey: string,
+  viewFilters: FilterGroup[] = [],
+  search = '',
+): Promise<Kpi[]> => {
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, objectKey)
   const scope = scopeFor(ctx.actorId)
@@ -311,16 +316,23 @@ export const listKpis = async (ctx: AccountContext, objectKey: string): Promise<
   )
   if (tiles.length === 0) return []
 
+  // Counted inside what the screen already shows — its filters and its search —
+  // because the tile links to this view with its filter added: a count of the
+  // whole table would name a number the click cannot produce.
   const aggregates = tiles.map((tile, index) => {
-    const where = compileFilters(object, tile.filters, scope)
+    const where = compileFilters(object, [...viewFilters, ...tile.filters], scope)
     return sql`count(*) filter (where ${where ?? sql`false`})::int as ${sql.raw(`k${index}`)}`
   })
 
+  const term = search.trim()
+  const matches = term
+    ? sql` and ${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${term})`
+    : sql``
   const [row] = await withAccount(ctx, (tx) =>
     tx.execute<Record<string, number>>(sql`
       select ${sql.join(aggregates, sql`, `)}
         from ${tableFor(object)}
-       where ${rowsOf(object)} and ${sql.raw(`"${object.key}"."deleted_at"`)} is null`),
+       where ${rowsOf(object)} and ${sql.raw(`"${object.key}"."deleted_at"`)} is null${matches}`),
   )
 
   return tiles.map((tile, index) => ({ ...tile, count: Number(row?.[`k${index}`] ?? 0) }))

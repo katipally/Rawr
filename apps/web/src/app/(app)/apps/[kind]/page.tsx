@@ -61,6 +61,10 @@ const AppPage = async ({
   const meta = metaFor(row.kind)
   const personal = PERSONAL_KINDS.has(row.kind)
   const connected = row.state !== 'not_configured'
+  // A row that exists is a row somebody has to be able to remove, whatever its
+  // health says. Reading "not configured" off a half-written row and offering
+  // Connect again leaves it stranded: connecting rewrites it, nothing deletes it.
+  const removable = row.id !== null
   // Apollo is the one provider whose key can be valid and still be pointed at the
   // wrong workspace: the connection test proves Apollo answered, not that it
   // answered for the mailboxes the sync is meant to read back. Asking it who it
@@ -115,7 +119,7 @@ const AppPage = async ({
         <Badge tone={HEALTH[row.state].tone} dot>
           {HEALTH[row.state].label}
         </Badge>
-        {connected ? (
+        {connected || removable ? (
           <AppActions
             kind={row.kind}
             name={meta.name}
@@ -123,6 +127,10 @@ const AppPage = async ({
             connectPath={connectPath}
             canManage={session.isSuperAdmin}
           />
+        ) : row.kind === 'hubspot' ? (
+          // Nothing is stored and nothing is called: HubSpot is read from its own
+          // exports, so the only step there is to take is the import itself.
+          <LinkButton href={importsPath(session.accountSlug)}>Open Import</LinkButton>
         ) : (
           <LinkButton href={connectPath}>
             {/* Gmail and Calendar are consented to per person, from the page that

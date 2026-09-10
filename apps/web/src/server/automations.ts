@@ -13,6 +13,7 @@ import {
   openScannedRun,
   readAutomation,
   parkAutomationRun,
+  readMailbox,
   readSubscriptions,
   renderMergeFields,
   scanTargets,
@@ -22,6 +23,7 @@ import {
   type AutomationStep,
   type AutomationTrigger,
   type AccountContext,
+  type MergeFieldKey,
   type StepPath,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
@@ -135,12 +137,20 @@ const runAction = async (
       const template = await automationEmailTemplate(ctx, text(action.config, 'templateId'))
       if (!template) throw new Error('That template no longer exists.')
 
+      const mailboxId = text(action.config, 'mailboxId')
       const record = await getRecord(ctx, 'contact', event.entityId)
-      const values = {
+      const mailbox = mailboxId ? await readMailbox(ctx, mailboxId) : null
+      // Every key a sequence step can fill, so the same template reads the same
+      // either way. There is no sequence around an automation's mail, and the
+      // send refuses an unfilled field, so {{sequence}} needs a fallback here.
+      const values: Record<MergeFieldKey, string | null> = {
         first_name: asText(record?.values.first_name),
         last_name: asText(record?.values.last_name),
         full_name: name,
         email: to,
+        company: asText(record?.labels.company_id),
+        sender_email: mailbox?.email ?? null,
+        sequence: null,
       }
       const subject = renderMergeFields(template.subject, values)
       const body = renderMergeFields(template.bodyText, values)
@@ -154,7 +164,7 @@ const runAction = async (
       }
 
       await compose(ctx, {
-        mailboxId: text(action.config, 'mailboxId'),
+        mailboxId,
         to,
         subject: subject.text,
         text: body.text,

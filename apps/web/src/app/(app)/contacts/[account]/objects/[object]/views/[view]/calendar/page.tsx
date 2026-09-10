@@ -8,6 +8,7 @@ import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeFilters, exportPath, importsPath, objectView, recordPath, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** The third way to look at a list: what is happening this month.
@@ -106,11 +107,11 @@ const CalendarPage = async ({
         title={object.namePlural}
         currentObject={objectParam}
         objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(account, other.key, 'all') }))}
-        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        addLabel={`Add ${inSentence(object.namePlural)}`}
         add={
           canWrite
             ? [
-                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(account, objectParam, resolved.view.slug, 'calendar', { ...listParams, new: '1' } as ListParams) },
+                { label: `Create ${inSentence(object.nameSingular)}`, href: objectView(account, objectParam, resolved.view.slug, 'calendar', { ...listParams, new: '1' } as ListParams) },
                 { label: 'Import', href: importsPath(account) },
               ]
             : []

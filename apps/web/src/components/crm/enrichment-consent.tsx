@@ -75,7 +75,7 @@ export const EnrichmentConsent = ({ canWrite }: { canWrite: boolean }) => {
         toast('success', `${approved} record${approved === 1 ? '' : 's'} sent to be enriched. They fill in over the next few minutes.`)
       } else {
         const { discarded } = await api.integrations.discardEnrichment.mutate()
-        toast('info', `${discarded} request${discarded === 1 ? '' : 's'} dropped. No credits were used.`)
+        toast('info', `${discarded} record${discarded === 1 ? '' : 's'} dropped. No credits were used.`)
       }
       setPending({ contacts: 0, companies: 0, total: 0 })
       setOpen(false)

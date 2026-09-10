@@ -85,6 +85,16 @@ const STALE_MS = 36 * 60 * 60 * 1000
  *  credential before it can do anything. */
 const KEYLESS_KINDS = new Set<IntegrationKind>(['ga4'])
 
+/** The stand-in providers answer from fixtures and have no key to paste, so a
+ *  connection made against them would store a row with no `secret_ref`, which
+ *  `healthOf` reads as never configured: the card offers Connect, the row is
+ *  absent from the connected list, and nothing can remove it. Storing this marker
+ *  where the credential would go makes it an ordinary connected row. */
+const DEV_SECRET = 'dev'
+
+const devIntegrations = (): boolean =>
+  process.env.RAWR_DEV_INTEGRATIONS === '1' && process.env.NODE_ENV !== 'production'
+
 const healthOf = (row: {
   kind: IntegrationKind
   hasSecret: boolean
@@ -317,7 +327,14 @@ export const saveIntegration = async (
   input: SaveIntegrationInput,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'integration', async (tx) => {
-    const secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
+    let secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
+    if (secretRef === undefined && devIntegrations() && !KEYLESS_KINDS.has(input.kind)) {
+      const [held] = await tx
+        .select({ secretRef: integration.secretRef })
+        .from(integration)
+        .where(eq(integration.kind, input.kind))
+      if (!held?.secretRef) secretRef = encryptToken(DEV_SECRET)
+    }
     // Brevo does not sign its webhooks, and Woodpecker's signing header is not
     // documented, so the URL Rawr hands each of them carries a token compared on
     // every delivery.

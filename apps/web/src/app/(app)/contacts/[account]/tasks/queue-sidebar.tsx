@@ -35,6 +35,10 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
   const [renaming, setRenaming] = useState<QueueRow | null>(null)
   const [removing, setRemoving] = useState<QueueRow | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Queues created here, kept until router.refresh brings them back from the
+   *  server: the round trip is long enough that a new queue looked like it had
+   *  not been created. */
+  const [created, setCreated] = useState<QueueRow[]>([])
 
   const run = async (fn: () => Promise<unknown>, done: string, after: () => void) => {
     setBusy(true)
@@ -51,6 +55,8 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
   }
 
   const href = (queue?: string) => tasksPath(account, { ...keep, ...(queue ? { queue } : {}) })
+
+  const shown = [...queues, ...created.filter((queue) => !queues.some((row) => row.id === queue.id))]
 
   return (
     <nav aria-label="Task queues" className="flex min-h-0 w-full shrink-0 flex-col gap-1 sm:w-56">
@@ -72,7 +78,7 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
             No queue
           </Link>
         </li>
-        {queues.map((queue) => (
+        {shown.map((queue) => (
           <li key={queue.id} className="group flex items-center gap-1">
             <Link
               href={href(queue.id)}
@@ -101,10 +107,18 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
           className="flex flex-wrap items-end gap-2"
           onSubmit={(event) => {
             event.preventDefault()
-            void run(() => api.crm.tasks.queues.create.mutate({ name }), 'Queue created.', () => {
-              setName('')
-              setAdding(false)
-            })
+            const wanted = name.trim()
+            void run(
+              async () => {
+                const { id } = await api.crm.tasks.queues.create.mutate({ name: wanted })
+                setCreated((current) => [...current, { id, name: wanted, openCount: 0 }])
+              },
+              'Queue created.',
+              () => {
+                setName('')
+                setAdding(false)
+              },
+            )
           }}
         >
           <TextInput
@@ -153,7 +167,12 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
                 void run(
                   () => api.crm.tasks.queues.remove.mutate({ id: removing!.id }),
                   'Queue deleted.',
-                  () => setRemoving(null),
+                  () => {
+                    setRemoving(null)
+                    // The address still names the queue that just went away, so
+                    // leaving it there shows an empty list for nothing.
+                    if (removing!.id === current) router.replace(href())
+                  },
                 )
               }
             >

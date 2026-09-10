@@ -8,6 +8,15 @@ import type { Group } from './filter-builder.tsx'
 
 type Kpi = { key: string; label: string; count: number; filters: Group[] }
 
+/** Four blank tiles the size of real ones, so the strip takes its space before
+ *  it knows what to put in it. Every object's strip is four wide. */
+const PLACEHOLDERS: Kpi[] = [0, 1, 2, 3].map((n) => ({
+  key: `placeholder-${n}`,
+  label: '\u00a0',
+  count: 0,
+  filters: [],
+}))
+
 export type KpiStripProps = {
   account: string
   object: string
@@ -32,12 +41,16 @@ export type KpiStripProps = {
  *  fails: a broken count is not worth an error above somebody's list. */
 export const KpiStrip = ({ account, object, view, params, filters, hasRecords }: KpiStripProps) => {
   const [tiles, setTiles] = useState<Kpi[] | null>(null)
+  // Filters arrive as a fresh array every render, so the effect keys off what is
+  // in them rather than their identity, and reads them back from that same key.
+  const filterKey = JSON.stringify(filters)
+  const search = params.q ?? ''
 
   useEffect(() => {
     if (!hasRecords) return
     let live = true
     api.crm.kpis
-      .query({ object })
+      .query({ object, filters: JSON.parse(filterKey), search })
       .then((rows) => {
         if (live) setTiles(rows as Kpi[])
       })
@@ -47,19 +60,28 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
     return () => {
       live = false
     }
-  }, [object, hasRecords])
+  }, [object, hasRecords, filterKey, search])
 
   // Nothing to say is not worth a row. An object with no records has four
   // zeroes, and so does one whose data is complete.
-  if (!hasRecords || !tiles || tiles.every((tile) => tile.count === 0)) return null
+  if (!hasRecords) return null
+
+  if (tiles?.every((tile) => tile.count === 0)) return null
+
+  // The counts arrive after the rows do, so the strip holds its own height in
+  // the meantime: one that appears late pushes the table down under a cursor
+  // already aimed at it, and the click lands on a tile.
+  const shells = tiles ?? PLACEHOLDERS
 
   return (
     // Wraps rather than scrolls: four short tiles on a phone are two rows, and a
     // row that scrolls sideways hides the tile nobody thought to look for.
-    <ul className="flex shrink-0 flex-wrap gap-2">
-      {tiles.map((tile) => (
+    <ul aria-busy={tiles ? undefined : true} className="flex shrink-0 flex-wrap gap-2">
+      {shells.map((tile) => (
         <li key={tile.key} className="min-w-0 flex-1 basis-[min(12rem,100%)]">
           <Link
+            aria-hidden={tiles ? undefined : true}
+            tabIndex={tiles ? undefined : -1}
             href={objectView(account, object, view, 'list', {
               ...params,
               filters: encodeFilters([...filters, ...tile.filters]),
@@ -68,7 +90,7 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
               cursor: undefined,
               skip: undefined,
             })}
-            className="flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill"
+            className={`flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
           >
             <span className="text-small text-secondary">{tile.label}</span>
             <span className="text-base font-semibold tabular-nums">{tile.count.toLocaleString()}</span>

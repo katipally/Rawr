@@ -1646,6 +1646,35 @@ try {
     })
   }
 
+  await check('a development connection is a connection that can be removed', async () => {
+    // The stand-in providers have no key to paste, so the connect form saves with
+    // no secret. Without a stored marker the row reads as never configured: the
+    // card offers Connect, the connected list does not have it, and nothing on
+    // the screen can delete it.
+    const before = process.env.RAWR_DEV_INTEGRATIONS
+    process.env.RAWR_DEV_INTEGRATIONS = '1'
+    try {
+      await disconnectIntegration(accountAdmin, 'clay').catch(() => undefined)
+      await saveIntegration(accountAdmin, { kind: 'clay', config: { tier: 'growth' } })
+
+      const saved = (await listIntegrations(accountAdmin)).find((row) => row.kind === 'clay')
+      expect(saved?.hasSecret === true, 'a development connect stored no credential at all')
+      expect(saved?.state !== 'not_configured', `it reads as ${saved?.state}, which offers Connect again`)
+
+      await recordHealth(accountAdmin, 'clay', { ok: true })
+      const green = (await listIntegrations(accountAdmin)).find((row) => row.kind === 'clay')
+      expect(green?.state === 'connected', `it reads as ${green?.state} after the connection test passed`)
+
+      await disconnectIntegration(accountAdmin, 'clay')
+      const gone = (await listIntegrations(accountAdmin)).find((row) => row.kind === 'clay')
+      expect(gone?.state === 'not_configured', `it still reads as ${gone?.state} after disconnecting`)
+      return 'connects, reads as connected, and disconnects'
+    } finally {
+      if (before === undefined) delete process.env.RAWR_DEV_INTEGRATIONS
+      else process.env.RAWR_DEV_INTEGRATIONS = before
+    }
+  })
+
   await check('a personal app is never a shared credential', async () => {
     for (const kind of PERSONAL_KINDS) {
       const row = (await listIntegrations(accountAdmin)).find((entry) => entry.kind === kind)

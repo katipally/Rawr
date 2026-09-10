@@ -442,7 +442,16 @@ export type ConsentRecordRow = {
   policyVersion: string
   userAgent: string | null
   at: Date
+  /** Who the visitor turned out to be, when a form or a click later said so. Null
+   *  is the ordinary case: a consent record names nobody by design. */
+  contact: { id: string; name: string } | null
 }
+
+/** The categories worth asking about, each in both directions: "who agreed to be
+ *  measured" and "who refused" are different questions and both get asked. */
+export const CONSENT_FILTERS = ['analytics', 'no-analytics', 'advertisement', 'no-advertisement'] as const
+
+export type ConsentFilter = (typeof CONSENT_FILTERS)[number]
 
 /** The cookie choices strangers actually made, newest first.
  *
@@ -452,11 +461,29 @@ export type ConsentRecordRow = {
  *  traffic rather than with the account. */
 export const listConsentRecords = async (
   ctx: AccountContext,
-  input: { limit?: number | undefined; offset?: number | undefined } = {},
+  input: {
+    limit?: number | undefined
+    offset?: number | undefined
+    /** Matches the visitor id itself, or the name or address of whoever that
+     *  visitor was later resolved to. */
+    search?: string | null | undefined
+    category?: ConsentFilter | null | undefined
+  } = {},
 ): Promise<{ rows: ConsentRecordRow[]; hasMore: boolean }> =>
   withAccount(ctx, async (tx) => {
     const limit = Math.min(Math.max(input.limit ?? CONSENT_PAGE, 1), 200)
     const offset = Math.max(input.offset ?? 0, 0)
+    const needle = input.search?.trim().toLowerCase()
+    const wanted = input.category && CONSENT_FILTERS.includes(input.category) ? input.category : null
+    const category = wanted
+      ? sql`and (r.categories ->> ${wanted.replace('no-', '')})::boolean = ${!wanted.startsWith('no-')}`
+      : sql``
+    const match = needle
+      ? sql`and (lower(r.visitor_id) like ${`%${needle}%`}
+                 or lower(coalesce(c.email, '')) like ${`%${needle}%`}
+                 or lower(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')) like ${`%${needle}%`})`
+      : sql``
+
     const rows = await tx.execute<{
       id: string
       visitor_id: string
@@ -464,10 +491,24 @@ export const listConsentRecords = async (
       policy_version: string
       user_agent: string | null
       at: Date
+      contact_id: string | null
+      contact_name: string | null
+      contact_email: string | null
     }>(sql`
-      select id, visitor_id, categories, policy_version, user_agent, at
-        from consent_record
-       order by at desc, id desc
+      select r.id, r.visitor_id, r.categories, r.policy_version, r.user_agent, r.at,
+             c.id as contact_id, c.email as contact_email,
+             nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') as contact_name
+        from consent_record r
+        left join lateral (
+          select ct.id, ct.first_name, ct.last_name, ct.email
+            from visitor_alias a
+            join contact ct on ct.id = a.contact_id and ct.deleted_at is null
+           where a.account_id = r.account_id and a.visitor_id = r.visitor_id
+           order by a.created_at
+           limit 1
+        ) c on true
+       where true ${category} ${match}
+       order by r.at desc, r.id desc
        limit ${limit + 1} offset ${offset}`)
 
     return {
@@ -478,6 +519,9 @@ export const listConsentRecords = async (
         policyVersion: row.policy_version,
         userAgent: row.user_agent,
         at: new Date(row.at),
+        contact: row.contact_id
+          ? { id: row.contact_id, name: row.contact_name ?? row.contact_email ?? 'Unnamed' }
+          : null,
       })),
       hasMore: rows.length > limit,
     }

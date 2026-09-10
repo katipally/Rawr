@@ -10,7 +10,7 @@ import { EventDefList } from './event-list.tsx'
  *  under whatever name it arrives with, and this is where somebody puts a label
  *  and a property schema on the ones that matter, so a funnel can be built out of
  *  names a reader recognises. */
-const TrackingEventsPage = async () => {
+const TrackingEventsPage = async ({ searchParams }: { searchParams: Promise<{ q?: string }> }) => {
   const session = await readSession()
   if (!session) return null
 
@@ -23,7 +23,9 @@ const TrackingEventsPage = async () => {
     )
   }
 
-  const first = await listEventDefs(contextFrom(session), {})
+  const { q } = await searchParams
+  const search = q?.trim() ?? ''
+  const first = await listEventDefs(contextFrom(session), { search: search || null })
 
   return (
     <div className="flex flex-col gap-4">
@@ -44,6 +46,7 @@ const TrackingEventsPage = async () => {
       <TrackingTabs />
 
       <EventDefList
+        search={search}
         initial={{
           rows: first.rows.map((row) => ({ ...row, updatedAt: row.updatedAt.toISOString() })),
           total: first.total,

@@ -1,6 +1,7 @@
 import {
   beginFormUpload,
   FORM_UPLOAD_MIME,
+  issuedUploadKey,
   MAX_FORM_UPLOAD_BYTES,
   publicEdgeContext,
   publicFormById,
@@ -8,18 +9,24 @@ import {
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { clientIp, CORS_HEADERS, rateLimit, readBody } from '~/server/edge.ts'
-import { NOT_CONFIGURED, signedUpload, storageConfigured } from '~/server/storage.ts'
+import { NOT_CONFIGURED, putObject, storageConfigured } from '~/server/storage.ts'
+import { readCapped } from '~/server/uploads.ts'
 
-/** POST /f/:formId/upload — a signed URL for one file, and the id that names it.
+/** One file for one form fill, in two calls.
  *
- *  No bytes pass through here. The browser is handed a one-shot PUT straight to
- *  storage, which is what keeps a ten megabyte CV off a request worker, and the
- *  id it gets back is the only thing the form posts. A visitor never sees, names
- *  or chooses a storage key, so there is nothing here to point at another tenant.
+ *  POST issues an id and refuses everything refusable before a byte moves. PUT
+ *  carries the bytes under that id. A visitor never sees, names or chooses a
+ *  storage key, so there is nothing here to point at another tenant, and the id
+ *  is the only thing the form itself posts.
  *
- *  The size and type are declared rather than observed. That is not the last word
- *  on either: the row records what was claimed, storage enforces the key, and the
- *  submission is refused if the id was never issued for this form. */
+ *  The bytes come through this endpoint rather than going straight to storage
+ *  because the hosted form page may only open connections to this origin, and a
+ *  PUT to a bucket on another host is refused by the browser before it is made.
+ *
+ *  On POST the size and type are declared rather than observed. That is not the
+ *  last word on either: PUT counts what actually arrives, the row records what
+ *  was claimed, and the submission is refused if the id was never issued for
+ *  this form. */
 
 export const OPTIONS = (): NextResponse =>
   new NextResponse(null, { status: 204, headers: CORS_HEADERS })
@@ -84,10 +91,38 @@ export const POST = async (
     entityId: form.formId,
     filename,
   })
-  const [id, signed] = await Promise.all([
-    beginFormUpload(form, { storageKey, filename, bytes, mime }),
-    signedUpload(storageKey),
-  ])
+  const id = await beginFormUpload(form, { storageKey, filename, bytes, mime })
 
-  return json({ id, url: signed.url }, 200)
+  return json({ id }, 200)
+}
+
+/** PUT /f/:formId/upload?id=... — the bytes of a file POST already issued an id
+ *  for. The key comes from that row and never from the caller, and a row already
+ *  attached to a submission cannot be written over. */
+export const PUT = async (
+  request: NextRequest,
+  { params }: { params: Promise<{ formId: string }> },
+): Promise<NextResponse> => {
+  const { formId } = await params
+
+  const form = await publicFormById(formId)
+  if (!form || !form.isActive) {
+    return json({ error: 'That form is not accepting submissions.' }, 404)
+  }
+  if (!storageConfigured) return json({ error: NOT_CONFIGURED }, 503)
+
+  const issued = await issuedUploadKey(form, request.nextUrl.searchParams.get('id') ?? '')
+  if (!issued) return json({ error: 'That upload was not offered for this form.' }, 404)
+
+  const body = await readCapped(request, MAX_FORM_UPLOAD_BYTES)
+  if (!body) {
+    return json(
+      { error: `That file is larger than ${Math.round(MAX_FORM_UPLOAD_BYTES / 1024 / 1024)} MB.` },
+      413,
+    )
+  }
+  if (body.byteLength === 0) return json({ error: 'That file is empty.' }, 400)
+
+  await putObject(issued.storageKey, body, issued.mime || 'application/octet-stream')
+  return json({ bytes: body.byteLength }, 200)
 }

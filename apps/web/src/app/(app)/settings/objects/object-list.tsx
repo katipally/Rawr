@@ -36,7 +36,11 @@ export const ObjectList = ({
 
   const [singular, setSingular] = useState('')
   const [plural, setPlural] = useState('')
-  const { page, pager } = usePagedRows(rows, 'objects')
+  /** Objects created here, held until router.refresh brings them back: the round
+   *  trip is long enough that a new object looked like it had not been created. */
+  const [created, setCreated] = useState<ObjectView[]>([])
+  const all = [...rows, ...created.filter((object) => !rows.some((row) => row.id === object.id))]
+  const { page, pager } = usePagedRows(all, 'objects')
 
   const run = async (what: () => Promise<unknown>, said: string) => {
     setBusy(true)
@@ -63,7 +67,7 @@ export const ObjectList = ({
         </div>
       ) : null}
 
-      {rows.length === 0 ? (
+      {all.length === 0 ? (
         <EmptyState
           title="No objects of your own yet"
           description="Contacts, companies and deals are built in. An object you create sits beside them with its own fields, its own list and its own records — a project, a vendor, a piece of equipment."
@@ -117,22 +121,40 @@ export const ObjectList = ({
         onClose={() => setCreating(false)}
         title="Create object"
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
               disabled={!singular.trim() || !plural.trim()}
               onClick={() =>
-                void run(
-                  () => api.admin.objects.create.mutate({ nameSingular: singular, namePlural: plural }),
-                  `${plural} was created. Add its fields under Properties.`,
-                ).then((ok) => ok && setCreating(false))
+                void run(async () => {
+                  const made = await api.admin.objects.create.mutate({
+                    nameSingular: singular,
+                    namePlural: plural,
+                  })
+                  setCreated((current) => [
+                    ...current,
+                    {
+                      id: made.id,
+                      key: made.key,
+                      nameSingular: singular.trim(),
+                      namePlural: plural.trim(),
+                      // Its naming field is created with it.
+                      fieldCount: 1,
+                      recordCount: 0,
+                    },
+                  ])
+                }, `${plural} was created. Add its fields under Properties.`).then(
+                  (ok) => ok && setCreating(false),
+                )
               }
             >
               Create
             </Button>
-            <Button onClick={() => setCreating(false)}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <div className="flex flex-col gap-3">
@@ -192,7 +214,10 @@ export const ObjectList = ({
         size="sm"
         title={`Delete ${removing?.namePlural ?? ''}?`}
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -205,8 +230,7 @@ export const ObjectList = ({
             >
               Delete
             </Button>
-            <Button onClick={() => setRemoving(null)}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <p>

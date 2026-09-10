@@ -117,9 +117,38 @@ try {
       { kind: 'email', delayDays: 0, delayHours: 0, subject: 'Following up', bodyText: 'A second note.' },
     ],
   })
+  // A token nothing can fill is caught where it is typed, and the sentence names
+  // it rather than leaving somebody to hunt through four bodies for the typo.
+  const badStep = await refused(() =>
+    saveSteps(sales, {
+      sequenceId: created.id,
+      steps: [
+        { kind: 'email', delayDays: 0, delayHours: 0, subject: 'Hi {{contact.first_name}}', bodyText: 'A note.' },
+      ],
+    }),
+  )
+  check(
+    badStep?.includes('{{contact.first_name}}') === true,
+    'a step using a merge field nothing can fill is refused',
+    badStep ?? '',
+  )
+
   const withSteps = await readSequence(sales, created.id)
   check(withSteps?.steps.length === 3, 'the steps are saved in order', `${withSteps?.steps.length ?? 0}`)
   check(withSteps?.steps[1]?.kind === 'call', 'and keep the order they were given', withSteps?.steps[1]?.kind ?? '')
+
+  // Written straight to the row, because saveSteps now refuses it: what is being
+  // checked is a sequence that predates the rule, or arrived by import.
+  await owner`update sequence_step set subject = 'Hi {{contact.first_name}}'
+               where sequence_id = ${created.id}::uuid and position = 0`
+  const badActivate = await refused(() => setSequenceState(sales, { id: created.id, state: 'active' }))
+  check(
+    badActivate?.includes('{{contact.first_name}}') === true,
+    'and a sequence already holding one cannot be turned on',
+    badActivate ?? '',
+  )
+  await owner`update sequence_step set subject = 'Hello {{first_name|there}}'
+               where sequence_id = ${created.id}::uuid and position = 0`
 
   await setSequenceState(sales, { id: created.id, state: 'active' })
   check((await readSequence(sales, created.id))?.sequence.state === 'active', 'and it turns on once it has steps')

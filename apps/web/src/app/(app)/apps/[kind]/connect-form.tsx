@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Button, Field, IconButton, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, Field, IconButton, Select, TextInput, cn, useToast } from '@rawr/ui'
 import { Check, Copy } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -14,7 +14,7 @@ export type ConnectFormProps = {
   name: string
   hasSecret: boolean
   secretLabel: string | null
-  configFields: { key: string; label: string; hint: string }[]
+  configFields: { key: string; label: string; hint: string; options?: { value: string; label: string }[] }[]
   setup: string[]
   config: Record<string, unknown>
   webhookBase: string
@@ -119,12 +119,28 @@ export const ConnectForm = (props: ConnectFormProps) => {
 
       {props.configFields.map((field) => (
         <Field key={field.key} id={`config-${props.kind}-${field.key}`} label={field.label} hint={field.hint}>
-          <TextInput
-            id={`config-${props.kind}-${field.key}`}
-            value={config[field.key] ?? ''}
-            disabled={!props.canWrite}
-            onChange={(event) => setConfig((current) => ({ ...current, [field.key]: event.target.value }))}
-          />
+          {field.options ? (
+            <Select
+              id={`config-${props.kind}-${field.key}`}
+              value={config[field.key] ?? ''}
+              disabled={!props.canWrite}
+              onChange={(event) => setConfig((current) => ({ ...current, [field.key]: event.target.value }))}
+            >
+              <option value="">Pick one</option>
+              {field.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <TextInput
+              id={`config-${props.kind}-${field.key}`}
+              value={config[field.key] ?? ''}
+              disabled={!props.canWrite}
+              onChange={(event) => setConfig((current) => ({ ...current, [field.key]: event.target.value }))}
+            />
+          )}
         </Field>
       ))}
 

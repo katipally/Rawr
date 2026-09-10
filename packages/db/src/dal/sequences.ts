@@ -16,7 +16,12 @@ import {
 import { contactLabels, linksForContacts, recordActivity } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { DEFAULT_WINDOW, nextSendAt, type SendWindow } from './sequence-rules.ts'
+import {
+  DEFAULT_WINDOW,
+  MERGE_FIELD_KEYS,
+  nextSendAt,
+  unknownMergeFields,
+  type SendWindow } from './sequence-rules.ts'
 import { createTask } from './tasks.ts'
 
 /** Sequences: the definitions, who is in them, and every reason one stops.
@@ -386,6 +391,17 @@ const mergeSettings = (base: SequenceSettings, patch: SettingsPatch | undefined)
   return merged
 }
 
+/** Refuses a step whose text asks for something no send can fill. The sentence
+ *  names the token, because "unknown merge field" leaves the person hunting
+ *  through four bodies for the typo. */
+const assertMergeFields = (label: string, texts: (string | null | undefined)[]): void => {
+  const unknown = [...new Set(texts.flatMap((text) => unknownMergeFields(text ?? '')))]
+  if (unknown.length === 0) return
+  throw new Error(
+    `${label} uses ${unknown.map((key) => `{{${key}}}`).join(', ')}, which nothing can fill. The merge fields that work are ${MERGE_FIELD_KEYS.join(', ')}.`,
+  )
+}
+
 const assertWindow = (window: SendWindow): void => {
   if (window.days.length === 0) {
     throw new Error('A sending window needs at least one day, or nothing would ever go out.')
@@ -419,6 +435,24 @@ export const setSequenceState = async (
       if (Number(steps?.n ?? 0) === 0) throw new Error('Add a step before turning this on.')
       if (Number(steps?.emails ?? 0) === 0) {
         throw new Error('At least one step has to be an email with a subject, or nothing is ever sent.')
+      }
+
+      // Steps saved before this rule existed, or written by an import, are caught
+      // here rather than on the first send.
+      const texts = await tx
+        .select({
+          subject: sequenceStep.subject,
+          subjectB: sequenceStep.subjectB,
+          bodyText: sequenceStep.bodyText,
+          bodyHtml: sequenceStep.bodyHtml,
+          taskTitle: sequenceStep.taskTitle,
+          taskBody: sequenceStep.taskBody,
+        })
+        .from(sequenceStep)
+        .where(eq(sequenceStep.sequenceId, input.id))
+        .orderBy(asc(sequenceStep.position))
+      for (const [index, step] of texts.entries()) {
+        assertMergeFields(`Step ${index + 1}`, Object.values(step))
       }
     }
 
@@ -500,6 +534,14 @@ export const saveSteps = async (
       if (step.kind !== 'email' && !(step.taskTitle ?? '').trim()) {
         throw new Error(`Step ${index + 1} makes a task and needs a title for it.`)
       }
+      assertMergeFields(`Step ${index + 1}`, [
+        step.subject,
+        step.subjectB,
+        step.bodyText,
+        step.bodyHtml,
+        step.taskTitle,
+        step.taskBody,
+      ])
       const values = {
         accountId: ctx.accountId,
         sequenceId: input.sequenceId,

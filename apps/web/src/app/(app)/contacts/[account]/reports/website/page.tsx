@@ -84,14 +84,14 @@ const WebsiteReport = async ({
                   <thead>
                     <tr className="border-b border-divider text-left text-secondary">
                       <th scope="col" className="py-1 pr-3 font-medium">Path</th>
-                      <th scope="col" className="py-1 pr-3 text-right font-medium">Views</th>
-                      <th scope="col" className="py-1 text-right font-medium">People</th>
+                      <th scope="col" className="whitespace-nowrap py-1 pr-3 text-right font-medium">Views</th>
+                      <th scope="col" className="whitespace-nowrap py-1 text-right font-medium">People</th>
                     </tr>
                   </thead>
                   <tbody>
                     {report.pages.map((row) => (
                       <tr key={row.path} className="border-b border-divider last:border-0">
-                        <th scope="row" className="py-1 pr-3 text-left font-normal">{row.path}</th>
+                        <th scope="row" className="break-all py-1 pr-3 text-left font-normal">{row.path}</th>
                         <td className="py-1 pr-3 text-right tabular-nums">{row.views}</td>
                         <td className="py-1 text-right tabular-nums">{row.visitors}</td>
                       </tr>

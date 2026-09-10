@@ -268,24 +268,31 @@ export type PendingEnrichment = {
   since: Date | null
 }
 
+/** A request whose record is still here.
+ *
+ *  A row whose record was deleted or merged away is cleared at the source, but
+ *  erasure and a hand-run delete do not go through that path. The prompt counts
+ *  live records, so everything that reports a number back to the same person has
+ *  to count the same ones, or the answer to "12 records waiting" is "15 dropped". */
+const stillHere = (alias: string) => sql.raw(`
+    case ${alias}.entity
+      when 'contact' then exists (select 1 from contact c where c.id = ${alias}.entity_id and c.deleted_at is null)
+      when 'company' then exists (select 1 from company c where c.id = ${alias}.entity_id and c.deleted_at is null)
+      else false
+    end`)
+
 /** What is waiting for a person to say yes. Counted rather than listed: the
  *  decision is "these many records, this many credits", and a list of ninety
  *  thousand names is not a decision anybody can read. */
 export const pendingEnrichment = async (ctx: AccountContext): Promise<PendingEnrichment> =>
   withAccount(ctx, async (tx) => {
-    // Only records that are still here. A row whose record was deleted or merged
-    // away is cleared at the source, but erasure and a hand-run delete do not go
-    // through that path, and a count that over-reports is the one number this
-    // prompt must never get wrong.
+    // A count that over-reports is the one number this prompt must never get
+    // wrong, so only records that are still here are counted.
     const rows = await tx.execute<{ entity: string; n: number; oldest: Date }>(
       sql`select r.entity, count(*)::int as n, min(r.requested_at) as oldest
             from enrichment_request r
            where r.approved_at is null
-             and case r.entity
-                   when 'contact' then exists (select 1 from contact c where c.id = r.entity_id and c.deleted_at is null)
-                   when 'company' then exists (select 1 from company c where c.id = r.entity_id and c.deleted_at is null)
-                   else false
-                 end
+             and ${stillHere('r')}
            group by r.entity`,
     )
     const of = (entity: string) => rows.find((row) => row.entity === entity)?.n ?? 0
@@ -303,17 +310,26 @@ export const pendingEnrichment = async (ctx: AccountContext): Promise<PendingEnr
 export const approveEnrichment = async (ctx: AccountContext): Promise<{ approved: number }> => {
   assertCanWrite(ctx, 'contact')
   return withAccount(ctx, async (tx) => {
-    const rows = await tx.execute<{ n: number }>(
-      sql`update enrichment_request set approved_at = now() where approved_at is null returning 1 as n`,
+    // Everything waiting is released; what is counted back is the records the
+    // person was shown the number of, which is not the same as the rows.
+    const [counted] = await tx.execute<{ n: number }>(
+      sql`with released as (
+            update enrichment_request set approved_at = now()
+             where approved_at is null
+             returning entity, entity_id)
+          select count(distinct (r.entity, r.entity_id))::int as n
+            from released r
+           where ${stillHere('r')}`,
     )
+    const approved = Number(counted?.n ?? 0)
     await writeAudit(tx, ctx, {
       entity: 'enrichment_request',
       entityId: null,
       action: 'approve',
       before: null,
-      after: { approved: rows.length },
+      after: { approved },
     })
-    return { approved: rows.length }
+    return { approved }
   })
 }
 
@@ -324,17 +340,23 @@ export const approveEnrichment = async (ctx: AccountContext): Promise<{ approved
 export const discardEnrichment = async (ctx: AccountContext): Promise<{ discarded: number }> => {
   assertCanWrite(ctx, 'contact')
   return withAccount(ctx, async (tx) => {
-    const rows = await tx.execute<{ n: number }>(
-      sql`delete from enrichment_request where approved_at is null returning 1 as n`,
+    const [counted] = await tx.execute<{ n: number }>(
+      sql`with dropped as (
+            delete from enrichment_request where approved_at is null
+             returning entity, entity_id)
+          select count(distinct (r.entity, r.entity_id))::int as n
+            from dropped r
+           where ${stillHere('r')}`,
     )
+    const discarded = Number(counted?.n ?? 0)
     await writeAudit(tx, ctx, {
       entity: 'enrichment_request',
       entityId: null,
       action: 'discard',
-      before: { waiting: rows.length },
+      before: { waiting: discarded },
       after: null,
     })
-    return { discarded: rows.length }
+    return { discarded }
   })
 }
 

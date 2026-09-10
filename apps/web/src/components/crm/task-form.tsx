@@ -4,22 +4,8 @@ import { Button, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 
-export type TaskType = 'todo' | 'call' | 'email'
-export type TaskPriority = 'low' | 'medium' | 'high'
-
-/** HubSpot's three, in the order its own dropdown offers them. */
-export const TASK_TYPE_LABELS: Record<TaskType, string> = {
-  todo: 'To-do',
-  call: 'Call',
-  email: 'Email',
-}
-
-export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-}
 
 /** The hour a relative reminder lands on. A reminder at midnight is one nobody
  *  sees before the day it is about is already half gone. */

@@ -196,6 +196,9 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
               {removing.subscribed.toLocaleString()} explicit opt-ins go too.
             </p>
             <div className="flex flex-wrap gap-2">
+              <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
               <Button
                 variant="destructive"
                 busy={busy}
@@ -211,9 +214,6 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
                 }
               >
                 Delete permanently
-              </Button>
-              <Button variant="tertiary" onClick={() => setRemoving(null)}>
-                Cancel
               </Button>
             </div>
           </div>

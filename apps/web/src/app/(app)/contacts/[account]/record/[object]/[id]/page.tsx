@@ -52,6 +52,7 @@ import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
 /** HubSpot's record anatomy, because familiarity is the point:
@@ -191,9 +192,9 @@ const RecordPage = async ({
     const { object } = await loadCrmContext(ctx, objectParam)
     return (
       <EmptyState
-        title={`That ${object.nameSingular.toLowerCase()} is not here`}
+        title={`That ${inSentence(object.nameSingular)} is not here`}
         description="It was deleted, or the link points at a record in another account. Its history is still on the records it touched."
-        action={<LinkButton variant="primary" href={objectView(account, objectParam, 'all')}>Back to {object.namePlural.toLowerCase()}</LinkButton>}
+        action={<LinkButton variant="primary" href={objectView(account, objectParam, 'all')}>Back to {inSentence(object.namePlural)}</LinkButton>}
       />
     )
   }

@@ -205,11 +205,11 @@ export const CreateRecordDialog = ({
         ) : null}
 
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" variant="primary" busy={saving}>
-            Create {objectLabel.toLowerCase()}
-          </Button>
           <Button type="button" variant="tertiary" onClick={close}>
             Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={saving}>
+            Create {objectLabel.toLowerCase()}
           </Button>
         </div>
       </form>

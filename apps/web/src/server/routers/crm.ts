@@ -19,6 +19,7 @@ import {
   duplicateView,
   dissociate,
   previewImportRun,
+  dismissDuplicate,
   findDuplicates,
   getRecord,
   getRegistry,
@@ -71,7 +72,7 @@ import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
 import { announceStageChange } from '../stage-alerts.ts'
-import { NOT_CONFIGURED, removeObject, signedDownload, signedUpload, storageConfigured } from '../storage.ts'
+import { NOT_CONFIGURED, removeObject, signedDownload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 /** The three the system is built on. Used only where a procedure genuinely needs
@@ -296,6 +297,20 @@ export const crmRouter = router({
         call(() => findDuplicates(ctx.account, input.object, input.limit ? { limit: input.limit } : {})),
       ),
 
+    /** "Not the same", kept. The queue is a scan, so without a row the same pair
+     *  comes back on the next visit. */
+    dismissDuplicate: protectedProcedure
+      .input(
+        z.object({
+          object: z.enum(['contact', 'company']),
+          leftId: z.uuid(),
+          rightId: z.uuid(),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() => dismissDuplicate(ctx.account, input.object, input)),
+      ),
+
     merge: protectedProcedure
       .input(
         z.object({
@@ -376,8 +391,16 @@ export const crmRouter = router({
    *  the page, so four counts over eighty-eight thousand rows never hold up the
    *  rows themselves. */
   kpis: protectedProcedure
-    .input(z.object({ object: anyObject }))
-    .query(({ ctx, input }) => call(() => listKpis(ctx.account, input.object))),
+    .input(
+      z.object({
+        object: anyObject,
+        filters: z.array(filterGroup).max(5).optional(),
+        search: z.string().max(200).optional(),
+      }),
+    )
+    .query(({ ctx, input }) =>
+      call(() => listKpis(ctx.account, input.object, (input.filters ?? []) as never, input.search ?? '')),
+    ),
 
   board: router({
     read: protectedProcedure
@@ -467,7 +490,10 @@ export const crmRouter = router({
         })),
       ),
 
-    sign: protectedProcedure
+    /** Names where the bytes will go and refuses everything refusable before any
+     *  of them move. The upload itself is a POST to /api/attachments/upload with
+     *  this key, because a browser cannot reach the bucket from this origin. */
+    begin: protectedProcedure
       .input(
         z.object({
           entityType: anyObject,
@@ -483,9 +509,7 @@ export const crmRouter = router({
           // Both refusals happen before a byte moves, so somebody is told while
           // they are still looking at the dialog rather than after the wait.
           assertCanAttach(ctx.account, input.bytes)
-          const storageKey = storageKeyFor(ctx.account, input)
-          const { url } = await signedUpload(storageKey)
-          return { storageKey, url }
+          return { storageKey: storageKeyFor(ctx.account, input) }
         }),
       ),
 

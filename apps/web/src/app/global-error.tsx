@@ -9,7 +9,11 @@ const GlobalError = ({ error, reset }: { error: Error & { digest?: string }; res
       <main style={{ maxWidth: '32rem', textAlign: 'center' }}>
         <h1 style={{ margin: '0 0 .5rem', fontSize: '1.25rem', fontWeight: 500 }}>Rawr could not start this page</h1>
         <p style={{ margin: '0 0 1.5rem' }}>
-          {error.message || 'Something failed without saying what.'}
+          {/* Same rule as the app's own boundary: Next redacts a server error's
+              message in a production build but not a client-thrown one, and a
+              query error carries its statement and parameters in its text. */}
+          {(process.env.NODE_ENV !== 'production' && error.message) ||
+            'Something failed before the page could be built. Try again, and if it keeps happening, tell whoever runs Rawr.'}
         </p>
         <button
           type="button"

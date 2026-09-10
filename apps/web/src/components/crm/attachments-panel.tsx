@@ -16,13 +16,15 @@ export type AttachmentView = {
 
 /** Files on a record.
  *
- *  The bytes go straight from this browser to storage and never through Rawr: a
- *  signed URL is asked for, the file is PUT to it, and only then is the row
- *  written. So a failed upload leaves nothing on the record, and a large file
- *  never occupies a request worker.
+ *  Three steps, in this order: a key is asked for, the file is posted to Rawr
+ *  under that key, and only then is the row written. So a failed upload leaves
+ *  nothing on the record.
  *
- *  Reading is the same in reverse — a link is minted per click and expires — so
- *  the bucket is never public and a URL copied out of the page stops working. */
+ *  The bytes go through Rawr rather than straight to the bucket because a page
+ *  here may only open connections to this origin, and a PUT to storage was
+ *  refused by the browser before it was made. Reading is the other way round: a
+ *  link is minted per click and expires, so the bucket is never public and a URL
+ *  copied out of the page stops working. */
 export const AttachmentsPanel = ({
   object,
   recordId,
@@ -48,7 +50,7 @@ export const AttachmentsPanel = ({
   const upload = async (file: File) => {
     setBusy('upload')
     try {
-      const signed = await api.crm.attachments.sign.mutate({
+      const begun = await api.crm.attachments.begin.mutate({
         entityType: object,
         entityId: recordId,
         filename: file.name,
@@ -56,18 +58,23 @@ export const AttachmentsPanel = ({
         mime: file.type || 'application/octet-stream',
       })
 
-      const put = await fetch(signed.url, {
-        method: 'PUT',
+      const sent = await fetch(`/api/attachments/upload?key=${encodeURIComponent(begun.storageKey)}`, {
+        method: 'POST',
         headers: { 'content-type': file.type || 'application/octet-stream' },
         body: file,
+      }).catch(() => {
+        throw new Error('The file could not be sent. Check your connection and try again.')
       })
-      if (!put.ok) throw new Error(`The upload was refused (${put.status}). Try again.`)
+      if (!sent.ok) {
+        const said = (await sent.json().catch(() => ({}))) as { error?: string }
+        throw new Error(said.error ?? `The upload was refused (${sent.status}). Try again.`)
+      }
 
       // Only now: a row that exists is a file that landed.
       const made = await api.crm.attachments.confirm.mutate({
         entityType: object,
         entityId: recordId,
-        storageKey: signed.storageKey,
+        storageKey: begun.storageKey,
         filename: file.name,
         bytes: file.size,
         mime: file.type || 'application/octet-stream',

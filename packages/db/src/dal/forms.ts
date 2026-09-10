@@ -222,6 +222,31 @@ export const beginFormUpload = async (
     return row.id
   })
 
+/** Where one issued upload's bytes belong, for the endpoint that receives them.
+ *
+ *  Scoped to the form the id was issued for and to a row nothing has claimed
+ *  yet, so an id from another form, or one already attached to a submission,
+ *  names no key at all. */
+export const issuedUploadKey = async (
+  form: PublicForm,
+  id: string,
+): Promise<{ storageKey: string; mime: string } | null> =>
+  withAccount(publicEdgeContext(form.accountId), async (tx) => {
+    if (!isUuid(id)) return null
+    const [row] = await tx
+      .select({ storageKey: formUpload.storageKey, mime: formUpload.mime })
+      .from(formUpload)
+      .where(
+        and(
+          eq(formUpload.id, id),
+          eq(formUpload.formId, form.formId),
+          isNull(formUpload.submissionId),
+        ),
+      )
+      .limit(1)
+    return row ?? null
+  })
+
 export type FormUploadRow = {
   id: string
   storageKey: string

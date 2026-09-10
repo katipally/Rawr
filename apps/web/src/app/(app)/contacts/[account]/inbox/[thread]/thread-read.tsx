@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import { useEffect } from 'react'
 import { api } from '~/lib/rpc.ts'
 
@@ -8,8 +9,11 @@ import { api } from '~/lib/rpc.ts'
  *  a preview cannot clear somebody's unread count for them. Failing is silent:
  *  nobody needs a toast because a read receipt did not save. */
 export const ThreadRead = ({ threadId }: { threadId: string }) => {
+  const router = useRouter()
   useEffect(() => {
-    void api.mail.markRead.mutate({ threadId }).catch(() => {})
-  }, [threadId])
+    // Refreshed once it lands, or the unread count beside the list keeps
+    // counting a thread the reader is looking at.
+    void api.mail.markRead.mutate({ threadId }).then(() => router.refresh()).catch(() => {})
+  }, [threadId, router])
   return null
 }

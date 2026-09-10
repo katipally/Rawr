@@ -1,16 +1,17 @@
 'use client'
 
-import { Checkbox, DataTable, EmptyState, IconButton, Modal, Select, cn, useToast, type Column } from '@rawr/ui'
+import { Button, Checkbox, DataTable, EmptyState, IconButton, Modal, Select, cn, useToast, type Column } from '@rawr/ui'
 import { Pencil } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { useNavigation } from '~/components/navigation.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { recordPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { TaskForm, TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-form.tsx'
+import { TaskForm } from './task-form.tsx'
+import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-labels.ts'
 import type { TaskRow } from './tasks-panel.tsx'
 import { formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -25,6 +26,11 @@ export type TasksTableProps = {
   canWrite: boolean
   /** Shown when the view matched nothing. */
   emptyTitle: string
+  /** Read from ?new=1 on the server, so a deep link has the dialog open on the
+   *  first paint rather than after hydration. */
+  openCreate?: boolean
+  /** True when a filter, not an empty account, is why the table is empty. */
+  filtered?: boolean
 }
 
 /** High is the only one worth colouring: medium is the default every task has,
@@ -39,30 +45,40 @@ const PRIORITY_TONE: Record<TaskRow['priority'], string> = {
  *  the record the task hangs on one click away, and the count in the footer.
  *  The "Add tasks" button on the header links here with ?new=1, so the create
  *  dialog lives once, next to the table it adds to. */
-export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite, emptyTitle }: TasksTableProps) => {
+export const TasksTable = ({
+  account,
+  rows,
+  assignees,
+  queues,
+  queueId,
+  canWrite,
+  emptyTitle,
+  openCreate = false,
+  filtered = false,
+}: TasksTableProps) => {
   const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
   const query = useSearchParams()
-  const askedToCreate = query.get('new') === '1'
-  const [creating, setCreating] = useState(false)
+  // Derived from the prop rather than seeded into state from it, the way the list
+  // toolbar's create dialog is: state read once at mount stays shut when a
+  // client-side navigation re-renders this table with ?new=1 instead of
+  // remounting it, and reading the param in an effect opens it only after
+  // hydration, which on a cold load is late enough to look broken.
+  const creating = openCreate && canWrite
   const [editing, setEditing] = useState<TaskRow | null>(null)
+  const [removing, setRemoving] = useState<TaskRow | null>(null)
   const [busy, setBusy] = useState(false)
   const { page, pager } = usePagedRows(rows, 'task')
 
-  useEffect(() => {
-    if (askedToCreate && canWrite) setCreating(true)
-  }, [askedToCreate, canWrite])
-
+  // Drop ?new=1 so a refresh, or a step back, does not reopen the dialog. Run by
+  // both ways out of the dialog: cancelling it and creating a task in it.
   const closeCreate = () => {
-    setCreating(false)
-    // Drop ?new=1 so a refresh, or a step back, does not reopen the dialog.
-    if (askedToCreate) {
-      const next = new URLSearchParams(query)
-      next.delete('new')
-      navigate(`${tasksPath(account)}${next.size ? `?${next}` : ''}`)
-    }
+    if (!creating) return
+    const next = new URLSearchParams(query)
+    next.delete('new')
+    navigate(`${tasksPath(account)}${next.size ? `?${next}` : ''}`)
   }
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -199,7 +215,7 @@ export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite
                   disabled={busy}
                   onClick={(event) => {
                     event.stopPropagation()
-                    void run(() => api.crm.tasks.remove.mutate({ id: row.id }), 'Task deleted.')
+                    setRemoving(row)
                   }}
                 />
               </span>
@@ -210,7 +226,7 @@ export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite
   ]
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <DataTable
         columns={columns}
         rows={page}
@@ -222,7 +238,17 @@ export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite
           <div className="flex flex-1 flex-col justify-center">
             <EmptyState
               title={emptyTitle}
-              {...(canWrite ? { description: 'Add one with the button above. Overdue tasks are what the Monday list is built from.' } : {})}
+              {...(filtered
+                ? {
+                    description:
+                      'Widen the search, pick a different type, or clear the filter to see the rest of the tasks.',
+                  }
+                : canWrite
+                  ? {
+                      description:
+                        'Add one with the button above. Overdue tasks are what the Monday list is built from.',
+                    }
+                  : {})}
             />
           </div>
         }
@@ -242,6 +268,34 @@ export const TasksTable = ({ account, rows, assignees, queues, queueId, canWrite
           onCreated={closeCreate}
           className="flex flex-wrap items-end gap-2"
         />
+      </Modal>
+      <Modal
+        open={removing !== null}
+        title={`Delete “${removing?.title ?? ''}”?`}
+        onClose={() => setRemoving(null)}
+        footer={
+          <>
+            <Button variant="tertiary" disabled={busy} onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() =>
+                void run(() => api.crm.tasks.remove.mutate({ id: removing!.id }), 'Task deleted.').then(() =>
+                  setRemoving(null),
+                )
+              }
+            >
+              Delete task
+            </Button>
+          </>
+        }
+      >
+        <p>
+          The record it hangs on keeps its timeline, so what was done about it is still there. The
+          task itself does not come back.
+        </p>
       </Modal>
       <Modal open={editing !== null} title="Edit task" onClose={() => setEditing(null)}>
         {editing ? (

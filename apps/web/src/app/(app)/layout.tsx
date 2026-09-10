@@ -37,6 +37,7 @@ import {
 import { settingsGroups } from '~/lib/settings-nav.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import type { Hub } from '~/lib/hubs.ts'
+import { inSentence } from '~/lib/label-case.ts'
 
 /** A rail section before its grants are applied. The hub on a group overrides the
  *  section's, which is how Data Management lists moving contacts next to the
@@ -207,7 +208,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const actions: Action[] = [
     ...create.map((option) => ({
       href: option.href,
-      label: `Create ${option.label.toLowerCase()}`,
+      label: `Create ${inSentence(option.label)}`,
       keywords: ['new', 'add', option.label],
     })),
     ...(canWrite(ctx, 'contact')

@@ -110,6 +110,17 @@ export const saveCampaign = async (ctx: AccountContext, input: SaveCampaignInput
       throw new Error('That campaign would end before it started.')
     }
 
+    // Read the row the update is about to overwrite, so the audit entry can say
+    // what changed rather than showing every field as arriving from nothing.
+    const prior = input.id
+      ? (
+          await tx.execute<{ name: string; utm_campaign: string; spend: string }>(sql`
+            select name, utm_campaign, spend::text
+              from campaign
+             where id = ${input.id} and account_id = ${ctx.accountId}`)
+        )[0]
+      : undefined
+
     const rows = input.id
       ? await tx.execute<{ id: string }>(sql`
           update campaign
@@ -137,7 +148,13 @@ export const saveCampaign = async (ctx: AccountContext, input: SaveCampaignInput
     await resolveContactCampaigns(tx, ctx, null)
     return {
       result: id,
-      audit: { entity: 'campaign', entityId: id, action: input.id ? 'update' : 'create', after: { name, utmCampaign, spend: input.spend } },
+      audit: {
+        entity: 'campaign',
+        entityId: id,
+        action: input.id ? 'update' : 'create',
+        before: prior && { name: prior.name, utmCampaign: prior.utm_campaign, spend: Number(prior.spend) },
+        after: { name, utmCampaign, spend: input.spend },
+      },
     }
   })
 

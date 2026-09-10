@@ -8,6 +8,7 @@ import { FilterBuilder, type FilterField, type Group } from '~/components/crm/fi
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
 import { automationRunsPath } from '~/lib/links.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -147,7 +148,10 @@ const describeDelay = (minutes: number): string =>
 const summarise = (step: StepView): string => {
   if (step.kind === 'delay') return `wait ${describeDelay(step.minutes)}`
   if (step.kind === 'guard') return 'check it still matches'
-  if (step.kind === 'branch') return `if it matches: ${step.matched.map(summarise).join(', then ') || 'nothing'}`
+  if (step.kind === 'branch') {
+    const arm = (steps: StepView[]) => steps.map(summarise).join(', then ') || 'nothing'
+    return `if it matches: ${arm(step.matched)}; otherwise: ${arm(step.otherwise)}`
+  }
   return ACTIONS.find((entry) => entry.key === step.type)?.label.toLowerCase() ?? step.type
 }
 
@@ -568,6 +572,10 @@ export const AutomationList = ({
   const [removing, setRemoving] = useState<AutomationRowView | null>(null)
   const { page, pager } = usePagedRows(rows, 'automations')
   const [busy, setBusy] = useState(false)
+  /** Whether a rule is on, as this browser has just set it. router.refresh takes a
+   *  round trip, and a switch that snaps back for that long reads as a failure.
+   *  Dropped on failure, leaving the server's answer. */
+  const [switched, setSwitched] = useState<Record<string, boolean>>({})
 
   const [name, setName] = useState('')
   const [trigger, setTrigger] = useState<Trigger>('record_created')
@@ -579,6 +587,7 @@ export const AutomationList = ({
   const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
   const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
   const labelOf = (key: string): string => objects.find((entry) => entry.key === key)?.label ?? key
+  const isOn = (row: AutomationRowView): boolean => switched[row.id] ?? row.isActive
   const setTrigger_ = (key: string, value: string) => setTriggerConfig({ ...triggerConfig, [key]: value })
 
   const editor: EditorContext = {
@@ -612,7 +621,7 @@ export const AutomationList = ({
     setEditing(row)
   }
 
-  const run = async (what: () => Promise<unknown>, said: string) => {
+  const run = async (what: () => Promise<unknown>, said: string, undo?: () => void) => {
     setBusy(true)
     try {
       await what()
@@ -621,6 +630,7 @@ export const AutomationList = ({
       setRemoving(null)
       router.refresh()
     } catch (cause) {
+      undo?.()
       toast('error', errorMessage(cause))
     } finally {
       setBusy(false)
@@ -642,7 +652,7 @@ export const AutomationList = ({
           // the editor holds is already the shape the layer parses.
           steps,
         }),
-      'Saved. Turn it on when you are ready.',
+      editing === 'new' ? 'Saved. Turn it on when you are ready.' : 'Saved.',
     )
 
   return (
@@ -668,11 +678,11 @@ export const AutomationList = ({
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-baseline gap-x-2">
                   <span className="font-medium">{row.name}</span>
-                  {row.isActive ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
+                  {isOn(row) ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
                 </p>
                 <p className="text-small text-secondary">
                   When {TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a{' '}
-                  {labelOf(row.objectKey).toLowerCase()}:{' '}
+                  {inSentence(labelOf(row.objectKey))}:{' '}
                   {row.steps.map(summarise).join(', then ')}
                 </p>
                 <p className="text-small text-secondary tabular-nums">
@@ -683,13 +693,20 @@ export const AutomationList = ({
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
                 <Switch
-                  checked={row.isActive}
-                  label={row.isActive ? 'On' : 'Off'}
+                  checked={isOn(row)}
+                  label={isOn(row) ? 'On' : 'Off'}
                   onChange={(event) => {
                     const next = event.target.checked
+                    setSwitched((current) => ({ ...current, [row.id]: next }))
                     void run(
                       () => api.admin.automations.setActive.mutate({ id: row.id, isActive: next }),
                       next ? 'Running from now on.' : 'Stopped.',
+                      () =>
+                        setSwitched((current) => {
+                          const rest = { ...current }
+                          delete rest[row.id]
+                          return rest
+                        }),
                     )
                   }}
                 />
@@ -746,12 +763,14 @@ export const AutomationList = ({
         size="lg"
         title={editing === 'new' ? 'Create automation' : 'Edit automation'}
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
             <Button variant="primary" busy={busy} disabled={!name.trim()} onClick={() => void save()}>
               Save
             </Button>
-            <Button onClick={() => setEditing(null)}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <div className="flex flex-col gap-3">
@@ -884,7 +903,10 @@ export const AutomationList = ({
         size="sm"
         title={`Delete ${removing?.name ?? ''}?`}
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -895,8 +917,7 @@ export const AutomationList = ({
             >
               Delete
             </Button>
-            <Button onClick={() => setRemoving(null)}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <p>

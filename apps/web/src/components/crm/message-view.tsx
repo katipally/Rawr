@@ -46,11 +46,14 @@ const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone:
 
 /** One message, with its stored body.
  *
- *  Sender HTML is rendered inside an iframe with an empty sandbox: no scripts, no
- *  forms, no navigation, no access to this page. It is also sanitised before it is
- *  stored, so this is the second of two defences rather than the only one. Remote
- *  images stay blocked until asked for, because loading one tells the sender the
- *  mail was opened and by whom. */
+ *  Sender HTML is rendered inside a sandboxed iframe. The sandbox grants only
+ *  `allow-same-origin`, and never `allow-scripts`, so nothing in the mail runs:
+ *  script elements, event handlers and javascript: URLs are stripped before the
+ *  body is stored, and the sandbox refuses to execute them even if one survived.
+ *  Same-origin is what makes the frame measurable, and a frame nobody can measure
+ *  is a mail cropped at an arbitrary height. Remote images stay blocked until
+ *  asked for, because loading one tells the sender the mail was opened and by
+ *  whom. */
 export const MessageView = ({ message }: { message: ThreadMessage }) => {
   const zone = useZone()
   const [showHtml, setShowHtml] = useState(true)
@@ -73,16 +76,32 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
         `a{color:#007d96}table{max-width:100%}</style>` +
         (loadImages ? html : html.replace(/(<img\b[^>]*?)\ssrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '$1'))
 
-  // The frame has no layout of its own, so it is measured after it paints and
-  // again when its content settles. Capped: a marketing mail is not a page.
+  // The frame has no layout of its own, so it is measured once its document
+  // exists and then watched: a table reflowing on a resize, or an image arriving
+  // late, changes the height after the first paint. Capped both ways, because a
+  // marketing mail is not a page. Where the document cannot be read at all the
+  // fallback height stands and the frame scrolls itself.
   useEffect(() => {
-    if (!document_ || !showHtml) return
+    const box = frame.current
+    if (!document_ || !showHtml || !box) return
+    let observer: ResizeObserver | null = null
+
     const measure = () => {
-      const body = frame.current?.contentDocument?.body
-      if (body) setHeight(Math.min(Math.max(body.scrollHeight + 16, 60), 900))
+      const body = box.contentDocument?.body
+      if (!body) return
+      setHeight(Math.min(Math.max(body.scrollHeight + 16, 60), 900))
+      if (observer) return
+      observer = new ResizeObserver(measure)
+      observer.observe(body)
     }
-    const timer = window.setTimeout(measure, 60)
-    return () => window.clearTimeout(timer)
+
+    // srcdoc may have parsed already, or may still be on its way.
+    measure()
+    box.addEventListener('load', measure)
+    return () => {
+      box.removeEventListener('load', measure)
+      observer?.disconnect()
+    }
   }, [document_, showHtml])
 
   return (
@@ -118,7 +137,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
         <iframe
           ref={frame}
           title={`Message from ${message.fromAddr ?? 'unknown sender'}`}
-          sandbox=""
+          sandbox="allow-same-origin"
           srcDoc={document_ ?? ''}
           style={{ height }}
           className="mt-2 w-full border-0"

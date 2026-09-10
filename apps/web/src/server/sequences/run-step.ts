@@ -13,6 +13,7 @@ import {
   windowFor,
   type ClaimedRun,
   type AccountContext,
+  type MergeFieldKey,
 } from '@rawr/db'
 import { createHash } from 'node:crypto'
 import { RevokedError } from '../gmail.ts'
@@ -36,9 +37,10 @@ export type RunOutcome =
 
 const SENDERS: Record<string, Sender> = { gmail: gmailSender }
 
-/** The values a merge field can use. Deliberately small: a template that can read
- *  any field would be a way to put anything from the CRM into a stranger's inbox. */
-const mergeValues = (run: ClaimedRun): Record<string, string | null> => ({
+/** The values a merge field can use. Typed by the key list the editors offer and
+ *  the save enforces, so a key that exists in one place and not the other is a
+ *  compile error rather than an empty greeting. */
+const mergeValues = (run: ClaimedRun): Record<MergeFieldKey, string | null> => ({
   first_name: run.contactFirstName,
   last_name: run.contactLastName,
   full_name: [run.contactFirstName, run.contactLastName].filter(Boolean).join(' ') || null,

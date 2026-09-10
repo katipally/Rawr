@@ -1,4 +1,12 @@
-import { canWrite, getRegistry, listImportRuns } from '@rawr/db'
+import {
+  canWrite,
+  dedupeKeyOf,
+  getRegistry,
+  importShapeFor,
+  listImportRuns,
+  requiredColumnKeys,
+  type ImportKind,
+} from '@rawr/db'
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -6,6 +14,33 @@ import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MAX_BYTES, MAX_ROWS } from '~/server/spreadsheet.ts'
+import { ClearError } from './clear-error.tsx'
+import { ImportKindField, type ImportKindOption } from './import-kind-field.tsx'
+
+/** What each of the five shape files is for, in the picker's own words. The
+ *  columns beside them are read off the shapes themselves. */
+const SHAPE_LABEL: Record<Exclude<ImportKind, 'records'>, { label: string; what: string }> = {
+  activities: {
+    label: 'Notes and logged emails',
+    what: 'Timeline entries against records that already exist. Nothing here creates a contact.',
+  },
+  properties: {
+    label: 'Property definitions',
+    what: 'The fields records go into. Import this first: a column cannot arrive before the field it fills.',
+  },
+  associations: {
+    label: 'Deal contacts and companies',
+    what: 'Who is on which deal. A record export carries a contact’s company and nothing else.',
+  },
+  lists: {
+    label: 'List memberships',
+    what: 'One row per person per list. Each list arrives as a snapshot of the people the file names.',
+  },
+  submissions: {
+    label: 'Form submissions',
+    what: 'Submission history, so the forms report is not empty and a timeline does not start at the cutover.',
+  },
+}
 
 const ImportPage = async ({
   params,
@@ -26,6 +61,35 @@ const ImportPage = async ({
   // has records, and a migration arrives as a file of them like anything else.
   const registry = await getRegistry(ctx)
   const allowed = canWrite(contextFrom(session), 'contact')
+
+  /** Built here rather than in the picker: the shapes and the match column are
+   *  the import layer's answer, and a sentence typed into a component is one
+   *  that goes stale the first time a shape gains a column. */
+  const kindOptions: ImportKindOption[] = [
+    ...registry.objects.map((entry) => {
+      const key = dedupeKeyOf('records', entry)
+      return {
+        value: entry.key,
+        label: entry.namePlural,
+        what: `Every column is a field on a ${entry.nameSingular.toLowerCase()}. Rows are matched on ${
+          entry.byKey.get(key)?.label ?? key
+        }, so importing the same file again updates rather than creating a second copy.`,
+        columns: [],
+        required: [],
+      }
+    }),
+    ...(Object.keys(SHAPE_LABEL) as Exclude<ImportKind, 'records'>[]).map((kind) => {
+      const shape = importShapeFor(kind)
+      const labelOf = (key: string) => shape?.byKey.get(key)?.label ?? key
+      return {
+        value: kind,
+        label: SHAPE_LABEL[kind].label,
+        what: SHAPE_LABEL[kind].what,
+        columns: shape?.fields.map((entry) => entry.label) ?? [],
+        required: requiredColumnKeys(kind).map(labelOf),
+      }
+    }),
+  ]
 
   return (
     <div className="flex flex-col gap-4">
@@ -48,9 +112,10 @@ const ImportPage = async ({
       />
 
       {error ? (
-        <Alert>
-          {error}
-        </Alert>
+        <>
+          <Alert>{error}</Alert>
+          <ClearError />
+        </>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -63,20 +128,7 @@ const ImportPage = async ({
         >
           <h2 className="text-base font-semibold">Import a file</h2>
           <p className="text-secondary">One-time import from a file, directly into the CRM.</p>
-          <Field id="import-object" label="What is in the file">
-            <Select id="import-object" name="object" defaultValue="contact">
-              {registry.objects.map((entry) => (
-                <option key={entry.key} value={entry.key}>
-                  {entry.namePlural}
-                </option>
-              ))}
-              <option value="activities">Notes and logged emails</option>
-              <option value="properties">Property definitions</option>
-              <option value="associations">Deal contacts and companies</option>
-              <option value="lists">List memberships</option>
-              <option value="submissions">Form submissions</option>
-            </Select>
-          </Field>
+          <ImportKindField options={kindOptions} />
 
           <Field
             id="import-source"

@@ -313,6 +313,9 @@ export const ListToolbar = ({
               Everyone in this account can see it
             </label>
             <div className="flex flex-wrap gap-2">
+              <Button variant="tertiary" onClick={() => closeSave()}>
+                Cancel
+              </Button>
               <Button
                 variant="primary"
                 busy={saving}
@@ -320,9 +323,6 @@ export const ListToolbar = ({
                 onClick={() => void writeView(null, viewName.trim())}
               >
                 Save as new view
-              </Button>
-              <Button variant="tertiary" onClick={() => closeSave()}>
-                Cancel
               </Button>
             </div>
           </div>
@@ -380,16 +380,14 @@ export const ListToolbar = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              disabled={draftColumns.length === 0}
-              onClick={() => {
-                setShowColumns(false)
-                goTo({ cols: draftColumns.join(',') })
-              }}
-            >
-              Apply to this screen
+            <Button variant="tertiary" onClick={() => setShowColumns(false)}>
+              Cancel
             </Button>
+            {params.cols ? (
+              <Button variant="tertiary" onClick={() => { setShowColumns(false); goTo({ cols: undefined }) }}>
+                Back to the view’s columns
+              </Button>
+            ) : null}
             {canWrite && viewId ? (
               <Button
                 busy={saving}
@@ -399,13 +397,15 @@ export const ListToolbar = ({
                 Save to “{viewLabel}”
               </Button>
             ) : null}
-            {params.cols ? (
-              <Button variant="tertiary" onClick={() => { setShowColumns(false); goTo({ cols: undefined }) }}>
-                Back to the view’s columns
-              </Button>
-            ) : null}
-            <Button variant="tertiary" onClick={() => setShowColumns(false)}>
-              Cancel
+            <Button
+              variant="primary"
+              disabled={draftColumns.length === 0}
+              onClick={() => {
+                setShowColumns(false)
+                goTo({ cols: draftColumns.join(',') })
+              }}
+            >
+              Apply to this screen
             </Button>
           </div>
         </div>

@@ -126,7 +126,15 @@ export const readSpreadsheet = async (file: File): Promise<Sheet> => {
   }
 
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(await file.arrayBuffer())
+  try {
+    await workbook.xlsx.load(await file.arrayBuffer())
+  } catch {
+    // The zip reader's own words are "Can't find end of central directory", with a
+    // link to its docs. Neither belongs on a page about a spreadsheet.
+    throw new SpreadsheetError(
+      'That .xlsx file could not be opened. Re-save it from your spreadsheet app, or export it as CSV.',
+    )
+  }
   const sheet = workbook.worksheets[0]
   if (!sheet) throw new SpreadsheetError('That workbook has no sheets in it.')
 

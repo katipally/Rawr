@@ -10,10 +10,6 @@ import { useZone } from '~/components/zone.tsx'
 import { recordPath, segmentsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
-/** One screenful. The list itself can hold eighty thousand, so the page walks it
- *  rather than asking for it. */
-export const PAGE_SIZE = 50
-
 type Member = { id: string; displayName: string; enteredAt: string }
 
 export type ListMembersProps = {
@@ -27,10 +23,14 @@ export type ListMembersProps = {
     memberCount: number
   }
   initial: Member[]
+  /** One screenful. The list itself can hold eighty thousand, so the page walks
+   *  it rather than asking for it. Set by the server page, which fetched the
+   *  first screenful with the same number. */
+  pageSize: number
   canWrite: boolean
 }
 
-export const ListMembers = ({ account, list, initial, canWrite }: ListMembersProps) => {
+export const ListMembers = ({ account, list, initial, pageSize, canWrite }: ListMembersProps) => {
   const zone = useZone()
   const router = useRouter()
   const toast = useToast()
@@ -42,7 +42,7 @@ export const ListMembers = ({ account, list, initial, canWrite }: ListMembersPro
   const load = async (next: number) => {
     setBusy(true)
     try {
-      const rows = await api.segments.members.query({ id: list.id, limit: PAGE_SIZE, offset: next })
+      const rows = await api.segments.members.query({ id: list.id, limit: pageSize, offset: next })
       setMembers(rows.map((row) => ({ ...row, enteredAt: row.enteredAt.toISOString() })))
       setOffset(next)
       setSelected(new Set())
@@ -172,7 +172,7 @@ export const ListMembers = ({ account, list, initial, canWrite }: ListMembersPro
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={busy || offset === 0} onClick={() => void load(Math.max(0, offset - PAGE_SIZE))}>
+        <Button disabled={busy || offset === 0} onClick={() => void load(Math.max(0, offset - pageSize))}>
           Previous
         </Button>
         <span className="text-small text-secondary">
@@ -182,7 +182,7 @@ export const ListMembers = ({ account, list, initial, canWrite }: ListMembersPro
         </span>
         <Button
           disabled={busy || offset + members.length >= list.memberCount}
-          onClick={() => void load(offset + PAGE_SIZE)}
+          onClick={() => void load(offset + pageSize)}
         >
           Next
         </Button>

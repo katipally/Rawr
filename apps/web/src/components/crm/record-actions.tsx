@@ -242,11 +242,11 @@ export const RecordActions = ({
           ) : null}
 
           <div className="flex flex-wrap gap-2">
-            <Button variant="primary" busy={busy} disabled={absorbedId === ''} onClick={() => void merge()}>
-              Merge, permanently
-            </Button>
             <Button variant="tertiary" onClick={() => setShowMerge(false)}>
               Cancel
+            </Button>
+            <Button variant="primary" busy={busy} disabled={absorbedId === ''} onClick={() => void merge()}>
+              Merge, permanently
             </Button>
           </div>
         </div>
@@ -273,6 +273,9 @@ export const RecordActions = ({
             onChange={(event) => setConfirmText(event.target.value)}
           />
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -280,9 +283,6 @@ export const RecordActions = ({
               onClick={() => void remove()}
             >
               Delete {objectLabel.toLowerCase()}
-            </Button>
-            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
-              Cancel
             </Button>
           </div>
         </div>

@@ -21,6 +21,8 @@ export type OrderedListProps = {
 /** An ordered, named list where deleting one entry means deciding where its records
  *  go. The same shape as a pipeline stage, without the probability. */
 export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedListProps) => {
+  // noun reads mid-sentence ("New lifecycle stage"); Noun starts a sentence.
+  const Noun = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -82,7 +84,7 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
         className="flex flex-wrap items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          void run(() => routes.create.mutate({ name: adding }), `${noun} added.`).then(
+          void run(() => routes.create.mutate({ name: adding }), `${Noun} added.`).then(
             (ok) => ok && setAdding(''),
           )
         }}
@@ -146,7 +148,7 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
       <RenamePrompt
         value={renaming?.name ?? null}
         title={`Rename ${renaming?.name ?? ''}`}
-        label={`${noun.charAt(0).toUpperCase()}${noun.slice(1)} name`}
+        label={`${Noun} name`}
         busy={busy}
         onCancel={() => setRenaming(null)}
         onRename={(name) => {
@@ -157,7 +159,34 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
         }}
       />
 
-      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
+      <Modal
+        open={removing !== null}
+        size="sm"
+        title={`Delete ${removing?.name ?? ''}`}
+        onClose={() => setRemoving(null)}
+        footer={
+          removing ? (
+            <>
+              <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                busy={busy}
+                disabled={removing.usedBy > 0 && destination === ''}
+                onClick={() =>
+                  void run(
+                    () => routes.remove.mutate({ id: removing.id, destinationId: destination || null }),
+                    'Deleted.',
+                  ).then((ok) => ok && setRemoving(null))
+                }
+              >
+                Delete
+              </Button>
+            </>
+          ) : null
+        }
+      >
         {removing ? (
           <div className="flex flex-col gap-3">
             {removing.usedBy === 0 ? (
@@ -187,24 +216,6 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
                 </Field>
               </>
             )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="destructive"
-                busy={busy}
-                disabled={removing.usedBy > 0 && destination === ''}
-                onClick={() =>
-                  void run(
-                    () => routes.remove.mutate({ id: removing.id, destinationId: destination || null }),
-                    'Deleted.',
-                  ).then((ok) => ok && setRemoving(null))
-                }
-              >
-                Delete
-              </Button>
-              <Button variant="tertiary" onClick={() => setRemoving(null)}>
-                Cancel
-              </Button>
-            </div>
           </div>
         ) : null}
       </Modal>

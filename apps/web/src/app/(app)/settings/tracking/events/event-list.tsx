@@ -2,6 +2,7 @@
 
 import { Badge, Button, Card, DataTable, Field, IconButton, Modal, Pagination, Select, TextInput, useToast } from '@rawr/ui'
 import { Trash2 } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -33,11 +34,13 @@ const rowsFrom = (properties: Record<string, unknown>): PropertyRow[] =>
       : 'string',
   }))
 
-export const EventDefList = ({ initial }: { initial: Page }) => {
+export const EventDefList = ({ initial, search: initialSearch }: { initial: Page; search: string }) => {
   const zone = useZone()
   const toast = useToast()
+  const router = useRouter()
+  const pathname = usePathname()
   const [page, setPage] = useState<Page>(initial)
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(initialSearch)
   const [offset, setOffset] = useState(0)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<EventDefView | null>(null)
@@ -59,14 +62,25 @@ export const EventDefList = ({ initial }: { initial: Page }) => {
     [toast],
   )
 
-  // A typed search is one request after the typing stops, not one per keystroke.
+  // A typed search is one request after the typing stops, not one per keystroke,
+  // and the address follows it so a search can be linked to or reloaded. The
+  // query is read at the moment the timer fires rather than tracked as a
+  // dependency, which would run this again on the replace it just made.
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      const needle = search.trim()
       setOffset(0)
-      load(0, search.trim())
+      load(0, needle)
+      const query = new URLSearchParams(window.location.search)
+      if (needle) query.set('q', needle)
+      else query.delete('q')
+      const next = query.toString()
+      if (next !== window.location.search.replace(/^\?/, '')) {
+        router.replace(next ? `${pathname}?${next}` : pathname, { scroll: false })
+      }
     }, 250)
     return () => window.clearTimeout(timer)
-  }, [search, load])
+  }, [search, load, pathname, router])
 
   const move = (next: number) => {
     setOffset(next)

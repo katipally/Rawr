@@ -60,6 +60,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
   const [objectFilter, setObjectFilter] = useState<'all' | ObjectKey>('all')
   const [creatingList, setCreatingList] = useState(false)
   const [viewing, setViewing] = useState<SegmentRow | null>(null)
+  const [removing, setRemoving] = useState<SegmentRow | null>(null)
   const [members, setMembers] = useState<{ id: string; displayName: string; enteredAt: Date }[] | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
@@ -214,7 +215,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
       width: 200,
       render: (row) =>
         row.isStatic ? (
-          <span className="text-secondary">Imported</span>
+          <span className="text-secondary">Kept by hand</span>
         ) : row.lastEvaluatedAt === null ? (
           <span className="text-secondary">Never</span>
         ) : (
@@ -231,47 +232,50 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
           groups={[
             {
               key: 'read',
-              items: [
-                { key: 'members', label: 'View members', onSelect: () => void openMembers(row) },
-                {
-                  key: 'list',
-                  label: 'Open as a list',
-                  href: objectView(account, row.objectKey, 'all', 'list', { filters: JSON.stringify(row.filters) }),
-                },
-              ],
+              // Two destinations, never the same one twice: who is in it, and the
+              // records themselves. A static list holds no conditions, so filtering
+              // a record list by them would show every record rather than its own.
+              items: row.isStatic
+                ? [{ key: 'members', label: 'Open the members page', href: segmentsPath(account, row.id) }]
+                : [
+                    { key: 'members', label: 'View members here', onSelect: () => void openMembers(row) },
+                    {
+                      key: 'list',
+                      label: 'Open matching records',
+                      href: objectView(account, row.objectKey, 'all', 'list', { filters: JSON.stringify(row.filters) }),
+                    },
+                  ],
             },
             ...(canWrite
               ? [
-                  {
-                    key: 'write',
-                    items: row.isStatic
-                      ? [
-                          {
-                            key: 'static',
-                            label: 'Open the list',
-                            href: segmentsPath(account, row.id),
-                          },
-                        ]
-                      : [
-                          { key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) },
-                          { key: 'edit', label: 'Edit', onSelect: () => openEdit(row) },
-                        ],
-                  },
+                  ...(row.isStatic
+                    ? []
+                    : [
+                        {
+                          key: 'write',
+                          items: [
+                            { key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) },
+                            { key: 'edit', label: 'Edit', onSelect: () => openEdit(row) },
+                          ],
+                        },
+                      ]),
                   {
                     key: 'danger',
                     items: [
-                      {
-                        key: 'delete',
-                        label: 'Delete',
-                        destructive: true,
-                        onSelect: () => void run(() => api.segments.remove.mutate({ id: row.id }), 'Segment deleted.'),
-                      },
+                      { key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) },
                     ],
                   },
                 ]
               : []),
           ]}
-          trigger={(props) => <IconButton {...props} label={`Actions for ${row.name}`} icon={<MoreVertical className="size-4" />} />}
+          trigger={(props) => (
+            <IconButton
+              {...props}
+              side="left"
+              label={`Actions for ${row.name}`}
+              icon={<MoreVertical className="size-4" />}
+            />
+          )}
         />
       ),
     },
@@ -346,7 +350,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
       </label>
 
-        <label className="flex min-w-0 flex-col gap-1">
+        <label className="flex min-w-fit flex-col gap-1">
           <span className="text-small text-secondary">Type</span>
           <Select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
             <option value="all">Active and static</option>
@@ -355,7 +359,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
           </Select>
         </label>
 
-        <label className="flex min-w-0 flex-col gap-1">
+        <label className="flex min-w-fit flex-col gap-1">
           <span className="text-small text-secondary">Records</span>
           <Select
             value={objectFilter}
@@ -499,6 +503,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
           ) : null}
 
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -506,9 +513,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               onClick={() => void save()}
             >
               Save segment
-            </Button>
-            <Button variant="tertiary" onClick={() => setEditing(null)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -547,6 +551,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             </Select>
           </Field>
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
+              Cancel
+            </Button>
             <Button
               variant="primary"
               busy={busy}
@@ -566,9 +573,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               }
             >
               Create list
-            </Button>
-            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -605,6 +609,38 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             ))}
           </ul>
         )}
+      </Modal>
+
+      {/* --------------------------------------------------------- delete */}
+      <Modal
+        open={removing !== null}
+        title={`Delete ${removing?.name ?? ''}?`}
+        onClose={() => setRemoving(null)}
+        footer={
+          <>
+            <Button variant="tertiary" disabled={busy} onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() =>
+                void run(() => api.segments.remove.mutate({ id: removing!.id }), 'Segment deleted.').then((ok) => {
+                  if (ok) setRemoving(null)
+                })
+              }
+            >
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>
+          {removing?.isStatic
+            ? 'The records stay where they are. What goes is the list and the record of who was put in it.'
+            : 'The records stay where they are. What goes is the saved query and the membership it worked out.'}{' '}
+          Not reversible.
+        </p>
       </Modal>
     </div>
   )

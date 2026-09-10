@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, DropdownMenu, RenamePrompt, cn, useToast } from '@rawr/ui'
+import { Badge, Button, DropdownMenu, Modal, RenamePrompt, cn, useToast } from '@rawr/ui'
 import { CalendarDays, ChevronDown, Columns3, MoreHorizontal, Pin, Plus, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -66,6 +66,7 @@ export const ViewTabs = ({
   const { navigate } = useNavigation()
   const toast = useToast()
   const [renaming, setRenaming] = useState<ViewTab | null>(null)
+  const [deleting, setDeleting] = useState<ViewTab | null>(null)
   const [busy, setBusy] = useState(false)
 
   const href = (view: { slug: string }, kind: ViewKind = currentKind): string =>
@@ -145,13 +146,9 @@ export const ViewTabs = ({
           key: 'delete',
           label: 'Delete view',
           destructive: true,
-          onSelect: () =>
-            void run('View deleted.', async () => {
-              await api.crm.views.remove.mutate({ id: view.id! })
-              // The records are still there; only the arrangement went. Land on
-              // the tab every link falls back to rather than on a dead address.
-              navigate(objectView(account, object, 'all', currentKind, withoutCursor(params)))
-            }),
+          // Asked rather than done: a shared view is somebody else's screen too,
+          // and a menu item one row below Rename is a menu item that gets hit.
+          onSelect: () => setDeleting(view),
         },
       ],
     },
@@ -267,6 +264,50 @@ export const ViewTabs = ({
           })}
         </span>
       ) : null}
+
+      <Modal
+        open={deleting !== null}
+        size="sm"
+        title="Delete this view?"
+        onClose={() => setDeleting(null)}
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            {/* The name in full and selectable rather than only in the title,
+                which truncates: a view named at length is still a view somebody
+                has to be able to recognise before they agree to lose it. */}
+            <span className="font-medium break-words select-all">{deleting?.name}</span> goes for
+            good. The records stay; only this arrangement of them is deleted.
+          </p>
+          {deleting?.isShared ? (
+            <p className="text-secondary">
+              It is shared, so it disappears for everybody in this account, not just for you.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setDeleting(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() => {
+                const view = deleting
+                if (!view?.id) return
+                void run('View deleted.', async () => {
+                  await api.crm.views.remove.mutate({ id: view.id! })
+                  setDeleting(null)
+                  // The records are still there; only the arrangement went. Land
+                  // on the tab every link falls back to rather than on a dead one.
+                  navigate(objectView(account, object, 'all', currentKind, withoutCursor(params)))
+                })
+              }}
+            >
+              Delete view
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <RenamePrompt
         value={renaming?.name ?? null}

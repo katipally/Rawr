@@ -64,7 +64,9 @@ const DEDUPE_KEY: Partial<Record<ImportKind, string>> = {
   submissions: 'contact_email',
 }
 
-const dedupeKeyOf = (kind: ImportKind, object: RegistryObject): string => {
+/** Exported so the import picker can name the column a file will be matched on
+ *  before one is chosen, in the same words the mapper will use. */
+export const dedupeKeyOf = (kind: ImportKind, object: RegistryObject): string => {
   const fixed = DEDUPE_KEY[kind]
   if (fixed) return fixed
   if (object.key === 'contact') return 'email'
@@ -84,6 +86,16 @@ const ALSO_REQUIRED: Partial<Record<ImportKind, { key: string; because: string }
   lists: { key: 'contact_email', because: 'Map a column to Contact email. A list of nobody is not a list.' },
   submissions: { key: 'form_name', because: 'Map a column to Form. A submission has to belong to one.' },
 }
+
+/** The columns the mapper will refuse to start without, by key, for the kinds
+ *  whose answer does not depend on the account's registry.
+ *
+ *  Exported so the picker can say what a file needs before one is chosen rather
+ *  than after it is uploaded, and derived from the two maps above so the two
+ *  sentences cannot drift apart. `records` is absent: what identifies a record
+ *  is decided by the object it is going into. */
+export const requiredColumnKeys = (kind: ImportKind): string[] =>
+  [DEDUPE_KEY[kind], ALSO_REQUIRED[kind]?.key].filter((key): key is string => Boolean(key))
 
 export type ImportSummary = {
   id: string
@@ -357,6 +369,21 @@ export const planRow = async (
   return { values, warnings }
 }
 
+/** What makes two rows of one file the same record. The run creates the first and
+ *  updates the rest, so the preview has to count the rest as updates too. */
+const dedupeIdentity = (object: RegistryObject, values: Record<string, unknown>): string | null => {
+  const key = object.isCustom
+    ? object.labelFieldKey
+    : object.key === 'contact'
+      ? 'email'
+      : object.key === 'company'
+        ? 'domain'
+        : null
+  const value = key ? values[key] : null
+  if (!key || typeof value !== 'string' || !value) return null
+  return `${key}:${key === 'domain' ? value : value.toLowerCase()}`
+}
+
 const dedupeLookup = async (
   ctx: AccountContext,
   object: RegistryObject,
@@ -553,6 +580,9 @@ const preview = async (
   }
 
   const checked = input.rows
+  // Records this file will have created by the time a later row with the same
+  // identity is reached, so a repeat inside the file counts as the update it is.
+  const willExist = new Set<string>()
   const resolve = relationResolver(ctx, { create: false })
   const findRecord = recordResolver(ctx)
   const writer = SHAPE_WRITER[kind]
@@ -609,12 +639,14 @@ const preview = async (
       }
       continue
     }
-    const existing = await dedupeLookup(ctx, object, planned.values)
+    const identity = dedupeIdentity(object, planned.values)
+    const existing = identity && willExist.has(identity) ? true : await dedupeLookup(ctx, object, planned.values)
     if (existing) {
       result.willUpdate += 1
       if (result.samples.update.length < SAMPLE_SIZE) result.samples.update.push(row)
     } else {
       result.willCreate += 1
+      if (identity) willExist.add(identity)
       if (result.samples.create.length < SAMPLE_SIZE) result.samples.create.push(row)
     }
   }

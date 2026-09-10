@@ -1,13 +1,14 @@
 'use client'
 
-import { EmptyState, IconButton, cn, useToast } from '@rawr/ui'
+import { Button, EmptyState, IconButton, Modal, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { TaskForm, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-form.tsx'
+import { TaskForm } from './task-form.tsx'
+import { TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 import { formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -60,6 +61,7 @@ export const TasksPanel = ({
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState<TaskRow | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -166,13 +168,42 @@ export const TasksPanel = ({
                   tone="destructive"
                   icon={<ACTION_ICONS.delete size={16} />}
                   disabled={busy}
-                  onClick={() => void run(() => api.crm.tasks.remove.mutate({ id: row.id }), 'Task deleted.')}
+                  onClick={() => setRemoving(row)}
                 />
               ) : null}
             </li>
           ))}
         </ul>
       )}
+
+      <Modal
+        open={removing !== null}
+        title={`Delete “${removing?.title ?? ''}”?`}
+        onClose={() => setRemoving(null)}
+        footer={
+          <>
+            <Button variant="tertiary" disabled={busy} onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() =>
+                void run(() => api.crm.tasks.remove.mutate({ id: removing!.id }), 'Task deleted.').then(() =>
+                  setRemoving(null),
+                )
+              }
+            >
+              Delete task
+            </Button>
+          </>
+        }
+      >
+        <p>
+          The record it hangs on keeps its timeline, so what was done about it is still there. The
+          task itself does not come back.
+        </p>
+      </Modal>
     </section>
   )
 }

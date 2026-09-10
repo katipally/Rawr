@@ -394,23 +394,25 @@ export const saveAutomation = async (
       triggerConfig: { ...(input.triggerConfig ?? {}), object: input.objectKey },
       conditions: input.conditions,
       steps: input.steps,
-      isActive: input.isActive ?? false,
       updatedAt: new Date(),
     }
 
     if (input.id) {
       const [before] = await tx.select(SELECT).from(automation).where(eq(automation.id, input.id)).limit(1)
       if (!before) throw new Error('That automation no longer exists.')
-      await tx.update(automation).set(values).where(eq(automation.id, input.id))
+      // Editing a running rule must not stop it: only the on/off control changes
+      // isActive, so an edit that omits it leaves the rule as it was found.
+      const after = input.isActive === undefined ? values : { ...values, isActive: input.isActive }
+      await tx.update(automation).set(after).where(eq(automation.id, input.id))
       return {
         result: { id: input.id },
-        audit: { entity: 'automation', entityId: input.id, action: 'update', before, after: values },
+        audit: { entity: 'automation', entityId: input.id, action: 'update', before, after },
       }
     }
 
     const [created] = await tx
       .insert(automation)
-      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, ...values })
+      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, ...values, isActive: input.isActive ?? false })
       .returning({ id: automation.id })
     if (!created) throw new Error('The automation could not be created.')
     return {

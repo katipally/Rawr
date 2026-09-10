@@ -52,9 +52,12 @@ export const rangeFrom = (
   // A date with no time means the whole of that day, so the end is exclusive at
   // midnight the following morning rather than excluding the day it names.
   const lastDay = params.to ?? dayOf(new Date(), timeZone)
+  const last = dayStart(lastDay, timeZone)
   const range = clampRange({
-    from: params.from ? dayStart(params.from, timeZone) : null,
-    to: new Date(dayStart(lastDay, timeZone).getTime() + DAY_MS),
+    // Thirty whole days ending on `lastDay`, so the default range is the one the
+    // picker calls "Last 30 days" rather than a 29-day range it cannot name.
+    from: params.from ? dayStart(params.from, timeZone) : new Date(last.getTime() - 29 * DAY_MS),
+    to: new Date(last.getTime() + DAY_MS),
   })
   return {
     ...range,

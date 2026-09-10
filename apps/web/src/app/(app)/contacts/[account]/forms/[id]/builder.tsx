@@ -312,6 +312,9 @@ export const FormBuilder = ({
             onChange={(event) => setConfirmText(event.target.value)}
           />
           <div className="flex flex-wrap gap-2">
+            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={deleting}
@@ -319,9 +322,6 @@ export const FormBuilder = ({
               onClick={() => void remove()}
             >
               Delete form
-            </Button>
-            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
-              Cancel
             </Button>
           </div>
         </div>
@@ -537,7 +537,7 @@ export const FormBuilder = ({
                   <FieldExtras
                     field={field}
                     index={index}
-                    others={fields.filter((other) => other.key !== field.key)}
+                    others={fields.filter((other, position) => position < index && other.type !== 'heading')}
                     canEdit={canEdit}
                     patch={patch}
                   />

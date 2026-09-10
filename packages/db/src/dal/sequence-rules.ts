@@ -120,3 +120,23 @@ export const mergeFields = (template: string): string[] => [
     [...template.matchAll(/\{\{\s*([a-z0-9_.]+)\s*(?:\|[^}]*)?\}\}/gi)].map((match) => (match[1] ?? '').trim()),
   ),
 ]
+
+/** The only keys the send has values for, and therefore the only ones a template
+ *  may use. Deliberately short: a template that could read any field would be a
+ *  way to put anything in the CRM into a stranger's inbox. The pickers in the
+ *  editors offer this list and the save refuses anything outside it, so a typo is
+ *  caught where it is made rather than in somebody's inbox. */
+export const MERGE_FIELD_KEYS = [
+  'first_name',
+  'last_name',
+  'full_name',
+  'company',
+  'email',
+  'sender_email',
+  'sequence',
+] as const
+
+export type MergeFieldKey = (typeof MERGE_FIELD_KEYS)[number]
+
+export const unknownMergeFields = (template: string): string[] =>
+  mergeFields(template).filter((key) => !(MERGE_FIELD_KEYS as readonly string[]).includes(key))

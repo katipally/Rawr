@@ -934,7 +934,7 @@ try {
       { kind: 'task' as const, delayDays: 4, subject: null },
       { kind: 'email' as const, delayDays: 7, subject: 'Closing the loop' },
     ]
-    await db.insert(s.sequenceStep).values(
+    const steps = await db.insert(s.sequenceStep).values(
       sequences.flatMap((sequence) =>
         STEPS.map((step, position) => ({
           accountId: sandbox,
@@ -943,13 +943,18 @@ try {
           kind: step.kind,
           delayDays: step.delayDays,
           subject: step.subject,
-          bodyHtml: step.kind === 'email' ? '<p>Hello {{contact.first_name}},</p><p>Worth a look?</p>' : null,
-          bodyText: step.kind === 'email' ? 'Hello {{contact.first_name}},\n\nWorth a look?' : null,
-          taskTitle: step.kind === 'task' ? 'Call {{contact.first_name}}' : null,
+          bodyHtml: step.kind === 'email' ? '<p>Hello {{first_name|there}},</p><p>Worth a look?</p>' : null,
+          bodyText: step.kind === 'email' ? 'Hello {{first_name|there}},\n\nWorth a look?' : null,
+          taskTitle: step.kind === 'task' ? 'Call {{full_name}}' : null,
           taskBody: step.kind === 'task' ? 'They have had two mails and not replied.' : null,
         })),
       ),
-    )
+    ).returning({
+      id: s.sequenceStep.id,
+      sequenceId: s.sequenceStep.sequenceId,
+      position: s.sequenceStep.position,
+      kind: s.sequenceStep.kind,
+    })
 
     // Six enrollments, one per state a screen has to render. The live one is due
     // tomorrow rather than now: a seeded enrollment that is already due starts a
@@ -961,9 +966,9 @@ try {
       { state: 'replied' as const, currentStep: 2, nextRunAt: null, stopReason: 'They replied on the thread.' },
       { state: 'bounced' as const, currentStep: 1, nextRunAt: null, stopReason: 'The address bounced permanently.' },
       { state: 'unsubscribed' as const, currentStep: 2, nextRunAt: null, stopReason: 'They asked to stop hearing from us.' },
-      { state: 'finished' as const, currentStep: 4, nextRunAt: null, stopReason: null },
+      { state: 'finished' as const, currentStep: STEPS.length - 1, nextRunAt: null, stopReason: null },
     ]
-    await db.insert(s.sequenceEnrollment).values(
+    const enrollments = await db.insert(s.sequenceEnrollment).values(
       ENROLLMENTS.map((enrollment, i) => ({
         accountId: sandbox,
         sequenceId: live.id,
@@ -979,6 +984,37 @@ try {
         unsubscribeToken: `seed-unsubscribe-${i}`.padEnd(28, '0'),
         createdAt: dayAgo(i + 5),
       })),
+    ).returning({ id: s.sequenceEnrollment.id })
+
+    // A tile that reads "Sent 0 · Replied 1" is a tile nobody can trust. Every
+    // enrollment carries the mail its step counter implies: one row per email
+    // step it has already passed, newest ending on its own lastSentAt.
+    const emailSteps = steps
+      .filter((step) => step.sequenceId === live.id && step.kind === 'email')
+      .sort((a, b) => a.position - b.position)
+    await db.insert(s.sequenceSend).values(
+      enrollments.flatMap((enrollment, i) => {
+        const state = ENROLLMENTS[i]!.state
+        // Ran out of steps means every email went; anything still running has
+        // only passed the ones behind its counter.
+        const reached = state === 'finished' ? STEPS.length : ENROLLMENTS[i]!.currentStep
+        const taken = emailSteps.filter((step) => step.position < reached)
+        return taken.map((step, n) => ({
+          accountId: sandbox,
+          enrollmentId: enrollment.id,
+          contactId: emailed[i]!.id,
+          stepId: step.id,
+          mailboxId: box.id,
+          token: `seed-send-${i}-${n}`.padEnd(28, '0'),
+          sentAt: dayAgo(i + 1 + (taken.length - 1 - n)),
+          state: state === 'bounced' && n === taken.length - 1 ? ('bounced' as const) : ('sent' as const),
+          // Somebody who replied had read it; nothing else claims an open it
+          // cannot evidence.
+          openCount: state === 'replied' ? 1 : 0,
+          firstOpenedAt: state === 'replied' ? dayAgo(i + 1) : null,
+          lastOpenedAt: state === 'replied' ? dayAgo(i + 1) : null,
+        }))
+      }),
     )
 
     await db.insert(s.emailTemplate).values([
@@ -986,7 +1022,7 @@ try {
         accountId: sandbox,
         name: 'Demo follow-up',
         subject: 'Following up on your demo',
-        bodyText: 'Hello {{contact.first_name}},\n\nHere are the notes from our call.',
+        bodyText: 'Hello {{first_name|there}},\n\nHere are the notes from our call.',
         createdBy: salesId,
       },
       {
@@ -1000,7 +1036,7 @@ try {
         accountId: sandbox,
         name: 'Renewal reminder',
         subject: 'Your renewal is coming up',
-        bodyText: 'Your term ends on {{deal.close_date}}. Shall we talk?',
+        bodyText: 'Your term ends soon. Shall we talk?',
         createdBy: marketingId,
       },
     ])

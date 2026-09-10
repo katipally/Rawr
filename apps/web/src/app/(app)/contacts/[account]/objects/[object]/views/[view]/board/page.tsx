@@ -7,6 +7,7 @@ import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeFilters, exportCsvPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
+import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 type Params = { account: string; object: string; view: string }
@@ -91,11 +92,11 @@ const BoardPage = async ({
         title={object.namePlural}
         currentObject={'deal'}
         objects={objects.map((other) => ({ key: other.key, label: other.namePlural, href: objectView(account, other.key, 'all') }))}
-        addLabel={`Add ${object.namePlural.toLowerCase()}`}
+        addLabel={`Add ${inSentence(object.namePlural)}`}
         add={
           canWrite
             ? [
-                { label: `Create ${object.nameSingular.toLowerCase()}`, href: objectView(account, 'deal', resolved.view.slug, 'board', { ...listParams, new: '1' } as ListParams) },
+                { label: `Create ${inSentence(object.nameSingular)}`, href: objectView(account, 'deal', resolved.view.slug, 'board', { ...listParams, new: '1' } as ListParams) },
                 { label: 'Import', href: importsPath(account) },
               ]
             : []

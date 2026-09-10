@@ -55,7 +55,10 @@ export type IntegrationMeta = {
   failureMode: string
   /** Named so the settings form can label the field a person has to paste in. */
   secretLabel: string | null
-  configFields: { key: string; label: string; hint: string }[]
+  /** `options` turns the field into a choice. A value a provider only accepts
+   *  from a fixed set is not free text: typed wrong it reads as a valid setting
+   *  and behaves as none. */
+  configFields: { key: string; label: string; hint: string; options?: { value: string; label: string }[] }[]
   /** Which Notion rows this is the answer to. */
   rows: string[]
   /** Where the credential comes from, as steps a person follows in the provider's
@@ -166,7 +169,15 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     secretLabel: 'Webhook auth token',
     configFields: [
       { key: 'webhookUrl', label: 'Table webhook URL', hint: 'The Clay table Rawr pushes domains into.' },
-      { key: 'tier', label: 'Plan tier', hint: 'launch or growth. Launch has no API write-back.' },
+      {
+        key: 'tier',
+        label: 'Plan tier',
+        hint: 'What the Clay account is on. Launch has no API write-back.',
+        options: [
+          { value: 'launch', label: 'Launch' },
+          { value: 'growth', label: 'Growth' },
+        ],
+      },
     ],
     rows: ['Company & Contact Enrichment'],
     setup: [

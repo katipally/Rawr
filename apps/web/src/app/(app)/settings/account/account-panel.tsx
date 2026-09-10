@@ -162,7 +162,7 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
         </div>
       </Panel>
 
-      <Panel title="Your account">
+      <Panel title={accounts.length > 1 ? 'Your accounts' : 'Your account'}>
         <ul className="flex flex-col divide-y divide-divider">
           {accounts.map((w) => (
             <li key={w.slug} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">

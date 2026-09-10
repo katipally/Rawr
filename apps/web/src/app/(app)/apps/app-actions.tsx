@@ -88,22 +88,27 @@ export const AppActions = ({ kind, name, personal, connectPath, canManage, varia
         )}
       />
 
-      <Modal open={confirming} size="sm" title={`Disconnect ${name}`} onClose={() => setConfirming(false)}>
-        <div className="flex flex-col gap-3">
-          <p>
-            The stored credential is deleted and everybody in this account stops using {name}.
-            Work already queued for it dead-letters rather than disappearing, so nothing is lost, but
-            nothing new is sent either.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="destructive" busy={busy} onClick={() => void disconnect()}>
-              Disconnect {name}
-            </Button>
+      <Modal
+        open={confirming}
+        size="sm"
+        title={`Disconnect ${name}`}
+        onClose={() => setConfirming(false)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setConfirming(false)}>
               Cancel
             </Button>
-          </div>
-        </div>
+            <Button variant="destructive" busy={busy} onClick={() => void disconnect()}>
+              Disconnect {name}
+            </Button>
+          </>
+        }
+      >
+        <p>
+          The stored credential is deleted and everybody in this account stops using {name}. Work
+          already queued for it dead-letters rather than disappearing, so nothing is lost, but
+          nothing new is sent either.
+        </p>
       </Modal>
     </>
   )

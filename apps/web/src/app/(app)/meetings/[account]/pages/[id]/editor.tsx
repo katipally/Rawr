@@ -42,6 +42,9 @@ export type WorkingLocations = { zoom: boolean; google_meet: boolean }
 
 const DARK = 'Not set up here, so a meeting booked this way has no link.'
 
+const DUPLICATE_REMINDER =
+  'Two reminders at the same moment would send the same mail twice. Change one of them.'
+
 const numeric = (value: string, fallback: number): number => {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
@@ -104,6 +107,12 @@ export const PageEditor = ({
     new Set(reminders.map((row) => `${row.unit}:${row.amount}`)).size !== reminders.length
 
   const save = async () => {
+    // Refused rather than quietly deduplicated: the person asked for two, and a
+    // save that silently drops one is a setting that reads back wrong.
+    if (duplicateReminder) {
+      show('error', DUPLICATE_REMINDER)
+      return
+    }
     setSaving(true)
     try {
       await api.booking.savePage.mutate({
@@ -700,9 +709,7 @@ export const PageEditor = ({
         ) : null}
 
         {duplicateReminder ? (
-          <p className="mt-2 text-sm text-error">
-            Two reminders at the same moment would send the same mail twice. Change one of them.
-          </p>
+          <p className="mt-2 text-sm text-error">{DUPLICATE_REMINDER}</p>
         ) : null}
 
         {reminders.length > 0 ? (

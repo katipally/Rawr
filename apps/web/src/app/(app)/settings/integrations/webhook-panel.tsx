@@ -53,6 +53,7 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
    *  receiver down until somebody redeploys it. */
   const [composing, setComposing] = useState<'new' | EndpointView | null>(null)
   const [removing, setRemoving] = useState<EndpointView | null>(null)
+  const [rolling, setRolling] = useState<EndpointView | null>(null)
   /** Shown once and never again, so it is state rather than anything read back. */
   const [issued, setIssued] = useState<{ name: string; secret: string } | null>(null)
 
@@ -194,16 +195,7 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
                     <Button variant="tertiary" onClick={() => open(row)}>
                       Edit
                     </Button>
-                    <Button
-                      variant="tertiary"
-                      busy={busy}
-                      onClick={() =>
-                        void api.integrations.webhooks.rollSecret
-                          .mutate({ id: row.id })
-                          .then((secret) => setIssued({ name: row.name, secret }))
-                          .catch((cause) => toast('error', errorMessage(cause)))
-                      }
-                    >
+                    <Button variant="tertiary" busy={busy} onClick={() => setRolling(row)}>
                       New key
                     </Button>
                     <IconButton
@@ -225,12 +217,14 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
         onClose={close}
         title={composing === 'new' || composing === null ? 'Add an endpoint' : `Edit ${composing.name}`}
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={close}>
+              Cancel
+            </Button>
             <Button variant="primary" busy={busy} disabled={!name.trim() || !url.trim()} onClick={() => void submit()}>
               {composing === 'new' ? 'Create' : 'Save'}
             </Button>
-            <Button onClick={close}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <div className="flex flex-col gap-3">
@@ -285,7 +279,10 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
         size="sm"
         title={`Delete ${removing?.name ?? ''}?`}
         footer={
-          <div className="flex gap-2">
+          <>
+            <Button variant="tertiary" onClick={() => setRemoving(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               busy={busy}
@@ -298,13 +295,50 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
             >
               Delete
             </Button>
-            <Button onClick={() => setRemoving(null)}>Cancel</Button>
-          </div>
+          </>
         }
       >
         <p>
           Nothing more is sent to {removing?.url}. Switching it off instead keeps the endpoint and
           its key, which is what you want if this is temporary.
+        </p>
+      </Modal>
+
+      <Modal
+        open={rolling !== null}
+        onClose={() => setRolling(null)}
+        size="sm"
+        title={`Issue a new signing key for ${rolling?.name ?? ''}?`}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setRolling(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              onClick={() => {
+                const target = rolling!
+                setBusy(true)
+                void api.integrations.webhooks.rollSecret
+                  .mutate({ id: target.id })
+                  .then((secret) => {
+                    setIssued({ name: target.name, secret })
+                    setRolling(null)
+                  })
+                  .catch((cause: unknown) => toast('error', errorMessage(cause)))
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Issue a new key
+            </Button>
+          </>
+        }
+      >
+        <p>
+          The key {rolling?.url} verifies with stops working the moment this is done, and every
+          delivery it signs is refused until the new key is deployed there. The new one is shown
+          once and cannot be read back, so have somewhere to paste it before you go on.
         </p>
       </Modal>
     </Card>

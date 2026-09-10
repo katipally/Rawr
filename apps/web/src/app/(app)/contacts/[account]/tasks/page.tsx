@@ -4,7 +4,7 @@ import { CalendarDays, Search, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
-import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-form.tsx'
+import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-labels.ts'
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
 import { formatDate } from '~/components/crm/value.tsx'
 import { objectView, recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
@@ -31,7 +31,14 @@ const TasksPage = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ view?: string; mine?: string; q?: string; queue?: string; type?: string }>
+  searchParams: Promise<{
+    view?: string
+    mine?: string
+    q?: string
+    queue?: string
+    type?: string
+    new?: string
+  }>
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -162,7 +169,9 @@ const TasksPage = async ({
           queues={queues}
           {...(queue && queue !== 'none' ? { queueId: queue } : {})}
           canWrite={writable}
-          emptyTitle={q ? 'No tasks match the search' : view.empty}
+          emptyTitle={q || type ? 'No tasks match the filter' : view.empty}
+          filtered={Boolean(q || type)}
+          openCreate={search.new === '1'}
         />
       </div>
 
