@@ -387,8 +387,10 @@ try {
   )
   check(
     'a delete, merge or bulk tool is marked destructive, so a client confirms first',
+    // Writing tools only: crm_bulk_progress reads how far a bulk action got, and
+    // a read a client would confirm before running is a read nobody runs.
     tools
-      .filter((tool) => /remove|merge|bulk/.test(tool.name))
+      .filter((tool) => /remove|merge|bulk/.test(tool.name) && tool.annotations?.readOnlyHint !== true)
       .every((tool) => tool.annotations?.destructiveHint === true),
     tools.filter((tool) => tool.annotations?.destructiveHint === true).map((t) => t.name).join(', '),
   )

@@ -98,13 +98,15 @@ const blankKeywordFrom = (body: string): string => {
 
 /** Interpolations first: a `${...}` can hold a nested template, a comment, or an
  *  identifier that is not ours to resolve. Then SQL's two comment forms, so
- *  prose in a `--` line is not read as code. */
+ *  prose in a `--` line is not read as code, and last the string literals, whose
+ *  prose reads as code just as easily: `'Imported from HubSpot'`. */
 const strip = (body: string): string =>
   blankKeywordFrom(
     body
       .replace(/\$\{[^{}]*\}/g, ' ? ')
       .replace(/--[^\n]*/g, ' ')
-      .replace(/\/\*[\s\S]*?\*\//g, ' '),
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/'(?:[^']|'')*'/g, "''"),
   )
 
 /** Names bound inside the statement itself: CTEs, derived tables and the alias
