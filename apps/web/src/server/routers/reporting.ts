@@ -1,6 +1,5 @@
 import {
   attributionReport,
-  campaignPerformance,
   clampRange,
   listCampaigns,
   saveCampaign,
@@ -61,14 +60,9 @@ export const reportingRouter = router({
     .input(range)
     .query(({ ctx, input }) => call(() => attributionReport(ctx.account, within(input)))),
 
-  /** Item 14. What each campaign bought, and what it cost per contact and per
-   *  deal. Reading it is open like every other report; the spend behind it is
-   *  edited under Settings. */
+  /** Item 14. The campaigns a contact can arrive through, and the spend behind
+   *  each one. Edited under Settings. */
   campaigns: router({
-    performance: protectedProcedure
-      .input(range)
-      .query(({ ctx, input }) => call(() => campaignPerformance(ctx.account, within(input)))),
-
     list: protectedProcedure
       .input(
         z.object({

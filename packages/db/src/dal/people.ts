@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { recordActivity } from './activity.ts'
+import { resolveContactCampaigns } from './campaigns.ts'
 import { sourceFrom, type Attribution } from './attribution.ts'
 import type { AccountContext } from './context.ts'
 import { employerDomainFromEmail } from './domains.ts'
@@ -79,6 +80,10 @@ export const upsertCapturedPerson = async (
     await tx.execute(
       sql`update contact set ${sql.join(assignments, sql`, `)} where id = ${existing.id}`,
     )
+    // The sources this capture just wrote are what name the campaign, so the two
+    // campaign columns are resolved from them here. Without it a lead who arrived
+    // on a utm_campaign has no campaign until somebody saves the whole account.
+    await resolveContactCampaigns(tx, ctx, [existing.id])
     if (!existing.owner_id) await assignOwner(tx, ctx, existing.id, input.assignOwner, input.source)
     if (input.lifecycleStage) {
       await applyLifecycle(tx, ctx, existing.id, input.lifecycleStage, input.source)
@@ -115,6 +120,7 @@ export const upsertCapturedPerson = async (
     return { contactId: raced?.id ?? null, companyId }
   }
 
+  await resolveContactCampaigns(tx, ctx, [created.id])
   await requestEnrichment(tx, ctx, 'contact', created.id)
   await assignOwner(tx, ctx, created.id, input.assignOwner, input.source)
   if (input.lifecycleStage) {

@@ -52,6 +52,7 @@ const BookedScreen = async ({
   ])
 
   const pageName = pages.find((page) => page.id === query.page)?.name
+  const filtered = filters.page !== null || filters.host !== null || filters.state !== null
 
   return (
     <div className="w-full max-w-6xl">
@@ -75,14 +76,21 @@ const BookedScreen = async ({
       />
 
       {result.rows.length === 0 ? (
-        <EmptyState
-          title={when === 'upcoming' ? 'Nothing booked yet' : 'No past meetings'}
-          description={
-            when === 'upcoming'
-              ? 'A meeting booked through a page shows up here, and on the contact’s timeline.'
-              : 'Meetings move here once they have happened.'
-          }
-        />
+        filtered ? (
+          <EmptyState
+            title="Nothing matches those filters"
+            description="Widen the meeting link, the host or the state below to see more."
+          />
+        ) : (
+          <EmptyState
+            title={when === 'upcoming' ? 'Nothing booked yet' : 'No past meetings'}
+            description={
+              when === 'upcoming'
+                ? 'A meeting booked through a page shows up here, and on the contact’s timeline.'
+                : 'Meetings move here once they have happened.'
+            }
+          />
+        )
       ) : null}
 
       {/* Keyed on the filters: the list holds the pages it has fetched, and a

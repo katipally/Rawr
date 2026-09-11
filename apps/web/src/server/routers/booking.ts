@@ -4,9 +4,6 @@ import {
   FORM_FIELD_TYPES,
   listBookingPages,
   listBookings,
-  listGrants,
-  pagesHostedBy,
-  bookingPageStats,
   REMINDER_UNITS,
   readBooking,
   readBookingPage,
@@ -64,11 +61,6 @@ export const bookingRouter = router({
   hosts: protectedProcedure
     .input(z.object({ pageId: z.uuid() }))
     .query(({ ctx, input }) => call(() => readPageHostList(ctx.account, input.pageId))),
-
-  /** Views, meetings and the rate between them, for one link over a window. */
-  stats: protectedProcedure
-    .input(z.object({ pageId: z.uuid(), sinceDays: z.number().int().min(1).max(365).default(30) }))
-    .query(({ ctx, input }) => call(() => bookingPageStats(ctx.account, input.pageId, input.sinceDays))),
 
   savePage: protectedProcedure
     .input(
@@ -216,12 +208,6 @@ export const bookingRouter = router({
         clearOverride(ctx.account, { userId: input.userId ?? ctx.session.userId, day: input.day }),
       ),
     ),
-
-  grants: protectedProcedure.query(({ ctx }) => call(() => listGrants(ctx.account))),
-
-  myPages: protectedProcedure.query(({ ctx }) =>
-    call(() => pagesHostedBy(ctx.account, ctx.session.userId)),
-  ),
 
   /** Open item 3 is outstanding, so there is no Google project to consent against.
    *  This connects the development provider instead: Rawr's own confirmed bookings

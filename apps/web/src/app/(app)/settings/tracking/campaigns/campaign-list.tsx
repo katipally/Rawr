@@ -122,18 +122,26 @@ export const CampaignList = ({ initial, search: initialSearch }: { initial: Page
             {
               key: 'name',
               header: 'Campaign',
-              render: (row) => <span className="truncate font-medium">{row.name}</span>,
+              render: (row) => (
+                <span className="block truncate font-medium" title={row.name}>
+                  {row.name}
+                </span>
+              ),
             },
             {
               key: 'utm',
               header: 'utm_campaign',
-              render: (row) => <span className="truncate text-secondary">{row.utmCampaign}</span>,
+              render: (row) => (
+                <span className="block truncate text-secondary" title={row.utmCampaign}>
+                  {row.utmCampaign}
+                </span>
+              ),
             },
             {
               key: 'source',
               header: 'Source and medium',
               render: (row) => (
-                <span className="truncate text-secondary">
+                <span className="block truncate text-secondary">
                   {[row.source, row.medium].filter(Boolean).join(' / ') || 'Not set'}
                 </span>
               ),

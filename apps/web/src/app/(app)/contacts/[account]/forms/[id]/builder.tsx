@@ -65,6 +65,7 @@ export const FormBuilder = ({
   members,
   subscriptions,
   baseUrl,
+  siteKey,
   canEdit,
   slack,
 }: {
@@ -77,6 +78,10 @@ export const FormBuilder = ({
    *  new contact into. Matched by name on submit, so the list is the names. */
   subscriptions: { name: string; isInternal: boolean }[]
   baseUrl: string
+  /** The tracked site the embed snippet should name. Null when the account has
+   *  none, which the snippet says out loud rather than printing a key that
+   *  resolves to nothing. */
+  siteKey: string | null
   canEdit: boolean
   /** What the account's Slack actually is. 'none' means nothing is connected, so
    *  naming a channel here changes nothing at all; 'webhook' means the channel is
@@ -296,7 +301,7 @@ export const FormBuilder = ({
       </header>
 
       <Modal open={showEmbed} title={`Embed \u201c${form.name}\u201d`} onClose={() => setShowEmbed(false)}>
-        <EmbedSnippet baseUrl={baseUrl} formId={form.id} account={account} slug={slug} />
+        <EmbedSnippet baseUrl={baseUrl} siteKey={siteKey} formId={form.id} account={account} slug={slug} />
       </Modal>
 
       <Modal open={showDelete} size="sm" title={`Delete ${form.name}`} onClose={() => setShowDelete(false)}>

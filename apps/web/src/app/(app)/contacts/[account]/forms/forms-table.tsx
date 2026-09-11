@@ -44,12 +44,14 @@ const rate = (part: number, whole: number): string =>
 export const FormsTable = ({
   account,
   baseUrl,
+  siteKey,
   rows,
   folders,
   canEdit,
 }: {
   account: string
   baseUrl: string
+  siteKey: string | null
   rows: FormRow[]
   folders: FolderRow[]
   canEdit: boolean
@@ -256,7 +258,7 @@ export const FormsTable = ({
       {pager}
 
       <Modal open={embedding !== null} title={embedding ? `Embed “${embedding.name}”` : 'Embed'} onClose={() => setEmbedding(null)}>
-        {embedding ? <EmbedSnippet baseUrl={baseUrl} formId={embedding.id} account={account} slug={embedding.slug} /> : null}
+        {embedding ? <EmbedSnippet baseUrl={baseUrl} siteKey={siteKey} formId={embedding.id} account={account} slug={embedding.slug} /> : null}
       </Modal>
 
       <Modal

@@ -11,10 +11,13 @@ const TrackingPage = async () => {
 
   if (!sessionIsAdmin(session)) {
     return (
-      <EmptyState
-        title="Only an admin sets the tracking domain"
-        description={`You need account access, which you do not have. can send sequences but not change where their links point.`}
-      />
+      <div className="flex flex-col gap-4">
+        <TrackingTabs />
+        <EmptyState
+          title="Only an admin sets the tracking domain"
+          description={`This needs account access in ${session.accountName}, which you do not have. A marketing seat can send sequences and describe events, but not change where the links in mail point.`}
+        />
+      </div>
     )
   }
 

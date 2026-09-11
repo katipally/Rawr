@@ -92,23 +92,6 @@ export const GET = async (
       month: monthKey,
       nextAvailable: nextAvailable ? nextAvailable.toISOString() : null,
       timezone,
-      name: page.name,
-      accountName: page.accountName,
-      /** Names only, the same ones the hosted page prints above the calendar. */
-      hosts: page.hostNames,
-      location: page.location,
-      durationMinutes: page.durationMinutes,
-      /** The questions to ask, so the embed renders the same form the hosted page
-       *  does from the same source rather than a copy that drifts. Already public:
-       *  anybody can read them off the hosted page. */
-      questions: page.questions.map((field) => ({
-        key: field.key,
-        type: field.type,
-        label: field.label,
-        required: field.required,
-        placeholder: field.placeholder ?? null,
-        options: field.options ?? null,
-      })),
       slots: offer.slots.map((slot) => ({
         startsAt: slot.startsAt.toISOString(),
         /** How many hosts could take it. A visitor does not need to know who, but

@@ -21,11 +21,16 @@ export const EmbedSnippet = ({
   formId,
   account,
   slug,
+  siteKey,
 }: {
   baseUrl: string
   formId: string
   account: string
   slug: string
+  /** The tracked site this page lives on. `data-rawr-site` is matched against
+   *  the `site` table, not against the account, so an account slug here reads as
+   *  a site nobody registered and the page views are silently never counted. */
+  siteKey: string | null
 }) => {
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -33,11 +38,13 @@ export const EmbedSnippet = ({
     {
       id: 'embed',
       label: 'Paste into Webflow',
-      hint: 'An Embed element on the page, and the script once anywhere in the site footer.',
+      hint: siteKey
+        ? 'An Embed element on the page, and the script once anywhere in the site footer.'
+        : 'An Embed element on the page, and the script once anywhere in the site footer. This account has no tracked site yet, so fill in the site key from Settings, Tracked sites before pasting it: without one the form still works and nothing is counted.',
       lang: 'html',
       value:
         `<div data-rawr-form="${formId}"></div>\n` +
-        `<script src="${baseUrl}/embed.js" data-rawr-site="${account}" data-rawr-consent defer></script>`,
+        `<script src="${baseUrl}/embed.js" data-rawr-site="${siteKey ?? 'your-site-key'}" data-rawr-consent defer></script>`,
     },
     {
       id: 'hosted',

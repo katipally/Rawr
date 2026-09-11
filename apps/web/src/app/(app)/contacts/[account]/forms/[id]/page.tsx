@@ -2,6 +2,7 @@ import {
   getForm,
   getRegistry,
   listMembers,
+  listSites,
   listSubscriptionTypes,
   readSettings,
   SEED_FORMS,
@@ -64,12 +65,13 @@ const BuilderPage = async ({
     fields: template?.fields ?? [],
     settings: template?.settings ?? readSettings({}),
   }
-  const [form, registry, members, subscriptions, slack] = await Promise.all([
+  const [form, registry, members, subscriptions, slack, sites] = await Promise.all([
     id === 'new' ? blank : getForm(ctx, id),
     getRegistry(ctx),
     listMembers(ctx),
     listSubscriptionTypes(ctx),
     slackCredentials(ctx),
+    listSites(ctx),
   ])
   if (!form) notFound()
 
@@ -95,11 +97,18 @@ const BuilderPage = async ({
       members={members.filter((m) => m.isSuperAdmin || m.editHubs.includes('sales')).map((m) => ({ id: m.userId, name: m.name }))}
       subscriptions={subscriptions.map((type) => ({ name: type.name, isInternal: type.isInternal }))}
       baseUrl={publicBaseUrl}
+      siteKey={siteKeyOf(sites)}
       canEdit={canEdit}
       slack={slack === null ? 'none' : slack.webhookUrl != null ? 'webhook' : 'bot'}
     />
   )
 }
+
+/** Which site key the embed snippet names. The first active one: an account
+ *  usually has one tracked site, and a snippet that names an inactive site would
+ *  count nothing. */
+const siteKeyOf = (sites: { siteKey: string; isActive: boolean }[]): string | null =>
+  sites.find((site) => site.isActive)?.siteKey ?? null
 
 /** The shapes a new form can start from: every seeded form, plus nothing.
  *

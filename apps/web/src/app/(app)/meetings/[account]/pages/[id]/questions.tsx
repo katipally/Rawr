@@ -17,6 +17,14 @@ export type MappingTarget = { value: string; label: string }
 
 const KEY = /^[a-z][a-z0-9_]{0,58}$/
 
+/** The form field types the booking widget actually renders. Offering the whole
+ *  list let somebody pick `radio`, which has no choices editor here and is refused
+ *  on save, or `file`, which has no upload endpoint on a booking page and renders
+ *  as a text box the submit path then rejects. */
+const BOOKING_QUESTION_TYPES = FORM_FIELD_TYPES.filter(
+  (type) => !['radio', 'consent', 'file', 'heading', 'hidden'].includes(type),
+)
+
 /** Blank is not an answer. Left as '' the parser would store an empty
  *  placeholder and the page would render one. */
 const blank = (value: string): string | undefined => (value.trim() === '' ? undefined : value)
@@ -148,7 +156,7 @@ export const QuestionList = ({
                 patch(index, { type: event.target.value as FormField['type'] })
               }
             >
-              {FORM_FIELD_TYPES.filter((type) => type !== 'hidden').map((type) => (
+              {BOOKING_QUESTION_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type.replace('_', ' ')}
                 </option>

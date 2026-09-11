@@ -2,17 +2,13 @@ import {
   clampRange,
   createSite,
   eraseContactActivity,
-  eventCountsByDay,
   eventFunnel,
   exportContactActivity,
   FUNNEL_MAX_STEPS,
   FUNNEL_MIN_STEPS,
-  listCollectorNotices,
   listEventDefs,
-  listSites,
   saveEventDef,
   setSiteActive,
-  websiteActivity,
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
@@ -21,13 +17,7 @@ import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 /** F4's surfaces. The two data-subject paths are admin only and enforced in the
  *  data access layer as well, so calling them directly is refused the same way. */
 export const analyticsRouter = router({
-  websiteActivity: protectedProcedure
-    .input(z.object({ contactId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => websiteActivity(ctx.account, input.contactId))),
-
   sites: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listSites(ctx.account))),
-
     create: adminProcedure
       .input(
         z.object({
@@ -45,8 +35,6 @@ export const analyticsRouter = router({
       ),
   }),
 
-  notices: adminProcedure.query(({ ctx }) => call(() => listCollectorNotices(ctx.account))),
-
   /** Item 13. Reading the list is open to anybody signed in, because a funnel is
    *  aggregate numbers about the account's own traffic; describing an event is a
    *  settings act and goes through the data layer's write check. */
@@ -61,7 +49,7 @@ export const analyticsRouter = router({
       )
       .query(({ ctx, input }) => call(() => listEventDefs(ctx.account, input ?? {}))),
 
-    save: adminProcedure
+    save: protectedProcedure
       .input(
         z.object({
           name: z.string().trim().min(1).max(120),
@@ -70,18 +58,6 @@ export const analyticsRouter = router({
         }),
       )
       .mutation(({ ctx, input }) => call(() => saveEventDef(ctx.account, input))),
-
-    counts: protectedProcedure
-      .input(
-        z.object({
-          from: z.iso.datetime().optional(),
-          to: z.iso.datetime().optional(),
-          names: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
-        }),
-      )
-      .query(({ ctx, input }) =>
-        call(() => eventCountsByDay(ctx.account, clampRange(input), input.names ?? [])),
-      ),
 
     funnel: protectedProcedure
       .input(

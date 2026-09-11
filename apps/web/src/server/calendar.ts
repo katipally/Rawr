@@ -9,7 +9,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
-import { googleRefresher, OAuth2RequestError, GoogleTokens } from './auth/google.ts'
+import { googleRefresher, OAuth2RequestError, type GoogleTokens } from './auth/google.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.

@@ -5,7 +5,7 @@ import { handleApolloWebhook } from '~/server/integrations/apollo.ts'
 import { handleBrevoWebhook } from '~/server/integrations/brevo.ts'
 import { handleClayWebhook } from '~/server/integrations/clay.ts'
 import { handleWoodpeckerWebhook } from '~/server/integrations/woodpecker.ts'
-import { clientIp, rateLimit } from '~/server/edge.ts'
+import { byteLength, clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
 
 /** POST /w/:source — F0 §6's fourth public endpoint, and F6 §1's inbound half.
  *
@@ -60,7 +60,18 @@ export const POST = async (
   }
 
   const ctx = publicEdgeContext(accountId)
+
+  // The same 64 KB budget every other public reader works to. Applied here rather
+  // than through readBody because the signature is over the raw text, and an
+  // unauthenticated endpoint must not read an unbounded body to find that out.
+  const declared = Number(request.headers.get('content-length') ?? '0')
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    return rejected(`A webhook body may be at most ${MAX_BODY_BYTES / 1024}KB.`, 413)
+  }
   const raw = await request.text()
+  if (byteLength(raw) > MAX_BODY_BYTES) {
+    return rejected(`A webhook body may be at most ${MAX_BODY_BYTES / 1024}KB.`, 413)
+  }
 
   const stored = await readCredentials(ctx, source)
   if (!stored?.secret) {

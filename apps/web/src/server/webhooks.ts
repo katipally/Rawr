@@ -43,7 +43,7 @@ export type WebhookJob = {
 /** What a subscriber is told. The record itself, not a diff: a receiver that has
  *  to reassemble state from a sequence of deltas has to receive every one of them
  *  in order, and nothing over HTTP promises that. */
-export const buildDelivery = async (
+const buildDelivery = async (
   ctx: AccountContext,
   input: { event: string; objectKey: string; entityId: string; accountSlug: string },
 ): Promise<WebhookJob[]> => {

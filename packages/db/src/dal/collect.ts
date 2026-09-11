@@ -11,6 +11,7 @@ import {
 } from '../schema/analytics.ts'
 import { recordActivity } from './activity.ts'
 import { channelOfSession, sourceFromSession } from './attribution.ts'
+import { resolveContactCampaigns } from './campaigns.ts'
 import { publicEdgeContext } from './forms.ts'
 import { withAccount, type Tx } from './index.ts'
 
@@ -275,6 +276,10 @@ export const collect = async (input: CollectInput): Promise<CollectResult> => {
         path,
         at: input.at,
       })
+      // A first visit fills original_source, and the campaign that first touch
+      // names has to land in first_campaign_id with it. Both columns come from the
+      // sources as they now stand, which is the one place that rule lives.
+      await resolveContactCampaigns(tx, ctx, [contactId])
     }
 
     if (contactId) {
@@ -429,8 +434,6 @@ const notice = async (
     })
 }
 
-/** The Website activity panel's three numbers, maintained here and by the
- *  back-fill job, and read by nothing else. */
 /** The latest touch on a contact, written from a session rather than a form.
  *
  *  `original_source` is filled only when it is empty: a contact created by an
@@ -464,9 +467,6 @@ const noteLatestTouch = async (
     update contact
        set latest_source = ${payload}::jsonb,
            original_source = coalesce(original_source, ${payload}::jsonb),
-           last_campaign_id = (select k.id from campaign k
-                                where k.account_id = ${accountId}
-                                  and lower(k.utm_campaign) = lower(${payload}::jsonb #>> '{detail,utm,campaign}')),
            updated_at = now()
      where id = ${contactId} and account_id = ${accountId}`)
 }
