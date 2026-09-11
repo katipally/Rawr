@@ -1,5 +1,5 @@
-import { canWrite, getRegistry, isUuid, listTaskQueues, listTasks, overdueNextSteps, schema } from '@rawr/db'
-import { EmptyState, Tabs, cn } from '@rawr/ui'
+import { canWrite, getRegistry, isUuid, listTaskQueues, listTasks, overdueNextSteps, schema, TASK_LIST_CAP } from '@rawr/db'
+import { Alert, EmptyState, Tabs, buttonClass, cn } from '@rawr/ui'
 import { CalendarDays, Search, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -21,8 +21,7 @@ const VIEWS: { key: TaskView; label: string; empty: string }[] = [
   { key: 'done', label: 'Completed', empty: 'Nothing has been completed yet' },
 ]
 
-const pill =
-  'inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline'
+const pill = buttonClass('secondary', 'no-underline')
 
 /** Trevor's Monday: what is overdue, and what he told himself he would do next.
  *  Both are the same question asked of two different columns. A9. */
@@ -85,6 +84,10 @@ const TasksPage = async ({
   ])
   const needle = q.toLowerCase()
   const rows = needle ? tasks.filter((row) => row.title.toLowerCase().includes(needle)) : tasks
+  // The table pages and searches over what this read returned, so once the read
+  // is full the view is a window rather than the view. Saying so is the honest
+  // answer: a queue, a type or "assigned to me" is how somebody gets past it.
+  const capped = tasks.length === TASK_LIST_CAP
   const writable = canWrite(contextFrom(session), 'task')
 
   return (
@@ -159,6 +162,13 @@ const TasksPage = async ({
           </Link>
         ))}
       </div>
+
+      {capped ? (
+        <Alert>
+          Showing the first {TASK_LIST_CAP.toLocaleString()} tasks of this view. Narrow it by
+          queue, type or assignee to see the rest.
+        </Alert>
+      ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
         <QueueSidebar account={account} queues={queues} current={queue} keep={filters} canWrite={writable} />

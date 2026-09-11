@@ -128,6 +128,7 @@ const fieldIn = (shape: string) => (
   trackChanges: false,
   options: [],
   helpText: null,
+  groupName: null,
   position: 0,
   operators: operatorsFor(type),
   conditional: null,

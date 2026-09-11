@@ -1,4 +1,4 @@
-import { exportCsv, isObjectKey, parseFilters, parseSorts } from '@rawr/db'
+import { exportCsv, parseFilters, parseSorts } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -18,7 +18,9 @@ export const GET = async (
 
   const search = request.nextUrl.searchParams
   const object = search.get('object') ?? ''
-  if (!isObjectKey(object)) {
+  // Shape only. Whether the key names an object is the registry's answer, given
+  // below, so an invented object exports the same way the three do.
+  if (!/^[a-z][a-z0-9_]{1,58}$/.test(object)) {
     return NextResponse.json({ error: `"${object}" is not an object.` }, { status: 400 })
   }
 

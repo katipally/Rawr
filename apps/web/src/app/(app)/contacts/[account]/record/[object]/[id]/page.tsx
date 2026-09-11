@@ -61,6 +61,10 @@ import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
  *    LEFT     properties, sectioned, collapsible, inline edit
  *    CENTRE   activity timeline with its type filter
  *    RIGHT    association rail
+ *
+ *  Only the fields the system ships are placed by hand, because which of those
+ *  belong beside each other is a judgement nobody can derive. Everything else is
+ *  laid out by its property group, which is the answer an admin already gave.
  */
 const SECTIONS: Record<ObjectKey, PropertySection[]> = {
   contact: [
@@ -82,7 +86,6 @@ const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'Next step', fieldKeys: ['next_step', 'next_step_date'] },
     { title: 'Pipeline', fieldKeys: ['pipeline_id', 'stage_id'] },
     { title: 'Ownership', fieldKeys: ['owner_id', 'company_id'] },
-    { title: 'Custom properties', fieldKeys: ['uttr_pipeline', 'deal_product_of_interest'] },
     { title: 'Where it came from', fieldKeys: ['original_source', 'latest_source'] },
     { title: 'Record', fieldKeys: ['created_at'] },
   ],
@@ -240,14 +243,29 @@ const RecordPage = async ({
   // has no such layout and needs none: its fields are in the order the admin put
   // them in, which is the only order that means anything.
   const layout = object.isCustom ? [] : (SECTIONS[objectParam as ObjectKey] ?? [])
-  // Every field the layout does not place, in registry order. This is what makes
-  // a property created in Settings show up here without a deploy (D4), and for a
-  // custom object it is every field it has.
+  // Every field the layout does not place goes under the group an admin filed it
+  // in, so a property group made in Settings, Properties -- or the one an import
+  // names its new properties after -- is a heading here without a deploy. Groups
+  // appear in the order the properties are in, because that is the order Settings
+  // lets somebody choose; ungrouped fields come last.
   const placed = new Set(layout.flatMap((section) => section.fieldKeys))
-  const unplaced = fields.filter((field) => !placed.has(field.key)).map((field) => field.key)
-  const sections = unplaced.length
-    ? [...layout, { title: object.isCustom ? 'Details' : 'More properties', fieldKeys: unplaced }]
-    : layout
+  const byGroup = new Map<string, string[]>()
+  for (const field of fields) {
+    if (placed.has(field.key)) continue
+    const group = object.byKey.get(field.key)?.groupName ?? ''
+    const bucket = byGroup.get(group)
+    if (bucket) bucket.push(field.key)
+    else byGroup.set(group, [field.key])
+  }
+  const ungrouped = byGroup.get('') ?? []
+  byGroup.delete('')
+  const sections: PropertySection[] = [
+    ...layout,
+    ...[...byGroup].map(([title, fieldKeys]) => ({ title, fieldKeys })),
+    ...(ungrouped.length
+      ? [{ title: object.isCustom ? 'Details' : 'More properties', fieldKeys: ungrouped }]
+      : []),
+  ]
   const headerFields = (object.isCustom ? [] : (HEADER_FIELDS[objectParam as ObjectKey] ?? [])).flatMap((key) => {
     const field = object.byKey.get(key)
     return field ? [field] : []

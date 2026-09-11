@@ -30,7 +30,7 @@ const DuplicatesPage = async ({
     return (
       <EmptyState
         title="Merging is not something your role does"
-        description={`You need contacts access, which you do not have. can read records but not join two of them together.`}
+        description="Merging two records needs contacts access, which your role does not have. You can read records but not join two of them together."
       />
     )
   }

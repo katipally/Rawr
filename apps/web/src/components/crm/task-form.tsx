@@ -1,6 +1,7 @@
 'use client'
 
 import { Button, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -89,6 +90,9 @@ export const TaskForm = ({
   const [queueId, setQueueId] = useState(task?.queueId ?? defaultQueueId ?? '')
   const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '')
   const [busy, setBusy] = useState(false)
+  const [more, setMore] = useState(
+    Boolean(task?.remindAt || task?.queueId || task?.assigneeId || task?.body),
+  )
 
   useEffect(() => {
     if (autoFocus) titleField.current?.focus()
@@ -167,79 +171,107 @@ export const TaskForm = ({
           </option>
         ))}
       </Select>
-      <TextInput
-        type="date"
-        value={dueDate}
-        aria-label="Due date"
-        onChange={(event) => setDueDate(event.target.value)}
-        className="w-auto"
-      />
-      {/* The preset fills the instant; the instant is what is stored, and stays
-          editable, so "a day before" and "next Tuesday at four" are the same
-          control rather than two. */}
-      <Select
-        aria-label="Reminder"
-        value={REMINDER_PRESETS.find((preset) => preset.daysBefore !== null && dueDate && remindFrom(dueDate, preset.daysBefore) === remindAt)?.key ?? (remindAt ? 'custom' : 'none')}
-        onChange={(event) => {
-          const preset = REMINDER_PRESETS.find((option) => option.key === event.target.value)
-          if (!preset) return
-          setRemindAt(preset.daysBefore === null || !dueDate ? '' : remindFrom(dueDate, preset.daysBefore))
-        }}
-        className="w-auto min-w-36"
-      >
-        {REMINDER_PRESETS.map((preset) => (
-          <option key={preset.key} value={preset.key} disabled={preset.daysBefore !== null && !dueDate}>
-            {preset.label}
-          </option>
-        ))}
-        {remindAt ? <option value="custom">Custom</option> : null}
-      </Select>
-      <TextInput
-        type="datetime-local"
-        value={remindAt}
-        aria-label="Remind me at"
-        onChange={(event) => setRemindAt(event.target.value)}
-        className="w-auto"
-      />
-      <Select
-        aria-label="Queue"
-        value={queueId}
-        onChange={(event) => setQueueId(event.target.value)}
-        className="w-auto min-w-32"
-      >
-        <option value="">No queue</option>
-        {queues.map((queue) => (
-          <option key={queue.id} value={queue.id}>
-            {queue.name}
-          </option>
-        ))}
-      </Select>
-      <Select
-        aria-label="Assignee"
-        value={assigneeId}
-        onChange={(event) => setAssigneeId(event.target.value)}
-        className="w-auto min-w-32"
-      >
-        <option value="">Me</option>
-        {assignees.map((person) => (
-          <option key={person.id} value={person.id}>
-            {person.label}
-          </option>
-        ))}
-      </Select>
+      {/* A native date field shows nothing but a format, so it says what it is.
+          The selects beside it read as their own value and need no label. */}
+      <label className="flex flex-col gap-0.5">
+        <span className="text-small text-secondary">Due date</span>
+        <TextInput
+          type="date"
+          value={dueDate}
+          onChange={(event) => setDueDate(event.target.value)}
+          className="w-auto"
+        />
+      </label>
       <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
         {task ? 'Save task' : 'Add task'}
       </Button>
-      {/* Full width under the row: automations and sequences already write a
-          body, and until now a task that had one showed only its title. */}
-      <TextArea
-        value={body}
-        rows={2}
-        aria-label="Details"
-        placeholder="Details (optional)"
-        onChange={(event) => setBody(event.target.value)}
-        className="w-full"
-      />
+      <Button
+        variant="tertiary"
+        aria-expanded={more}
+        onClick={() => setMore(!more)}
+        icon={more ? <ChevronDown aria-hidden="true" className="size-4" /> : <ChevronRight aria-hidden="true" className="size-4" />}
+      >
+        {more ? 'Fewer' : 'More'}
+      </Button>
+
+      {/* Four controls most tasks never set. Shut by default so the form beside a
+          record is three fields tall, and open from the start whenever the task
+          being edited already uses one of them. */}
+      {more ? (
+        <div className="flex w-full flex-wrap items-end gap-2">
+          {/* The preset fills the instant; the instant is what is stored, and stays
+              editable, so "a day before" and "next Tuesday at four" are the same
+              control rather than two. */}
+          <label className="flex flex-col gap-0.5">
+            <span className="text-small text-secondary">Reminder</span>
+            <Select
+              value={REMINDER_PRESETS.find((preset) => preset.daysBefore !== null && dueDate && remindFrom(dueDate, preset.daysBefore) === remindAt)?.key ?? (remindAt ? 'custom' : 'none')}
+              onChange={(event) => {
+                const preset = REMINDER_PRESETS.find((option) => option.key === event.target.value)
+                if (!preset) return
+                setRemindAt(preset.daysBefore === null || !dueDate ? '' : remindFrom(dueDate, preset.daysBefore))
+              }}
+              className="w-auto min-w-36"
+            >
+              {REMINDER_PRESETS.map((preset) => (
+                <option key={preset.key} value={preset.key} disabled={preset.daysBefore !== null && !dueDate}>
+                  {preset.label}
+                </option>
+              ))}
+              {remindAt ? <option value="custom">Custom</option> : null}
+            </Select>
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-small text-secondary">Remind me at</span>
+            <TextInput
+              type="datetime-local"
+              value={remindAt}
+              onChange={(event) => setRemindAt(event.target.value)}
+              className="w-auto"
+            />
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-small text-secondary">Queue</span>
+            <Select
+              value={queueId}
+              onChange={(event) => setQueueId(event.target.value)}
+              className="w-auto min-w-32"
+            >
+              <option value="">No queue</option>
+              {queues.map((queue) => (
+                <option key={queue.id} value={queue.id}>
+                  {queue.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-small text-secondary">Assignee</span>
+            <Select
+              value={assigneeId}
+              onChange={(event) => setAssigneeId(event.target.value)}
+              className="w-auto min-w-32"
+            >
+              <option value="">Me</option>
+              {assignees.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+          {/* Full width under the row: automations and sequences already write a
+              body, and until now a task that had one showed only its title. */}
+          <TextArea
+            value={body}
+            rows={2}
+            aria-label="Details"
+            placeholder="Details (optional)"
+            onChange={(event) => setBody(event.target.value)}
+            className="w-full"
+          />
+        </div>
+      ) : null}
     </form>
   )
 }

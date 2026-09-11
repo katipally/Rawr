@@ -851,13 +851,17 @@ const readForWrite = async (
   tx: Tx,
   object: RegistryObject,
   id: string,
+  /** A soft-deleted row is still the row somebody ticked, and reading it is the
+   *  difference between naming it in a refusal and printing its uuid. */
+  includeDeleted = false,
 ): Promise<(RecordValues & { updated_at: Date }) | undefined> => {
   const fields = object.fields.map((field) => fieldOrThrow(object, field.key))
   const [row] = await tx.execute<RecordValues & { updated_at: Date }>(sql`
     select ${sql.raw(`"${object.key}"."updated_at"`)},
            ${sql.join(fields.map((field) => selectExpression(object, field)), sql`, `)}
       from ${tableFor(object)}
-     where ${sql.raw(`"${object.key}"."id"`)} = ${id} and ${NOT_DELETED(object)}
+     where ${sql.raw(`"${object.key}"."id"`)} = ${id}
+       and ${includeDeleted ? rowsOf(object) : NOT_DELETED(object)}
      limit 1`)
   if (!row) return undefined
   return { ...row, updated_at: asDate(row.updated_at), created_at: asDate(row.created_at) }
@@ -1032,7 +1036,7 @@ const deleteRecordIn = async (
   return displayName(object, before)
 }
 
-export type BulkDeleteResult = { deleted: number; failed: { id: string; reason: string }[] }
+export type BulkDeleteResult = { deleted: number; failed: { id: string; displayName: string; reason: string }[] }
 
 /** A selection deleted in one transaction, a savepoint each, for the same reason
  *  a bulk edit is: a record somebody has already deleted must not take the other
@@ -1071,7 +1075,12 @@ export const bulkDeleteRecords = async (
         result.deleted += 1
       } catch (cause) {
         await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
-        result.failed.push({ id, reason: cause instanceof Error ? cause.message : String(cause) })
+        const row = await readForWrite(tx, object, id, true).catch(() => undefined)
+        result.failed.push({
+          id,
+          displayName: row ? displayName(object, row) : id,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        })
       }
     }
 

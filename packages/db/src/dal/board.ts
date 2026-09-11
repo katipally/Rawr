@@ -137,83 +137,89 @@ type CardRow = {
 
 /** One window of cards per column. row_number is over the same partition the
  *  footers group by, so a column's cards and its count can never disagree about
- *  which deals belong to it. Ranks are 1-based, so `after` is an offset. */
+ *  which deals belong to it. Ranks are 1-based, so `after` is an offset.
+ *
+ *  Ranking is its own query level, and the four per-card extras hang off the rows
+ *  that survive it. A window function cannot be pushed below, so anything computed
+ *  beside row_number() is computed for every deal the filter matches: on a
+ *  thousand-deal pipeline that was four thousand index lookups to draw six
+ *  hundred cards. Now it is four per card actually returned, at most
+ *  4 x 50 x columns. */
 const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: number, upTo: number) =>
   withAccount(ctx, (tx) => tx.execute<CardRow>(sql`
-    select id, group_key, name, amount, currency, close_date, next_step, next_step_date,
-           owner_name, company_name, days_in_stage, days_since_activity, score,
-           next_task_title, next_task_due, contact_names, contact_count, email_contact_id
-      from (
-        select "deal"."id" as id,
-               ${groupExpr} as group_key,
-               "deal"."name" as name,
-               "deal"."amount"::text as amount,
-               "deal"."currency" as currency,
-               "deal"."close_date"::text as close_date,
-               "deal"."next_step" as next_step,
-               "deal"."next_step_date"::text as next_step_date,
-               u."name" as owner_name,
-               coalesce(c."name", c."domain") as company_name,
-               -- Two correlated reads per visible card, capped at fifty per
-               -- column by the window below, over the index the timeline already
-               -- has. Not a join: a deal with four hundred activities would
-               -- multiply every row of the board.
-               extract(day from now() - coalesce((
-                 select max(l."occurred_at") from "activity_link" l
-                  where l."entity_type" = 'deal' and l."entity_id" = "deal"."id"
-                    and l."type" = 'stage_change'
-               ), "deal"."created_at"))::int as days_in_stage,
-               (select extract(day from now() - max(l."occurred_at"))::int
-                  from "activity_link" l
-                 where l."entity_type" = 'deal' and l."entity_id" = "deal"."id") as days_since_activity,
-               "deal"."score" as score,
-               task."title" as next_task_title,
-               task."due_date"::text as next_task_due,
-               people."names" as contact_names,
-               coalesce(people."n", 0) as contact_count,
-               people."email_contact_id" as email_contact_id,
-               row_number() over (
-                 partition by ${groupExpr}
-                 order by "deal"."close_date" asc nulls last, "deal"."id" desc
-               ) as rank
-          from "deal"
-          left join user_account u on u.id = "deal"."owner_id"
-          left join company c on c.id = "deal"."company_id"
-          -- Two more lateral reads per visible card, both over an index that
-          -- already exists, and both bounded by the window below. A join would
-          -- multiply the row instead: a deal with nine tasks and forty contacts
-          -- is one card, not three hundred and sixty.
-          left join lateral (
-            select t."title", t."due_date"
-              from "task" t
-             where t."entity_type" = 'deal' and t."entity_id" = "deal"."id" and t."status" = 'open'
-             order by t."due_date" asc nulls last, t."id" asc
-             limit 1
-          ) task on true
-          left join lateral (
-            select count(*)::int as n,
-                   (array_agg(named."name" order by named."name"))[1:3] as names,
-                   (array_agg(named."id"::text order by named."name")
-                      filter (where named."email" is not null))[1] as email_contact_id
-              from (
-                select p."id", p."email",
-                       coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact') as name
-                  from "association" a
-                  join "contact" p on p.id = a."to_id"
-                 where a."from_type" = 'deal' and a."from_id" = "deal"."id" and a."to_type" = 'contact'
-                   and p."deleted_at" is null
-                union
-                select p."id", p."email",
-                       coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact')
-                  from "association" a
-                  join "contact" p on p.id = a."from_id"
-                 where a."to_type" = 'deal' and a."to_id" = "deal"."id" and a."from_type" = 'contact'
-                   and p."deleted_at" is null
-              ) named
-          ) people on true
-         where ${predicate}
-      ) ranked
-     where rank > ${after} and rank <= ${upTo}`))
+    with ranked as (
+      select "deal"."id" as id,
+             ${groupExpr} as group_key,
+             "deal"."name" as name,
+             "deal"."amount"::text as amount,
+             "deal"."currency" as currency,
+             "deal"."close_date"::text as close_date,
+             "deal"."next_step" as next_step,
+             "deal"."next_step_date"::text as next_step_date,
+             "deal"."created_at" as created_at,
+             "deal"."score" as score,
+             u."name" as owner_name,
+             coalesce(c."name", c."domain") as company_name,
+             row_number() over (
+               partition by ${groupExpr}
+               order by "deal"."close_date" asc nulls last, "deal"."id" desc
+             ) as rank
+        from "deal"
+        left join user_account u on u.id = "deal"."owner_id"
+        left join company c on c.id = "deal"."company_id"
+       where ${predicate}
+    ),
+    visible as (select * from ranked where rank > ${after} and rank <= ${upTo})
+    select w.id, w.group_key, w.name, w.amount, w.currency, w.close_date, w.next_step,
+           w.next_step_date, w.owner_name, w.company_name, w.score,
+           -- Two correlated reads per visible card, over the index the timeline
+           -- already has. Not a join: a deal with four hundred activities would
+           -- multiply every row of the board.
+           extract(day from now() - coalesce((
+             select max(l."occurred_at") from "activity_link" l
+              where l."entity_type" = 'deal' and l."entity_id" = w.id
+                and l."type" = 'stage_change'
+           ), w.created_at))::int as days_in_stage,
+           (select extract(day from now() - max(l."occurred_at"))::int
+              from "activity_link" l
+             where l."entity_type" = 'deal' and l."entity_id" = w.id) as days_since_activity,
+           task."title" as next_task_title,
+           task."due_date"::text as next_task_due,
+           people."names" as contact_names,
+           coalesce(people."n", 0) as contact_count,
+           people."email_contact_id" as email_contact_id
+      from visible w
+      -- Two more lateral reads per visible card, both over an index that already
+      -- exists. A join would multiply the row instead: a deal with nine tasks and
+      -- forty contacts is one card, not three hundred and sixty.
+      left join lateral (
+        select t."title", t."due_date"
+          from "task" t
+         where t."entity_type" = 'deal' and t."entity_id" = w.id and t."status" = 'open'
+         order by t."due_date" asc nulls last, t."id" asc
+         limit 1
+      ) task on true
+      left join lateral (
+        select count(*)::int as n,
+               (array_agg(named."name" order by named."name"))[1:3] as names,
+               (array_agg(named."id"::text order by named."name")
+                  filter (where named."email" is not null))[1] as email_contact_id
+          from (
+            select p."id", p."email",
+                   coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact') as name
+              from "association" a
+              join "contact" p on p.id = a."to_id"
+             where a."from_type" = 'deal' and a."from_id" = w.id and a."to_type" = 'contact'
+               and p."deleted_at" is null
+            union
+            select p."id", p."email",
+                   coalesce(nullif(trim(concat_ws(' ', p."first_name", p."last_name")), ''), p."email", 'Contact')
+              from "association" a
+              join "contact" p on p.id = a."from_id"
+             where a."to_type" = 'deal' and a."to_id" = w.id and a."from_type" = 'contact'
+               and p."deleted_at" is null
+          ) named
+      ) people on true`))
 
 const toCard = (object: RegistryObject, card: CardRow): BoardCard => ({
   id: card.id,

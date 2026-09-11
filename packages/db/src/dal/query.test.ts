@@ -29,6 +29,7 @@ const field = (over: Partial<RegistryField> & Pick<RegistryField, 'key' | 'type'
   trackChanges: false,
   options: [],
   helpText: null,
+  groupName: null,
   position: 0,
   operators: TYPE_META[over.type].operators,
   ...over,

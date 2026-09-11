@@ -38,7 +38,7 @@ const MAX_IDS = 50_000
  *  count is what says how bad it was. */
 const MAX_ERRORS = 20
 
-export type BulkFailure = { id: string; reason: string }
+export type BulkFailure = { id: string; displayName: string; reason: string }
 
 export type BulkAction =
   | { type: 'delete' }
@@ -82,10 +82,7 @@ const applyBatch = async (
     }
     case 'assign': {
       const result = await bulkUpdateRecords(ctx, objectKey, ids, { owner_id: action.ownerId })
-      return {
-        processed: result.updated,
-        failed: result.failed.map((row) => ({ id: row.id, reason: row.reason })),
-      }
+      return { processed: result.updated, failed: result.failed }
     }
     case 'associate': {
       await associateMany(ctx, objectKey, ids, action.target, action.label ?? null)

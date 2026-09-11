@@ -1,5 +1,6 @@
 'use client'
 
+import { matchesConditional } from '@rawr/db/registry'
 import { Button, Field, Modal, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useNavigation } from '~/components/navigation.tsx'
@@ -97,6 +98,11 @@ export const CreateRecordDialog = ({
     onClose()
   }
 
+  /** Conditional property logic, the same rule the record panel applies: a
+   *  property whose rule does not match what has been filled in so far is not
+   *  asked for, and a required one that is not asked for cannot hold the form up. */
+  const asked = fields.filter((field) => matchesConditional(field.conditional, values))
+
   const submit = async () => {
     const filled = Object.fromEntries(
       Object.entries(values).filter(([, value]) => value !== '' && value !== null && value !== undefined),
@@ -104,7 +110,7 @@ export const CreateRecordDialog = ({
     // Nothing at all is a mis-click, not a record. Without this the dialog writes
     // a row with every column null, which reads as "Unnamed company" in the list
     // and can only be found by whoever notices it.
-    const missing = fields.filter((field) => field.isRequired && filled[field.key] === undefined)
+    const missing = asked.filter((field) => field.isRequired && filled[field.key] === undefined)
     if (missing.length > 0 || Object.keys(filled).length === 0) {
       setError(
         missing.length > 0
@@ -153,7 +159,7 @@ export const CreateRecordDialog = ({
           void submit()
         }}
       >
-        {fields.map((field, index) => (
+        {asked.map((field, index) => (
           <Field
             key={field.key}
             id={`${prefix}-${field.key}`}

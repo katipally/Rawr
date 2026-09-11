@@ -180,7 +180,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         return
       }
       if (result.failed.length > 0) {
-        setFailed(result.failed.map((row) => ({ id: row.id, displayName: row.id, reason: row.reason })))
+        setFailed(result.failed)
       }
       toast('success', done(result.processed))
       onDone()
@@ -207,7 +207,8 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
     setPending('list')
     setListId(null)
     try {
-      const rows = await api.segments.list.query({ object: object as 'contact' })
+      // Safe because the button that opens this only exists for the three.
+      const rows = await api.segments.list.query({ object: object as 'contact' | 'company' | 'deal' })
       setLists(rows.filter((row) => row.isStatic).map((row) => ({ id: row.id, name: row.name })))
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -228,7 +229,10 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
     }
   }
 
-  const canMerge = ids.length === 2 && (object === 'contact' || object === 'company' || object === 'deal')
+  /** A segment is saved against one of the three built-in objects, so a list is
+   *  only somewhere a record of one of them can go. */
+  const isBuiltIn = object === 'contact' || object === 'company' || object === 'deal'
+  const canMerge = ids.length === 2 && isBuiltIn
 
   return (
     <div className="flex flex-col gap-2 rounded-panel border border-line-interactive bg-accent-subtle p-3">
@@ -254,7 +258,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         >
           Associate with
         </Button>
-        <Button onClick={() => void openList()}>Add to list</Button>
+        {isBuiltIn ? <Button onClick={() => void openList()}>Add to list</Button> : null}
         <Button
           disabled={!canMerge}
           title={canMerge ? undefined : 'Merging takes exactly two records of the same kind.'}

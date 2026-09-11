@@ -163,7 +163,7 @@ export const isPast = (value: unknown): boolean => {
   return date < today
 }
 
-export const formatValue = (type: FieldType, value: unknown, zone: Zone, currency = 'USD'): string => {
+const formatValue = (type: FieldType, value: unknown, zone: Zone, currency = 'USD'): string => {
   if (value === null || value === undefined || value === '') return ''
   switch (type) {
     case 'currency':

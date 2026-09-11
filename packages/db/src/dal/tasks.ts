@@ -5,7 +5,7 @@ import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { notify } from './notifications.ts'
+import { notify, resolveNotifications } from './notifications.ts'
 import { entityAlive } from './registry.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
 // The two modules import each other for exactly that pair of calls; Node resolves
@@ -75,6 +75,11 @@ export type TaskFilter = {
   queueId?: string | 'none' | undefined
 }
 
+/** The most rows one view of the list reads. The page renders in slices of its
+ *  own and searches in the browser over everything it was given, so this is the
+ *  point past which the view stops being the whole truth and has to say so. */
+export const TASK_LIST_CAP = 500
+
 export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
   withAccount(ctx, (tx) =>
     tx
@@ -105,7 +110,7 @@ export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): P
       // Undated tasks sit after dated ones rather than jumping to the top. Written
       // as one fragment because asc() would put the direction after the modifier.
       .orderBy(sql`${task.dueDate} asc nulls last`, asc(task.id))
-      .limit(500),
+      .limit(TASK_LIST_CAP),
   ) as Promise<TaskRow[]>
 
 export type NewTask = {
@@ -328,7 +333,16 @@ export const setTaskStatus = async (
     // A sequence step that made this task is waiting on it. Completing it here is
     // what moves the outreach on, so nobody has to remember there is a sequence
     // behind the call they just logged.
-    if (status === 'done') await onTaskDone(tx, ctx, id)
+    if (status === 'done') {
+      await onTaskDone(tx, ctx, id)
+      // The three notices this task can have raised stop being true the moment it
+      // is done, and a stored notice cannot work that out for itself. Each sweep
+      // adds the due date or the reminder time after the id, so the id is the
+      // prefix that catches every one of them.
+      for (const kind of ['overdue', 'remind', 'assigned']) {
+        await resolveNotifications(tx, ctx, `task:${kind}:${id}`)
+      }
+    }
 
     return {
       result: undefined,

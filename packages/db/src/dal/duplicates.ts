@@ -242,9 +242,8 @@ export const findDuplicates = async (
     const seen = new Set(dismissed.map((row) => `${row.leftId}:${row.rightId}`))
     const out: DuplicatePair[] = []
 
-    for (const { rule } of rules) {
+    for (const found of rules) {
       if (out.length >= limit) break
-      const found = rules.find((candidate) => candidate.rule === rule)!
       // Names are joined back on rather than selected in the group, because a
       // grouped query cannot carry a column it did not group by and repeating the
       // whole name expression in the GROUP BY is how the two drift apart.

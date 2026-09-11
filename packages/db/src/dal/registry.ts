@@ -44,6 +44,9 @@ export type RegistryField = {
   trackChanges: boolean
   options: string[]
   helpText: string | null
+  /** The group an admin filed it under, from Settings, Properties, or the name an
+   *  import gave the properties it created. Null is ungrouped. */
+  groupName: string | null
   position: number
   operators: readonly Operator[]
   /** While this does not match the record's other values, the field is not on the
@@ -118,6 +121,7 @@ const load = async (tx: Tx): Promise<Registry> => {
       trackChanges: fieldDef.trackChanges,
       options: fieldDef.options,
       helpText: fieldDef.helpText,
+      groupName: fieldDef.groupName,
       position: fieldDef.position,
       conditional: fieldDef.conditional,
     })
@@ -168,6 +172,7 @@ const load = async (tx: Tx): Promise<Registry> => {
       trackChanges: row.trackChanges ?? false,
       options: Array.isArray(row.options) ? (row.options as string[]) : [],
       helpText: row.helpText,
+      groupName: row.groupName,
       position: row.position ?? 0,
       operators: TYPE_META[row.type as FieldType].operators,
       conditional: readConditional(row.conditional),

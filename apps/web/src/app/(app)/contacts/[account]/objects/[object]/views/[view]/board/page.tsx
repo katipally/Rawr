@@ -166,6 +166,10 @@ const BoardPage = async ({
         trailing={
           byStage && lookups.pipelines.length > 1 ? (
             <PipelinePicker
+              // Keyed because this element is created here and rendered inside the
+              // toolbar's own children array on the client, which is a list as far
+              // as React is concerned.
+              key="pipeline"
               currentId={pipelineId ?? ''}
               pipelines={lookups.pipelines.map((pipeline) => ({
                 id: pipeline.id,

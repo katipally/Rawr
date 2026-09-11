@@ -25,7 +25,7 @@ export type Associated = {
 
 /** One card: everything of one object that is linked to this record. Named by the
  *  registry, so an object an admin invented gets a card that reads like the rest. */
-export type AssociationCard = {
+type AssociationCard = {
   objectKey: string
   nameSingular: string
   namePlural: string
