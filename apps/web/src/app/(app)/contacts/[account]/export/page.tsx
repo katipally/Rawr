@@ -38,8 +38,9 @@ const ExportPage = async () => {
         lead="A CSV of exactly what a view holds: its filters, its columns, its order."
         why={
           <p>
-            The file downloads in the browser, so it is capped at 50,000 rows. Past that, narrow the
-            view and export twice.
+            The file streams straight to your downloads a page at a time, so there is no limit on
+            how many rows it holds. Accented names open correctly in Excel, and the same file imports
+            back in unchanged.
           </p>
         }
       />

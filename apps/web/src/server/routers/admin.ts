@@ -1,5 +1,7 @@
 import {
   ACTION_TYPES,
+  MAX_CHOICES,
+  MAX_OPTION_LENGTH,
   createCustomObject,
   deleteCustomObject,
   listCustomObjects,
@@ -225,7 +227,7 @@ export const adminRouter = router({
           key: z.string().trim().min(1).max(59),
           label: name,
           type: fieldType,
-          options: z.array(z.string().max(120)).max(200).optional(),
+          options: z.array(z.string().max(MAX_OPTION_LENGTH)).max(MAX_CHOICES).optional(),
           helpText: z.string().max(500).nullish(),
           groupName: z.string().trim().max(80).nullish(),
           conditional: conditional.optional(),
@@ -255,7 +257,7 @@ export const adminRouter = router({
         z.object({
           id: z.uuid(),
           label: name.optional(),
-          options: z.array(z.string().max(120)).max(200).optional(),
+          options: z.array(z.string().max(MAX_OPTION_LENGTH)).max(MAX_CHOICES).optional(),
           helpText: z.string().max(500).nullish(),
           groupName: z.string().trim().max(80).nullish(),
           conditional: conditional.optional(),

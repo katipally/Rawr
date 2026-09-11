@@ -31,7 +31,8 @@ export type ImportWizardProps = {
   state: string
   processedRows: number
   counts: { created: number; updated: number; skipped: number; errored: number }
-  errors: { row: number; reason: string; values: Record<string, string> }[]
+  /** What the run said about rows: refused ones, and ones written with a change. */
+  errors: { row: number; reason: string; warning?: true }[]
   /** Owner names in the file that match nobody here. Those rows landed
    *  unassigned rather than failing, so this is what a migration reconciles. */
   unmatchedOwners: string[]
@@ -45,6 +46,7 @@ type Preview = {
   checked: number
   total: number
   newProperties: { header: string; label: string; type: string; options?: string[] }[]
+  newChoices: { label: string; choices: string[] }[]
   samples: { create: Record<string, string>[]; update: Record<string, string>[]; error: { row: number; reason: string; values: Record<string, string> }[] }
 }
 
@@ -163,6 +165,10 @@ export const ImportWizard = ({
   }
 
   const running = live.state === 'running'
+  // Row 0 is the run's own failure rather than a row of the file.
+  const failure = errors.find((note) => note.row === 0)
+  const refused = errors.filter((note) => !note.warning && note.row > 0)
+  const warnings = errors.filter((note) => note.warning)
 
   if (finished || stoppedForGood || running) {
     const pct = totalRows === 0 ? 100 : Math.round((live.processed / totalRows) * 100)
@@ -230,7 +236,7 @@ export const ImportWizard = ({
           <p className="text-secondary">
             {live.state === 'cancelled'
               ? 'Stopped. Everything imported before it stopped is in the CRM; upload the file again to bring in the rest.'
-              : 'This import could not go on. The reason is in the errors below; fix it and upload the file again.'}
+              : `This import could not go on${failure ? `: ${failure.reason}` : '.'} Fix it and upload the file again.`}
           </p>
         ) : null}
 
@@ -255,7 +261,7 @@ export const ImportWizard = ({
           </div>
         ) : null}
 
-        {errors.length > 0 ? (
+        {live.counts.errored > 0 ? (
           <section className="flex flex-col gap-2">
             <h3 className="font-medium">Rows that need a person ({formatNumber(live.counts.errored)})</h3>
             <p className="text-secondary">
@@ -270,19 +276,17 @@ export const ImportWizard = ({
             >
               Download the failed rows as CSV
             </a>
-            <ul className="flex flex-col rounded-panel border border-line bg-surface">
-              {errors.slice(0, 25).map((row) => (
-                <li key={`${row.row}-${row.reason}`} className="border-b border-divider px-3 py-1.5 last:border-0">
-                  <span className="text-secondary tabular-nums">Row {row.row}: </span>
-                  {row.reason}
-                </li>
-              ))}
-            </ul>
-            {errors.length > 25 ? (
-              <p className="text-secondary">
-                Showing the first 25. The CSV has all {formatNumber(live.counts.errored)}.
-              </p>
-            ) : null}
+            <NoteList notes={refused} total={live.counts.errored} />
+          </section>
+        ) : null}
+
+        {/* Written, with something changed on the way in: a value cut to fit, or
+            a row with nothing to match it on next time. Not in the counts above,
+            because the row itself landed. */}
+        {warnings.length > 0 ? (
+          <section className="flex flex-col gap-2">
+            <h3 className="font-medium">Imported with a change</h3>
+            <NoteList notes={warnings} />
           </section>
         ) : null}
       </div>
@@ -334,7 +338,7 @@ export const ImportWizard = ({
               <tr key={header} className="border-b border-divider last:border-0">
                 <td className="px-3 py-1.5 align-middle break-words">{header}</td>
                 <td className="px-3 py-1.5 align-middle text-secondary break-words">
-                  {sampleRows[0]?.[header] || <span className="text-secondary">empty</span>}
+                  {sampleRows.find((row) => row[header])?.[header] || <span className="text-secondary">empty</span>}
                 </td>
                 <td className="px-3 py-1.5 align-middle">
                   <div className="flex flex-col gap-1.5">
@@ -468,6 +472,23 @@ export const ImportWizard = ({
             </div>
           ) : null}
 
+          {preview.newChoices.length > 0 ? (
+            <div>
+              <p className="font-medium">Adds choices the file uses</p>
+              <p className="text-secondary">
+                Before the first row is written, so the rows that use them import rather than being
+                refused.
+              </p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {preview.newChoices.map((entry) => (
+                  <li key={entry.label}>
+                    {entry.label}: <span className="text-secondary">{entry.choices.join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {/* What the counts are worth. Every row past the checked window is
               counted as a create, which is what a row nobody has looked at
               usually is; a number that says so is worth more than one that does
@@ -509,6 +530,27 @@ export const ImportWizard = ({
     </div>
   )
 }
+
+/** The first twenty-five of a run's notes. The run keeps a hundred for this, and
+ *  every refused row for the CSV, so a count past what is listed says where the
+ *  rest are. */
+const NoteList = ({ notes, total }: { notes: { row: number; reason: string }[]; total?: number }) => (
+  <>
+    <ul className="flex flex-col rounded-panel border border-line bg-surface">
+      {notes.slice(0, 25).map((note) => (
+        <li key={`${note.row}-${note.reason}`} className="border-b border-divider px-3 py-1.5 last:border-0">
+          <span className="text-secondary tabular-nums">Row {note.row}: </span>
+          {note.reason}
+        </li>
+      ))}
+    </ul>
+    {total !== undefined && total > Math.min(notes.length, 25) ? (
+      <p className="text-secondary">
+        Showing {Math.min(notes.length, 25)}. The CSV has all {formatNumber(total)}.
+      </p>
+    ) : null}
+  </>
+)
 
 /** A handful of rows exactly as they will be written. Columns come from the rows
  *  themselves rather than the mapping, because a value the mapping drops is

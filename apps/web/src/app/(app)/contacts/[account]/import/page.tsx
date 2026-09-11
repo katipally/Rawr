@@ -7,16 +7,15 @@ import {
   requiredColumnKeys,
   type ImportKind,
 } from '@rawr/db'
-import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
+import { Badge, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
-import { MAX_BYTES, MAX_ROWS } from '~/server/spreadsheet.ts'
-import { ClearError } from './clear-error.tsx'
-import { ImportKindField, type ImportKindOption } from './import-kind-field.tsx'
+import type { ImportKindOption } from './import-kind-field.tsx'
+import { ImportUploader } from './import-uploader.tsx'
 
 /** What each of the five shape files is for, in the picker's own words. The
  *  columns beside them are read off the shapes themselves. */
@@ -43,19 +42,12 @@ const SHAPE_LABEL: Record<Exclude<ImportKind, 'records'>, { label: string; what:
   },
 }
 
-const ImportPage = async ({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ account: string }>
-  searchParams: Promise<{ error?: string }>
-}) => {
+const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const zone = session.timezone
 
   const { account } = await params
-  const { error } = await searchParams
   const ctx = contextFrom(session)
   const runs = await listImportRuns(ctx)
   // From the registry rather than a list of three: an object an admin invented
@@ -112,57 +104,9 @@ const ImportPage = async ({
         }
       />
 
-      {error ? (
-        <>
-          <Alert>{error}</Alert>
-          <ClearError />
-        </>
-      ) : null}
-
       <div className="grid gap-4 md:grid-cols-2">
       {allowed ? (
-        <form
-          action={`${importsPath(account)}/upload`}
-          method="post"
-          encType="multipart/form-data"
-          className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel"
-        >
-          <h2 className="text-base font-semibold">Import a file</h2>
-          <p className="text-secondary">One-time import from a file, directly into the CRM.</p>
-          <ImportKindField options={kindOptions} />
-
-          <Field
-            id="import-source"
-            label="Where it came from"
-            hint="A HubSpot export is mapped for you: its column names are matched to Rawr's fields, and the columns that mean nothing here are dismissed. Importing the same export twice changes nothing."
-          >
-            <Select id="import-source" name="source" defaultValue="">
-              <option value="">A file I put together</option>
-              <option value="hubspot">A HubSpot export</option>
-            </Select>
-          </Field>
-
-          <Field
-            id="import-file"
-            label="File"
-            hint={`CSV or XLSX, up to ${MAX_BYTES / 1024 / 1024}MB and ${formatNumber(MAX_ROWS)} rows. Nothing is written until you have seen the preview.`}
-          >
-            <input
-              id="import-file"
-              name="file"
-              type="file"
-              required
-              accept=".csv,.txt,.xlsx"
-              className="w-full min-w-0 rounded-hs border border-line bg-fill px-3 py-1.5"
-            />
-          </Field>
-
-          <div>
-            <Button type="submit" variant="primary">
-              Upload and map columns
-            </Button>
-          </div>
-        </form>
+        <ImportUploader account={account} kinds={kindOptions} />
       ) : (
         <p className="rounded-panel border border-line bg-surface p-6 text-secondary shadow-panel">
           You need contacts access to create records, so you cannot import them either.

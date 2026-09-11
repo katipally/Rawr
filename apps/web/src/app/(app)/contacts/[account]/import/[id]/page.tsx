@@ -1,6 +1,7 @@
 import {
   getRegistry,
   importShapeFor,
+  isImportable,
   objectOrThrow,
   readImportRows,
   readImportRun,
@@ -15,6 +16,7 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '~/components/crm/import-wizard.tsx'
+import { formatNumber } from '~/components/crm/value.tsx'
 import { importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -36,6 +38,16 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
         title="That import is not here"
         description="It was never started in this account, or the link is wrong."
         action={<LinkButton variant="primary" href={importsPath(account)}>Back to imports</LinkButton>}
+      />
+    )
+  }
+
+  if (run.state === 'uploading') {
+    return (
+      <EmptyState
+        title="This file is still arriving"
+        description={`${formatNumber(run.totalRows)} rows of ${run.filename} are here so far. The tab that is uploading it opens the mapper when the last row lands.`}
+        action={<LinkButton href={importsPath(account)}>Back to imports</LinkButton>}
       />
     )
   }
@@ -95,7 +107,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
         headers={headers}
         sampleRows={rows}
         fields={object.fields
-          .filter((field) => field.key !== 'created_at')
+          .filter(isImportable)
           .map((field) => ({ key: field.key, label: field.label, isRequired: field.isRequired }))}
         initialMapping={mapping}
         previousMapping={(previous?.mapping as Mapping | undefined) ?? null}

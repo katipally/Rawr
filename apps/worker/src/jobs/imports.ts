@@ -19,6 +19,21 @@ const dispatch = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 60,
   handle: async () => {
+    // An upload whose tab closed half way sends nothing more, and its rows would
+    // sit in import_row for good. An hour without a batch is a tab that is gone:
+    // a live one sends a batch every few seconds.
+    const abandoned = await owner<{ id: string }[]>`
+      update import_run
+         set state = 'failed', finished_at = now(), updated_at = now(),
+             errors = coalesce(errors, '[]'::jsonb)
+               || ${JSON.stringify([{ row: 0, reason: 'The upload stopped before the whole file arrived. Upload it again.' }])}::jsonb
+       where state = 'uploading' and updated_at < now() - interval '1 hour'
+       returning id`
+    if (abandoned.length > 0) {
+      await owner`delete from import_row where run_id in ${owner(abandoned.map((run) => run.id))}`
+      console.log(`[import] ${abandoned.length} abandoned upload(s) closed`)
+    }
+
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
       select r.id, r.account_id, a.slug
         from import_run r

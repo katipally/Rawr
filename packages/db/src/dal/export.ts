@@ -1,3 +1,5 @@
+import { and, asc, eq, gt, isNotNull } from 'drizzle-orm'
+import { importRow, importRun } from '../schema/imports.ts'
 import { assertCanDo, type AccountContext } from './context.ts'
 import { withAccount, writeAudit } from './index.ts'
 import { listRecords } from './records.ts'
@@ -6,16 +8,17 @@ import { formatForCsv } from './values.ts'
 import type { Cursor, FilterGroup, Sort } from './query.ts'
 
 const PAGE = 200
-/** A browser download, not a job. Beyond this the answer is the importer's own
- *  result file or a database export, not a link that times out halfway. */
-const MAX_ROWS = 50_000
+
+/** Excel reads a CSV without one as its local code page, so every accented name
+ *  arrives mangled. The importer strips it, so a file goes out and back unchanged. */
+const BOM = '\uFEFF'
 
 const quoted = (value: string): string =>
   /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 
 /** Yields the CSV of exactly the current view: its filters, its columns, its sort
- *  order, nothing else. Streamed a page at a time so a 50,000-row export never
- *  holds 50,000 rows in memory. A8. */
+ *  order, nothing else. Streamed a page at a time, so memory holds one page
+ *  whatever the view's size, and no row count is too many to download. A8. */
 export async function* exportCsv(
   ctx: AccountContext,
   input: { objectKey: string; columns: string[]; filters: FilterGroup[]; sorts: Sort[]; search?: string },
@@ -29,11 +32,10 @@ export async function* exportCsv(
   })
   if (fields.length === 0) throw new Error('Pick at least one column to export.')
 
-  yield `${fields.map((field) => quoted(field.label)).join(',')}\n`
+  yield `${BOM}${fields.map((field) => quoted(field.label)).join(',')}\n`
 
   let cursor: Cursor | null = null
   let emitted = 0
-  let stoppedAtCap = false
   try {
     do {
       const page = await listRecords(ctx, {
@@ -57,11 +59,6 @@ export async function* exportCsv(
       }
 
       cursor = page.nextCursor
-      if (emitted >= MAX_ROWS) {
-        stoppedAtCap = true
-        yield `\n"Stopped at ${MAX_ROWS.toLocaleString()} rows. Narrow the view's filters and export again."\n`
-        return
-      }
     } while (cursor)
   } finally {
     // In `finally` because a download the person cancels halfway is still an
@@ -78,7 +75,6 @@ export async function* exportCsv(
           rows: emitted,
           columns: fields.map((field) => field.key),
           filters: summarise(input.filters, input.search ?? ''),
-          stoppedAtCap,
         },
       }),
     )
@@ -102,17 +98,36 @@ const summarise = (filters: FilterGroup[], search: string): string => {
   return parts.length > 0 ? parts.join('; ') : 'no filters, the whole object'
 }
 
-/** The failed rows of an import, as a file the person can fix and re-upload. Every
- *  original column is kept so the corrected file imports the same way. A8. */
-export const errorCsv = (errors: { row: number; reason: string; values: Record<string, string> }[]): string => {
-  const headers = [...new Set(errors.flatMap((error) => Object.keys(error.values)))]
-  const lines = [['Row', 'Reason', ...headers].map(quoted).join(',')]
-  for (const error of errors) {
-    lines.push(
-      [String(error.row), error.reason, ...headers.map((header) => error.values[header] ?? '')]
-        .map(quoted)
-        .join(','),
+/** Rows of the error file read per query. */
+const ERROR_PAGE = 1000
+
+/** Every row an import refused, as a file the person can fix and re-upload: the
+ *  file's own columns in the file's own order, so the corrected file maps the same
+ *  way. Paged by position off the primary key, so a run that refused ninety
+ *  thousand rows streams them rather than holding them. A8. */
+export async function* importErrorCsv(ctx: AccountContext, id: string): AsyncGenerator<string> {
+  const [run] = await withAccount(ctx, (tx) =>
+    tx.select({ headers: importRun.headers }).from(importRun).where(eq(importRun.id, id)).limit(1),
+  )
+  if (!run) throw new Error('That import does not exist.')
+  const headers = run.headers as string[]
+
+  yield `${BOM}${['Row', 'Reason', ...headers].map(quoted).join(',')}\n`
+  let after = -1
+  for (;;) {
+    const page = await withAccount(ctx, (tx) =>
+      tx
+        .select({ position: importRow.position, values: importRow.values, reason: importRow.reason })
+        .from(importRow)
+        .where(and(eq(importRow.runId, id), isNotNull(importRow.reason), gt(importRow.position, after)))
+        .orderBy(asc(importRow.position))
+        .limit(ERROR_PAGE),
     )
+    for (const row of page) {
+      const values = row.values as Record<string, string>
+      yield `${[String(row.position + 2), row.reason ?? '', ...headers.map((header) => values[header] ?? '')].map(quoted).join(',')}\n`
+    }
+    if (page.length < ERROR_PAGE) return
+    after = page.at(-1)!.position
   }
-  return `${lines.join('\n')}\n`
 }

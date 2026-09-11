@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, type SQL } from 'drizzle-orm'
 import { importRow, importRun } from '../schema/imports.ts'
 import { activityLink } from '../schema/records.ts'
 import {
@@ -15,7 +15,13 @@ import {
   SUBMISSION_IMPORT } from '../registry/hubspot.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { FieldType } from '../registry/types.ts'
-import { isNewProperty, type Mapping, type NewProperty } from '../registry/mapping.ts'
+import {
+  isNewProperty,
+  MAX_CHOICES,
+  MAX_OPTION_LENGTH,
+  type Mapping,
+  type NewProperty,
+} from '../registry/mapping.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanDo, assertCanWrite } from './context.ts'
 import { isUuid, mutate, withAccount, type Tx } from './index.ts'
@@ -25,7 +31,7 @@ import { orderedPair } from './associations.ts'
 import { createRecord, updateRecord, DuplicateError } from './records.ts'
 import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { assertUsableFieldKey } from './fields.ts'
-import { coerce, ValueError } from './values.ts'
+import { choiceOf, coerce, ValueError } from './values.ts'
 
 /** An import does not queue its rows for enrichment. A file of ninety thousand
  *  contacts would ask somebody to approve ninety thousand lookups in one modal,
@@ -36,9 +42,14 @@ const NO_ENRICH = { enrich: false } as const
 
 export type ImportRow = Record<string, string>
 
-export { isNewProperty, type Mapping, type NewProperty }
+export { isNewProperty, MAX_CHOICES, MAX_OPTION_LENGTH, type Mapping, type NewProperty }
 
 export type RowError = { row: number; reason: string; values: ImportRow }
+
+/** One line of what a run said about a row, kept on the run for the screen. A
+ *  warning is a row that was written with something changed; anything else is a
+ *  row that was refused, and that row itself stays in import_row for the file. */
+export type RunNote = { row: number; reason: string; warning?: true }
 
 /** Records fill columns on a record; activities land on its timeline; the other
  *  four carry the shape around the records rather than the records themselves.
@@ -105,14 +116,14 @@ export type ImportSummary = {
   objectType: string
   importKind: ImportKind
   source: string | null
-  state: 'mapping' | 'previewing' | 'running' | 'done' | 'failed' | 'cancelled'
+  state: 'uploading' | 'mapping' | 'previewing' | 'running' | 'done' | 'failed' | 'cancelled'
   totalRows: number
   processedRows: number
   created: number
   updated: number
   skipped: number
   errored: number
-  errors: RowError[]
+  errors: RunNote[]
   /** Owner names in the file that match nobody here. Those rows landed
    *  unassigned rather than failing, so this is the list to act on. */
   unmatchedOwners: string[]
@@ -161,16 +172,25 @@ const HEADER_SYNONYMS: Record<string, string> = {
   linkedin: 'linkedin_url',
 }
 
+const loose = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
+
+/** A file can set a field unless Rawr keeps it up to date itself. Create date is
+ *  the exception: a migration carries when each record really began, and only a
+ *  new record takes it. */
+export const isImportable = (field: RegistryField): boolean => !field.isSystem || field.key === 'created_at'
+
+/** The field a header names: exact key, then label, then key, on letters only. */
+const fieldNamed = (fields: RegistryField[], header: string): RegistryField | undefined =>
+  fields.find((field) => field.key === header.trim()) ??
+  fields.find((field) => loose(field.label) === loose(header)) ??
+  fields.find((field) => loose(field.key) === loose(header))
+
 export const suggestMapping = (
   object: RegistryObject,
   headers: string[],
   preset: Record<string, string | null> = {},
 ): Mapping => {
-  const loose = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const byKey = new Map(object.fields.map((field) => [field.key, field.key]))
-  const byLabel = new Map(object.fields.map((field) => [loose(field.label), field.key]))
-  const byLooseKey = new Map(object.fields.map((field) => [loose(field.key), field.key]))
-
+  const fields = object.fields.filter(isImportable)
   const mapping: Mapping = {}
   const taken = new Set<string>()
   for (const header of Object.values(preset)) {
@@ -183,11 +203,9 @@ export const suggestMapping = (
     }
     const synonym = HEADER_SYNONYMS[loose(header)]
     const candidate =
-      byKey.get(header.trim()) ??
-      byLabel.get(loose(header)) ??
-      byLooseKey.get(loose(header)) ??
+      fieldNamed(fields, header)?.key ??
       // Last, so a real field called "Website" always beats the synonym for it.
-      (synonym && object.byKey.has(synonym) ? synonym : null)
+      (synonym && fields.some((field) => field.key === synonym) ? synonym : null)
     // Two headers mapping to one field is blocked in the mapper, so the second
     // one is left unmapped rather than silently overwriting the first. A8.
     mapping[header] = candidate && !taken.has(candidate) ? candidate : null
@@ -208,8 +226,14 @@ export const assertMappingIsUsable = (
     // with an existing field and with another proposal exactly as a mapped
     // column does. Its key not being in the registry yet is the point of it.
     const key = isNewProperty(target) ? target.key : target
-    if (!isNewProperty(target) && !object.byKey.has(key)) {
+    const field = object.byKey.get(key)
+    if (!isNewProperty(target) && !field) {
       throw new Error(`${object.namePlural} has no field called "${key}".`)
+    }
+    // Refused here rather than row by row: the run would turn every row down for
+    // it while the preview, which writes nothing, said they would all land.
+    if (field && !isImportable(field)) {
+      throw new Error(`${field.label} is kept up to date by Rawr, so "${header}" cannot go into it. Pick another field or Do not import.`)
     }
     const previous = seen.get(key)
     if (previous) {
@@ -237,70 +261,91 @@ export const assertMappingIsUsable = (
  *  carries the owner's name, the company's name and the stage's label, never an
  *  id, so each is matched on what a person would type. Only a company is created
  *  when nothing matches: a stage or an owner that does not exist is a mistake in
- *  the file, a company that does not exist is the point of the import. */
-const RELATION_LOOKUPS: Record<string, { what: string; find: (needle: string) => SQL }> = {
+ *  the file, a company that does not exist is the point of the import.
+ *
+ *  Each takes a list and answers every name in it at once, with the two lowercase
+ *  spellings a row may use for the record, `a` and `b`. */
+const RELATION_LOOKUPS: Record<string, { what: string; find: (names: SQL) => SQL }> = {
   owner_id: {
     what: 'member',
-    find: (needle) => sql`select u.id from user_account u join membership m on m.user_id = u.id
-                          where lower(u.name) = lower(${needle}) or lower(u.email) = lower(${needle}) limit 1`,
+    find: (names) => sql`select u.id, lower(u.name) as a, lower(u.email) as b
+                           from user_account u join membership m on m.user_id = u.id
+                          where lower(u.name) in ${names} or lower(u.email) in ${names}`,
   },
   company_id: {
     what: 'company',
-    find: (needle) => sql`select id from company where deleted_at is null
-                          and (lower(name) = lower(${needle}) or domain = lower(${needle}))
-                          order by created_at limit 1`,
+    find: (names) => sql`select id, lower(name) as a, domain as b from company
+                          where deleted_at is null and (lower(name) in ${names} or domain in ${names})
+                          order by created_at`,
   },
   lifecycle_stage_id: {
     what: 'lifecycle stage',
-    find: (needle) => sql`select id from lifecycle_stage where lower(name) = lower(${needle}) limit 1`,
+    find: (names) => sql`select id, lower(name) as a, null as b from lifecycle_stage where lower(name) in ${names}`,
   },
   pipeline_id: {
     what: 'pipeline',
-    find: (needle) => sql`select id from pipeline where lower(name) = lower(${needle}) limit 1`,
+    find: (names) => sql`select id, lower(name) as a, null as b from pipeline where lower(name) in ${names}`,
   },
   stage_id: {
     what: 'deal stage',
-    find: (needle) => sql`select id from pipeline_stage where lower(name) = lower(${needle}) limit 1`,
+    find: (names) => sql`select id, lower(name) as a, null as b from pipeline_stage where lower(name) in ${names}`,
   },
 }
 
 const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
 
-/** Resolves the relation values in one run, remembering every answer so a file
- *  with 90,000 rows and 300 distinct companies costs 300 lookups, not 90,000.
- *  O(distinct values) queries, O(1) per row after the first.
+/** Resolves the relation values in one run, remembering every answer, a miss
+ *  included, so a file with 90,000 rows and 300 distinct companies asks about each
+ *  company once. `prime` asks about a whole batch of rows in one query per
+ *  relation, which is what keeps a preview of five hundred rows to a handful of
+ *  round trips: O(relations) queries per batch, O(1) per row.
  *
  *  Returns null for a company that does not exist yet when creating is off: the
  *  preview promises nothing has been written, so it reports the row without the
  *  company and the real run creates it. */
 const relationResolver = (ctx: AccountContext, options: { create: boolean }) => {
   const remembered = new Map<string, string | null>()
+  const keyOf = (field: RegistryField, name: string) => `${field.key}\u0000${name.toLowerCase()}`
   /** Every owner name in the file that matches nobody here, once each. A portal
    *  carries the names of people who never got a Rawr account, and at eighty-eight
    *  thousand rows that used to be eighty-eight thousand identical errors. */
   const unmatchedOwners = new Set<string>()
+
+  const lookUp = async (field: RegistryField, names: string[]): Promise<void> => {
+    const lookup = RELATION_LOOKUPS[field.key]
+    const fresh = [...new Set(names.map((name) => name.trim().toLowerCase()))].filter(
+      (name) => name && !isUuid(name) && !remembered.has(keyOf(field, name)),
+    )
+    if (!lookup || fresh.length === 0) return
+    const list = sql`(select jsonb_array_elements_text(${JSON.stringify(fresh)}::jsonb))`
+    const rows = await withAccount(ctx, (tx) =>
+      tx.execute<{ id: string; a: string | null; b: string | null }>(lookup.find(list)),
+    )
+    const found = new Map<string, string>()
+    for (const row of rows) {
+      for (const name of [row.a, row.b]) if (name && !found.has(name)) found.set(name, row.id)
+    }
+    for (const name of fresh) remembered.set(keyOf(field, name), found.get(name) ?? null)
+  }
+
   const resolve = async (field: RegistryField, raw: string): Promise<string | null> => {
     const needle = raw.trim()
     if (isUuid(needle)) return needle
     const lookup = RELATION_LOOKUPS[field.key]
     if (!lookup) throw new ValueError(field, 'has to be picked from the list, not typed.')
 
-    const cacheKey = `${field.key}\u0000${needle.toLowerCase()}`
-    let id = remembered.get(cacheKey)
-    if (id === undefined) {
-      const [found] = await withAccount(ctx, (tx) => tx.execute<{ id: string }>(lookup.find(needle)))
-      id = found?.id ?? null
-      if (id === null && field.key === 'company_id') {
-        if (!options.create) return null
-        try {
-          const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle }, NO_ENRICH)
-          id = created.id
-        } catch (cause) {
-          if (!(cause instanceof DuplicateError)) throw cause
-          id = cause.existingId
-        }
+    await lookUp(field, [needle])
+    let id = remembered.get(keyOf(field, needle)) ?? null
+    if (id === null && field.key === 'company_id') {
+      if (!options.create) return null
+      try {
+        const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle }, NO_ENRICH)
+        id = created.id
+      } catch (cause) {
+        if (!(cause instanceof DuplicateError)) throw cause
+        id = cause.existingId
       }
-      remembered.set(cacheKey, id)
+      remembered.set(keyOf(field, needle), id)
     }
     if (id === null) {
       // An owner who is not here is a person, not a mistake in the file. The row
@@ -315,8 +360,18 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
     }
     return id
   }
-  resolve.unmatchedOwners = unmatchedOwners
-  return resolve
+
+  /** Every relation these rows name, asked for up front, one query per field. */
+  const prime = async (object: RegistryObject, mapping: Mapping, rows: ImportRow[]): Promise<void> => {
+    for (const [header, target] of Object.entries(mapping)) {
+      if (typeof target !== 'string') continue
+      const field = object.byKey.get(target)
+      if (!field || (field.type !== 'relation' && field.type !== 'user')) continue
+      await lookUp(field, rows.flatMap((row) => row[header] ?? []))
+    }
+  }
+
+  return Object.assign(resolve, { unmatchedOwners, prime })
 }
 
 type Resolve = ReturnType<typeof relationResolver>
@@ -369,16 +424,15 @@ export const planRow = async (
   return { values, warnings }
 }
 
+/** The column a core record is matched on, the same one `dedupeKeyOf` makes the
+ *  mapper insist on. A deal has no unique key, so its name is the match: without
+ *  it the mapper's promise that a second run updates was false for every deal. */
+const CORE_MATCH: Record<string, string> = { contact: 'email', company: 'domain', deal: 'name' }
+
 /** What makes two rows of one file the same record. The run creates the first and
  *  updates the rest, so the preview has to count the rest as updates too. */
 const dedupeIdentity = (object: RegistryObject, values: Record<string, unknown>): string | null => {
-  const key = object.isCustom
-    ? object.labelFieldKey
-    : object.key === 'contact'
-      ? 'email'
-      : object.key === 'company'
-        ? 'domain'
-        : null
+  const key = object.isCustom ? object.labelFieldKey : (CORE_MATCH[object.key] ?? null)
   const value = key ? values[key] : null
   if (!key || typeof value !== 'string' || !value) return null
   return `${key}:${key === 'domain' ? value : value.toLowerCase()}`
@@ -403,7 +457,7 @@ const dedupeLookup = async (
       return found?.id ?? null
     })
   }
-  const key = object.key === 'contact' ? 'email' : object.key === 'company' ? 'domain' : null
+  const key = CORE_MATCH[object.key]
   const value = key ? values[key] : null
   if (!key || typeof value !== 'string' || !value) return null
 
@@ -411,10 +465,41 @@ const dedupeLookup = async (
     const [found] = await tx.execute<{ id: string }>(
       key === 'email'
         ? sql`select id from contact where lower(email) = lower(${value}) and deleted_at is null limit 1`
-        : sql`select id from company where domain = ${value} and deleted_at is null limit 1`,
+        : key === 'domain'
+          ? sql`select id from company where domain = ${value} and deleted_at is null limit 1`
+          : sql`select id from deal where lower(name) = lower(${value}) and deleted_at is null
+                 order by created_at limit 1`,
     )
     return found?.id ?? null
   })
+}
+
+/** Which of these rows already name a record, by the same identity the run
+ *  matches on, in one query for all of them. */
+const knownIdentities = async (
+  ctx: AccountContext,
+  object: RegistryObject,
+  rows: Record<string, unknown>[],
+): Promise<Set<string>> => {
+  const key = object.isCustom ? object.labelFieldKey : CORE_MATCH[object.key]
+  const identities = new Set(rows.flatMap((values) => dedupeIdentity(object, values) ?? []))
+  if (!key || identities.size === 0) return new Set()
+  const wanted = [...identities].map((identity) => identity.slice(key.length + 1))
+  const list = sql`(select jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb))`
+  if (object.isCustom) assertUsableFieldKey(key)
+  const found = await withAccount(ctx, (tx) =>
+    tx.execute<{ value: string }>(
+      object.isCustom
+        ? sql`select lower(custom ->> ${key}) as value from custom_record
+               where object_id = ${object.id}::uuid and deleted_at is null and lower(custom ->> ${key}) in ${list}`
+        : key === 'email'
+          ? sql`select lower(email) as value from contact where deleted_at is null and lower(email) in ${list}`
+          : key === 'domain'
+            ? sql`select domain as value from company where deleted_at is null and domain in ${list}`
+            : sql`select lower(name) as value from deal where deleted_at is null and lower(name) in ${list}`,
+    ),
+  )
+  return new Set(found.map((row) => `${key}:${row.value}`))
 }
 
 /** The driver's SQLSTATE, not drizzle's message, which is the statement and its
@@ -538,7 +623,120 @@ export type DryRun = {
   /** Columns with nowhere to go that the run will make a property for, and what
    *  each would be. Nothing here is created until the run starts. */
   newProperties: { header: string; label: string; type: FieldType; options?: string[] }[]
+  /** Choices the file uses that a field does not have yet. They are added when
+   *  the run starts, which is why rows using them count as imported here. */
+  newChoices: { label: string; choices: string[] }[]
   samples: { create: ImportRow[]; update: ImportRow[]; error: RowError[] }
+}
+
+/** The choice columns of a run, read against the whole file. */
+type Settled = {
+  object: RegistryObject
+  mapping: Mapping
+  added: { field: RegistryField; choices: string[] }[]
+}
+
+/** The parts of a list cell: "a; b;c" is three choices. */
+const splitList = (value: string): string[] =>
+  value
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+
+/** More distinct cells than this and the column is a name or an id, not a set of
+ *  choices, so the scan stops rather than reading every one of them. */
+const CHOICE_SCAN = 5_000
+
+/** Every distinct value each of these columns holds across the whole file, not
+ *  the rows the mapper sampled: a choice that first appears on row 40,000 is still
+ *  a choice. One query for every column, O(cells); a column stops at CHOICE_SCAN
+ *  values, and `complete` says whether it got there. */
+const fileValues = async (
+  ctx: AccountContext,
+  id: string,
+  headers: string[],
+): Promise<Map<string, { values: string[]; complete: boolean }>> => {
+  const found = new Map(headers.map((header) => [header, { values: [] as string[], complete: true }]))
+  if (headers.length === 0) return found
+  const rows = await withAccount(ctx, (tx) =>
+    tx.execute<{ header: string; value: string }>(sql`
+      select header, value from (
+        select header, value, row_number() over (partition by header order by value) as n from (
+          select distinct cell.key as header, btrim(cell.value) as value
+            from import_row r cross join jsonb_each_text(r.values) as cell
+           where r.run_id = ${id}::uuid
+             and cell.key in (select jsonb_array_elements_text(${JSON.stringify(headers)}::jsonb))
+             and btrim(cell.value) <> ''
+        ) as distinct_cells
+      ) as ranked
+      where n <= ${CHOICE_SCAN}`),
+  )
+  for (const { header, value } of rows) found.get(header)?.values.push(value)
+  for (const entry of found.values()) entry.complete = entry.values.length < CHOICE_SCAN
+  return found
+}
+
+/** A column's values as choices: a list cell counts as each of its parts, and a
+ *  choice spelled two ways in the file counts once. */
+const choicesIn = (found: { values: string[]; complete: boolean } | undefined, list: boolean) => {
+  const seen = new Map<string, string>()
+  for (const value of found?.values ?? []) {
+    for (const part of list ? splitList(value) : [value]) {
+      if (!seen.has(part.toLowerCase())) seen.set(part.toLowerCase(), part)
+    }
+  }
+  return { choices: [...seen.values()], complete: found?.complete ?? true }
+}
+
+const fitsAField = (found: { choices: string[]; complete: boolean }): boolean =>
+  found.complete &&
+  found.choices.length > 0 &&
+  found.choices.length <= MAX_CHOICES &&
+  found.choices.every((choice) => choice.length <= MAX_OPTION_LENGTH)
+
+/** A proposed choice field takes every choice the file uses, or becomes text when
+ *  that is more than a field can hold. An existing one gains the choices it is
+ *  missing, so a portal's own lead statuses arrive instead of every row that uses
+ *  one being refused. Only record files: the other kinds map onto fixed shapes
+ *  whose choices are the importer's, not the account's. */
+const settleChoices = async (
+  ctx: AccountContext,
+  id: string,
+  object: RegistryObject,
+  mapping: Mapping,
+): Promise<Settled> => {
+  const next: Mapping = { ...mapping }
+  const fields = new Map(object.fields.map((field) => [field.key, field]))
+  const added: Settled['added'] = []
+  const isChoice = (type: FieldType) => type === 'select' || type === 'multi_select'
+  const choiceColumns = Object.entries(mapping).flatMap(([header, target]) => {
+    if (!target) return []
+    if (isNewProperty(target)) return isChoice(target.type) ? [header] : []
+    const field = fields.get(target)
+    return field && isChoice(field.type) && field.options.length > 0 ? [header] : []
+  })
+  const values = await fileValues(ctx, id, choiceColumns)
+
+  for (const header of choiceColumns) {
+    const target = mapping[header]!
+    if (isNewProperty(target)) {
+      const found = choicesIn(values.get(header), target.type === 'multi_select')
+      next[header] = fitsAField(found)
+        ? { ...target, options: found.choices.sort() }
+        : { ...target, type: 'text', options: undefined }
+      continue
+    }
+    const field = fields.get(target)!
+    const found = choicesIn(values.get(header), field.type === 'multi_select')
+    const missing = found.choices.filter((choice) => choiceOf(field.options, choice) === undefined)
+    const options = [...field.options, ...missing]
+    // Past the limit the column is mapped wrong, and its rows are refused with
+    // the field's own choices named, which says so better than a field of 900.
+    if (missing.length === 0 || !fitsAField({ choices: options, complete: found.complete })) continue
+    fields.set(field.key, { ...field, options })
+    added.push({ field, choices: missing })
+  }
+  return { object: { ...object, fields: [...fields.values()], byKey: fields }, mapping: next, added }
 }
 
 const SAMPLE_SIZE = 5
@@ -564,11 +762,14 @@ const preview = async (
     total: number
     kind?: ImportKind
     source?: string | null
+    /** The whole file's choices, when the rows live on a run to read them from. */
+    settled?: Settled
   },
 ): Promise<DryRun> => {
   const kind = input.kind ?? 'records'
-  const object = await objectFor(ctx, kind, input.objectKey)
-  assertMappingIsUsable(object, input.mapping, kind)
+  const object = input.settled?.object ?? (await objectFor(ctx, kind, input.objectKey))
+  const mapping = input.settled?.mapping ?? input.mapping
+  assertMappingIsUsable(object, mapping, kind)
 
   const result: DryRun = {
     willCreate: 0,
@@ -577,11 +778,12 @@ const preview = async (
     willError: 0,
     checked: input.rows.length,
     total: input.total,
-    newProperties: Object.entries(input.mapping).flatMap(([header, target]) =>
+    newProperties: Object.entries(mapping).flatMap(([header, target]) =>
       isNewProperty(target) && !object.byKey.has(target.key)
         ? [{ header, label: target.label, type: target.type, ...(target.options ? { options: target.options } : {}) }]
         : [],
     ),
+    newChoices: (input.settled?.added ?? []).map(({ field, choices }) => ({ label: field.label, choices })),
     samples: { create: [], update: [], error: [] },
   }
 
@@ -593,8 +795,17 @@ const preview = async (
   const findRecord = recordResolver(ctx)
   const writer = SHAPE_WRITER[kind]
   const deps: ShapeDeps = { ctx, source: input.source ?? null, dry: true, cache: new Map() }
+  await resolve.prime(object, mapping, checked)
+  const plans = []
+  for (const row of checked) plans.push(await planRow(object, mapping, row, resolve, kind))
+  // One lookup for the whole window rather than one per row. Each is a round trip
+  // to the database, and five hundred of them made a preview take minutes.
+  const known =
+    writer || kind === 'activities'
+      ? new Set<string>()
+      : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
   for (const [index, row] of checked.entries()) {
-    const planned = await planRow(object, input.mapping, row, resolve, kind)
+    const planned = plans[index]!
     if (planned.error) {
       result.willError += 1
       if (result.samples.error.length < SAMPLE_SIZE) {
@@ -646,8 +857,7 @@ const preview = async (
       continue
     }
     const identity = dedupeIdentity(object, planned.values)
-    const existing = identity && willExist.has(identity) ? true : await dedupeLookup(ctx, object, planned.values)
-    if (existing) {
+    if (identity && (willExist.has(identity) || known.has(identity))) {
       result.willUpdate += 1
       if (result.samples.update.length < SAMPLE_SIZE) result.samples.update.push(row)
     } else {
@@ -689,6 +899,7 @@ export const previewImportRun = async (ctx: AccountContext, id: string): Promise
       .limit(1),
   )
   if (!run) throw new Error('That import no longer exists.')
+  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
   if (run.state !== 'mapping' && run.state !== 'previewing') {
     throw new Error('That import has already been started, so there is nothing left to preview.')
   }
@@ -700,13 +911,17 @@ export const previewImportRun = async (ctx: AccountContext, id: string): Promise
     tx.update(importRun).set({ state: 'previewing', updatedAt: new Date() }).where(eq(importRun.id, id)),
   )
   try {
+    const mapping = run.mapping as Mapping
     return await preview(ctx, {
       objectKey: run.objectType,
       kind: run.importKind,
       source: run.source,
-      mapping: run.mapping as Mapping,
+      mapping,
       rows: await readImportRows(ctx, id, 0, PREVIEW_ROWS),
       total: run.totalRows,
+      ...(run.importKind === 'records'
+        ? { settled: await settleChoices(ctx, id, await objectFor(ctx, run.importKind, run.objectType), mapping) }
+        : {}),
     })
   } finally {
     await withAccount(ctx, (tx) =>
@@ -748,23 +963,38 @@ export const readImportRows = async (
  *  four parameters per row and Postgres takes 65,535 of them. */
 const ROWS_PER_INSERT = 1000
 
-const writeImportRows = async (tx: Tx, accountId: string, runId: string, rows: ImportRow[]): Promise<void> => {
-  for (let from = 0; from < rows.length; from += ROWS_PER_INSERT) {
+/** A row as stored: its cells by header, trimmed, the empty ones left out. */
+const storedRow = (row: ImportRow): ImportRow =>
+  Object.fromEntries(
+    Object.entries(row).flatMap(([header, value]) => {
+      const text = String(value ?? '').trim()
+      return text ? [[header, text]] : []
+    }),
+  )
+
+const writeImportRows = async (
+  tx: Tx,
+  accountId: string,
+  runId: string,
+  from: number,
+  rows: ImportRow[],
+): Promise<void> => {
+  for (let offset = 0; offset < rows.length; offset += ROWS_PER_INSERT) {
     await tx.insert(importRow).values(
-      rows.slice(from, from + ROWS_PER_INSERT).map((values, offset) => ({
+      rows.slice(offset, offset + ROWS_PER_INSERT).map((values, index) => ({
         accountId,
         runId,
-        position: from + offset,
-        values,
+        position: from + offset + index,
+        values: storedRow(values),
       })),
     )
   }
 }
 
-/** The rows of a run that is over, dropped. They exist to make a killed run
- *  resumable, and a finished, failed or cancelled run is not resumed. */
+/** A run that is over keeps only the rows it refused, which are its error file.
+ *  The rest existed to make a killed run resumable, and an ended run is not. */
 const dropImportRows = async (ctx: AccountContext, id: string): Promise<void> => {
-  await withAccount(ctx, (tx) => tx.delete(importRow).where(eq(importRow.runId, id)))
+  await withAccount(ctx, (tx) => tx.delete(importRow).where(and(eq(importRow.runId, id), isNull(importRow.reason))))
 }
 
 /** How many rows of the file are looked at to decide what a column holds. Enough
@@ -786,11 +1016,19 @@ const inferType = (label: string, values: string[]): { type: FieldType; options?
   if (values.every((value) => ISO_DATE.test(value) && !Number.isNaN(Date.parse(value)))) {
     return { type: 'date' }
   }
-  const distinct = [...new Set(values)]
-  // Fewer distinct values than rows, or every row is its own value and the column
-  // is a name rather than a choice.
-  if (distinct.length <= MAX_INFERRED_OPTIONS && distinct.length < values.length) {
-    return { type: 'select', options: distinct.sort() }
+  // Several choices in one cell is how HubSpot writes a multiple checkbox.
+  const listed = values.some((value) => value.includes(';'))
+  const choices = listed ? values.flatMap(splitList) : values
+  const distinct = [...new Set(choices)]
+  // Fewer distinct values than cells, or every cell is its own value and the
+  // column is a name rather than a choice. A value longer than a choice may be is
+  // a sentence, and proposing it as one is a field nobody can save.
+  if (
+    distinct.length <= MAX_INFERRED_OPTIONS &&
+    distinct.length < choices.length &&
+    distinct.every((choice) => choice.length <= MAX_OPTION_LENGTH)
+  ) {
+    return { type: listed ? 'multi_select' : 'select', options: distinct.sort() }
   }
   return { type: 'text' }
 }
@@ -815,6 +1053,7 @@ const withProposals = (
   mapping: Mapping,
   rows: ImportRow[],
   kind: ImportKind,
+  preset: Record<string, string | null>,
 ): Mapping => {
   if (kind !== 'records') return mapping
   const samples = rows.slice(0, TYPE_SAMPLE_ROWS)
@@ -824,12 +1063,17 @@ const withProposals = (
   const next: Mapping = { ...mapping }
   for (const [header, target] of Object.entries(mapping)) {
     if (target) continue
+    // Unmapped on purpose, not for want of a field: a column the export's preset
+    // dismisses, or one naming a field Rawr keeps up to date itself.
+    if (header in preset || fieldNamed(object.fields, header)) continue
     const proposal = proposeProperty(header, samples.map((row) => row[header] ?? ''))
     if (!proposal || taken.has(proposal.key)) continue
+    const existing = object.byKey.get(proposal.key)
+    if (existing && !isImportable(existing)) continue
     // A key the object already has is a column that was only unmapped because the
     // header did not read like the label. Mapping to it beats a second field
     // holding the same thing under a name one character different.
-    next[header] = object.byKey.has(proposal.key) ? proposal.key : proposal
+    next[header] = existing ? proposal.key : proposal
     taken.add(proposal.key)
   }
   return next
@@ -884,6 +1128,174 @@ export const createProposedProperties = async (
   return { created: created.length }
 }
 
+const STILL_ARRIVING = 'That file is still arriving. Wait for the upload to finish, or upload it again.'
+
+/** Blank names would collide in the mapping, and duplicates would silently drop a
+ *  column, so both are made unique and visible rather than fixed up quietly. */
+const nameHeaders = (raw: string[]): string[] => {
+  const seen = new Map<string, number>()
+  return raw.map((header, index) => {
+    const base = header.trim() || `Column ${index + 1}`
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    return count === 0 ? base : `${base} (${count + 1})`
+  })
+}
+
+/** The first of three steps: the run, named and shaped, with none of its rows.
+ *  The rows follow in batches and `finishImportRun` opens the mapper. Nothing
+ *  reads a run that is still 'uploading', so a file that never finishes arriving
+ *  is never half imported. */
+export const beginImportRun = async (
+  ctx: AccountContext,
+  input: {
+    objectKey: string
+    filename: string
+    headers: string[]
+    kind?: ImportKind
+    source?: string | null
+    /** Left empty, the mapping is worked out when the last row has arrived. */
+    mapping?: Mapping
+  },
+): Promise<{ id: string }> => {
+  assertCanWrite(ctx, input.objectKey)
+  const kind = input.kind ?? 'records'
+  const object = await objectFor(ctx, kind, input.objectKey)
+  const headers = nameHeaders(input.headers)
+  if (headers.length === 0) throw new Error('That file has no columns in it.')
+
+  const [row] = await withAccount(ctx, (tx) =>
+    tx
+      .insert(importRun)
+      .values({
+        accountId: ctx.accountId,
+        // A shape file is matched against contacts whatever it names; a record
+        // file carries its own object, which since 0066 may be an invented one.
+        objectType: kind === 'activities' ? 'contact' : object.key,
+        importKind: kind,
+        source: input.source ?? null,
+        filename: input.filename,
+        fileSignature: fileSignature(`${kind}:${object.key}`, headers),
+        headers,
+        mapping: input.mapping ?? {},
+        state: 'uploading',
+        createdBy: ctx.actorId,
+      })
+      .returning({ id: importRun.id }),
+  )
+  if (!row) throw new Error('The import could not be started.')
+  return { id: row.id }
+}
+
+/** One batch of the file, cells in the order of the run's headers. `from` is the
+ *  position of its first row, which is what makes a batch sent twice, after an
+ *  answer that never arrived, land once. */
+export const appendImportRows = async (
+  ctx: AccountContext,
+  id: string,
+  input: { from: number; rows: string[][] },
+): Promise<{ total: number }> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  return withAccount(ctx, async (tx) => {
+    // Locked, so two copies of one batch cannot both find the position free.
+    const [run] = await tx
+      .select({ state: importRun.state, headers: importRun.headers, totalRows: importRun.totalRows })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .for('update')
+    if (!run) throw new Error('That import no longer exists.')
+    if (run.state !== 'uploading') throw new Error('That file has finished arriving, so nothing more can be added to it.')
+    if (input.from + input.rows.length <= run.totalRows) return { total: run.totalRows }
+    if (input.from !== run.totalRows) throw new Error('The upload lost its place in the file. Upload it again.')
+
+    const headers = run.headers as string[]
+    await writeImportRows(
+      tx,
+      ctx.accountId,
+      id,
+      input.from,
+      input.rows.map((cells) => Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? '']))),
+    )
+    const total = input.from + input.rows.length
+    await tx.update(importRun).set({ totalRows: total, updatedAt: new Date() }).where(eq(importRun.id, id))
+    return { total }
+  })
+}
+
+/** The last row has arrived: the mapping is worked out from the file and the run
+ *  opens in the mapper. */
+export const finishImportRun = async (
+  ctx: AccountContext,
+  id: string,
+): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  const [run] = await withAccount(ctx, (tx) =>
+    tx
+      .select({
+        objectType: importRun.objectType,
+        importKind: importRun.importKind,
+        source: importRun.source,
+        filename: importRun.filename,
+        fileSignature: importRun.fileSignature,
+        headers: importRun.headers,
+        mapping: importRun.mapping,
+        totalRows: importRun.totalRows,
+        state: importRun.state,
+      })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .limit(1),
+  )
+  if (!run) throw new Error('That import no longer exists.')
+  // Asked twice when the first answer never reached the browser. The run is
+  // already in the mapper, and saying so beats an error that cancels it.
+  if (run.state === 'mapping') return { id, suggested: run.mapping as Mapping, previousMapping: null }
+  if (run.state !== 'uploading') throw new Error('That upload was stopped. Upload the file again.')
+  if (run.totalRows === 0) throw new Error('That file has a header row and nothing under it.')
+
+  const kind = run.importKind
+  const object = await objectFor(ctx, kind, run.objectType)
+  const headers = run.headers as string[]
+  const preset = presetFor(kind, object.key, run.source, headers)
+  const suggested = withProposals(
+    object,
+    suggestMapping(object, headers, preset),
+    await readImportRows(ctx, id, 0, TYPE_SAMPLE_ROWS),
+    kind,
+    preset,
+  )
+  const given = run.mapping as Mapping
+
+  return mutate(ctx, 'import_run', async (tx) => {
+    const [previous] = await tx
+      .select({ mapping: importRun.mapping })
+      .from(importRun)
+      .where(and(eq(importRun.fileSignature, run.fileSignature), eq(importRun.state, 'done')))
+      .orderBy(desc(importRun.createdAt))
+      .limit(1)
+    await tx
+      .update(importRun)
+      .set({ mapping: Object.keys(given).length > 0 ? given : suggested, state: 'mapping', updatedAt: new Date() })
+      .where(and(eq(importRun.id, id), eq(importRun.state, 'uploading')))
+    return {
+      result: { id, suggested, previousMapping: (previous?.mapping as Mapping | undefined) ?? null },
+      audit: {
+        entity: 'import_run',
+        entityId: id,
+        action: 'create',
+        before: null,
+        after: { filename: run.filename, rows: run.totalRows, kind, source: run.source },
+      },
+    }
+  })
+}
+
+/** A whole file in one call, for a caller that already holds its rows: scripts
+ *  and the verify suites. The browser takes the same three steps a batch at a
+ *  time. An empty mapping means "work it out": the caller has no view of the
+ *  preset, and re-deriving it in two places is how the two drift. */
 export const createImportRun = async (
   ctx: AccountContext,
   input: {
@@ -895,67 +1307,16 @@ export const createImportRun = async (
     kind?: ImportKind
     source?: string | null
   },
-): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> =>
-  mutate(ctx, input.objectKey, async (tx) => {
-    const kind = input.kind ?? 'records'
-    const object = await objectFor(ctx, kind, input.objectKey)
-    const signature = fileSignature(`${kind}:${object.key}`, input.headers)
-
-    const [previous] = await tx
-      .select({ mapping: importRun.mapping })
-      .from(importRun)
-      .where(and(eq(importRun.fileSignature, signature), eq(importRun.state, 'done')))
-      .orderBy(desc(importRun.createdAt))
-      .limit(1)
-
-    const suggested = withProposals(
-      object,
-      suggestMapping(object, input.headers, presetFor(kind, object.key, input.source ?? null, input.headers)),
-      input.rows,
-      kind,
-    )
-
-    const [row] = await tx
-      .insert(importRun)
-      .values({
-        accountId: ctx.accountId,
-        // A shape file is matched against contacts whatever it names; a record
-        // file carries its own object, which since 0066 may be an invented one.
-        objectType: kind === 'activities' ? 'contact' : object.key,
-        importKind: kind,
-        source: input.source ?? null,
-        filename: input.filename,
-        fileSignature: signature,
-        headers: input.headers,
-        // An empty mapping means "work it out": the caller has no view of the
-        // preset, and re-deriving it in two places is how the two drift.
-        mapping: Object.keys(input.mapping).length > 0 ? input.mapping : suggested,
-        totalRows: input.rows.length,
-        state: 'mapping',
-        createdBy: ctx.actorId,
-      })
-      .returning({ id: importRun.id })
-    if (!row) throw new Error('The import could not be started.')
-
-    // Same transaction as the run: a run whose rows are half written is a run
-    // that would import half a file and call it done.
-    await writeImportRows(tx, ctx.accountId, row.id, input.rows)
-
-    return {
-      result: {
-        id: row.id,
-        suggested,
-        previousMapping: (previous?.mapping as Mapping | undefined) ?? null,
-      },
-      audit: {
-        entity: 'import_run',
-        entityId: row.id,
-        action: 'create',
-        before: null,
-        after: { filename: input.filename, rows: input.rows.length, kind, source: input.source ?? null },
-      },
-    }
-  })
+): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
+  const { id } = await beginImportRun(ctx, input)
+  if (input.rows.length > 0) {
+    await appendImportRows(ctx, id, {
+      from: 0,
+      rows: input.rows.map((row) => input.headers.map((header) => row[header] ?? '')),
+    })
+  }
+  return finishImportRun(ctx, id)
+}
 
 export const setImportMapping = async (
   ctx: AccountContext,
@@ -964,10 +1325,16 @@ export const setImportMapping = async (
 ): Promise<void> =>
   mutate(ctx, 'import_run', async (tx) => {
     const [run] = await tx
-      .select({ objectType: importRun.objectType, importKind: importRun.importKind })
+      .select({ objectType: importRun.objectType, importKind: importRun.importKind, state: importRun.state })
       .from(importRun)
       .where(eq(importRun.id, id))
     if (!run) throw new Error('That import no longer exists.')
+    if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+    // A started run reads its mapping chunk by chunk, so changing it now would
+    // import the top of the file one way and the rest another.
+    if (run.state !== 'mapping' && run.state !== 'previewing') {
+      throw new Error('That import has already been started, so its mapping can no longer change.')
+    }
     assertMappingIsUsable(await objectFor(ctx, run.importKind, run.objectType), mapping, run.importKind)
 
     await tx
@@ -1377,6 +1744,8 @@ const SHAPE_WRITER: Partial<
 }
 
 const CHUNK = 200
+/** Lines of a run's notes kept for the screen, which shows twenty-five. */
+const NOTES_KEPT = 100
 
 /** One chunk of an import. Called repeatedly by the worker, so an interrupted run
  *  continues from processed_rows instead of restarting, and re-running the same
@@ -1408,6 +1777,7 @@ export const runImportChunk = async (
   if (run.state === 'done' || run.state === 'cancelled') {
     return { done: true, processed: run.processedRows, total: run.totalRows }
   }
+  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
 
   const kind = run.importKind
   const object = await objectFor(ctx, kind, run.objectType).catch(async (cause: unknown) => {
@@ -1420,17 +1790,25 @@ export const runImportChunk = async (
   let created = 0
   let updated = 0
   let skipped = 0
-  const errors: RowError[] = []
+  // Every row lands in exactly one of the four counts. A warning is said on the
+  // side: the row it is about was still written.
+  const refused: { position: number; reason: string }[] = []
+  const notes: RunNote[] = []
+  const refuse = (offset: number, reason: string) => {
+    refused.push({ position: run.processedRows + offset, reason })
+    notes.push({ row: run.processedRows + offset + 2, reason })
+  }
+  const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause))
   const resolve = relationResolver(ctx, { create: true })
   const findRecord = recordResolver(ctx)
   const writer = SHAPE_WRITER[kind]
   const deps: ShapeDeps = { ctx, source: run.source, dry: false, cache: new Map() }
+  await resolve.prime(object, mapping, slice)
 
   for (const [offset, row] of slice.entries()) {
-    const rowNumber = run.processedRows + offset + 2
     const planned = await planRow(object, mapping, row, resolve, kind)
     if (planned.error) {
-      errors.push({ row: rowNumber, reason: planned.error, values: row })
+      refuse(offset, planned.error)
       continue
     }
     if (Object.keys(planned.values).length === 0) {
@@ -1438,12 +1816,12 @@ export const runImportChunk = async (
       continue
     }
     for (const warning of planned.warnings) {
-      errors.push({ row: rowNumber, reason: warning, values: row })
+      notes.push({ row: run.processedRows + offset + 2, reason: warning, warning: true })
     }
 
     if (writer) {
       const outcome = await writer(deps, planned.values)
-      if (typeof outcome === 'object') errors.push({ row: rowNumber, reason: outcome.error, values: row })
+      if (typeof outcome === 'object') refuse(offset, outcome.error)
       else if (outcome === 'created') created += 1
       else if (outcome === 'updated') updated += 1
       else skipped += 1
@@ -1454,23 +1832,21 @@ export const runImportChunk = async (
       const outcome = await writeImportedActivity(ctx, findRecord, run.source, planned.values)
       if (outcome === 'created') created += 1
       else if (outcome === 'already') skipped += 1
-      else {
-        errors.push({
-          row: rowNumber,
-          reason: 'No contact or company in this account matches that address, so there is nothing to put this on.',
-          values: row,
-        })
-      }
+      else refuse(offset, 'No contact or company in this account matches that address, so there is nothing to put this on.')
       continue
     }
 
+    // Create date is Rawr's to keep, so only a record this row brings into being
+    // takes the one the file carries.
+    const { created_at: createdAt, ...values } = planned.values
+    const firstWrite = { ...NO_ENRICH, ...(createdAt instanceof Date ? { createdAt } : {}) }
     try {
-      const existing = await dedupeLookup(ctx, object, planned.values)
+      const existing = await dedupeLookup(ctx, object, values)
       if (existing) {
-        await updateRecord(ctx, object.key, existing, planned.values, null, NO_ENRICH)
+        await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
         updated += 1
       } else {
-        await createRecord(ctx, object.key, planned.values, NO_ENRICH)
+        await createRecord(ctx, object.key, values, firstWrite)
         created += 1
       }
     } catch (cause) {
@@ -1481,19 +1857,18 @@ export const runImportChunk = async (
         cause instanceof DuplicateError
           ? cause.existingId
           : isUniqueViolation(cause)
-            ? await dedupeLookup(ctx, object, planned.values)
+            ? await dedupeLookup(ctx, object, values)
             : null
-      if (collidedWith) {
-        try {
-          await updateRecord(ctx, object.key, collidedWith, planned.values, null, NO_ENRICH)
-          updated += 1
-          continue
-        } catch (retry) {
-          errors.push({ row: rowNumber, reason: retry instanceof Error ? retry.message : String(retry), values: row })
-          continue
-        }
+      if (!collidedWith) {
+        refuse(offset, reasonOf(cause))
+        continue
       }
-      errors.push({ row: rowNumber, reason: cause instanceof Error ? cause.message : String(cause), values: row })
+      try {
+        await updateRecord(ctx, object.key, collidedWith, values, null, NO_ENRICH)
+        updated += 1
+      } catch (retry) {
+        refuse(offset, reasonOf(retry))
+      }
     }
   }
 
@@ -1506,31 +1881,37 @@ export const runImportChunk = async (
   // The file's length, not the slice's: a short slice on a run somebody cancelled
   // mid-chunk must not read as a finished import.
   const done = processed >= run.totalRows || slice.length === 0
-  const previousErrors = (run.errors as RowError[] | null) ?? []
+  const previousNotes = (run.errors as RunNote[] | null) ?? []
 
   try {
-  await withAccount(ctx, (tx) =>
-    tx
-      .update(importRun)
-      .set({
-        processedRows: processed,
-        createdCount: sql`${importRun.createdCount} + ${created}`,
-        updatedCount: sql`${importRun.updatedCount} + ${updated}`,
-        skippedCount: sql`${importRun.skippedCount} + ${skipped}`,
-        erroredCount: sql`${importRun.erroredCount} + ${errors.length}`,
-        // Capped: a file where every row fails must not put a 90,000-entry array
-        // in one column. The count stays exact.
-        errors: [...previousErrors, ...errors].slice(0, 1000),
-        unmatchedOwners,
-        state: done ? 'done' : 'running',
-        finishedAt: done ? new Date() : null,
-        updatedAt: new Date(),
-      })
-      // A run cancelled while this chunk was in flight stays cancelled. Without
-      // the state in the predicate the chunk that lost the race wrote 'done' over
-      // it and the screen claimed a stopped import had finished.
-      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running']))),
-  )
+    await withAccount(ctx, async (tx) => {
+      await tx
+        .update(importRun)
+        .set({
+          processedRows: processed,
+          createdCount: sql`${importRun.createdCount} + ${created}`,
+          updatedCount: sql`${importRun.updatedCount} + ${updated}`,
+          skippedCount: sql`${importRun.skippedCount} + ${skipped}`,
+          erroredCount: sql`${importRun.erroredCount} + ${refused.length}`,
+          // The first few, for the screen. Every refused row, with its reason, is
+          // in import_row for the error file, so this list never has to be whole.
+          errors: [...previousNotes, ...notes].slice(0, NOTES_KEPT),
+          unmatchedOwners,
+          state: done ? 'done' : 'running',
+          finishedAt: done ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        // A run cancelled while this chunk was in flight stays cancelled. Without
+        // the state in the predicate the chunk that lost the race wrote 'done' over
+        // it and the screen claimed a stopped import had finished.
+        .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running'])))
+      if (refused.length > 0) {
+        await tx.execute(sql`
+          update import_row r set reason = e.reason
+            from jsonb_to_recordset(${JSON.stringify(refused)}::jsonb) as e(position int, reason text)
+           where r.run_id = ${id}::uuid and r.position = e.position`)
+      }
+    })
   } catch (cause) {
     await failImportRun(ctx, id, cause)
     throw cause
@@ -1546,8 +1927,34 @@ export const startImportRun = async (ctx: AccountContext, id: string): Promise<v
   assertCanWrite(ctx, 'import_run')
   assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
-  // Before the first chunk, not during it: a column whose field appears halfway
-  // through the file is a column that imported nothing for the rows above it.
+  const [run] = await withAccount(ctx, (tx) =>
+    tx
+      .select({
+        objectType: importRun.objectType,
+        importKind: importRun.importKind,
+        mapping: importRun.mapping,
+        state: importRun.state,
+      })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .limit(1),
+  )
+  if (!run) throw new Error('That import no longer exists.')
+  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+
+  // Before the first chunk, not during it: a column whose field or choice appears
+  // halfway through the file is a column that imported nothing above that point.
+  // The same reading of the file the preview showed, so the two cannot differ.
+  if (run.importKind === 'records' && (run.state === 'mapping' || run.state === 'previewing')) {
+    const object = await objectFor(ctx, run.importKind, run.objectType)
+    const settled = await settleChoices(ctx, id, object, run.mapping as Mapping)
+    await withAccount(ctx, (tx) =>
+      tx.update(importRun).set({ mapping: settled.mapping, updatedAt: new Date() }).where(eq(importRun.id, id)),
+    )
+    for (const { field, choices } of settled.added) {
+      await updateField(ctx, { id: field.id, options: [...field.options, ...choices] })
+    }
+  }
   await createProposedProperties(ctx, id)
   const updated = await withAccount(ctx, (tx) =>
     tx
@@ -1569,7 +1976,7 @@ const failImportRun = async (ctx: AccountContext, id: string, cause: unknown): P
       .update(importRun)
       .set({
         state: 'failed',
-        errors: sql`coalesce(${importRun.errors}, '[]'::jsonb) || ${JSON.stringify([{ row: 0, reason, values: {} }])}::jsonb`,
+        errors: sql`coalesce(${importRun.errors}, '[]'::jsonb) || ${JSON.stringify([{ row: 0, reason } satisfies RunNote])}::jsonb`,
         finishedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -1593,7 +2000,7 @@ export const cancelImportRun = async (ctx: AccountContext, id: string): Promise<
     tx
       .update(importRun)
       .set({ state: 'cancelled', finishedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running']))),
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['uploading', 'mapping', 'previewing', 'running']))),
   )
   await dropImportRows(ctx, id)
 }
@@ -1633,7 +2040,7 @@ export const readImportRun = async (
   return {
     ...row,
     headers: (row.headers as string[] | null) ?? [],
-    errors: (row.errors as RowError[] | null) ?? [],
+    errors: (row.errors as RunNote[] | null) ?? [],
     unmatchedOwners: (row.unmatchedOwners as string[] | null) ?? [],
   } as ImportSummary
 }

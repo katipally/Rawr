@@ -19,6 +19,12 @@ import {
   duplicateView,
   dissociate,
   previewImportRun,
+  beginImportRun,
+  appendImportRows,
+  finishImportRun,
+  IMPORT_KINDS,
+  MAX_CHOICES,
+  MAX_OPTION_LENGTH,
   dismissDuplicate,
   findDuplicates,
   getRecord,
@@ -819,6 +825,41 @@ export const crmRouter = router({
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => call(() => readImportRun(ctx.account, input.id))),
 
+    /** The file arrives as its rows, a batch at a time, read in the browser. No
+     *  request carries the whole file, so nothing between the browser and here
+     *  can put a ceiling on how big it is. */
+    begin: protectedProcedure
+      .input(
+        z.object({
+          // An object's key, or one of the five shape files the picker also offers.
+          what: z.string().min(1).max(64),
+          source: z.string().max(40).nullable(),
+          filename: z.string().trim().min(1).max(255),
+          headers: z.array(z.string()).min(1),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(() => {
+          const shape = (IMPORT_KINDS as readonly string[]).includes(input.what) && input.what !== 'records'
+          return beginImportRun(ctx.account, {
+            kind: shape ? (input.what as (typeof IMPORT_KINDS)[number]) : 'records',
+            // A shape file is matched against contacts whatever it names.
+            objectKey: shape ? 'contact' : input.what,
+            source: input.source,
+            filename: input.filename,
+            headers: input.headers,
+          })
+        }),
+      ),
+
+    append: protectedProcedure
+      .input(z.object({ id: z.uuid(), from: z.number().int().min(0), rows: z.array(z.array(z.string())).min(1) }))
+      .mutation(({ ctx, input }) => call(() => appendImportRows(ctx.account, input.id, input))),
+
+    finish: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => finishImportRun(ctx.account, input.id))),
+
     setMapping: protectedProcedure
       .input(
         z.object({
@@ -835,7 +876,7 @@ export const crmRouter = router({
                 key: z.string().trim().min(1).max(59),
                 label: z.string().trim().min(1).max(120),
                 type: z.enum(FIELD_TYPES),
-                options: z.array(z.string().max(120)).max(500).optional(),
+                options: z.array(z.string().max(MAX_OPTION_LENGTH)).max(MAX_CHOICES).optional(),
               }),
               z.null(),
             ]),

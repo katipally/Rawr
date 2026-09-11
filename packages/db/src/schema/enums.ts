@@ -197,6 +197,7 @@ export const importKindEnum = pgEnum('rawr_import_kind', [
 ])
 
 export const importStateEnum = pgEnum('rawr_import_state', [
+  'uploading',
   'mapping',
   'previewing',
   'running',

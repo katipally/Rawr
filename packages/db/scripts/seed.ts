@@ -1255,9 +1255,9 @@ try {
           skippedCount: 5,
           erroredCount: 3,
           errors: [
-            { position: 17, message: 'Email is not an address: "n/a"' },
-            { position: 402, message: 'Email is not an address: "-"' },
-            { position: 998, message: 'Lifecycle Stage "Evangelist" matches no stage here' },
+            { row: 19, reason: 'Email: "n/a" is not an email address.' },
+            { row: 404, reason: 'Email: "-" is not an email address.' },
+            { row: 1000, reason: 'Lifecycle stage: no lifecycle stage called "Evangelist" exists in this account.' },
           ],
           unmatchedOwners: ['dana@oldportal.example', 'rob@oldportal.example'],
           createdBy: adminId,

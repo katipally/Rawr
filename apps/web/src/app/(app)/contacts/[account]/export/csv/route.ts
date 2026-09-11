@@ -2,8 +2,8 @@ import { exportCsv, parseFilters, parseSorts } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { contextFrom, readSession } from '~/server/session.ts'
 
-/** Streamed, not buffered: a 50,000-row export never holds 50,000 rows in memory,
- *  and the browser starts saving as soon as the first page is ready. A8. */
+/** Streamed, not buffered: an export of any size holds one page in memory, and the
+ *  browser starts saving as soon as the first page is ready. A8. */
 export const GET = async (
   request: NextRequest,
   { params }: { params: Promise<{ account: string }> },

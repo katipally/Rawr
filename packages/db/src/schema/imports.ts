@@ -54,7 +54,8 @@ export const importRun = pgTable(
   ],
 )
 
-/** The file itself, one row per line, kept only while the run can still resume.
+/** The file itself, one row per line, kept while the run can still resume and,
+ *  after that, only for the rows it refused.
  *
  *  Not a jsonb array on the run: Postgres rewrites a jsonb value whole, so an
  *  88,000-row file re-serialised once per 200-row chunk is quadratic in the
@@ -70,8 +71,13 @@ export const importRow = pgTable(
     /** The row's place in the file, from zero, so `import_run.processed_rows` is
      *  both the resume cursor and the position of the next row to read. */
     position: integer('position').notNull(),
-    /** Header name to cell text, as the file had it, before any mapping. */
+    /** Header name to cell text, as the file had it, before any mapping. Empty
+     *  cells are left out: a HubSpot export is mostly empty columns, and storing
+     *  every one of them made a row eighteen times the size of its line in the CSV. */
     values: jsonb('values').notNull(),
+    /** Why the run refused this row. A refused row outlives the run so the error
+     *  file can hand back every one of them, not the first thousand. */
+    reason: text('reason'),
   },
   (t) => [primaryKey({ columns: [t.runId, t.position] })],
 )

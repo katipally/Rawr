@@ -1,13 +1,15 @@
-import { readFile } from 'node:fs/promises'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import {
+  appendImportRows,
   assertMappingIsUsable,
+  beginImportRun,
   cancelImportRun,
   createImportRun,
+  finishImportRun,
   createProposedProperties,
   importShapeFor,
   isNewProperty,
@@ -24,7 +26,8 @@ import {
   type ImportRow,
   type Mapping,
 } from '../src/dal/imports.ts'
-import { errorCsv } from '../src/dal/export.ts'
+import { importErrorCsv } from '../src/dal/export.ts'
+import { createField } from '../src/dal/admin-fields.ts'
 import { hubspotPreset, looksLikeHubspot } from '../src/registry/hubspot.ts'
 import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
@@ -225,47 +228,18 @@ const FILE_FOR: Record<ImportKind, { headers: string[]; row: (stamp: string, i: 
   },
 }
 
-/** Next compiles a matcher `source` with path-to-regexp. Only two forms appear in
- *  ours, so only two are translated: a parenthesised group is raw regex and is
- *  copied through, `:name*` is zero or more segments. Anything else would need the
- *  real library, and a check that quietly mistranslated its input would be worse
- *  than no check at all, so it refuses instead. */
-const compileMatcher = (source: string): RegExp => {
-  let out = ''
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i]!
-    if (char === '(') {
-      let depth = 1
-      let j = i + 1
-      while (j < source.length && depth > 0) {
-        if (source[j] === '(') depth += 1
-        if (source[j] === ')') depth -= 1
-        j += 1
-      }
-      out += source.slice(i, j)
-      i = j - 1
-      continue
-    }
-    if (char === ':') {
-      const name = /^:([A-Za-z0-9_]+)(\*?)/.exec(source.slice(i))
-      if (!name) throw new Error(`unsupported matcher token in ${source}`)
-      if (name[2] !== '*') throw new Error(`unsupported matcher modifier in ${source}`)
-      out += '(.*)'
-      i += name[0].length - 1
-      continue
-    }
-    if ('.+?^${}|[]\\'.includes(char)) throw new Error(`unsupported matcher character "${char}" in ${source}`)
-    out += char
-  }
-  return new RegExp(`^${out}$`)
-}
-
 const runToEnd = async (ctx: AccountContext, id: string, guard = 200): Promise<void> => {
   for (let i = 0; i < guard; i += 1) {
     const { done } = await runImportChunk(ctx, id)
     if (done) return
   }
   throw new Error(`the run did not finish in ${guard} chunks`)
+}
+
+const collect = async (lines: AsyncGenerator<string>): Promise<string> => {
+  let out = ''
+  for await (const line of lines) out += line
+  return out
 }
 
 const rowCount = async (runId: string): Promise<number> => {
@@ -755,7 +729,7 @@ try {
     const done = (await readImportRun(admin, run.id))!
     expect(done.errored === 1, `${done.errored} rows were refused, expected 1`)
 
-    const csv = errorCsv(done.errors)
+    const csv = await collect(importErrorCsv(admin, run.id))
     const header = csv.split('\n')[0]!
     for (const column of ['Row', 'Reason', 'Deal Name', 'Close Date', 'Note']) {
       expect(header.includes(column), `the CSV header has no "${column}": ${header}`)
@@ -786,6 +760,250 @@ try {
     return 'start, preview and chunk all refused'
   })
 
+  await check('the error file holds every refused row, not the first thousand', async () => {
+    const stamp = String(Date.now())
+    const rows = Array.from({ length: 1_100 }, (_, i) => ({
+      'Deal Name': `Verify refused deal ${stamp} ${i}`,
+      'Close Date': 'sometime soon',
+    }))
+    const run = await createImportRun(admin, {
+      objectKey: 'deal',
+      filename: `refused-${stamp}.csv`,
+      headers: ['Deal Name', 'Close Date'],
+      rows,
+      mapping: { 'Deal Name': 'name', 'Close Date': 'close_date' },
+    })
+    created.push(run.id)
+    await runToEnd(admin, run.id)
+    const done = (await readImportRun(admin, run.id))!
+    expect(done.errored === 1_100, `${done.errored} refused, expected 1,100`)
+    const lines = (await collect(importErrorCsv(admin, run.id))).trimEnd().split('\n')
+    expect(lines.length === 1_101, `the file has ${lines.length - 1} rows, expected 1,100`)
+    expect((await rowCount(run.id)) === 1_100, 'the refused rows did not outlive the run')
+    return `${lines.length - 1} rows in the file, the run kept ${done.errors.length} for the screen`
+  })
+
+  console.log('\n-- an upload in batches ----------------------------------------------')
+
+  await check('a file arrives in batches, a batch sent twice lands once, and empty cells are not stored', async () => {
+    const stamp = String(Date.now())
+    const { id } = await beginImportRun(admin, {
+      objectKey: 'contact',
+      filename: `batches-${stamp}.csv`,
+      headers: ['Email', 'First Name', ''],
+    })
+    created.push(id)
+    const batch = (from: number, count: number) =>
+      Array.from({ length: count }, (_, i) => [
+        `verify.batch.${stamp}.${from + i}@partner7.example`,
+        from + i === 0 ? '' : `Batch${from + i}`,
+        '',
+      ])
+    await appendImportRows(admin, id, { from: 0, rows: batch(0, 3) })
+    await appendImportRows(admin, id, { from: 0, rows: batch(0, 3) })
+    await appendImportRows(admin, id, { from: 3, rows: batch(3, 2) })
+
+    for (const [what, call, words] of [
+      ['a preview', () => previewImportRun(admin, id), 'still arriving'],
+      ['a batch past the end', () => appendImportRows(admin, id, { from: 9, rows: batch(9, 1) }), 'lost its place'],
+    ] as const) {
+      try {
+        await call()
+        throw new Error(`${what} was allowed`)
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause)
+        expect(message.includes(words), `${what} refused with "${message}"`)
+      }
+    }
+
+    await finishImportRun(admin, id)
+    await finishImportRun(admin, id)
+    const run = (await readImportRun(admin, id))!
+    expect(run.state === 'mapping', `the run is ${run.state}`)
+    expect(run.totalRows === 5 && (await rowCount(id)) === 5, `${run.totalRows} rows recorded, ${await rowCount(id)} stored`)
+    expect(run.headers[2] === 'Column 3', `a blank header became "${run.headers[2]}"`)
+    const [first] = await db.execute<{ values: Record<string, string> }>(
+      sql`select values from import_row where run_id = ${id}::uuid and position = 0`,
+    )
+    expect(
+      JSON.stringify(first?.values) === JSON.stringify({ Email: `verify.batch.${stamp}.0@partner7.example` }),
+      `the first row was stored as ${JSON.stringify(first?.values)}`,
+    )
+    await cancelImportRun(admin, id)
+    return '5 rows from 3 batches, one of them sent twice'
+  })
+
+  console.log('\n-- what a HubSpot export carries ---------------------------------------')
+
+  await check('columns the preset dismisses, associations and fields Rawr keeps become no properties', async () => {
+    const stamp = String(Date.now())
+    const dismissed = [
+      'Record ID',
+      'Last Activity Date',
+      'Associated Deal',
+      'Associated Deal IDs',
+      'Number of Associated Deals',
+      'Last Contacted',
+      'Emails Sent',
+    ]
+    const headers = [...HUBSPOT_CONTACT_HEADERS, ...dismissed.filter((header) => !HUBSPOT_CONTACT_HEADERS.includes(header))]
+    const deals = Array.from({ length: 8 }, (_, i) => `Verify deal ${stamp} with a long name number ${i}`).join(';')
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      source: 'hubspot',
+      filename: `dismissed-${stamp}.csv`,
+      headers,
+      rows: Array.from({ length: 4 }, (_, i) => ({
+        ...hubspotWideRow(stamp, i),
+        'Associated Deal': deals,
+        'Associated Deal IDs': '42229008919;39542877209',
+        'Number of Associated Deals': '2',
+        'Last Contacted': '2026-02-01',
+        'Emails Sent': '3',
+      })),
+      mapping: {},
+    })
+    created.push(run.id)
+    for (const header of dismissed) {
+      expect(run.suggested[header] === null, `"${header}" went to ${JSON.stringify(run.suggested[header])}`)
+    }
+    expect(run.suggested['Create Date'] === 'created_at', `Create Date went to ${JSON.stringify(run.suggested['Create Date'])}`)
+    await previewImportRun(admin, run.id)
+    await cancelImportRun(admin, run.id)
+    return `${dismissed.length} dismissed, Create Date kept, and the preview answers`
+  })
+
+  await check('a create date lands on a new record and is never written over', async () => {
+    const stamp = String(Date.now())
+    const object = objectOrThrow(await getRegistry(admin), 'contact')
+    try {
+      assertMappingIsUsable(object, { Email: 'email', Contacted: 'last_contacted_at' })
+      throw new Error('a column was allowed into a field Rawr maintains')
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      expect(message.includes('kept up to date by Rawr'), `refused with "${message}"`)
+    }
+
+    const once = async (date: string) => {
+      const run = await createImportRun(admin, {
+        objectKey: 'contact',
+        filename: `created-${stamp}.csv`,
+        headers: ['Email', 'Create Date'],
+        rows: [{ Email: `verify.created.${stamp}@partner7.example`, 'Create Date': date }],
+        mapping: { Email: 'email', 'Create Date': 'created_at' },
+      })
+      created.push(run.id)
+      await runToEnd(admin, run.id)
+      return (await readImportRun(admin, run.id))!
+    }
+    const first = await once('2020-05-06T07:08:09Z')
+    expect(first.created === 1 && first.errored === 0, `first run: ${first.created} created, ${first.errored} refused`)
+    const second = await once('2024-01-01T00:00:00Z')
+    expect(second.updated === 1 && second.errored === 0, `second run: ${second.updated} updated, ${second.errored} refused`)
+    const [stored] = await db.execute<{ created_at: string }>(sql`
+      select created_at::text from contact where account_id = ${sandbox.id} and email = ${`verify.created.${stamp}@partner7.example`}`)
+    expect(String(stored?.created_at).startsWith('2020-05-06'), `created_at is ${String(stored?.created_at)}`)
+    await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.created.${stamp}%`}`)
+    return `kept ${String(stored?.created_at)} through an update`
+  })
+
+  await check('a choice the file uses is added, and a proposed one reads the whole file', async () => {
+    const stamp = String(Date.now())
+    const key = `verify_choice_${stamp}`
+    await createField(admin, { objectKey: 'contact', key, label: `Verify choice ${stamp}`, type: 'select', options: ['One', 'Two'] })
+    forgetRegistry(sandbox.id)
+    const tier = `Tier ${stamp}`
+    const rows = Array.from({ length: 250 }, (_, i) => ({
+      Email: `verify.choice.${stamp}.${i}@partner7.example`,
+      [`Verify choice ${stamp}`]: i === 240 ? 'Three' : i % 2 === 0 ? 'One' : 'two',
+      // The first two hundred rows are all the mapper samples. Bronze is past them.
+      [tier]: i === 230 ? 'Bronze' : i % 2 === 0 ? 'Gold' : 'Silver',
+    }))
+    try {
+      const run = await createImportRun(admin, {
+        objectKey: 'contact',
+        filename: `choices-${stamp}.csv`,
+        headers: Object.keys(rows[0]!),
+        rows,
+        mapping: {},
+      })
+      created.push(run.id)
+      const proposal = run.suggested[tier]
+      expect(isNewProperty(proposal) && proposal.type === 'select', `${tier} proposed as ${JSON.stringify(proposal)}`)
+
+      const preview = await previewImportRun(admin, run.id)
+      expect(preview.willError === 0, `the preview refused ${preview.willError}: ${preview.samples.error[0]?.reason ?? ''}`)
+      const added = preview.newChoices.find((entry) => entry.label === `Verify choice ${stamp}`)
+      expect(added?.choices.join() === 'Three', `the preview adds ${JSON.stringify(preview.newChoices)}`)
+      const planned = preview.newProperties.find((entry) => entry.header === tier)
+      expect(planned?.options?.join() === 'Bronze,Gold,Silver', `${tier} would be made with ${JSON.stringify(planned?.options)}`)
+
+      await startImportRun(admin, run.id)
+      await runToEnd(admin, run.id)
+      const done = (await readImportRun(admin, run.id))!
+      expect(done.created === 250 && done.errored === 0, `${done.created} created, ${done.errored} refused`)
+      forgetRegistry(sandbox.id)
+      const field = objectOrThrow(await getRegistry(admin), 'contact').byKey.get(key)
+      expect(field?.options.join() === 'One,Two,Three', `the field's choices are ${field?.options.join()}`)
+      const [spelled] = await db.execute<{ value: string }>(sql`
+        select custom ->> ${key} as value from contact
+         where account_id = ${sandbox.id} and email = ${`verify.choice.${stamp}.1@partner7.example`}`)
+      expect(spelled?.value === 'Two', `"two" was stored as ${String(spelled?.value)}`)
+      return 'Three added before the run, Bronze found past the sample, "two" stored as Two'
+    } finally {
+      await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.choice.${stamp}.%`}`)
+      await db.execute(sql`delete from field_def where account_id = ${sandbox.id} and key in (${key}, ${`tier_${stamp}`})`)
+      forgetRegistry(sandbox.id)
+    }
+  })
+
+  await check('a deal imported twice is updated, not duplicated', async () => {
+    const stamp = String(Date.now())
+    const once = async () => {
+      const run = await createImportRun(admin, {
+        objectKey: 'deal',
+        filename: `deals-${stamp}.csv`,
+        headers: ['Deal Name', 'Amount'],
+        rows: Array.from({ length: 3 }, (_, i) => ({ 'Deal Name': `Verify twice deal ${stamp} ${i}`, Amount: '100' })),
+        mapping: { 'Deal Name': 'name', Amount: 'amount' },
+      })
+      created.push(run.id)
+      await runToEnd(admin, run.id)
+      return (await readImportRun(admin, run.id))!
+    }
+    const first = await once()
+    const second = await once()
+    const [stored] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from deal where account_id = ${sandbox.id} and name like ${`Verify twice deal ${stamp}%`}`)
+    await db.execute(sql`delete from deal where account_id = ${sandbox.id} and name like ${`Verify twice deal ${stamp}%`}`)
+    expect(first.created === 3, `first run created ${first.created}`)
+    expect(second.updated === 3 && second.created === 0, `second run: ${second.created} created, ${second.updated} updated`)
+    expect(Number(stored?.n) === 3, `${stored?.n} deals exist, expected 3`)
+    return '3 created, then 3 updated'
+  })
+
+  await check('every row is counted once, and a warning is not a refusal', async () => {
+    const stamp = String(Date.now())
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      filename: `warned-${stamp}.csv`,
+      headers: ['Email', 'Job Title'],
+      rows: [
+        { Email: `verify.warned.${stamp}.0@partner7.example`, 'Job Title': 'x'.repeat(600) },
+        { Email: `verify.warned.${stamp}.1@partner7.example`, 'Job Title': 'Analyst' },
+      ],
+      mapping: { Email: 'email', 'Job Title': 'title' },
+    })
+    created.push(run.id)
+    await runToEnd(admin, run.id)
+    const done = (await readImportRun(admin, run.id))!
+    await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.warned.${stamp}.%`}`)
+    expect(done.created === 2 && done.errored === 0, `${done.created} created, ${done.errored} refused`)
+    expect(done.created + done.updated + done.skipped + done.errored === done.totalRows, 'the counts do not add up to the file')
+    expect(done.errors.some((note) => note.warning && note.reason.includes('cut')), 'the cut title was not mentioned')
+    return 'two created, the cut title noted on the side'
+  })
+
   console.log('\n-- tenancy -----------------------------------------------------------')
 
   await check("another tenant cannot read or run this account's import", async () => {
@@ -802,31 +1020,6 @@ try {
     }
     expect((await rowCount(id)) === 10, 'the peer took the rows with it')
     return 'invisible to the peer tenant, rows included'
-  })
-
-  console.log('\n-- the upload path ---------------------------------------------------')
-
-  await check('the proxy matcher does not cover the upload route', async () => {
-    const source = await readFile(new URL('../../../apps/web/src/proxy.ts', import.meta.url), 'utf8')
-    const literal = /export const config = \{[\s\S]*?matcher: \[([\s\S]*?)\]/.exec(source)
-    expect(!!literal, 'proxy.ts has no matcher array this check can read')
-    const matchers = [...literal![1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!)
-    expect(matchers.length > 0, 'the matcher array is empty')
-
-    const upload = '/contacts/sandbox/import/upload'
-    for (const matcher of matchers) {
-      expect(
-        !compileMatcher(matcher).test(upload),
-        `"${matcher}" matches ${upload}, so Next buffers the body against the 10MB cap and truncates a real export`,
-      )
-    }
-    // The account switch still has to happen everywhere else under /contacts.
-    const record = '/contacts/sandbox/record/contact/x'
-    expect(
-      matchers.some((matcher) => compileMatcher(matcher).test(record)),
-      `no matcher covers ${record}, so opening another account's link would show the wrong tenant`,
-    )
-    return `${matchers.length} matchers: upload excluded, ${record} still covered`
   })
 
   console.log('')
