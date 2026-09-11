@@ -79,6 +79,12 @@ const IGNORED = new Set(
   ].map(loose),
 )
 
+/** "Associated Deal", "Associated Deal IDs", "Number of Associated Deals" and the
+ *  same again for every object a portal links. The one a record carries as a
+ *  field, its primary company, has an alias above and is kept; the rest are links,
+ *  and made into properties they are columns of names and ids nothing can follow. */
+const ASSOCIATION_COLUMN = /^(numberof)?associated/
+
 export type Preset = Record<string, string | null>
 
 /** What the mapper opens with for a HubSpot file. Anything not named here is left
@@ -89,7 +95,7 @@ export const hubspotPreset = (object: ObjectKey, headers: string[]): Preset => {
   const taken = new Set<string>()
   for (const header of headers) {
     const key = aliases[loose(header)]
-    if (IGNORED.has(loose(header))) {
+    if (IGNORED.has(loose(header)) || (key === undefined && ASSOCIATION_COLUMN.test(loose(header)))) {
       preset[header] = null
       continue
     }

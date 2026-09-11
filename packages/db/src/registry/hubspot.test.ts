@@ -86,3 +86,17 @@ test('the activity shape carries the two columns a timeline entry cannot do with
   assert.equal(ACTIVITY_IMPORT.byKey.get('occurred_at')?.type, 'datetime')
   assert.deepEqual(ACTIVITY_IMPORT.byKey.get('activity_type')?.options, ['note', 'email', 'call', 'meeting'])
 })
+
+test('association columns are dismissed, except the primary company a record carries', () => {
+  const preset = hubspotPreset('contact', [
+    'Associated Company',
+    'Associated Company IDs',
+    'Associated Deal',
+    'Associated Deal IDs',
+    'Number of Associated Deals',
+  ])
+  assert.equal(preset['Associated Company'], 'company_id')
+  for (const header of ['Associated Company IDs', 'Associated Deal', 'Associated Deal IDs', 'Number of Associated Deals']) {
+    assert.equal(preset[header], null, header)
+  }
+})
