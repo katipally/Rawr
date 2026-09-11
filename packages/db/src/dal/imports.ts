@@ -417,6 +417,12 @@ const dedupeLookup = async (
   })
 }
 
+/** The driver's SQLSTATE, not drizzle's message, which is the statement and its
+ *  parameters. 23505 here is a value somebody else committed between the moment
+ *  this row was matched and the moment it was inserted. */
+const isUniqueViolation = (cause: unknown): boolean =>
+  (cause as { cause?: { code?: string } } | null)?.cause?.code === '23505'
+
 /** Every kind but `records` is mapped against a fixed shape rather than the
  *  account's registry: nothing on those rows becomes a column on a record, they
  *  say which record something belongs to and what it was. */
@@ -1468,11 +1474,18 @@ export const runImportChunk = async (
         created += 1
       }
     } catch (cause) {
-      if (cause instanceof DuplicateError) {
-        // Lost a race with another row in the same file. The row it collided with
-        // holds the value, so this one is an update.
+      // Lost a race for the dedupe value: either caught before the insert, or by
+      // the unique index during it, when the other writer committed in between.
+      // Whoever holds the value holds the record, so this row is an update.
+      const collidedWith =
+        cause instanceof DuplicateError
+          ? cause.existingId
+          : isUniqueViolation(cause)
+            ? await dedupeLookup(ctx, object, planned.values)
+            : null
+      if (collidedWith) {
         try {
-          await updateRecord(ctx, object.key, cause.existingId, planned.values, null, NO_ENRICH)
+          await updateRecord(ctx, object.key, collidedWith, planned.values, null, NO_ENRICH)
           updated += 1
           continue
         } catch (retry) {
