@@ -65,6 +65,13 @@ const toDate = (field: RegistryField, input: unknown): string => {
   return parsed.toISOString().slice(0, 10)
 }
 
+/** The choice as the field spells it. A file that says "open deal" means "Open
+ *  Deal", and storing its spelling would make one choice filter as two. */
+export const choiceOf = (options: string[], text: string): string | undefined => {
+  const wanted = text.toLowerCase()
+  return options.find((option) => option.toLowerCase() === wanted)
+}
+
 const BOOLEAN_TRUE = new Set(['true', 't', 'yes', 'y', '1', 'on'])
 const BOOLEAN_FALSE = new Set(['false', 'f', 'no', 'n', '0', 'off'])
 
@@ -130,27 +137,28 @@ export const coerce = (field: RegistryField, input: unknown): Coerced => {
 
     case 'select': {
       const text = String(input).trim()
-      if (field.options.length > 0 && !field.options.includes(text)) {
+      if (field.options.length === 0) return truncate(field, text)
+      const choice = choiceOf(field.options, text)
+      if (choice === undefined) {
         throw new ValueError(
           field,
           `"${text}" is not one of its choices: ${field.options.join(', ')}.`,
         )
       }
-      return truncate(field, text)
+      return { value: choice }
     }
 
     case 'multi_select': {
       const list = Array.isArray(input)
         ? input.map((v) => String(v).trim())
         : String(input).split(';').map((v) => v.trim())
-      const values = [...new Set(list.filter(Boolean))]
-      if (field.options.length > 0) {
-        const unknown = values.filter((v) => !field.options.includes(v))
-        if (unknown.length > 0) {
-          throw new ValueError(field, `${unknown.join(', ')} are not among its choices.`)
-        }
+      const named = list.filter(Boolean)
+      if (field.options.length === 0) return { value: [...new Set(named)] }
+      const unknown = named.filter((v) => choiceOf(field.options, v) === undefined)
+      if (unknown.length > 0) {
+        throw new ValueError(field, `${unknown.join(', ')} are not among its choices.`)
       }
-      return { value: values }
+      return { value: [...new Set(named.map((v) => choiceOf(field.options, v)!))] }
     }
 
     case 'email': {

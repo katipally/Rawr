@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
 import { conditionalBlocker, readConditional, type Conditional } from '../registry/conditional.ts'
+import { MAX_CHOICES } from '../registry/mapping.ts'
 import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import { assertCanDo, type AccountContext } from './context.ts'
 import { assertUsableFieldKey } from './fields.ts'
@@ -124,8 +125,8 @@ const validateOptions = (type: FieldType, options: string[]): string[] => {
   if (cleaned.length === 0) {
     throw new Error('A choice field needs at least one choice.')
   }
-  if (cleaned.length > 200) {
-    throw new Error(`That is ${cleaned.length} choices; 200 is the limit. A list that long wants to be a relation.`)
+  if (cleaned.length > MAX_CHOICES) {
+    throw new Error(`That is ${cleaned.length} choices; ${MAX_CHOICES} is the limit. A list that long wants to be a relation.`)
   }
   return cleaned
 }

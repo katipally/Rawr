@@ -523,7 +523,12 @@ export type CreateResult = {
  *  approve a queue that size is not a question, it is a wall. So the importer
  *  turns this off and the records it writes are enriched on a later edit, or one
  *  at a time from the record itself. Every other path asks. */
-export type WriteOptions = { enrich?: boolean }
+export type WriteOptions = {
+  enrich?: boolean
+  /** When the record really began, for a migration that carries it. Create
+   *  date is Rawr's to keep everywhere else, so only a new record takes one. */
+  createdAt?: Date
+}
 
 /** A record has to be findable by somebody who did not create it. Neither of
  *  these columns can be marked required on its own -- an import of company
@@ -592,6 +597,7 @@ export const createRecord = async (
       // Which object this row is one of. Only a shared-table row needs it; a
       // core record's table already answers the question.
       ...(object.isCustom ? { object_id: object.id } : {}),
+      ...(options.createdAt ? { created_at: options.createdAt } : {}),
     }
     const names = Object.keys(columns).map((c) => sql.raw(`"${c}"`))
     const values_: SQL[] = Object.values(columns).map(bind)
