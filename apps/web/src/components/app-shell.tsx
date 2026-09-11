@@ -140,7 +140,7 @@ const Shell = ({
   children,
 }: AppShellProps) => {
   const pathname = usePathname()
-  const { pendingHref } = useNavigation()
+  const { pendingHref, navigate } = useNavigation()
   // Where the person is going counts as where they are, from the click onward.
   const here = pendingHref?.split('?')[0] ?? pathname
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -494,7 +494,7 @@ const Shell = ({
             label="Settings"
             icon={<Settings className="size-4" />}
             className={cn(topbarIcon, here.startsWith('/settings') && 'bg-nav-active')}
-            onClick={() => window.location.assign(settingsHref)}
+            onClick={() => navigate(settingsHref)}
           />
 
           <NotificationBell accountSlug={accountSlug} />
@@ -548,34 +548,40 @@ const Shell = ({
 
       <div className="flex min-h-0 flex-1">
         {/* Wide screens: the rail. */}
-        {(
-          <aside
-            className={cn(
-              'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
-              expanded ? 'w-flyout' : 'w-rail',
-            )}
+        <aside
+          className={cn(
+            'z-rail hidden shrink-0 flex-col bg-nav text-nav-text transition-[width] duration-200 md:flex',
+            expanded ? 'w-flyout' : 'w-rail',
+          )}
+        >
+          {rail}
+          <button
+            type="button"
+            onClick={() => {
+              setExpanded(!expanded)
+              write(RAIL_KEY, expanded ? '0' : '1')
+              setFlyout(null)
+            }}
+            aria-pressed={expanded}
+            title={expanded ? 'Collapse' : 'Expand'}
+            className={cn('mb-2 flex h-10 shrink-0 items-center gap-3 self-center rounded-pill px-3 hover:bg-nav-hover', expanded && 'self-stretch mx-3')}
           >
-            {rail}
-            <button
-              type="button"
-              onClick={() => {
-                setExpanded(!expanded)
-                write(RAIL_KEY, expanded ? '0' : '1')
-                setFlyout(null)
-              }}
-              aria-pressed={expanded}
-              title={expanded ? 'Collapse' : 'Expand'}
-              className={cn('mb-2 flex h-10 shrink-0 items-center gap-3 self-center rounded-pill px-3 hover:bg-nav-hover', expanded && 'self-stretch mx-3')}
-            >
-              {expanded ? <ChevronsLeft aria-hidden="true" className="size-4 shrink-0" /> : <ChevronsRight aria-hidden="true" className="size-4 shrink-0" />}
-              <span className={expanded ? 'truncate' : 'sr-only'}>{expanded ? 'Collapse' : 'Expand'}</span>
-            </button>
-          </aside>
-        )}
+            {expanded ? <ChevronsLeft aria-hidden="true" className="size-4 shrink-0" /> : <ChevronsRight aria-hidden="true" className="size-4 shrink-0" />}
+            <span className={expanded ? 'truncate' : 'sr-only'}>{expanded ? 'Collapse' : 'Expand'}</span>
+          </button>
+        </aside>
 
         {/* Phones: the same sections as a sheet over the content. */}
         {sheetOpen ? (
           <>
+            {/* Same layer as its panel so it covers the top bar too, and before
+                it in the DOM so the panel paints over it. */}
+            <button
+              type="button"
+              aria-label="Close menu"
+              onClick={() => setSheetOpen(false)}
+              className="fixed inset-0 z-overlay cursor-default bg-scrim md:hidden"
+            />
             <div id="primary-nav" className="fixed inset-y-0 left-0 z-overlay flex w-64 flex-col bg-nav text-nav-text md:hidden">
               <div className="flex h-topbar shrink-0 items-center justify-between gap-2 px-4">
                 <span className="flex items-center gap-2 font-semibold tracking-tight">
@@ -616,12 +622,6 @@ const Shell = ({
                 )}
               </div>
             </div>
-            <button
-              type="button"
-              aria-label="Close menu"
-              onClick={() => setSheetOpen(false)}
-              className="fixed inset-0 z-rail cursor-default bg-scrim md:hidden"
-            />
           </>
         ) : null}
 

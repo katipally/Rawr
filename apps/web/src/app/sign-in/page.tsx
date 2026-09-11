@@ -10,7 +10,6 @@ const SignIn = async ({ searchParams }: Props) => {
   const { error, next } = await searchParams
   const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''
 
-
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 p-6">
       <div className="flex flex-col gap-2">

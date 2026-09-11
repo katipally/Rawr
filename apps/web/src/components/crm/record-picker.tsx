@@ -1,6 +1,6 @@
 'use client'
 
-import { cn } from '@rawr/ui'
+import { cn, Popover } from '@rawr/ui'
 import { useEffect, useId, useRef, useState } from 'react'
 import { api } from '~/lib/rpc.ts'
 
@@ -86,16 +86,6 @@ export const RecordPicker = ({
     }
   }, [object, query, excludeId, open])
 
-  // Clicking anywhere else closes the list. Escape does too, further down.
-  useEffect(() => {
-    if (!open) return
-    const away = (event: MouseEvent) => {
-      if (box.current && !box.current.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', away)
-    return () => document.removeEventListener('mousedown', away)
-  }, [open])
-
   const choose = (option: PickedRecord) => {
     onChange(option)
     setOpen(false)
@@ -103,7 +93,10 @@ export const RecordPicker = ({
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Escape') {
+    // preventDefault so a dialog holding this picker does not read the same
+    // Escape as "close the dialog" and throw the edit away.
+    if (event.key === 'Escape' && open) {
+      event.preventDefault()
       setOpen(false)
       return
     }
@@ -130,7 +123,7 @@ export const RecordPicker = ({
   }
 
   return (
-    <div ref={box} className="relative flex min-w-0 flex-col gap-1">
+    <div ref={box} className="flex min-w-0 flex-col gap-1">
       <div className="flex min-w-0 items-center gap-2">
         <input
           id={inputId}
@@ -164,17 +157,23 @@ export const RecordPicker = ({
         ) : null}
       </div>
 
-      {/* A listbox holds options, not list items. This was a <ul> of <li> each
-          wrapping a role="option" button, so the options were not children of the
-          listbox at all and the list semantics fought the widget semantics. The
-          options are the buttons, and they sit directly inside now. */}
-      {open ? (
-        <div
-          id={listId}
-          role="listbox"
-          aria-label={label}
-          className="absolute top-full right-0 left-0 z-30 mt-1 max-h-64 overflow-y-auto rounded-panel border border-line bg-surface-raised shadow-overlay"
-        >
+      {/* Portalled and anchored rather than positioned in place: this picker is
+          used inside a modal, whose body is its own scroll box, and a panel drawn
+          there is clipped by it. The Popover also flips and clamps, so the list
+          stays on screen for a field near the bottom of the window. */}
+      <Popover
+        open={open && !disabled}
+        onClose={() => setOpen(false)}
+        anchorRef={box}
+        autoFocus={false}
+        side="bottom"
+        align="start"
+        label={label}
+        className="min-w-64 py-1"
+      >
+        {/* A listbox holds options, not list items, so the options sit directly
+            inside it. */}
+        <div id={listId} role="listbox" aria-label={label}>
           {problem ? (
             <p role="alert" className="px-2 py-2 text-error">
               {problem}
@@ -207,7 +206,7 @@ export const RecordPicker = ({
             ))
           )}
         </div>
-      ) : null}
+      </Popover>
     </div>
   )
 }

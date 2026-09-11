@@ -30,7 +30,8 @@ export const Tabs = ({ label, items, className }: TabsProps) => (
         href={item.href}
         aria-current={item.current ? 'page' : undefined}
         className={cn(
-          'flex h-12 shrink-0 items-center gap-1.5 border-r border-line px-7 text-body no-underline last:border-r-0',
+          // min-h, as on Button: a tab label at 200% text size must wrap, not clip.
+          'flex min-h-12 shrink-0 items-center gap-1.5 border-r border-line px-7 py-2 text-body no-underline last:border-r-0',
           item.current ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
         )}
       >
@@ -66,7 +67,7 @@ export const FilterRow = ({ label, items, lead, className }: FilterRowProps) => 
         href={item.href}
         aria-current={item.current ? 'page' : undefined}
         className={cn(
-          'inline-flex h-control shrink-0 items-center gap-1.5 rounded-pill border border-line-strong px-4',
+          'inline-flex min-h-control shrink-0 items-center gap-1.5 rounded-pill border border-line-strong px-4 py-1',
           'text-small font-light text-body no-underline',
           item.current ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
         )}

@@ -42,7 +42,7 @@ export const Modal = ({ open, onClose, title, size = 'md', children, footer }: M
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-overlay flex items-end justify-center p-0 sm:items-center sm:p-4">
       {/* The scrim is a token: black at 30% over a dark canvas is invisible. */}
       <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-scrim" />
       <div

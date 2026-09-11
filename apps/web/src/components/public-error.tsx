@@ -6,7 +6,10 @@
  *  quoting a digest. That is the right sentence for a colleague and the wrong one
  *  for somebody who followed a link to book half an hour: they have no idea what
  *  Rawr is, and the person they need is the one whose page they were on. So this
- *  says what happened, offers the one thing that ever helps, and stops. */
+ *  says what happened, offers the one thing that ever helps, and stops.
+ *
+ *  Styled inline because an error boundary has to render whether or not the
+ *  stylesheet loaded; every value is the one tokens.css holds. */
 export const PublicErrorScreen = ({ reset }: { error: Error; reset: () => void }) => (
   <main
     style={{
@@ -17,11 +20,11 @@ export const PublicErrorScreen = ({ reset }: { error: Error; reset: () => void }
       padding: '3rem 1rem',
       textAlign: 'center',
       fontFamily: 'system-ui, sans-serif',
-      color: '#33475b',
+      color: '#333333',
     }}
   >
     <p style={{ fontWeight: 500 }}>This page could not load</p>
-    <p style={{ color: '#516f90', maxWidth: '32rem' }}>
+    <p style={{ color: '#666666', maxWidth: '32rem' }}>
       Something went wrong at our end, not yours. Try again in a moment, or reply to whoever sent
       you this link.
     </p>
@@ -31,8 +34,8 @@ export const PublicErrorScreen = ({ reset }: { error: Error; reset: () => void }
       style={{
         minHeight: '2.25rem',
         padding: '0.375rem 0.875rem',
-        borderRadius: '3px',
-        border: '1px solid #cbd6e2',
+        borderRadius: '999999px',
+        border: '1px solid #cccccc',
         background: '#ffffff',
         cursor: 'pointer',
         font: 'inherit',

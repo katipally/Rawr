@@ -1,5 +1,5 @@
 import { listMembers, readAgenda } from '@rawr/db'
-import { PageHeader, Select } from '@rawr/ui'
+import { Button, PageHeader, Select } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
 import { todayIn } from '~/components/crm/value.tsx'
 import { redirect } from 'next/navigation'
@@ -82,9 +82,7 @@ const CalendarScreen = async ({
           </Select>
           {/* A plain form, so this works before the page has hydrated and the
               address still carries the choice. */}
-          <button type="submit" className="h-control rounded-pill border border-line-strong px-4 text-small">
-            Show
-          </button>
+          <Button type="submit">Show</Button>
         </form>
       ) : null}
 

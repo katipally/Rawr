@@ -1,6 +1,6 @@
 'use client'
 
-import { DataTable, EmptyState, Pagination, cn, type Column } from '@rawr/ui'
+import { DataTable, EmptyState, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
 import { Download } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -152,18 +152,6 @@ export const RecordTable = ({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {canBulk && live.length > 0 ? (
-        <BulkBar
-          object={object}
-          objectLabel={objectLabel}
-          objectPlural={objectPlural}
-          ids={live}
-          fields={bulkFields}
-          onDone={() => setSelected(new Set())}
-          onClear={() => setSelected(new Set())}
-        />
-      ) : null}
-
       <DataTable
         fill
         storageKey={`${object}.${view}`}
@@ -188,6 +176,24 @@ export const RecordTable = ({
           />
         }
       />
+
+      {/* Below the list, not above it. The bar appears the moment a row is ticked,
+          and above the table it pushed every row down by its own height, so the
+          next click landed on the row after the intended one. Here the table box
+          gives up the height instead, from its bottom edge, and no row moves. */}
+      {canBulk && live.length > 0 ? (
+        <div className="shrink-0">
+          <BulkBar
+            object={object}
+            objectLabel={objectLabel}
+            objectPlural={objectPlural}
+            ids={live}
+            fields={bulkFields}
+            onDone={() => setSelected(new Set())}
+            onClear={() => setSelected(new Set())}
+          />
+        </div>
+      ) : null}
 
       {/* Previous is the browser's own history, because a keyset cursor points
           forward only and there is no address to jump back to. */}
@@ -227,7 +233,7 @@ export const RecordTable = ({
         <a
           href={exportHref}
           download
-          className="inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
+          className={buttonClass('secondary', 'no-underline')}
         >
           <Download aria-hidden="true" className="size-3.5" />
           Export

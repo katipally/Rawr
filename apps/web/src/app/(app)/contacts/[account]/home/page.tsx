@@ -244,12 +244,7 @@ const HomePage = async ({
             {session.accountName}, {formatDate(new Date(), zone)}. Every number opens the list behind it.
           </p>
         </div>
-        <Link
-          href={objectView(account, 'deal', 'all', 'board')}
-          className="inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
-        >
-          Open the board
-        </Link>
+        <LinkButton href={objectView(account, 'deal', 'all', 'board')}>Open the board</LinkButton>
       </div>
       <div className="flex flex-col gap-4 px-2 pb-2 sm:px-4 sm:pb-4">
 

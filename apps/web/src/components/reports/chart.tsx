@@ -1,4 +1,5 @@
 import { cn } from '@rawr/ui'
+import { AxisLabels } from './axis-labels.tsx'
 
 /** B7's charts. SVG drawn from the design tokens, no charting library.
  *
@@ -105,8 +106,8 @@ const Table = ({
  *  The bars are an SVG stretched to the container, because bars should fill the
  *  width they are given. The labels are HTML underneath it rather than text inside
  *  it: a stretched SVG scales its text with it, which turns a three-column chart
- *  into distorted letterforms, and CSS truncates a long label better than any
- *  character count could. */
+ *  into distorted letterforms. How many of them are drawn is measured in the
+ *  browser; see AxisLabels. */
 export const BarChart = ({ title, labels, series, format = nice, className }: ChartProps) => {
   const top = ceiling(series)
   const columns = labels.length
@@ -168,17 +169,7 @@ export const BarChart = ({ title, labels, series, format = nice, className }: Ch
               ))}
             </svg>
 
-            <div className="flex min-w-0" aria-hidden="true">
-              {labels.map((label, column) => (
-                <span
-                  key={column}
-                  title={label}
-                  className="min-w-0 flex-1 truncate px-0.5 text-center text-small text-secondary"
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
+            <AxisLabels labels={labels} />
           </div>
 
           <Table labels={labels} series={series} format={format} caption={title} />

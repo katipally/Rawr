@@ -1,7 +1,7 @@
 'use client'
 
 import type { BookingKind } from '@rawr/db'
-import { Badge, DataTable, Modal, Switch, type Column, useToast } from '@rawr/ui'
+import { Badge, Button, DataTable, Modal, Switch, type Column, useToast } from '@rawr/ui'
 import { ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -161,16 +161,15 @@ export const PagesTable = ({
       header: '',
       width: 170,
       render: (row) => (
-        <button
-          type="button"
+        <Button
+          className="whitespace-nowrap"
           onClick={(event) => {
             event.stopPropagation()
             setEmbedding(row)
           }}
-          className="inline-flex h-control items-center whitespace-nowrap rounded-pill border border-line-strong px-4 text-small font-light hover:bg-fill"
         >
           Link and embed
-        </button>
+        </Button>
       ),
     },
   ]

@@ -9,6 +9,7 @@ import {
 } from '@rawr/db'
 import { Alert, Badge, Button, EmptyState, Field, PageHeader, Select } from '@rawr/ui'
 import Link from 'next/link'
+import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { availableAppsPath, importsPath } from '~/lib/links.ts'
@@ -171,12 +172,7 @@ const ImportPage = async ({
           <h2 className="text-base font-semibold">Sync from apps</h2>
           <p className="text-secondary">Keep data flowing between the CRM and the tools already connected to it: mail, enrichment, calendars and the rest.</p>
           <div className="mt-auto">
-            <Link
-              href={availableAppsPath()}
-              className="inline-flex h-control items-center rounded-pill border border-line-strong px-4 text-small font-light text-body no-underline hover:bg-fill"
-            >
-              Connect an app
-            </Link>
+            <LinkButton href={availableAppsPath()}>Connect an app</LinkButton>
           </div>
         </section>
       </div>

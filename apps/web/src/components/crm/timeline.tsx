@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Button, DropdownMenu, EmptyState, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Button, DropdownMenu, EmptyState, TextArea, TextInput, buttonClass, cn, useToast } from '@rawr/ui'
 import type { EmailPayload, EmailStats } from '@rawr/db'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import Link from 'next/link'
@@ -421,10 +421,7 @@ export const Timeline = ({
             <button
               {...props}
               type="button"
-              className={cn(
-                'inline-flex h-control items-center gap-1 rounded-pill border border-line-strong px-4 text-small font-light text-body',
-                selected.length > 0 ? 'bg-fill-hover' : 'bg-surface hover:bg-fill',
-              )}
+              className={buttonClass('secondary', selected.length > 0 ? 'bg-fill-hover' : undefined)}
             >
               Activity ({shownCount.toLocaleString()}/{total.toLocaleString()})
               <ChevronDown aria-hidden="true" className="size-3.5" />

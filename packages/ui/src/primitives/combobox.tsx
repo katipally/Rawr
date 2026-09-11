@@ -1,7 +1,7 @@
 'use client'
 
 import { Check, ChevronDown, X } from 'lucide-react'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { cn } from '../cn.ts'
 import { filterOptions } from './combobox.ts'
 import { Popover } from './popover.tsx'
@@ -59,6 +59,7 @@ export const Combobox = (props: ComboboxProps) => {
   const [active, setActive] = useState(0)
   const box = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLInputElement>(null)
+  const highlighted = useRef<HTMLDivElement>(null)
 
   const shown = onSearch ? options : filterOptions(options, query)
   const selected = props.multiple ? props.value : props.value === null ? [] : [props.value]
@@ -68,6 +69,16 @@ export const Combobox = (props: ComboboxProps) => {
   // highlight back on the first row.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => setActive(0), [query, options])
+
+  // The input keeps the focus, so the browser scrolls nothing when the arrow keys
+  // move the highlight: past the eighth owner in a list of two hundred the
+  // selection was being moved somewhere the reader could not see. The highlight is
+  // the trigger rather than something the effect reads: the ref it scrolls is
+  // re-pointed by the render that moved it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
+  useLayoutEffect(() => {
+    if (open) highlighted.current?.scrollIntoView({ block: 'nearest' })
+  }, [open, active])
 
   const commit = (option: ComboboxOption) => {
     if (option.disabled) return
@@ -114,6 +125,10 @@ export const Combobox = (props: ComboboxProps) => {
         ref={box}
         className={cn(
           'flex min-h-9 flex-wrap items-center gap-1 rounded-hs border bg-surface px-2 py-1',
+          // The input inside carries no outline of its own, so the ring is drawn
+          // on the box: a combobox reads as one control, and a 1px border going
+          // teal is not a focus indicator anybody notices.
+          'has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent',
           error ? 'border-error' : 'border-line focus-within:border-line-interactive',
           disabled && 'bg-disabled',
         )}
@@ -222,6 +237,7 @@ export const Combobox = (props: ComboboxProps) => {
               // never itself a focus stop, so it is a list item and not a button.
               <div
                 key={option.value}
+                ref={index === active ? highlighted : null}
                 id={`${id}-option-${option.value}`}
                 role="option"
                 tabIndex={-1}

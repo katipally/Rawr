@@ -43,10 +43,14 @@ export const Button = ({
   className,
   disabled,
   children,
+  // A <button> with no type submits the form it sits in, so a Cancel or a filter
+  // toggle inside one posted the form. Submitting is opted into.
+  type = 'button',
   ...rest
 }: ButtonProps) => (
   <button
     {...rest}
+    type={type}
     disabled={disabled || busy}
     aria-busy={busy || undefined}
     className={buttonClass(

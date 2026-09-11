@@ -23,7 +23,7 @@ export const SidePanel = ({ open, onClose, title, children, footer }: SidePanelP
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className="fixed inset-0 z-overlay flex justify-end">
       <div aria-hidden="true" onClick={onClose} className="flex-1 bg-scrim" />
       <aside
         ref={dialog}

@@ -57,6 +57,18 @@ export const Popover = ({
     else setBox(null)
   }, [open, reposition])
 
+  // The panel's own height changes while it is open: a combobox list of twenty
+  // rows becomes one as the query narrows, and a filter panel grows a section.
+  // Placed once, a panel that had flipped above its trigger stays where the old
+  // height put it and drifts away from what it is anchored to.
+  useEffect(() => {
+    const layer = panel.current
+    if (!open || !layer || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(reposition)
+    observer.observe(layer)
+    return () => observer.disconnect()
+  }, [open, reposition])
+
   useEffect(() => {
     if (!open) return
     if (autoFocus) panel.current?.focus()
