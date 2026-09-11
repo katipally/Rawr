@@ -2,6 +2,7 @@ import { and, eq, inArray, notLike, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
+import { resolveContactCampaigns } from '../src/dal/campaigns.ts'
 import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
 import { provisionAccount } from '../src/dal/provision.ts'
 import { DEFAULT_SETTINGS } from '../src/dal/form-schema.ts'
@@ -355,11 +356,28 @@ try {
       )
     }
 
+    // A queue is a named list worked top to bottom. Two of them, so the sidebar
+    // has something to switch between and "no queue" is still a visible state.
+    const queues = await db
+      .insert(s.taskQueue)
+      .values(
+        ['Follow-ups', 'Onboarding'].map((name) => ({ accountId: ws, name, createdBy: owners[0] ?? null })),
+      )
+      .returning({ id: s.taskQueue.id })
+
     await db.insert(s.task).values(
       deals.slice(0, Math.min(4, deals.length)).map((deal, i) => ({
         accountId: ws,
         title: `Chase ${deal.name ?? 'the unnamed deal'}`,
+        // Not all the same shape: a board where every row reads "To-do, Medium,
+        // no queue, no reminder" hides four columns at once.
+        type: s.TASK_TYPES[i % s.TASK_TYPES.length]!,
+        priority: s.TASK_PRIORITIES[i % s.TASK_PRIORITIES.length]!,
         dueDate: dayAgo(i === 0 ? 3 : -(i + 1)).toISOString().slice(0, 10),
+        // Ahead of the real clock rather than the seed's anchor, or the reminder
+        // sweep would treat every seeded task as one it owes somebody a notice on.
+        remindAt: i === 1 ? new Date(Date.now() + 36 * 3_600_000) : null,
+        queueId: queues[i]?.id ?? null,
         assigneeId: owners[i % owners.length] ?? null,
         entityType: 'deal' as const,
         entityId: deal.id,
@@ -385,13 +403,21 @@ try {
   // F3. Every account gets the same starting forms, including the peer tenant,
   // so the cross-tenant test has a form on both sides to prove isolation with.
   for (const ws of [sandbox, peer]) {
+    // One folder with forms in it and the rest loose, so the tree renders both a
+    // populated folder and the unfiled list beside it.
+    const [folder] = await db
+      .insert(s.formFolder)
+      .values({ accountId: ws, name: 'Website' })
+      .returning({ id: s.formFolder.id })
+
     await db.insert(s.form).values(
-      SEED_FORMS.map((form) => ({
+      SEED_FORMS.map((form, i) => ({
         accountId: ws,
         name: form.name,
         slug: form.slug,
         schema: form.fields,
         settings: form.settings,
+        folderId: i < 2 ? (folder?.id ?? null) : null,
         isActive: true,
       })),
     )
@@ -556,6 +582,29 @@ try {
         }),
       )
     }
+
+    // B7. The campaign the seeded traffic actually arrived on. Without the row
+    // the campaign list, the spend column and the cost-per numbers on the
+    // attribution report are all empty on a seeded database, and the visits are
+    // already there to be counted.
+    await db.insert(s.campaign).values({
+      accountId: sandbox,
+      name: 'March newsletter',
+      source: 'newsletter',
+      medium: 'email',
+      utmCampaign: 'march',
+      spend: '2400.00',
+      currency: 'USD',
+      startsOn: dayAgo(50).toISOString().slice(0, 10),
+      endsOn: dayAgo(20).toISOString().slice(0, 10),
+    })
+    // The same resolve a saved campaign runs, so the contacts it found are
+    // attached by the rule the report reads rather than by a second copy of it.
+    await resolveContactCampaigns(
+      db as unknown as Parameters<typeof resolveContactCampaigns>[0],
+      { accountId: sandbox, actorId: null, actorKind: 'job', isSuperAdmin: true, viewHubs: [], editHubs: [] },
+      null,
+    )
   }
 
   // F2. A round robin across the three non-viewer staff plus a personal link for
@@ -710,6 +759,28 @@ try {
     await db
       .insert(s.bookingHost)
       .values({ accountId: ws, bookingPageId: personal.id, userId: owner, weight: 1 })
+
+    // Two reminders on the team page and one on the personal link. The unit is
+    // stored as the person chose it, so the seed has to carry both a days and an
+    // hours row or the editor only ever renders one of its two shapes.
+    await db.insert(s.bookingReminder).values([
+      { accountId: ws, bookingPageId: roundRobin.id, amount: 1, unit: 'day' },
+      { accountId: ws, bookingPageId: roundRobin.id, amount: 2, unit: 'hour' },
+      { accountId: ws, bookingPageId: personal.id, amount: 30, unit: 'minute' },
+    ])
+
+    // Views, so the conversion rate on a booking page is a ratio rather than a
+    // dash. Uneven across the days on purpose: a flat line hides a grouping bug.
+    await db.insert(s.bookingPageView).values(
+      [roundRobin.id, personal.id].flatMap((pageId, page) =>
+        Array.from({ length: 14 }, (_, day) => ({
+          accountId: ws,
+          bookingPageId: pageId,
+          day: dayAgo(day).toISOString().slice(0, 10),
+          views: 3 + ((day * (page + 2)) % 7),
+        })),
+      ),
+    )
 
     // F2. Meetings on the books, two ahead and two behind, so the booked list is
     // not an empty screen on a seeded database and the upcoming and past tabs

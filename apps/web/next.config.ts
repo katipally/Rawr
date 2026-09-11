@@ -71,7 +71,10 @@ const EDGE_CSP = [
   "object-src 'none'",
 ].join('; ')
 
-/** Every public path, kept next to the list in the README so the two cannot drift. */
+/** The public paths that are loaded into somebody else's page, which is what this
+ *  list is for. The rest of the edge the README names -- the open pixel, the click
+ *  redirect and the unsubscribe page -- is reached as a top-level navigation from
+ *  a mail client, so it keeps the app's own refusal to be framed. */
 const EDGE_PATHS = [
   '/embed.js',
   '/booking.js',

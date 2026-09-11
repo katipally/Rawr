@@ -13,10 +13,6 @@ import { withAccount } from '../src/dal/index.ts'
 export const SANDBOX = { name: 'Sandbox', slug: 'sandbox', domain: 'sandbox.test' } as const
 export const PEER = { name: 'Peer Tenant', slug: 'peer', domain: 'peer.test' } as const
 
-/** A seeded seat's address. The local parts are the shapes of access the seed
- *  builds: `admin`, `sales`, `marketing`, `viewer`, `former`. */
-export const seat = (who: string): string => `${who}@${SANDBOX.domain}`
-
 /** The account's own super admin, for a suite context that writes.
  *
  *  A suite calling itself `actorKind: 'user'` with `actorId: null` is a person
@@ -62,7 +58,10 @@ const SEEDED_TABLES = new Set([
   'booking',
   'booking_host',
   'booking_page',
+  'booking_page_view',
+  'booking_reminder',
   'calendar_grant',
+  'campaign',
   'company',
   'contact',
   'custom_record',
@@ -70,6 +69,7 @@ const SEEDED_TABLES = new Set([
   'email_template',
   'field_def',
   'form',
+  'form_folder',
   'form_submission',
   'import_row',
   'import_run',
@@ -93,11 +93,13 @@ const SEEDED_TABLES = new Set([
   'segment_membership',
   'sequence',
   'sequence_enrollment',
+  'sequence_send',
   'sequence_step',
   'site',
   'subscription_state',
   'subscription_type',
   'task',
+  'task_queue',
   'team',
   'team_member',
   'visitor',

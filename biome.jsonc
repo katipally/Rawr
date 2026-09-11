@@ -6,6 +6,9 @@
       "apps/web/scripts/**",
       "packages/**/src/**",
       "packages/db/scripts/**",
+      // The container entrypoint. Unlinted it was the one production file the
+      // gate did not read.
+      "scripts/**",
       // Tailwind 4 at-rules are not something Biome's CSS parser reads, and a
       // stylesheet has no lint rules here worth the parse error.
       "!**/*.css"

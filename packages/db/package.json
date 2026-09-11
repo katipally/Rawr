@@ -42,8 +42,7 @@
   "dependencies": {
     "drizzle-orm": "catalog:",
     "postgres": "catalog:",
-    "psl": "^1.15.0",
-    "zod": "catalog:"
+    "psl": "^1.15.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",

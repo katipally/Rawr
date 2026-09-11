@@ -4,7 +4,7 @@ import { z } from 'zod'
  *  loudly rather than running unscoped. */
 export const basePayload = z.object({ accountId: z.uuid() })
 
-export type ParseResult = { ok: true; value: unknown } | { ok: false; error: string }
+type ParseResult = { ok: true; value: unknown } | { ok: false; error: string }
 
 /** Generics are erased at the definition boundary so the runner can hold a list of
  *  differently-shaped jobs without a cast at every call site. */

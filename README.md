@@ -23,11 +23,10 @@ the data layer is vendor-specific.
  pnpm db:seed                   # two fixture accounts, ~20 records each
 ```
 
-`.env.example` is written for a deployment, so on a laptop add these four and
+`.env.example` is written for a deployment, so on a laptop add these three and
 give the four secrets any value long enough to parse:
 
 ```
- DATABASE_URL_SESSION   a second handle, for the tenancy suite only
  RAWR_DEV_CALENDAR=1    free-busy without a Google project
  RAWR_DEV_GMAIL=1       mailbox sync without one either
  RAWR_DEV_INTEGRATIONS=1  stand-ins for Brevo, Apollo, Clay, Slack and GA4
@@ -104,7 +103,7 @@ directly. Nothing signs in as them.
  docker build -t rawr .       the deployable image — see DEPLOY.md
 ```
 
-`pnpm verify` runs typecheck, lint, the unit tests, and sixteen suites against
+`pnpm verify` runs typecheck, lint, the unit tests, and eighteen suites against
 the real database. Each exits non-zero on failure:
 
 ```
@@ -116,6 +115,8 @@ the real database. Each exits non-zero on failure:
                           mutations directly
  db:verify:account        seats, invitations, grants, teams, scope, history
  db:verify:crm            board totals, merge, dedupe, import, search, export
+ db:verify:automations    triggers, branching, the parked run and its resume
+ db:verify:imports        mapping, the dry run, chunked runs, per-row errors
  db:verify:admin          custom fields, pipelines, stages, lifecycle
  db:verify:objects        objects an admin invents, and their rows
  db:verify:forms          schema rules, spam scoring, capture, review queue
@@ -260,12 +261,20 @@ Nothing on a schedule happens without `pnpm worker`.
 
 ```
  * * * * *      field indexes · visitor stitching · sequence steps ·
-                automation rules · enrichment
- */5, */10      mailbox bodies · mailbox sync · sequence leases
+                automation rules · enrichment · imports · bulk actions
+ */5, */10      mailbox bodies · booking reminders · mailbox sync ·
+                sequence leases
+ */15           task reminders
  0 * * * *      segment membership
+ 10 * * * *     the two automation triggers no write announces
  */30, :15/:45  integration health · Apollo read-back
- 30 3, 0 7      activity roll-up · the notification sweep
+ 03:30 UTC      activity roll-up
+ 04:15, 04:45   property fill rates · deal scores
+ 07:00 UTC      the notification sweep
 ```
+
+The four daily ones are also asked, on boot, whether they have run since they
+were last due, because a free tier asleep at 03:30 is a night with no roll-up.
 
 A job that fails past its retries lands in `dead_letter`, visible under
 Settings, Failed jobs, and can be replayed.

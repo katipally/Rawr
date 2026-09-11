@@ -184,7 +184,10 @@ quiet week, are both answered by the same thing: something outside calling
 wake itself.
 
 Run `node scripts/both.mjs` there, so the job daemon lives in the one process the
-host gives you.
+host gives you. The image's own `CMD` starts the app alone, which is the shape to
+prefer, so this is set as the service's Docker Command rather than in the
+Dockerfile. Nothing else changes: Render supplies `PORT`, the app binds it, and
+the worker reaches the app at `127.0.0.1` on the same port.
 
 **Keep it up, and catch up on boot.** UptimeRobot calls
 
@@ -195,11 +198,13 @@ host gives you.
 which is well inside Render's 15-minute idle window, so the service never
 suspends and Postgres never reaches its own inactivity pause.
 
-That is belt, and the worker carries braces. Two schedules run at a fixed time of
-day:
+That is belt, and the worker carries braces. Four schedules run at a fixed time
+of day:
 
 ```
  30 3 * * *   activity roll-up
+ 15 4 * * *   property fill rates
+ 45 4 * * *   deal scores
  0 7 * * *    the notification sweep
 ```
 

@@ -181,9 +181,6 @@ importers:
       psl:
         specifier: ^1.15.0
         version: 1.15.0
-      zod:
-        specifier: 'catalog:'
-        version: 4.5.4
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

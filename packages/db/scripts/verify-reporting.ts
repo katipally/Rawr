@@ -411,8 +411,8 @@ try {
   console.log('')
   console.log('-- campaigns, spend and cost-per ----------------------------------')
 
-  // Blocked until 0074 is applied: campaign, contact.first_campaign_id and
-  // contact.last_campaign_id do not exist before it.
+  // One utm per run, shared by the campaign and by every contact this section
+  // attributes to it, so a re-run never matches the last run's rows.
   const utm = `verify-${stamp}`
 
   await check('a campaign is keyed by its utm_campaign, not its name', async () => {
@@ -508,6 +508,12 @@ try {
     console.log('all reporting checks passed.')
   }
 } finally {
+  // Its own rows in the tables the seed fills, which `cleanup` leaves alone: the
+  // seeded sequence sends and campaign are what the sequences report and the
+  // campaign list read, so emptying those tables wholesale would blank them.
+  await owner`delete from sequence_send where token like ${`vt${stamp}%`}`
+  await owner`delete from contact where email = ${`campaign-${stamp}@example.com`}`
+  await owner`delete from campaign where lower(utm_campaign) = ${`verify-${stamp}`}`
   await owner.end({ timeout: 5 })
   await closeAppPool()
   await cleanup()

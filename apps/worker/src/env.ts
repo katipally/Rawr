@@ -16,6 +16,13 @@ export const OWNER_URL = required('DATABASE_URL_OWNER')
  *  Apollo sync. Failing here turns a silent outage into a start-up error. */
 export const INTERNAL_SECRET = required('RAWR_INTERNAL_SECRET')
 
+/** Named for the same reason, and not exported because nothing here opens it:
+ *  @rawr/db does, on first use. Five jobs go through the data access layer -- the
+ *  activity roll-up, segment evaluation, fill rates, deal scoring and visitor
+ *  stitching -- so a worker started without it boots clean, logs "ready", and then
+ *  dead-letters every one of them once a cycle. */
+required('DATABASE_URL')
+
 /** Where the worker reaches the web app. Both run in one container on Render, so
  *  the loopback address and the port the app was told to listen on is the answer
  *  whenever nobody has named an external one. An empty string is a variable

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env.local --watch src/index.ts",
     "start": "node src/index.ts",
-    "test": "DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none RAWR_INTERNAL_SECRET=unit-test node --test \"src/**/*.test.ts\"",
+    "test": "DATABASE_URL=postgres://unit:test@127.0.0.1:5432/none DATABASE_URL_OWNER=postgres://unit:test@127.0.0.1:5432/none RAWR_INTERNAL_SECRET=unit-test node --test \"src/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

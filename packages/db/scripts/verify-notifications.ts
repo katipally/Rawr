@@ -208,7 +208,7 @@ try {
   check(
     kindNames.includes('task_reminder') && kindNames.includes('task_assigned'),
     'the bell knows the two task kinds',
-    'blocked until 0069 is applied',
+    kindNames.join(' '),
   )
 
   // Caught rather than thrown so the retention and plan checks below still run
@@ -261,7 +261,7 @@ try {
   check(
     reminders.length === 1 && Number(reminders[0]?.count) === 1,
     'a reminder that is still due is sent once, not every run',
-    'blocked until 0070 is applied; the key carries the instant, so moving it arms it again',
+    'the key carries the instant, so moving the due date arms it again',
   )
   check(
     reminders[0]?.user_id === alice,

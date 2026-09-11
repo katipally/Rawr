@@ -149,13 +149,6 @@ export const viewKindEnum = pgEnum('rawr_view_kind', [
   'calendar',
 ])
 
-/** Only `import_job.object_type` still holds this. Every other column that points
- *  at a record (a timeline link, an association, a task, a file, an automation
- *  run) is text, because an admin invents objects and an enum cannot be widened
- *  to hold a name nobody has typed yet. Importing into a custom object is not
- *  built, so this column really does hold one of three. */
-export const entityTypeEnum = pgEnum('rawr_entity_type', ['company', 'contact', 'deal'])
-
 /** Twenty types, reduced from HubSpot's 44-type filter set to what
  *  Rawr will actually produce. Grouped in the order the timeline filter shows them. */
 export const activityTypeEnum = pgEnum('rawr_activity_type', [

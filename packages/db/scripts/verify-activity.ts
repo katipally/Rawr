@@ -634,7 +634,8 @@ try {
   // -------------------------------------------------------------------------
   section('event definitions and the funnel')
 
-  // Blocked until 0073 is applied: custom_event_def does not exist before it.
+  // The collector registers a name the moment it first sees it, so this reads
+  // back a definition nobody typed.
   const defs = await listEventDefs(datasaur, { search: 'trial_started' })
   check(
     'a name the collector saw registers itself',

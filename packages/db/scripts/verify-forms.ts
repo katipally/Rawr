@@ -460,9 +460,9 @@ try {
   // ------------------------------------------------- folders, clone, counters
   section('folders, clone and the performance counters')
 
-  // Everything in this section reads columns and a function that 0075 adds. Until
-  // the orchestrator applies it these fail, and they are the checks that prove it
-  // landed.
+  // Folders, cloning and the submission counters: the counters are maintained by a
+  // database function rather than by the caller, so a clone and a submission both
+  // have to leave them right.
   const folderId = await saveFormFolder(admin, { name: `Campaigns ${stamp}` })
   check('a folder is created', /^[0-9a-f-]{36}$/i.test(folderId), folderId.slice(0, 8))
   check('two folders cannot share a name, whatever the case',
