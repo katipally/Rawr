@@ -1,4 +1,4 @@
-import { canView, canWrite, getRegistry } from '@rawr/db'
+import { canDo, canView, canWrite, getRegistry } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell.tsx'
@@ -138,11 +138,14 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       groups: [
         {
           label: 'Move data',
+          // Each of these is a critical grant of its own, held separately from the
+          // hub: a seat that may edit contacts is not thereby allowed to take the
+          // database out as a file or fold two records together.
           items: [
-            { href: importsPath(account), label: 'Import', match: `/contacts/${account}/import` },
-            { href: exportPath(account), label: 'Export' },
-            { href: duplicatesPath(account), label: 'Duplicates' },
-          ],
+            { href: importsPath(account), label: 'Import', match: `/contacts/${account}/import`, action: 'import' as const },
+            { href: exportPath(account), label: 'Export', action: 'export' as const },
+            { href: duplicatesPath(account), label: 'Duplicates', action: 'merge' as const },
+          ].flatMap(({ action, ...item }) => (canDo(ctx, action) ? [item] : [])),
         },
         {
           label: 'Configure',
@@ -178,7 +181,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   // already did.
   const nav: NavSection[] = sections.flatMap(({ hub, groups, ...section }) => {
     const kept = groups.flatMap(({ hub: groupHub, ...group }) =>
-      canView(ctx, groupHub ?? hub) ? [group] : [],
+      canView(ctx, groupHub ?? hub) && group.items.length > 0 ? [group] : [],
     )
     return kept.length ? [{ ...section, groups: kept }] : []
   })
@@ -211,13 +214,15 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       label: `Create ${inSentence(option.label)}`,
       keywords: ['new', 'add', option.label],
     })),
-    ...(canWrite(ctx, 'contact')
-      ? [
-          { href: importsPath(account), label: 'Import records', keywords: ['csv', 'upload', 'migrate'] },
-          { href: duplicatesPath(account), label: 'Find duplicates', keywords: ['merge', 'dedupe'] },
-        ]
+    ...(canWrite(ctx, 'contact') && canDo(ctx, 'import')
+      ? [{ href: importsPath(account), label: 'Import records', keywords: ['csv', 'upload', 'migrate'] }]
       : []),
-    { href: exportPath(account), label: 'Export to CSV', keywords: ['download', 'xlsx', 'spreadsheet'] },
+    ...(canWrite(ctx, 'contact') && canDo(ctx, 'merge')
+      ? [{ href: duplicatesPath(account), label: 'Find duplicates', keywords: ['merge', 'dedupe'] }]
+      : []),
+    ...(canDo(ctx, 'export')
+      ? [{ href: exportPath(account), label: 'Export to CSV', keywords: ['download', 'xlsx', 'spreadsheet'] }]
+      : []),
     { href: appsPath(), label: 'Connect an app', keywords: ['integration', 'gmail', 'slack', 'apollo'] },
     { href: agentAccessPath(), label: 'Connect an assistant', keywords: ['mcp', 'token', 'agent', 'claude'] },
   ]

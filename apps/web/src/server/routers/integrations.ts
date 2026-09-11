@@ -95,8 +95,6 @@ export const integrationsRouter = router({
     .input(z.object({ kind }))
     .mutation(({ ctx, input }) => call(() => disconnectIntegration(ctx.account, input.kind))),
 
-  /** A Rawr segment becomes a Brevo list. Nobody who has opted out is included,
-   *  and running it twice pushes each contact once. F6 §2. */
   /** B12. Brevo keeps the designer and the sending reputation; Rawr owns the
    *  audience, the opt-out, the schedule and the numbers. */
   brevoTemplates: protectedProcedure.query(({ ctx }) => call(() => listBrevoTemplates(ctx.account))),
@@ -135,6 +133,8 @@ export const integrationsRouter = router({
     .input(z.object({ campaignId: z.number().int().positive() }))
     .mutation(({ ctx, input }) => call(() => sendBrevoCampaign(ctx.account, input.campaignId))),
 
+  /** A Rawr segment becomes a Brevo list. Nobody who has opted out is included,
+   *  and running it twice pushes each contact once. F6 §2. */
   pushSegment: protectedProcedure
     // Optional, because the integration carries a configured list id and
     // pushSegmentToBrevo already falls back to it. Requiring one here made that
@@ -204,8 +204,6 @@ export const integrationsRouter = router({
     .input(z.object({ email: z.email() }))
     .query(({ input }) => apolloContactUrl(input.email)),
 
-  /** F6 §1's replay, for every job family rather than one. The idempotency key on
-   *  the outbound call is what makes replaying twice a no-op. */
   /** B12. Who is subscribed to what happens here.
    *
    *  On the integrations router rather than a new one: an endpoint is a connected
@@ -250,6 +248,8 @@ export const integrationsRouter = router({
       .mutation(({ ctx, input }) => call(() => removeWebhookEndpoint(ctx.account, input.id))),
   }),
 
+  /** F6 §1's replay, for every job family rather than one. The idempotency key on
+   *  the outbound call is what makes replaying twice a no-op. */
   replay: adminProcedure
     .input(z.object({ id: z.uuid() }))
     .mutation(({ ctx, input }) =>

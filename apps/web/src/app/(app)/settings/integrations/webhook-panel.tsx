@@ -149,9 +149,16 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
       ) : null}
 
       {rows.length === 0 ? (
+        // An endpoint is a standing copy of everything that happens here, so only
+        // the account hub may read one. Saying "nothing is subscribed" to somebody
+        // who is simply not allowed to look is the one wrong answer.
         <EmptyState
-          title="Nothing is subscribed"
-          description="An endpoint gets a signed POST whenever a record is created, a deal moves, a lifecycle stage changes or a form is filled."
+          title={canWrite ? 'Nothing is subscribed' : 'You need account access to see these'}
+          description={
+            canWrite
+              ? 'An endpoint gets a signed POST whenever a record is created, a deal moves, a lifecycle stage changes or a form is filled.'
+              : 'An endpoint is a standing copy of everything that happens in this account, sent somewhere Rawr does not control, so only an admin reads the list.'
+          }
         />
       ) : (
         <ul className="flex flex-col rounded-panel border border-line bg-surface">

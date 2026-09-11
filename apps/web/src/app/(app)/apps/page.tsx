@@ -10,6 +10,7 @@ import { appPath } from '~/lib/links.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTable } from './apps-table.tsx'
+import { errorSummary } from './health.ts'
 import { AppsTabs } from './tabs.tsx'
 
 /** Connections home: what this company has connected, what is wrong with any of
@@ -58,6 +59,7 @@ const AppsPage = async () => {
               {attention.map((row) => {
                 const meta = metaFor(row.kind)
                 const personal = PERSONAL_KINDS.has(row.kind)
+                const reported = row.lastError ? errorSummary(row.lastError) : null
                 return (
                   <li key={row.kind} className="flex flex-wrap items-center gap-3 border-b border-divider px-4 py-3 last:border-b-0">
                     <span className="flex size-10 shrink-0 items-center justify-center rounded-hs bg-fill">
@@ -69,8 +71,16 @@ const AppsPage = async () => {
                         <Link href={appPath(row.kind)} className="font-medium text-link no-underline hover:underline">
                           {meta.name}
                         </Link>{' '}
-                        {row.lastError ?? 'is disconnected and is not being retried.'}
+                        {reported?.headline ?? 'is disconnected and is not being retried.'}
                       </span>
+                      {reported?.detail ? (
+                        <details className="text-small text-secondary">
+                          <summary className="cursor-pointer">What the provider answered</summary>
+                          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-hs bg-fill p-2">
+                            {reported.detail}
+                          </pre>
+                        </details>
+                      ) : null}
                     </span>
                     <LinkButton
                       href={personal ? connectPathFor(row.kind, session.accountSlug) : appPath(row.kind, 'settings')}

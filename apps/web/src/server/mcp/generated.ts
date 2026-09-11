@@ -103,8 +103,6 @@ export const sessionFor = (caller: {
   timezone: 'UTC',
 })
 
-const SKIPPED = new Set(['health', 'me'])
-
 const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
   const [group = '', ...rest] = path.split('.')
   const leaf = rest.join(' ')
@@ -157,5 +155,5 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
 export const GENERATED_TOOLS: ToolDefinition[] = Object.entries(
   appRouter._def.procedures as unknown as Record<string, Procedure>,
 )
-  .filter(([path, procedure]) => !SKIPPED.has(path) && procedure._def.type !== 'subscription')
+  .filter(([, procedure]) => procedure._def.type !== 'subscription')
   .map(([path, procedure]) => generatedTool(path, procedure))

@@ -488,7 +488,21 @@ export const once = async <T>(
   if (existing) return { fresh: false, response: existing.response as T }
 
   const response = await run()
+  await recordOutboundCall(ctx, { ...input, response })
 
+  return { fresh: true, response }
+}
+
+/** One row in the outbound ledger, and the only writer of it. Every provider call
+ *  lands here, claimed under an idempotency key or not, which is what makes the
+ *  "Calls out" panel a record of what Rawr did rather than of the two providers
+ *  that happen to claim their calls.
+ *
+ *  O(1): one insert, and a key already taken is left alone rather than raising. */
+export const recordOutboundCall = async (
+  ctx: AccountContext,
+  input: { key: string; operation: string; integrationId?: string | null; response?: unknown },
+): Promise<void> => {
   await withAccount(ctx, async (tx) => {
     await tx
       .insert(outboundCall)
@@ -497,12 +511,10 @@ export const once = async <T>(
         integrationId: input.integrationId ?? null,
         idempotencyKey: input.key,
         operation: input.operation,
-        response: (response ?? null) as never,
+        response: (input.response ?? null) as never,
       })
       .onConflictDoNothing()
   })
-
-  return { fresh: true, response }
 }
 
 /** Inbound deduplication, the mirror of `once`. Returns false when this event has

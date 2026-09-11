@@ -6,32 +6,20 @@ import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
-export type OrderedRow = { id: string; name: string; detail: string; usedBy: number }
+type Stage = { id: string; name: string; detail: string; usedBy: number }
 
-export type OrderedListProps = {
-  rows: OrderedRow[]
-  canWrite: boolean
-  hub: string
-  noun: string
-  /** Which router this list edits. Only lifecycle uses it today; naming it keeps
-   *  the component honest rather than pretending to be generic. */
-  namespace: 'lifecycle'
-}
-
-/** An ordered, named list where deleting one entry means deciding where its records
- *  go. The same shape as a pipeline stage, without the probability. */
-export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedListProps) => {
-  // noun reads mid-sentence ("New lifecycle stage"); Noun starts a sentence.
-  const Noun = `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`
+/** The lifecycle list: ordered, named, and deleting one entry means deciding where
+ *  its records go. The same shape as a pipeline stage, without the probability. */
+export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean }) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState('')
-  const [removing, setRemoving] = useState<OrderedRow | null>(null)
-  const [renaming, setRenaming] = useState<OrderedRow | null>(null)
+  const [removing, setRemoving] = useState<Stage | null>(null)
+  const [renaming, setRenaming] = useState<Stage | null>(null)
   const [destination, setDestination] = useState('')
 
-  const routes = api.admin[namespace]
+  const routes = api.admin.lifecycle
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -61,7 +49,7 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
     return (
       <div className="flex flex-col gap-3">
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          You need {hub} access to change this.
+          You need account access to change this.
         </p>
         <ol className="flex flex-col rounded-panel border border-line bg-surface">
           {rows.map((row) => (
@@ -84,15 +72,15 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
         className="flex flex-wrap items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          void run(() => routes.create.mutate({ name: adding }), `${Noun} added.`).then(
+          void run(() => routes.create.mutate({ name: adding }), 'Lifecycle stage added.').then(
             (ok) => ok && setAdding(''),
           )
         }}
       >
-        <Field id="ordered-new" label={`New ${noun}`}>
-          <TextInput id="ordered-new" value={adding} onChange={(event) => setAdding(event.target.value)} />
+        <Field id="stage-new" label="New lifecycle stage">
+          <TextInput id="stage-new" value={adding} onChange={(event) => setAdding(event.target.value)} />
         </Field>
-        <Button variant="primary" busy={busy} disabled={!adding.trim()}>
+        <Button type="submit" variant="primary" busy={busy} disabled={!adding.trim()}>
           Add
         </Button>
       </form>
@@ -148,7 +136,7 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
       <RenamePrompt
         value={renaming?.name ?? null}
         title={`Rename ${renaming?.name ?? ''}`}
-        label={`${Noun} name`}
+        label="Lifecycle stage name"
         busy={busy}
         onCancel={() => setRenaming(null)}
         onRename={(name) => {
@@ -198,9 +186,9 @@ export const OrderedList = ({ rows, canWrite, hub, noun, namespace }: OrderedLis
                   to this. Leaving them pointing at nothing would read as "never had one", which is
                   a different thing, so pick where they go.
                 </p>
-                <Field id="ordered-destination" label="Move them to">
+                <Field id="stage-destination" label="Move them to">
                   <Select
-                    id="ordered-destination"
+                    id="stage-destination"
                     value={destination}
                     onChange={(event) => setDestination(event.target.value)}
                   >

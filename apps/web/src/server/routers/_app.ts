@@ -1,5 +1,5 @@
 import { listDeadLetters, signOutEverywhere } from '@rawr/db'
-import { adminProcedure, protectedProcedure, publicProcedure, router } from '../trpc.ts'
+import { adminProcedure, protectedProcedure, router } from '../trpc.ts'
 import { accountRouter } from './account.ts'
 import { adminRouter } from './admin.ts'
 import { analyticsRouter } from './analytics.ts'
@@ -26,17 +26,6 @@ export const appRouter = router({
   segments: segmentsRouter,
   sequences: sequencesRouter,
   reporting: reportingRouter,
-
-  health: publicProcedure.query(() => ({ ok: true as const })),
-
-  me: protectedProcedure.query(({ ctx }) => ({
-    email: ctx.session.email,
-    displayName: ctx.session.displayName,
-    isSuperAdmin: ctx.session.isSuperAdmin,
-    viewHubs: ctx.session.viewHubs,
-    editHubs: ctx.session.editHubs,
-    accountName: ctx.session.accountName,
-  })),
 
   account: accountRouter,
 

@@ -19,7 +19,7 @@ type Service = {
 }
 
 export type AccountPanelProps = {
-  me: { email: string; displayName: string; avatarUrl: string | null; userId: string }
+  me: { email: string; displayName: string; avatarUrl: string | null }
   accounts: { slug: string; name: string; joinedAt: string }[]
   admins: { name: string; email: string }[]
   timezone: string
@@ -49,7 +49,12 @@ const Panel = ({ title, children }: { title: string; children: React.ReactNode }
   </section>
 )
 
-const ServiceRow = ({ name, service, what }: { name: string; service: Service; what: string }) => {
+const ServiceRow = ({
+  name,
+  service,
+  what,
+  needs,
+}: { name: string; service: Service; what: string; needs: string }) => {
   const connected = service.state !== null
   const healthy = service.state === 'connected' || service.state === 'active'
   return (
@@ -76,7 +81,7 @@ const ServiceRow = ({ name, service, what }: { name: string; service: Service; w
             {connected ? 'Reconnect' : 'Connect'}
           </a>
         ) : (
-          <span className="text-small text-secondary">Needs a Google Cloud project with Gmail enabled.</span>
+          <span className="text-small text-secondary">{needs}</span>
         )}
         <Link href={service.managePath} className="inline-flex min-h-8 items-center">
           Manage
@@ -225,8 +230,18 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
       </Panel>
 
       <Panel title="Connected Google services">
-        <ServiceRow name="Gmail" service={gmail} what="Read only. Threads with people in this CRM appear on their records, so a successor can read the history." />
-        <ServiceRow name="Google Calendar" service={calendar} what="Free-busy for your booking pages, and the event a booking creates. Without it you are unavailable on every page." />
+        <ServiceRow
+          name="Gmail"
+          service={gmail}
+          what="Read only. Threads with people in this CRM appear on their records, so a successor can read the history."
+          needs="Needs a Google Cloud project with Gmail enabled."
+        />
+        <ServiceRow
+          name="Google Calendar"
+          service={calendar}
+          what="Free-busy for your booking pages, and the event a booking creates. Without it you are unavailable on every page."
+          needs="Needs a Google Cloud project with Calendar enabled, and a key to encrypt the grant with."
+        />
       </Panel>
 
       <Panel title="Assistants and sessions">

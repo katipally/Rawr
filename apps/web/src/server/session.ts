@@ -129,15 +129,10 @@ export const contextFrom = (session: Session): AccountContext => ({
   criticalGrants: session.criticalGrants,
 })
 
-/** The same two questions the data access layer asks, for screens deciding what to
+/** The same question the data access layer asks, for screens deciding what to
  *  render. Never the only gate: every write is checked again in the layer. */
 export const sessionCanEdit = (session: Session, hub: Hub): boolean =>
   session.isSuperAdmin || session.editHubs.includes(hub)
-
-/** The critical acts, for screens deciding whether to offer the button. Never the
- *  only gate: the data access layer asks the same question again. */
-export const sessionCanDo = (session: Session, action: CriticalAction): boolean =>
-  session.isSuperAdmin || session.criticalGrants.includes(action)
 
 /** Holds the account hub: may act on rows that are somebody else's, and open the
  *  settings that shape the account. */

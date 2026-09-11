@@ -8,7 +8,7 @@ import { AppLogo } from '~/components/app-logo.tsx'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { appPath } from '~/lib/links.ts'
 import { AppActions } from './app-actions.tsx'
-import { HEALTH } from './health.ts'
+import { HEALTH, errorSummary } from './health.ts'
 import { useZone } from '~/components/zone.tsx'
 
 export type AppRow = {
@@ -60,8 +60,10 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
       header: 'Status',
       width: 160,
       render: (row) => (
-        <span title={row.lastError ?? undefined}>
-          <Badge tone={HEALTH[row.state].tone} dot>
+        <span title={row.lastError ? errorSummary(row.lastError).headline : undefined}>
+          {/*  The label wraps rather than truncating: "Needs attention" read as
+               "Needs atten..." in a narrowed column. */}
+          <Badge tone={HEALTH[row.state].tone} dot className="[&>span]:whitespace-normal">
             {HEALTH[row.state].label}
           </Badge>
         </span>

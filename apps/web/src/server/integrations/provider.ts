@@ -1,4 +1,5 @@
-import { recordDeadLetter, type IntegrationKind, type AccountContext } from '@rawr/db'
+import { randomUUID } from 'node:crypto'
+import { recordDeadLetter, recordOutboundCall, type IntegrationKind, type AccountContext } from '@rawr/db'
 
 /** The half of F6 §1 that is about talking to somebody else's server.
  *
@@ -34,6 +35,9 @@ export type AttemptOptions = {
   payload: Record<string, unknown>
   /** Total tries, not retries. Finite by construction: F6 §1 forbids a loop. */
   attempts?: number
+  /** Set where the caller already wrapped this in `once`, which ledgers the call
+   *  itself. Without it one HTTP request would be counted twice. */
+  claimed?: boolean
 }
 
 const BASE_DELAY_MS = 500
@@ -48,7 +52,20 @@ export const attempt = async <T>(options: AttemptOptions, run: () => Promise<T>)
 
   for (let n = 1; n <= total; n++) {
     try {
-      return await run()
+      const answer = await run()
+      if (!options.claimed) {
+        // The ledger the Insights panel counts. A random key because this is a
+        // record of a call that was made, not a claim on one: a derived key would
+        // collapse two real enrichments of the same contact into one row.
+        await recordOutboundCall(options.ctx, {
+          key: `${options.jobName}:${randomUUID()}`,
+          operation: options.jobName,
+        }).catch(() => {
+          // The call itself succeeded. Losing its ledger row is not worth failing
+          // the work that provoked it.
+        })
+      }
+      return answer
     } catch (cause) {
       last = cause
       // A rejected credential does not improve with waiting. Fail out now so the

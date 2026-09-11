@@ -65,7 +65,6 @@ jobs:
           AUTH_URL=http://localhost:3000
           GOOGLE_HOSTED_DOMAIN=${{ secrets.GOOGLE_HOSTED_DOMAIN }}
           TOKEN_ENCRYPTION_KEY=${{ secrets.TOKEN_ENCRYPTION_KEY }}
-          RAWR_DEV_LOGIN=1
           RAWR_DEV_CALENDAR=1
           RAWR_DEV_GMAIL=1
           RAWR_DEV_INTEGRATIONS=1

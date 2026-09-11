@@ -17,7 +17,7 @@ const AuditPage = async ({
     return (
       <EmptyState
         title="Only an admin can read the history"
-        description={`You need account access, which you do not have. can use this account but not audit it. A history is a security record.`}
+        description="You need account access, which you do not have. You can use this account but not audit it. A history is a security record."
       />
     )
   }

@@ -101,7 +101,7 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
               </span>
             </span>
           </label>
-          <Button variant="primary" busy={busy} disabled={!name.trim()}>
+          <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
             Create
           </Button>
         </form>

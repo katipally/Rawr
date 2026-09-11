@@ -362,7 +362,8 @@ export const accountPath = (): string => '/settings/account'
 
 export const failedJobsPath = (): string => '/settings/jobs'
 
-/** The company above this account: its accounts, its seats, its history. */
+/** The account itself: its name, the domain it trusts, what a domain joiner
+ *  arrives holding, its seats and how long raw activity is kept. */
 export const defaultsPath = (): string => '/settings/defaults'
 
 export const teamsPath = (): string => '/settings/teams'

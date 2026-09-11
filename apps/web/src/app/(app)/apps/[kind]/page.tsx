@@ -12,7 +12,7 @@ import { clayDegraded } from '~/server/integrations/clay.ts'
 import { connectPathFor, integrationTraffic, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppActions } from '../app-actions.tsx'
-import { HEALTH } from '../health.ts'
+import { HEALTH, errorSummary } from '../health.ts'
 import { ConnectForm } from './connect-form.tsx'
 
 const TABS: AppTab[] = ['overview', 'settings', 'insights']
@@ -81,6 +81,7 @@ const AppPage = async ({
   const traffic = tab === 'insights' ? await integrationTraffic(ctx, row.kind, row.id) : null
   // Said on every tab of the card, not only when somebody presses Test: on Launch
   // the connection is real and every enrichment through it still refuses.
+  const reported = row.lastError ? errorSummary(row.lastError) : null
   const clayLimit = row.kind === 'clay' ? clayDegraded(row.config as { tier?: 'launch' | 'growth' }) : null
   const connectPath = connectPathFor(row.kind, session.accountSlug)
   // The webhook URL names the account through a tracked site's key; the first
@@ -151,10 +152,18 @@ const AppPage = async ({
         }))}
       />
 
-      {row.lastError ? (
+      {reported ? (
         <Alert tone="warning">
-          {meta.name} last reported: {row.lastError}
+          {meta.name} last reported: {reported.headline}
           {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt.toISOString(), zone)})` : ''}
+          {reported.detail ? (
+            <details className="mt-1">
+              <summary className="cursor-pointer">What the provider answered</summary>
+              <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-hs bg-fill p-2 text-small">
+                {reported.detail}
+              </pre>
+            </details>
+          ) : null}
         </Alert>
       ) : null}
 

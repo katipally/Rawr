@@ -19,10 +19,7 @@ const DefaultsPage = async () => {
         title="Account defaults"
         lead={`Settings that apply to everyone in ${account.name}.`}
       />
-      <DefaultsPanel
-        account={{ ...account, defaultViewHubs: account.defaultViewHubs }}
-        canWrite={session.isSuperAdmin}
-      />
+      <DefaultsPanel account={account} canWrite={session.isSuperAdmin} />
     </div>
   )
 }

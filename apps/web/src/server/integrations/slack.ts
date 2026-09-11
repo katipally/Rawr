@@ -132,7 +132,7 @@ export const postToSlack = async (
     async () => {
       if (devIntegrationsEnabled) return { posted: true, dev: true }
 
-      await attempt({ ctx, kind: 'slack', jobName: input.jobName, payload: input.payload }, async () => {
+      await attempt({ ctx, kind: 'slack', jobName: input.jobName, payload: input.payload, claimed: true }, async () => {
         const target = creds.botToken ? 'https://slack.com/api/chat.postMessage' : creds.webhookUrl!
         const body = creds.botToken
           ? { ...input.body, channel: input.body.channel ?? creds.channel ?? undefined }

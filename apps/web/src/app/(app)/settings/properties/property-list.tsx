@@ -19,6 +19,9 @@ export type PropertyListProps = {
    *  conditional rule is written with the same control as every other filter. */
   filterFields: FilterField[]
   hub: string
+  /** Every mutation on this screen is `field_def`, which dal/context.ts gives to
+   *  the account hub alone. Rendering the controls for anybody else is four
+   *  buttons that can only ever answer with a red toast. */
   canWrite: boolean
 }
 
@@ -207,11 +210,6 @@ export const PropertyList = ({
     )
   }
 
-  /** Every mutation on this screen is `field_def`, which dal/context.ts gives to
-   *  the account hub alone. Rendering the controls for anybody else is four
-   *  buttons that can only ever answer with a red toast. */
-  const canEdit = canWrite
-
   /** A rename the server has been told about and has not been read back yet.
    *  Without it the list beside the table keeps the old name until the refresh
    *  lands, with the group just renamed selected and not in it. */
@@ -274,7 +272,7 @@ export const PropertyList = ({
         {groups.map((name) => (
           <div key={name} className="flex items-center gap-0.5">
             <GroupLink label={name} count={countIn(name)} active={group === name} onPick={() => setGroup(name)} />
-            {canEdit ? (
+            {canWrite ? (
               <IconButton
                 label={`Rename ${name}`}
                 icon={<ACTION_ICONS.edit size={14} />}
@@ -294,7 +292,7 @@ export const PropertyList = ({
             onPick={() => setGroup('ungrouped')}
           />
         ) : null}
-        {canEdit ? (
+        {canWrite ? (
           <Button
             variant="tertiary"
             className="mt-1 w-full"
@@ -337,7 +335,7 @@ export const PropertyList = ({
 
       {/* A group is made by putting properties in it, which is also how one is
           renamed away: there is nowhere else the name is kept. */}
-      {canEdit && picked.size > 0 ? (
+      {canWrite && picked.size > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-hs border border-line bg-fill px-3 py-2">
           <span className="min-w-0 flex-1 tabular-nums">
             {picked.size.toLocaleString()} selected
@@ -387,7 +385,7 @@ export const PropertyList = ({
             key={field.id}
             className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
           >
-            {canEdit ? (
+            {canWrite ? (
               <input
                 type="checkbox"
                 aria-label={`Select ${field.label}`}
@@ -443,7 +441,7 @@ export const PropertyList = ({
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
-              {!canEdit ? null : (
+              {!canWrite ? null : (
                 <>
               {filtered ? null : (
                 <>
@@ -528,7 +526,7 @@ export const PropertyList = ({
                   <code className="text-small text-secondary">{field.key}</code>
                 </span>
                 <span className="flex shrink-0 items-center gap-0.5">
-                  {canEdit ? (
+                  {canWrite ? (
                   <IconButton
                     label={`Restore ${field.label}`}
                     icon={<ACTION_ICONS.restore size={16} />}
@@ -538,7 +536,7 @@ export const PropertyList = ({
                     }
                   />
                   ) : null}
-                  {canEdit ? (
+                  {canWrite ? (
                     <IconButton
                       label={`Purge ${field.label} from every record`}
                       tone="destructive"

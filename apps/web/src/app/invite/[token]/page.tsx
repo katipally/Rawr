@@ -75,13 +75,8 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
       <div className="rounded-panel border border-line bg-surface p-4">
         <h2 className="text-base font-medium">You have been invited to {offer.accountName}</h2>
         <p className="mt-1 text-secondary">
-          The invitation is for <strong className="text-body">{offer.email}</strong>
-          {offer.accountName ? (
-            <>
-              , with a seat in <strong className="text-body">{offer.accountName}</strong>
-            </>
-          ) : null}
-          . Sign in with that Google account to accept it.
+          The invitation is for <strong className="text-body">{offer.email}</strong>. Sign in with
+          that Google account to accept it.
         </p>
         <Link
           href={`/api/auth/invite/${token}`}

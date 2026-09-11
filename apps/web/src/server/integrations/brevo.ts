@@ -139,6 +139,7 @@ export const pushSegmentToBrevo = async (
           kind: 'brevo',
           jobName: 'brevo.import_contacts',
           payload: { segmentId: input.segmentId, listId, count: mailable.length },
+          claimed: true,
         },
         () =>
           json<{ processId?: number }>({
@@ -441,7 +442,7 @@ export const scheduleBrevoCampaign = async (
 
   const outcome = await once(ctx, { key, operation: 'brevo.create_campaign', integrationId: id }, () =>
     attempt(
-      { ctx, kind: 'brevo', jobName: 'brevo.create_campaign', payload: { listId: input.listId, name: input.name } },
+      { ctx, kind: 'brevo', jobName: 'brevo.create_campaign', payload: { listId: input.listId, name: input.name }, claimed: true },
       () =>
         json<{ id?: number }>({
           url: `${API}/emailCampaigns`,
@@ -471,7 +472,7 @@ export const sendBrevoCampaign = async (ctx: AccountContext, campaignId: number)
   if (devIntegrationsEnabled) return
   const { secret, id } = await credentials(ctx)
   await once(ctx, { key: `brevo:send:${campaignId}`, operation: 'brevo.send_campaign', integrationId: id }, () =>
-    attempt({ ctx, kind: 'brevo', jobName: 'brevo.send_campaign', payload: { campaignId } }, () =>
+    attempt({ ctx, kind: 'brevo', jobName: 'brevo.send_campaign', payload: { campaignId }, claimed: true }, () =>
       json<null>({
         url: `${API}/emailCampaigns/${campaignId}/sendNow`,
         method: 'POST',

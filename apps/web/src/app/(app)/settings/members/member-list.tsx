@@ -297,7 +297,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
-  const [ending, setEnding] = useState<{ userId: string; name: string } | null>(null)
+  const [ending, setEnding] = useState<{ userId: string; name: string; kind: 'deactivate' | 'remove' } | null>(null)
   const [busy, setBusy] = useState(false)
   /** What a member looks like after a change this browser has made but the server
    *  has not sent back yet. router.refresh takes a round trip, and a permission
@@ -451,7 +451,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                       : {
                           key: 'deactivate',
                           label: 'End access',
-                          onSelect: () => setEnding({ userId: row.userId, name: row.name }),
+                          onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'deactivate' }),
                         },
                     {
                       key: 'copy',
@@ -461,8 +461,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                     {
                       key: 'remove',
                       label: 'Remove from account',
-                      onSelect: () =>
-                        run(() => api.account.members.remove.mutate({ userId: row.userId }), 'Removed.'),
+                      onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'remove' }),
                     },
                   ] }]}
                 />
@@ -574,7 +573,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                 disabled={busy || copying.fromUserId === ''}
                 onClick={() => {
                   const source = members.find((row) => row.userId === copying.fromUserId)
-                  run(
+                  void run(
                     async () => {
                       await api.account.members.copyGrants.mutate({
                         fromUserId: copying.fromUserId,
@@ -594,12 +593,17 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
         ) : null}
       </Modal>
 
-      {/* Ending access is the one action here that logs somebody out of their work,
-          so it is confirmed like every other destructive action in Rawr. */}
+      {/* Both actions here take somebody's access away, so both are confirmed like
+          every other destructive action in Rawr. Removing is the one that cannot be
+          undone: the seat and its grants are deleted rather than suspended. */}
       <Modal
         open={ending !== null}
         onClose={() => setEnding(null)}
-        title={`End access for ${ending?.name ?? ''}?`}
+        title={
+          ending?.kind === 'remove'
+            ? `Remove ${ending.name} from this account?`
+            : `End access for ${ending?.name ?? ''}?`
+        }
         size="sm"
         footer={
           <>
@@ -612,21 +616,34 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               onClick={() => {
                 const target = ending!
                 setEnding(null)
-                run(() => api.account.members.deactivate.mutate({ userId: target.userId }), 'Access ended.', {
+                if (target.kind === 'remove') {
+                  void run(() => api.account.members.remove.mutate({ userId: target.userId }), 'Removed.')
+                  return
+                }
+                void run(() => api.account.members.deactivate.mutate({ userId: target.userId }), 'Access ended.', {
                   userId: target.userId,
                   patch: { state: 'deactivated' },
                 })
               }}
             >
-              End access
+              {ending?.kind === 'remove' ? 'Remove' : 'End access'}
             </Button>
           </>
         }
       >
-        <p>
-          They are signed out and cannot get back in. Their records, notes and emails stay where
-          they are, and restoring access puts back exactly what they held.
-        </p>
+        {ending?.kind === 'remove' ? (
+          <p>
+            Their seat and everything it granted go, and nothing puts them back except a new
+            invitation with the permissions typed again. Their records, notes and emails stay where
+            they are. Ending access instead keeps the seat, so restoring it puts back exactly what
+            they held.
+          </p>
+        ) : (
+          <p>
+            They are signed out and cannot get back in. Their records, notes and emails stay where
+            they are, and restoring access puts back exactly what they held.
+          </p>
+        )}
       </Modal>
 
       {/* The link is shown once and stored nowhere, so a lost one is resent rather

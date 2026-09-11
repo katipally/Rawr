@@ -110,10 +110,6 @@ const automationSteps = z
   .min(1)
   .max(20)
 
-/** Where one of the three is genuinely required. An automation's triggers are
- *  record created, stage changed, lifecycle changed and form submitted — all
- *  four are things that only happen to a core object, and its run log names an
- *  entity type that is an enum of exactly them. */
 const name = z.string().trim().min(1).max(120)
 const fieldType = z.enum(FIELD_TYPES as unknown as [string, ...string[]])
 

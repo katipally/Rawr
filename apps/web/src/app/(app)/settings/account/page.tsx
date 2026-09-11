@@ -31,7 +31,6 @@ const AccountPage = async () => {
         email: session.email,
         displayName: session.displayName,
         avatarUrl: session.avatarUrl,
-        userId: session.userId,
       }}
       accounts={mine.map((m) => ({ slug: m.accountSlug, name: m.accountName, joinedAt: m.joinedAt.toISOString() }))}
       admins={members.filter((m) => m.isSuperAdmin && m.userId !== session.userId).map((m) => ({ name: m.name, email: m.email }))}

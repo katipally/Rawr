@@ -92,7 +92,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
             placeholder="Enterprise"
           />
         </Field>
-        <Button variant="primary" busy={busy} disabled={!newPipeline.trim()}>
+        <Button type="submit" variant="primary" busy={busy} disabled={!newPipeline.trim()}>
           Create pipeline
         </Button>
       </form>
@@ -218,10 +218,10 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                     onChange={(event) => setStageProbability(event.target.value)}
                   />
                 </Field>
-                <Button variant="primary" busy={busy} disabled={!stageName.trim()}>
+                <Button type="submit" variant="primary" busy={busy} disabled={!stageName.trim()}>
                   Add stage
                 </Button>
-                <Button variant="tertiary" onClick={() => setAddingTo(null)}>
+                <Button variant="tertiary" type="button" onClick={() => setAddingTo(null)}>
                   Cancel
                 </Button>
               </form>
