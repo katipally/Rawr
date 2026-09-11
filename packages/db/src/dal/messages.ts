@@ -12,7 +12,10 @@ import {
 import { company, contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
+import { sequenceEnrollment } from '../schema/sequences.ts'
 import { detectReply, isDeliveryReport } from './sequences.ts'
+import { nextSendAt, type SendWindow } from './sequence-rules.ts'
+import { resolveNotifications } from './notifications.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import { employerDomainFromEmail, registrableDomain } from './domains.ts'
@@ -54,6 +57,9 @@ export type MailboxRow = {
   canSend: boolean
   dailyCap: number
   minGapSeconds: number
+  /** This mailbox's own sending window, which overrides the sequence's when set.
+   *  Null means every sequence sending from here keeps its own. */
+  sendWindow: SendWindow | null
   /** Whether the owner asked to be told when a mail they sent is opened. */
   alertOnOpen: boolean
 }
@@ -71,6 +77,7 @@ export const listMailboxes = async (ctx: AccountContext): Promise<MailboxRow[]> 
         canSend: mailbox.canSend,
         dailyCap: mailbox.dailyCap,
         minGapSeconds: mailbox.minGapSeconds,
+        sendWindow: mailbox.sendWindow,
         alertOnOpen: mailbox.alertOnOpen,
         historyId: mailbox.historyId,
         accessToken: mailbox.accessToken,
@@ -145,6 +152,10 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
       })
       .returning({ id: mailbox.id })
     if (!saved) throw new Error('The mailbox could not be stored.')
+
+    // The withdrawal notice was true until this moment. A stored row does not
+    // heal itself, so the reconnect that makes it false says so.
+    await resolveNotifications(tx, ctx, `mailbox_revoked:${saved.id}`)
 
     return {
       result: { id: saved.id },
@@ -1490,6 +1501,95 @@ export const setMailboxOpenAlert = async (
       },
     }
   })
+
+/** What this mailbox will send and how fast: the day's allowance, the pause
+ *  between two sends, and a window that overrides whatever window the sequence
+ *  carries. Theirs to set, or an admin's, the same test visibility uses.
+ *
+ *  A null window hands the decision back to each sequence. */
+export const setMailboxSending = async (
+  ctx: AccountContext,
+  input: { mailboxId: string; dailyCap: number; minGapSeconds: number; sendWindow: SendWindow | null },
+): Promise<void> =>
+  mutate(ctx, 'mailbox', async (tx) => {
+    const [box] = await tx
+      .select({
+        userId: mailbox.userId,
+        dailyCap: mailbox.dailyCap,
+        minGapSeconds: mailbox.minGapSeconds,
+        sendWindow: mailbox.sendWindow,
+      })
+      .from(mailbox)
+      .where(eq(mailbox.id, input.mailboxId))
+    if (!box) throw new Error('That mailbox is not in this account.')
+    if (box.userId !== ctx.actorId && !isAdmin(ctx)) {
+      throw new Error('That is somebody else\'s mailbox. Only they or an admin can change what it sends.')
+    }
+
+    await tx
+      .update(mailbox)
+      .set({ dailyCap: input.dailyCap, minGapSeconds: input.minGapSeconds, sendWindow: input.sendWindow })
+      .where(eq(mailbox.id, input.mailboxId))
+
+    if (JSON.stringify(box.sendWindow) !== JSON.stringify(input.sendWindow)) {
+      await resnapMailboxWaiting(tx, input.mailboxId)
+    }
+
+    return {
+      result: undefined,
+      audit: {
+        entity: 'mailbox',
+        entityId: input.mailboxId,
+        action: 'set_sending',
+        before: { dailyCap: box.dailyCap, minGapSeconds: box.minGapSeconds, sendWindow: box.sendWindow },
+        after: { dailyCap: input.dailyCap, minGapSeconds: input.minGapSeconds, sendWindow: input.sendWindow },
+      },
+    }
+  })
+
+/** A waiting enrollment already has the instant it will run at, chosen under the
+ *  old window. Changing the window without moving those leaves them queued for a
+ *  time the mailbox no longer sends at, so each is asked again.
+ *
+ *  O(waiting enrollments on this mailbox), and only when the window actually
+ *  changed. Anything leased is left alone: the sender owns it until the lease ends
+ *  and will read the new window on its next pass. */
+const resnapMailboxWaiting = async (tx: Tx, mailboxId: string): Promise<void> => {
+  const rows = await tx.execute<{
+    id: string
+    next_run_at: Date
+    since: Date
+    delay_days: number
+    delay_hours: number
+    window: SendWindow | null
+  }>(sql`
+    select e.id, e.next_run_at,
+           coalesce(e.last_sent_at, e.created_at) as since,
+           coalesce(st.delay_days, 0) as delay_days,
+           coalesce(st.delay_hours, 0) as delay_hours,
+           coalesce(m.send_window, s.settings -> 'sendWindow') as window
+      from sequence_enrollment e
+      join sequence s on s.id = e.sequence_id
+      join mailbox m on m.id = e.mailbox_id
+      left join sequence_step st
+        on st.sequence_id = e.sequence_id and st.position = e.current_step
+     where e.mailbox_id = ${mailboxId}::uuid
+       and e.state = 'active'
+       and e.lease_until is null
+       and e.next_run_at is not null`)
+
+  for (const row of rows) {
+    if (!row.window) continue
+    const next = nextSendAt({
+      after: new Date(row.since),
+      delayDays: Number(row.delay_days),
+      delayHours: Number(row.delay_hours),
+      window: row.window,
+    })
+    if (next.getTime() === new Date(row.next_run_at).getTime()) continue
+    await tx.update(sequenceEnrollment).set({ nextRunAt: next }).where(eq(sequenceEnrollment.id, row.id))
+  }
+}
 
 /** Puts a contact on the mail they were already on.
  *

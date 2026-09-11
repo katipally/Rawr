@@ -85,6 +85,7 @@ export const sequencesRouter = router({
               delayDays: z.number().int().min(0).max(365),
               delayHours: z.number().int().min(0).max(23),
               subject: z.string().max(300).nullable().optional(),
+              subjectB: z.string().max(300).nullable().optional(),
               bodyHtml: z.string().max(100_000).nullable().optional(),
               bodyText: z.string().max(100_000).nullable().optional(),
               taskTitle: z.string().max(300).nullable().optional(),

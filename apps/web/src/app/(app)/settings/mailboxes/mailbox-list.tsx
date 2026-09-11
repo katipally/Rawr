@@ -1,9 +1,9 @@
 'use client'
 
-import { Alert, Badge, Button, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Checkbox, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import type { BlocklistRow, MailboxState } from '@rawr/db'
+import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
@@ -24,6 +24,8 @@ export type MailboxSummary = {
   visibility: 'team' | 'private'
   canSend: boolean
   dailyCap: number
+  minGapSeconds: number
+  sendWindow: SendWindow | null
   alertOnOpen: boolean
   /** How much of what this mailbox read has had its body stored. */
   pendingBodies: number
@@ -66,6 +68,168 @@ const STATE_COPY: Record<MailboxState, { label: string; tone: 'ok' | 'warn' | 'e
   },
   error: { label: 'Not syncing', tone: 'error', hint: 'The last pass failed. The reason is below.' },
   paused: { label: 'Paused', tone: 'warn', hint: 'Reading is stopped on purpose. Existing history stays.' },
+}
+
+const DAYS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 7, label: 'Sun' },
+]
+
+const DEFAULT_WINDOW: SendWindow = { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', timezone: 'UTC' }
+
+/** Every zone this runtime knows, with the saved one guaranteed to be among them:
+ *  `supportedValuesOf` omits UTC in several runtimes, and a select whose value
+ *  matches no option silently displays the first, so Save would move the window
+ *  to a zone nobody chose. */
+const timezones = (current: string): string[] => {
+  const known = Intl.supportedValuesOf?.('timeZone') ?? []
+  const all = known.length > 0 ? known : ['UTC']
+  return all.includes(current) ? all : [current, ...all]
+}
+
+/** The three columns the sender actually reads: the day's allowance, the pause
+ *  between two sends, and a window that overrides whatever window the sequence
+ *  carries. Until this existed the page reported the column defaults as though
+ *  somebody had chosen them. */
+const SendingLimits = ({
+  row,
+  busy,
+  onSave,
+}: {
+  row: MailboxSummary
+  busy: boolean
+  onSave: (input: { dailyCap: number; minGapSeconds: number; sendWindow: SendWindow | null }) => Promise<boolean>
+}) => {
+  const [cap, setCap] = useState(String(row.dailyCap))
+  const [gap, setGap] = useState(String(row.minGapSeconds))
+  const [hours, setWindow] = useState<SendWindow | null>(row.sendWindow)
+
+  const capNumber = Number(cap)
+  const gapNumber = Number(gap)
+  const valid =
+    Number.isInteger(capNumber) &&
+    capNumber >= 1 &&
+    capNumber <= 2000 &&
+    Number.isInteger(gapNumber) &&
+    gapNumber >= 0 &&
+    (hours === null || (hours.days.length > 0 && hours.start < hours.end))
+
+  return (
+    <details className="w-full max-w-md">
+      <summary className="cursor-pointer text-small">Sending limits</summary>
+      <form
+        className="mt-2 flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void onSave({ dailyCap: capNumber, minGapSeconds: gapNumber, sendWindow: hours })
+        }}
+      >
+        <div className="flex flex-wrap gap-3">
+          <Field id={`cap-${row.id}`} label="Most a day" hint="Sequence sends only. A mail written by hand never spends it.">
+            <TextInput
+              id={`cap-${row.id}`}
+              type="number"
+              min={1}
+              max={2000}
+              value={cap}
+              disabled={busy}
+              onChange={(event) => setCap(event.target.value)}
+            />
+          </Field>
+          <Field id={`gap-${row.id}`} label="Seconds between sends" hint="The pause that keeps a run looking like a person typing.">
+            <TextInput
+              id={`gap-${row.id}`}
+              type="number"
+              min={0}
+              max={86400}
+              value={gap}
+              disabled={busy}
+              onChange={(event) => setGap(event.target.value)}
+            />
+          </Field>
+        </div>
+
+        <Switch
+          label="Only send inside my own hours"
+          hint={
+            hours
+              ? 'These hours win over the window each sequence carries.'
+              : 'Each sequence keeps its own window.'
+          }
+          checked={hours !== null}
+          disabled={busy}
+          onChange={(event) => setWindow(event.target.checked ? (row.sendWindow ?? DEFAULT_WINDOW) : null)}
+        />
+
+        {hours ? (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-small font-medium">When this mailbox may send</legend>
+            <div className="flex flex-wrap gap-2">
+              {DAYS.map((day) => (
+                <Checkbox
+                  key={day.value}
+                  label={day.label}
+                  disabled={busy}
+                  checked={hours.days.includes(day.value)}
+                  onChange={(event) =>
+                    setWindow({
+                      ...hours,
+                      days: event.target.checked
+                        ? [...hours.days, day.value].sort()
+                        : hours.days.filter((value) => value !== day.value),
+                    })
+                  }
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Field id={`from-${row.id}`} label="From">
+                <TextInput
+                  id={`from-${row.id}`}
+                  type="time"
+                  value={hours.start}
+                  disabled={busy}
+                  onChange={(event) => setWindow({ ...hours, start: event.target.value })}
+                />
+              </Field>
+              <Field id={`to-${row.id}`} label="To">
+                <TextInput
+                  id={`to-${row.id}`}
+                  type="time"
+                  value={hours.end}
+                  disabled={busy}
+                  onChange={(event) => setWindow({ ...hours, end: event.target.value })}
+                />
+              </Field>
+              <Field id={`zone-${row.id}`} label="Timezone">
+                <Select
+                  id={`zone-${row.id}`}
+                  value={hours.timezone}
+                  disabled={busy}
+                  onChange={(event) => setWindow({ ...hours, timezone: event.target.value })}
+                >
+                  {timezones(hours.timezone).map((zone) => (
+                    <option key={zone} value={zone}>
+                      {zone}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          </fieldset>
+        ) : null}
+
+        <Button type="submit" variant="primary" busy={busy} disabled={!valid}>
+          Save sending limits
+        </Button>
+      </form>
+    </details>
+  )
 }
 
 export const MailboxList = ({
@@ -169,7 +333,10 @@ export const MailboxList = ({
                       </p>
                       <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
                         {row.canSend ? (
-                          <Badge tone="ok">Can send, up to {row.dailyCap} a day</Badge>
+                          <Badge tone="ok">
+                            Can send, up to {row.dailyCap.toLocaleString()} a day
+                            {row.sendWindow ? `, ${row.sendWindow.start} to ${row.sendWindow.end}` : ''}
+                          </Badge>
                         ) : (
                           <Badge>Reading only</Badge>
                         )}
@@ -235,6 +402,18 @@ export const MailboxList = ({
                             )
                           }
                         />
+                        {row.canSend ? (
+                          <SendingLimits
+                            row={row}
+                            busy={busy}
+                            onSave={(input) =>
+                              run(
+                                () => api.mail.setSending.mutate({ mailboxId: row.id, ...input }),
+                                'Saved. Anything already waiting has been moved into the new window.',
+                              )
+                            }
+                          />
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                         {isMine && googleReady && !row.standIn && !row.canSend ? (
                           <Button
@@ -318,7 +497,7 @@ export const MailboxList = ({
               <option value="account">Everybody</option>
             </Select>
           </Field>
-          <Button variant="primary" busy={busy} disabled={pattern.trim().length < 3}>
+          <Button type="submit" variant="primary" busy={busy} disabled={pattern.trim().length < 3}>
             Add
           </Button>
         </form>

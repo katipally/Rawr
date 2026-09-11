@@ -76,6 +76,10 @@ const runAction = async (
   event: AutomationEvent,
   action: AutomationAction,
   ruleId: string,
+  /** This firing, and where in the rule this step sits. Together they name one
+   *  thing that happened once, which is what an idempotency key has to be. */
+  runId: string,
+  path: StepPath,
   name: string,
 ): Promise<string> => {
   switch (action.type) {
@@ -121,10 +125,11 @@ const runAction = async (
       queueHostAlert({
         accountId: ctx.accountId,
         jobName: 'slack.automation',
-        // Keyed on the rule and the record, so a retry of the same firing posts
-        // once. A rule that fires twice for real carries two different records or
-        // two different stage moves, and each gets its own key.
-        idempotencyKey: `slack:automation:${ruleId}:${event.entityId}`,
+        // Keyed on the firing and the step, so a retry of the same resume posts
+        // once and a rule with two Slack steps posts both. Keyed on the rule and
+        // the record instead, the second time a deal reached Proposal was silent
+        // for ever, because the key had already been spent.
+        idempotencyKey: `slack:automation:${runId}:${path.join('.')}`,
         payload: { automationId: ruleId, entityId: event.entityId },
         text: `${message}\n<${publicBaseUrl}${link}|Open in Rawr>`,
         ...(text(action.config, 'channel') ? { channel: text(action.config, 'channel') } : {}),
@@ -340,7 +345,7 @@ const walkList = async (
       continue
     }
 
-    done.push(await runAction(ctx, event, step, rule.id, name))
+    done.push(await runAction(ctx, event, step, rule.id, runId, here, name))
   }
 
   return 'continue'
@@ -352,7 +357,7 @@ const walkList = async (
  *  and the dispatcher runs it from wherever a delay left it. A run that never
  *  waits does the whole tree in one pass, which is exactly what a rule did before
  *  delays existed. */
-export const walkSteps = async (
+const walkSteps = async (
   ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
@@ -516,7 +521,7 @@ export const reportEvent = (
 }
 
 /** Fire everything armed for this event. Never awaited by a request. */
-export const runAutomations = (ctx: AccountContext, event: AutomationEvent | undefined): void => {
+const runAutomations = (ctx: AccountContext, event: AutomationEvent | undefined): void => {
   if (!event) return
   inBackground(`automations for ${event.objectKey} ${event.entityId}`, async () => {
     const rules = await armedFor(ctx, event.trigger, event.objectKey)

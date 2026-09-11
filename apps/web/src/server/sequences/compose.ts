@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { sql } from 'drizzle-orm'
 import {
   directTracking,
   isAdmin,
@@ -6,9 +7,9 @@ import {
   internalDomainOf,
   isUuid,
   readMailbox,
-  readThread,
   recordDirectSend,
   trackingBase,
+  withAccount,
   type AccountContext,
 } from '@rawr/db'
 import { env } from '~/lib/env.ts'
@@ -63,14 +64,12 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   let providerThreadId: string | null = null
 
   if (input.threadId && isUuid(input.threadId)) {
-    const found = await readThread(ctx, input.threadId)
-    const last = found?.messages[found.messages.length - 1]
-    if (last) {
-      const [row] = await threadHeaders(ctx, input.threadId)
-      inReplyTo = row?.internetMessageId ?? null
-      references = row?.references ?? []
-      providerThreadId = row?.providerThreadId ?? null
-    }
+    // No row means the thread has no messages, which is the same answer as no
+    // thread: nothing to reply to.
+    const [row] = await threadHeaders(ctx, input.threadId)
+    inReplyTo = row?.internetMessageId ?? null
+    references = row?.references ?? []
+    providerThreadId = row?.providerThreadId ?? null
   }
 
   // Asked before the message is built, because whether it is tracked decides
@@ -151,8 +150,6 @@ const threadHeaders = async (
   ctx: AccountContext,
   threadId: string,
 ): Promise<{ internetMessageId: string | null; references: string[]; providerThreadId: string | null }[]> => {
-  const { withAccount } = await import('@rawr/db')
-  const { sql } = await import('drizzle-orm')
   return withAccount(ctx, (tx) =>
     tx.execute<{ internetMessageId: string | null; references: string[]; providerThreadId: string | null }>(sql`
       select m.internet_message_id as "internetMessageId",

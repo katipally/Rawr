@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, EmptyState, IconButton, Spinner, cn } from '@rawr/ui'
 import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr/db'
 import { formatDateTime } from '~/components/crm/value.tsx'
-import { mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
+import { failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useZone } from '~/components/zone.tsx'
 
@@ -39,6 +39,12 @@ const hrefFor = (row: Row, account: string): string | null => {
   if (row.kind === 'form_quarantined') return submissionsPath(account, { state: 'quarantined' })
   if (row.kind === 'form_submission') return submissionsPath(account)
   if (row.kind === 'mailbox_revoked') return mailboxesPath()
+  // Raised for one reason only: no mailbox in the account is connected for
+  // sending, so the meeting mail had nothing to go out through. It carries a
+  // booking as its entity, which is not a record page, and connecting a mailbox
+  // is the fix either way.
+  if (row.kind === 'integration_error') return mailboxesPath()
+  if (row.kind === 'dead_letter') return failedJobsPath()
   return null
 }
 

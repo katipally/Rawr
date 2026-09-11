@@ -12,6 +12,7 @@ import {
   removeBlocklistEntry,
   saveMailbox,
   setMailboxOpenAlert,
+  setMailboxSending,
   setMailboxVisibility,
   threadsForContact,
 } from '@rawr/db'
@@ -21,6 +22,25 @@ import { call } from '../errors.ts'
 import { hydrateMailboxBodies, syncMailbox } from '../gmail.ts'
 import { compose } from '../sequences/compose.ts'
 import { protectedProcedure, router } from '../trpc.ts'
+
+const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
+
+const sendWindowInput = z
+  .object({
+    days: z.array(z.number().int().min(1).max(7)).min(1).max(7),
+    start: z.string().regex(CLOCK),
+    end: z.string().regex(CLOCK),
+    timezone: z.string().min(1).max(64),
+  })
+  .refine((window) => window.start < window.end, 'The sending window has to end after it starts.')
+  .refine((window) => {
+    try {
+      new Intl.DateTimeFormat('en-GB', { timeZone: window.timezone })
+      return true
+    } catch {
+      return false
+    }
+  }, 'That is not a timezone this system knows.')
 
 /** Reading is open to anybody signed in, because a thread on a record is the
  *  record's history. Which threads that means is decided by the mailbox's own
@@ -65,6 +85,20 @@ export const mailRouter = router({
   setVisibility: protectedProcedure
     .input(z.object({ mailboxId: z.uuid(), visibility: z.enum(['team', 'private']) }))
     .mutation(({ ctx, input }) => call(() => setMailboxVisibility(ctx.account, input))),
+
+  /** What this mailbox sends and how fast. Validated here rather than in the
+   *  browser as well: a window that never opens would queue every enrollment on
+   *  it for ever. */
+  setSending: protectedProcedure
+    .input(
+      z.object({
+        mailboxId: z.uuid(),
+        dailyCap: z.number().int().min(1).max(2000),
+        minGapSeconds: z.number().int().min(0).max(86_400),
+        sendWindow: sendWindowInput.nullable(),
+      }),
+    )
+    .mutation(({ ctx, input }) => call(() => setMailboxSending(ctx.account, input))),
 
   /** Opt in, per mailbox, to a bell entry when a mail this mailbox sent is
    *  opened. One notice per message however many times the pixel is fetched. */

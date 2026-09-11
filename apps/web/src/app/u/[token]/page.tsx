@@ -25,27 +25,31 @@ const UnsubscribePage = async ({
   const { token } = await params
   const { done } = await searchParams
 
+  // Confirming clears the token this page looks a subscription up by, so the
+  // success screen is keyed on the redirect's own marker. Looking the token up
+  // again could only fail, and the failure read as "that link is not one we know"
+  // straight after a successful opt-in.
+  if (done === 'confirmed') {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
+        <div className="rounded-panel border border-line bg-surface p-4">
+          <h1 className="text-base font-medium">You are subscribed</h1>
+          <p className="mt-1 text-secondary">
+            Thank you for confirming. There is an unsubscribe link at the bottom of everything we
+            send, and it works the moment you use it.
+          </p>
+        </div>
+      </main>
+    )
+  }
+
   // Two kinds of link land here, both opaque and both from a mail: one asks to
   // stop, one asks to start. The token's own kind decides which, rather than a
   // query parameter somebody could flip.
   const confirmAccountId = await subscriptionAccountForToken(token)
   if (confirmAccountId) {
     const scope = { ...publicEdgeContext(confirmAccountId), actorKind: 'public' as const }
-    const subscription = done === '1' ? null : await confirmTarget(scope, token)
-
-    if (done === '1') {
-      return (
-        <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
-          <div className="rounded-panel border border-line bg-surface p-4">
-            <h1 className="text-base font-medium">You are subscribed</h1>
-            <p className="mt-1 text-secondary">
-              Thank you for confirming. There is an unsubscribe link at the bottom of everything we
-              send, and it works the moment you use it.
-            </p>
-          </div>
-        </main>
-      )
-    }
+    const subscription = await confirmTarget(scope, token)
 
     if (subscription) {
       return (

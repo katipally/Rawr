@@ -187,8 +187,8 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
             <a href={BREVO_APP} target="_blank" rel="noreferrer noopener">
               Open Brevo
             </a>
-            , go to Campaigns and pick {handoff.name}. Its recipients are already list {handoff.listId};
-            changing that there sends to somebody else.
+            , go to Campaigns and pick {handoff.name}. Its recipients are already list {handoff.listId}.
+            Changing that there sends to somebody else.
           </span>
         </Alert>
       ) : null}

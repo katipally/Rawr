@@ -367,6 +367,11 @@ const resnapWaiting = async (
        and e.lease_until is null
        and e.next_run_at is not null`)
 
+  // One statement for the whole sequence rather than one per enrollment: this runs
+  // inside the transaction that saves the settings, and a sequence with two
+  // thousand people waiting would otherwise hold it open for two thousand
+  // round trips.
+  const moved: { id: string; at: Date }[] = []
   for (const row of rows) {
     const next = nextSendAt({
       after: new Date(row.since),
@@ -375,8 +380,18 @@ const resnapWaiting = async (
       window: after,
     })
     if (next.getTime() === new Date(row.next_run_at).getTime()) continue
-    await tx.update(sequenceEnrollment).set({ nextRunAt: next }).where(eq(sequenceEnrollment.id, row.id))
+    moved.push({ id: row.id, at: next })
   }
+  if (moved.length === 0) return
+
+  await tx.execute(sql`
+    update sequence_enrollment e
+       set next_run_at = v.next_run_at
+      from (values ${sql.join(
+        moved.map((row) => sql`(${row.id}::uuid, ${row.at.toISOString()}::timestamptz)`),
+        sql`, `,
+      )}) as v(id, next_run_at)
+     where e.id = v.id`)
 }
 
 type SettingsPatch = {
@@ -630,10 +645,19 @@ export const enroll = async (
     const ids = [...new Set(contactIds)]
     if (ids.length === 0) return { result: [], audit: { entity: 'sequence_enrollment', entityId: input.sequenceId, action: 'enroll', after: { count: 0 } } }
 
+    // The label comes back with the row rather than from a call per contact: it is
+    // the same expression contactLabels uses, and the row is already being read.
     const people = await tx
-      .select({ id: contact.id, email: contact.email })
+      .select({
+        id: contact.id,
+        email: contact.email,
+        label: sql<string>`coalesce(nullif(trim(concat_ws(' ', ${contact.firstName}, ${contact.lastName})), ''), ${contact.email})`,
+      })
       .from(contact)
       .where(inArray(contact.id, ids))
+    // Keyed, because walking the list per id is O(N^2) over a selection that can
+    // be a whole company.
+    const byId = new Map(people.map((row) => [row.id, row]))
 
     // Everything that would refuse a contact, asked once for the whole batch
     // rather than once per contact: three statements, not three times N.
@@ -662,7 +686,7 @@ export const enroll = async (
     const outcomes: EnrollOutcome[] = []
 
     for (const id of ids) {
-      const person = people.find((row) => row.id === id)
+      const person = byId.get(id)
       if (!person) {
         outcomes.push({ contactId: id, enrolled: false, reason: 'That contact is not in this account.' })
         continue
@@ -708,7 +732,7 @@ export const enroll = async (
       await recordActivity(tx, ctx, {
         type: 'sequence_activity',
         subject: `was enrolled in ${found.name}`,
-        payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: await contactLabels(tx, [id]) },
+        payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: person.label },
         links: await linksForContacts(tx, [id]),
       })
       outcomes.push({ contactId: id, enrolled: true })

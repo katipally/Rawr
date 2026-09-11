@@ -4,11 +4,13 @@ import {
   failBody,
   ingestMessage,
   internalDomainOf,
+  notify,
   pendingBodies,
   readMailbox,
   recordMailboxFailure,
   storeBody,
   updateMailboxCursor,
+  withAccount,
   DEV_ACCESS_TOKEN,
   type IncomingAttachment,
   type IncomingMessage,
@@ -51,6 +53,32 @@ export class RevokedError extends Error {
     super(message)
     this.name = 'RevokedError'
   }
+}
+
+/** A grant Google has withdrawn, wherever it is found.
+ *
+ *  Every path that finds one has to mark the mailbox, not only the sync. A send or
+ *  a body fetch that leaves the row reading 'connected' is asked again on the next
+ *  tick, for ever, because the dispatchers select on that column.
+ *
+ *  And the owner is the only person who can grant it again, so they are told.
+ *  Keyed on the mailbox, so one withdrawal is one notice however many enrollments
+ *  and bodies run into it. */
+const recordRevocation = async (
+  ctx: AccountContext,
+  box: { id: string; userId: string; email: string },
+  message: string,
+): Promise<void> => {
+  await recordMailboxFailure(ctx, box.id, message, true)
+  await withAccount(ctx, (tx) =>
+    notify(tx, ctx, {
+      kind: 'mailbox_revoked',
+      dedupeKey: `mailbox_revoked:${box.id}`,
+      title: `${box.email} is no longer connected`,
+      body: 'Google withdrew Rawr’s access, so nothing is read or sent from it until you connect it again.',
+      to: { userIds: [box.userId] },
+    }),
+  )
 }
 
 /** Google's own signal that the grant is gone. Anything else is a transient error
@@ -197,7 +225,7 @@ const attachmentsOf = (payload: GmailPayload | undefined, into: IncomingAttachme
  *  In-Reply-To will carry and what a match compares against. */
 const messageIds = (raw: string): string[] => raw.match(/<[^>]+>/g) ?? []
 
-export const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
+const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
   const headers = raw.payload?.headers ?? []
   const from = parseAddresses(headerValue(headers, 'From'))[0]
   if (!raw.id || !raw.threadId || !from) return null
@@ -333,18 +361,27 @@ export const syncMailbox = async (
 
     return outcome
   } catch (cause) {
-    const revoked = cause instanceof RevokedError
-    await recordMailboxFailure(
-      ctx,
-      mailboxId,
-      cause instanceof Error ? cause.message : String(cause),
-      revoked,
-    )
+    const message = cause instanceof Error ? cause.message : String(cause)
+    if (cause instanceof RevokedError) await recordRevocation(ctx, box, message)
+    else await recordMailboxFailure(ctx, mailboxId, message, false)
     throw cause
   }
 }
 
 type Options = { internalDomain: string; blocked: Set<string> }
+
+/** One message, or null if Gmail no longer has it. A message can be deleted
+ *  between the list that named it and the read of it, and that 404 is one message
+ *  gone rather than a broken mailbox: the pass skips it and carries on. Only a 404
+ *  from history.list means the cursor aged out. */
+const fetchMessage = async (fetcher: Fetcher, id: string): Promise<GmailMessage | null> => {
+  try {
+    return (await fetcher(`/messages/${id}`, { format: 'full' })) as GmailMessage
+  } catch (cause) {
+    if ((cause as { status?: number }).status === 404) return null
+    throw cause
+  }
+}
 
 type Tally = { stored: number; alreadyHad: number; skipped: number }
 
@@ -382,8 +419,8 @@ const backfill = async (
   for (const stub of list.messages ?? []) {
     // One read, not two: metadata now and the body later cost two requests per
     // message against the same quota, and left every thread unreadable in between.
-    const raw = (await fetcher(`/messages/${stub.id}`, { format: 'full' })) as GmailMessage
-    const incoming = toIncoming(raw)
+    const raw = await fetchMessage(fetcher, stub.id)
+    const incoming = raw && toIncoming(raw)
     if (!incoming) {
       tally.skipped += 1
       continue
@@ -453,8 +490,8 @@ const incremental = async (
   for (const entry of history.history ?? []) {
     for (const added of entry.messagesAdded ?? []) {
       read += 1
-      const raw = (await fetcher(`/messages/${added.message.id}`, { format: 'full' })) as GmailMessage
-      const incoming = toIncoming(raw)
+      const raw = added.message.id ? await fetchMessage(fetcher, added.message.id) : null
+      const incoming = raw && toIncoming(raw)
       if (!incoming) {
         tally.skipped += 1
         continue
@@ -500,13 +537,18 @@ export const hydrateMailboxBodies = async (
 
   const { fetcher } = isDevMailbox(box)
     ? { fetcher: devFetcher(box.email, await internalDomainOf(ctx)) }
-    : await authorised(ctx, box.id, box)
+    : await guarding(ctx, box, () => authorised(ctx, box.id, box))
 
   let stored = 0
   let failed = 0
   for (const row of pending) {
     try {
-      const raw = (await fetcher(`/messages/${row.providerMessageId}`, { format: 'full' })) as GmailMessage
+      const raw = await fetchMessage(fetcher, row.providerMessageId)
+      if (!raw) {
+        await failBody(ctx, row.id, 'Gmail no longer has this message, so its body cannot be read.')
+        failed += 1
+        continue
+      }
       const found = { text: [] as string[], html: [] as string[] }
       collect(raw.payload as BodyPart | undefined, found)
       const text = found.text.length > 0 ? found.text.join('\n').trim() : htmlToText(found.html.join('\n'))
@@ -517,7 +559,10 @@ export const hydrateMailboxBodies = async (
       })
       stored += 1
     } catch (cause) {
-      if (cause instanceof RevokedError) throw cause
+      if (cause instanceof RevokedError) {
+        await recordRevocation(ctx, box, cause.message)
+        throw cause
+      }
       await failBody(ctx, row.id, cause instanceof Error ? cause.message : String(cause))
       failed += 1
     }
@@ -615,8 +660,25 @@ export const gmailFetcherFor = async (
     throw new RevokedError('Access to this mailbox has been withdrawn in the Google account.')
   }
   if (isDevMailbox(box)) return devFetcher(box.email, await internalDomainOf(ctx))
-  const { fetcher } = await authorised(ctx, box.id, box)
-  return fetcher
+  // Wrapped rather than handed back bare: the withdrawal usually surfaces on the
+  // call itself, long after this function returned, and the sequence dispatcher
+  // and the composer both go through here.
+  const { fetcher } = await guarding(ctx, box, () => authorised(ctx, box.id, box))
+  return (path, params, send) => guarding(ctx, box, () => fetcher(path, params, send))
+}
+
+/** Runs one Gmail call and records the mailbox as revoked if that is what it says. */
+const guarding = async <T>(
+  ctx: AccountContext,
+  box: { id: string; userId: string; email: string },
+  work: () => Promise<T>,
+): Promise<T> => {
+  try {
+    return await work()
+  } catch (cause) {
+    if (cause instanceof RevokedError) await recordRevocation(ctx, box, cause.message)
+    throw cause
+  }
 }
 
 

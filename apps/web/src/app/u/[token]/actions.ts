@@ -32,6 +32,8 @@ export const confirmAction = async (form: FormData): Promise<void> => {
   if (accountId) {
     await confirmSubscription({ ...publicEdgeContext(accountId), actorKind: 'public' }, token)
   }
-  // The same page either way, so this cannot be used to test tokens.
-  redirect(`/u/${encodeURIComponent(token)}?done=1`)
+  // The same page either way, so this cannot be used to test tokens. The marker
+  // says which answer to render, because the confirm has just cleared the token
+  // the page would otherwise look up.
+  redirect(`/u/${encodeURIComponent(token)}?done=confirmed`)
 }
