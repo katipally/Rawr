@@ -6,6 +6,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath, tasksPath } from '~/lib/links.ts'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 type Item = { key: string; label: string; detail: string | null; href: string }
 type Group = { label: string; items: Item[] }
@@ -29,20 +30,6 @@ const DEBOUNCE_MS = 180
 const MAX_PAGES = 8
 const MAX_ACTIONS = 5
 
-const RECENT_KEY = 'rawr.recent-search'
-const MAX_RECENT = 5
-
-const readRecent = (): Item[] => {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? '[]')
-    return Array.isArray(parsed)
-      ? parsed.filter((row): row is Item => typeof row?.href === 'string' && typeof row?.label === 'string')
-      : []
-  } catch {
-    // Private windows and blocked site data are normal, not an error.
-    return []
-  }
-}
 
 export const CommandPalette = ({
   account,
@@ -58,7 +45,13 @@ export const CommandPalette = ({
   const input = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
   const [groups, setGroups] = useState<Group[]>([])
-  const [recent, setRecent] = useState<Item[]>([])
+  // Where somebody went last, from the store the rest of this browser's
+  // preferences live in, so it is already right when the box opens rather than
+  // re-read on every focus and click.
+  const stored = useUi((state) => state.recent)
+  const remember = useUi((state) => state.remember)
+  const ready = useUiReady()
+  const recent: Item[] = ready ? stored.map((row) => ({ key: row.href, detail: null, ...row })) : []
   const [active, setActive] = useState(0)
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,9 +63,6 @@ export const CommandPalette = ({
         event.preventDefault()
         input.current?.focus()
         input.current?.select()
-        // Not only on focus: choosing a result closes the panel without blurring,
-        // so the box is often already focused and no focus event would fire.
-        setRecent(readRecent())
         setOpen(true)
       }
     }
@@ -194,13 +184,7 @@ export const CommandPalette = ({
     setOpen(false)
     setText('')
     setGroups([])
-    const next = [item, ...recent.filter((row) => row.href !== item.href)].slice(0, MAX_RECENT)
-    setRecent(next)
-    try {
-      window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
-    } catch {
-      // Nothing depends on this surviving the tab.
-    }
+    remember({ href: item.href, label: item.label })
     navigate(item.href)
   }
 
@@ -246,14 +230,10 @@ export const CommandPalette = ({
           setOpen(true)
         }}
         onFocus={() => {
-          setRecent(readRecent())
           setActive(0)
           setOpen(true)
         }}
-        onClick={() => {
-          setRecent(readRecent())
-          setOpen(true)
-        }}
+        onClick={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 120)}
         onKeyDown={onKeyDown}
         className="h-8 w-full min-w-0 rounded-pill border border-nav-line bg-nav pl-4 pr-10 text-nav-text placeholder:text-nav-text outline-none focus:border-nav-text"

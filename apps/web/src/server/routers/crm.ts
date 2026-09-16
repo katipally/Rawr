@@ -58,6 +58,8 @@ import {
   readTimeline,
   recordOptions,
   cancelImportRun,
+  unfinishedImportUploads,
+  UPLOAD_PART_BYTES,
   startImportRun,
   saveView,
   searchAll,
@@ -77,6 +79,7 @@ import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
+import { discardUpload, sealUpload, startUpload } from '../import-upload.ts'
 import { announceStageChange } from '../stage-alerts.ts'
 import { NOT_CONFIGURED, removeObject, signedDownload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
@@ -825,9 +828,50 @@ export const crmRouter = router({
       .input(z.object({ id: z.uuid() }))
       .query(({ ctx, input }) => call(() => readImportRun(ctx.account, input.id))),
 
-    /** The file arrives as its rows, a batch at a time, read in the browser. No
-     *  request carries the whole file, so nothing between the browser and here
-     *  can put a ceiling on how big it is. */
+    /** What is still half uploaded, so somebody coming back is offered the file
+     *  they left rather than having to remember it. */
+    unfinished: protectedProcedure.query(({ ctx }) =>
+      call(async () =>
+        (await unfinishedImportUploads(ctx.account)).map((run) => ({
+          id: run.id,
+          filename: run.filename,
+          fileBytes: run.fileBytes,
+          uploadedBytes: run.uploadedBytes,
+          /** The parts storage already holds, and the size it holds them in. The
+           *  browser decides neither: it sends what is missing, in the size the
+           *  run was started with. */
+          have: run.parts.map((part) => part.n),
+          partBytes: UPLOAD_PART_BYTES,
+        })),
+      ),
+    ),
+
+    /** The file goes to storage a part at a time and the server reads it. The
+     *  parts themselves go to /api/imports/part, which takes bytes; these three
+     *  are the bookkeeping either side of them. */
+    beginUpload: protectedProcedure
+      .input(
+        z.object({
+          // An object's key, or one of the five shape files the picker also offers.
+          what: z.string().min(1).max(64),
+          source: z.string().max(40).nullable(),
+          filename: z.string().trim().min(1).max(255),
+          fileBytes: z.number().int().positive(),
+        }),
+      )
+      .mutation(({ ctx, input }) => call(() => startUpload(ctx.account, input))),
+
+    finishUpload: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => sealUpload(ctx.account, input.id))),
+
+    /** Stopping an upload, and taking its half-sent file out of storage with it. */
+    discardUpload: protectedProcedure
+      .input(z.object({ id: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => discardUpload(ctx.account, input.id))),
+
+    /** The file arrives as its rows, a batch at a time, from a caller that already
+     *  holds them: a script, or a verify suite. The app uploads the file instead. */
     begin: protectedProcedure
       .input(
         z.object({

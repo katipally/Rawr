@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, sql, type SQL } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
 import { importRow, importRun } from '../schema/imports.ts'
 import { activityLink } from '../schema/records.ts'
 import {
@@ -116,7 +116,11 @@ export type ImportSummary = {
   objectType: string
   importKind: ImportKind
   source: string | null
-  state: 'uploading' | 'mapping' | 'previewing' | 'running' | 'done' | 'failed' | 'cancelled'
+  state: 'uploading' | 'parsing' | 'mapping' | 'previewing' | 'running' | 'done' | 'failed' | 'cancelled'
+  /** How much of the file has reached storage, against how big it is. Both zero
+   *  for a run whose rows were handed over directly, which has no file. */
+  uploadedBytes: number
+  fileBytes: number
   totalRows: number
   processedRows: number
   created: number
@@ -953,7 +957,7 @@ export const previewImportRun = async (ctx: AccountContext, id: string): Promise
       .limit(1),
   )
   if (!run) throw new Error('That import no longer exists.')
-  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+  if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
   if (run.state !== 'mapping' && run.state !== 'previewing') {
     throw new Error('That import has already been started, so there is nothing left to preview.')
   }
@@ -1034,14 +1038,20 @@ const writeImportRows = async (
   rows: ImportRow[],
 ): Promise<void> => {
   for (let offset = 0; offset < rows.length; offset += ROWS_PER_INSERT) {
-    await tx.insert(importRow).values(
-      rows.slice(offset, offset + ROWS_PER_INSERT).map((values, index) => ({
-        accountId,
-        runId,
-        position: from + offset + index,
-        values: storedRow(values),
-      })),
-    )
+    await tx
+      .insert(importRow)
+      .values(
+        rows.slice(offset, offset + ROWS_PER_INSERT).map((values, index) => ({
+          accountId,
+          runId,
+          position: from + offset + index,
+          values: storedRow(values),
+        })),
+      )
+      // A row's position is its identity, so writing the same slice twice writes
+      // it once. That is what lets a parse that died half way through be run
+      // again from where the run says it got to.
+      .onConflictDoNothing()
   }
 }
 
@@ -1279,6 +1289,62 @@ export const appendImportRows = async (
 
 /** The last row has arrived: the mapping is worked out from the file and the run
  *  opens in the mapper. */
+/** The tail every way into the mapper shares: what the columns suggest, what the
+ *  last run of the same shape was mapped to, and the run leaving the state it was
+ *  filling up in. `from` is that state, and the update is conditional on it so two
+ *  callers racing settle the run once. */
+const settleIntoMapping = async (
+  ctx: AccountContext,
+  id: string,
+  from: 'uploading' | 'parsing',
+  run: {
+    objectType: string
+    importKind: ImportKind
+    source: string | null
+    filename: string
+    fileSignature: string
+    headers: unknown
+    mapping: unknown
+    totalRows: number
+  },
+): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
+  const kind = run.importKind
+  const object = await objectFor(ctx, kind, run.objectType)
+  const headers = run.headers as string[]
+  const preset = presetFor(kind, object.key, run.source, headers)
+  const suggested = withProposals(
+    object,
+    suggestMapping(object, headers, preset),
+    await readImportRows(ctx, id, 0, TYPE_SAMPLE_ROWS),
+    kind,
+    preset,
+  )
+  const given = run.mapping as Mapping
+
+  return mutate(ctx, 'import_run', async (tx) => {
+    const [previous] = await tx
+      .select({ mapping: importRun.mapping })
+      .from(importRun)
+      .where(and(eq(importRun.fileSignature, run.fileSignature), eq(importRun.state, 'done')))
+      .orderBy(desc(importRun.createdAt))
+      .limit(1)
+    await tx
+      .update(importRun)
+      .set({ mapping: Object.keys(given).length > 0 ? given : suggested, state: 'mapping', updatedAt: new Date() })
+      .where(and(eq(importRun.id, id), eq(importRun.state, from)))
+    return {
+      result: { id, suggested, previousMapping: (previous?.mapping as Mapping | undefined) ?? null },
+      audit: {
+        entity: 'import_run',
+        entityId: id,
+        action: 'create',
+        before: null,
+        after: { filename: run.filename, rows: run.totalRows, kind, source: run.source },
+      },
+    }
+  })
+}
+
 export const finishImportRun = async (
   ctx: AccountContext,
   id: string,
@@ -1309,42 +1375,227 @@ export const finishImportRun = async (
   if (run.state !== 'uploading') throw new Error('That upload was stopped. Upload the file again.')
   if (run.totalRows === 0) throw new Error('That file has a header row and nothing under it.')
 
-  const kind = run.importKind
-  const object = await objectFor(ctx, kind, run.objectType)
-  const headers = run.headers as string[]
-  const preset = presetFor(kind, object.key, run.source, headers)
-  const suggested = withProposals(
-    object,
-    suggestMapping(object, headers, preset),
-    await readImportRows(ctx, id, 0, TYPE_SAMPLE_ROWS),
-    kind,
-    preset,
-  )
-  const given = run.mapping as Mapping
+  return settleIntoMapping(ctx, id, 'uploading', run)
+}
 
-  return mutate(ctx, 'import_run', async (tx) => {
-    const [previous] = await tx
-      .select({ mapping: importRun.mapping })
+/** The file, uploaded whole instead of read in the browser.
+ *
+ *  The browser's only job here is to push bytes: it sends the file to storage a
+ *  part at a time and stops. The server opens the object, reads it into rows and
+ *  moves the run on by itself, so closing the tab after the last part costs
+ *  nothing, and a tab closed before it can pick the upload back up from the part
+ *  it got to.
+ *
+ *  This is the path every import through the app takes. The three-step row path
+ *  above stays because a caller that already holds the rows -- a script, a verify
+ *  suite -- has no file to upload and no storage to reach. */
+
+export type UploadPart = { n: number; etag: string; bytes: number }
+
+export type ImportUpload = {
+  id: string
+  filename: string
+  fileBytes: number
+  uploadedBytes: number
+  uploadKey: string | null
+  uploadId: string | null
+  parts: UploadPart[]
+  /** Rows already read out of the file. A parse that died is picked back up from
+   *  here rather than reading the file into the table twice. */
+  totalRows: number
+  state: ImportSummary['state']
+}
+
+/** How the file's bytes are cut up. Both ends have to agree, so it lives here
+ *  rather than next to the storage client: part `n` is always the same byte range,
+ *  which is what makes "which parts are missing" answerable from the numbers alone. */
+export const UPLOAD_PART_BYTES = 8 * 1024 * 1024
+
+const uploadFields = {
+  id: importRun.id,
+  filename: importRun.filename,
+  fileBytes: importRun.fileBytes,
+  uploadedBytes: importRun.uploadedBytes,
+  uploadKey: importRun.uploadKey,
+  uploadId: importRun.uploadId,
+  parts: importRun.uploadParts,
+  totalRows: importRun.totalRows,
+  state: importRun.state,
+}
+
+const asUpload = (row: Record<string, unknown>): ImportUpload => ({
+  ...(row as unknown as ImportUpload),
+  parts: (row.parts as UploadPart[] | null) ?? [],
+})
+
+/** The run, before any of the file is here. The key and the upload were minted by
+ *  the caller, which is the half that can reach storage. */
+export const beginImportUpload = async (
+  ctx: AccountContext,
+  input: {
+    objectKey: string
+    filename: string
+    kind?: ImportKind
+    source?: string | null
+    fileBytes: number
+    uploadKey: string
+    uploadId: string
+  },
+): Promise<{ id: string }> => {
+  assertCanWrite(ctx, input.objectKey)
+  const kind = input.kind ?? 'records'
+  const object = await objectFor(ctx, kind, input.objectKey)
+
+  const [row] = await withAccount(ctx, (tx) =>
+    tx
+      .insert(importRun)
+      .values({
+        accountId: ctx.accountId,
+        objectType: kind === 'activities' ? 'contact' : object.key,
+        importKind: kind,
+        source: input.source ?? null,
+        filename: input.filename,
+        // Both are the file's, and the file has not been opened yet.
+        fileSignature: '',
+        headers: [],
+        uploadKey: input.uploadKey,
+        uploadId: input.uploadId,
+        fileBytes: input.fileBytes,
+        state: 'uploading',
+        createdBy: ctx.actorId,
+      })
+      .returning({ id: importRun.id }),
+  )
+  if (!row) throw new Error('The import could not be started.')
+  return { id: row.id }
+}
+
+export const readImportUpload = async (ctx: AccountContext, id: string): Promise<ImportUpload | null> => {
+  if (!isUuid(id)) return null
+  const [row] = await withAccount(ctx, (tx) =>
+    tx.select(uploadFields).from(importRun).where(eq(importRun.id, id)).limit(1),
+  )
+  return row ? asUpload(row) : null
+}
+
+/** Every upload of this account's that never finished, newest first, so somebody
+ *  coming back to the import page is offered the file they left rather than
+ *  having to remember it. */
+export const unfinishedImportUploads = async (ctx: AccountContext): Promise<ImportUpload[]> => {
+  const rows = await withAccount(ctx, (tx) =>
+    tx
+      .select(uploadFields)
       .from(importRun)
-      .where(and(eq(importRun.fileSignature, run.fileSignature), eq(importRun.state, 'done')))
+      .where(and(eq(importRun.state, 'uploading'), isNotNull(importRun.uploadId)))
       .orderBy(desc(importRun.createdAt))
-      .limit(1)
+      .limit(10),
+  )
+  return rows.map(asUpload)
+}
+
+/** One part is in storage. Recorded under lock and by number, so a part sent
+ *  twice counts once and two parts landing together cannot lose each other. */
+export const recordUploadPart = async (
+  ctx: AccountContext,
+  id: string,
+  part: UploadPart,
+): Promise<{ uploadedBytes: number; parts: UploadPart[] }> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  return withAccount(ctx, async (tx) => {
+    const [run] = await tx
+      .select({ state: importRun.state, parts: importRun.uploadParts })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .for('update')
+    if (!run) throw new Error('That import no longer exists.')
+    if (run.state !== 'uploading') throw new Error('That upload is over, so no more of the file can be added to it.')
+
+    const parts = ((run.parts as UploadPart[] | null) ?? []).filter((held) => held.n !== part.n)
+    parts.push(part)
+    const uploadedBytes = parts.reduce((total, held) => total + held.bytes, 0)
     await tx
       .update(importRun)
-      .set({ mapping: Object.keys(given).length > 0 ? given : suggested, state: 'mapping', updatedAt: new Date() })
-      .where(and(eq(importRun.id, id), eq(importRun.state, 'uploading')))
-    return {
-      result: { id, suggested, previousMapping: (previous?.mapping as Mapping | undefined) ?? null },
-      audit: {
-        entity: 'import_run',
-        entityId: id,
-        action: 'create',
-        before: null,
-        after: { filename: run.filename, rows: run.totalRows, kind, source: run.source },
-      },
-    }
+      .set({ uploadParts: parts, uploadedBytes, updatedAt: new Date() })
+      .where(eq(importRun.id, id))
+    return { uploadedBytes, parts }
   })
 }
+
+/** The whole file is in storage and the server takes it from here. The upload is
+ *  cleared because there is nothing left to abandon. */
+export const beginImportParse = async (ctx: AccountContext, id: string): Promise<void> => {
+  assertCanWrite(ctx, 'import_run')
+  await withAccount(ctx, (tx) =>
+    tx
+      .update(importRun)
+      .set({ uploadId: null, state: 'parsing', updatedAt: new Date() })
+      .where(and(eq(importRun.id, id), eq(importRun.state, 'uploading'))),
+  )
+}
+
+/** A slice of the file, read by the server. `from` is the position of its first
+ *  row, so the same slice written twice lands once. */
+export const writeParsedRows = async (
+  ctx: AccountContext,
+  id: string,
+  from: number,
+  rows: ImportRow[],
+  headers: string[],
+): Promise<void> => {
+  await withAccount(ctx, async (tx) => {
+    await writeImportRows(tx, ctx.accountId, id, from, rows)
+    await tx
+      .update(importRun)
+      .set({
+        // Only ever forwards: a slice written again after a restart must not
+        // wind the count back past rows that are already there.
+        totalRows: sql`greatest(${importRun.totalRows}, ${from + rows.length})`,
+        headers,
+        updatedAt: new Date(),
+      })
+      .where(eq(importRun.id, id))
+  })
+}
+
+/** The file has been read: its columns are known, so the run can be matched
+ *  against the last one of the same shape and opened in the mapper. */
+export const finishImportParse = async (
+  ctx: AccountContext,
+  id: string,
+): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
+  assertCanWrite(ctx, 'import_run')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  const [run] = await withAccount(ctx, (tx) =>
+    tx
+      .select({
+        objectType: importRun.objectType,
+        importKind: importRun.importKind,
+        source: importRun.source,
+        filename: importRun.filename,
+        headers: importRun.headers,
+        mapping: importRun.mapping,
+        totalRows: importRun.totalRows,
+        state: importRun.state,
+      })
+      .from(importRun)
+      .where(eq(importRun.id, id))
+      .limit(1),
+  )
+  if (!run) throw new Error('That import no longer exists.')
+  if (run.state === 'mapping') return { id, suggested: run.mapping as Mapping, previousMapping: null }
+  if (run.state !== 'parsing') throw new Error('That upload was stopped. Upload the file again.')
+  if (run.totalRows === 0) throw new Error('That file has a header row and nothing under it.')
+
+  const kind = run.importKind
+  const object = await objectFor(ctx, kind, run.objectType)
+  const fingerprint = fileSignature(`${kind}:${object.key}`, run.headers as string[])
+  await withAccount(ctx, (tx) =>
+    tx.update(importRun).set({ fileSignature: fingerprint }).where(eq(importRun.id, id)),
+  )
+  return settleIntoMapping(ctx, id, 'parsing', { ...run, fileSignature: fingerprint })
+}
+
 
 /** A whole file in one call, for a caller that already holds its rows: scripts
  *  and the verify suites. The browser takes the same three steps a batch at a
@@ -1383,7 +1634,7 @@ export const setImportMapping = async (
       .from(importRun)
       .where(eq(importRun.id, id))
     if (!run) throw new Error('That import no longer exists.')
-    if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+    if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
     // A started run reads its mapping chunk by chunk, so changing it now would
     // import the top of the file one way and the rest another.
     if (run.state !== 'mapping' && run.state !== 'previewing') {
@@ -1837,7 +2088,7 @@ export const runImportChunk = async (
   if (run.state === 'done' || run.state === 'cancelled') {
     return { done: true, processed: run.processedRows, total: run.totalRows }
   }
-  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+  if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
 
   const kind = run.importKind
   const object = await objectFor(ctx, kind, run.objectType).catch(async (cause: unknown) => {
@@ -2066,7 +2317,7 @@ export const startImportRun = async (ctx: AccountContext, id: string): Promise<v
       .limit(1),
   )
   if (!run) throw new Error('That import no longer exists.')
-  if (run.state === 'uploading') throw new Error(STILL_ARRIVING)
+  if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
 
   // Before the first chunk, not during it: a column whose field or choice appears
   // halfway through the file is a column that imported nothing above that point.
@@ -2126,7 +2377,7 @@ export const cancelImportRun = async (ctx: AccountContext, id: string): Promise<
     tx
       .update(importRun)
       .set({ state: 'cancelled', finishedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(importRun.id, id), inArray(importRun.state, ['uploading', 'mapping', 'previewing', 'running']))),
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['uploading', 'parsing', 'mapping', 'previewing', 'running']))),
   )
   await dropImportRows(ctx, id)
 }
@@ -2146,6 +2397,8 @@ export const readImportRun = async (
         importKind: importRun.importKind,
         source: importRun.source,
         state: importRun.state,
+        uploadedBytes: importRun.uploadedBytes,
+        fileBytes: importRun.fileBytes,
         totalRows: importRun.totalRows,
         processedRows: importRun.processedRows,
         created: importRun.createdCount,
@@ -2181,6 +2434,8 @@ export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary
         importKind: importRun.importKind,
         source: importRun.source,
         state: importRun.state,
+        uploadedBytes: importRun.uploadedBytes,
+        fileBytes: importRun.fileBytes,
         totalRows: importRun.totalRows,
         processedRows: importRun.processedRows,
         created: importRun.createdCount,

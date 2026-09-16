@@ -3,50 +3,25 @@
 import { cn } from '@rawr/ui'
 import { Bookmark, BookmarkCheck, X } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-
-export type BookmarkEntry = { href: string; label: string }
-
-const KEY = 'rawr.bookmarks'
-
-const readAll = (): BookmarkEntry[] => {
-  try {
-    const raw = window.localStorage.getItem(KEY)
-    const parsed: unknown = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed)
-      ? parsed.filter((row): row is BookmarkEntry => typeof row?.href === 'string' && typeof row?.label === 'string')
-      : []
-  } catch {
-    // Private windows and blocked site data are normal, not an error.
-    return []
-  }
-}
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 /** What the page calls itself: its heading, since the tab title is the app's
  *  name on every screen. */
 const titleOf = (): string => document.querySelector('main h1')?.textContent?.trim() || document.title.trim() || 'This page'
 
 /** HubSpot's bookmarks flyout: the pages this person pinned, and a way to pin
- *  the one they are on. Kept in this browser, which is where the rest of the
- *  shell's preferences live. */
+ *  the one they are on. Kept in this browser, in the store the rest of the
+ *  shell's preferences live in. */
 export const BookmarksPanel = ({ here }: { here: string }) => {
-  const [rows, setRows] = useState<BookmarkEntry[]>([])
-  // `here` is a trigger rather than something the body reads: the pinned list is
-  // re-read whenever the person navigates.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
-  useEffect(() => setRows(readAll()), [here])
+  const rows = useUi((state) => state.bookmarks)
+  const toggleBookmark = useUi((state) => state.toggleBookmark)
+  const removeBookmark = useUi((state) => state.removeBookmark)
+  // Nothing is pinned until the stored list has replaced the empty default, or
+  // the panel would render one thing on the server and another here.
+  const ready = useUiReady()
 
-  const save = (next: BookmarkEntry[]) => {
-    setRows(next)
-    try {
-      window.localStorage.setItem(KEY, JSON.stringify(next))
-    } catch {
-      // Nothing depends on this surviving the tab.
-    }
-  }
-
-  const pinned = rows.some((row) => row.href === here)
-  const toggle = () => save(pinned ? rows.filter((row) => row.href !== here) : [...rows, { href: here, label: titleOf() }])
+  const pinned = ready && rows.some((row) => row.href === here)
+  const toggle = () => toggleBookmark({ href: here, label: titleOf() })
 
   return (
     <div className="flex flex-col gap-1">
@@ -58,9 +33,9 @@ export const BookmarksPanel = ({ here }: { here: string }) => {
         {pinned ? <BookmarkCheck aria-hidden="true" className="size-4" /> : <Bookmark aria-hidden="true" className="size-4" />}
         {pinned ? 'Remove this page' : 'Bookmark this page'}
       </button>
-      {rows.length > 0 ? <hr className="mx-4 my-3 border-nav-active" /> : null}
+      {ready && rows.length > 0 ? <hr className="mx-4 my-3 border-nav-active" /> : null}
       <ul className="flex flex-col gap-1">
-        {rows.map((row) => (
+        {(ready ? rows : []).map((row) => (
           <li key={row.href} className="flex items-center">
             <Link
               href={row.href}
@@ -75,7 +50,7 @@ export const BookmarksPanel = ({ here }: { here: string }) => {
             <button
               type="button"
               aria-label={`Remove ${row.label} from bookmarks`}
-              onClick={() => save(rows.filter((other) => other.href !== row.href))}
+              onClick={() => removeBookmark(row.href)}
               className="grid size-8 shrink-0 place-items-center rounded-pill text-nav-muted hover:bg-nav-hover hover:text-nav-text"
             >
               <X aria-hidden="true" className="size-3.5" />

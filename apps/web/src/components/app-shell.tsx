@@ -26,6 +26,8 @@ import { NavigationProgress, NavigationProvider, useNavigation } from './navigat
 import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { TaskTray } from './task-tray.tsx'
 
 export type NavItem = {
   href: string
@@ -76,8 +78,6 @@ export type AppShellProps = {
   children: ReactNode
 }
 
-const RAIL_KEY = 'rawr.rail.expanded'
-
 /** HubSpot's first rail item, above a divider from the hubs. Its flyout is the
  *  bookmarks panel rather than a list of links, so it is drawn by hand below. */
 const BOOKMARKS: NavSection = { key: 'bookmarks', label: 'Bookmarks', icon: 'bookmarks', groups: [] }
@@ -93,23 +93,6 @@ const CREATE_ICONS: Record<string, typeof Contact> = {
   company: Building2,
   deal: Handshake,
   task: ListChecks,
-}
-
-const read = (key: string): string | null => {
-  try {
-    return window.localStorage.getItem(key)
-  } catch {
-    // Private windows and blocked site data are normal, not an error.
-    return null
-  }
-}
-
-const write = (key: string, value: string): void => {
-  try {
-    window.localStorage.setItem(key, value)
-  } catch {
-    // The rail still works for this page view.
-  }
 }
 
 /** HubSpot's 2026 frame: a charcoal top bar across the whole window with the
@@ -144,7 +127,13 @@ const Shell = ({
   // Where the person is going counts as where they are, from the click onward.
   const here = pendingHref?.split('?')[0] ?? pathname
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [expanded, setExpanded] = useState(false)
+  const railExpanded = useUi((state) => state.railExpanded)
+  const setRailExpanded = useUi((state) => state.setRailExpanded)
+  // The server cannot see this browser's storage, so it renders the rail
+  // collapsed and so does the first client pass. The stored width arrives on the
+  // next one, which is the same shape this had when it read storage in an effect.
+  const uiReady = useUiReady()
+  const expanded = uiReady && railExpanded
   /** Which section's flyout is showing on a wide screen. */
   const [flyout, setFlyout] = useState<string | null>(null)
   /** Which sections are unfolded inside the phone sheet. */
@@ -155,7 +144,6 @@ const Shell = ({
   /** HubSpot frames every screen as one white card except a record, a dashboard
    *  and Home, which are cards straight on the canvas. */
   const onCanvas = CANVAS_ROUTES.some((route) => here.includes(route))
-  useEffect(() => setExpanded(read(RAIL_KEY) === '1'), [])
 
   // Neither the sheet nor a flyout survives a navigation, or the new page loads
   // with the menu still covering it. pathname is the trigger rather than
@@ -558,8 +546,7 @@ const Shell = ({
           <button
             type="button"
             onClick={() => {
-              setExpanded(!expanded)
-              write(RAIL_KEY, expanded ? '0' : '1')
+              setRailExpanded(!expanded)
               setFlyout(null)
             }}
             aria-pressed={expanded}
@@ -654,6 +641,8 @@ const Shell = ({
           ) : null}
         </main>
       </div>
+
+      <TaskTray account={accountSlug} />
     </div>
   )
 }

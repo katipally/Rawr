@@ -25,7 +25,8 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "superjson": "catalog:",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",

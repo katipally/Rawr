@@ -1,4 +1,13 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
+} from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '~/lib/env.ts'
 
@@ -82,3 +91,78 @@ export const removeObject = async (key: string): Promise<void> => {
  *  header or arrive mangled. */
 const contentDisposition = (filename: string): string =>
   `attachment; filename="${filename.replaceAll(/["\\\r\n]/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+
+/** A file too big for one request, sent in parts.
+ *
+ *  An import's file is uploaded this way for two reasons that the attachment path
+ *  does not have: it can be hundreds of megabytes, which is more than one request
+ *  worker should hold in memory, and the browser tab may be closed half way
+ *  through, which a numbered part can resume from and a single PUT cannot. */
+
+export const beginMultipart = async (key: string, contentType: string): Promise<string> => {
+  const started = await client().send(
+    new CreateMultipartUploadCommand({ Bucket: env.S3_BUCKET, Key: key, ContentType: contentType }),
+  )
+  if (!started.UploadId) throw new Error('Storage did not start the upload.')
+  return started.UploadId
+}
+
+/** One part, by number. The tag storage answers with is what
+ *  `completeMultipart` hands back to it, and storage refuses an assembly whose
+ *  tags do not match what it holds. */
+export const uploadPart = async (
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  body: Uint8Array,
+): Promise<string> => {
+  const done = await client().send(
+    new UploadPartCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+      Body: body,
+      ContentLength: body.byteLength,
+    }),
+  )
+  if (!done.ETag) throw new Error('Storage did not acknowledge that part.')
+  return done.ETag
+}
+
+export const completeMultipart = async (
+  key: string,
+  uploadId: string,
+  parts: { n: number; etag: string }[],
+): Promise<void> => {
+  await client().send(
+    new CompleteMultipartUploadCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        // Storage requires them ascending, and the caller holds them in whatever
+        // order they were acknowledged.
+        Parts: [...parts]
+          .sort((a, b) => a.n - b.n)
+          .map((part) => ({ PartNumber: part.n, ETag: part.etag })),
+      },
+    }),
+  )
+}
+
+/** Abandons the parts. Without this a stopped upload leaves them billed and
+ *  invisible: an incomplete multipart upload is not an object, so it does not
+ *  show in a listing and is never cleaned up on its own. */
+export const abortMultipart = async (key: string, uploadId: string): Promise<void> => {
+  await client().send(new AbortMultipartUploadCommand({ Bucket: env.S3_BUCKET, Key: key, UploadId: uploadId }))
+}
+
+/** The object as a stream, so a file is read in the memory of one chunk however
+ *  big it is. */
+export const objectStream = async (key: string): Promise<ReadableStream<Uint8Array>> => {
+  const got = await client().send(new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
+  const body = got.Body as { transformToWebStream?: () => ReadableStream<Uint8Array> } | undefined
+  if (!body?.transformToWebStream) throw new Error('Storage returned nothing for that file.')
+  return body.transformToWebStream()
+}

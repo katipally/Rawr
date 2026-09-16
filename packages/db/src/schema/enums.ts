@@ -198,6 +198,10 @@ export const importKindEnum = pgEnum('rawr_import_kind', [
 
 export const importStateEnum = pgEnum('rawr_import_state', [
   'uploading',
+  /** The file is in storage whole and the server is reading it into rows. The
+   *  browser has nothing left to do here, which is the point: shutting the laptop
+   *  between 'uploading' and 'mapping' costs nothing. */
+  'parsing',
   'mapping',
   'previewing',
   'running',

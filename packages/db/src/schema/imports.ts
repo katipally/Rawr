@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { bigint, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, pk, updatedAt, accountId } from './columns.ts'
 import { importKindEnum, importStateEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
@@ -22,8 +22,24 @@ export const importRun = pgTable(
     source: text('source'),
     filename: text('filename').notNull(),
     /** Header shape plus column count. The mapping of the last run with the same
-     *  signature is offered as the default, so the same weekly export is mapped once. */
+     *  signature is offered as the default, so the same weekly export is mapped once.
+     *  Empty until the file has been read, because an uploaded file's headers are
+     *  not known until the server opens it. */
     fileSignature: text('file_signature').notNull(),
+    /** Where the file itself is, while it is being read. Null for a run whose rows
+     *  were handed over directly, which is what the scripts and the verify suites do. */
+    uploadKey: text('upload_key'),
+    /** The multipart upload in progress, cleared once storage has the whole object.
+     *  Its presence is what says an unfinished upload can still be abandoned. */
+    uploadId: text('upload_id'),
+    /** What storage has acknowledged, `[{ n, etag, bytes }]` in part order. A part
+     *  sent twice is recognised by its number and not uploaded again, which is what
+     *  makes an upload resumable after the tab was closed. */
+    uploadParts: jsonb('upload_parts').notNull().default([]),
+    /** How much of the file is in storage, and how big the file is. Both are
+     *  bigint: a 2GB export is four bytes past what an integer holds. */
+    uploadedBytes: bigint('uploaded_bytes', { mode: 'number' }).notNull().default(0),
+    fileBytes: bigint('file_bytes', { mode: 'number' }).notNull().default(0),
     /** The column names in the order the file had them. Recovering them from the
      *  stored rows does not work: jsonb does not preserve key order, so the mapper
      *  would list a person's columns in an order they never chose. */

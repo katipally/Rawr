@@ -10,6 +10,7 @@ import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime, formatMonth } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 export type TimelineEntry = {
   id: string
@@ -63,7 +64,6 @@ const LOGGABLE = [
 
 type Loggable = (typeof LOGGABLE)[number]['type']
 
-const STORAGE_PREFIX = 'rawr.timeline.types.'
 
 /** HubSpot's sub-tabs over the timeline. Each one is a preset of the type
  *  filter, so "Emails" and ticking Email and Marketing email are the same view. */
@@ -149,6 +149,8 @@ export const Timeline = ({
   const [happenedOn, setHappenedOn] = useState('')
   const [posting, setPosting] = useState(false)
   const [hydrated, setHydrated] = useState(false)
+  const setTimelineKinds = useUi((state) => state.setTimelineKinds)
+  const uiReady = useUiReady()
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
@@ -169,31 +171,27 @@ export const Timeline = ({
     composer.current?.focus()
   }, [openKind])
 
-  // Restores a remembered filter, once. `load` and `counts` are rebuilt every
-  // render, so listing them would refetch on every render.
+  // Restores a remembered filter, once the store holds this browser's copy.
+  // `load` and `counts` are rebuilt every render, so listing them would refetch
+  // on every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (urlTypes !== null) {
       setHydrated(true)
       return
     }
-    try {
-      // A remembered filter only makes sense for types this record has. Restoring
-      // "Task" onto a record with no tasks would open on an empty timeline.
-      const saved = (window.localStorage.getItem(`${STORAGE_PREFIX}${object}`)?.split(',').filter(Boolean) ?? []).filter(
-        (type) => (counts[type] ?? 0) > 0,
-      )
-      if (saved.length > 0) {
-        setSelected(saved)
-        // The server rendered every type; the restored choice has to fetch its own
-        // rows or the chips say one thing and the cards another.
-        void load(saved, null, false)
-      }
-    } catch {
-      // Private windows and blocked site data are normal, not an error.
+    if (!uiReady) return
+    // A remembered filter only makes sense for types this record has. Restoring
+    // "Task" onto a record with no tasks would open on an empty timeline.
+    const saved = (useUi.getState().timelineKinds[object] ?? []).filter((type) => (counts[type] ?? 0) > 0)
+    if (saved.length > 0) {
+      setSelected(saved)
+      // The server rendered every type; the restored choice has to fetch its own
+      // rows or the chips say one thing and the cards another.
+      void load(saved, null, false)
     }
     setHydrated(true)
-  }, [object, urlTypes])
+  }, [object, urlTypes, uiReady])
 
   const load = async (types: string[], from: typeof cursor, append: boolean) => {
     setLoading(true)
@@ -232,11 +230,7 @@ export const Timeline = ({
 
   const choose = (next: string[]) => {
     setSelected(next)
-    try {
-      window.localStorage.setItem(`${STORAGE_PREFIX}${object}`, next.join(','))
-    } catch {
-      // Nothing depends on this surviving; the URL is the shareable copy.
-    }
+    setTimelineKinds(object, next)
     // Put the choice in the URL so the filtered timeline can be linked to.
     const search = new URLSearchParams(params.toString())
     if (next.length === 0) search.delete('type')
@@ -431,15 +425,9 @@ export const Timeline = ({
         {selected.length > 0 ? (
           <Button
             variant="tertiary"
-            onClick={() => {
-              try {
-                // Forgotten, not only cleared: otherwise the next record opens filtered again.
-                window.localStorage.removeItem(`${STORAGE_PREFIX}${object}`)
-              } catch {
-                // Nothing depends on this surviving.
-              }
-              choose([])
-            }}
+            // An empty choice is forgotten rather than stored, or the next
+            // record of this kind opens filtered again.
+            onClick={() => choose([])}
           >
             Clear all
           </Button>

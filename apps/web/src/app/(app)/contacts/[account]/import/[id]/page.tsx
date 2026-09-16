@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '~/components/crm/import-wizard.tsx'
-import { formatNumber } from '~/components/crm/value.tsx'
+import { ImportArriving } from './arriving.tsx'
 import { importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -42,13 +42,21 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
     )
   }
 
-  if (run.state === 'uploading') {
+  if (run.state === 'uploading' || run.state === 'parsing') {
     return (
-      <EmptyState
-        title="This file is still arriving"
-        description={`${formatNumber(run.totalRows)} rows of ${run.filename} are here so far. The tab that is uploading it opens the mapper when the last row lands.`}
-        action={<LinkButton href={importsPath(account)}>Back to imports</LinkButton>}
-      />
+      <div className="flex max-w-4xl flex-col gap-4">
+        <p>
+          <Link href={importsPath(account)}>Imports</Link>
+        </p>
+        <ImportArriving
+          runId={id}
+          filename={run.filename}
+          state={run.state}
+          uploadedBytes={run.uploadedBytes}
+          fileBytes={run.fileBytes}
+          backHref={importsPath(account)}
+        />
+      </div>
     )
   }
 

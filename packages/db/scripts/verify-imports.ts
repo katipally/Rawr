@@ -5,6 +5,13 @@ import * as s from '../src/schema/index.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import {
   appendImportRows,
+  beginImportParse,
+  beginImportUpload,
+  finishImportParse,
+  readImportUpload,
+  recordUploadPart,
+  unfinishedImportUploads,
+  writeParsedRows,
   assertMappingIsUsable,
   beginImportRun,
   cancelImportRun,
@@ -874,6 +881,68 @@ try {
     )
     await cancelImportRun(admin, id)
     return '5 rows from 3 batches, one of them sent twice'
+  })
+
+  await check('a file uploaded whole is resumable, and the server reading it can be run twice', async () => {
+    const stamp = String(Date.now())
+    const filename = `uploaded-${stamp}.csv`
+    const { id } = await beginImportUpload(admin, {
+      objectKey: 'contact',
+      filename,
+      fileBytes: 900,
+      uploadKey: `${admin.accountId}/imports/${stamp}/${filename}`,
+      uploadId: `upload-${stamp}`,
+    })
+    created.push(id)
+
+    // Two parts, the first of them sent twice: a part is placed by its number, so
+    // the second copy replaces rather than adds.
+    await recordUploadPart(admin, id, { n: 1, etag: 'one', bytes: 500 })
+    await recordUploadPart(admin, id, { n: 1, etag: 'one', bytes: 500 })
+    await recordUploadPart(admin, id, { n: 2, etag: 'two', bytes: 400 })
+    const half = (await readImportUpload(admin, id))!
+    expect(half.uploadedBytes === 900, `${half.uploadedBytes} bytes recorded, expected 900`)
+    expect(half.parts.length === 2, `${half.parts.length} parts recorded, expected 2`)
+
+    // An unfinished upload is offered back, because the file it is missing can
+    // still be handed over.
+    expect(
+      (await unfinishedImportUploads(admin)).some((run) => run.id === id),
+      'the half-finished upload was not offered back',
+    )
+
+    const headers = ['Email', 'First Name']
+    const rows = (from: number, count: number): ImportRow[] =>
+      Array.from({ length: count }, (_, i) => ({
+        Email: `verify.upload.${stamp}.${from + i}@partner7.example`,
+        'First Name': `Upload${from + i}`,
+      }))
+
+    await beginImportParse(admin, id)
+    expect((await readImportUpload(admin, id))!.state === 'parsing', 'the run did not pass to the server')
+
+    // The first attempt writes half the file and stops, the way a process that
+    // died would leave it.
+    await writeParsedRows(admin, id, 0, rows(0, 4), headers)
+    // The second starts again from the top and writes the same rows plus the rest.
+    // Nothing is duplicated, because a row is placed by its position.
+    await writeParsedRows(admin, id, 0, rows(0, 4), headers)
+    await writeParsedRows(admin, id, 4, rows(4, 2), headers)
+
+    const settled = await finishImportParse(admin, id)
+    const run = (await readImportRun(admin, id))!
+    expect(run.state === 'mapping', `the run is ${run.state}`)
+    expect(run.totalRows === 6, `${run.totalRows} rows recorded, expected 6`)
+    expect((await rowCount(id)) === 6, `${await rowCount(id)} rows stored, expected 6`)
+    expect(run.headers.join(',') === headers.join(','), `the columns came back as ${run.headers.join(',')}`)
+    expect(settled.suggested.Email === 'email', `Email was mapped to ${String(settled.suggested.Email)}`)
+    // The upload is over, so nothing offers to carry on with it.
+    expect(
+      !(await unfinishedImportUploads(admin)).some((run) => run.id === id),
+      'a finished upload is still being offered back',
+    )
+    await cancelImportRun(admin, id)
+    return 'resumed from 4 of 6 rows with nothing duplicated, and the columns reached the run'
   })
 
   console.log('\n-- what a HubSpot export carries ---------------------------------------')
