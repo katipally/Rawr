@@ -141,6 +141,12 @@ try {
     console.log(`\n  ${String(held.reduce((total, [, n]) => total + n, 0)).padStart(38)} rows`)
     console.log(`  properties an import invented ${String(invented?.n ?? 0).padStart(8)}  (dropped too)`)
   }
+  const [mailboxes] = await owner<{ n: number }[]>`
+    select count(*)::int as n from mailbox
+     where account_id = ${account.id} and (history_id is not null or backfill_done)`
+  if ((mailboxes?.n ?? 0) > 0) {
+    console.log(`  mailboxes rewound            ${String(mailboxes?.n ?? 0).padStart(9)}  (kept, but re-synced)`)
+  }
   console.log(`\n  kept: ${[...KEEP].sort().join(', ')}\n`)
 
   if (!confirmed) {
@@ -153,6 +159,14 @@ try {
       await tx`
         delete from field_def f using object_def o
          where o.id = f.object_id and o.account_id = ${account.id} and f.source = 'import'`
+      // A mailbox is a connection, so it stays; how far it had read is not, and
+      // it just went. Left alone, Gmail's cursor says everything is already here
+      // and the threads this emptied never come back. Rewound, the next sync
+      // fetches them again.
+      await tx`
+        update mailbox
+           set history_id = null, backfill_cursor = null, backfill_done = false, last_sync_at = null
+         where account_id = ${account.id}`
     })
     console.log('  Emptied.\n')
   }
