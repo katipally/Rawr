@@ -1,6 +1,6 @@
 'use client'
 
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   createContext,
   startTransition as reactStartTransition,
@@ -40,6 +40,10 @@ const isPlainLeftClick = (event: MouseEvent) =>
 export const NavigationProvider = ({ children }: { children: ReactNode }) => {
   const router = useRouter()
   const pathname = usePathname()
+  // The whole address, not just the path. A record's tabs, a list's filters and
+  // a view's sort all navigate by query string alone, and a provider watching
+  // only the path never saw those arrive.
+  const address = `${pathname}?${useSearchParams()}`
   const [pending, startTransition] = useTransition()
   const [target, setTarget] = useState<string | null>(null)
   /** True while the pending navigation is one this provider pushed. A Link's own
@@ -57,13 +61,13 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
   )
 
   // Arriving is what ends a navigation, whoever started it, and the address is
-  // what the person sees arrive: pathname is a trigger here rather than
+  // what the person sees arrive: `address` is a trigger here rather than
   // something the body reads.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     ours.current = false
     setTarget(null)
-  }, [pathname])
+  }, [address])
 
   // A push of our own that ends on the address it started from: the same page
   // asked for again, or a route that sent the person back.
@@ -83,7 +87,10 @@ export const NavigationProvider = ({ children }: { children: ReactNode }) => {
       if (url.origin !== window.location.origin) return
       const here = window.location.pathname + window.location.search
       const there = url.pathname + url.search
-      if (url.hash && there === here) return
+      // Nothing to wait for when the link points at the address already open,
+      // which a record's own tab does when it is the tab showing. Setting a
+      // target for it leaves the veil up over a page that never changes.
+      if (there === here) return
       // The public and API routes are not part of the app router tree.
       if (/^\/(api|b|f|form|c|e|w|t|u|invite|embed\.js|booking\.js)(\/|$)/.test(url.pathname)) return
       if (event.defaultPrevented) {

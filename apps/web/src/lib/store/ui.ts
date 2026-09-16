@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { startTransition, useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 
@@ -102,12 +102,28 @@ export const useUi = create<UiState>()(
  *  disagree with that markup, and React would throw the whole tree away. So a
  *  component reads this and shows the default for one render, which is the same
  *  shape the app used before the store existed: read it in an effect, render it
- *  on the next pass. */
+ *  on the next pass.
+ *
+ *  Two details are load-bearing, and both were wrong here before.
+ *
+ *  It starts false rather than at `hasHydrated()`. `localStorage` is synchronous,
+ *  so persist rehydrates while this module is being evaluated and `hasHydrated()`
+ *  is already true by the very first client render. Reading it there put the
+ *  stored value into the render that has to match the server's markup, which is
+ *  the mismatch this hook exists to avoid.
+ *
+ *  And the flip is a transition. An urgent update from the shell while the page
+ *  below it is still streaming makes React give up on the server's half-arrived
+ *  Suspense boundary and render it itself, and the boundary then sits on its
+ *  loading state for ever. A transition lets React finish the boundary first. */
 export const useUiReady = (): boolean => {
-  const [ready, setReady] = useState(() => useUi.persist.hasHydrated())
+  const [ready, setReady] = useState(false)
   useEffect(() => {
-    if (ready) return
-    return useUi.persist.onFinishHydration(() => setReady(true))
-  }, [ready])
+    if (useUi.persist.hasHydrated()) {
+      startTransition(() => setReady(true))
+      return
+    }
+    return useUi.persist.onFinishHydration(() => startTransition(() => setReady(true)))
+  }, [])
   return ready
 }

@@ -25,7 +25,13 @@ import { useUploads, type Upload } from '~/lib/store/uploads.ts'
 /** Long enough that a finished import stays visible for somebody who was looking
  *  elsewhere, short enough that the strip does not become a log. */
 const KEEP_DONE_MS = 30_000
-const POLL_MS = 3_000
+
+/** Two rates, because the strip is empty on almost every page view. Watching
+ *  something move wants three seconds; discovering that a colleague started an
+ *  import in another tab does not, and a tab left open overnight should not spend
+ *  the night asking. */
+const POLL_ACTIVE_MS = 3_000
+const POLL_IDLE_MS = 30_000
 
 type Running = {
   id: string
@@ -36,6 +42,21 @@ type Running = {
 }
 
 const ACTIVE = new Set(['parsing', 'running'])
+
+/** Field by field, because the whole point is not to hand React a new array that
+ *  holds the same numbers. */
+const same = (a: Running[], b: Running[]): boolean =>
+  a.length === b.length &&
+  a.every((row, at) => {
+    const other = b[at]
+    return (
+      other !== undefined &&
+      row.id === other.id &&
+      row.state === other.state &&
+      row.processedRows === other.processedRows &&
+      row.totalRows === other.totalRows
+    )
+  })
 
 const percent = (done: number, total: number): number =>
   total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0
@@ -48,30 +69,35 @@ export const TaskTray = ({ account }: { account: string }) => {
 
   useEffect(() => {
     let dropped = false
+    let timer: ReturnType<typeof setTimeout>
     const ask = async () => {
+      let found: Running[] = []
       try {
         const rows = await api.crm.imports.list.query()
         if (dropped) return
-        setRuns(
-          rows
-            .filter((row) => ACTIVE.has(row.state))
-            .map((row) => ({
-              id: row.id,
-              filename: row.filename,
-              state: row.state,
-              processedRows: row.processedRows,
-              totalRows: row.totalRows,
-            })),
-        )
+        found = rows
+          .filter((row) => ACTIVE.has(row.state))
+          .map((row) => ({
+            id: row.id,
+            filename: row.filename,
+            state: row.state,
+            processedRows: row.processedRows,
+            totalRows: row.totalRows,
+          }))
+        // Only when it differs. `setRuns` on an equal list is still a new array,
+        // and the shell re-rendering on a timer for ever is what made React give
+        // up on the page's Suspense boundary and leave it loading.
+        setRuns((held) => (same(held, found) ? held : found))
       } catch {
         // A poll that misses is a poll. The next one answers.
+      } finally {
+        if (!dropped) timer = setTimeout(ask, found.length > 0 ? POLL_ACTIVE_MS : POLL_IDLE_MS)
       }
     }
     void ask()
-    const timer = setInterval(() => void ask(), POLL_MS)
     return () => {
       dropped = true
-      clearInterval(timer)
+      clearTimeout(timer)
     }
   }, [])
 
