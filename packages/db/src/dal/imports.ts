@@ -361,13 +361,50 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
     return id
   }
 
-  /** Every relation these rows name, asked for up front, one query per field. */
+  /** Every relation these rows name, asked for up front, one query per field —
+   *  and every company they name that this account has never heard of, made here
+   *  too, for the whole batch in one write.
+   *
+   *  Creating them one at a time as each row reached it was the whole cost of a
+   *  chunk. A HubSpot migration names an employer per contact and tens of
+   *  thousands of them are new, and a record created on its own is a transaction
+   *  and a dozen round trips: over a pooler in another region that is a second
+   *  each, spent before a single contact is written. It is why the first chunk of
+   *  the real file never finished inside the worker's patience. */
   const prime = async (object: RegistryObject, mapping: Mapping, rows: ImportRow[]): Promise<void> => {
     for (const [header, target] of Object.entries(mapping)) {
       if (typeof target !== 'string') continue
       const field = object.byKey.get(target)
       if (!field || (field.type !== 'relation' && field.type !== 'user')) continue
-      await lookUp(field, rows.flatMap((row) => row[header] ?? []))
+      const named = rows.flatMap((row) => row[header] ?? [])
+      await lookUp(field, named)
+      if (field.key !== 'company_id' || !options.create) continue
+
+      // Remembered as null is what a miss looks like, and a miss is what needs
+      // making. Names, not lowercased: the company keeps the spelling the file
+      // gave it, the way the one-at-a-time path did.
+      const missing = [...new Set(named.map((name) => name.trim()).filter(Boolean))].filter(
+        (name) => !isUuid(name) && remembered.get(keyOf(field, name)) === null,
+      )
+      if (missing.length === 0) continue
+      const outcome = await bulkWriteRecords(
+        ctx,
+        'company',
+        missing.map((name, position) => ({
+          position,
+          values: DOMAIN.test(name) ? { name, domain: name.toLowerCase() } : { name },
+          existingId: null,
+        })),
+      )
+      for (const made of outcome.created) remembered.set(keyOf(field, missing[made.position]!), made.id)
+      // Two spellings of one domain inside this batch, or a name somebody else
+      // committed in between: few, and asking for those by name is cheaper than
+      // losing the company off every row that named it.
+      const contested = outcome.contested.map((position) => missing[position]!)
+      if (contested.length > 0) {
+        for (const name of contested) remembered.delete(keyOf(field, name))
+        await lookUp(field, contested)
+      }
     }
   }
 
@@ -1832,14 +1869,22 @@ export const runImportChunk = async (
   // instead of a transaction and a query per row. Planning is where a company
   // named for the first time is created, which is why it stays outside the write
   // transaction below: those companies are wanted whatever becomes of this chunk.
+  const deadline = Date.now() + CHUNK_MS
   const plans: Awaited<ReturnType<typeof planRow>>[] = []
-  for (const row of slice) plans.push(await planRow(object, mapping, row, resolve, kind))
+  for (const row of slice) {
+    plans.push(await planRow(object, mapping, row, resolve, kind))
+    // Planning is not free — it resolves the owner and the company each row
+    // names — so the budget is counted here as well as over the writes. A chunk
+    // that stops early is a shorter chunk, and the next one starts where it
+    // stopped; a chunk that runs past the worker's patience is abandoned
+    // mid-write and done again from the same position, for ever.
+    if (Date.now() >= deadline) break
+  }
   const known =
     writer || kind === 'activities'
       ? new Map<string, string>()
       : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
 
-  const deadline = Date.now() + CHUNK_MS
   /** Rows this chunk finished with. Short of the slice when the budget ran out,
    *  and the next chunk starts where this one stopped. */
   let handled = 0
