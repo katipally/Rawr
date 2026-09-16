@@ -14,14 +14,35 @@ import { bySlug, defineJob } from './registry.ts'
  *  than a chunk a minute. */
 
 /** A call into the app, for the work that needs what only the app has: the
- *  registry, the dedupe rules, and the credentials for storage. */
+ *  registry, the dedupe rules, and the credentials for storage.
+ *
+ *  Tried twice when the connection itself fails, because of what these calls are:
+ *  this process is long-lived and talks to one host, so fetch keeps the socket
+ *  open between them, and the app closes an idle one long before the next chunk
+ *  is ready. Writing to that socket fails, and a POST is not replayed for us --
+ *  so every few chunks died with "fetch failed" and the run crawled along at
+ *  whatever the minute's dispatch could revive.
+ *
+ *  Only a connection failure is retried. An answer, even a bad one, is the app's
+ *  and belongs to the caller; a chunk that timed out is still running there and
+ *  must not be started again underneath itself. */
 const ask = async (path: string, body: unknown, timeoutMs = 180_000): Promise<unknown> => {
-  const response = await fetch(`${APP_BASE}/api/internal/${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  })
+  const send = () =>
+    fetch(`${APP_BASE}/api/internal/${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+
+  let response: Response
+  try {
+    response = await send()
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'TimeoutError') throw cause
+    response = await send()
+  }
+
   const answer = (await response.json().catch(() => ({}))) as { error?: string }
   if (!response.ok) throw new Error(answer.error ?? `The app answered ${response.status} for ${path}.`)
   return answer
@@ -92,26 +113,14 @@ const run = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 120,
   handle: async ({ accountId, runId }) => {
-    const response = await fetch(`${APP_BASE}/api/internal/import-chunk`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
-      body: JSON.stringify({ accountId, runId }),
-      // Comfortably past the app's own chunk budget, which is what decides how
-      // long a chunk takes. Cut too fine, every chunk of a slow file was abandoned
-      // here while the app went on writing it, and the run advanced only as fast
-      // as the minute's dispatch could revive it.
-      signal: AbortSignal.timeout(180_000),
-    })
-
-    const body = (await response.json().catch(() => ({}))) as {
-      error?: string
+    // The timeout is comfortably past the app's own chunk budget, which is what
+    // decides how long a chunk takes. Cut too fine, every chunk of a slow file
+    // was abandoned here while the app went on writing it, and the run advanced
+    // only as fast as the minute's dispatch could revive it.
+    const body = (await ask('import-chunk', { accountId, runId })) as {
       done?: boolean
       processed?: number
       total?: number
-    }
-
-    if (!response.ok) {
-      throw new Error(body.error ?? `The app answered ${response.status} for import ${runId}.`)
     }
 
     console.log(`[import] ${runId}: ${body.processed ?? 0} of ${body.total ?? 0}`)

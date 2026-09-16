@@ -186,9 +186,9 @@ const ResumeCard = ({
     <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
       <h2 className="text-base font-semibold">Carry on uploading {run.filename}?</h2>
       <p className="text-secondary">
-        {percent(run.uploadedBytes, run.fileBytes)}% of it is here ({megabytes(run.uploadedBytes)} of{' '}
-        {megabytes(run.fileBytes)}, {formatNumber(run.have.length)} parts). Choose the same file again and the rest
-        goes; nothing that arrived is sent twice.
+        {percent(run.uploadedBytes, run.fileBytes)}% of it is here: {megabytes(run.uploadedBytes)} of{' '}
+        {megabytes(run.fileBytes)}, in {run.have.length === 1 ? '1 piece' : `${formatNumber(run.have.length)} pieces`}.
+        Choose the same file again and the rest goes; nothing that arrived is sent twice.
       </p>
       {error ? <Alert>{error}</Alert> : null}
       <input

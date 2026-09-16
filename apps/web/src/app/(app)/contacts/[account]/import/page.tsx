@@ -42,6 +42,8 @@ const SHAPE_LABEL: Record<Exclude<ImportKind, 'records'>, { label: string; what:
   },
 }
 
+const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
+
 const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -153,7 +155,12 @@ const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) 
                       <Badge tone={run.state === 'done' ? 'ok' : run.state === 'failed' ? 'error' : 'neutral'}>{run.state}</Badge>
                     </td>
                     <td className="px-6 tabular-nums">
-                      {formatNumber(run.processedRows)} / {formatNumber(run.totalRows)}
+                      {/* A file that is still arriving has no rows yet, so this
+                          column read "0 / 0" for the length of an upload. What it
+                          has at that point is bytes, so that is what it says. */}
+                      {run.state === 'uploading'
+                        ? `${megabytes(run.uploadedBytes)} / ${megabytes(run.fileBytes)}`
+                        : `${formatNumber(run.processedRows)} / ${formatNumber(run.totalRows)}`}
                     </td>
                     <td className="px-6 tabular-nums">{formatNumber(run.created)}</td>
                     <td className="px-6 tabular-nums">{formatNumber(run.updated)}</td>
