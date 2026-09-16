@@ -988,7 +988,7 @@ try {
     return '20 created, then 20 updated, 20 rows total'
   })
 
-  await check('a bad date lands in the error list and does not stop the run', async () => {
+  await check('a bad date costs its own cell and the deal still imports', async () => {
     const stamp = Date.now()
     const rows = [
       { 'Deal Name': `Import deal ${stamp} a`, 'Close Date': '2026-09-01' },
@@ -1002,10 +1002,13 @@ try {
       mapping: { 'Deal Name': 'name', 'Close Date': 'close_date' },
       rows,
     })
-    expect(preview.willError === 1, `preview expected 1 error, saw ${preview.willError}`)
-    expect(preview.samples.error[0]!.row === 3, `the bad row was reported as row ${preview.samples.error[0]!.row}`)
+    // The close date is neither what a deal is matched on nor a required field,
+    // so the row that carries an unparseable one arrives without it rather than
+    // not at all.
+    expect(preview.willError === 0, `preview expected no refusals, saw ${preview.willError}`)
+    expect(preview.willCreate === 3, `${preview.willCreate} to create, expected all 3`)
     expect(object.byKey.has('close_date'), 'close_date left the registry')
-    return `${preview.willCreate} to create, 1 refused: ${preview.samples.error[0]!.reason}`
+    return `all ${preview.willCreate} import, the unparseable close date left empty`
   })
 
   await check('a mapping with two columns on one field is blocked before anything is written', async () => {

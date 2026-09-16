@@ -666,7 +666,9 @@ try {
 
   await check('a run picked up after the process died continues from where it stopped', async () => {
     const stamp = String(Date.now())
-    const id = await startRun(admin, 'records', stamp, 500)
+    // More rows than one chunk carries, which is what makes this a resume rather
+    // than a single pass that happens to be interrupted.
+    const id = await startRun(admin, 'records', stamp, 6_000)
     await startImportRun(admin, id)
     const first = await runImportChunk(admin, id)
     expect(!first.done && first.processed > 0, `one chunk did ${first.processed} rows and said done=${first.done}`)
@@ -676,22 +678,23 @@ try {
     await runToEnd(admin, id)
     const done = (await readImportRun(admin, id))!
     expect(done.state === 'done', `the resumed run ended ${done.state}`)
-    expect(done.processedRows === 500, `${done.processedRows} of 500 rows processed`)
-    expect(done.created === 500, `${done.created} created, expected 500 with no repeats`)
+    expect(done.processedRows === 6_000, `${done.processedRows} of 6,000 rows processed`)
+    expect(done.created === 6_000, `${done.created} created, expected 6,000 with no repeats`)
 
     const [stored] = await db.execute<{ n: number }>(sql`
       select count(*)::int as n from contact
        where account_id = ${sandbox.id} and email like ${`verify.imports.${stamp}.%`} and deleted_at is null`)
-    expect(Number(stored?.n) === 500, `${stored?.n} contacts exist, expected 500`)
+    expect(Number(stored?.n) === 6_000, `${stored?.n} contacts exist, expected 6,000`)
     await db.execute(
       sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.imports.${stamp}.%`}`,
     )
-    return `resumed at row ${first.processed}, finished at 500 with no duplicates`
+    return `resumed at row ${first.processed}, finished at 6,000 with no duplicates`
   })
 
   await check('cancelling mid-run stops it for good and a chunk in flight cannot undo it', async () => {
     const stamp = String(Date.now())
-    const id = await startRun(admin, 'records', stamp, 400)
+    // Again more than one chunk, so there is a middle to be cancelled in.
+    const id = await startRun(admin, 'records', stamp, 6_000)
     await startImportRun(admin, id)
     await runImportChunk(admin, id)
     await cancelImportRun(admin, id)
@@ -713,16 +716,18 @@ try {
 
   await check('a refused row lands in the error CSV with every column it came with', async () => {
     const stamp = String(Date.now())
+    // The match column, which is the one bad value that still refuses a row:
+    // without it there is no record to write to and nothing to match next time.
     const rows = [
-      { 'Deal Name': `Verify import deal ${stamp} a`, 'Close Date': '2026-09-01', Note: 'fine' },
-      { 'Deal Name': `Verify import deal ${stamp} b`, 'Close Date': 'next tuesday-ish', Note: 'bad date' },
+      { Email: `verify.imports.${stamp}.a@example.com`, 'First Name': 'Fine', Note: 'fine' },
+      { Email: 'not an address at all', 'First Name': 'Bad', Note: 'bad email' },
     ]
     const run = await createImportRun(admin, {
-      objectKey: 'deal',
-      filename: `deals-${stamp}.csv`,
-      headers: ['Deal Name', 'Close Date', 'Note'],
+      objectKey: 'contact',
+      filename: `contacts-${stamp}.csv`,
+      headers: ['Email', 'First Name', 'Note'],
       rows,
-      mapping: { 'Deal Name': 'name', 'Close Date': 'close_date', Note: null } as Mapping,
+      mapping: { Email: 'email', 'First Name': 'first_name', Note: null } as Mapping,
     })
     created.push(run.id)
     await runToEnd(admin, run.id)
@@ -731,14 +736,52 @@ try {
 
     const csv = await collect(importErrorCsv(admin, run.id))
     const header = csv.split('\n')[0]!
-    for (const column of ['Row', 'Reason', 'Deal Name', 'Close Date', 'Note']) {
+    for (const column of ['Row', 'Reason', 'Email', 'First Name', 'Note']) {
       expect(header.includes(column), `the CSV header has no "${column}": ${header}`)
     }
-    expect(csv.includes('next tuesday-ish'), 'the refused row lost the value that caused it')
+    expect(csv.includes('not an address at all'), 'the refused row lost the value that caused it')
     await db.execute(
-      sql`delete from deal where account_id = ${sandbox.id} and name like ${`Verify import deal ${stamp}%`}`,
+      sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.imports.${stamp}.%`}`,
     )
     return header
+  })
+
+  await check('a value that does not fit costs its cell, not the record', async () => {
+    const stamp = String(Date.now())
+    const email = `verify.imports.${stamp}.a@example.com`
+    const object = objectOrThrow(await getRegistry(admin), 'contact')
+    const key = `verify_number_${stamp}`
+    await createField(admin, { objectKey: 'contact', key, label: `Verify Number ${stamp}`, type: 'number' })
+    forgetRegistry(admin.accountId)
+
+    const run = await createImportRun(admin, {
+      objectKey: 'contact',
+      filename: `placeholder-${stamp}.csv`,
+      headers: ['Email', 'First Name', 'Count'],
+      // "-" is what a portal writes where it has nothing, and the column it sits
+      // in was guessed a number from rows that happened not to contain one.
+      rows: [{ Email: email, 'First Name': 'Kept', Count: '-' }],
+      mapping: { Email: 'email', 'First Name': 'first_name', Count: key },
+    })
+    created.push(run.id)
+    await runToEnd(admin, run.id)
+
+    const done = (await readImportRun(admin, run.id))!
+    expect(done.errored === 0, `${done.errored} rows were refused, expected none`)
+    expect(done.created === 1, `${done.created} created, expected 1`)
+    const note = done.errors.find((entry) => entry.warning && entry.reason.includes('is not a number'))
+    expect(note !== undefined, `no note about the cell: ${JSON.stringify(done.errors)}`)
+
+    const [stored] = await db.execute<{ first_name: string; custom: Record<string, unknown> }>(
+      sql`select first_name, custom from contact where account_id = ${sandbox.id} and email = ${email}`,
+    )
+    expect(stored?.first_name === 'Kept', 'the rest of the row did not land')
+    expect(stored !== undefined && !(key in (stored.custom ?? {})), 'the cell that did not fit was written anyway')
+
+    await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email = ${email}`)
+    await db.execute(sql`delete from field_def where object_id = ${object.id} and key = ${key}`)
+    forgetRegistry(admin.accountId)
+    return `imported with the cell left empty: ${note?.reason}`
   })
 
   await check('a seat with no contacts access cannot start or preview an import', async () => {
@@ -763,15 +806,15 @@ try {
   await check('the error file holds every refused row, not the first thousand', async () => {
     const stamp = String(Date.now())
     const rows = Array.from({ length: 1_100 }, (_, i) => ({
-      'Deal Name': `Verify refused deal ${stamp} ${i}`,
-      'Close Date': 'sometime soon',
+      Email: `refused ${stamp} ${i}, not an address`,
+      'First Name': 'Refused',
     }))
     const run = await createImportRun(admin, {
-      objectKey: 'deal',
+      objectKey: 'contact',
       filename: `refused-${stamp}.csv`,
-      headers: ['Deal Name', 'Close Date'],
+      headers: ['Email', 'First Name'],
       rows,
-      mapping: { 'Deal Name': 'name', 'Close Date': 'close_date' },
+      mapping: { Email: 'email', 'First Name': 'first_name' },
     })
     created.push(run.id)
     await runToEnd(admin, run.id)

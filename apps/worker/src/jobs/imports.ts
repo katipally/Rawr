@@ -42,8 +42,11 @@ const dispatch = defineJob({
          ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
 
     for (const row of rows) {
-      // One chunk in flight per run. Without it the tick that lands while a chunk
-      // is still writing would hand the same position range to two workers.
+      // What keeps two workers off the same position range is that the queue has
+      // one worker and it awaits each handler, not this key: a queue created
+      // without a policy is `standard`, and pg-boss enforces singletonKey only on
+      // the policies that carry a unique index for it. Kept because it is the
+      // right key the day this queue is given one, and it costs nothing today.
       await boss().send(
         'import.run',
         { accountId: row.account_id, runId: row.id },
@@ -65,7 +68,11 @@ const run = defineJob({
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
       body: JSON.stringify({ accountId, runId }),
-      signal: AbortSignal.timeout(120_000),
+      // Comfortably past the app's own chunk budget, which is what decides how
+      // long a chunk takes. Cut too fine, every chunk of a slow file was abandoned
+      // here while the app went on writing it, and the run advanced only as fast
+      // as the minute's dispatch could revive it.
+      signal: AbortSignal.timeout(180_000),
     })
 
     const body = (await response.json().catch(() => ({}))) as {

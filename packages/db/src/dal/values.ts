@@ -13,6 +13,22 @@ export class ValueError extends Error {
 
 export type Coerced = { value: unknown; warning?: string }
 
+/** Enough of a field's choices to recognise which set was meant, short enough
+ *  that a page of refused rows is still readable. Counting choices is not the
+ *  measure: six of them spelled as UUIDs is a line and a half on its own, and an
+ *  import that refuses a thousand rows repeats it a thousand times. */
+const namedChoices = (options: string[]): string => {
+  const named: string[] = []
+  let width = 0
+  for (const option of options) {
+    if (named.length > 0 && width + option.length > 60) break
+    named.push(option)
+    width += option.length + 2
+  }
+  const rest = options.length - named.length
+  return rest > 0 ? `${named.join(', ')} and ${rest} more` : named.join(', ')
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -140,10 +156,7 @@ export const coerce = (field: RegistryField, input: unknown): Coerced => {
       if (field.options.length === 0) return truncate(field, text)
       const choice = choiceOf(field.options, text)
       if (choice === undefined) {
-        throw new ValueError(
-          field,
-          `"${text}" is not one of its choices: ${field.options.join(', ')}.`,
-        )
+        throw new ValueError(field, `"${text}" is not one of its choices: ${namedChoices(field.options)}.`)
       }
       return { value: choice }
     }

@@ -28,7 +28,7 @@ import { isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { linksForContacts } from './activity.ts'
 import { createField, createFields, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
-import { createRecord, updateRecord, DuplicateError } from './records.ts'
+import { bulkWriteRecords, createRecord, updateRecord, DuplicateError, type BulkRow } from './records.ts'
 import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { choiceOf, coerce, ValueError } from './values.ts'
@@ -407,11 +407,28 @@ export const planRow = async (
       if (warning) warnings.push(warning)
       values[key] = value
     } catch (cause) {
-      return {
-        values,
-        warnings,
-        error: cause instanceof ValueError ? cause.message : String(cause),
+      // A value that does not fit costs that one cell, not the whole record. A
+      // contact with sixty-seven good columns and a "-" where a number was
+      // guessed from a sample is still that contact, and refusing it threw away
+      // the sixty-seven.
+      //
+      // Three things still refuse the row. The column it is matched on, because
+      // without it there is nothing to write to. A field somebody marked
+      // required, because they said so. And anything that is not a value
+      // complaint at all, which is a fault rather than a bad cell.
+      //
+      // Only for a record file. Every other kind is one instruction per row —
+      // put this deal on that company — where a dropped cell leaves half an
+      // instruction, and half is worse than none.
+      const essential = key === dedupeKey || field.isRequired || kind !== 'records'
+      if (essential || !(cause instanceof ValueError)) {
+        return {
+          values,
+          warnings,
+          error: cause instanceof ValueError ? cause.message : String(cause),
+        }
       }
+      warnings.push(`${cause.message} Left empty, and the rest of the row imported.`)
     }
   }
   if (Object.keys(values).length > 0 && !(dedupeKey in values)) {
@@ -475,38 +492,38 @@ const dedupeLookup = async (
 }
 
 /** Which of these rows already name a record, by the same identity the run
- *  matches on, in one query for all of them. */
+ *  matches on, in one query for all of them, and which record each one is.
+ *
+ *  The id rather than a bare yes is what lets the run update without asking again
+ *  per row: `dedupeLookup` is a transaction and a query each, so two hundred of
+ *  them are a thousand round trips before a single record is written. */
 const knownIdentities = async (
   ctx: AccountContext,
   object: RegistryObject,
   rows: Record<string, unknown>[],
-): Promise<Set<string>> => {
+): Promise<Map<string, string>> => {
   const key = object.isCustom ? object.labelFieldKey : CORE_MATCH[object.key]
   const identities = new Set(rows.flatMap((values) => dedupeIdentity(object, values) ?? []))
-  if (!key || identities.size === 0) return new Set()
+  if (!key || identities.size === 0) return new Map()
   const wanted = [...identities].map((identity) => identity.slice(key.length + 1))
   const list = sql`(select jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb))`
   if (object.isCustom) assertUsableFieldKey(key)
   const found = await withAccount(ctx, (tx) =>
-    tx.execute<{ value: string }>(
+    tx.execute<{ id: string; value: string }>(
       object.isCustom
-        ? sql`select lower(custom ->> ${key}) as value from custom_record
+        ? sql`select id, lower(custom ->> ${key}) as value from custom_record
                where object_id = ${object.id}::uuid and deleted_at is null and lower(custom ->> ${key}) in ${list}`
         : key === 'email'
-          ? sql`select lower(email) as value from contact where deleted_at is null and lower(email) in ${list}`
+          ? sql`select id, lower(email) as value from contact where deleted_at is null and lower(email) in ${list}`
           : key === 'domain'
-            ? sql`select domain as value from company where deleted_at is null and domain in ${list}`
-            : sql`select lower(name) as value from deal where deleted_at is null and lower(name) in ${list}`,
+            ? sql`select id, domain as value from company where deleted_at is null and domain in ${list}`
+            : sql`select distinct on (lower(name)) id, lower(name) as value from deal
+                   where deleted_at is null and lower(name) in ${list}
+                   order by lower(name), created_at`,
     ),
   )
-  return new Set(found.map((row) => `${key}:${row.value}`))
+  return new Map(found.map((row) => [`${key}:${row.value}`, row.id]))
 }
-
-/** The driver's SQLSTATE, not drizzle's message, which is the statement and its
- *  parameters. 23505 here is a value somebody else committed between the moment
- *  this row was matched and the moment it was inserted. */
-const isUniqueViolation = (cause: unknown): boolean =>
-  (cause as { cause?: { code?: string } } | null)?.cause?.code === '23505'
 
 /** Every kind but `records` is mapped against a fixed shape rather than the
  *  account's registry: nothing on those rows becomes a column on a record, they
@@ -802,7 +819,7 @@ const preview = async (
   // to the database, and five hundred of them made a preview take minutes.
   const known =
     writer || kind === 'activities'
-      ? new Set<string>()
+      ? new Map<string, string>()
       : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
   for (const [index, row] of checked.entries()) {
     const planned = plans[index]!
@@ -1743,9 +1760,15 @@ const SHAPE_WRITER: Partial<
   submissions: writeSubmission,
 }
 
-const CHUNK = 200
+const CHUNK = 5_000
 /** Lines of a run's notes kept for the screen, which shows twenty-five. */
 const NOTES_KEPT = 100
+
+/** A chunk stops here and answers with what it did, however many of its rows it
+ *  got through. The worker waits longer than this for the answer, so a file whose
+ *  rows are slow returns short rather than being abandoned mid-write, retried from
+ *  the same position, and never finishing. */
+const CHUNK_MS = 45_000
 
 /** One chunk of an import. Called repeatedly by the worker, so an interrupted run
  *  continues from processed_rows instead of restarting, and re-running the same
@@ -1805,71 +1828,129 @@ export const runImportChunk = async (
   const deps: ShapeDeps = { ctx, source: run.source, dry: false, cache: new Map() }
   await resolve.prime(object, mapping, slice)
 
-  for (const [offset, row] of slice.entries()) {
-    const planned = await planRow(object, mapping, row, resolve, kind)
-    if (planned.error) {
-      refuse(offset, planned.error)
-      continue
-    }
-    if (Object.keys(planned.values).length === 0) {
-      skipped += 1
-      continue
-    }
-    for (const warning of planned.warnings) {
-      notes.push({ row: run.processedRows + offset + 2, reason: warning, warning: true })
-    }
+  // Planned before anything is written, so the chunk's whole dedupe is one query
+  // instead of a transaction and a query per row. Planning is where a company
+  // named for the first time is created, which is why it stays outside the write
+  // transaction below: those companies are wanted whatever becomes of this chunk.
+  const plans: Awaited<ReturnType<typeof planRow>>[] = []
+  for (const row of slice) plans.push(await planRow(object, mapping, row, resolve, kind))
+  const known =
+    writer || kind === 'activities'
+      ? new Map<string, string>()
+      : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
 
-    if (writer) {
-      const outcome = await writer(deps, planned.values)
-      if (typeof outcome === 'object') refuse(offset, outcome.error)
-      else if (outcome === 'created') created += 1
-      else if (outcome === 'updated') updated += 1
-      else skipped += 1
-      continue
-    }
+  const deadline = Date.now() + CHUNK_MS
+  /** Rows this chunk finished with. Short of the slice when the budget ran out,
+   *  and the next chunk starts where this one stopped. */
+  let handled = 0
 
-    if (kind === 'activities') {
-      const outcome = await writeImportedActivity(ctx, findRecord, run.source, planned.values)
-      if (outcome === 'created') created += 1
-      else if (outcome === 'already') skipped += 1
-      else refuse(offset, 'No contact or company in this account matches that address, so there is nothing to put this on.')
-      continue
-    }
-
-    // Create date is Rawr's to keep, so only a record this row brings into being
-    // takes the one the file carries.
-    const { created_at: createdAt, ...values } = planned.values
-    const firstWrite = { ...NO_ENRICH, ...(createdAt instanceof Date ? { createdAt } : {}) }
-    try {
-      const existing = await dedupeLookup(ctx, object, values)
-      if (existing) {
-        await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
-        updated += 1
-      } else {
-        await createRecord(ctx, object.key, values, firstWrite)
-        created += 1
-      }
-    } catch (cause) {
-      // Lost a race for the dedupe value: either caught before the insert, or by
-      // the unique index during it, when the other writer committed in between.
-      // Whoever holds the value holds the record, so this row is an update.
-      const collidedWith =
-        cause instanceof DuplicateError
-          ? cause.existingId
-          : isUniqueViolation(cause)
-            ? await dedupeLookup(ctx, object, values)
-            : null
-      if (!collidedWith) {
-        refuse(offset, reasonOf(cause))
+  // A file of records is written for the whole chunk at once: the rules that
+  // decide what to write have already run, up there in `planRow`, and what is
+  // left is sending it. Every other kind is a row of instructions rather than a
+  // record — make this property, put that deal on this company — and each one
+  // still goes on its own, below.
+  if (!writer && kind !== 'activities') {
+    const batch: BulkRow[] = []
+    for (const [offset, planned] of plans.entries()) {
+      handled = offset + 1
+      if (planned.error) {
+        refuse(offset, planned.error)
         continue
       }
+      if (Object.keys(planned.values).length === 0) {
+        skipped += 1
+        continue
+      }
+      for (const warning of planned.warnings) {
+        notes.push({ row: run.processedRows + offset + 2, reason: warning, warning: true })
+      }
+      // Create date is Rawr's to keep, so only a record this row brings into
+      // being takes the one the file carries.
+      const { created_at: createdAt, ...values } = planned.values
+      const identity = dedupeIdentity(object, values)
+      batch.push({
+        position: offset,
+        values,
+        existingId: identity ? (known.get(identity) ?? null) : null,
+        ...(createdAt instanceof Date ? { createdAt } : {}),
+      })
+    }
+
+    const outcome = await bulkWriteRecords(ctx, object.key, batch)
+    created += outcome.created.length
+    updated += outcome.updated.length
+    for (const note of outcome.warnings) {
+      notes.push({ row: run.processedRows + note.position + 2, reason: note.reason, warning: true })
+    }
+    for (const entry of outcome.refused) refuse(entry.position, entry.reason)
+
+    // The few the batch could not place: a second row of this same file naming
+    // the record the first one made, or a unique value somebody else committed
+    // in between. Rare enough to cost one round trip each, and they must not be
+    // dropped, so they go the way every row used to.
+    for (const position of outcome.contested) {
+      const values = batch.find((row) => row.position === position)!.values
       try {
-        await updateRecord(ctx, object.key, collidedWith, values, null, NO_ENRICH)
+        const existing = await dedupeLookup(ctx, object, values)
+        if (!existing) {
+          refuse(position, 'Another record took that value while this file was importing.')
+          continue
+        }
+        await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
         updated += 1
-      } catch (retry) {
-        refuse(offset, reasonOf(retry))
+      } catch (cause) {
+        refuse(position, reasonOf(cause))
       }
     }
+  } else {
+    // A shape file: one instruction per row, each of which reads the account back
+    // before it writes, so these stay one at a time. One transaction for the whole
+    // chunk rather than one per row, with a savepoint per row so a refusal undoes
+    // itself and leaves the rest of the chunk standing.
+    await withAccount(ctx, async (tx) => {
+      for (const [offset, planned] of plans.entries()) {
+        // Never on the first row: a row slower than the whole budget still has to
+        // advance the run rather than be retried for ever.
+        if (handled > 0 && Date.now() >= deadline) return
+        handled = offset + 1
+
+        if (planned.error) {
+          refuse(offset, planned.error)
+          continue
+        }
+        if (Object.keys(planned.values).length === 0) {
+          skipped += 1
+          continue
+        }
+        for (const warning of planned.warnings) {
+          notes.push({ row: run.processedRows + offset + 2, reason: warning, warning: true })
+        }
+
+        await tx.execute(sql`savepoint rawr_row`)
+        try {
+          if (writer) {
+            const outcome = await writer(deps, planned.values)
+            if (typeof outcome === 'object') refuse(offset, outcome.error)
+            else if (outcome === 'created') created += 1
+            else if (outcome === 'updated') updated += 1
+            else skipped += 1
+          } else {
+            const outcome = await writeImportedActivity(ctx, findRecord, run.source, planned.values)
+            if (outcome === 'created') created += 1
+            else if (outcome === 'already') skipped += 1
+            else refuse(offset, 'No contact or company in this account matches that address, so there is nothing to put this on.')
+          }
+        } catch (cause) {
+          await tx.execute(sql`rollback to savepoint rawr_row`)
+          refuse(offset, reasonOf(cause))
+        } finally {
+          // Always: an unreleased savepoint is a live subtransaction, and a chunk
+          // of them nested is a transaction Postgres spends its time bookkeeping
+          // rather than writing.
+          await tx.execute(sql`release savepoint rawr_row`)
+        }
+      }
+    })
   }
 
   // Once per run, not once per row: a portal with four departed owners produced
@@ -1877,7 +1958,7 @@ export const runImportChunk = async (
   const previousUnmatched = (run.unmatchedOwners as string[] | null) ?? []
   const unmatchedOwners = [...new Set([...previousUnmatched, ...resolve.unmatchedOwners])].slice(0, 200)
 
-  const processed = run.processedRows + slice.length
+  const processed = run.processedRows + handled
   // The file's length, not the slice's: a short slice on a run somebody cancelled
   // mid-chunk must not read as a finished import.
   const done = processed >= run.totalRows || slice.length === 0

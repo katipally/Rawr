@@ -94,8 +94,13 @@ export const isCoreObject = (object: RegistryObject): object is RegistryObject &
 const cache = new Map<string, { at: number; registry: Registry }>()
 const TTL_MS = 30_000
 
+/** Bumped by every field or object write, which is what lets the per-transaction
+ *  memo below expire without each of those writers having to know it exists. */
+let generation = 0
+
 export const forgetRegistry = (accountId: string): void => {
   cache.delete(accountId)
+  generation += 1
 }
 
 const load = async (tx: Tx): Promise<Registry> => {
@@ -215,8 +220,23 @@ export const getRegistry = async (ctx: AccountContext): Promise<Registry> => {
 }
 
 /** Reads the registry inside a transaction the caller already opened, so a write
- *  path does not need a second round trip or a second account context. */
-export const getRegistryIn = async (tx: Tx): Promise<Registry> => load(tx)
+ *  path does not need a second round trip or a second account context.
+ *
+ *  Memoised for the life of that transaction. `load` returns a row per object per
+ *  field, and an import that creates records inside one transaction called this
+ *  once per record: on a migrated portal with several hundred fields that is the
+ *  same few thousand rows fetched and parsed again for every row of the file. The
+ *  generation counter is what expires it, so a field written mid-transaction is
+ *  still read back correctly. */
+const perTransaction = new WeakMap<Tx, { generation: number; registry: Registry }>()
+
+export const getRegistryIn = async (tx: Tx): Promise<Registry> => {
+  const hit = perTransaction.get(tx)
+  if (hit && hit.generation === generation) return hit.registry
+  const registry = await load(tx)
+  perTransaction.set(tx, { generation, registry })
+  return registry
+}
 
 export class UnknownFieldError extends Error {
   constructor(objectKey: string, fieldKey: string) {

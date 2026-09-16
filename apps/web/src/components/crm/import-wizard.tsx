@@ -548,6 +548,11 @@ const NoteList = ({ notes, total }: { notes: { row: number; reason: string }[]; 
       <p className="text-secondary">
         Showing {Math.min(notes.length, 25)}. The CSV has all {formatNumber(total)}.
       </p>
+    ) : notes.length > 25 ? (
+      // No total to point at: a note about a row that still imported is not in
+      // the error CSV, and the run keeps only the first hundred. Saying which
+      // slice this is beats a list that looks complete and is not.
+      <p className="text-secondary">Showing 25 of {formatNumber(notes.length)}.</p>
     ) : null}
   </>
 )

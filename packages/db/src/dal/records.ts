@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { sql, type SQL } from 'drizzle-orm'
 import type { ObjectKey } from '../registry/core.ts'
 import { moveActivityLinks, recordActivity, type EntityType } from './activity.ts'
@@ -436,6 +437,13 @@ const findDuplicate = async (
   return null
 }
 
+/** The domains this transaction has already placed. An import writes two hundred
+ *  contacts on one transaction and most of them share an employer, which was two
+ *  hundred identical lookups for the one answer. It lives only as long as the
+ *  transaction, so a company created or renamed by anyone else is seen by the
+ *  next one. */
+const companyByDomain = new WeakMap<Tx, Map<string, string>>()
+
 /** Files a contact under the company its email domain implies, creating that company
  *  when it is not known yet. A free or disposable domain creates nothing, so
  *  gmail.com never becomes a company called Gmail. A4. */
@@ -447,10 +455,21 @@ const autoAssociateCompany = async (
   const domain = employerDomainFromEmail(typeof email === 'string' ? email : null)
   if (!domain) return null
 
+  let placed = companyByDomain.get(tx)
+  if (!placed) {
+    placed = new Map()
+    companyByDomain.set(tx, placed)
+  }
+  const remembered = placed.get(domain)
+  if (remembered) return { companyId: remembered, created: false }
+
   const [existing] = await tx.execute<{ id: string }>(
     sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
   )
-  if (existing) return { companyId: existing.id, created: false }
+  if (existing) {
+    placed.set(domain, existing.id)
+    return { companyId: existing.id, created: false }
+  }
 
   const [created] = await tx.execute<{ id: string }>(sql`
     insert into company (account_id, name, domain)
@@ -458,12 +477,16 @@ const autoAssociateCompany = async (
     on conflict do nothing
     returning id`)
 
-  if (created) return { companyId: created.id, created: true }
+  if (created) {
+    placed.set(domain, created.id)
+    return { companyId: created.id, created: true }
+  }
 
   // Lost a race with a concurrent insert; the winner's row is the answer.
   const [raced] = await tx.execute<{ id: string }>(
     sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
   )
+  if (raced) placed.set(domain, raced.id)
   return raced ? { companyId: raced.id, created: false } : null
 }
 
@@ -636,6 +659,380 @@ export const createRecord = async (
     })
 
     return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, written) }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// The same writes, for a great many records at once
+// ---------------------------------------------------------------------------
+
+/** One row a bulk write is asked to place. `existingId` is the caller's own
+ *  match: it has already asked which of these records are here, in one query for
+ *  the whole batch, and asking again per row is the cost this exists to avoid. */
+export type BulkRow = {
+  /** The caller's name for this row, handed back on every outcome so it can
+   *  attribute one without matching on values. */
+  position: number
+  values: RecordValues
+  existingId: string | null
+  /** When the record really began, for a migration that carries it. Taken only
+   *  by a record this write brings into being, as everywhere else. */
+  createdAt?: Date | undefined
+}
+
+export type BulkOutcome = {
+  created: { position: number; id: string }[]
+  updated: { position: number; id: string }[]
+  refused: { position: number; reason: string }[]
+  warnings: { position: number; reason: string }[]
+  /** Rows whose unique value another writer committed first, between the
+   *  caller's match and this insert. A handful at most, handed back so the
+   *  caller can put them through the one-at-a-time path rather than lose them. */
+  contested: number[]
+}
+
+/** The table a write names. `tableFor` aliases a custom object's shared table to
+ *  the object's key, which is what every read wants and what no INSERT accepts. */
+const writeTable = (object: RegistryObject): SQL =>
+  sql.raw(`"${object.isCustom ? 'custom_record' : object.key}"`)
+
+/** The database's own type for every column of a record table, so a set-based
+ *  write can declare its input without a second, hand-written map from field
+ *  types to SQL types — the kind that is correct until the day a column changes
+ *  and nobody remembers the map exists. Memoised for the transaction. */
+const columnTypes = new WeakMap<Tx, Map<string, Map<string, string>>>()
+
+const typesOf = async (tx: Tx, object: RegistryObject): Promise<Map<string, string>> => {
+  let tables = columnTypes.get(tx)
+  if (!tables) {
+    tables = new Map()
+    columnTypes.set(tx, tables)
+  }
+  const name = object.isCustom ? 'custom_record' : object.key
+  const hit = tables.get(name)
+  if (hit) return hit
+  const rows = await tx.execute<{ column_name: string; type: string }>(sql`
+    select attname as column_name, format_type(atttypid, atttypmod) as type
+      from pg_attribute
+     where attrelid = ${name}::regclass and attnum > 0 and not attisdropped`)
+  const found = new Map(rows.map((row) => [row.column_name, row.type]))
+  tables.set(name, found)
+  return found
+}
+
+/** `jsonb_to_recordset(...) as x("col" type, ...)`, the one shape that turns a
+ *  batch of rows into a relation Postgres can insert from or join against. */
+const recordset = (payload: string, columns: [string, string][], alias: string): SQL =>
+  sql`jsonb_to_recordset(${payload}::jsonb) as ${sql.raw(alias)} (${sql.join(
+    columns.map(([column, type]) => sql.raw(`"${column}" ${type}`)),
+    sql`, `,
+  )})`
+
+/** Every company these contacts imply, in two statements rather than two per
+ *  row. Same rule as `autoAssociateCompany`: a free or disposable domain makes
+ *  no company. */
+const companiesForDomains = async (
+  tx: Tx,
+  ctx: AccountContext,
+  domains: string[],
+): Promise<Map<string, string>> => {
+  if (domains.length === 0) return new Map()
+  const wanted = JSON.stringify(domains.map((domain) => ({ domain, name: companyNameFromDomain(domain) })))
+  await tx.execute(sql`
+    insert into company (account_id, name, domain)
+    select ${ctx.accountId}::uuid, d.name, d.domain
+      from ${recordset(wanted, [['domain', 'text'], ['name', 'text']], 'd')}
+    on conflict do nothing`)
+  const rows = await tx.execute<{ id: string; domain: string }>(sql`
+    select id, domain from company
+     where deleted_at is null
+       and domain in (select jsonb_array_elements_text(${JSON.stringify(domains)}::jsonb))`)
+  return new Map(rows.map((row) => [row.domain, row.id]))
+}
+
+/** Creating and updating many records the way `createRecord` and `updateRecordIn`
+ *  do one, in a fixed number of statements rather than a fixed number per row.
+ *
+ *  Every rule that decides *what* is written still lives in TypeScript and is the
+ *  same code the single-record path runs: `prepare` coerces through the registry,
+ *  `assertIdentified` insists a record is findable, the display name and the audit
+ *  row are built here exactly as there. Only the *sending* is set-based, so there
+ *  is no second copy of the rules in SQL to drift from the first.
+ *
+ *  What it deliberately does not do is the part of an update that only means
+ *  something for a person's edit: the per-field timeline entry, the stage
+ *  notification, the deal rescore. An import is a data load. Those already never
+ *  reached an automation from an import — the trigger is raised from
+ *  `updateRecord`'s return value, which the importer discards — so this drops the
+ *  writing, not the behaviour. Enrichment is off here for the same reason it is
+ *  off for the importer: a queue of ninety thousand is not a question.
+ *
+ *  O(1) statements per batch. 88,000 contacts cost about seventy statements
+ *  rather than six hundred thousand round trips. */
+export const bulkWriteRecords = async (
+  ctx: AccountContext,
+  objectKey: string,
+  rows: BulkRow[],
+): Promise<BulkOutcome> => {
+  assertCanWrite(ctx, objectKey)
+  const outcome: BulkOutcome = { created: [], updated: [], refused: [], warnings: [], contested: [] }
+  if (rows.length === 0) return outcome
+
+  return withAccount(ctx, async (tx) => {
+    const registry = await getRegistryIn(tx)
+    const object = objectOrThrow(registry, objectKey)
+    const types = await typesOf(tx, object)
+
+    type Planned = BulkRow & { id: string; columns: Record<string, unknown>; custom: Record<string, unknown> }
+    const planned: Planned[] = []
+
+    // Coerced and checked exactly as one record would be, and entirely in
+    // memory: this loop asks the database nothing.
+    for (const row of rows) {
+      try {
+        const prepared = prepare(object, row.values)
+        assertIdentified(object, prepared.columns)
+        for (const warning of prepared.warnings) outcome.warnings.push({ position: row.position, reason: warning })
+        planned.push({ ...row, id: randomUUID(), columns: prepared.columns, custom: prepared.custom })
+      } catch (cause) {
+        outcome.refused.push({
+          position: row.position,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    }
+    if (planned.length === 0) return outcome
+
+    // A4, for the whole batch: a contact with no company of its own is filed
+    // under the one its email domain implies.
+    if (object.key === 'contact') {
+      const needed = planned.filter((row) => !row.columns.company_id)
+      const domains = [
+        ...new Set(
+          needed.flatMap((row) => employerDomainFromEmail(
+            typeof row.columns.email === 'string' ? row.columns.email : null,
+          ) ?? []),
+        ),
+      ]
+      const companies = await companiesForDomains(tx, ctx, domains)
+      for (const row of needed) {
+        const domain = employerDomainFromEmail(typeof row.columns.email === 'string' ? row.columns.email : null)
+        const company = domain ? companies.get(domain) : undefined
+        if (company) row.columns.company_id = company
+      }
+    }
+
+    // A deal's pipeline and stage are one fact told twice, and `reconcileDeal`
+    // is what settles them: `pipeline_id` is not null, so a deal with neither
+    // named cannot be inserted until it has the first stage of the first
+    // pipeline. The answer depends only on the pair the row named, and a file of
+    // deals names the same pair over and over, so it is asked once per pair.
+    //
+    // A row that moves an existing deal's stage is handed back as contested
+    // instead. That move writes a timeline entry, notifies the owner and
+    // rescores the deal, and none of that belongs in a set-based write; the
+    // single-record path does it properly, and an import carries few of them.
+    const moved: number[] = []
+    if (object.key === 'deal') {
+      const settled = new Map<string, { pipeline_id: unknown; stage_id: unknown }>()
+      for (const row of planned) {
+        const names = row.columns.stage_id !== undefined || row.columns.pipeline_id !== undefined
+        if (row.existingId) {
+          if (names) moved.push(row.position)
+          continue
+        }
+        const key = `${String(row.columns.stage_id ?? '')} ${String(row.columns.pipeline_id ?? '')}`
+        try {
+          let answer = settled.get(key)
+          if (!answer) {
+            const probe = { ...row.columns }
+            await reconcileDeal(tx, probe, null)
+            answer = { pipeline_id: probe.pipeline_id, stage_id: probe.stage_id }
+            settled.set(key, answer)
+          }
+          row.columns.pipeline_id = answer.pipeline_id
+          row.columns.stage_id = answer.stage_id
+        } catch (cause) {
+          outcome.refused.push({
+            position: row.position,
+            reason: cause instanceof Error ? cause.message : String(cause),
+          })
+          moved.push(row.position)
+        }
+      }
+    }
+    const held = new Set(moved)
+    const inserts = planned.filter((row) => !row.existingId && !held.has(row.position))
+    const updates = planned.filter((row) => row.existingId && !held.has(row.position))
+    for (const position of moved) {
+      if (!outcome.refused.some((entry) => entry.position === position)) outcome.contested.push(position)
+    }
+
+    const auditRows: { entity_id: string; before: unknown; after: unknown; action: string }[] = []
+
+    if (updates.length > 0) {
+      // Read before written, because the audit row's "before" is the one thing
+      // nobody can work out afterwards.
+      const ids = JSON.stringify(updates.map((row) => row.existingId))
+      const touched = [...new Set(updates.flatMap((row) => Object.keys(row.columns)))]
+      const also = touched.map((column) => sql.raw(`, "${column}"`))
+      const before = await tx.execute<Record<string, unknown>>(sql`
+        select id, custom${sql.join(also, sql``)}
+          from ${writeTable(object)}
+         where deleted_at is null
+           and id in (select (jsonb_array_elements_text(${ids}::jsonb))::uuid)`)
+      const previous = new Map(before.map((row) => [String(row.id), row]))
+
+      const payload = JSON.stringify(
+        updates.map((row) => ({ id: row.existingId, custom: row.custom, ...row.columns })),
+      )
+      const columns: [string, string][] = [
+        ['id', 'uuid'],
+        ['custom', 'jsonb'],
+        ...touched.map((column) => [column, types.get(column) ?? 'text'] as [string, string]),
+      ]
+      // `coalesce(s.col, t.col)` rather than a plain assignment: a column this
+      // particular row did not carry must keep what the record already had. An
+      // empty cell never reaches here — the planner drops it — so "absent" and
+      // "cleared" cannot be confused.
+      const sets = [
+        ...touched.map((column) => {
+          const quoted = sql.raw(`"${column}"`)
+          return sql`${quoted} = coalesce(s.${quoted}, t.${quoted})`
+        }),
+        sql`"custom" = coalesce(t."custom", '{}'::jsonb) || s."custom"`,
+        sql`"updated_at" = now()`,
+      ]
+      if (object.isCustom) {
+        sets.push(sql`"search" = ${searchVectorFrom(object, sql`coalesce(t."custom", '{}'::jsonb) || s."custom"`)}`)
+      }
+      const written = await tx.execute<{ id: string }>(sql`
+        update ${writeTable(object)} t
+           set ${sql.join(sets, sql`, `)}
+          from ${recordset(payload, columns, 's')}
+         where t.id = s."id" and t.deleted_at is null
+        returning t.id`)
+      const landed = new Set(written.map((row) => String(row.id)))
+      for (const row of updates) {
+        if (!landed.has(String(row.existingId))) {
+          outcome.refused.push({ position: row.position, reason: 'That record no longer exists.' })
+          continue
+        }
+        outcome.updated.push({ position: row.position, id: row.existingId! })
+        auditRows.push({
+          entity_id: row.existingId!,
+          action: 'update',
+          before: pick(previous.get(String(row.existingId)) ?? {}, Object.keys(row.values), object),
+          after: row.values,
+        })
+      }
+    }
+
+    if (inserts.length > 0) {
+      const touched = [...new Set(inserts.flatMap((row) => Object.keys(row.columns)))]
+      const payload = JSON.stringify(
+        inserts.map((row) => ({
+          id: row.id,
+          custom: row.custom,
+          created_at: row.createdAt ? row.createdAt.toISOString() : null,
+          ...row.columns,
+        })),
+      )
+      const columns: [string, string][] = [
+        ['id', 'uuid'],
+        ['custom', 'jsonb'],
+        ['created_at', 'timestamptz'],
+        ...touched.map((column) => [column, types.get(column) ?? 'text'] as [string, string]),
+      ]
+      const target = [
+        sql.raw('"id"'),
+        sql.raw('"account_id"'),
+        sql.raw('"custom"'),
+        sql.raw('"created_at"'),
+        ...touched.map((column) => sql.raw(`"${column}"`)),
+        ...(object.isCustom ? [sql.raw('"object_id"'), sql.raw('"search"')] : []),
+      ]
+      const selected = [
+        sql`s."id"`,
+        sql`${ctx.accountId}::uuid`,
+        sql`s."custom"`,
+        sql`coalesce(s."created_at", now())`,
+        ...touched.map((column) => sql`s.${sql.raw(`"${column}"`)}`),
+        ...(object.isCustom
+          ? [sql`${object.id}::uuid`, searchVectorFrom(object, sql`s."custom"`)]
+          : []),
+      ]
+      // No conflict target named, so this covers every unique index the table
+      // carries rather than only the one the caller matched on. What it drops is
+      // reported as contested and re-run one at a time, where the single-record
+      // path names the record it collided with.
+      const written = await tx.execute<{ id: string }>(sql`
+        insert into ${writeTable(object)} (${sql.join(target, sql`, `)})
+        select ${sql.join(selected, sql`, `)}
+          from ${recordset(payload, columns, 's')}
+        on conflict do nothing
+        returning id`)
+      const landed = new Set(written.map((row) => String(row.id)))
+      for (const row of inserts) {
+        if (!landed.has(row.id)) {
+          outcome.contested.push(row.position)
+          continue
+        }
+        outcome.created.push({ position: row.position, id: row.id })
+        auditRows.push({ entity_id: row.id, action: 'create', before: null, after: row.values })
+      }
+    }
+
+    if (auditRows.length > 0) {
+      await tx.execute(sql`
+        insert into audit_log (account_id, actor_id, actor_kind, entity, entity_id, action, before, after)
+        select ${ctx.accountId}::uuid, ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind,
+               ${object.key}, a."entity_id", a."action", a."before", a."after"
+          from ${recordset(
+            JSON.stringify(auditRows),
+            [['entity_id', 'uuid'], ['action', 'text'], ['before', 'jsonb'], ['after', 'jsonb']],
+            'a',
+          )}`)
+    }
+
+    // The timeline entry a new record gets, and only a new one: an imported
+    // update writes no "changed X" line, for the reason in this function's note.
+    const made = inserts.filter((row) => outcome.created.some((entry) => entry.position === row.position))
+    if (made.length > 0) {
+      const entries = made.map((row) => ({
+        activity_id: randomUUID(),
+        entity_id: row.id,
+        company_id: typeof row.columns.company_id === 'string' ? row.columns.company_id : null,
+        subject: `created ${displayName(object, row.values)}`,
+      }))
+      const payload = JSON.stringify(entries)
+      const shape: [string, string][] = [
+        ['activity_id', 'uuid'],
+        ['entity_id', 'uuid'],
+        ['company_id', 'uuid'],
+        ['subject', 'text'],
+      ]
+      await tx.execute(sql`
+        insert into activity (id, account_id, type, subject, occurred_at, actor_id, actor_kind)
+        select e."activity_id", ${ctx.accountId}::uuid, 'field_change'::rawr_activity_type, e."subject", now(),
+               ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind
+          from ${recordset(payload, shape, 'e')}`)
+      // The record, and the company it was filed under, which is what `linksFor`
+      // gives a single write. Union rather than two statements: one round trip.
+      await tx.execute(sql`
+        insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
+        select ${ctx.accountId}::uuid, e."activity_id", ${object.key}, e."entity_id",
+               'field_change'::rawr_activity_type, now()
+          from ${recordset(payload, shape, 'e')}
+        union all
+        select ${ctx.accountId}::uuid, e."activity_id", 'company', e."company_id",
+               'field_change'::rawr_activity_type, now()
+          from ${recordset(payload, shape, 'e')}
+         where e."company_id" is not null
+        on conflict do nothing`)
+    }
+
+    return outcome
   })
 }
 
