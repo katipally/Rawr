@@ -91,6 +91,22 @@ export const assertProductionSecrets = (): void => {
   if (placeholders.length > 0) {
     throw new Error(`Production is running with development values for: ${placeholders.join(', ')}. Set real ones in the secrets store.`)
   }
+
+  // A value that still has its quotes came from a dotenv file handed to
+  // `docker run --env-file`, which unlike dotenv keeps them: the quote characters
+  // are part of the value. Refused here rather than where it is used, because a
+  // wrong bucket name or a wrong signing region does not fail at boot -- it fails
+  // the first time somebody uploads a file, which may be weeks later and looks
+  // like a bug in the upload. See DEPLOY.md.
+  const quoted = Object.entries(env).flatMap(([name, value]) =>
+    typeof value === 'string' && value.length > 1 && value.startsWith('"') && value.endsWith('"') ? [name] : [],
+  )
+  if (quoted.length > 0) {
+    throw new Error(
+      `These are set to a value that still has its quotation marks: ${quoted.join(', ')}. ` +
+        'A file for `docker run --env-file` is written without quotes; see DEPLOY.md.',
+    )
+  }
 }
 
 export const googleConfigured = env.GOOGLE_CLIENT_ID !== '' && env.GOOGLE_CLIENT_SECRET !== ''

@@ -29,8 +29,16 @@ attached and the driver rejects it as "Invalid URL". Write an unquoted file for
 Docker:
 
 ```
- sed 's/^\([A-Z_]*\)="\(.*\)"$/\1=\2/' .env.local > .env.docker
+ sed 's/^\([A-Z0-9_]*\)="\(.*\)"$/\1=\2/' .env.local > .env.docker
 ```
+
+The `0-9` in that character class matters. Written `[A-Z_]` it quietly skips
+every name with a digit in it, which here is all five `S3_*` variables, and they
+reach the container still wrapped in quotes. Nothing complains at boot: the app
+starts, serves every page, and refuses the first file somebody uploads with
+`region=""us-east-2"" is not a valid hostname component`. `assertProductionSecrets`
+now refuses to start on a value that still has its quotes, so a file made the
+wrong way fails loudly instead of waiting for a user to find it.
 
 A real host does not have this problem. Render's Environment tab has an "Add
 from .env" import that parses the file properly, quotes included, and turns each

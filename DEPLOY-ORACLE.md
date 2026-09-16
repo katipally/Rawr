@@ -194,7 +194,7 @@ Back over SSH, inside `~/Rawr`, unquote it the same way `DEPLOY.md` describes
 for any Docker host:
 
 ```
- sed 's/^\([A-Z_]*\)="\(.*\)"$/\1=\2/' .env.production > .env.docker
+ sed 's/^\([A-Z0-9_]*\)="\(.*\)"$/\1=\2/' .env.production > .env.docker
 ```
 
 **The build needs BuildKit explicitly.** The Dockerfile's dependency-install
@@ -322,7 +322,7 @@ values:
 ```
 ```
  cd ~/Rawr
- sed 's/^\([A-Z_]*\)="\(.*\)"$/\1=\2/' .env.production > .env.docker
+ sed 's/^\([A-Z0-9_]*\)="\(.*\)"$/\1=\2/' .env.production > .env.docker
  docker stop rawr && docker rm rawr
  docker run -d --restart unless-stopped -p 3000:3000 --env-file .env.docker --name rawr rawr node scripts/both.mjs
 ```
