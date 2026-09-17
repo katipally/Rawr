@@ -27,6 +27,7 @@ import {
   MAX_OPTION_LENGTH,
   dismissDuplicate,
   findDuplicates,
+  findJunkCompanies,
   getRecord,
   getRegistry,
   isActivityType,
@@ -305,6 +306,12 @@ export const crmRouter = router({
       .query(({ ctx, input }) =>
         call(() => findDuplicates(ctx.account, input.object, input.limit ? { limit: input.limit } : {})),
       ),
+
+    /** Companies named after a HubSpot id, behind the same page as the queue
+     *  above. Read-only, so unlike `duplicates` it carries no write gate. */
+    junkCompanies: protectedProcedure
+      .input(z.object({ limit: z.number().int().min(1).max(200).optional() }))
+      .query(({ ctx, input }) => call(() => findJunkCompanies(ctx.account, input.limit ? { limit: input.limit } : {}))),
 
     /** "Not the same", kept. The queue is a scan, so without a row the same pair
      *  comes back on the next visit. */

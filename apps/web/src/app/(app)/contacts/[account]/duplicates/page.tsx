@@ -38,7 +38,8 @@ const DuplicatesPage = async ({
 
   const LIMIT = 50
   const pairs = await findDuplicates(contextFrom(session), object, { limit: LIMIT })
-  const junkCompanies = object === 'company' ? await findJunkCompanies(contextFrom(session), { limit: LIMIT }) : []
+  const junk =
+    object === 'company' ? await findJunkCompanies(contextFrom(session), { limit: LIMIT }) : { rows: [], total: 0 }
 
   return (
     <div className="flex flex-col gap-4">
@@ -95,7 +96,8 @@ const DuplicatesPage = async ({
         <JunkCompanies
           account={account}
           limit={LIMIT}
-          companies={junkCompanies.map((company) => ({ ...company, createdAt: company.createdAt.toISOString() }))}
+          total={junk.total}
+          companies={junk.rows.map((company) => ({ ...company, createdAt: company.createdAt.toISOString() }))}
         />
       ) : null}
     </div>
