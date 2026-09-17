@@ -19,7 +19,7 @@
     "lint": "biome lint .",
     "lint:ci": "biome ci . --diagnostic-level=error && node apps/web/scripts/check-client-imports.ts",
     "test": "pnpm -r --if-present test",
-    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify:sql && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:account && pnpm db:verify:crm && pnpm db:verify:automations && pnpm db:verify:imports && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:verify:notifications",
+    "verify": "pnpm -r typecheck && pnpm lint:ci && pnpm test && pnpm db:verify:sql && pnpm db:verify && pnpm db:verify:guards && pnpm db:verify:account && pnpm db:verify:crm && pnpm db:verify:automations && pnpm db:verify:imports && pnpm db:verify:admin && pnpm db:verify:forms && pnpm db:verify:booking && pnpm db:verify:mcp && pnpm db:verify:activity && pnpm db:verify:mail && pnpm db:verify:sequences && pnpm db:verify:integrations && pnpm db:verify:reporting && pnpm db:verify:objects && pnpm db:verify:notifications && pnpm db:verify:preferences",
     "db:verify:crm": "pnpm --filter @rawr/db verify:crm",
     "db:verify:automations": "pnpm --filter @rawr/db verify:automations",
     "db:verify:imports": "pnpm --filter @rawr/db verify:imports",
@@ -37,7 +37,8 @@
     "db:reclaim": "pnpm --filter @rawr/db reclaim",
     "db:probe:large": "pnpm --filter @rawr/db probe:large",
     "db:verify:objects": "pnpm --filter @rawr/db verify:objects",
-    "db:verify:notifications": "pnpm --filter @rawr/db verify:notifications"
+    "db:verify:notifications": "pnpm --filter @rawr/db verify:notifications",
+    "db:verify:preferences": "pnpm --filter @rawr/db verify:preferences"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",

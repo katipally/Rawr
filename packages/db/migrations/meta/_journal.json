@@ -596,6 +596,13 @@
       "when": 1791132834179,
       "tag": "0083_import_file_uploads",
       "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1791219234179,
+      "tag": "0084_preferences",
+      "breakpoints": true
     }
   ]
 }

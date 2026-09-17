@@ -37,7 +37,8 @@
     "reclaim": "node --env-file-if-exists=../../.env.local scripts/reclaim.mjs",
     "probe:large": "node --env-file-if-exists=../../.env.local scripts/probe-large-values.mjs",
     "verify:objects": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-objects.ts",
-    "verify:notifications": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-notifications.ts"
+    "verify:notifications": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-notifications.ts",
+    "verify:preferences": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-preferences.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

@@ -10,6 +10,7 @@ import { integrationsRouter } from './integrations.ts'
 import { mailRouter } from './mail.ts'
 import { mcpRouter } from './mcp.ts'
 import { notificationsRouter } from './notifications.ts'
+import { preferencesRouter } from './preferences.ts'
 import { segmentsRouter } from './segments.ts'
 import { reportingRouter } from './reporting.ts'
 import { sequencesRouter } from './sequences.ts'
@@ -37,6 +38,10 @@ export const appRouter = router({
 
   /** The bell in the top bar and the drawer behind it. */
   notifications: notificationsRouter,
+
+  /** Cross-device settings: bookmarks, recent navigation, a timeline filter, a
+   *  collapsed panel, the rail's width. */
+  preferences: preferencesRouter,
 
   jobs: router({
     /** The failed-jobs screen. Replaying is on the integrations router, because a

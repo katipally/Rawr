@@ -8,10 +8,13 @@ export type CardProps = {
   title?: ReactNode
   /** Sits at the right of the header: a count, a Badge, an Add button. */
   action?: ReactNode
-  /** Makes the header a disclosure button. Open state is local; a card that must
-   *  remember belongs in the URL, not here. */
+  /** Makes the header a disclosure button. Open state is local by default; pass
+   *  `open`/`onOpenChange` to have a caller remember it somewhere that outlives
+   *  this page (a URL, a preference) instead. */
   collapsible?: boolean
   defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   /** Removes the body padding, for a card whose content is a table. */
   flush?: boolean
   className?: string
@@ -25,12 +28,19 @@ export const Card = ({
   action,
   collapsible = false,
   defaultOpen = true,
+  open: openProp,
+  onOpenChange,
   flush = false,
   className,
   children,
 }: CardProps) => {
   const id = useId()
-  const [open, setOpen] = useState(defaultOpen)
+  const [localOpen, setLocalOpen] = useState(defaultOpen)
+  const open = openProp ?? localOpen
+  const setOpen = (value: boolean) => {
+    if (openProp === undefined) setLocalOpen(value)
+    onOpenChange?.(value)
+  }
   const showing = collapsible ? open : true
 
   return (
@@ -42,7 +52,7 @@ export const Card = ({
               type="button"
               aria-expanded={open}
               aria-controls={id}
-              onClick={() => setOpen((value) => !value)}
+              onClick={() => setOpen(!open)}
               className="flex min-w-0 items-center gap-2 rounded-hs text-base font-semibold"
             >
               {open ? (

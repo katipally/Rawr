@@ -26,7 +26,7 @@ import { NavigationProgress, NavigationProvider, useNavigation } from './navigat
 import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
-import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { useUi, useUiReady, usePreferencesSync } from '~/lib/store/ui.ts'
 import { TaskTray } from './task-tray.tsx'
 
 export type NavItem = {
@@ -134,6 +134,11 @@ const Shell = ({
   // next one, which is the same shape this had when it read storage in an effect.
   const uiReady = useUiReady()
   const expanded = uiReady && railExpanded
+  // Migrates any preferences this browser still only has locally, then hydrates
+  // the rest from the account this session is signed into. One shell renders on
+  // every signed-in page, so this runs once per session rather than once per
+  // component that happens to read a synced field.
+  usePreferencesSync()
   /** Which section's flyout is showing on a wide screen. */
   const [flyout, setFlyout] = useState<string | null>(null)
   /** Which sections are unfolded inside the phone sheet. */

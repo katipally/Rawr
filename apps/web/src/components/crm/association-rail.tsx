@@ -12,6 +12,7 @@ import { inSentence } from '~/lib/label-case.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 export type Associated = {
   id: string
@@ -78,6 +79,13 @@ export const AssociationRail = ({
   // its deals at the same time.
   const [needles, setNeedles] = useState<Record<string, string>>({})
   const [sorts, setSorts] = useState<Record<string, 'recent' | 'name'>>({})
+  // Whether each card is collapsed, remembered per object type across every
+  // record page rather than per record: collapsing "Tasks" is a statement about
+  // tasks, not about this one contact. Undefined until preferences arrive, so the
+  // first client render still matches the server's markup (every card open).
+  const panelOpen = useUi((state) => state.panelOpen)
+  const setPanelOpen = useUi((state) => state.setPanelOpen)
+  const panelsReady = useUiReady()
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -120,12 +128,20 @@ export const AssociationRail = ({
         const needle = needles[card.objectKey] ?? ''
         const plural = inSentence(card.namePlural)
 
+        const panelKey = `assoc:${card.objectKey}`
+
         return (
           <Card
             key={card.objectKey}
             flush
             collapsible
             title={`${card.namePlural} (${card.total.toLocaleString()})`}
+            {...(panelsReady
+              ? {
+                  open: panelOpen[panelKey] ?? true,
+                  onOpenChange: (value: boolean) => setPanelOpen(panelKey, value),
+                }
+              : {})}
             action={
               canWrite && canLink ? (
                 <>
