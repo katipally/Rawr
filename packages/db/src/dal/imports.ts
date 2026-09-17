@@ -297,6 +297,10 @@ const RELATION_LOOKUPS: Record<string, { what: string; find: (names: SQL) => SQL
 }
 
 const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
+// A HubSpot export puts the numeric id of a merged or deleted company here instead
+// of its name, and a name-based lookup would otherwise create a company literally
+// called that number.
+const NUMERIC_ID = /^\d+$/
 
 /** Resolves the relation values in one run, remembering every answer, a miss
  *  included, so a file with 90,000 rows and 300 distinct companies asks about each
@@ -332,16 +336,19 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
     for (const name of fresh) remembered.set(keyOf(field, name), found.get(name) ?? null)
   }
 
-  const resolve = async (field: RegistryField, raw: string): Promise<string | null> => {
+  const resolve = async (field: RegistryField, raw: string): Promise<{ id: string | null; warning?: string }> => {
     const needle = raw.trim()
-    if (isUuid(needle)) return needle
+    if (isUuid(needle)) return { id: needle }
+    if (field.key === 'company_id' && NUMERIC_ID.test(needle)) {
+      return { id: null, warning: `"${needle}" looks like a HubSpot company id, not a name, so no company was linked.` }
+    }
     const lookup = RELATION_LOOKUPS[field.key]
     if (!lookup) throw new ValueError(field, 'has to be picked from the list, not typed.')
 
     await lookUp(field, [needle])
     let id = remembered.get(keyOf(field, needle)) ?? null
     if (id === null && field.key === 'company_id') {
-      if (!options.create) return null
+      if (!options.create) return { id: null }
       try {
         const created = await createRecord(ctx, 'company', DOMAIN.test(needle) ? { name: needle, domain: needle.toLowerCase() } : { name: needle }, NO_ENRICH)
         id = created.id
@@ -358,11 +365,11 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
       // or a pipeline that does not exist means the column is mapped wrong.
       if (field.key === 'owner_id') {
         unmatchedOwners.add(needle)
-        return null
+        return { id: null }
       }
       throw new ValueError(field, `no ${lookup.what} called "${needle}" exists in this account.`)
     }
-    return id
+    return { id }
   }
 
   /** Every relation these rows name, asked for up front, one query per field —
@@ -388,7 +395,7 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
       // making. Names, not lowercased: the company keeps the spelling the file
       // gave it, the way the one-at-a-time path did.
       const missing = [...new Set(named.map((name) => name.trim()).filter(Boolean))].filter(
-        (name) => !isUuid(name) && remembered.get(keyOf(field, name)) === null,
+        (name) => !isUuid(name) && !NUMERIC_ID.test(name) && remembered.get(keyOf(field, name)) === null,
       )
       if (missing.length === 0) continue
       const outcome = await bulkWriteRecords(
@@ -442,7 +449,12 @@ export const planRow = async (
     const field = object.byKey.get(key)
     if (!field) continue
     try {
-      const named = field.type === 'relation' || field.type === 'user' ? await resolve(field, String(raw)) : raw
+      let named: unknown = raw
+      if (field.type === 'relation' || field.type === 'user') {
+        const resolved = await resolve(field, String(raw))
+        if (resolved.warning) warnings.push(resolved.warning)
+        named = resolved.id
+      }
       if (named === null) continue
       const { value, warning } = coerce(field, named)
       if (warning) warnings.push(warning)

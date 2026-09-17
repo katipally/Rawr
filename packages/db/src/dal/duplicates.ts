@@ -282,3 +282,25 @@ export const findDuplicates = async (
     return out.slice(0, limit)
   })
 }
+
+export type JunkCompany = { id: string; name: string; createdAt: Date; contactCount: number }
+
+/** Companies named after a HubSpot company id rather than a company: a bare
+ *  export like "58242052997" from a contact whose real employer in HubSpot had
+ *  already been merged or deleted. Read-only and lists every one there is,
+ *  because a person decides record by record whether it is safe to delete;
+ *  nothing here does that for them. */
+export const findJunkCompanies = async (ctx: AccountContext, options: { limit?: number } = {}): Promise<JunkCompany[]> => {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
+  return withAccount(ctx, (tx) =>
+    tx.execute<{ id: string; name: string; created_at: Date; contact_count: number }>(sql`
+      select co.id, co.name, co.created_at,
+             (select count(*)::int from contact c where c.company_id = co.id and c.deleted_at is null) as contact_count
+        from company co
+       where co.deleted_at is null and co.name ~ '^[0-9]+$'
+       order by co.created_at desc
+       limit ${limit}`),
+  ).then((rows) =>
+    rows.map((row) => ({ id: row.id, name: row.name, createdAt: asDate(row.created_at), contactCount: row.contact_count })),
+  )
+}
