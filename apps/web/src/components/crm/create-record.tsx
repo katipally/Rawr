@@ -4,7 +4,8 @@ import { matchesConditional } from '@rawr/db/registry'
 import { Button, Field, Modal, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useState } from 'react'
+import { useDraft } from '~/lib/drafts.ts'
 import { objectView, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
@@ -25,16 +26,6 @@ export type CreateRecordDialogProps = {
   onCreated?: (id: string) => Promise<void> | void
 }
 
-const readDraft = (key: string): Record<string, unknown> => {
-  try {
-    const raw = sessionStorage.getItem(key)
-    const parsed: unknown = raw ? JSON.parse(raw) : null
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-  } catch {
-    return {}
-  }
-}
-
 export const CreateRecordDialog = ({
   account,
   object,
@@ -47,7 +38,6 @@ export const CreateRecordDialog = ({
   const { navigate } = useNavigation()
   const toast = useToast()
   const prefix = useId()
-  const draftKey = `rawr:create:${account}:${object}`
   // A deal starts on the first pipeline's first stage, the way HubSpot opens the
   // form, rather than on "Not set" twice.
   const [values, setValues] = useState<Record<string, unknown>>(() => {
@@ -60,38 +50,14 @@ export const CreateRecordDialog = ({
   /** The page under this dialog refreshes on its own -- the enrichment banner's
    *  count changes behind it -- and a refresh that remounts the toolbar takes this
    *  component's state with it, emptying a half-filled form under somebody's hands.
-   *  Session storage outlives the mount, so the draft comes back.
-   *
-   *  Restored after mount rather than in the initialiser: the initialiser also runs
-   *  on the server, where there is no storage, and a client that started from a
-   *  different value would be a hydration mismatch. */
-  const restored = useRef(false)
-  useEffect(() => {
-    const draft = readDraft(draftKey)
-    if (Object.keys(draft).length > 0) setValues((current) => ({ ...current, ...draft }))
-    restored.current = true
-  }, [draftKey])
-
-  useEffect(() => {
-    if (!restored.current) return
-    try {
-      sessionStorage.setItem(draftKey, JSON.stringify(values))
-    } catch {
-      // A private window with storage denied still gets a working form.
-    }
-  }, [draftKey, values])
+   *  The draft outlives the mount (and the tab), so it comes back. */
+  const { forget } = useDraft(account, object, undefined, values, (draft) =>
+    setValues((current) => ({ ...current, ...draft })),
+  )
 
   const [error, setError] = useState<string | null>(null)
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
-  const forget = () => {
-    try {
-      sessionStorage.removeItem(draftKey)
-    } catch {
-      // Nothing was stored, so nothing to forget.
-    }
-  }
 
   const close = () => {
     forget()

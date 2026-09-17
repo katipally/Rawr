@@ -4,6 +4,7 @@ import { Button, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { useDraft } from '~/lib/drafts.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 
@@ -52,6 +53,7 @@ export type EditableTask = {
 }
 
 export type TaskFormProps = {
+  account: string
   assignees: { id: string; label: string }[]
   queues: { id: string; name: string }[]
   /** Set on a record page, so a new task is filed against that record. */
@@ -69,6 +71,7 @@ export type TaskFormProps = {
 
 /** One form behind the record panel, the tasks index dialog and the edit dialog. */
 export const TaskForm = ({
+  account,
   assignees,
   queues,
   entity,
@@ -92,6 +95,24 @@ export const TaskForm = ({
   const [busy, setBusy] = useState(false)
   const [more, setMore] = useState(
     Boolean(task?.remindAt || task?.queueId || task?.assigneeId || task?.body),
+  )
+
+  const { forget } = useDraft(
+    account,
+    'task',
+    task?.id,
+    { title, body, type, priority, dueDate, remindAt, queueId, assigneeId },
+    (draft) => {
+      setTitle(draft.title)
+      setBody(draft.body)
+      setType(draft.type)
+      setPriority(draft.priority)
+      setDueDate(draft.dueDate)
+      setRemindAt(draft.remindAt)
+      setQueueId(draft.queueId)
+      setAssigneeId(draft.assigneeId)
+      setMore(Boolean(draft.remindAt || draft.queueId || draft.assigneeId || draft.body))
+    },
   )
 
   useEffect(() => {
@@ -122,6 +143,7 @@ export const TaskForm = ({
         setRemindAt('')
         toast('success', 'Task created.')
       }
+      forget()
       router.refresh()
       onCreated?.()
     } catch (cause) {

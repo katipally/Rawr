@@ -261,6 +261,7 @@ export const TasksTable = ({
       </div>
       <Modal open={creating} title="Create task" onClose={closeCreate}>
         <TaskForm
+          account={account}
           assignees={assignees}
           queues={queues}
           defaultQueueId={queueId}
@@ -301,6 +302,7 @@ export const TasksTable = ({
         {editing ? (
           <TaskForm
             key={editing.id}
+            account={account}
             assignees={assignees}
             queues={queues}
             task={editing}

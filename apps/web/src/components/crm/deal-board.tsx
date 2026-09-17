@@ -549,6 +549,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
       {scheduling && lookups ? (
         <TaskForm
           autoFocus
+          account={account}
           assignees={lookups.assignees}
           queues={lookups.queues}
           entity={{ entityType: 'deal', entityId: scheduling.id }}

@@ -9,10 +9,12 @@ import { ComposeDialog } from '~/components/crm/compose-dialog.tsx'
  *  thread's headers, so it lands in the same conversation for the recipient as
  *  well as for us. */
 export const ReplyButton = ({
+  account,
   threadId,
   to,
   subject,
 }: {
+  account: string
   threadId: string
   to: string
   subject: string | null
@@ -27,6 +29,7 @@ export const ReplyButton = ({
       </Button>
       {open ? (
         <ComposeDialog
+          account={account}
           to={to}
           subject={subject?.toLowerCase().startsWith('re:') ? subject : `Re: ${subject ?? '(no subject)'}`}
           threadId={threadId}

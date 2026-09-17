@@ -3,6 +3,7 @@
 import { Button, Combobox, Field, Modal, Spinner, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { useDraft } from '~/lib/drafts.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Mailbox = { id: string; email: string; canSend: boolean; state: string }
@@ -13,6 +14,7 @@ type Mailbox = { id: string; email: string; canSend: boolean; state: string }
  *  colleague writing to one person would be surveillance rather than reporting,
  *  and the numbers on the sequence screens would stop meaning campaign. */
 export const ComposeDialog = ({
+  account,
   to,
   subject: initialSubject,
   threadId,
@@ -20,6 +22,7 @@ export const ComposeDialog = ({
   onClose,
   onSent,
 }: {
+  account: string
   to: string
   subject?: string
   threadId?: string | null
@@ -34,6 +37,18 @@ export const ComposeDialog = ({
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // Keyed on the thread when replying and on the contact for a fresh email, so a
+  // reply-in-progress and an unrelated compose to the same person never collide.
+  const { forget } = useDraft(account, 'email', threadId ?? contactId ?? undefined, { subject, text }, (draft) => {
+    setSubject(draft.subject)
+    setText(draft.text)
+  })
+
+  const close = () => {
+    forget()
+    onClose()
+  }
 
   useEffect(() => {
     api.mail.mailboxes
@@ -55,7 +70,7 @@ export const ComposeDialog = ({
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
 
   return (
-    <Modal open size="lg" title={threadId ? `Reply to ${to}` : `Email ${to}`} onClose={onClose}>
+    <Modal open size="lg" title={threadId ? `Reply to ${to}` : `Email ${to}`} onClose={close}>
       {!mailboxes ? <Spinner label="Loading mailboxes" /> : null}
 
       {mailboxes ? (
@@ -78,7 +93,7 @@ export const ComposeDialog = ({
                 toast('success', 'Sent. It is on the record and in the inbox already.')
                 onSent?.()
                 router.refresh()
-                onClose()
+                close()
               })
               .catch((cause) => toast('error', errorMessage(cause)))
               .finally(() => setBusy(false))
@@ -122,7 +137,7 @@ export const ComposeDialog = ({
           </Field>
 
           <div className="flex justify-end gap-2">
-            <Button variant="tertiary" type="button" onClick={onClose}>
+            <Button variant="tertiary" type="button" onClick={close}>
               Cancel
             </Button>
             <Button

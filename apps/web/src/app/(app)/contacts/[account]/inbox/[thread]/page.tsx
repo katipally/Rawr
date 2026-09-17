@@ -69,7 +69,7 @@ const ThreadPage = async ({
           </Badge>
         </div>
         {replyTo ? (
-          <ReplyButton threadId={threadId} to={replyTo} subject={found.thread.subject} />
+          <ReplyButton account={account} threadId={threadId} to={replyTo} subject={found.thread.subject} />
         ) : null}
       </div>
 

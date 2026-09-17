@@ -164,6 +164,7 @@ export const RecordActions = ({
 
       {showCompose && typeof values.email === 'string' ? (
         <ComposeDialog
+          account={account}
           to={values.email}
           contactId={recordId}
           onClose={() => setShowCompose(false)}

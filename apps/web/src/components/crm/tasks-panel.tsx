@@ -87,6 +87,7 @@ export const TasksPanel = ({
 
       {canWrite ? (
         <TaskForm
+          account={account}
           assignees={assignees}
           queues={queues}
           entity={entity}
