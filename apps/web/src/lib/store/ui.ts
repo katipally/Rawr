@@ -56,6 +56,11 @@ type UiState = {
    *  `assoc:deal` on a record page's association rail). A panel with no entry
    *  defaults open, the way it always has. */
   panelOpen: Record<string, boolean>
+  /** Whether `usePreferencesSync` has finished its one round trip for this
+   *  session (or given up after one), so the server-backed fields above hold
+   *  this account's real values rather than the empty defaults every field
+   *  starts at. Not persisted: it is meaningless before this tab has asked. */
+  serverSynced: boolean
 
   setRailExpanded: (expanded: boolean) => void
   toggleBookmark: (entry: Bookmark) => void
@@ -73,6 +78,7 @@ export const useUi = create<UiState>()(
       recent: [],
       timelineKinds: {},
       panelOpen: {},
+      serverSynced: false,
 
       setRailExpanded: (railExpanded) => set({ railExpanded }),
       toggleBookmark: (entry) =>
@@ -150,15 +156,18 @@ export const useUi = create<UiState>()(
  *  Suspense boundary and render it itself, and the boundary then sits on its
  *  loading state for ever. A transition lets React finish the boundary first. */
 export const useUiReady = (): boolean => {
-  const [ready, setReady] = useState(false)
+  const [localHydrated, setLocalHydrated] = useState(false)
   useEffect(() => {
     if (useUi.persist.hasHydrated()) {
-      startTransition(() => setReady(true))
+      startTransition(() => setLocalHydrated(true))
       return
     }
-    return useUi.persist.onFinishHydration(() => startTransition(() => setReady(true)))
+    return useUi.persist.onFinishHydration(() => startTransition(() => setLocalHydrated(true)))
   }, [])
-  return ready
+  // Local hydration alone only proves `railExpanded` is real; every other field
+  // above still holds its empty default until the server round trip below lands.
+  const serverSynced = useUi((state) => state.serverSynced)
+  return localHydrated && serverSynced
 }
 
 const isBookmarkArray = (value: unknown): value is Bookmark[] =>
@@ -263,12 +272,16 @@ export const usePreferencesSync = (): void => {
           recent: isRecentArray(server.recent) ? server.recent : local.recent,
           timelineKinds: isStringArrayRecord(server.timelineKinds) ? server.timelineKinds : local.timelineKinds,
           panelOpen: isBooleanRecord(server.panelOpen) ? server.panelOpen : local.panelOpen,
+          serverSynced: true,
         })
         startWriteBack()
       } catch {
         // No network, signed out mid-flight, or the server did not answer: keep
         // rendering the local copy and try the same migration and hydrate next
-        // time this mounts.
+        // time this mounts. Still marked synced so a reader who reached for a
+        // preference before the network came back sees the local default
+        // instead of waiting forever on a round trip that already failed.
+        useUi.setState({ serverSynced: true })
       }
     }
 
