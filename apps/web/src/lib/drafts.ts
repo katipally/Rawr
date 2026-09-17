@@ -1,16 +1,7 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
-
-/** Long enough to survive a busy weekend or a canceled meeting; short enough that
- *  a draft from a task nobody came back to does not reappear weeks later as if it
- *  were still relevant. */
-const DRAFT_EXPIRY_MS = 3 * 24 * 60 * 60 * 1000
-
-type Stored<T> = { savedAt: number; value: T }
-
-const draftKey = (account: string, object: string, recordId: string | undefined): string =>
-  recordId ? `rawr:draft:${account}:${object}:${recordId}` : `rawr:draft:${account}:${object}`
+import { useEffect, useRef, useState } from 'react'
+import { draftKey, readDraft } from './draft-read.ts'
 
 /** One create-or-edit form's unsaved input, kept in `localStorage` so it survives
  *  a closed tab or a browser restart, not just the remount create-record.tsx used
@@ -19,7 +10,14 @@ const draftKey = (account: string, object: string, recordId: string | undefined)
  *  `onRestore` is called at most once, on mount, with whatever was saved under
  *  this key and has not expired. It is a callback rather than a merge this hook
  *  does itself because callers disagree on shape: one state object here, several
- *  `useState` fields there. */
+ *  `useState` fields there.
+ *
+ *  The restore and the autosave race by nature: the autosave effect sees this
+ *  render's `value` before a restore dispatched from the other effect has been
+ *  applied. `restoredKey` closes that gap -- it is state, not a ref, so the
+ *  render where it first equals `key` is guaranteed to be the render after
+ *  restore's own state updates landed, batched together with it. Until then the
+ *  save effect does not run at all. */
 export const useDraft = <T,>(
   account: string,
   object: string,
@@ -28,34 +26,39 @@ export const useDraft = <T,>(
   onRestore: (draft: T) => void,
 ): { forget: () => void } => {
   const key = draftKey(account, object, recordId)
-  const restored = useRef(false)
+  const [restoredKey, setRestoredKey] = useState<string | null>(null)
   const onRestoreRef = useRef(onRestore)
   onRestoreRef.current = onRestore
+  // True from the first render where `restoredKey` matches `key` onward, so that
+  // first render's write (redundant: it is either the value we just restored, or
+  // a pristine default that never should have been treated as a saved draft) can
+  // be skipped without also skipping every real edit after it.
+  const settled = useRef(false)
 
   useEffect(() => {
-    restored.current = false
+    settled.current = false
     try {
-      const raw = localStorage.getItem(key)
-      const parsed = raw ? (JSON.parse(raw) as Stored<T>) : null
-      if (parsed && typeof parsed.savedAt === 'number' && Date.now() - parsed.savedAt < DRAFT_EXPIRY_MS) {
-        onRestoreRef.current(parsed.value)
-      } else if (parsed) {
-        localStorage.removeItem(key)
-      }
+      const read = readDraft<T>(localStorage.getItem(key), Date.now())
+      if (read.kind === 'value') onRestoreRef.current(read.value)
+      else if (read.kind === 'expired') localStorage.removeItem(key)
     } catch {
       // Private window or blocked storage: the form still works, just with no draft.
     }
-    restored.current = true
+    setRestoredKey(key)
   }, [key])
 
   useEffect(() => {
-    if (!restored.current) return
+    if (restoredKey !== key) return
+    if (!settled.current) {
+      settled.current = true
+      return
+    }
     try {
       localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }))
     } catch {
       // Quota exceeded or blocked: the form keeps working without a saved draft.
     }
-  }, [key, value])
+  }, [key, value, restoredKey])
 
   const forget = () => {
     try {

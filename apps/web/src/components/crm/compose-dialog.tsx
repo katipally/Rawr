@@ -45,8 +45,9 @@ export const ComposeDialog = ({
     setText(draft.text)
   })
 
+  // Cancel and the modal's own X are a dismissal, not a discard: the draft is
+  // only forgotten once the email actually sends.
   const close = () => {
-    forget()
     onClose()
   }
 
@@ -93,6 +94,7 @@ export const ComposeDialog = ({
                 toast('success', 'Sent. It is on the record and in the inbox already.')
                 onSent?.()
                 router.refresh()
+                forget()
                 close()
               })
               .catch((cause) => toast('error', errorMessage(cause)))

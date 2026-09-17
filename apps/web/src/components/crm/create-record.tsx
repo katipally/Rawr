@@ -59,8 +59,9 @@ export const CreateRecordDialog = ({
   const [duplicateId, setDuplicateId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
+  // Cancel and the modal's own X are a dismissal, not a discard: the draft is
+  // only forgotten once the record actually exists.
   const close = () => {
-    forget()
     onClose()
   }
 
@@ -102,6 +103,7 @@ export const CreateRecordDialog = ({
         toast('info', 'Filed under the company that matches the email domain.')
       }
       toast('success', `${objectLabel} created.`)
+      forget()
       close()
       if (onCreated) await onCreated(created.id)
       else navigate(recordPath(account, object, created.id))
