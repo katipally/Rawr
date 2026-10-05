@@ -261,17 +261,17 @@ export const TasksTable = ({
         </span>
         {pager}
       </div>
-      <Modal open={creating} title="Create task" onClose={closeCreate}>
+      {creating ? (
         <TaskForm
+          modal={{ title: 'Create task', onClose: closeCreate }}
           account={account}
           assignees={assignees}
           queues={queues}
           defaultQueueId={queueId}
-          autoFocus={creating}
-          onCreated={closeCreate}
+          onSaved={closeCreate}
           className="flex flex-wrap items-end gap-2"
         />
-      </Modal>
+      ) : null}
       <Modal
         open={removing !== null}
         title={`Delete “${removing?.title ?? ''}”?`}
@@ -300,20 +300,21 @@ export const TasksTable = ({
           task itself does not come back.
         </p>
       </Modal>
-      <Modal open={editing !== null} title="Edit task" onClose={() => setEditing(null)}>
-        {editing ? (
-          <TaskForm
-            key={editing.id}
-            account={account}
-            assignees={assignees}
-            queues={queues}
-            task={editing}
-            autoFocus
-            onCreated={() => setEditing(null)}
-            className="flex flex-wrap items-end gap-2"
-          />
-        ) : null}
-      </Modal>
+      {editing ? (
+        <TaskForm
+          key={editing.id}
+          modal={{ title: 'Edit task', onClose: () => setEditing(null) }}
+          account={account}
+          assignees={assignees}
+          queues={queues}
+          task={editing}
+          onSaved={() => {
+            setEditing(null)
+            router.refresh()
+          }}
+          className="flex flex-wrap items-end gap-2"
+        />
+      ) : null}
     </div>
   )
 }

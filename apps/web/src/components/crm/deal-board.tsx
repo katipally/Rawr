@@ -1,6 +1,6 @@
 'use client'
 
-import { Avatar, Badge, DropdownMenu, EmptyState, Modal, Spinner, cn, useToast } from '@rawr/ui'
+import { Avatar, Badge, DropdownMenu, EmptyState, cn, useToast } from '@rawr/ui'
 import { CalendarPlus, ChevronDown, CircleCheck, Mail, MoreHorizontal, StickyNote } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -123,7 +123,9 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
   const [pages, setPages] = useState<Record<string, { cards: BoardCard[]; hasMore: boolean }>>({})
   const [loadingMore, setLoadingMore] = useState<string | null>(null)
   /** The card whose next activity is being scheduled, and the two lists the real
-   *  task form needs. Null until somebody asks for one. */
+   *  task form needs. Null until somebody asks for one; the dialog opens once the
+   *  lists are here, because a dialog that swaps its content for the form loses
+   *  track of the button that opened it. */
   const [scheduling, setScheduling] = useState<BoardCard | null>(null)
   const [lookups, setLookups] = useState<TaskLookups | null>(null)
 
@@ -139,7 +141,9 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
         })
       })
       .catch((cause) => {
-        if (live) toast('error', errorMessage(cause))
+        if (!live) return
+        toast('error', errorMessage(cause))
+        setScheduling(null)
       })
     return () => {
       live = false
@@ -542,31 +546,24 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
     {/* The record page's own task form, on the board, filed against the card it
         was opened from. One form, so a task scheduled here carries the type, the
         priority, the queue and the reminder a task scheduled anywhere else does. */}
-    <Modal
-      open={scheduling !== null}
-      onClose={() => setScheduling(null)}
-      title={scheduling ? `Next activity on ${shortName(scheduling.displayName)}` : 'Next activity'}
-      size="sm"
-    >
-      {scheduling && lookups ? (
-        <TaskForm
-          autoFocus
-          account={account}
-          assignees={lookups.assignees}
-          queues={lookups.queues}
-          entity={{ entityType: 'deal', entityId: scheduling.id }}
-          onCreated={() => {
-            setScheduling(null)
-            setPages({})
-            router.refresh()
-          }}
-        />
-      ) : (
-        <div className="flex justify-center p-4">
-          <Spinner />
-        </div>
-      )}
-    </Modal>
+    {scheduling && lookups ? (
+      <TaskForm
+        modal={{
+          title: `Next activity on ${shortName(scheduling.displayName)}`,
+          size: 'sm',
+          onClose: () => setScheduling(null),
+        }}
+        account={account}
+        assignees={lookups.assignees}
+        queues={lookups.queues}
+        entity={{ entityType: 'deal', entityId: scheduling.id }}
+        onSaved={() => {
+          setScheduling(null)
+          setPages({})
+          router.refresh()
+        }}
+      />
+    ) : null}
     </>
   )
 }

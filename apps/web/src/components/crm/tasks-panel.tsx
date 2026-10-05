@@ -92,6 +92,7 @@ export const TasksPanel = ({
           queues={queues}
           entity={entity}
           autoFocus={startNew}
+          onSaved={() => router.refresh()}
           className="flex flex-wrap items-end gap-2 border-b border-divider px-6 py-2"
         />
       ) : null}

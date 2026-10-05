@@ -1,8 +1,7 @@
 'use client'
 
-import { Button, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Button, Modal, Select, TextArea, TextInput, useToast, type ModalProps } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { useDraft } from '~/lib/drafts.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -62,14 +61,20 @@ export type TaskFormProps = {
   defaultQueueId?: string | undefined
   /** Present to edit that task instead of creating one. */
   task?: EditableTask | undefined
-  /** Focus the title as soon as the form shows: a dialog, or the record page's
-   *  quick-action row asking for a new task. */
+  /** Focus the title as soon as the form shows: the record page's quick-action
+   *  row asking for a new task. A dialog focuses its first field on its own. */
   autoFocus?: boolean | undefined
-  onCreated?: (() => void) | undefined
+  /** After the task is saved, whether created or edited. The caller refreshes
+   *  whatever shows tasks, because only it knows what that is. */
+  onSaved: () => void
   className?: string | undefined
+  /** Present to show the form in a dialog with its actions pinned under it,
+   *  rather than inline where the caller put it. */
+  modal?: { title: string; size?: ModalProps['size'] | undefined; onClose: () => void } | undefined
 }
 
-/** One form behind the record panel, the tasks index dialog and the edit dialog. */
+/** One form behind the record's composer, the tasks index dialog, the edit dialog
+ *  and the board's next-activity dialog. */
 export const TaskForm = ({
   account,
   assignees,
@@ -78,10 +83,10 @@ export const TaskForm = ({
   defaultQueueId,
   task,
   autoFocus,
-  onCreated,
+  onSaved,
   className,
+  modal,
 }: TaskFormProps) => {
-  const router = useRouter()
   const toast = useToast()
   const titleField = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState(task?.title ?? '')
@@ -144,8 +149,7 @@ export const TaskForm = ({
         toast('success', 'Task created.')
       }
       forget()
-      router.refresh()
-      onCreated?.()
+      onSaved()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
@@ -153,14 +157,8 @@ export const TaskForm = ({
     }
   }
 
-  return (
-    <form
-      className={className}
-      onSubmit={(event) => {
-        event.preventDefault()
-        void save()
-      }}
-    >
+  const controls = (
+    <>
       <TextInput
         ref={titleField}
         value={title}
@@ -204,9 +202,10 @@ export const TaskForm = ({
           className="w-auto"
         />
       </label>
-      <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
-        {task ? 'Save task' : 'Add task'}
-      </Button>
+    </>
+  )
+  const options = (
+    <>
       <Button
         variant="tertiary"
         aria-expanded={more}
@@ -294,6 +293,50 @@ export const TaskForm = ({
           />
         </div>
       ) : null}
+    </>
+  )
+  const label = task ? 'Save task' : 'Add task'
+
+  if (modal) {
+    return (
+      <Modal
+        open
+        title={modal.title}
+        size={modal.size ?? 'md'}
+        onClose={modal.onClose}
+        onSubmit={() => void save()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={modal.onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
+              {label}
+            </Button>
+          </>
+        }
+      >
+        <div className={className}>
+          {controls}
+          {options}
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <form
+      className={className}
+      onSubmit={(event) => {
+        event.preventDefault()
+        void save()
+      }}
+    >
+      {controls}
+      <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
+        {label}
+      </Button>
+      {options}
     </form>
   )
 }
