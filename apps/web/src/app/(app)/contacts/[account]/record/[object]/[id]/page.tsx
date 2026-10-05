@@ -36,6 +36,7 @@ import { EnrichmentPanel } from '~/components/crm/enrichment-panel.tsx'
 import { PropertyPanel, type PropertySection } from '~/components/crm/property-panel.tsx'
 import { RecordActions } from '~/components/crm/record-actions.tsx'
 import { RecordOverview, type Touch } from '~/components/crm/record-overview.tsx'
+import { RecordComposer } from '~/components/crm/record-composer.tsx'
 import { RecordQuickActions } from '~/components/crm/record-quick-actions.tsx'
 import { MailPanel } from '~/components/crm/mail-panel.tsx'
 import { SegmentsPanel } from '~/components/crm/segments-panel.tsx'
@@ -55,10 +56,6 @@ import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
-
-/** What the quick-action row may ask the timeline composer to open. Narrowed
- *  here because it arrives from an address a person can hand-edit. */
-const LOG_KINDS = ['note', 'call', 'meeting', 'email'] as const
 
 /** The two or three values worth reading before anything else. */
 const HEADER_FIELDS: Record<ObjectKey, string[]> = {
@@ -93,8 +90,6 @@ const RecordPage = async ({
   searchParams: Promise<{
     type?: string
     tab?: string
-    log?: string
-    task?: string
     compose?: string
     from?: string
   }>
@@ -108,11 +103,10 @@ const RecordPage = async ({
   // through exactly this page. Whether the key names one is the registry's
   // answer, which loadCrmContext gives below.
   if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
-  const { type, tab, log, task, compose, from } = await searchParams
+  const { type, tab, compose, from } = await searchParams
   // Overview is the landing tab, the way HubSpot opens on a summary rather than
   // on a wall of history. An unknown value falls back rather than 404ing.
   const activeTab = tab === 'activities' ? 'activities' : 'overview'
-  const openKind = LOG_KINDS.find((kind) => kind === log)
 
   const ctx = contextFrom(session)
   // Every read on this screen runs at once, each on its own connection; see
@@ -352,9 +346,6 @@ const RecordPage = async ({
             ) : null}
             <div className="mt-2 flex justify-center">
               <RecordQuickActions
-                account={account}
-                object={objectParam}
-                recordId={id}
                 email={emailAction}
                 canWrite={canWrite}
               />
@@ -525,7 +516,6 @@ const RecordPage = async ({
             />
           ) : (
           <Timeline
-            openKind={openKind}
             object={objectParam}
             recordId={id}
             account={account}
@@ -585,11 +575,8 @@ const RecordPage = async ({
               entityId: row.entityId,
               entityName: row.entityName,
             }))}
-            assignees={lookups.users}
-            queues={queues}
             entity={entity}
             canWrite={canWrite}
-            startNew={task === 'new'}
           />
           <AttachmentsPanel
             object={objectParam}
@@ -605,6 +592,15 @@ const RecordPage = async ({
             }))}
           />
         </div>
+
+        <RecordComposer
+          account={account}
+          object={objectParam}
+          recordId={id}
+          canWrite={canWrite}
+          assignees={lookups.users}
+          queues={queues}
+        />
     </div>
   )
 }

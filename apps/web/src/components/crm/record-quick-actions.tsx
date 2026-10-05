@@ -2,12 +2,9 @@
 
 import { CalendarCheck, CircleCheck, Mail, Phone, StickyNote } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { recordPath } from '~/lib/links.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 
 export type RecordQuickActionsProps = {
-  account: string
-  object: string
-  recordId: string
   /** Where the Email button goes, and what its tooltip says. A null href
    *  disables it and the title is the reason, so there is never a button that
    *  cannot do anything.
@@ -21,25 +18,16 @@ export type RecordQuickActionsProps = {
 /** HubSpot's row of round buttons under a record's name: Note, Email, Call,
  *  Task, Meeting.
  *
- *  None of them own a form. Each is a link into the address that opens the panel
- *  already on this page, so there is one composer, one task form and one compose
- *  dialog, and "log a call on this deal" is a link somebody can be sent. */
-export const RecordQuickActions = ({
-  account,
-  object,
-  recordId,
-  email,
-  canWrite,
-}: RecordQuickActionsProps) => {
+ *  None of them own a form. Each asks for the panel already on this page through
+ *  the address, so there is one composer, one task form and one compose dialog,
+ *  and "log a call on this deal" is a link somebody can be sent. */
+export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps) => {
   const { navigate } = useNavigation()
 
   if (!canWrite) return null
 
-  const go = (params: Parameters<typeof recordPath>[3]) =>
-    navigate(recordPath(account, object, recordId, { tab: 'activities', ...params }))
-
   const actions = [
-    { label: 'Note', icon: StickyNote, onClick: () => go({ log: 'note' }) },
+    { label: 'Note', icon: StickyNote, onClick: () => replaceParams({ log: 'note', task: null }) },
     {
       label: 'Email',
       icon: Mail,
@@ -49,9 +37,9 @@ export const RecordQuickActions = ({
       disabled: email.href === null,
       title: email.title,
     },
-    { label: 'Call', icon: Phone, onClick: () => go({ log: 'call' }) },
-    { label: 'Task', icon: CircleCheck, onClick: () => go({ task: 'new' }) },
-    { label: 'Meeting', icon: CalendarCheck, onClick: () => go({ log: 'meeting' }) },
+    { label: 'Call', icon: Phone, onClick: () => replaceParams({ log: 'call', task: null }) },
+    { label: 'Task', icon: CircleCheck, onClick: () => replaceParams({ task: 'new', log: null }) },
+    { label: 'Meeting', icon: CalendarCheck, onClick: () => replaceParams({ log: 'meeting', task: null }) },
   ]
 
   return (

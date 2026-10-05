@@ -1,12 +1,13 @@
 'use client'
 
-import { Alert, Button, DropdownMenu, EmptyState, TextArea, TextInput, buttonClass, cn, useToast } from '@rawr/ui'
+import { Alert, Button, DropdownMenu, EmptyState, TextArea, buttonClass, cn, useToast } from '@rawr/ui'
 import type { EmailPayload, EmailStats } from '@rawr/db'
 import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
+import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime, formatMonth } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -47,22 +48,19 @@ export type TimelineProps = {
   /** Who is looking. Their own hand-logged entries can be corrected or removed; an
    *  admin can do that to anyone's. Nothing the system wrote can be touched. */
   viewer: { userId: string; isAdmin: boolean }
-  /** Which composer the quick-action row above asked for, from the address. The
-   *  composer lives here, so the row asks rather than carrying a second copy. */
-  openKind?: 'note' | 'call' | 'meeting' | 'email' | undefined
 }
 
 /** What a person can put on the timeline by hand, and the prompt each one needs.
  *  A note is about the record; the other three are about something that happened,
  *  which is why they carry a date and a note does not. A3. */
-const LOGGABLE = [
+export const LOGGABLE = [
   { type: 'note', verb: 'Add note', prompt: 'Add a note to this record', dated: false },
   { type: 'call', verb: 'Log call', prompt: 'What was said on the call', dated: true },
   { type: 'meeting', verb: 'Log meeting', prompt: 'What happened in the meeting', dated: true },
   { type: 'email', verb: 'Log email', prompt: 'What the email said', dated: true },
 ] as const
 
-type Loggable = (typeof LOGGABLE)[number]['type']
+export type Loggable = (typeof LOGGABLE)[number]['type']
 
 
 /** HubSpot's sub-tabs over the timeline. Each one is a preset of the type
@@ -130,7 +128,6 @@ export const Timeline = ({
   groups,
   canWrite,
   viewer,
-  openKind,
 }: TimelineProps) => {
   const zone = useZone()
   const router = useRouter()
@@ -143,11 +140,6 @@ export const Timeline = ({
   const [cursor, setCursor] = useState(initialCursor)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [note, setNote] = useState('')
-  const [kind, setKind] = useState<Loggable>(openKind ?? 'note')
-  const composer = useRef<HTMLTextAreaElement>(null)
-  const [happenedOn, setHappenedOn] = useState('')
-  const [posting, setPosting] = useState(false)
   const [hydrated, setHydrated] = useState(false)
   const setTimelineKinds = useUi((state) => state.setTimelineKinds)
   const uiReady = useUiReady()
@@ -162,15 +154,6 @@ export const Timeline = ({
 
   /** The URL wins, because a link has to open the screen it was taken from. With
    *  nothing in the URL, the last choice this person made is restored. A3. */
-  // The quick-action row is a link, so asking for a kind arrives as a new prop on
-  // the same instance. Focus follows, because a person who clicked "Log call"
-  // wants the cursor in the box, not a scrolled page they have to click into.
-  useEffect(() => {
-    if (!openKind) return
-    setKind(openKind)
-    composer.current?.focus()
-  }, [openKind])
-
   // Restores a remembered filter, once the store holds this browser's copy.
   // `load` and `counts` are rebuilt every render, so listing them would refetch
   // on every render.
@@ -246,30 +229,8 @@ export const Timeline = ({
     : rows
   const allCollapsed = shown.length > 0 && shown.every((entry) => collapsed.has(entry.id))
 
-  const compose = LOGGABLE.find((entry) => entry.type === kind) ?? LOGGABLE[0]
-
-  const log = async () => {
-    setPosting(true)
-    try {
-      await api.crm.timeline.log.mutate({
-        entity: { entityType: object, entityId: recordId },
-        type: kind,
-        body: note,
-        // A bare date means midday local, so a call logged for yesterday does not
-        // land on the day before in a zone behind the browser.
-        ...(compose.dated && happenedOn ? { occurredAt: new Date(`${happenedOn}T12:00`) } : {}),
-      })
-      setNote('')
-      setHappenedOn('')
-      toast('success', `${TYPE_LABELS[kind]} added.`)
-      await load(selected, null, false)
-      router.refresh()
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-    } finally {
-      setPosting(false)
-    }
-  }
+  // Entries are written from the composer over the page, which says so here.
+  useOnChange('timeline', () => void load(selected, null, false))
 
   // A synced or sent email is a record of what went over the wire, not a note
   // somebody typed, so it is never edited here.
@@ -311,45 +272,6 @@ export const Timeline = ({
 
   return (
     <div className="flex flex-col gap-3">
-      {canWrite ? (
-        <div className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-4 shadow-panel">
-          <div className="flex flex-wrap gap-1">
-            {LOGGABLE.map((entry) => (
-              <Button
-                key={entry.type}
-                variant={entry.type === kind ? 'secondary' : 'tertiary'}
-                aria-pressed={entry.type === kind}
-                onClick={() => setKind(entry.type)}
-              >
-                {TYPE_LABELS[entry.type]}
-              </Button>
-            ))}
-          </div>
-          <TextArea
-            ref={composer}
-            value={note}
-            aria-label={compose.prompt}
-            placeholder={compose.prompt}
-            onChange={(event) => setNote(event.target.value)}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" busy={posting} disabled={note.trim() === ''} onClick={() => void log()}>
-              {compose.verb}
-            </Button>
-            {compose.dated ? (
-              <label className="flex items-center gap-2 text-secondary">
-                When
-                <TextInput
-                  type="date"
-                  value={happenedOn}
-                  onChange={(event) => setHappenedOn(event.target.value)}
-                />
-              </label>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       <nav aria-label="Activity type" className="flex flex-wrap border-b border-line">
         {SUBTABS.map((tab) => {
           const active = sameSet(tab.types, selected)

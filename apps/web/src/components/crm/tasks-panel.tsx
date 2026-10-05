@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
+import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { TaskForm } from './task-form.tsx'
+import { replaceParams } from '~/lib/url-params.ts'
 import { TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 import { formatDate, isPast } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -34,34 +35,37 @@ export type TaskRow = {
 export type TasksPanelProps = {
   account: string
   rows: TaskRow[]
-  assignees: { id: string; label: string }[]
-  /** Absent on a record, where there is no queue sidebar to file into. */
-  queues?: { id: string; name: string }[] | undefined
   /** Set on a record page, so a new task is filed against that record. */
   entity?: { entityType: string; entityId: string }
   canWrite: boolean
   /** Rendered as a boxed panel on a record, and bare on the tasks page. */
   heading?: string
-  /** The record page's quick-action row asking for a new task, from the address.
-   *  The form is here, so the row asks rather than carrying a second copy. */
-  startNew?: boolean | undefined
 }
 
 export const TasksPanel = ({
   account,
   rows,
-  assignees,
-  queues = [],
   entity,
   canWrite,
   heading = 'Tasks',
-  startNew,
 }: TasksPanelProps) => {
   const zone = useZone()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<TaskRow | null>(null)
+  // Tasks read again after one was added, held with the rows they replace so a
+  // fresh render from the server takes over as soon as there is one.
+  const [fresh, setFresh] = useState<{ since: TaskRow[]; rows: TaskRow[] } | null>(null)
+  const shown = fresh?.since === rows ? fresh.rows : rows
+
+  useOnChange('tasks', () => {
+    if (!entity) return
+    api.crm.tasks.list
+      .query({ entity })
+      .then((list) => setFresh({ since: rows, rows: list }))
+      .catch((cause) => toast('error', errorMessage(cause)))
+  })
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -76,8 +80,8 @@ export const TasksPanel = ({
     }
   }
 
-  const open = rows.filter((row) => row.status === 'open')
-  const done = rows.filter((row) => row.status === 'done')
+  const open = shown.filter((row) => row.status === 'open')
+  const done = shown.filter((row) => row.status === 'done')
 
   return (
     <section className="rounded-panel border border-line bg-surface shadow-panel">
@@ -86,18 +90,12 @@ export const TasksPanel = ({
       </h2>
 
       {canWrite ? (
-        <TaskForm
-          account={account}
-          assignees={assignees}
-          queues={queues}
-          entity={entity}
-          autoFocus={startNew}
-          onSaved={() => router.refresh()}
-          className="flex flex-wrap items-end gap-2 border-b border-divider px-6 py-2"
-        />
+        <div className="border-b border-divider px-6 py-2">
+          <Button onClick={() => replaceParams({ task: 'new', log: null })}>Add task</Button>
+        </div>
       ) : null}
 
-      {rows.length === 0 ? (
+      {shown.length === 0 ? (
         <EmptyState
           title="No tasks"
           description={
