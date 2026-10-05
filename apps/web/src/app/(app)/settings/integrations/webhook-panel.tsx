@@ -223,12 +223,14 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
         open={composing !== null}
         onClose={close}
         title={composing === 'new' || composing === null ? 'Add an endpoint' : `Edit ${composing.name}`}
+        dirty={composing === 'new' && (name !== '' || url !== '')}
+        onSubmit={() => void submit()}
         footer={
           <>
             <Button variant="tertiary" onClick={close}>
               Cancel
             </Button>
-            <Button variant="primary" busy={busy} disabled={!name.trim() || !url.trim()} onClick={() => void submit()}>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim() || !url.trim()}>
               {composing === 'new' ? 'Create' : 'Save'}
             </Button>
           </>

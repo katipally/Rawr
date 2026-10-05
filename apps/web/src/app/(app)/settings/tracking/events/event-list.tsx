@@ -241,12 +241,14 @@ const EventDefEditor = ({
       open
       onClose={onClose}
       title={row.id ? row.name : 'Describe an event'}
+      dirty={!row.id && (name !== '' || label !== '')}
+      onSubmit={save}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" busy={saving || busy} disabled={!name.trim()} onClick={save}>
+          <Button type="submit" variant="primary" busy={saving || busy} disabled={!name.trim()}>
             Save
           </Button>
         </>

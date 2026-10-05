@@ -120,38 +120,33 @@ export const ObjectList = ({
         open={creating}
         onClose={() => setCreating(false)}
         title="Create object"
+        dirty={singular !== '' || plural !== ''}
+        onSubmit={() =>
+          void run(async () => {
+            const made = await api.admin.objects.create.mutate({
+              nameSingular: singular,
+              namePlural: plural,
+            })
+            setCreated((current) => [
+              ...current,
+              {
+                id: made.id,
+                key: made.key,
+                nameSingular: singular.trim(),
+                namePlural: plural.trim(),
+                // Its naming field is created with it.
+                fieldCount: 1,
+                recordCount: 0,
+              },
+            ])
+          }, `${plural} was created. Add its fields under Properties.`).then((ok) => ok && setCreating(false))
+        }
         footer={
           <>
             <Button variant="tertiary" onClick={() => setCreating(false)}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!singular.trim() || !plural.trim()}
-              onClick={() =>
-                void run(async () => {
-                  const made = await api.admin.objects.create.mutate({
-                    nameSingular: singular,
-                    namePlural: plural,
-                  })
-                  setCreated((current) => [
-                    ...current,
-                    {
-                      id: made.id,
-                      key: made.key,
-                      nameSingular: singular.trim(),
-                      namePlural: plural.trim(),
-                      // Its naming field is created with it.
-                      fieldCount: 1,
-                      recordCount: 0,
-                    },
-                  ])
-                }, `${plural} was created. Add its fields under Properties.`).then(
-                  (ok) => ok && setCreating(false),
-                )
-              }
-            >
+            <Button type="submit" variant="primary" busy={busy} disabled={!singular.trim() || !plural.trim()}>
               Create
             </Button>
           </>

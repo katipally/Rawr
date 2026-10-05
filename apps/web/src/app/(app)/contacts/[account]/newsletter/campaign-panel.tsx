@@ -260,18 +260,14 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
         open={composing}
         onClose={() => setComposing(false)}
         title="Aim a campaign"
+        onSubmit={() => void schedule()}
         footer={
           <div className="flex flex-wrap items-center gap-2">
             {missing ? <p className="text-small text-secondary">Still needs {missing}.</p> : null}
             <Button variant="tertiary" onClick={() => setComposing(false)}>
               Cancel
             </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={missing !== null}
-              onClick={() => void schedule()}
-            >
+            <Button type="submit" variant="primary" busy={busy} disabled={missing !== null}>
               {scheduledAt ? 'Push and schedule' : 'Push and create the draft'}
             </Button>
           </div>

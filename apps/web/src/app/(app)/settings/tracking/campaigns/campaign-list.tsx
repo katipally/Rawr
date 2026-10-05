@@ -238,12 +238,14 @@ const CampaignEditor = ({
       open
       onClose={onClose}
       title={draft.id ? draft.name : 'New campaign'}
+      dirty={!draft.id && (draft.name !== '' || draft.utmCampaign !== '')}
+      onSubmit={save}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" busy={saving} disabled={!valid} onClick={save}>
+          <Button type="submit" variant="primary" busy={saving} disabled={!valid}>
             Save
           </Button>
         </>

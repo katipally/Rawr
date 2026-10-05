@@ -762,12 +762,14 @@ export const AutomationList = ({
         onClose={() => setEditing(null)}
         size="lg"
         title={editing === 'new' ? 'Create automation' : 'Edit automation'}
+        dirty={editing === 'new' && name !== ''}
+        onSubmit={() => void save()}
         footer={
           <>
             <Button variant="tertiary" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button variant="primary" busy={busy} disabled={!name.trim()} onClick={() => void save()}>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
               Save
             </Button>
           </>

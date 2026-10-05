@@ -68,17 +68,13 @@ export const CardPicker = ({
       onClose={onClose}
       size="lg"
       title={title}
+      onSubmit={() => onSave({ name: name.trim(), cards, isShared })}
       footer={
         <>
           <Button variant="tertiary" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            variant="primary"
-            busy={busy}
-            disabled={!name.trim() || cards.length === 0}
-            onClick={() => onSave({ name: name.trim(), cards, isShared })}
-          >
+          <Button type="submit" variant="primary" busy={busy} disabled={!name.trim() || cards.length === 0}>
             Save
           </Button>
         </>
