@@ -16,8 +16,8 @@ const PLACEHOLDER = /\{\{\s*([a-z0-9_.]+)\s*\}\}/gi
 
 /** Collapses the wreckage a missing value leaves behind: doubled spaces, and a
  *  trailing separator where the last variable was the whole tail. Without this,
- *  "Discovery Session with Datasaur <> {{company.name}}" with no company becomes
- *  "Discovery Session with Datasaur <> ", which is what §5 forbids. */
+ *  "Intro call <> {{company.name}}" with no company becomes
+ *  "Intro call <> ", which is what §5 forbids. */
 const tidy = (value: string): string =>
   value
     .replace(/[ \t]{2,}/g, ' ')

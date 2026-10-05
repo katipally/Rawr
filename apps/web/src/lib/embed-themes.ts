@@ -3,7 +3,7 @@ import { FORM_THEME_TOKENS, type FormTheme, type FormThemeToken } from '@rawr/db
 /** What a form looks like, as values for the custom properties embed-styles.ts
  *  already reads.
  *
- *  This exists because of what is live on datasaur.ai today: the HubSpot embed
+ *  This exists because of what is live on customer sites today: the HubSpot embed
  *  ships its own stylesheet, so every form on that site carries a block of
  *  overrides fighting it, several with `!important`, one of which hides the
  *  validation errors outright. Nothing here is `!important` and nothing here is
@@ -45,7 +45,7 @@ export const EMBED_PRESETS: Record<string, Preset> = {
     },
   },
 
-  /** Datasaur's own: bare underlined inputs on a dark hero, Inter, a text-only
+  /** Bare underlined inputs on a dark hero, Inter, a text-only
    *  submit. Reproduces what the footer and hero forms are hand-styled into. */
   underline: {
     label: 'Underline on dark',

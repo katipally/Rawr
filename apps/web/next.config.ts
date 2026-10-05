@@ -5,7 +5,7 @@ import type { NextConfig } from 'next'
  *
  *  The app is for signed-in staff and must never be framed: a CRM inside somebody
  *  else's iframe is a clickjacked CRM. The public edge is the opposite. The embed,
- *  the hosted form and the booking page are loaded onto datasaur.ai and a Webflow
+ *  the hosted form and the booking page are loaded onto a marketing site and a Webflow
  *  copy site, so denying frame-ancestors there would break the one thing they
  *  exist to do.
  *
@@ -125,7 +125,7 @@ const config: NextConfig = {
         { key: 'content-security-policy', value: EDGE_CSP },
         // Undoes the DENY above. An empty value is what removes a header here;
         // omitting the key would leave the catch-all's DENY in place and the
-        // embed would render as a blank frame on datasaur.ai.
+        // embed would render as a blank frame on the marketing site.
         { key: 'x-frame-options', value: '' },
       ],
     })),

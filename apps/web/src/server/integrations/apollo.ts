@@ -555,7 +555,7 @@ const DEV_SEQUENCES: ApolloSequence[] = [
   { id: 'dev-seq-2', name: 'Re-engage dormant leads', active: true },
 ]
 
-const DEV_ACCOUNTS: ApolloEmailAccount[] = [{ id: 'dev-acct-1', email: 'sales@datasaur.ai', active: true }]
+const DEV_ACCOUNTS: ApolloEmailAccount[] = [{ id: 'dev-acct-1', email: 'sales@example.com', active: true }]
 
 /** Fixed timestamps, so a second sync records nothing new: the same property a
  *  real feed has, and the one the timeline dedupe is tested against. */

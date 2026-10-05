@@ -6,7 +6,7 @@ import { bookingTemplateValues, renderTemplate } from '@rawr/db/templates'
  *  not known.
  *
  *  The second case is the one worth showing. A title reading "Discovery Session
- *  with Datasaur <> " is the specific failure F2 §5 forbids, and the only way to be
+ *  with " is the specific failure F2 §5 forbids, and the only way to be
  *  sure it cannot happen is to look at it.
  *
  *  The renderer is a pure function, so this preview runs the same code the booking

@@ -305,7 +305,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       },
     ],
     name: 'Slack',
-    purpose: 'Form-fill notifications to #sales-leads-2026, and deal stage-change alerts.',
+    purpose: 'Form-fill notifications to #sales-leads, and deal stage-change alerts.',
     failureMode: 'Dead-letter, red health, and leads keep saving. A Slack outage never loses a lead.',
     secretLabel: 'Bot token, or an incoming webhook URL',
     configFields: [
@@ -316,7 +316,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     setup: [
       'Quickest: in Slack open the channel, then its settings, Integrations, Add an app, Incoming WebHooks; copy the webhook URL and paste it as the secret.',
       'Better: at api.slack.com/apps create an app, add the chat:write and channels:read bot scopes, install it to the account and paste the xoxb bot token instead.',
-      'Invite the bot to #sales-leads-2026, or whichever channel you name as the default.',
+      'Invite the bot to #sales-leads, or whichever channel you name as the default.',
     ],
   },
   {

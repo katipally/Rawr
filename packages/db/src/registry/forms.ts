@@ -4,11 +4,8 @@ import { DEFAULT_SETTINGS, type FormField, type FormSettings } from '../dal/form
  *  start from. One list, because those are the same thing: the shapes a marketer
  *  here actually builds.
  *
- *  The first two reproduce what is live on datasaur.ai today, so cutover swaps a
- *  script tag and nothing else changes for a visitor:
- *
- *    1e5bd40a-660d-4018-b67f-7fd07b6df934   /contact-us, /book-a-demo, /demo
- *    65dc4e99-b46e-4b12-b1d5-3665e7471f6d   /contact-us
+ *  The first two are the contact and demo forms most sites already run, so cutover
+ *  swaps a script tag and nothing else changes for a visitor.
  *
  *  The third is the gated-asset form the paid hubspotonwebflow.com bridge exists
  *  for. It has to reach Rawr without that bridge, which is the whole reason the
@@ -86,7 +83,7 @@ export const SEED_FORMS: SeedForm[] = [
       successValue: 'Check your inbox. The link is on its way.',
       lifecycleStageOnSubmit: 'Subscriber',
       // A gated download is not a sales conversation, so it does not interrupt
-      // #sales-leads-2026. It still lands on the contact's timeline.
+      // #sales-leads. It still lands on the contact's timeline.
       notifySlack: false,
     },
   },

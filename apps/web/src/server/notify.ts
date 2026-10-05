@@ -3,7 +3,7 @@ import { publicBaseUrl } from '~/lib/env.ts'
 import { inBackground } from './background.ts'
 import { postToSlack, slackCredentials, type SlackBody } from './integrations/slack.ts'
 
-/** Replaces what HubSpot posts to #sales-leads-2026 today. Trevor flagged this
+/** Replaces what HubSpot posts to #sales-leads today. Trevor flagged this
  *  loss first: a form fill from a real prospect lands in Slack, and that stops at
  *  cutover.
  *

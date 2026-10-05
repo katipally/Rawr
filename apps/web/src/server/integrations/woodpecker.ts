@@ -42,8 +42,8 @@ export type WoodpeckerCampaign = {
 }
 
 const DEV_CAMPAIGNS: WoodpeckerCampaign[] = [
-  { id: 101, name: 'Development outbound', status: 'RUNNING', fromEmail: 'dev@datasaur.ai', perDay: 50 },
-  { id: 102, name: 'Development nurture', status: 'PAUSED', fromEmail: 'dev@datasaur.ai', perDay: 25 },
+  { id: 101, name: 'Development outbound', status: 'RUNNING', fromEmail: 'dev@example.com', perDay: 50 },
+  { id: 102, name: 'Development nurture', status: 'PAUSED', fromEmail: 'dev@example.com', perDay: 25 },
 ]
 
 /** The campaigns a sequence can point at. Woodpecker answers 204 with no body when

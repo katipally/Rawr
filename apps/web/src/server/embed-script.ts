@@ -4,7 +4,7 @@ import { clientFieldErrorSource, clientRuleMatchesSource } from '~/lib/form-rule
 
 /** The browser half of F3, served as one file from /embed.js.
  *
- *  No framework, no bundler, no dependencies. It runs on datasaur.ai inside
+ *  No framework, no bundler, no dependencies. It runs on the marketing site inside
  *  Webflow's page, so every byte and every global it touches is somebody else's
  *  budget. Everything is scoped inside one IIFE and the only global it defines is
  *  window.rawr.
