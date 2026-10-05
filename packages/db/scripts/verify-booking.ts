@@ -709,8 +709,8 @@ try {
   })
   check(
     'a resolved title reads as the production string',
-    renderTemplate('Discovery Session with Datasaur <> {{company.name}}', withCompany) ===
-      'Discovery Session with Datasaur <> Acme',
+    renderTemplate('Discovery Session with {{company.name}}', withCompany) ===
+      'Discovery Session with Acme',
   )
 
   const withoutCompany = bookingTemplateValues({
@@ -725,8 +725,8 @@ try {
   })
   check(
     'an unknown company falls back rather than trailing off',
-    renderTemplate('Discovery Session with Datasaur <> {{company.name}}', withoutCompany) ===
-      'Discovery Session with Datasaur <> a new team',
+    renderTemplate('Discovery Session with {{company.name}}', withoutCompany) ===
+      'Discovery Session with a new team',
   )
 
   check(
@@ -737,7 +737,7 @@ try {
 
   check(
     'a title whose tail resolves to nothing does not end in a separator',
-    renderTemplate('Datasaur <> {{nonsense.key}}', withCompany) === 'Datasaur',
+    renderTemplate('Intro call <> {{nonsense.key}}', withCompany) === 'Intro call',
   )
 
   // -----------------------------------------------------------------------
@@ -800,7 +800,7 @@ try {
   const eventTitle = provisioned.at(-1)
   check(
     'the calendar event carries the templated title with real values in it',
-    eventTitle?.summary === 'Discovery Session with Datasaur <> acme-booking',
+    eventTitle?.summary === 'Discovery Session with acme-booking',
     eventTitle?.summary ?? '(nothing was provisioned)',
   )
 

@@ -252,7 +252,7 @@ try {
 
   const attribution = readAttribution({
     rawQuery: '?utm_source=google&utm_medium=cpc&gclid=Cj0abc&li_fat_id=xyz&something_new=1',
-    referrer: 'https://www.google.com/', landingPage: 'https://datasaur.ai/', pagePath: '/contact-us',
+    referrer: 'https://www.google.com/', landingPage: 'https://example.com/', pagePath: '/contact-us',
   })
   check('nothing in the query string is dropped on the way in',
     attribution.rawQuery?.includes('something_new=1') === true && attribution.rawQuery?.includes('li_fat_id') === true,
@@ -278,7 +278,7 @@ try {
     form: contactUs,
     body: {
       first_name: 'Verify', last_name: 'Person', email,
-      company: 'Verify Corp', message: 'Interested in Data Studio.',
+      company: 'Verify Corp', message: 'Interested in pricing.',
       rawr_t: minutesAgo(1), rawr_q: '?utm_source=verify&gclid=zzz', rawr_page: '/contact-us',
     },
     attribution: { rawQuery: '?utm_source=verify&gclid=zzz', pagePath: '/contact-us' },

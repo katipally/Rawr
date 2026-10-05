@@ -13,6 +13,7 @@ import {
   listRecords,
   mergeRecords,
   updateRecord } from '../src/dal/records.ts'
+import { createField, deleteField, purgeField } from '../src/dal/admin-fields.ts'
 import { dismissDuplicate, findDuplicates } from '../src/dal/duplicates.ts'
 import {
   armedFor,
@@ -162,13 +163,12 @@ try {
     }
     const deal = objectOrThrow(registry, 'deal')
     const custom = deal.fields.filter((f) => f.storage === 'jsonb')
-    // The two HubSpot properties the seed carries, checked by name. Not by count:
-    // custom fields are creatable from Settings now, so a total is a property of
-    // whatever somebody has added rather than of the system. A1.
-    for (const key of ['uttr_pipeline', 'deal_product_of_interest']) {
+    // Core fields by name, not by count: custom fields are creatable from Settings,
+    // so a total is a property of whatever somebody has added. A1.
+    for (const key of ['name', 'amount', 'stage_id']) {
       expect(
-        custom.some((field) => field.key === key),
-        `deal has no custom jsonb field called ${key}`,
+        deal.fields.some((field) => field.key === key),
+        `deal has no field called ${key}`,
       )
     }
     return `deal has ${deal.fields.length} fields, ${custom.length} of them custom jsonb`
@@ -361,56 +361,67 @@ try {
     .orderBy(s.pipeline.position)
   const stagesOf = async (pipelineId: string) =>
     db.select({ id: s.pipelineStage.id, pipelineId: s.pipelineStage.pipelineId }).from(s.pipelineStage).where(eq(s.pipelineStage.pipelineId, pipelineId)).orderBy(s.pipelineStage.position)
-  const [enterprise, salesPipeline] = pipelines
-  const enterpriseStages = await stagesOf(enterprise!.id)
-  const salesStages = await stagesOf(salesPipeline!.id)
+  const [first] = pipelines
+  const firstStages = await stagesOf(first!.id)
+  // A new account has one pipeline, and coupling is about two, so the section brings its own.
+  const [second] = await db
+    .insert(s.pipeline)
+    .values({ accountId: datasaur.id, name: 'Coupling probe pipeline', position: 99 })
+    .returning({ id: s.pipeline.id, name: s.pipeline.name })
+  await db.insert(s.pipelineStage).values(
+    ['Probe one', 'Probe two'].map((name, position) => ({ accountId: datasaur.id, pipelineId: second!.id, name, probability: '10', position })),
+  )
+  const secondStages = await stagesOf(second!.id)
 
   await check('a deal created with only a pipeline lands on its first stage', async () => {
-    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: salesPipeline!.id })
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: second!.id })
     const record = await getRecord(sales, 'deal', created.id)
-    expect(record?.values.stage_id === salesStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
+    expect(record?.values.stage_id === secondStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
     await db.delete(s.deal).where(eq(s.deal.id, created.id))
-    return `first stage of ${salesPipeline!.name}`
+    return `first stage of ${second!.name}`
   })
 
   await check('a deal created with neither lands on the first pipeline', async () => {
     const created = await createRecord(sales, 'deal', { name: 'Coupling probe' })
     const record = await getRecord(sales, 'deal', created.id)
-    expect(record?.values.pipeline_id === enterprise!.id && record?.values.stage_id === enterpriseStages[0]!.id, 'it did not')
+    expect(record?.values.pipeline_id === first!.id && record?.values.stage_id === firstStages[0]!.id, 'it did not')
     await db.delete(s.deal).where(eq(s.deal.id, created.id))
-    return enterprise!.name
+    return first!.name
   })
 
   await check('a stage from another pipeline is refused when the pipeline is named', async () => {
     const said = await refuses('a cross-pipeline pair', () =>
-      createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: enterprise!.id, stage_id: salesStages[0]!.id }),
+      createRecord(sales, 'deal', { name: 'Coupling probe', pipeline_id: first!.id, stage_id: secondStages[0]!.id }),
     )
     expect(said.includes('not in that pipeline'), said)
     return said
   })
 
   await check('a stage alone carries its pipeline with it', async () => {
-    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: salesStages[1]!.id })
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: secondStages[1]!.id })
     let record = await getRecord(sales, 'deal', created.id)
-    expect(record?.values.pipeline_id === salesPipeline!.id, 'create did not follow the stage')
-    await updateRecord(sales, 'deal', created.id, { stage_id: enterpriseStages[2]!.id })
+    expect(record?.values.pipeline_id === second!.id, 'create did not follow the stage')
+    await updateRecord(sales, 'deal', created.id, { stage_id: firstStages[2]!.id })
     record = await getRecord(sales, 'deal', created.id)
-    expect(record?.values.pipeline_id === enterprise!.id, 'update did not follow the stage')
+    expect(record?.values.pipeline_id === first!.id, 'update did not follow the stage')
     await db.delete(s.deal).where(eq(s.deal.id, created.id))
     return 'pipeline follows the stage on create and on update'
   })
 
   await check('changing the pipeline resets the stage to its first', async () => {
-    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: enterpriseStages[3]!.id })
-    await updateRecord(sales, 'deal', created.id, { pipeline_id: salesPipeline!.id })
+    const created = await createRecord(sales, 'deal', { name: 'Coupling probe', stage_id: firstStages[3]!.id })
+    await updateRecord(sales, 'deal', created.id, { pipeline_id: second!.id })
     const record = await getRecord(sales, 'deal', created.id)
-    expect(record?.values.stage_id === salesStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
+    expect(record?.values.stage_id === secondStages[0]!.id, `stage was ${String(record?.values.stage_id)}`)
     // The stage moved, so the timeline says so: nothing is silently reshuffled.
     const page = await readTimeline(sales, { entity: { entityType: 'deal', entityId: created.id }, types: ['stage_change'], limit: 1 })
     expect(page.rows.length === 1, 'no stage_change entry')
     await db.delete(s.deal).where(eq(s.deal.id, created.id))
     return 'and the move is on the timeline'
   })
+
+  await db.delete(s.pipelineStage).where(eq(s.pipelineStage.pipelineId, second!.id))
+  await db.delete(s.pipeline).where(eq(s.pipeline.id, second!.id))
 
   await check('a lifecycle change writes an event, and changing it back writes another', async () => {
     const stages = await db
@@ -528,13 +539,13 @@ try {
 
   console.log('\n-- board -------------------------------------------------------------')
 
-  await check('the Enterprise board reproduces its nine stages with real totals', async () => {
+  await check('the sales board reproduces its seven stages with real totals', async () => {
     const [pipeline] = await db
       .select({ id: s.pipeline.id })
       .from(s.pipeline)
-      .where(and(eq(s.pipeline.accountId, datasaur.id), eq(s.pipeline.name, 'Enterprise')))
+      .where(and(eq(s.pipeline.accountId, datasaur.id), eq(s.pipeline.name, 'Sales Pipeline')))
     const board = await readBoard(sales, { pipelineId: pipeline!.id })
-    expect(board.columns.length === 9, `saw ${board.columns.length} columns`)
+    expect(board.columns.length === 7, `saw ${board.columns.length} columns`)
 
     const counted = board.columns.reduce((sum, column) => sum + column.count, 0)
     const stored = await db.execute<{ n: number }>(sql`
@@ -543,7 +554,7 @@ try {
     expect(counted === Number(stored[0]!.n), `columns counted ${counted}, table holds ${stored[0]!.n}`)
 
     const mixed = board.columns.find((column) => column.totals.length > 1)
-    return `${counted} deals across 9 columns${mixed ? `, ${mixed.name} subtotals ${mixed.totals.length} currencies separately` : ''}`
+    return `${counted} deals across 7 columns${mixed ? `, ${mixed.name} subtotals ${mixed.totals.length} currencies separately` : ''}`
   })
 
   await check('a weighted total uses the stage probability and recomputes on read', async () => {
@@ -643,16 +654,26 @@ try {
   })
 
   await check('a custom jsonb field filters and sorts through the registry', async () => {
-    const page = await listRecords(sales, {
-      object: 'deal',
-      columns: ['name', 'uttr_pipeline', 'deal_product_of_interest'],
-      filters: [{ conjunction: 'and', conditions: [{ field: 'uttr_pipeline', operator: 'is', value: true }] }],
-      sorts: [{ key: 'uttr_pipeline', direction: 'desc' }],
-      limit: 50,
-    })
-    expect(page.rows.length > 0, 'no deal matched the custom boolean')
-    expect(page.rows.every((row) => row.values.uttr_pipeline === true), 'a non-matching deal came back')
-    return `${page.rows.length} deals on the custom field, products: ${JSON.stringify(page.rows[0]!.values.deal_product_of_interest)}`
+    const key = `verify_flag_${Date.now().toString(36)}`
+    const field = await createField(admin, { objectKey: 'deal', key, label: 'Verify flag', type: 'boolean' })
+    try {
+      await db.execute(sql`
+        update deal set custom = custom || jsonb_build_object(${key}::text, (id::text < '8'))
+         where account_id = ${datasaur.id} and deleted_at is null`)
+      const page = await listRecords(sales, {
+        object: 'deal',
+        columns: ['name', key],
+        filters: [{ conjunction: 'and', conditions: [{ field: key, operator: 'is', value: true }] }],
+        sorts: [{ key, direction: 'desc' }],
+        limit: 50,
+      })
+      expect(page.rows.length > 0, 'no deal matched the custom boolean')
+      expect(page.rows.every((row) => row.values[key] === true), 'a non-matching deal came back')
+      return `${page.rows.length} deals on the custom field`
+    } finally {
+      await deleteField(admin, field.id)
+      await purgeField(admin, field.id)
+    }
   })
 
   await check('CSV export contains exactly the filtered rows and the visible columns', async () => {

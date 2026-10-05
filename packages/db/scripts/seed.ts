@@ -311,10 +311,6 @@ try {
           ownerId: ownerFor(i),
           companyId: companies[i % companies.length]?.id ?? null,
           dealType: i % 2 === 0 ? 'New Business' : 'Existing Business',
-          custom: {
-            uttr_pipeline: i % 4 === 0,
-            deal_product_of_interest: i % 3 === 0 ? ['NLP Labeling'] : ['LLM Labs', 'Data Studio'],
-          },
           createdAt: dayAgo(scale - i),
         })),
       )
@@ -661,7 +657,7 @@ try {
         maxHorizonDays: 60,
         granularityMinutes: 30,
         location: 'zoom',
-        titleTpl: 'Discovery Session with Datasaur <> {{company.name}}',
+        titleTpl: 'Discovery Session with {{company.name}}',
         descriptionTpl:
           '{{contact.first_name}} {{contact.last_name}} {{contact.email}}\n{{company.name}}',
         companyFallback: 'a new team',
@@ -709,7 +705,7 @@ try {
         maxHorizonDays: 45,
         granularityMinutes: 60,
         location: 'google_meet',
-        titleTpl: 'Solution review · Datasaur <> {{company.name}}',
+        titleTpl: 'Solution review · {{company.name}}',
         descriptionTpl: '{{contact.full_name}} · {{contact.email}}\n{{company.name}}',
         companyFallback: 'a new team',
         questions: [],
@@ -811,7 +807,7 @@ try {
             attendeeTimezone: BOOKING_ZONES[i % BOOKING_ZONES.length]!,
             attendeeName: `${contact.firstName ?? 'Someone'} Surname${i + 1}`,
             attendeeEmail: contact.email ?? `booked${i}@partner${i}.example`,
-            answers: { notes: 'Looking at Data Studio for the research team.' },
+            answers: { notes: 'Looking at pricing for the research team.' },
             state: i === 3 ? ('cancelled' as const) : ('confirmed' as const),
             cancelledAt: i === 3 ? dayAgo(2) : null,
             cancelReason: i === 3 ? 'Something came up.' : null,
@@ -1433,7 +1429,7 @@ try {
       {
         accountId: sandbox,
         kind: 'slack',
-        config: { channel: '#sales-leads-2026', mode: 'bot' },
+        config: { channel: '#sales-leads', mode: 'bot' },
         secretRef: secret('xoxb-seed-not-a-real-token'),
         state: 'connected' as const,
         lastOkAt: dayAgo(0),

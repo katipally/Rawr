@@ -200,19 +200,6 @@ export const CORE_VIEWS: Record<ObjectKey, CoreView[]> = {
   ],
 }
 
-/** Datasaur's own enterprise pipeline, reproduced exactly, probabilities included. */
-export const ENTERPRISE_STAGES = [
-  { name: 'Meeting Booked', probability: '5' },
-  { name: 'Interest (Mtg Occurred)', probability: '10' },
-  { name: 'Research (2nd Meeting)', probability: '25' },
-  { name: 'In Trial', probability: '35' },
-  { name: 'Review (Eval/Pricing)', probability: '50' },
-  { name: 'Decision (Internal)', probability: '75' },
-  { name: 'Procurement', probability: '90' },
-  { name: 'Closed Won', probability: '100', isClosedWon: true },
-  { name: 'Closed Lost', probability: '0', isClosedLost: true },
-] as const
-
 export const SALES_STAGES = [
   { name: 'Appointment Scheduled', probability: '20' },
   { name: 'Qualified To Buy', probability: '40' },

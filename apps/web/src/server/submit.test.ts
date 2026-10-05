@@ -17,10 +17,10 @@ test('the answers survive', () => {
   assert.deepEqual(
     answersFromFormData(form([
       ['first_name', 'Trevor'],
-      ['email', 'trevor@datasaur.ai'],
+      ['email', 'trevor@example.com'],
       ['message', 'We would like a demo.'],
     ])),
-    { first_name: 'Trevor', email: 'trevor@datasaur.ai', message: 'We would like a demo.' },
+    { first_name: 'Trevor', email: 'trevor@example.com', message: 'We would like a demo.' },
   )
 })
 
@@ -29,9 +29,9 @@ test("React's transport fields do not", () => {
     ['$ACTION_ID_400039d4699b4d681683b8c7f04d0f1fddedb8bdf3', 'whatever'],
     ['$ACTION_REF_1', 'whatever'],
     ['$ACTION_KEY', 'whatever'],
-    ['email', 'trevor@datasaur.ai'],
+    ['email', 'trevor@example.com'],
   ]))
-  assert.deepEqual(answers, { email: 'trevor@datasaur.ai' })
+  assert.deepEqual(answers, { email: 'trevor@example.com' })
   assert.ok(Object.keys(answers).every((key) => !key.startsWith('$')))
 })
 
@@ -39,10 +39,10 @@ test('nor do the two fields the page uses to say which form this is', () => {
   assert.deepEqual(
     answersFromFormData(form([
       ['rawr_form_id', 'abc'],
-      ['rawr_path', 'datasaur/contact-us'],
-      ['email', 'trevor@datasaur.ai'],
+      ['rawr_path', 'acme/contact-us'],
+      ['email', 'trevor@example.com'],
     ])),
-    { email: 'trevor@datasaur.ai' },
+    { email: 'trevor@example.com' },
   )
 })
 
@@ -60,11 +60,11 @@ test('the honeypot and the attribution fields do survive, because scoring reads 
 
 test('a repeated key becomes an array, which is how a multi_select arrives', () => {
   const answers = answersFromFormData(form([
-    ['interest', 'Data Studio'],
-    ['interest', 'LLM Labs'],
+    ['interest', 'Pricing'],
+    ['interest', 'A demo'],
     ['email', 'a@b.com'],
   ]))
-  assert.deepEqual(answers.interest, ['Data Studio', 'LLM Labs'])
+  assert.deepEqual(answers.interest, ['Pricing', 'A demo'])
   // One value is still a string, not an array of one.
   assert.equal(answers.email, 'a@b.com')
 })
