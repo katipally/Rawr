@@ -19,6 +19,7 @@ import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateTime, todayIn } from '~/components/crm/value.tsx'
 import {
+  accountHome,
   bookedPath,
   calendarsPath,
   encodeFilters,
@@ -357,7 +358,7 @@ const HomePage = async ({
               {overdue.slice(0, 8).map((deal) => (
                 <li key={deal.id} className="flex flex-col gap-0.5 py-2">
                   <div className="flex min-w-0 items-baseline justify-between gap-2">
-                    <Link href={recordPath(account, 'deal', deal.id)} className="min-w-0 truncate font-medium">
+                    <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
                     <span className="shrink-0 text-small text-error">{formatDate(deal.nextStepDate, zone)}</span>
@@ -381,7 +382,7 @@ const HomePage = async ({
               {board.closingThisMonth.map((deal) => (
                 <li key={deal.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
                   <div className="min-w-0">
-                    <Link href={recordPath(account, 'deal', deal.id)} className="block truncate font-medium">
+                    <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="block truncate font-medium">
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
                     <p className="truncate text-small text-secondary">
@@ -408,7 +409,7 @@ const HomePage = async ({
                 <li key={b.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
                   <div className="min-w-0">
                     {b.contactId ? (
-                      <Link href={recordPath(account, 'contact', b.contactId)} className="block truncate font-medium">
+                      <Link href={recordPath(account, 'contact', b.contactId, { from: accountHome(account) })} className="block truncate font-medium">
                         {b.attendeeName}
                       </Link>
                     ) : (
@@ -436,7 +437,7 @@ const HomePage = async ({
                   <div className="min-w-0">
                     <p className="truncate font-medium">{t.title}</p>
                     {t.entityType && t.entityId ? (
-                      <Link href={recordPath(account, t.entityType, t.entityId)} className="block truncate text-small">
+                      <Link href={recordPath(account, t.entityType, t.entityId, { from: accountHome(account) })} className="block truncate text-small">
                         {t.entityName ?? t.entityType}
                       </Link>
                     ) : null}
@@ -473,7 +474,7 @@ const HomePage = async ({
                     {entry.entityDeleted ? (
                       <span className="italic">{entry.entityName}</span>
                     ) : (
-                      <Link href={recordPath(account, entry.entityType, entry.entityId)}>{entry.entityName}</Link>
+                      <Link href={recordPath(account, entry.entityType, entry.entityId, { from: accountHome(account) })}>{entry.entityName}</Link>
                     )}
                     {entry.body ? ` · ${entry.body}` : ''}
                   </p>

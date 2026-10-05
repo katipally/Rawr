@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { formatDate, shortName } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useZone } from '~/components/zone.tsx'
 
@@ -54,6 +55,7 @@ const RULES: Record<string, string> = {
  *  away on the record itself. */
 export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListProps) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [rows, setRows] = useState(pairs)
@@ -180,7 +182,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
 
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <Link
-                  href={recordPath(account, object, survivor.id)}
+                  href={recordPath(account, object, survivor.id, { from: origin })}
                   title={survivor.displayName}
                   className="min-w-0 truncate font-medium"
                 >
@@ -191,7 +193,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                   &larr;
                 </span>
                 <Link
-                  href={recordPath(account, object, absorbed.id)}
+                  href={recordPath(account, object, absorbed.id, { from: origin })}
                   title={absorbed.displayName}
                   className="min-w-0 truncate"
                 >

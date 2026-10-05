@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { enrollmentsPath, recordPath, sequencePath, sequencesPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE, formatDate, formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -44,6 +45,7 @@ export const EnrollmentTable = ({
   canWrite: boolean
 }) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -100,7 +102,7 @@ export const EnrollmentTable = ({
             {rows.map((row) => (
               <li key={row.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
                 <span className="flex min-w-0 flex-1 flex-col">
-                  <Link href={recordPath(account, 'contact', row.contactId)} className="truncate font-medium">
+                  <Link href={recordPath(account, 'contact', row.contactId, { from: origin })} className="truncate font-medium">
                     {row.contactName}
                   </Link>
                   <span className="truncate text-small text-secondary">{row.contactEmail ?? 'No email'}</span>

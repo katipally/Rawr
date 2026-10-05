@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, objectView, recordPath, accountInPath } from './links.ts'
+import { exportCsvPath, exportPath, objectView, recordPath, accountInPath, safeFrom } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -90,4 +90,38 @@ test('a record quick action is a link, so it can be sent to somebody', () => {
     recordPath('datasaur', 'deal', 'abc', { tab: 'activities', log: 'call' }),
     '/contacts/datasaur/record/deal/abc?tab=activities&log=call',
   )
+})
+
+/** Back on a record follows `from`, which anyone can write into a link, so every
+ *  form of "somewhere else" has to come out as no origin at all. */
+test('a list on this account is a valid origin, filters and all', () => {
+  const list = '/contacts/datasaur/objects/contact/views/all/list?filters=%5B%5D&sort=-created_at'
+  assert.equal(safeFrom(list, 'datasaur'), list)
+  assert.equal(safeFrom('/contacts/datasaur/record/deal/abc?tab=activities', 'datasaur'), '/contacts/datasaur/record/deal/abc?tab=activities')
+})
+
+test('an origin on another account is refused', () => {
+  assert.equal(safeFrom('/contacts/probe/objects/contact/views/all/list', 'datasaur'), null)
+})
+
+test('anything the browser would read as another host is refused', () => {
+  for (const hostile of ['//evil.com', '/\\evil.com', '\\\\evil.com', 'https://evil.com', 'http://evil.com/contacts/datasaur/home', 'javascript:alert(1)', '/\t/evil.com', '/\n/evil.com']) {
+    assert.equal(safeFrom(hostile, 'datasaur'), null, hostile)
+  }
+})
+
+test('a relative form that names no account is refused', () => {
+  for (const value of ['', null, undefined, 'contacts/datasaur/home', '/', '/settings/members', '/contacts']) {
+    assert.equal(safeFrom(value, 'datasaur'), null, String(value))
+  }
+})
+
+test('an origin too long to be a real address is refused', () => {
+  assert.equal(safeFrom(`/contacts/datasaur/home?x=${'a'.repeat(3000)}`, 'datasaur'), null)
+})
+
+test('the origin travels in the record address and comes back out of it', () => {
+  const list = '/contacts/datasaur/objects/deal/views/all/list?sort=-amount'
+  const href = recordPath('datasaur', 'deal', 'abc', { from: list })
+  assert.equal(safeFrom(new URL(href, 'http://x').searchParams.get('from'), 'datasaur'), list)
 })

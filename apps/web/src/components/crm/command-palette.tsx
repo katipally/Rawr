@@ -6,6 +6,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath, tasksPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 type Item = { key: string; label: string; detail: string | null; href: string }
@@ -41,6 +42,7 @@ export const CommandPalette = ({
   actions: Action[]
 }) => {
   const { navigate } = useNavigation()
+  const origin = useOrigin()
   const listId = useId()
   const input = useRef<HTMLInputElement>(null)
   const [text, setText] = useState('')
@@ -99,10 +101,10 @@ export const CommandPalette = ({
                 // of their own, so both open the record they name. A task on
                 // nothing has only the task list.
                 href: hit.parent
-                  ? recordPath(account, hit.parent.objectKey, hit.parent.id)
+                  ? recordPath(account, hit.parent.objectKey, hit.parent.id, { from: origin })
                   : hit.objectKey === 'task'
                     ? tasksPath(account, { q: hit.displayName })
-                    : recordPath(account, hit.objectKey, hit.id),
+                    : recordPath(account, hit.objectKey, hit.id, { from: origin }),
               })),
             })),
           )
@@ -122,7 +124,7 @@ export const CommandPalette = ({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [text, account])
+  }, [text, account, origin])
 
   // The rail and Settings both reach a handful of the same pages under different
   // names: "Data Model" is /settings/objects, "Properties" is in both lists. One

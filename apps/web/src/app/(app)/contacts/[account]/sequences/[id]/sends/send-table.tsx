@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 import { recordPath, sequencePath, sequenceSendsPath, sequencesPath, threadPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 
 type SendState = 'sent' | 'failed' | 'bounced'
 
@@ -56,6 +57,7 @@ export const SendTable = ({
   hasMore: boolean
 }) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
 
   const go = (skip: number) =>
@@ -112,7 +114,7 @@ export const SendTable = ({
                 <span className="flex min-w-0 flex-1 basis-56 flex-col">
                   {row.contactId ? (
                     <Link
-                      href={recordPath(account, 'contact', row.contactId)}
+                      href={recordPath(account, 'contact', row.contactId, { from: origin })}
                       className="truncate font-medium"
                     >
                       {row.contactName}

@@ -9,6 +9,7 @@ import { shortName } from '~/components/crm/value.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { encodeFilters, objectView, recordPath } from '~/lib/links.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordDialog, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -69,6 +70,7 @@ export const AssociationRail = ({
   canWrite,
 }: AssociationRailProps) => {
   const router = useRouter()
+  const origin = useOrigin()
   const toast = useToast()
   const [adding, setAdding] = useState<string | null>(null)
   const [choice, setChoice] = useState<PickedRecord | null>(null)
@@ -286,7 +288,7 @@ export const AssociationRail = ({
                     <span className="flex min-w-0 flex-col gap-1">
                       <span className="flex flex-wrap items-center gap-2">
                         <Link
-                          href={recordPath(account, row.objectKey, row.id)}
+                          href={recordPath(account, row.objectKey, row.id, { from: origin })}
                           title={row.displayName}
                           className="line-clamp-2 break-words"
                         >

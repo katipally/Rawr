@@ -8,6 +8,7 @@ import type { ObjectKey } from '@rawr/db'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 import { recordPath, segmentsPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Member = { id: string; displayName: string; enteredAt: string }
@@ -32,6 +33,7 @@ export type ListMembersProps = {
 
 export const ListMembers = ({ account, list, initial, pageSize, canWrite }: ListMembersProps) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [members, setMembers] = useState(initial)
@@ -77,7 +79,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
       header: 'Name',
       width: 360,
       render: (row) => (
-        <Link href={recordPath(account, list.objectKey, row.id)} title={row.displayName} className="min-w-0 truncate text-link hover:underline">
+        <Link href={recordPath(account, list.objectKey, row.id, { from: origin })} title={row.displayName} className="min-w-0 truncate text-link hover:underline">
           {row.displayName}
         </Link>
       ),

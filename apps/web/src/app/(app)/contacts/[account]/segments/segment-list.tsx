@@ -9,6 +9,7 @@ import type { ObjectKey } from '@rawr/db'
 import { usePagedRows } from '~/components/paged.tsx'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -43,6 +44,7 @@ const OBJECT_LABEL: Record<ObjectKey, string> = {
 
 export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: SegmentListProps) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -597,7 +599,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             {members.map((member) => (
               <li key={member.id} className="flex flex-wrap items-baseline justify-between gap-2">
                 <Link
-                  href={recordPath(account, viewing?.objectKey ?? 'contact', member.id)}
+                  href={recordPath(account, viewing?.objectKey ?? 'contact', member.id, { from: origin })}
                   title={member.displayName}
                   className="min-w-0 truncate"
                 >

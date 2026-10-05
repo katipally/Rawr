@@ -8,6 +8,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { FieldType } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
 import { Value, isPast } from './value.tsx'
@@ -64,6 +65,7 @@ export const RecordTable = ({
 }: RecordTableProps) => {
   const zone = useZone()
   const router = useRouter()
+  const origin = useOrigin()
   const { navigate } = useNavigation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const canBulk = bulkFields.length > 0
@@ -91,7 +93,7 @@ export const RecordTable = ({
         const text = own.trim() || row.displayName
         return (
           <Link
-            href={recordPath(account, object, row.id)}
+            href={recordPath(account, object, row.id, { from: origin })}
             className="block truncate font-medium"
             title={text}
             onClick={(event) => event.stopPropagation()}
@@ -158,7 +160,7 @@ export const RecordTable = ({
         columns={tableColumns}
         rows={rows}
         rowKey={(row) => row.id}
-        onRowClick={(row) => router.push(recordPath(account, object, row.id))}
+        onRowClick={(row) => router.push(recordPath(account, object, row.id, { from: origin }))}
         caption={`${object} records in the ${view} view`}
         {...(canBulk
           ? { selection: { selected, onChange: setSelected, noun: objectLabel.toLowerCase() } }

@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import type { Group } from './filter-builder.tsx'
 import { ScoreRing } from './score-ring.tsx'
@@ -112,6 +113,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
   const zone = useZone()
   const router = useRouter()
   const { navigate } = useNavigation()
+  const origin = useOrigin()
   const toast = useToast()
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
@@ -202,18 +204,18 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
     {
       key: 'open',
       items: [
-        { key: 'open', label: 'Open deal', href: recordPath(account, 'deal', card.id) },
+        { key: 'open', label: 'Open deal', href: recordPath(account, 'deal', card.id, { from: origin }) },
         {
           key: 'note',
           label: 'Add a note',
           onSelect: () =>
-            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note' })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin })),
         },
         {
           key: 'task',
           label: 'Create a task',
           onSelect: () =>
-            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new' })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new', from: origin })),
         },
       ],
     },
@@ -322,7 +324,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                     >
                       <div className="flex items-start gap-1">
                         <Link
-                          href={recordPath(account, 'deal', card.id)}
+                          href={recordPath(account, 'deal', card.id, { from: origin })}
                           title={card.displayName}
                           className="line-clamp-2 min-w-0 flex-1 break-words text-body"
                         >
@@ -440,13 +442,13 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                               key: 'note',
                               label: 'Add a note',
                               icon: StickyNote,
-                              href: recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note' }),
+                              href: recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin }),
                             },
                             {
                               key: 'task',
                               label: 'Create a task',
                               icon: CircleCheck,
-                              href: recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new' }),
+                              href: recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new', from: origin }),
                             },
                             {
                               key: 'email',
@@ -457,7 +459,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                               label: card.emailContactId ? 'Email a contact on this deal' : 'No contact on this deal has an email address',
                               icon: Mail,
                               href: card.emailContactId
-                                ? recordPath(account, 'contact', card.emailContactId, { tab: 'activities', compose: '1' })
+                                ? recordPath(account, 'contact', card.emailContactId, { tab: 'activities', compose: '1', from: origin })
                                 : null,
                             },
                           ].map((action) =>

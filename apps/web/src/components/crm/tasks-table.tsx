@@ -10,6 +10,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { recordPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { TaskForm } from './task-form.tsx'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-labels.ts'
 import type { TaskRow } from './tasks-panel.tsx'
@@ -60,6 +61,7 @@ export const TasksTable = ({
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
+  const origin = useOrigin()
   const query = useSearchParams()
   // Derived from the prop rather than seeded into state from it, the way the list
   // toolbar's create dialog is: state read once at mount stays shut when a
@@ -143,7 +145,7 @@ export const TasksTable = ({
       width: 220,
       render: (row) =>
         row.entityId && row.entityType ? (
-          <Link href={recordPath(account, row.entityType, row.entityId)} className="truncate" onClick={(event) => event.stopPropagation()}>
+          <Link href={recordPath(account, row.entityType, row.entityId, { from: origin })} className="truncate" onClick={(event) => event.stopPropagation()}>
             {row.entityName ?? 'the linked record'}
           </Link>
         ) : (

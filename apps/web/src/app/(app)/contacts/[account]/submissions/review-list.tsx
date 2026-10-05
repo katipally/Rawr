@@ -7,6 +7,7 @@ import { Button, useToast } from '@rawr/ui'
 import { Contact } from 'lucide-react'
 import { LinkButton } from '~/components/link-button.tsx'
 import { recordPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -27,6 +28,7 @@ export const ReviewList = ({
   state: string
 }) => {
   const zone = useZone()
+  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [pending, startTransition] = useTransition()
@@ -136,7 +138,7 @@ export const ReviewList = ({
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {row.contactId ? (
               <LinkButton
-                href={recordPath(account, 'contact', row.contactId)}
+                href={recordPath(account, 'contact', row.contactId, { from: origin })}
                 icon={<Contact aria-hidden="true" className="size-4" />}
               >
                 Open contact

@@ -190,7 +190,13 @@ const CalendarPage = async ({
           today={today}
           entries={calendar.entries.map((entry) => ({
             ...entry,
-            href: recordPath(account, objectParam, entry.id),
+            href: recordPath(account, objectParam, entry.id, {
+              from: objectView(account, objectParam, resolved.view.slug, 'calendar', {
+                ...listParams,
+                group: calendar.fieldKey,
+                month,
+              }),
+            }),
           }))}
           truncated={calendar.truncated}
           fieldLabel={calendar.fieldLabel}

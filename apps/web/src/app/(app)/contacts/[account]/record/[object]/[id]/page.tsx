@@ -47,7 +47,7 @@ import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value, formatDateTime } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
-import { objectView, recordPath } from '~/lib/links.ts'
+import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
@@ -131,6 +131,7 @@ const RecordPage = async ({
     log?: string
     task?: string
     compose?: string
+    from?: string
   }>
 }) => {
   const session = await readSession()
@@ -142,7 +143,7 @@ const RecordPage = async ({
   // through exactly this page. Whether the key names one is the registry's
   // answer, which loadCrmContext gives below.
   if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
-  const { type, tab, log, task, compose } = await searchParams
+  const { type, tab, log, task, compose, from } = await searchParams
   // Overview is the landing tab, the way HubSpot opens on a summary rather than
   // on a wall of history. An unknown value falls back rather than 404ing.
   const activeTab = tab === 'activities' ? 'activities' : 'overview'
@@ -285,6 +286,14 @@ const RecordPage = async ({
   )
   const createInitial = objectParam === 'company' ? { company_id: id } : {}
 
+  // Back goes to the screen the person came from, with its filters, when the link
+  // names one on this account; otherwise to the object's default list.
+  const origin = safeFrom(from, account)
+  const originObject = origin ? /\/objects\/([^/]+)\//.exec(origin)?.[1] : undefined
+  const backLabel = origin
+    ? ((originObject ? registry.byKey.get(originObject)?.namePlural : undefined) ?? 'Back')
+    : object.namePlural
+
   const phone = typeof record.values.phone === 'string' && record.values.phone ? record.values.phone : null
   const website = typeof record.values.domain === 'string' && record.values.domain ? record.values.domain : null
   /** The line under the name: a contact's title at their company, a company's
@@ -308,11 +317,11 @@ const RecordPage = async ({
         <div className="rounded-panel border border-line bg-surface shadow-panel">
           <div className="flex items-center justify-between gap-2 px-4 pt-3">
             <Link
-              href={objectView(account, objectParam, 'all')}
+              href={origin ?? objectView(account, objectParam, 'all')}
               className="flex h-10 items-center gap-1 rounded-hs text-body no-underline hover:underline"
             >
               <ChevronLeft aria-hidden="true" className="size-4" />
-              {object.namePlural}
+              {backLabel}
             </Link>
             <RecordActions
               startCompose={compose === '1'}
@@ -516,8 +525,8 @@ const RecordPage = async ({
               scrolling back up the column to find the tabs. */}
           <nav aria-label="Record sections" className="sticky top-0 z-10 flex shrink-0 overflow-hidden rounded-t-hs border-b border-line bg-canvas">
             {[
-              { key: 'overview', label: 'Overview', href: recordPath(account, objectParam, id) },
-              { key: 'activities', label: `Activities (${timelineTotal.toLocaleString()})`, href: recordPath(account, objectParam, id, { tab: 'activities' }) },
+              { key: 'overview', label: 'Overview', href: recordPath(account, objectParam, id, { from: origin ?? undefined }) },
+              { key: 'activities', label: `Activities (${timelineTotal.toLocaleString()})`, href: recordPath(account, objectParam, id, { tab: 'activities', from: origin ?? undefined }) },
             ].map((item) => (
               <Link
                 key={item.key}

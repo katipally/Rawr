@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 import { recordPath } from '~/lib/links.ts'
+import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Row = {
@@ -40,6 +41,7 @@ export const MessageTable = ({
   to: string
 }) => {
   const zone = useZone()
+  const origin = useOrigin()
   const toast = useToast()
   const [rows, setRows] = useState<Row[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -128,7 +130,7 @@ export const MessageTable = ({
               header: 'To',
               render: (row) =>
                 row.contactId ? (
-                  <Link href={recordPath(account, 'contact', row.contactId)} className="truncate">
+                  <Link href={recordPath(account, 'contact', row.contactId, { from: origin })} className="truncate">
                     {row.contactName ?? row.to ?? '(unknown)'}
                   </Link>
                 ) : (

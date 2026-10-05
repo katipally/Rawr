@@ -69,6 +69,8 @@ export type ListParams = {
   /** How many rows the pages before this one held. Carried so the pager can say
    *  "Showing 51-100" on a keyset list, which has no page numbers to count from. */
   skip?: string | undefined
+  /** The record whose preview panel is open over the list. */
+  preview?: string | undefined
 }
 
 const query = (params: Record<string, string | number | undefined | null>): string => {
@@ -93,11 +95,12 @@ export const objectView = (
 ): string =>
   `/${CRM_ROOT}/${account}/objects/${object}/views/${view}/${kind}${query(params)}`
 
-/** `tab` is Overview or Activities, `type` filters the timeline, and the last
+/** `tab` is Overview or Activities, `type` filters the timeline, and the next
  *  three are the quick-action row asking a panel that is already on the page to
  *  open: log an activity of this kind, start a task, start an email. They are in
  *  the address rather than in component state so "log a call on this deal" is a
- *  link somebody can be sent. */
+ *  link somebody can be sent. `from` is the screen the person came from, so Back
+ *  returns to it with its filters rather than to the object's default list. */
 export const recordPath = (
   account: string,
   object: string,
@@ -108,8 +111,31 @@ export const recordPath = (
     log?: string | undefined
     task?: string | undefined
     compose?: string | undefined
+    from?: string | undefined
   } = {},
 ): string => `/${CRM_ROOT}/${account}/record/${object}/${id}${query(params)}`
+
+/** A record address carries a whole origin address inside it, and each hop adds
+ *  one more layer of escaping, so a long chain of record to record clicks stops
+ *  being honoured rather than growing without bound. */
+const MAX_FROM_LENGTH = 2048
+const PARSE_BASE = 'http://rawr.invalid'
+
+/** The origin a record link asked Back to return to, or null when it is anything
+ *  else. `from` is typed into an address by whoever wrote the link, so it is only
+ *  followed when the browser would resolve it to this site, on this account.
+ *
+ *  Asking the URL parser rather than matching the string is the point: it reads
+ *  `/\evil.com` and a tab inside `//` the way a browser does, as another host. */
+export const safeFrom = (value: string | null | undefined, account: string): string | null => {
+  if (!value || value.length > MAX_FROM_LENGTH || !value.startsWith('/')) return null
+  try {
+    if (new URL(value, PARSE_BASE).origin !== PARSE_BASE) return null
+  } catch {
+    return null
+  }
+  return accountInPath(value) === account ? value : null
+}
 
 /** The + in the top bar. It lands on the object's own list, which is where the
  *  create dialog lives, so there is one create form per object rather than a
