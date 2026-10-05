@@ -17,6 +17,7 @@ import {
 } from '@rawr/db'
 import { createHash } from 'node:crypto'
 import { RevokedError } from '../gmail.ts'
+import { describe, logError } from '../log.ts'
 import { addProspect } from '../integrations/woodpecker.ts'
 import { canSendFrom, gmailSender } from './gmail-sender.ts'
 import { toEmailHtml, toEmailText } from './markdown-email.ts'
@@ -204,6 +205,10 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
     return { ran: false, reason: error }
   }
 
+  // From here the mail is out, and Gmail takes no idempotency key: anything that
+  // throws reaches the queue, which runs the step again and sends it twice. So the
+  // stored copy is best effort and the send row is the part that has to land.
+  //
   // The sent copy is stored the same way an incoming one is, so it appears in the
   // thread, on the record and in the inbox rather than only in a sequence report.
   let threadId: string | null = null
@@ -231,31 +236,44 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
       internalDomain: await internalDomainOf(ctx),
       blocked: new Set(),
       origin: { sequenceId: run.sequenceId, sequenceName: run.sequenceName },
+    }).catch((cause) => {
+      logError({ msg: 'a sent sequence mail could not be stored', enrollmentId, error: describe(cause) })
+      return null
     })
-    if (stored.stored) {
+    if (stored?.stored) {
       threadId = stored.threadId
       messageId = stored.messageId
       activityId = stored.activityId
     }
   }
 
-  const recorded = await recordSend(ctx, {
-    enrollmentId,
-    stepId: run.step.id,
-    mailboxId: run.mailboxId,
-    providerMessageId: sent.providerMessageId,
-    internetMessageId: sent.internetMessageId,
-    variant,
-    threadId,
-    messageId,
-    activityId,
-    token: sent.sendToken,
-    links: sent.links,
-    subject: subject.text,
-    contactId: run.contactId,
-  })
-
-  return { ran: true, kind: 'email', sendId: recorded.sendId }
+  try {
+    const recorded = await recordSend(ctx, {
+      enrollmentId,
+      stepId: run.step.id,
+      mailboxId: run.mailboxId,
+      providerMessageId: sent.providerMessageId,
+      internetMessageId: sent.internetMessageId,
+      variant,
+      threadId,
+      messageId,
+      activityId,
+      token: sent.sendToken,
+      links: sent.links,
+      subject: subject.text,
+      contactId: run.contactId,
+    })
+    return { ran: true, kind: 'email', sendId: recorded.sendId }
+  } catch (cause) {
+    // The mail went and the row did not. Retrying the step is the one thing that
+    // cannot be allowed, so the enrollment stops, with the reason where somebody
+    // will read it. If even that cannot be written the queue's retry is all that
+    // is left, and it is raised.
+    const error = 'A mail was sent but could not be recorded, so this enrollment was stopped rather than send it twice. Check the contact’s mail and enroll again if it is still wanted.'
+    logError({ msg: 'a sent sequence mail could not be recorded', enrollmentId, error: describe(cause) })
+    await stopEnrollment(ctx, enrollmentId, 'failed', error)
+    return { ran: false, reason: error }
+  }
 }
 
 /** A stable coin toss for a string. The same enrollment and step always land the

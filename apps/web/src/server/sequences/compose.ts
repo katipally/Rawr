@@ -14,6 +14,7 @@ import {
 } from '@rawr/db'
 import { env } from '~/lib/env.ts'
 import { gmailFetcherFor } from '../gmail.ts'
+import { describe, logError } from '../log.ts'
 import { toEmailHtml } from './markdown-email.ts'
 import { buildMessage } from './mime.ts'
 
@@ -99,6 +100,10 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
     }),
   })) as { id?: string; threadId?: string }
 
+  // The mail is out, and Gmail takes no idempotency key: an error from here on
+  // would show the sender a failure and invite a second send. So what follows is
+  // best effort, and the next sync stores the copy if this could not.
+  //
   // Stored the way an incoming message is, so it is on the record and in the
   // inbox now rather than whenever the next sync happens to run.
   const stored = sent.id
@@ -122,6 +127,9 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
         mailboxId: box.id,
         internalDomain: await internalDomainOf(ctx),
         blocked: new Set(),
+      }).catch((cause) => {
+        logError({ msg: 'a sent mail could not be stored', error: describe(cause) })
+        return null
       })
     : null
 
@@ -136,7 +144,7 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
       messageId: stored?.stored ? stored.messageId : null,
       token: sendToken,
       links: built.links,
-    })
+    }).catch((cause) => logError({ msg: 'a sent mail could not be tracked', error: describe(cause) }))
   }
 
   return {
