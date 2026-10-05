@@ -10,6 +10,7 @@ import {
 } from '@rawr/db'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
 import { googleRefresher, OAuth2RequestError, type GoogleTokens } from './auth/google.ts'
+import { sendWithBackoff } from './integrations/provider.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.
@@ -220,7 +221,7 @@ const busyForHost = async (
       timeMax: window.to.toISOString(),
       items: [{ id: grant.calendarId }],
     }),
-  })
+  }, true)
 
   const payload = (await response.json()) as {
     calendars?: Record<string, { busy?: { start: string; end: string }[]; errors?: { reason: string }[] }>
@@ -239,20 +240,29 @@ const busyForHost = async (
   return busy
 }
 
+/** `repeatable` is for a request that does the same thing however many times it
+ *  lands (a read, a patch to a fixed value), which is the only kind worth sending
+ *  again after a 5xx. An insert is not: Google may have made the event before it
+ *  failed. */
 const googleFetch = async (
   url: string,
   token: string,
   init: RequestInit = {},
+  repeatable = false,
 ): Promise<Response> => {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      authorization: `Bearer ${token}`,
-      'content-type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  })
+  const response = await sendWithBackoff(
+    () =>
+      fetch(url, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          ...(init.headers ?? {}),
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }),
+    { repeatable },
+  )
   if (response.ok) return response
   // Google's error body carries the reason a person needs; the status alone does
   // not distinguish "no such calendar" from "token revoked".
@@ -387,7 +397,7 @@ export const patchCalendarEvent = async (
         : {}),
       ...(input.description === undefined ? {} : { description: input.description }),
     }),
-  })
+  }, true)
 }
 
 /** Idempotent: a 404 or 410 means somebody already removed it, which is the state
@@ -406,11 +416,15 @@ export const deleteCalendarEvent = async (
   )
   url.searchParams.set('sendUpdates', 'all')
 
-  const response = await fetch(url.toString(), {
-    method: 'DELETE',
-    headers: { authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  })
+  const response = await sendWithBackoff(
+    () =>
+      fetch(url.toString(), {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }),
+    { repeatable: true },
+  )
   if (response.ok || response.status === 404 || response.status === 410) return
   const detail = await response.text().catch(() => '')
   throw new Error(

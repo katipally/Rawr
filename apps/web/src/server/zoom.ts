@@ -1,5 +1,5 @@
 import { readCredentials, recordHealth, type AccountContext } from '@rawr/db'
-import type { ConnectionTest } from './integrations/provider.ts'
+import { sendWithBackoff, type ConnectionTest } from './integrations/provider.ts'
 
 /** Nothing here throws: a Zoom outage must not lose a booking, so failure comes
  *  back as a reason and the caller confirms without a link. */
@@ -34,16 +34,17 @@ const accessToken = async (creds: ZoomCredentials): Promise<string> => {
   if (hit && hit.expiresAt - 60_000 > Date.now()) return hit.token
 
   const basic = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString('base64')
-  const response = await fetch(
-    `${TOKEN_URL}?grant_type=account_credentials&account_id=${encodeURIComponent(creds.accountId)}`,
-    {
-      method: 'POST',
-      headers: {
-        authorization: `Basic ${basic}`,
-        'content-type': 'application/x-www-form-urlencoded',
-      },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    },
+  const response = await sendWithBackoff(
+    () =>
+      fetch(`${TOKEN_URL}?grant_type=account_credentials&account_id=${encodeURIComponent(creds.accountId)}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Basic ${basic}`,
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      }),
+    { attempts: 3, repeatable: true },
   )
 
   if (!response.ok) {
@@ -91,9 +92,10 @@ export const createZoomMeeting = async (
 
   try {
     const token = await accessToken(creds)
-    const response = await fetch(
-      `${API}/users/${encodeURIComponent(request.hostEmail)}/meetings`,
-      {
+    // 429 only: a create that failed with a 5xx may still have made the meeting.
+    const response = await sendWithBackoff(
+      () =>
+        fetch(`${API}/users/${encodeURIComponent(request.hostEmail)}/meetings`, {
         method: 'POST',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -111,7 +113,8 @@ export const createZoomMeeting = async (
           },
         }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
-      },
+        }),
+      { attempts: 3 },
     )
 
     if (!response.ok) {
@@ -143,11 +146,15 @@ export const deleteZoomMeeting = async (
     const creds = await credentials(ctx)
     if (!creds) return
     const token = await accessToken(creds)
-    await fetch(`${API}/meetings/${encodeURIComponent(meetingId)}`, {
-      method: 'DELETE',
-      headers: { authorization: `Bearer ${token}` },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
+    await sendWithBackoff(
+      () =>
+        fetch(`${API}/meetings/${encodeURIComponent(meetingId)}`, {
+          method: 'DELETE',
+          headers: { authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        }),
+      { attempts: 3, repeatable: true },
+    )
   } catch {
     // An orphaned Zoom meeting costs nothing; a refused cancellation costs a day.
   }
@@ -167,16 +174,20 @@ export const updateZoomMeeting = async (
       return { ok: false, reason: 'Zoom is not connected, so the meeting time was not moved there.' }
     }
     const token = await accessToken(creds)
-    const response = await fetch(`${API}/meetings/${encodeURIComponent(meetingId)}`, {
-      method: 'PATCH',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({
-        start_time: input.startsAt.toISOString(),
-        duration: input.durationMinutes,
-        timezone: input.timezone,
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
+    const response = await sendWithBackoff(
+      () =>
+        fetch(`${API}/meetings/${encodeURIComponent(meetingId)}`, {
+          method: 'PATCH',
+          headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            start_time: input.startsAt.toISOString(),
+            duration: input.durationMinutes,
+            timezone: input.timezone,
+          }),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        }),
+      { attempts: 3, repeatable: true },
+    )
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
       return { ok: false, reason: `Zoom refused the change: ${response.status} ${detail.slice(0, 200)}` }

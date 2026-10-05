@@ -18,6 +18,7 @@ import {
 } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
+import { isRateLimited, sendWithBackoff } from './integrations/provider.ts'
 
 /** Reading is what every mailbox is connected for. Nothing about the CRM needs
  *  more than this, and every extra scope widens the blast radius of a leaked
@@ -134,18 +135,24 @@ export const authorised = async (
     const url = new URL(`${API}${path}`)
     for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value)
 
+    // A send is not repeated on a 5xx: Gmail takes no idempotency key, so a
+    // failure after it acted would put the mail in the inbox twice.
     const request = () =>
-      fetch(url, {
-        method: send?.method ?? 'GET',
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          ...(send ? { 'content-type': 'application/json' } : {}),
-        },
-        ...(send ? { body: send.body } : {}),
-        // Sending is slower than reading, and a timeout here means a mail that may
-        // or may not have gone out, so it is given longer.
-        signal: AbortSignal.timeout(send ? 45_000 : 20_000),
-      })
+      sendWithBackoff(
+        () =>
+          fetch(url, {
+            method: send?.method ?? 'GET',
+            headers: {
+              authorization: `Bearer ${accessToken}`,
+              ...(send ? { 'content-type': 'application/json' } : {}),
+            },
+            ...(send ? { body: send.body } : {}),
+            // Sending is slower than reading, and a timeout here means a mail that may
+            // or may not have gone out, so it is given longer.
+            signal: AbortSignal.timeout(send ? 45_000 : 20_000),
+          }),
+        { repeatable: !send },
+      )
 
     let response = await request()
     if (response.status === 401 && googleConfigured) {
@@ -155,7 +162,7 @@ export const authorised = async (
     if (response.ok) return response.json()
 
     const body = await response.text()
-    if (isRevocation(response.status, body)) {
+    if (!isRateLimited(response.status, body) && isRevocation(response.status, body)) {
       throw new RevokedError('Access to this mailbox has been withdrawn in the Google account.')
     }
     // A 404 on history.list means the stored historyId has aged out. The caller

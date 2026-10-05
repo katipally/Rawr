@@ -130,3 +130,19 @@ test('a 401 that survives a fresh token is a withdrawal, not a loop', async () =
   assert.equal(calls.gmail, 2)
   mock.restoreAll()
 })
+
+test('a rate limit is waited out and is not a withdrawal', async () => {
+  const live = { ...expired, accessTokenExpiresAt: new Date(Date.now() + 3_600_000) }
+  const quota = { error: { errors: [{ reason: 'userRateLimitExceeded' }] } }
+  const calls = google(
+    () => fresh,
+    (_, call) =>
+      call === 1
+        ? { status: 403, body: quota, headers: { 'retry-after': '1' } }
+        : { status: 200, body: { ok: true } },
+  )
+  const { fetcher } = await authorised(ctx, 'm', live, noStore)
+  assert.deepEqual(await fetcher('/profile'), { ok: true })
+  assert.equal(calls.gmail, 2)
+  mock.restoreAll()
+})

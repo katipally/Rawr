@@ -13,20 +13,66 @@ export type ProviderError = Error & {
    *  the retry loop: no number of attempts fixes a revoked key. */
   disconnected?: boolean
   status?: number
+  /** What the provider's Retry-After asked for, so the next try waits that long
+   *  instead of guessing. */
+  retryAfterMs?: number
 }
 
 export const providerError = (
   message: string,
-  options: { status?: number; disconnected?: boolean } = {},
+  options: { status?: number; disconnected?: boolean; retryAfterMs?: number | null } = {},
 ): ProviderError => {
   const error = new Error(message) as ProviderError
   if (options.status !== undefined) error.status = options.status
   if (options.disconnected) error.disconnected = true
+  if (options.retryAfterMs) error.retryAfterMs = options.retryAfterMs
   return error
 }
 
+/** Google reports a quota as a 403 whose reason is rateLimitExceeded or
+ *  userRateLimitExceeded, and Zoom, Slack and the rest as a 429. Telling them from
+ *  a rejected credential matters: acting on the 403 disconnects a working
+ *  integration for being busy. */
+export const isRateLimited = (status: number, body: string): boolean =>
+  status === 429 || (status === 403 && /rate.?limit|quota/i.test(body))
+
 /** A credential rejection, in the two shapes every provider uses. */
-export const isCredentialRejection = (status: number): boolean => status === 401 || status === 403
+export const isCredentialRejection = (status: number, body = ''): boolean =>
+  (status === 401 || status === 403) && !isRateLimited(status, body)
+
+/** Retry-After is seconds or an HTTP date. */
+const retryAfterMs = (header: string | null): number | null => {
+  if (!header) return null
+  const seconds = Number(header)
+  const ms = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now()
+  return Number.isFinite(ms) && ms > 0 ? ms : null
+}
+
+/** A wait longer than this is not spent holding a request or a worker open; the
+ *  answer is handed back and whatever queued the work tries again later. */
+const MAX_INLINE_WAIT_MS = 30_000
+
+/** Sends a request again, up to `attempts` times in all, while the provider says it
+ *  is too busy: Google's quota guidance is exponential backoff from one second, and
+ *  Retry-After is honoured when given. A refused request was not processed, so
+ *  repeating it cannot do the work twice. A 5xx is repeated only when the caller
+ *  says the request is safe to repeat, because a POST that failed after the
+ *  provider acted would otherwise happen twice. */
+export const sendWithBackoff = async (
+  send: () => Promise<Response>,
+  { attempts = 4, repeatable = false }: { attempts?: number; repeatable?: boolean } = {},
+): Promise<Response> => {
+  for (let n = 1; ; n++) {
+    const response = await send()
+    if (response.ok || n >= attempts) return response
+    const limited = isRateLimited(response.status, response.status === 403 ? await response.clone().text() : '')
+    if (!limited && !(repeatable && response.status >= 500)) return response
+    const asked = retryAfterMs(response.headers.get('retry-after'))
+    if (asked && asked > MAX_INLINE_WAIT_MS) return response
+    const base = 1000 * 2 ** (n - 1)
+    await sleep(asked ?? base + Math.random() * base)
+  }
+}
 
 export type AttemptOptions = {
   ctx: AccountContext
@@ -73,7 +119,8 @@ export const attempt = async <T>(options: AttemptOptions, run: () => Promise<T>)
       if ((cause as ProviderError).disconnected) break
       if (n === total) break
       const base = BASE_DELAY_MS * 2 ** (n - 1)
-      await sleep(base + Math.random() * base)
+      const asked = (cause as ProviderError).retryAfterMs
+      await sleep(asked ? Math.min(asked, MAX_INLINE_WAIT_MS) : base + Math.random() * base)
     }
   }
 
@@ -117,7 +164,8 @@ export const json = async <T>(request: JsonRequest): Promise<T> => {
   if (!response.ok) {
     throw providerError(`${response.status} ${response.statusText}: ${text.slice(0, 400)}`, {
       status: response.status,
-      disconnected: isCredentialRejection(response.status),
+      disconnected: isCredentialRejection(response.status, text),
+      retryAfterMs: retryAfterMs(response.headers.get('retry-after')),
     })
   }
   return (text ? JSON.parse(text) : null) as T
