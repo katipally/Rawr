@@ -9,17 +9,13 @@ import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeCursor, decodeFilters, decodeSort, duplicatesPath, encodeCursor, exportCsvPath, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
-import { SECTIONS } from '~/lib/record-layout.ts'
+import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 const PAGE_SIZE = 50
 /** The largest page the table offers. Above this a person is looking for the
  *  export, not a longer screen. */
 const MAX_PAGE_SIZE = 100
-
-/** An invented object has no hand-made layout, so its preview is the first few
- *  fields in the order the admin put them in. */
-const PREVIEW_CUSTOM_FIELDS = 6
 
 const readLimit = (raw: string | undefined): number => {
   const asked = Number(raw)
@@ -149,7 +145,7 @@ const ListPage = async ({
 
   // The first card of the record page, so the preview opens on what that page does.
   const previewKeys = object.isCustom
-    ? object.fields.slice(0, PREVIEW_CUSTOM_FIELDS).map((field) => field.key)
+    ? object.fields.slice(0, CUSTOM_KEY_FIELDS).map((field) => field.key)
     : (SECTIONS[objectParam as ObjectKey]?.[0]?.fieldKeys ?? [])
 
   const listParams: ListParams = {

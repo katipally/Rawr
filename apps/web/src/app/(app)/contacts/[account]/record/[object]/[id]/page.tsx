@@ -48,7 +48,7 @@ import { Timeline } from '~/components/crm/timeline.tsx'
 import { Value, formatDateTime } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
 import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
-import { SECTIONS } from '~/lib/record-layout.ts'
+import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
@@ -207,11 +207,16 @@ const RecordPage = async ({
   // The core three have a hand-made layout, because which fields belong beside
   // each other on a contact is a judgement nobody can derive. A custom object
   // has no such layout and needs none: its fields are in the order the admin put
-  // them in, which is the only order that means anything.
-  const layout = object.isCustom ? [] : (SECTIONS[objectParam as ObjectKey] ?? [])
+  // them in, which is the only order that means anything, so the first few are
+  // the ones on the card.
+  const layout = object.isCustom
+    ? [{ title: 'Details', fieldKeys: fields.slice(0, CUSTOM_KEY_FIELDS).map((field) => field.key) }]
+    : (SECTIONS[objectParam as ObjectKey] ?? [])
   // Every field the layout does not place goes under the group an admin filed it
   // in, so a property group made in Settings, Properties -- or the one an import
-  // names its new properties after -- is a heading here without a deploy. Groups
+  // names its new properties after -- is a heading here without a deploy. They sit
+  // behind "All properties": an import can add fifty, and the card is for the few
+  // that are read every time. Groups
   // appear in the order the properties are in, because that is the order Settings
   // lets somebody choose; ungrouped fields come last.
   const placed = new Set(layout.flatMap((section) => section.fieldKeys))
@@ -227,10 +232,8 @@ const RecordPage = async ({
   byGroup.delete('')
   const sections: PropertySection[] = [
     ...layout,
-    ...[...byGroup].map(([title, fieldKeys]) => ({ title, fieldKeys })),
-    ...(ungrouped.length
-      ? [{ title: object.isCustom ? 'Details' : 'More properties', fieldKeys: ungrouped }]
-      : []),
+    ...[...byGroup].map(([title, fieldKeys]) => ({ title, fieldKeys, secondary: true })),
+    ...(ungrouped.length ? [{ title: 'More properties', fieldKeys: ungrouped, secondary: true }] : []),
   ]
   const headerFields = (object.isCustom ? [] : (HEADER_FIELDS[objectParam as ObjectKey] ?? [])).flatMap((key) => {
     const field = object.byKey.get(key)

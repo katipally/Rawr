@@ -36,3 +36,7 @@ export const SECTIONS: Record<ObjectKey, PropertySection[]> = {
     { title: 'Record', fieldKeys: ['created_at'] },
   ],
 }
+
+/** An invented object has no hand-made layout, so what a card opens on is its
+ *  first few fields, in the order the admin put them in. */
+export const CUSTOM_KEY_FIELDS = 8
