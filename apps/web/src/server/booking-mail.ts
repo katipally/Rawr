@@ -4,7 +4,6 @@ import {
   renderTemplate,
   systemContext,
   withAccount,
-  type AccountContext,
   type BookingPageConfig,
   type TemplateValues,
 } from '@rawr/db'
@@ -115,22 +114,14 @@ const manageLines = (facts: BookingMailFacts): string =>
     `Cannot make it? ${publicBaseUrl}${bookingManagePath('cancel', facts.cancelToken)}`,
   ].join('\n')
 
-/** Which mailbox this goes out of.
- *
- *  The host's own, so a reply lands with the person the meeting is with. Failing
- *  that, any mailbox in the account that can send, because a reminder from the
- *  wrong colleague still gets somebody to the call. Failing that, nothing: Rawr
- *  has no transport of its own and pretending otherwise would swallow the mail. */
-const sendingMailbox = async (
-  ctx: AccountContext,
+/** Which mailbox this goes out of: the host's own, so a reply lands with the
+ *  person the meeting is with and the prospect hears from who they are meeting.
+ *  Nothing else. A colleague's mailbox would send "from Andika" about Yash's call,
+ *  so with none of the host's own that can send, nothing goes and the host is told. */
+export const hostMailbox = <T extends { userId: string; canSend: boolean; state: string }>(
+  boxes: T[],
   hostUserId: string,
-): Promise<{ id: string; email: string } | null> => {
-  const boxes = await listMailboxes(ctx)
-  const usable = boxes.filter((box) => box.canSend && box.state !== 'revoked')
-  const own = usable.find((box) => box.userId === hostUserId)
-  const chosen = own ?? usable[0]
-  return chosen ? { id: chosen.id, email: chosen.email } : null
-}
+): T | undefined => boxes.find((box) => box.userId === hostUserId && box.canSend && box.state !== 'revoked')
 
 export type BookingMailOutcome = { sent: boolean; reason: string | null }
 
@@ -163,10 +154,10 @@ export const sendBookingMail = async (input: SendInput): Promise<BookingMailOutc
   const subject = renderTemplate(subjectTpl, values) || facts.page.name
   const text = `${renderTemplate(bodyTpl, values)}\n${manageLines(facts)}`
 
-  const box = await sendingMailbox(ctx, input.hostUserId)
+  const box = hostMailbox(await listMailboxes(ctx), input.hostUserId)
   if (!box) {
     const reason =
-      'No mailbox in this account is connected for sending, so the meeting mail could not go out.'
+      'The host has no mailbox connected for sending, so the meeting mail could not go out. Connect one on Settings, Mailboxes. It is never sent from a colleague’s.'
     await withAccount(ctx, (tx) =>
       notify(tx, ctx, {
         kind: 'integration_error',
