@@ -195,7 +195,7 @@ const HomePage = async ({
           { done: connected('slack'), label: 'Connect Slack so form fills reach the team', href: integrationsPath('slack') },
           { done: grants.length > 0, label: 'Connect a calendar so booking pages have a host', href: calendarsPath(account) },
           { done: forms.length > 0, label: 'Build the first form', href: formsPath(account) },
-          { done: sites.length > 0, label: 'Register datasaur.ai as a tracked site', href: sitesPath() },
+          { done: sites.length > 0, label: 'Register your website as a tracked site', href: sitesPath() },
         ]
       })()
     : []

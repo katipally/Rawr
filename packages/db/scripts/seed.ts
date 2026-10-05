@@ -230,10 +230,10 @@ try {
       .select({ id: s.pipelineStage.id, name: s.pipelineStage.name, pipelineId: s.pipelineStage.pipelineId })
       .from(s.pipelineStage)
       .innerJoin(s.pipeline, eq(s.pipeline.id, s.pipelineStage.pipelineId))
-      .where(and(eq(s.pipelineStage.accountId, ws), eq(s.pipeline.name, 'Enterprise')))
+      .where(and(eq(s.pipelineStage.accountId, ws), eq(s.pipeline.name, 'Sales Pipeline')))
       .orderBy(s.pipelineStage.position)
     const enterpriseId = enterpriseStages[0]?.pipelineId
-    if (!enterpriseId) throw new Error('the Enterprise pipeline was not provisioned')
+    if (!enterpriseId) throw new Error('the Sales Pipeline was not provisioned')
 
     // The peer tenant gets one record of each, which is also the "exactly one row"
     // case every list has to render correctly.

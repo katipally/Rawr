@@ -12,7 +12,7 @@ const lexend = Lexend_Deca({
 
 export const metadata: Metadata = {
   title: 'Rawr',
-  description: 'Datasaur CRM',
+  description: 'CRM for contacts, companies, deals, forms and bookings',
 }
 
 const RootLayout = ({ children }: { children: React.ReactNode }) => (

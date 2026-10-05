@@ -1844,7 +1844,7 @@ export const setTrackingDomain = async (ctx: AccountContext, domain: string | nu
   mutate(ctx, 'site', async (tx) => {
     const value = (domain ?? '').trim().toLowerCase()
     if (value !== '' && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(value)) {
-      throw new Error('That is not a hostname. Use something like links.datasaur.ai.')
+      throw new Error('That is not a hostname. Use something like links.example.com.')
     }
     await tx.execute(sql`select rawr.set_tracking_domain(${value})`)
     return { result: undefined, audit: { entity: 'account', entityId: ctx.accountId, action: 'set_tracking_domain', after: { domain: value || null } } }

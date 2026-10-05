@@ -37,7 +37,6 @@ const MARKETING_STATUS = ['Marketing contact', 'Non-marketing contact']
 // nobody having been asked is.
 const TRACKING_CONSENT = ['Allowed', 'Never']
 const DEAL_TYPE = ['New Business', 'Existing Business', 'Renewal']
-const PRODUCT_OF_INTEREST = ['NLP Labeling', 'LLM Labs', 'Data Studio', 'Audio', 'OCR', 'Professional Services']
 
 /** The registry's starting content. Every column that exists on a core record has a
  *  field_def row, because a surface that cannot see a field in the registry cannot
@@ -130,10 +129,6 @@ export const CORE_OBJECTS: CoreObject[] = [
       { key: 'latest_source', label: 'Latest source', type: 'json', columnName: 'latest_source', position: 12 },
       { key: 'created_at', label: 'Create date', type: 'datetime', columnName: 'created_at', position: 13 },
       { key: 'score', label: 'Deal score', type: 'number', columnName: 'score', position: 16 },
-      // Custom HubSpot properties. No column, so they migrate straight into custom
-      // jsonb and prove the registry's custom path on day one. A1.
-      { key: 'uttr_pipeline', label: 'UTTR pipeline', type: 'boolean', position: 14 },
-      { key: 'deal_product_of_interest', label: 'Product of interest', type: 'multi_select', options: PRODUCT_OF_INTEREST, position: 15 },
     ],
   },
 ]

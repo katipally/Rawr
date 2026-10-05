@@ -341,7 +341,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     ],
     rows: [],
     setup: [
-      'In Google Analytics, Admin, Data streams, open the datasaur.ai web stream and copy its Measurement ID.',
+      'In Google Analytics, Admin, Data streams, open the web stream for your website and copy its Measurement ID.',
       'On the same screen, Measurement Protocol API secrets, create one named "Rawr" and paste it below.',
     ],
   },

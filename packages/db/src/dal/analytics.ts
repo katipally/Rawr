@@ -292,7 +292,7 @@ export const createSite = async (
       )
     }
     const host = input.host.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-    if (!host.includes('.')) throw new Error('A site needs a host, such as datasaur.ai.')
+    if (!host.includes('.')) throw new Error('A site needs a host, such as example.com.')
 
     // The unique index is across every tenant, and row level security means a key
     // held by another account is invisible to a check-then-insert here. The

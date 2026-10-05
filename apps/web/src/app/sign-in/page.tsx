@@ -17,8 +17,7 @@ const SignIn = async ({ searchParams }: Props) => {
         <img src="/rawr-logo.svg" alt="Rawr" width={190} height={80} className="h-12 w-auto self-start" />
         <h1 className="text-lg font-medium">Sign in</h1>
         <p className="text-secondary">
-          The CRM behind datasaur.ai: contacts, companies, deals, forms, bookings and the
-          history on every record.
+          Contacts, companies, deals, forms, bookings and the history on every record.
         </p>
       </div>
 

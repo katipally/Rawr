@@ -29,7 +29,7 @@ const DEFAULTS = {
   // in rather than assumed. Defaulting to Zoom on a deployment with no Zoom app
   // made every new page confirm meetings with no link in them.
 
-  titleTpl: 'Discovery Session with Datasaur <> {{company.name}}',
+  titleTpl: 'Discovery Session with {{company.name}}',
   descriptionTpl: '{{contact.first_name}} {{contact.last_name}} {{contact.email}}\n{{company.name}}',
   companyFallback: 'a new team',
 }

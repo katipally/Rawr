@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { CORE_OBJECTS, CORE_VIEWS, ENTERPRISE_STAGES, LIFECYCLE_STAGES, SALES_STAGES } from '../registry/core.ts'
+import { CORE_OBJECTS, CORE_VIEWS, LIFECYCLE_STAGES, SALES_STAGES } from '../registry/core.ts'
 import { savedView, subscriptionType } from '../schema/marketing.ts'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import { lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
@@ -7,7 +7,7 @@ import type { Tx } from './index.ts'
 
 /** What an account needs before anybody can use it: the object and field
  *  definitions, the views every deep link falls back to, the lifecycle ladder, the
- *  subscription types and two pipelines.
+ *  subscription types and a pipeline.
  *
  *  One function so the seed and the "create an account" button provision the same
  *  thing. They used to be the same code copied once, which is how a new account
@@ -85,29 +85,14 @@ export const provisionAccount = async (tx: Tx, accountId: string): Promise<void>
     )
   }
 
-  const pipelines = await tx
+  const [sales] = await tx
     .insert(pipeline)
-    .values([
-      { accountId, name: 'Enterprise', position: 0 },
-      { accountId, name: 'Sales Pipeline', position: 1 },
-    ])
-    .returning({ id: pipeline.id, name: pipeline.name })
+    .values({ accountId, name: 'Sales Pipeline', position: 0 })
+    .returning({ id: pipeline.id })
+  if (!sales) throw new Error('the pipeline was not created')
 
-  const enterprise = pipelines.find((row) => row.name === 'Enterprise')
-  const sales = pipelines.find((row) => row.name === 'Sales Pipeline')
-  if (!enterprise || !sales) throw new Error('the pipelines were not created')
-
-  await tx.insert(pipelineStage).values([
-    ...ENTERPRISE_STAGES.map((stage, index) => ({
-      accountId,
-      pipelineId: enterprise.id,
-      name: stage.name,
-      probability: stage.probability,
-      position: index,
-      isClosedWon: 'isClosedWon' in stage,
-      isClosedLost: 'isClosedLost' in stage,
-    })),
-    ...SALES_STAGES.map((stage, index) => ({
+  await tx.insert(pipelineStage).values(
+    SALES_STAGES.map((stage, index) => ({
       accountId,
       pipelineId: sales.id,
       name: stage.name,
@@ -116,5 +101,5 @@ export const provisionAccount = async (tx: Tx, accountId: string): Promise<void>
       isClosedWon: 'isClosedWon' in stage,
       isClosedLost: 'isClosedLost' in stage,
     })),
-  ])
+  )
 }

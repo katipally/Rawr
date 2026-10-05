@@ -62,7 +62,7 @@ export const TrackingPanel = ({
           >
             <TextInput
               id="tracking-domain"
-              placeholder="links.datasaur.ai"
+              placeholder="links.example.com"
               value={value}
               onChange={(event) => setValue(event.target.value)}
             />

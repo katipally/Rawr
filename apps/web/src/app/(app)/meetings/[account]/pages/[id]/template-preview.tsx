@@ -16,7 +16,7 @@ const SAMPLE = {
   attendeeName: 'Priya Raman',
   attendeeEmail: 'priya@acme.com',
   hostName: 'Ivan',
-  hostEmail: 'admin@datasaur.ai',
+  hostEmail: 'host@example.com',
 }
 
 export const TemplatePreview = ({

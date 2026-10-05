@@ -22,9 +22,9 @@ export type SeedForm = {
 }
 
 const PRODUCT_INTEREST = [
-  { value: 'Data Studio', label: 'Data Studio' },
-  { value: 'LLM Labs', label: 'LLM Labs' },
-  { value: 'Deliver', label: 'Deliver' },
+  { value: 'Pricing', label: 'Pricing' },
+  { value: 'A demo', label: 'A demo' },
+  { value: 'Support', label: 'Support' },
   { value: 'Not sure yet', label: 'Not sure yet' },
 ]
 
@@ -107,9 +107,9 @@ export const SEED_FORMS: SeedForm[] = [
     },
   },
   /** The demo request live on /request-a-demo, /scoping-session and the LP pages.
-   *  Its field keys are Webflow's (givenName, surname, numberOfLabelers), because
-   *  those are what the existing HubSpot properties are keyed on and a cutover
-   *  that renames them loses the join to every lead already captured. */
+   *  Its field keys are Webflow's (givenName, surname), because those are what
+   *  the existing HubSpot properties are keyed on and a cutover that renames
+   *  them loses the join to every lead already captured. */
   {
     name: 'Request a demo',
     slug: 'request-a-demo',
@@ -118,7 +118,7 @@ export const SEED_FORMS: SeedForm[] = [
       { key: 'surname', type: 'text', label: 'Last name', required: true, mapsTo: 'contact.last_name', step: 0 },
       { key: 'email', type: 'email', label: 'Work email', required: true, mapsTo: 'contact.email', step: 0 },
       { key: 'company', type: 'text', label: 'Company', required: true, mapsTo: 'company.name', step: 0 },
-      { key: 'number_of_labelers', type: 'select', label: 'How many labelers?', required: true, step: 0,
+      { key: 'team_size', type: 'select', label: 'How big is your team?', required: true, step: 0,
         options: [
           { value: '1-5', label: '1 to 5' },
           { value: '6-25', label: '6 to 25' },
@@ -126,7 +126,7 @@ export const SEED_FORMS: SeedForm[] = [
           { value: '100+', label: 'More than 100' },
         ],
         mapsTo: null },
-      { key: 'consent', type: 'consent', label: 'I agree to be contacted about Datasaur.',
+      { key: 'consent', type: 'consent', label: 'I agree to be contacted.',
         required: true, mapsTo: null, step: 0,
         help: 'We use these details to reply and nothing else. Unsubscribe at any time.' },
     ],

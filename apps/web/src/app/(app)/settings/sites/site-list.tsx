@@ -98,7 +98,7 @@ export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
               id="site-host"
               value={host}
               onChange={(event) => setHost(event.target.value)}
-              placeholder="datasaur.ai"
+              placeholder="example.com"
             />
           </Field>
           <Field
@@ -110,7 +110,7 @@ export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
               id="site-key"
               value={siteKey}
               onChange={(event) => setSiteKey(event.target.value)}
-              placeholder="datasaur-www"
+              placeholder="example-www"
             />
           </Field>
         </div>
