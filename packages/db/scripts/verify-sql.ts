@@ -45,6 +45,7 @@ const NOT_A_TABLE = new Set([
   'generate_series',
   'jsonb_array_elements',
   'jsonb_array_elements_text',
+  'jsonb_each_text',
   'jsonb_to_recordset',
   'json_array_elements',
   'regexp_split_to_table',

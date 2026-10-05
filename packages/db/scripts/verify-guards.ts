@@ -339,7 +339,7 @@ try {
     return ''
   }
   check(await forbidden(() => firstChunk(none)), 'exporting a view is refused without the export grant')
-  check((await firstChunk(criticalCtx(['export']))).startsWith('Email'), 'and the export grant streams the file')
+  check((await firstChunk(criticalCtx(['export']))).startsWith('\uFEFFEmail'), 'and the export grant streams the file')
 
   check(
     CRITICAL_ACTIONS.every((action) => !canDo(none, action)) &&
