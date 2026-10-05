@@ -3,7 +3,15 @@ import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import type { AccountContext } from '../src/dal/context.ts'
-import { attributionReport, clampRange, pipelineReport, websiteReport, MAX_DAYS } from '../src/dal/reporting.ts'
+import {
+  attributionReport,
+  clampRange,
+  formsReport,
+  pipelineReport,
+  sequencesReport,
+  websiteReport,
+  MAX_DAYS,
+} from '../src/dal/reporting.ts'
 import { campaignPerformance, listCampaigns, saveCampaign } from '../src/dal/campaigns.ts'
 import { trackedMessages } from '../src/dal/messages.ts'
 import { withAccount } from '../src/dal/index.ts'
@@ -500,6 +508,126 @@ try {
     return `${page.total} send(s) in the peer, all its own`
   })
 
+
+  console.log('')
+  console.log('-- the numbers are the right numbers -----------------------------')
+
+  // Everything below lives in the peer tenant in March 2001, a range nothing the
+  // seed wrote reaches, so every figure can be asserted exactly. Day boundaries are
+  // Pacific midnights (UTC-8 until April 2001).
+  const march = { from: new Date('2001-03-01T08:00:00Z'), to: new Date('2001-03-31T08:00:00Z') }
+  const tag = `p2b-${stamp}`
+
+  const [salesRow] = await owner<{ id: string }[]>`
+    select id from pipeline where account_id = ${probe.id} and name = 'Sales Pipeline'`
+  const salesPipeline = salesRow!.id
+  const stageOf = async (kind: 'open' | 'won'): Promise<string> => {
+    const [row] = await owner<{ id: string }[]>`
+      select id from pipeline_stage
+       where pipeline_id = ${salesPipeline} and is_closed_won = ${kind === 'won'} and not is_closed_lost
+       order by position limit 1`
+    return row!.id
+  }
+  const [openStage, wonStage] = [await stageOf('open'), await stageOf('won')]
+  const makeContact = async (label: string, at: string, companyId: string | null, channel: string | null) => {
+    const [row] = await owner<{ id: string }[]>`
+      insert into contact (account_id, email, company_id, created_at, original_source, latest_source)
+      values (${probe.id}, ${`${tag}-${label}@example.com`}, ${companyId}, ${at}::timestamptz,
+              ${channel ? JSON.stringify({ channel }) : null}::jsonb, ${channel ? JSON.stringify({ channel }) : null}::jsonb)
+      returning id`
+    return row!.id
+  }
+  const makeCompany = async (label: string) => {
+    const [row] = await owner<{ id: string }[]>`
+      insert into company (account_id, name) values (${probe.id}, ${`${tag}-${label}`}) returning id`
+    return row!.id
+  }
+  const makeDeal = async (label: string, stage: string, created: string, extra: { company?: string; amount?: number; currency?: string; closeDate?: string } = {}) => {
+    const [row] = await owner<{ id: string }[]>`
+      insert into deal (account_id, name, pipeline_id, stage_id, created_at, company_id, amount, currency, close_date)
+      values (${probe.id}, ${`${tag}-${label}`}, ${salesPipeline}, ${stage}, ${created}::timestamptz,
+              ${extra.company ?? null}, ${extra.amount ?? null}, ${extra.currency ?? 'USD'}, ${extra.closeDate ?? null}::date)
+      returning id`
+    return row!.id
+  }
+
+  await check('A-02: a reply on a two-mail enrollment is one reply', async () => {
+    const [seq] = await owner<{ id: string }[]>`
+      insert into sequence (account_id, name, settings) values (${probe.id}, ${`${tag}-seq`}, '{}'::jsonb) returning id`
+    const enroll = async (label: string, state: string) => {
+      const contactId = await makeContact(`seq-${label}`, '2001-03-02T18:00:00Z', null, null)
+      const [row] = await owner<{ id: string }[]>`
+        insert into sequence_enrollment (account_id, sequence_id, contact_id, state, unsubscribe_token)
+        values (${probe.id}, ${seq!.id}, ${contactId}, ${state}::rawr_enrollment_state, ${`${tag}-${label}`}) returning id`
+      return { id: row!.id, contactId }
+    }
+    const send = (who: { id: string; contactId: string }, n: number, state: string) =>
+      owner`
+        insert into sequence_send (account_id, enrollment_id, contact_id, token, sent_at, state)
+        values (${probe.id}, ${who.id}, ${who.contactId}, ${`${tag}-${n}-${who.id}`}, ${`2001-03-0${n}T18:00:00Z`}::timestamptz, ${state}::rawr_send_state)`
+    const replied = await enroll('replied', 'replied')
+    await send(replied, 3, 'sent')
+    await send(replied, 4, 'sent')
+    const quiet = await enroll('quiet', 'active')
+    await send(quiet, 5, 'sent')
+    const bounced = await enroll('bounced', 'bounced')
+    await send(bounced, 6, 'bounced')
+
+    const report = await sequencesReport(probeCtx, march)
+    const row = report.sequences.find((each) => each.sequence === `${tag}-seq`)
+    expect(row?.sent === 3, `sent ${row?.sent}`)
+    expect(row?.replied === 1, `replied ${row?.replied}, and one enrollment replied`)
+    expect(row?.bounced === 1, `bounced ${row?.bounced}`)
+    return 'sent 3, replied 1, bounced 1'
+  })
+
+  await check('A-03: a submission whose company has two later deals is still one submission', async () => {
+    const company = await makeCompany('forms-co')
+    const [form] = await owner<{ id: string }[]>`
+      insert into form (account_id, name, slug) values (${probe.id}, ${`${tag}-fan`}, ${`${tag}-fan`}) returning id`
+    await owner`insert into form_submission (account_id, form_id, company_id, at, spam_state)
+                values (${probe.id}, ${form!.id}, ${company}, '2001-03-15T18:00:00Z', 'clean'),
+                       (${probe.id}, ${form!.id}, ${company}, '2001-03-16T18:00:00Z', 'quarantined')`
+    await makeDeal('fan-1', openStage, '2001-03-20T18:00:00Z', { company })
+    await makeDeal('fan-2', openStage, '2001-03-21T18:00:00Z', { company })
+
+    const report = await formsReport(probeCtx, march)
+    const row = report.forms.find((each) => each.id === form!.id)
+    expect(row?.submissions === 2, `submissions ${row?.submissions}`)
+    expect(row?.held === 1, `held ${row?.held}`)
+    expect(row?.deals === 2, `deals ${row?.deals}`)
+    return '2 submissions, 1 held, 2 deals'
+  })
+
+  await check('A-04: one 100,000 deal at a company with three contacts is 100,000', async () => {
+    const channel = `verify-${stamp}`
+    const company = await makeCompany('attr-co')
+    for (const label of ['a', 'b', 'c']) await makeContact(`attr-${label}`, '2001-03-03T18:00:00Z', company, channel)
+    await makeDeal('attr-won', wonStage, '2001-02-01T18:00:00Z', { company, amount: 100_000 })
+
+    const report = await attributionReport(probeCtx, march)
+    const row = report.first.find((each) => each.channel === channel)
+    expect(row?.contacts === 3 && row.deals === 1, `${row?.contacts} contacts, ${row?.deals} deals`)
+    expect(row?.wonAmount === 100_000, `${row?.wonAmount} won`)
+    return '3 contacts, 1 deal, 100,000'
+  })
+
+  await check('A-04: a campaign is not credited a deal once per contact either', async () => {
+    const [campaign] = await owner<{ id: string }[]>`
+      insert into campaign (account_id, name, utm_campaign) values (${probe.id}, ${`${tag}-camp`}, ${`${tag}-camp`}) returning id`
+    const company = await makeCompany('camp-co')
+    for (const label of ['a', 'b']) {
+      const contact = await makeContact(`camp-${label}`, '2001-03-03T18:00:00Z', company, null)
+      await owner`update contact set first_campaign_id = ${campaign!.id} where id = ${contact}`
+    }
+    await makeDeal('camp-won', wonStage, '2001-02-01T18:00:00Z', { company, amount: 40_000 })
+
+    const row = (await campaignPerformance(probeCtx, march)).find((each) => each.utmCampaign === `${tag}-camp`)
+    expect(row?.contacts === 2 && row.deals === 1, `${row?.contacts} contacts, ${row?.deals} deals`)
+    expect(row?.wonAmount === 40_000, `${row?.wonAmount} won`)
+    return '2 contacts, 1 deal, 40,000'
+  })
+
   console.log('')
   if (failures > 0) {
     console.log(`${failures} check(s) failed.`)
@@ -511,6 +639,12 @@ try {
   // Its own rows in the tables the seed fills, which `cleanup` leaves alone: the
   // seeded sequence sends and campaign are what the sequences report and the
   // campaign list read, so emptying those tables wholesale would blank them.
+  await owner`delete from form where slug like ${`p2b-${stamp}%`}`
+  await owner`delete from sequence where name like ${`p2b-${stamp}%`}`
+  await owner`delete from deal where name like ${`p2b-${stamp}%`}`
+  await owner`delete from contact where email like ${`p2b-${stamp}%`}`
+  await owner`delete from company where name like ${`p2b-${stamp}%`}`
+  await owner`delete from campaign where utm_campaign like ${`p2b-${stamp}%`}`
   await owner`delete from sequence_send where token like ${`vt${stamp}%`}`
   await owner`delete from contact where email = ${`campaign-${stamp}@example.com`}`
   await owner`delete from campaign where lower(utm_campaign) = ${`verify-${stamp}`}`

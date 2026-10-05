@@ -248,9 +248,10 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
       contacts: number
       deals: number
     }>(sql`
+      -- distinct: the deal join repeats a submission once per later deal.
       select f.id, f.name as form,
-             count(s.id)::int as submissions,
-             count(s.id) filter (where s.spam_state <> 'clean')::int as held,
+             count(distinct s.id)::int as submissions,
+             count(distinct s.id) filter (where s.spam_state <> 'clean')::int as held,
              count(distinct s.contact_id)::int as contacts,
              count(distinct d.id)::int as deals
         from form f
@@ -312,7 +313,8 @@ export const sequencesReport = async (ctx: AccountContext, range: Range): Promis
              count(*) filter (where d.state = 'sent')::int as sent,
              count(*) filter (where d.open_count > 0)::int as opened,
              count(*) filter (where d.click_count > 0)::int as clicked,
-             count(*) filter (where e.state = 'replied')::int as replied,
+             -- A reply belongs to the enrollment, not to each mail it sent.
+             count(distinct d.enrollment_id) filter (where e.state = 'replied')::int as replied,
              count(*) filter (where d.state = 'bounced')::int as bounced
         from sequence_send d
         join sequence_enrollment e on e.id = d.enrollment_id
@@ -522,19 +524,33 @@ export const attributionReport = async (ctx: AccountContext, range: Range): Prom
 
     const byTouch = async (column: 'original_source' | 'latest_source') =>
       tx.execute<{ channel: string | null; contacts: number; deals: number; won_amount: string | null }>(sql`
-        select coalesce(${source(column)} ->> 'channel', 'Not attributed') as channel,
-               count(distinct c.id)::int as contacts,
-               count(distinct d.id)::int as deals,
-               coalesce(sum(d.amount) filter (where s.is_closed_won), 0)::text as won_amount
-          from contact c
-          -- Deals are deliberately not bounded by the range: a channel that found
-          -- somebody in January is credited with the deal that closed in June, and
-          -- cutting the join at the range end would credit it with nothing.
-          left join deal d on d.company_id = c.company_id and d.deleted_at is null
-          left join pipeline_stage s on s.id = d.stage_id
-         where c.deleted_at is null and ${bounds(range, 'c.created_at')}
-         group by 1
-         order by 4 desc, 2 desc
+        with touched as (
+          select coalesce(${source(column)} ->> 'channel', 'Not attributed') as channel, c.id, c.company_id
+            from contact c
+           where c.deleted_at is null and ${bounds(range, 'c.created_at')}
+        ),
+        -- One row per channel and deal: every contact at a company is joined to its
+        -- deals, so summing straight off that join counted a deal once per contact.
+        --
+        -- Deals are deliberately not bounded by the range: a channel that found
+        -- somebody in January is credited with the deal that closed in June, and
+        -- cutting the join at the range end would credit it with nothing.
+        credited as (
+          select distinct t.channel, d.id, d.amount, coalesce(s.is_closed_won, false) as won
+            from touched t
+            join deal d on d.company_id = t.company_id and d.deleted_at is null
+            left join pipeline_stage s on s.id = d.stage_id
+        ),
+        deals as (
+          select channel, count(*)::int as deals,
+                 coalesce(sum(amount) filter (where won), 0) as won_amount
+            from credited group by channel
+        )
+        select p.channel, p.contacts, coalesce(k.deals, 0)::int as deals,
+               coalesce(k.won_amount, 0)::text as won_amount
+          from (select channel, count(*)::int as contacts from touched group by channel) p
+          left join deals k on k.channel = p.channel
+         order by coalesce(k.won_amount, 0) desc, p.contacts desc
          limit ${MAX_ROWS}`)
 
     const shape = (rows: Awaited<ReturnType<typeof byTouch>>) =>

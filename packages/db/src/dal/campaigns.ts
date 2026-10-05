@@ -276,17 +276,21 @@ export const campaignPerformance = async (
            and c.created_at < ${range.to.toISOString()}::timestamptz
          group by 1
       ), won as (
-        select c.first_campaign_id as cid,
-               count(distinct d.id)::int as n,
-               coalesce(sum(d.amount) filter (where st.is_closed_won), 0)::text as amount
-          from contact c
-          join deal d on d.company_id = c.company_id and d.deleted_at is null
-          left join pipeline_stage st on st.id = d.stage_id
-         where c.account_id = ${ctx.accountId}
-           and c.deleted_at is null
-           and c.first_campaign_id is not null
-           and c.created_at >= ${range.from.toISOString()}::timestamptz
-           and c.created_at < ${range.to.toISOString()}::timestamptz
+        -- One row per campaign and deal: every contact at a company is joined to
+        -- its deals, so summing straight off that join counted a deal once per contact.
+        select x.cid, count(*)::int as n,
+               coalesce(sum(x.amount) filter (where x.won), 0)::text as amount
+          from (
+            select distinct c.first_campaign_id as cid, d.id, d.amount, coalesce(st.is_closed_won, false) as won
+              from contact c
+              join deal d on d.company_id = c.company_id and d.deleted_at is null
+              left join pipeline_stage st on st.id = d.stage_id
+             where c.account_id = ${ctx.accountId}
+               and c.deleted_at is null
+               and c.first_campaign_id is not null
+               and c.created_at >= ${range.from.toISOString()}::timestamptz
+               and c.created_at < ${range.to.toISOString()}::timestamptz
+          ) x
          group by 1
       )
       select k.id, k.name, k.utm_campaign, k.spend::text, k.currency,
