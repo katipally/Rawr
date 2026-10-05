@@ -1,5 +1,6 @@
 import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
+import { SCHEDULE_OVERRIDES } from './env.ts'
 import { owner, recordDeadLetter } from './db.ts'
 import { automationJobs, dispatchAutomations, scanAutomationRules } from './jobs/automations.ts'
 import { bookingReminderJobs, dispatchBookingReminders } from './jobs/booking-reminders.ts'
@@ -96,12 +97,18 @@ for (const job of JOBS) {
   console.log(`[worker] listening on ${job.name}`)
 }
 
+// The cron a job runs on, unless RAWR_WORKER_SCHEDULES names another for it. A name
+// that matches no job is a typo, and refusing it beats a job that never moves.
+const unknown = Object.keys(SCHEDULE_OVERRIDES).filter((name) => !JOBS.some((job) => job.name === name))
+if (unknown.length > 0) throw new Error(`RAWR_WORKER_SCHEDULES names no job called ${unknown.join(', ')}.`)
+const every = (job: Job, cron: string) => boss.schedule(job.name, SCHEDULE_OVERRIDES[job.name] ?? cron, {})
+
 // Once a minute: the promotion request writes a pending row, this turns it into work.
-await boss.schedule(dispatchFieldIndexes.name, '* * * * *', {})
+await every(dispatchFieldIndexes, '* * * * *')
 // Same shape for F4: a form fill writes one visitor_alias row, this turns it into
 // a back-fill. A minute is the ceiling on how long a new contact reads as having
 // no browsing history.
-await boss.schedule(dispatchStitches.name, '* * * * *', {})
+await every(dispatchStitches, '* * * * *')
 // The daily jobs, declared once so the boot-time catch-up below asks about
 // the same times the schedule fires at. The roll-up is nightly: retention is
 // measured in months, so the hour it runs does not matter, only that it runs off
@@ -124,54 +131,54 @@ for (const daily of DAILY) await boss.schedule(daily.job.name, cronFor(daily.at)
 // looking at, and this covers everything else.
 // A reminder is set for an instant, so it cannot wait for the nightly sweep. A
 // quarter hour is the bound on how late one arrives.
-await boss.schedule(notificationReminders.name, '*/15 * * * *', {})
+await every(notificationReminders, '*/15 * * * *')
 // Hourly because each account's morning falls at a different UTC hour.
-await boss.schedule(notificationOverdue.name, '0 * * * *', {})
-await boss.schedule(evaluateSegments.name, '0 * * * *', {})
+await every(notificationOverdue, '0 * * * *')
+await every(evaluateSegments, '0 * * * *')
 // F1 phase B. Every ten minutes: connected mailboxes catch up, and one still
 // reading its history queues its own next page immediately rather than waiting.
-await boss.schedule(dispatchMailboxes.name, '*/10 * * * *', {})
+await every(dispatchMailboxes, '*/10 * * * *')
 
 // Bodies follow the messages a few minutes behind, so a thread opened right after
 // a sync shows its snippets now and its full text shortly after.
-await boss.schedule(dispatchMailboxBodies.name, '*/5 * * * *', {})
+await every(dispatchMailboxBodies, '*/5 * * * *')
 
 // Every minute: a run somebody started before a deploy or a sleep picks itself
 // up again, and a run that finishes its chunk queues the next one itself.
-await boss.schedule(dispatchImports.name, '* * * * *', {})
+await every(dispatchImports, '* * * * *')
 
 // Every minute, and for the same reason imports are: a bulk action somebody
 // started before a deploy picks itself up again, and one that finishes its chunk
 // queues the next one itself.
-await boss.schedule(dispatchBulk.name, '* * * * *', {})
+await every(dispatchBulk, '* * * * *')
 
 // Every five minutes. A reminder is due at an instant, and five minutes is the
 // bound on how late one arrives; finer than that only costs a scan of the same
 // upcoming meetings for nothing.
-await boss.schedule(dispatchBookingReminders.name, '*/5 * * * *', {})
+await every(dispatchBookingReminders, '*/5 * * * *')
 
 // Every minute: a step whose delay says "two hours" should not wait until the top
 // of the next hour, and the scan is one indexed range over the due queue.
-await boss.schedule(dispatchSequences.name, '* * * * *', {})
-await boss.schedule(sweepSequenceLeases.name, '*/10 * * * *', {})
+await every(dispatchSequences, '* * * * *')
+await every(sweepSequenceLeases, '*/10 * * * *')
 // B11. Every minute, for the same reason a sequence step is: a rule that says
 // "wait twenty minutes" should not wait until the top of the hour, and the scan
 // is one indexed range over the runs that are actually parked.
-await boss.schedule(dispatchAutomations.name, '* * * * *', {})
+await every(dispatchAutomations, '* * * * *')
 // B11 again, for the two triggers no write announces. Hourly, because both are
 // measured in days and the run's per-day uniqueness makes a second sweep in the
 // same day a no-op. Ten past, so it does not queue behind the top-of-hour segment
 // evaluation.
-await boss.schedule(scanAutomationRules.name, '10 * * * *', {})
+await every(scanAutomationRules, '10 * * * *')
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
-await boss.schedule(checkIntegrations.name, '*/30 * * * *', {})
+await every(checkIntegrations, '*/30 * * * *')
 // Every minute, which is the bound on how long a new contact reads as
 // unenriched. Sixty records a tick is the ceiling on provider credits a minute.
-await boss.schedule(dispatchEnrichment.name, '* * * * *', {})
+await every(dispatchEnrichment, '* * * * *')
 // F6 §3. Sequence steps, replies and failures read back from Apollo every half
 // hour, offset from the health check so the two do not queue behind each other.
-await boss.schedule(syncApollo.name, '15,45 * * * *', {})
+await every(syncApollo, '15,45 * * * *')
 
 // The free tier sleeps, and a schedule nobody was awake to evaluate is a night
 // with no roll-up and no overdue-task notices. Each daily job is asked whether it

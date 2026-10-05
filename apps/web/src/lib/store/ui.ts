@@ -3,7 +3,7 @@
 import { startTransition, useEffect, useState } from 'react'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { api } from '~/lib/rpc.ts'
+import { api, getQueryClient, trpc } from '~/lib/rpc.ts'
 
 /** Everything this browser remembers about how somebody uses the app.
  *
@@ -262,7 +262,7 @@ export const usePreferencesSync = (): void => {
         for (const [field, value] of Object.entries(legacy) as [SyncedField, unknown][]) {
           await api.preferences.set.mutate({ key: SYNCED_KEYS[field], value })
         }
-        const server = await api.preferences.all.query()
+        const server = await getQueryClient().fetchQuery({ ...trpc.preferences.all.queryOptions(), staleTime: 0 })
         if (cancelled) return
 
         const railExpanded = server.railExpanded

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { resolveAppBase, skipsFixtures } from './env.ts'
+import { resolveAppBase, scheduleOverrides, skipsFixtures } from './env.ts'
 
 /** Where the worker points its internal calls. An empty variable resolving to
  *  "undefined/api/..." is how six job families dead-lettered quietly. */
@@ -35,4 +35,24 @@ test('unset, empty, or any other value leaves every tenant in', () => {
   assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: '' }), false)
   assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: '0' }), false)
   assert.equal(skipsFixtures({ RAWR_WORKER_SKIPS_FIXTURES: 'true' }), false)
+})
+
+/** A job's schedule can be changed from the environment, and a mistake there stops
+ *  the worker rather than quietly running the job at a rate nobody chose. */
+
+test('nothing set leaves every schedule as shipped', () => {
+  assert.deepEqual(scheduleOverrides({}), {})
+  assert.deepEqual(scheduleOverrides({ RAWR_WORKER_SCHEDULES: '  ' }), {})
+})
+
+test('a named job takes the cron it is given', () => {
+  assert.deepEqual(scheduleOverrides({ RAWR_WORKER_SCHEDULES: '{"import.dispatch": " */5 * * * * "}' }), {
+    'import.dispatch': '*/5 * * * *',
+  })
+})
+
+test('anything that is not an object of five field crons is refused', () => {
+  for (const bad of ['not json', '[]', '"x"', '{"a": 5}', '{"a": "* * *"}', '{"a": "every minute"}']) {
+    assert.throws(() => scheduleOverrides({ RAWR_WORKER_SCHEDULES: bad }), /RAWR_WORKER_SCHEDULES/, bad)
+  }
 })

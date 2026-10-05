@@ -45,3 +45,35 @@ export const skipsFixtures = (env: { RAWR_WORKER_SKIPS_FIXTURES?: string }): boo
   env.RAWR_WORKER_SKIPS_FIXTURES?.trim() === '1'
 
 export const SKIPS_FIXTURES = skipsFixtures(process.env)
+
+const CRON = /^\S+ \S+ \S+ \S+ \S+$/
+
+/** A different cron expression for a job than the one the worker ships with, as
+ *  JSON from `RAWR_WORKER_SCHEDULES`: {"import.dispatch": "*\/5 * * * *"}. Eight
+ *  jobs fire every minute and fan out across every tenant, which a deployment with
+ *  one small database may want slower, and a deployment with none of the work they
+ *  poll for may want off the clock. A malformed value stops the start-up: a
+ *  schedule that silently reverted would be a job running at a rate nobody chose. */
+export const scheduleOverrides = (env: { RAWR_WORKER_SCHEDULES?: string }): Record<string, string> => {
+  const raw = env.RAWR_WORKER_SCHEDULES?.trim()
+  if (!raw) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error('RAWR_WORKER_SCHEDULES is not JSON. Expected {"job-name": "cron expression"}.')
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('RAWR_WORKER_SCHEDULES must be an object of job names to cron expressions.')
+  }
+  const out: Record<string, string> = {}
+  for (const [name, cron] of Object.entries(parsed)) {
+    if (typeof cron !== 'string' || !CRON.test(cron.trim())) {
+      throw new Error(`RAWR_WORKER_SCHEDULES: "${name}" needs a five field cron expression.`)
+    }
+    out[name] = cron.trim()
+  }
+  return out
+}
+
+export const SCHEDULE_OVERRIDES = scheduleOverrides(process.env)
