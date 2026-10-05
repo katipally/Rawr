@@ -168,18 +168,21 @@ const HomePage = async ({
   const [{ account }, { error }] = await Promise.all([params, searchParams])
   const ctx = contextFrom(session)
   const isAdmin = sessionIsAdmin(session)
+  const sales = canView(ctx, 'sales')
+  const people = canView(ctx, 'contacts')
+  const marketing = canView(ctx, 'marketing')
 
   const [board, overdue, myTasks, recent, members, setup] = await withAccountReads(ctx, () =>
     Promise.all([
       readDashboard(ctx),
-      overdueNextSteps(ctx),
-      listTasks(ctx, { status: 'open', assigneeId: session.userId }),
+      sales ? overdueNextSteps(ctx) : [],
+      people ? listTasks(ctx, { status: 'open', assigneeId: session.userId }) : [],
       recentActivity(ctx, 12),
       listMembers(ctx),
       // What an admin still has to switch on. Read only for them: nobody else can
       // act on it, and six extra queries for a viewer would buy nothing.
       isAdmin
-        ? Promise.all([listIntegrations(ctx), listGrants(ctx), canView(ctx, 'marketing') ? listForms(ctx) : [], listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
+        ? Promise.all([listIntegrations(ctx), listGrants(ctx), marketing ? listForms(ctx) : [], listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
         : null,
     ]),
   )
@@ -228,12 +231,22 @@ const HomePage = async ({
   const newContactsSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
   const tiles: Tile[] = [
-    { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
-    { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(account, 'deal', 'all', 'board') },
-    { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
-    { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(account, { mine: '1' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
-    { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at', filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'on_or_after', value: newContactsSince }] }]) }) },
-    { label: 'Submissions to review', value: board.quarantined.toLocaleString(), href: submissionsPath(account, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) },
+    ...(sales
+      ? [
+          { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
+          { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(account, 'deal', 'all', 'board') },
+          { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
+        ]
+      : []),
+    ...(people
+      ? [
+          { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(account, { mine: '1' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
+          { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at', filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'on_or_after', value: newContactsSince }] }]) }) },
+        ]
+      : []),
+    ...(marketing
+      ? [{ label: 'Submissions to review', value: board.quarantined.toLocaleString(), href: submissionsPath(account, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) }]
+      : []),
   ]
 
   return (
@@ -246,7 +259,7 @@ const HomePage = async ({
             {session.accountName}, {formatDate(new Date(), zone)}. Every number opens the list behind it.
           </p>
         </div>
-        <LinkButton href={objectView(account, 'deal', 'all', 'board')}>Open the board</LinkButton>
+        {sales ? <LinkButton href={objectView(account, 'deal', 'all', 'board')}>Open the board</LinkButton> : null}
       </div>
       <div className="flex flex-col gap-4 px-2 pb-2 sm:px-4 sm:pb-4">
 
@@ -288,7 +301,7 @@ const HomePage = async ({
           content pane, and whether two columns fit is a question about that pane,
           not about the window a narrow rail may be sharing. */}
       <div className="grid gap-4 @3xl:grid-cols-2">
-        <Panel
+        {sales ? <Panel
           title="Pipeline by stage"
           action={<SeeAll href={objectView(account, 'deal', 'all', 'board')}>Open the board</SeeAll>}
         >
@@ -346,9 +359,9 @@ const HomePage = async ({
               </table>
             </div>
           )}
-        </Panel>
+        </Panel> : null}
 
-        <Panel
+        {sales ? <Panel
           title="Next step overdue"
           action={<SeeAll href={objectView(account, 'deal', 'overdue-next-step', 'board')}>All overdue</SeeAll>}
         >
@@ -373,9 +386,9 @@ const HomePage = async ({
               ))}
             </ul>
           )}
-        </Panel>
+        </Panel> : null}
 
-        <Panel title="Closing this month" action={<SeeAll href={objectView(account, 'deal', 'all', 'list', { sort: 'close_date' })}>All deals</SeeAll>}>
+        {sales ? <Panel title="Closing this month" action={<SeeAll href={objectView(account, 'deal', 'all', 'list', { sort: 'close_date' })}>All deals</SeeAll>}>
           {board.closingThisMonth.length === 0 ? (
             <p className="text-secondary">No open deal has a close date this month.</p>
           ) : (
@@ -399,9 +412,9 @@ const HomePage = async ({
               ))}
             </ul>
           )}
-        </Panel>
+        </Panel> : null}
 
-        <Panel title="Meetings in the next 7 days" action={<SeeAll href={bookedPath(account)}>All booked</SeeAll>}>
+        {sales ? <Panel title="Meetings in the next 7 days" action={<SeeAll href={bookedPath(account)}>All booked</SeeAll>}>
           {board.upcoming.length === 0 ? (
             <p className="text-secondary">Nothing booked for the coming week.</p>
           ) : (
@@ -426,9 +439,9 @@ const HomePage = async ({
               ))}
             </ul>
           )}
-        </Panel>
+        </Panel> : null}
 
-        <Panel title="My tasks" action={<SeeAll href={tasksPath(account, { mine: '1' })}>All mine</SeeAll>}>
+        {people ? <Panel title="My tasks" action={<SeeAll href={tasksPath(account, { mine: '1' })}>All mine</SeeAll>}>
           {myTasks.length === 0 ? (
             <p className="text-secondary">No open tasks are assigned to you.</p>
           ) : (
@@ -452,7 +465,7 @@ const HomePage = async ({
               ))}
             </ul>
           )}
-        </Panel>
+        </Panel> : null}
 
         <Panel title="Recent activity" action={<SeeAll href={objectView(account, 'contact', 'all', 'list', { sort: '-updated_at' })}>Recently changed</SeeAll>}>
           {recent.length === 0 ? (

@@ -38,6 +38,7 @@ export const listCampaigns = async (
   input: { search?: string | null | undefined; limit?: number | undefined; offset?: number | undefined } = {},
 ): Promise<CampaignPage> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, ['marketing', 'reports'], 'campaigns')
     const limit = Math.min(Math.max(input.limit ?? PAGE, 1), MAX_PAGE)
     const offset = Math.max(input.offset ?? 0, 0)
     const needle = input.search?.trim().toLowerCase()

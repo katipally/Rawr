@@ -1,5 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
@@ -164,6 +164,7 @@ export const readAgenda = async (
   input: { month: string; userId?: string | null },
 ): Promise<Agenda> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'meetings')
     const start = monthStart(input.month)
     const who = input.userId ?? null
     const zone = await accountZone(ctx, tx)

@@ -230,8 +230,9 @@ export const canWrite = (ctx: AccountContext, entity: string): boolean => {
 /** The read side of the same map: a screen belongs to a hub, and holding neither
  *  its view nor its edit grant refuses the read itself, not only the link to it.
  *  Asked in the layer so a page, a procedure and an agent token all meet it. */
-export const assertCanView = (ctx: AccountContext, hub: Hub, what: string): void => {
-  if (!canView(ctx, hub)) throw new ForbiddenError(hub, `see ${what}`)
+export const assertCanView = (ctx: AccountContext, hub: Hub | readonly [Hub, ...Hub[]], what: string): void => {
+  const hubs = typeof hub === 'string' ? [hub] : hub
+  if (!hubs.some((h) => canView(ctx, h))) throw new ForbiddenError(hubs[0] as Hub, `see ${what}`)
 }
 
 export const assertCanWrite = (ctx: AccountContext, entity: string): void => {

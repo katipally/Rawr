@@ -8,7 +8,7 @@ import {
   visitor,
   visitorSession } from '../schema/analytics.ts'
 import { consentRecord } from '../schema/forms.ts'
-import { assertCanWrite, type AccountContext } from './context.ts'
+import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
 import { isUuid, mutate, withAccount } from './index.ts'
 import { refreshAllContactActivity, refreshContactActivity } from './stitch.ts'
 
@@ -241,6 +241,7 @@ export type SiteRow = {
 
 export const listSites = async (ctx: AccountContext): Promise<SiteRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, ['marketing', 'account'], 'sites')
     const rows = await tx.execute<{
       id: string
       name: string
@@ -356,6 +357,7 @@ export const listCollectorNotices = async (
   ctx: AccountContext,
 ): Promise<CollectorNoticeRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, ['marketing', 'account'], 'sites')
     const rows = await tx
       .select({
         kind: collectorNotice.kind,

@@ -393,8 +393,9 @@ export const readMemberships = async (
   ctx: AccountContext,
   entityId: string,
 ): Promise<MembershipRow[]> =>
-  withAccount(ctx, (tx) =>
-    tx
+  withAccount(ctx, (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
+    return tx
       .select({
         segmentId: segment.id,
         name: segment.name,
@@ -405,8 +406,8 @@ export const readMemberships = async (
       .innerJoin(segment, eq(segment.id, segmentMembership.segmentId))
       .where(eq(segmentMembership.entityId, entityId))
       .orderBy(desc(segmentMembership.enteredAt))
-      .limit(50),
-  )
+      .limit(50)
+  })
 
 /** A dry run for the builder: how many records the query selects right now, and a
  *  few of them, so nobody saves a segment without seeing what is in it. */

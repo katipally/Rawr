@@ -312,7 +312,7 @@ const RecordPage = async ({
   }
 
   const SegmentsSection = async () => {
-    const memberships = await readMemberships(ctx, id)
+    const memberships = canView(ctx, 'contacts') ? await readMemberships(ctx, id) : []
     return memberships.length > 0 || objectParam === 'contact' ? (
       <SegmentsPanel zone={zone} account={account} recordName={record.displayName} rows={memberships} />
     ) : null

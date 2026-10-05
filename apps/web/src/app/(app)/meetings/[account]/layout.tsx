@@ -1,6 +1,7 @@
 import { EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
+import { HubGate } from '~/components/hub-gate.tsx'
 import { accountHome } from '~/lib/links.ts'
 import { readSession } from '~/server/session.ts'
 
@@ -28,7 +29,7 @@ const AccountLayout = async ({
     )
   }
 
-  return <>{children}</>
+  return <HubGate hub="sales" what="Meetings">{children}</HubGate>
 }
 
 export default AccountLayout

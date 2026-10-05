@@ -2,7 +2,7 @@ import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm'
 import { task, taskQueue, type TaskPriority, type TaskType } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
-import { isAdmin, type AccountContext } from './context.ts'
+import { assertCanView, isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { notify, resolveNotifications } from './notifications.ts'
@@ -82,6 +82,9 @@ export const TASK_LIST_CAP = 500
 
 export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
   withAccount(ctx, async (tx) => {
+    // A record's own tasks are part of the record, which the row policy already
+    // decided this seat may open.
+    if (!filter.entity) assertCanView(ctx, 'contacts', 'tasks')
     const today = sql`(now() at time zone ${await accountZone(ctx, tx)})::date`
     return tx
       .select(SELECT)
@@ -453,8 +456,9 @@ export const deleteTask = async (ctx: AccountContext, id: string): Promise<void>
 export const overdueNextSteps = async (ctx: AccountContext): Promise<
   { id: string; name: string | null; nextStep: string | null; nextStepDate: string; ownerName: string | null; stageName: string | null }[]
 > =>
-  withAccount(ctx, async (tx) =>
-    tx.execute(sql`
+  withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'deals')
+    return tx.execute(sql`
       select d.id, d.name, d.next_step as "nextStep", d.next_step_date::text as "nextStepDate",
              u.name as "ownerName", s.name as "stageName"
         from deal d
@@ -466,5 +470,5 @@ export const overdueNextSteps = async (ctx: AccountContext): Promise<
          and coalesce(s.is_closed_won, false) = false
          and coalesce(s.is_closed_lost, false) = false
        order by d.next_step_date asc
-       limit 200`),
-  ) as never
+       limit 200`)
+  }) as never

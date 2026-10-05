@@ -56,6 +56,7 @@ export const listEventDefs = async (
   input: { search?: string | null | undefined; limit?: number | undefined; offset?: number | undefined } = {},
 ): Promise<EventDefPage> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, ['marketing', 'reports'], 'events')
     await registerDiscovered(tx, ctx)
 
     const limit = Math.min(Math.max(input.limit ?? PAGE, 1), MAX_PAGE)

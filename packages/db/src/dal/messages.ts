@@ -16,8 +16,7 @@ import { sequenceEnrollment } from '../schema/sequences.ts'
 import { detectReply, isDeliveryReport } from './sequences.ts'
 import { nextSendAt, type SendWindow } from './sequence-rules.ts'
 import { resolveNotifications } from './notifications.ts'
-import { isAdmin, type AccountContext } from './context.ts'
-import { assertCanWrite } from './context.ts'
+import { assertCanView, assertCanWrite, isAdmin, type AccountContext } from './context.ts'
 import { employerDomainFromEmail, registrableDomain } from './domains.ts'
 import { requestEnrichment } from './enrichment.ts'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
@@ -674,6 +673,11 @@ const storeMessage = async (
 ): Promise<IngestResult> => {
   const { incoming } = input
 
+  // Stored as the mailbox, not as the person: the conversation may already exist
+  // only through a colleague's private mailbox, and an upsert onto a row the
+  // actor may not read is refused. The actor is put back before anything is read.
+  const actor = ctx.actorId ?? ''
+  await tx.execute(sql`select set_config('rawr.user_id', '', true)`)
   const [thread] = await tx
     .insert(messageThread)
     .values({
@@ -694,6 +698,7 @@ const storeMessage = async (
       },
     })
     .returning({ id: messageThread.id })
+  await tx.execute(sql`select set_config('rawr.user_id', ${actor}, true)`)
   if (!thread) throw new Error('The thread could not be stored.')
 
   const direction = lower(incoming.from) === lower(input.ownerEmail) ? 'outbound' : 'inbound'
@@ -1003,6 +1008,7 @@ export const readThread = async (
   messages: ThreadMessage[]
 } | null> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'the inbox')
     const [thread] = await tx
       .select({
         id: messageThread.id,
@@ -1269,6 +1275,7 @@ export const listInboxThreads = async (
   } = {},
 ): Promise<InboxPage> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'the inbox')
     const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
     const scope = input.scope ?? 'all'
     const actor = ctx.actorId
@@ -1363,6 +1370,7 @@ export type InboxCounts = { all: number; mine: number; unreplied: number; unread
  *  visible threads, O(threads) in one round trip rather than four. */
 export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'the inbox')
     const actor = ctx.actorId
     const [row] = await tx.execute<{ all: number; mine: number; unreplied: number; unread: number }>(sql`
       with visible as (

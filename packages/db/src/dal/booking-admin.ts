@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
-import { assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
+import { assertCanView, assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
 import { assertSchemaIsUsable } from './form-schema.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import {
@@ -63,6 +63,7 @@ export type BookingPageSummary = {
  *  listed, because it is theirs. */
 export const listBookingPages = async (ctx: AccountContext): Promise<BookingPageSummary[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'meetings')
     const rows = await tx.execute<{
       id: string
       slug: string
@@ -408,6 +409,7 @@ export const readPageHostList = async (
   pageId: string,
 ): Promise<PageHostRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'meetings')
     const rows = await tx.execute<{
       user_id: string
       name: string

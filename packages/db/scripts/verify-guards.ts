@@ -19,7 +19,16 @@ import { rematchInbound } from '../src/dal/integrations.ts'
 import { formsReport, pipelineReport } from '../src/dal/reporting.ts'
 import { listForms } from '../src/dal/forms.ts'
 import { listSequences } from '../src/dal/sequences.ts'
-import { listSegments } from '../src/dal/segments.ts'
+import { listSegments, readMemberships } from '../src/dal/segments.ts'
+import { listTasks, overdueNextSteps } from '../src/dal/tasks.ts'
+import { inboxCounts, listInboxThreads } from '../src/dal/messages.ts'
+import { listBookings } from '../src/dal/bookings.ts'
+import { listBookingPages } from '../src/dal/booking-admin.ts'
+import { readAgenda } from '../src/dal/calendar.ts'
+import { listCampaigns } from '../src/dal/campaigns.ts'
+import { listEventDefs } from '../src/dal/custom-events.ts'
+import { listSites } from '../src/dal/analytics.ts'
+import { readDashboard } from '../src/dal/dashboard.ts'
 import { listReportDashboards } from '../src/dal/report-dashboards.ts'
 import { bulkDeleteRecords, deleteRecord, listRecords, mergeRecords } from '../src/dal/records.ts'
 import { setMemberGrants } from '../src/dal/members.ts'
@@ -487,11 +496,30 @@ try {
     ['the form list', (c) => listForms(c), 'marketing'],
     ['the sequence list', (c) => listSequences(c), 'sales'],
     ['the segment list', (c) => listSegments(c), 'contacts'],
+    ['a record\u2019s segment memberships', (c) => readMemberships(c, crypto.randomUUID()), 'contacts'],
+    ['the task list', (c) => listTasks(c), 'contacts'],
+    ['the overdue next steps', (c) => overdueNextSteps(c), 'sales'],
+    ['the inbox', (c) => listInboxThreads(c, {}), 'contacts'],
+    ['the inbox counts', (c) => inboxCounts(c), 'contacts'],
+    ['the bookings list', (c) => listBookings(c), 'sales'],
+    ['the booking pages', (c) => listBookingPages(c), 'sales'],
+    ['the meetings calendar', (c) => readAgenda(c, { month: new Date().toISOString().slice(0, 7) }), 'sales'],
+    ['the campaign list', (c) => listCampaigns(c), 'marketing'],
+    ['the event list', (c) => listEventDefs(c), 'marketing'],
+    ['the site list', (c) => listSites(c), 'marketing'],
   ]
   for (const [label, read, hub] of screens) {
     check(await forbidden(() => read(screenCtx('viewer'))), `${label} is refused to a seat with no hubs`)
     check(!(await forbidden(() => read(screenCtx('viewer', [hub])))), `and read with only the ${hub} view grant`)
   }
+
+  const blank = await readDashboard(screenCtx('viewer'))
+  check(
+    blank.stages.length === 0 && blank.closingThisMonth.length === 0 && blank.upcoming.length === 0 &&
+      blank.newContacts === 0 && blank.quarantined === 0 && blank.myOpenTasks === 0,
+    'the home dashboard carries no card for a hub the seat does not hold',
+  )
+  check((await readDashboard(screenCtx('admin'))).stages.length > 0, 'and every card for a seat that holds them')
 
   for (const seat of [salesSeat, marketingSeat]) {
     await setMemberGrants(superAdmin, {

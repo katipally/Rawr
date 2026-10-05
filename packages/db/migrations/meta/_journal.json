@@ -645,6 +645,13 @@
       "when": 1791737634179,
       "tag": "0090_delete_follows_edit_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1791824034179,
+      "tag": "0091_threads_follow_their_mail",
+      "breakpoints": true
     }
   ]
 }

@@ -1319,9 +1319,14 @@ try {
 
   const viewer = await actorCtx(SANDBOX.slug, 'viewer@sandbox.test', [])
   check(
-    'a viewer can read the booked list',
-    (await listBookings(viewer, { when: 'upcoming' })).rows.length >= 0,
+    'a viewer with the sales view grant can read the booked list',
+    (await listBookings({ ...viewer, viewHubs: ['sales'] }, { when: 'upcoming' })).rows.length >= 0,
     'reading is allowed',
+  )
+  check(
+    'a seat with no hubs cannot',
+    await refusesAsync(() => listBookings(viewer, { when: 'upcoming' })),
+    'refused in the data access layer',
   )
   check(
     'a viewer cannot change a page',
@@ -1389,7 +1394,7 @@ try {
     ),
   )
 
-  const visible = await listBookingPages(marketing)
+  const visible = await listBookingPages({ ...marketing, viewHubs: ['sales'] })
   check(
     'and it is not even listed for them',
     !visible.some((row) => row.id === ownLink),

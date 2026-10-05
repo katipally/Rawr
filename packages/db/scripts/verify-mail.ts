@@ -209,11 +209,41 @@ try {
   check((await readThread(sales, threadId)) !== null, 'its owner still reads it')
   check((await readThread(admin, threadId)) !== null, 'and so does an admin')
 
+  const threadRows = (ctx: AccountContext) =>
+    withAccount(ctx, async (tx) => (await tx.execute(sql`select id from message_thread where id = ${threadId}`)).length)
+  check((await threadRows(marketing)) === 0, 'the thread row itself, its subject and dates, is hidden with its mail')
+  check((await threadRows(sales)) === 1 && (await threadRows(admin)) === 1, 'and still read by its owner and by an admin')
+
+  await markThreadRead(sales, threadId)
+  const markers = (ctx: AccountContext) =>
+    withAccount(ctx, async (tx) => (await tx.execute(sql`select 1 from message_thread_read where thread_id = ${threadId}`)).length)
+  check((await markers(sales)) === 1 && (await markers(admin)) === 0, 'how far somebody has read a thread is read by that person alone, an admin included')
+
   const hiddenInbox = await listInboxThreads(marketing, {})
   check(
     !hiddenInbox.threads.some((thread) => thread.id === threadId),
     'a private thread is absent from a colleague’s inbox as well as from the record',
   )
+
+  // Two private mailboxes on one conversation: the second one's sync must store
+  // its message onto the thread it cannot yet read, and then read it.
+  const second = await saveMailbox(marketing, {
+    userId: marketingUser.id,
+    email: marketingUser.email,
+    accessToken: `access-m-${stamp}`,
+    refreshToken: `refresh-m-${stamp}`,
+    accessTokenExpiresAt: null,
+  })
+  const joined = await ingestMessage(marketing, {
+    incoming: incoming({ providerMessageId: `mail-m3-${stamp}`, subject: 'Re: Trial questions', to: [marketingUser.email] }),
+    ownerEmail: marketingUser.email,
+    mailboxId: second.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  check(joined.stored && joined.threadId === threadId, 'a second private mailbox stores its message onto the same thread')
+  check((await threadRows(marketing)) === 1, 'and then reads the thread through its own mail')
+  await disconnectMailbox(marketing, second.id)
 
   const notYours = await refused(() =>
     setMailboxVisibility(marketing, { mailboxId: box.id, visibility: 'team' }),

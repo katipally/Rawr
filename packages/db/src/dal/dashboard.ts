@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { AccountContext } from './context.ts'
+import { canView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 
 /** The Monday screen. Everything Trevor exports to a spreadsheet to see, read in
@@ -56,8 +56,12 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
     // Today and this month are the account's, not UTC's: a deal closing on the
     // 31st stayed "this month" for five hours after it ended in Pacific time.
     const today = sql`(now() at time zone ${await accountZone(ctx, tx)})::date`
+    // What a seat may not see is not read: every card is one hub's.
+    const sales = canView(ctx, 'sales')
+    const people = canView(ctx, 'contacts')
+    const marketing = canView(ctx, 'marketing')
     const [stages, closing, counts, upcoming] = await Promise.all([
-      tx.execute<{
+      sales ? tx.execute<{
         pipeline_id: string
         pipeline_name: string
         stage_id: string
@@ -80,8 +84,8 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
           from pipeline_stage s
           join pipeline p on p.id = s.pipeline_id
          where not s.is_closed_won and not s.is_closed_lost
-         order by p.position, s.position`),
-      tx.execute<{
+         order by p.position, s.position`) : [],
+      sales ? tx.execute<{
         id: string
         name: string | null
         amount: string | null
@@ -99,14 +103,14 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
            and d.close_date < date_trunc('month', ${today}) + interval '1 month'
            and not coalesce(s.is_closed_won, false) and not coalesce(s.is_closed_lost, false)
          order by d.close_date asc
-         limit 50`),
+         limit 50`) : [],
       tx.execute<{ new_contacts: number; quarantined: number; my_open: number; my_overdue: number }>(sql`
-        select (select count(*) from contact where deleted_at is null and created_at >= now() - interval '7 days')::int as new_contacts,
-               (select count(*) from form_submission where spam_state = 'quarantined')::int as quarantined,
-               (select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid)::int as my_open,
-               (select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid
-                   and due_date is not null and due_date < ${today})::int as my_overdue`),
-      tx.execute<{
+        select ${people ? sql`(select count(*) from contact where deleted_at is null and created_at >= now() - interval '7 days')::int` : sql`0`} as new_contacts,
+               ${marketing ? sql`(select count(*) from form_submission where spam_state = 'quarantined')::int` : sql`0`} as quarantined,
+               ${people ? sql`(select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid)::int` : sql`0`} as my_open,
+               ${people ? sql`(select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid
+                   and due_date is not null and due_date < ${today})::int` : sql`0`} as my_overdue`),
+      sales ? tx.execute<{
         id: string
         starts_at: Date
         attendee_name: string
@@ -120,7 +124,7 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
           left join user_account u on u.id = b.host_user_id
          where b.state = 'confirmed' and b.starts_at >= now() and b.starts_at < now() + interval '7 days'
          order by b.starts_at asc
-         limit 20`),
+         limit 20`) : [],
     ])
 
     const c = counts[0]

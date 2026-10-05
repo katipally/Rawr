@@ -3,7 +3,7 @@ import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type AttributionInput } from './attribution.ts'
-import { assertCanWrite, type AccountContext } from './context.ts'
+import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
 import { readSchema, type FormField } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
@@ -1396,6 +1396,7 @@ export const listBookings = async (
   const past = input.when === 'past'
 
   return withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'meetings')
     const rows = await tx.execute<{
       id: string
       page_name: string
@@ -1492,6 +1493,7 @@ export const bookingPageStats = async (
   sinceDays = 30,
 ): Promise<BookingPageStats> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'meetings')
     const days = Math.min(Math.max(Math.trunc(sinceDays) || 30, 1), 365)
     const [row] = await tx.execute<{ views: string; booked: string; cancelled: string }>(sql`
       select
