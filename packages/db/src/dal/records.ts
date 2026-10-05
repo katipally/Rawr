@@ -655,7 +655,8 @@ export const createRecord = async (
     await recordActivity(tx, ctx, {
       type: 'field_change',
       subject: `created ${name}`,
-      links: linksFor(object.key, row.id, prepared.columns),
+      payload: { created: true },
+      links: [{ entityType: object.key, entityId: row.id }],
     })
 
     return { id: row.id, warnings: prepared.warnings, autoCompanyId, displayName: displayName(object, written) }
@@ -760,8 +761,8 @@ const companiesForDomains = async (
  *  is no second copy of the rules in SQL to drift from the first.
  *
  *  What it deliberately does not do is the part of an update that only means
- *  something for a person's edit: the per-field timeline entry, the stage
- *  notification, the deal rescore. An import is a data load. Those already never
+ *  something for a person's edit: the per-field timeline entry, the "created"
+ *  line a new record gets, the stage notification, the deal rescore. An import is a data load. Those already never
  *  reached an automation from an import — the trigger is raised from
  *  `updateRecord`'s return value, which the importer discards — so this drops the
  *  writing, not the behaviour. Enrichment is off here for the same reason it is
@@ -993,43 +994,6 @@ export const bulkWriteRecords = async (
             [['entity_id', 'uuid'], ['action', 'text'], ['before', 'jsonb'], ['after', 'jsonb']],
             'a',
           )}`)
-    }
-
-    // The timeline entry a new record gets, and only a new one: an imported
-    // update writes no "changed X" line, for the reason in this function's note.
-    const made = inserts.filter((row) => outcome.created.some((entry) => entry.position === row.position))
-    if (made.length > 0) {
-      const entries = made.map((row) => ({
-        activity_id: randomUUID(),
-        entity_id: row.id,
-        company_id: typeof row.columns.company_id === 'string' ? row.columns.company_id : null,
-        subject: `created ${displayName(object, row.values)}`,
-      }))
-      const payload = JSON.stringify(entries)
-      const shape: [string, string][] = [
-        ['activity_id', 'uuid'],
-        ['entity_id', 'uuid'],
-        ['company_id', 'uuid'],
-        ['subject', 'text'],
-      ]
-      await tx.execute(sql`
-        insert into activity (id, account_id, type, subject, occurred_at, actor_id, actor_kind)
-        select e."activity_id", ${ctx.accountId}::uuid, 'field_change'::rawr_activity_type, e."subject", now(),
-               ${ctx.actorId}::uuid, ${ctx.actorKind}::rawr_actor_kind
-          from ${recordset(payload, shape, 'e')}`)
-      // The record, and the company it was filed under, which is what `linksFor`
-      // gives a single write. Union rather than two statements: one round trip.
-      await tx.execute(sql`
-        insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
-        select ${ctx.accountId}::uuid, e."activity_id", ${object.key}, e."entity_id",
-               'field_change'::rawr_activity_type, now()
-          from ${recordset(payload, shape, 'e')}
-        union all
-        select ${ctx.accountId}::uuid, e."activity_id", 'company', e."company_id",
-               'field_change'::rawr_activity_type, now()
-          from ${recordset(payload, shape, 'e')}
-         where e."company_id" is not null
-        on conflict do nothing`)
     }
 
     return outcome

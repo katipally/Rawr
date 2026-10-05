@@ -414,6 +414,13 @@ export const ACTIVITY_LABELS: Record<string, string> = {
   segment_change: 'Segment',
 }
 
+/** A record's own creation is a `field_change` row that says so in its payload; it
+ *  is not a property somebody edited. */
+export const activityLabel = (entry: { type: string; payload?: unknown }): string =>
+  entry.type === 'field_change' && (entry.payload as { created?: unknown } | null)?.created === true
+    ? 'Created'
+    : (ACTIVITY_LABELS[entry.type] ?? entry.type)
+
 export const ENROLLMENT_TONE: Record<EnrollmentState, BadgeTone> = {
   active: 'ok',
   waiting_task: 'info',

@@ -17,7 +17,7 @@ import { ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { ACTIVITY_LABELS, activityActor, formatCurrency, formatDate, formatDateTime, todayIn } from '~/components/crm/value.tsx'
+import { activityActor, activityLabel, formatCurrency, formatDate, formatDateTime, todayIn } from '~/components/crm/value.tsx'
 import {
   accountHome,
   bookedPath,
@@ -462,7 +462,7 @@ const HomePage = async ({
                 <li key={entry.id} className="flex flex-col gap-0.5 py-2">
                   <div className="flex min-w-0 items-baseline justify-between gap-2">
                     <p className="min-w-0 truncate">
-                      <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">{ACTIVITY_LABELS[entry.type] ?? entry.type}</span>{' '}
+                      <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">{activityLabel(entry)}</span>{' '}
                       <span className="font-medium">{activityActor(entry.type, { ...entry, recordName: entry.entityName })}</span>{' '}
                       {entry.subject ?? ''}
                     </p>

@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, formatDateTime, formatMonth } from './value.tsx'
+import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, activityLabel, formatDateTime, formatMonth } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
@@ -406,7 +406,7 @@ export const Timeline = ({
                   ) : (
                     <ChevronDown aria-hidden="true" className="size-4" />
                   )}
-                  {mail?.source === 'sequence' ? 'Sequence email' : (TYPE_LABELS[entry.type] ?? entry.type)}
+                  {mail?.source === 'sequence' ? 'Sequence email' : activityLabel(entry)}
                 </button>
                 <span className={cn('min-w-0 break-words', mail ? 'text-secondary' : 'font-medium')}>
                   {mail ? emailWho(entry, mail) : who ? `${who} ` : ''}
