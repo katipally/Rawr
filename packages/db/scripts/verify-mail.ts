@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import type { AccountContext } from '../src/dal/context.ts'
+import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import {
@@ -17,6 +18,7 @@ import {
   setMailboxVisibility,
   storeBody,
   TEXT_LIMIT_BYTES,
+  threadsForContact,
   type IncomingMessage,
 } from '../src/dal/messages.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
@@ -180,11 +182,26 @@ try {
   console.log('')
   console.log('-- who may read it -------------------------------------------------')
 
+  check((await readThread(marketing, threadId)) === null, 'a newly connected mailbox is private until its owner shares it')
+  await setMailboxVisibility(sales, { mailboxId: box.id, visibility: 'team' })
   const sharedForMarketing = await readThread(marketing, threadId)
   check(sharedForMarketing !== null, 'a shared mailbox is readable by a colleague')
 
+  const contactId = withBody.stored ? withBody.contactIds[0]! : ''
+  const contactRef = { entityType: 'contact' as const, entityId: contactId }
+  const timelineHas = async (ctx: AccountContext) =>
+    (await readTimeline(ctx, { entity: contactRef, types: ['email'] })).rows.length
+  const sharedTimeline = await timelineHas(marketing)
+  check(contactId !== '' && sharedTimeline > 0, 'a shared mailbox puts its mail on the contact timeline', `${sharedTimeline} rows`)
+  check((await threadsForContact(marketing, contactId)).some((thread) => thread.id === threadId), 'and its threads on the record')
+
   await setMailboxVisibility(sales, { mailboxId: box.id, visibility: 'private' })
   check((await readThread(marketing, threadId)) === null, 'a private mailbox is not')
+  check((await timelineHas(marketing)) === 0, 'its mail is off a colleague’s timeline too, not only out of the inbox')
+  check((await timelineCounts(marketing, contactRef)).email === undefined, 'and out of the timeline counts')
+  check(!(await threadsForContact(marketing, contactId)).some((thread) => thread.id === threadId), 'and out of the threads on the record')
+  check((await timelineHas(sales)) === sharedTimeline, 'its owner still reads it on the timeline')
+  check((await timelineHas(admin)) === sharedTimeline, 'and so does an admin')
   check((await readThread(sales, threadId)) !== null, 'its owner still reads it')
   check((await readThread(admin, threadId)) !== null, 'and so does an admin')
 

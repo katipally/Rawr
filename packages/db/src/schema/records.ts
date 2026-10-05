@@ -17,6 +17,7 @@ import {
 import { createdAt, pk, searchVector, tsvector, updatedAt, accountId } from './columns.ts'
 import { activityTypeEnum, actorKindEnum, taskStatusEnum, trackingConsentEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
+import { mailbox } from './messaging.ts'
 
 export const lifecycleStage = pgTable(
   'lifecycle_stage',
@@ -254,6 +255,10 @@ export const activity = pgTable(
      *  re-importing the same HubSpot export leaves the timeline as it was rather
      *  than writing every note a second time. Null for anything Rawr wrote itself. */
     importKey: text('import_key'),
+    /** The mailbox an email came through, so a private mailbox's mail stays off the
+     *  timeline for everybody it is not shared with. Null for everything else, and
+     *  for mail whose mailbox has since been disconnected. */
+    mailboxId: uuid('mailbox_id').references(() => mailbox.id, { onDelete: 'set null' }),
     payload: jsonb('payload'),
     /** The timeline is what people search for by memory: "the call where they
      *  mentioned the renewal". Generated, so it cannot go stale the way the
@@ -284,6 +289,7 @@ export const activityLink = pgTable(
      *  below; without these two columns every page would sort a join result. */
     type: activityTypeEnum('type').notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    mailboxId: uuid('mailbox_id').references(() => mailbox.id, { onDelete: 'set null' }),
   },
   (t) => [
     primaryKey({ columns: [t.accountId, t.activityId, t.entityType, t.entityId] }),

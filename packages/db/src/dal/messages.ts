@@ -131,7 +131,7 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
         refreshToken: encryptToken(input.refreshToken),
         accessTokenExpiresAt: input.accessTokenExpiresAt,
         canSend: input.canSend ?? false,
-        visibility: 'team',
+        visibility: 'private',
         lastError: null,
         lastErrorAt: null,
       })
@@ -807,6 +807,7 @@ const storeMessage = async (
       direction,
       counterpart: direction === 'inbound' ? [lower(incoming.from)] : incoming.to.map(lower),
       contactIds,
+      mailboxId: input.mailboxId,
       origin: input.origin,
     })
   }
@@ -886,6 +887,7 @@ const linkThreadActivity = async (
     direction: 'inbound' | 'outbound'
     counterpart: string[]
     contactIds: string[]
+    mailboxId: string | null
     origin?: MessageOrigin | undefined
   },
 ): Promise<string | null> => {
@@ -903,6 +905,7 @@ const linkThreadActivity = async (
     body: input.snippet,
     occurredAt: input.sentAt,
     payload,
+    mailboxId: input.mailboxId,
     links: await linksForContacts(tx, input.contactIds),
   })
 }
@@ -935,7 +938,7 @@ export const threadsForContact = async (
       .from(messageThread)
       .innerJoin(message, eq(message.threadId, messageThread.id))
       .innerJoin(messageParticipant, eq(messageParticipant.messageId, message.id))
-      .where(eq(messageParticipant.contactId, contactId))
+      .where(and(eq(messageParticipant.contactId, contactId), readable(ctx)))
       .orderBy(desc(messageThread.lastAt))
       .limit(Math.min(Math.max(limit, 1), 100)),
   )
@@ -1633,8 +1636,9 @@ export const attachContactToMail = async (
       direction: 'inbound' | 'outbound'
       from_addr: string | null
       to_addrs: string[]
+      mailbox_id: string | null
     }>(sql`
-      select m.id, m.thread_id, t.subject, m.snippet, m.sent_at, m.direction, m.from_addr, m.to_addrs
+      select m.id, m.thread_id, t.subject, m.snippet, m.sent_at, m.direction, m.from_addr, m.to_addrs, m.mailbox_id
         from message m join message_thread t on t.id = m.thread_id
        where m.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
        order by m.sent_at`)
@@ -1649,6 +1653,7 @@ export const attachContactToMail = async (
         direction: row.direction,
         counterpart: row.direction === 'inbound' ? [row.from_addr ?? address] : row.to_addrs,
         contactIds: [contactId],
+        mailboxId: row.mailbox_id,
       })
     }
 

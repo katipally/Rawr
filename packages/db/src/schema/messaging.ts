@@ -40,7 +40,7 @@ export const mailbox = pgTable(
     email: text('email').notNull(),
     state: mailboxStateEnum('state').notNull().default('connected'),
     /** Who may read the threads this mailbox brought in. */
-    visibility: mailboxVisibilityEnum('visibility').notNull().default('team'),
+    visibility: mailboxVisibilityEnum('visibility').notNull().default('private'),
     /** Encrypted with a key held outside this database. F0 §8. */
     accessToken: text('access_token').notNull(),
     refreshToken: text('refresh_token').notNull(),

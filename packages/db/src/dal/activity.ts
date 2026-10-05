@@ -48,6 +48,8 @@ export type NewActivity = {
   occurredAt?: Date
   source?: string | null
   payload?: unknown
+  /** Set for mail, so the timeline honours the mailbox's visibility. */
+  mailboxId?: string | null
   links: EntityRef[]
 }
 
@@ -90,6 +92,7 @@ export const recordActivity = async (
       actorKind: ctx.actorKind,
       source: entry.source ?? null,
       payload: entry.payload ?? null,
+      mailboxId: entry.mailboxId ?? null,
     })
     .returning({ id: activity.id })
 
@@ -105,6 +108,7 @@ export const recordActivity = async (
         entityId: link.entityId,
         type: entry.type,
         occurredAt,
+        mailboxId: entry.mailboxId ?? null,
       })),
     )
     .onConflictDoNothing()
