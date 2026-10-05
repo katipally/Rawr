@@ -411,6 +411,18 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         size="lg"
         title={editing === 'new' ? 'Create segment' : `Edit ${editing === null ? '' : editing.name}`}
         onClose={() => setEditing(null)}
+        dirty={editing === 'new' && (name !== '' || description !== '' || conditionCount(filters) > 0)}
+        onSubmit={() => void save()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim() || conditionCount(filters) === 0}>
+              Save segment
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           <Field id="segment-name" label="Name">
@@ -501,25 +513,39 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               )}
             </div>
           ) : null}
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!name.trim() || conditionCount(filters) === 0}
-              onClick={() => void save()}
-            >
-              Save segment
-            </Button>
-          </div>
         </div>
       </Modal>
 
       {/* ----------------------------------------------------- static list */}
-      <Modal open={creatingList} title="Create list" onClose={() => setCreatingList(false)}>
+      <Modal
+        open={creatingList}
+        title="Create list"
+        onClose={() => setCreatingList(false)}
+        dirty={name !== '' || description !== ''}
+        onSubmit={() =>
+          void run(
+            () =>
+              api.segments.createList.mutate({
+                object,
+                name,
+                description: description || null,
+              }),
+            'List created. Add records to it from the bulk bar.',
+          ).then((ok) => {
+            if (ok) setCreatingList(false)
+          })
+        }
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
+              Create list
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p className="text-secondary">
             A static list holds whoever you put in it and nothing takes them out again but you.
@@ -550,31 +576,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               ))}
             </Select>
           </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!name.trim()}
-              onClick={() =>
-                void run(
-                  () =>
-                    api.segments.createList.mutate({
-                      object,
-                      name,
-                      description: description || null,
-                    }),
-                  'List created. Add records to it from the bulk bar.',
-                ).then((ok) => {
-                  if (ok) setCreatingList(false)
-                })
-              }
-            >
-              Create list
-            </Button>
-          </div>
         </div>
       </Modal>
 

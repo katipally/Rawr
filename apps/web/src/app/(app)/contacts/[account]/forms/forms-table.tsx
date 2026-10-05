@@ -294,14 +294,8 @@ export const FormsTable = ({
         size="sm"
         title={removingFolder ? `Delete “${removingFolder.name}”?` : 'Delete folder'}
         onClose={() => setRemovingFolder(null)}
-      >
-        <div className="flex flex-col gap-3">
-          <p>
-            {removingFolder && removingFolder.forms > 0
-              ? `Deleting a folder empties it: the ${removingFolder.forms.toLocaleString()} ${removingFolder.forms === 1 ? 'form' : 'forms'} filed here move to Unfiled and keep collecting. A filing decision never takes a live capture path down with it.`
-              : 'The folder is empty, so nothing else changes.'}
-          </p>
-          <div className="flex flex-wrap gap-2">
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setRemovingFolder(null)}>
               Cancel
             </Button>
@@ -320,7 +314,15 @@ export const FormsTable = ({
             >
               Delete folder
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            {removingFolder && removingFolder.forms > 0
+              ? `Deleting a folder empties it: the ${removingFolder.forms.toLocaleString()} ${removingFolder.forms === 1 ? 'form' : 'forms'} filed here move to Unfiled and keep collecting. A filing decision never takes a live capture path down with it.`
+              : 'The folder is empty, so nothing else changes.'}
+          </p>
         </div>
       </Modal>
 
@@ -328,33 +330,36 @@ export const FormsTable = ({
         open={naming !== null}
         title={naming?.id ? 'Rename folder' : 'New folder'}
         onClose={() => setNaming(null)}
+        dirty={naming !== null && !naming.id && naming.name !== ''}
+        onSubmit={() => {
+          const draft = naming
+          if (!draft) return
+          setNaming(null)
+          void run(() =>
+            api.forms.saveFolder.mutate({ id: draft.id, name: draft.name }),
+          )
+        }}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setNaming(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={busy || !naming?.name.trim()}>
+              Save
+            </Button>
+          </>
+        }
       >
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const draft = naming
-            if (!draft) return
-            setNaming(null)
-            void run(() =>
-              api.forms.saveFolder.mutate({ id: draft.id, name: draft.name }),
-            )
-          }}
-        >
-          <Field id="folder-name" label="Name">
-            <TextInput
-              id="folder-name"
-              value={naming?.name ?? ''}
-              disabled={busy}
-              onChange={(event) =>
-                setNaming((current) => (current ? { ...current, name: event.target.value } : current))
-              }
-            />
-          </Field>
-          <Button type="submit" variant="primary" disabled={busy || !naming?.name.trim()}>
-            Save
-          </Button>
-        </form>
+        <Field id="folder-name" label="Name">
+          <TextInput
+            id="folder-name"
+            value={naming?.name ?? ''}
+            disabled={busy}
+            onChange={(event) =>
+              setNaming((current) => (current ? { ...current, name: event.target.value } : current))
+            }
+          />
+        </Field>
       </Modal>
     </>
   )

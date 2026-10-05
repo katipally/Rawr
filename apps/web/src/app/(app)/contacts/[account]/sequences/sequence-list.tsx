@@ -157,22 +157,34 @@ export const SequenceList = ({
       {pager}
 
       {creating ? (
-        <Modal open title="Create sequence" onClose={() => setCreating(false)}>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              setBusy(true)
-              void api.sequences.save
-                .mutate({ name: draft.name.trim(), description: draft.description.trim() || null })
-                .then((created) => {
-                  toast('success', 'Add the steps next. Nothing sends until you turn it on.')
-                  router.push(sequencePath(account, created.id))
-                })
-                .catch((cause) => toast('error', errorMessage(cause)))
-                .finally(() => setBusy(false))
-            }}
-          >
+        <Modal
+          open
+          title="Create sequence"
+          onClose={() => setCreating(false)}
+          dirty={draft.name !== '' || draft.description !== ''}
+          onSubmit={() => {
+            setBusy(true)
+            void api.sequences.save
+              .mutate({ name: draft.name.trim(), description: draft.description.trim() || null })
+              .then((created) => {
+                toast('success', 'Add the steps next. Nothing sends until you turn it on.')
+                router.push(sequencePath(account, created.id))
+              })
+              .catch((cause) => toast('error', errorMessage(cause)))
+              .finally(() => setBusy(false))
+          }}
+          footer={
+            <>
+              <Button variant="tertiary" onClick={() => setCreating(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" busy={busy} disabled={draft.name.trim() === ''}>
+                Create
+              </Button>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3">
             <Field label="Name" id="sequence-name" required>
               <TextInput
                 id="sequence-name"
@@ -189,15 +201,7 @@ export const SequenceList = ({
                 onChange={(event) => setDraft({ ...draft, description: event.target.value })}
               />
             </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="tertiary" type="button" onClick={() => setCreating(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit" busy={busy} disabled={draft.name.trim() === ''}>
-                Create
-              </Button>
-            </div>
-          </form>
+          </div>
         </Modal>
       ) : null}
     </div>

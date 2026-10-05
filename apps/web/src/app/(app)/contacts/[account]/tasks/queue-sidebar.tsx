@@ -102,38 +102,44 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
         ))}
       </ul>
 
-      <Modal open={adding} title="Create queue" onClose={() => setAdding(false)}>
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            const wanted = name.trim()
-            void run(
-              async () => {
-                const { id } = await api.crm.tasks.queues.create.mutate({ name: wanted })
-                setCreated((current) => [...current, { id, name: wanted, openCount: 0 }])
-              },
-              'Queue created.',
-              () => {
-                setName('')
-                setAdding(false)
-              },
-            )
-          }}
-        >
-          <TextInput
-            value={name}
-            data-autofocus
-            maxLength={120}
-            aria-label="Queue name"
-            placeholder="Monday calls"
-            onChange={(event) => setName(event.target.value)}
-            className="min-w-40 flex-1"
-          />
-          <Button type="submit" variant="primary" busy={busy} disabled={name.trim() === ''}>
-            Create
-          </Button>
-        </form>
+      <Modal
+        open={adding}
+        title="Create queue"
+        onClose={() => setAdding(false)}
+        dirty={name !== ''}
+        onSubmit={() => {
+          const wanted = name.trim()
+          void run(
+            async () => {
+              const { id } = await api.crm.tasks.queues.create.mutate({ name: wanted })
+              setCreated((current) => [...current, { id, name: wanted, openCount: 0 }])
+            },
+            'Queue created.',
+            () => {
+              setName('')
+              setAdding(false)
+            },
+          )
+        }}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={name.trim() === ''}>
+              Create
+            </Button>
+          </>
+        }
+      >
+        <TextInput
+          value={name}
+          data-autofocus
+          maxLength={120}
+          aria-label="Queue name"
+          placeholder="Monday calls"
+          onChange={(event) => setName(event.target.value)}
+        />
       </Modal>
 
       <RenamePrompt

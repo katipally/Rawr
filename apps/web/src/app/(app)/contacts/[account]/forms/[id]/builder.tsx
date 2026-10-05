@@ -304,7 +304,28 @@ export const FormBuilder = ({
         <EmbedSnippet baseUrl={baseUrl} siteKey={siteKey} formId={form.id} account={account} slug={slug} />
       </Modal>
 
-      <Modal open={showDelete} size="sm" title={`Delete ${form.name}`} onClose={() => setShowDelete(false)}>
+      <Modal
+        open={showDelete}
+        size="sm"
+        title={`Delete ${form.name}`}
+        onClose={() => setShowDelete(false)}
+        onSubmit={() => void remove()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              busy={deleting}
+              disabled={!sameWords(confirmText, form.name)}
+            >
+              Delete form
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p>
             The embed and the hosted page stop working the moment it is gone. A form that has taken
@@ -316,19 +337,6 @@ export const FormBuilder = ({
             value={confirmText}
             onChange={(event) => setConfirmText(event.target.value)}
           />
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              busy={deleting}
-              disabled={!sameWords(confirmText, form.name)}
-              onClick={() => void remove()}
-            >
-              Delete form
-            </Button>
-          </div>
         </div>
       </Modal>
 

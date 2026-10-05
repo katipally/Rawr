@@ -144,7 +144,23 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
       )}
 
       {draft ? (
-        <Modal open title={draft.id ? 'Edit template' : 'Create template'} onClose={() => setDraft(null)}>
+        <Modal
+          open
+          title={draft.id ? 'Edit template' : 'Create template'}
+          onClose={() => setDraft(null)}
+          dirty={!draft.id && (draft.name !== '' || draft.subject !== '' || draft.bodyText !== '')}
+          onSubmit={() => void save()}
+          footer={
+            <>
+              <Button variant="tertiary" onClick={() => setDraft(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" busy={busy} disabled={!draft.name.trim()}>
+                Save
+              </Button>
+            </>
+          }
+        >
           <div className="flex flex-col gap-3">
             <Field label="Name" id="template-name" required hint="What it is called in the picker.">
               <TextInput
@@ -177,14 +193,6 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
             <MergeFieldPicker
               onInsert={(token) => setDraft({ ...draft, bodyText: `${draft.bodyText}${token}` })}
             />
-            <div className="flex justify-end gap-2">
-              <Button variant="tertiary" onClick={() => setDraft(null)}>
-                Cancel
-              </Button>
-              <Button variant="primary" busy={busy} disabled={!draft.name.trim()} onClick={() => void save()}>
-                Save
-              </Button>
-            </div>
           </div>
         </Modal>
       ) : null}

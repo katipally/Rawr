@@ -168,6 +168,17 @@ export const BookedRow = ({
         size="sm"
         title={`Cancel ${booking.attendeeName}’s meeting`}
         onClose={close}
+        dirty={reason !== ''}
+        footer={
+          <>
+            <Button variant="destructive" busy={busy} onClick={() => void cancel()}>
+              Cancel the meeting
+            </Button>
+            <Button variant="tertiary" onClick={close}>
+              Keep it
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           <Field id={`reason-${booking.id}`} label="Why" hint="Sent to them. Leave it blank to say nothing.">
@@ -178,14 +189,6 @@ export const BookedRow = ({
               onChange={(event) => setReason(event.target.value)}
             />
           </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="destructive" busy={busy} onClick={() => void cancel()}>
-              Cancel the meeting
-            </Button>
-            <Button variant="tertiary" onClick={close}>
-              Keep it
-            </Button>
-          </div>
         </div>
       </Modal>
 
@@ -194,6 +197,22 @@ export const BookedRow = ({
         size="sm"
         title={`Move ${booking.attendeeName}’s meeting`}
         onClose={close}
+        onSubmit={() => void reschedule()}
+        footer={
+          <>
+            <Button
+              type="submit"
+              variant="primary"
+              busy={busy}
+              disabled={moveTo === '' || Number.isNaN(Date.parse(moveTo))}
+            >
+              Move it
+            </Button>
+            <Button variant="tertiary" onClick={close}>
+              Leave it
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           <Field
@@ -208,19 +227,6 @@ export const BookedRow = ({
               onChange={(event) => setMoveTo(event.target.value)}
             />
           </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={moveTo === '' || Number.isNaN(Date.parse(moveTo))}
-              onClick={() => void reschedule()}
-            >
-              Move it
-            </Button>
-            <Button variant="tertiary" onClick={close}>
-              Leave it
-            </Button>
-          </div>
         </div>
       </Modal>
     </li>

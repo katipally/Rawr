@@ -97,7 +97,23 @@ export const NewPageButton = ({
         Create scheduling page
       </Button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Create scheduling page">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Create scheduling page"
+        dirty={name !== ''}
+        onSubmit={() => void create()}
+        footer={
+          <>
+            <Button type="button" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" busy={saving} disabled={name.trim() === ''}>
+              {saving ? 'Creating…' : 'Create'}
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <Field
             id="new-booking-name"
@@ -136,15 +152,6 @@ export const NewPageButton = ({
               task.
             </p>
           )}
-
-          <div className="flex justify-end gap-2">
-            <Button type="button" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="button" busy={saving} onClick={() => void create()}>
-              {saving ? 'Creating…' : 'Create'}
-            </Button>
-          </div>
         </div>
       </Modal>
     </>

@@ -243,6 +243,22 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
         size="sm"
         title="Merge these two?"
         onClose={() => setConfirming(null)}
+        footer={
+          confirming ? (
+            <>
+              <Button variant="tertiary" onClick={() => setConfirming(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                busy={busy === keyOf(confirming)}
+                onClick={() => void merge(confirming)}
+              >
+                Merge into {shortName(sideOf(confirming).survivor.displayName)}
+              </Button>
+            </>
+          ) : null
+        }
       >
         {confirming ? (
           <div className="flex flex-col gap-3">
@@ -276,19 +292,6 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
               {sideOf(confirming).absorbed.displayName} is merged into{' '}
               {sideOf(confirming).survivor.displayName}.
             </p>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="tertiary" onClick={() => setConfirming(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                busy={busy === keyOf(confirming)}
-                onClick={() => void merge(confirming)}
-              >
-                Merge into {shortName(sideOf(confirming).survivor.displayName)}
-              </Button>
-            </div>
           </div>
         ) : null}
       </Modal>
