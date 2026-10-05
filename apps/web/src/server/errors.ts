@@ -1,5 +1,36 @@
+import { randomBytes } from 'node:crypto'
 import { ConflictError, DuplicateError, ForbiddenError, UnknownFieldError, ValueError } from '@rawr/db'
-import { TRPCError } from '@trpc/server'
+import { FormSchemaError } from '@rawr/db/forms'
+import { TRPCError, type TRPCDefaultErrorShape } from '@trpc/server'
+import { CalendarUnavailable } from './calendar.ts'
+import { RevokedError } from './gmail.ts'
+
+const digests = new WeakMap<object, string>()
+
+/** The reference a person quotes and the line the log carries, minted once per
+ *  error. Keyed on the TRPCError because tRPC hands the same instance to onError
+ *  and to the formatter that writes the response. */
+export const digestOf = (error: object): string => {
+  let digest = digests.get(error)
+  if (!digest) {
+    digest = randomBytes(4).toString('hex')
+    digests.set(error, digest)
+  }
+  return digest
+}
+
+export const serverFaultMessage = (digest: string): string =>
+  `Something failed on the server. Try again, and if it keeps happening, tell whoever runs Rawr and quote reference ${digest}.`
+
+/** The data access layer writes its own refusals as `new Error(sentence)`, so an
+ *  error of exactly that class is a sentence for a person. A driver error is not:
+ *  postgres.js sets `code` on a plain Error for a dropped connection, and every
+ *  other failure is a subclass or a built-in (DrizzleQueryError, TypeError), whose
+ *  message can hold the statement and its parameters. */
+const isSentence = (cause: unknown): cause is Error =>
+  cause instanceof Error &&
+  Object.getPrototypeOf(cause) === Error.prototype &&
+  typeof (cause as { code?: unknown }).code !== 'string'
 
 /** Every failure a person can reach has a sentence they can act on, never
  *  "something went wrong". 03-build-order, FAILING. */
@@ -15,17 +46,45 @@ export const asTrpcError = (cause: unknown): TRPCError => {
   if (cause instanceof DuplicateError) {
     return new TRPCError({ code: 'CONFLICT', message: cause.message, cause })
   }
-  if (cause instanceof ValueError || cause instanceof UnknownFieldError) {
+  if (
+    cause instanceof ValueError ||
+    cause instanceof UnknownFieldError ||
+    cause instanceof FormSchemaError ||
+    cause instanceof RevokedError ||
+    cause instanceof CalendarUnavailable ||
+    isSentence(cause)
+  ) {
     return new TRPCError({ code: 'BAD_REQUEST', message: cause.message, cause })
   }
-  return new TRPCError({
-    code: 'BAD_REQUEST',
-    message: cause instanceof Error ? cause.message : String(cause),
-    cause,
-  })
+  // Anything else is a fault in the server, not something the person typed. The
+  // formatter swaps the message for the reference; the cause stays on the server.
+  return new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'The server failed.', cause })
 }
 
-/** Wraps a data access call so no procedure can leak a raw driver error. */
+export const formatError = ({
+  shape,
+  error,
+}: {
+  shape: TRPCDefaultErrorShape
+  error: TRPCError
+}): TRPCDefaultErrorShape => {
+  // A refused grant is a 403 with a sentence a person can act on, never a
+  // generic failure. 03-build-order, FAILING.
+  if (error.cause instanceof ForbiddenError) {
+    return { ...shape, message: error.cause.message, data: { ...shape.data, code: 'FORBIDDEN' } }
+  }
+  // tRPC turns anything thrown outside `call` into a 500 that carries the raw
+  // message, and outside production it adds the stack, whose first line is that
+  // message. The swap happens here, where every error passes.
+  if (error.code === 'INTERNAL_SERVER_ERROR') {
+    const { stack: _stack, ...data } = shape.data
+    return { ...shape, message: serverFaultMessage(digestOf(error)), data }
+  }
+  return shape
+}
+
+/** Wraps a data access call so no procedure can leak a raw driver error: the
+ *  message a person sees for one is the reference, never the driver's text. */
 export const call = async <T>(fn: () => Promise<T>): Promise<T> => {
   try {
     return await fn()
