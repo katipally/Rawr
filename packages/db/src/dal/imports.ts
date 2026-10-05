@@ -952,6 +952,7 @@ const preview = async (
  *  has to make the trip. */
 export const previewImportRun = async (ctx: AccountContext, id: string): Promise<DryRun> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
 
   const [run] = await withAccount(ctx, (tx) =>
@@ -1235,6 +1236,7 @@ export const beginImportRun = async (
   },
 ): Promise<{ id: string }> => {
   assertCanWrite(ctx, input.objectKey)
+  assertCanDo(ctx, 'import')
   const kind = input.kind ?? 'records'
   const object = await objectFor(ctx, kind, input.objectKey)
   const headers = nameHeaders(input.headers)
@@ -1272,6 +1274,7 @@ export const appendImportRows = async (
   input: { from: number; rows: string[][] },
 ): Promise<{ total: number }> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
   return withAccount(ctx, async (tx) => {
     // Locked, so two copies of one batch cannot both find the position free.
@@ -1362,6 +1365,7 @@ export const finishImportRun = async (
   id: string,
 ): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
   const [run] = await withAccount(ctx, (tx) =>
     tx
@@ -1455,6 +1459,7 @@ export const beginImportUpload = async (
   },
 ): Promise<{ id: string }> => {
   assertCanWrite(ctx, input.objectKey)
+  assertCanDo(ctx, 'import')
   const kind = input.kind ?? 'records'
   const object = await objectFor(ctx, kind, input.objectKey)
 
@@ -1513,6 +1518,7 @@ export const recordUploadPart = async (
   part: UploadPart,
 ): Promise<{ uploadedBytes: number; parts: UploadPart[] }> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
   return withAccount(ctx, async (tx) => {
     const [run] = await tx
@@ -1538,6 +1544,7 @@ export const recordUploadPart = async (
  *  cleared because there is nothing left to abandon. */
 export const beginImportParse = async (ctx: AccountContext, id: string): Promise<void> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   await withAccount(ctx, (tx) =>
     tx
       .update(importRun)
@@ -1577,6 +1584,7 @@ export const finishImportParse = async (
   id: string,
 ): Promise<{ id: string; suggested: Mapping; previousMapping: Mapping | null }> => {
   assertCanWrite(ctx, 'import_run')
+  assertCanDo(ctx, 'import')
   if (!isUuid(id)) throw new Error('That import no longer exists.')
   const [run] = await withAccount(ctx, (tx) =>
     tx
@@ -1639,8 +1647,9 @@ export const setImportMapping = async (
   ctx: AccountContext,
   id: string,
   mapping: Mapping,
-): Promise<void> =>
-  mutate(ctx, 'import_run', async (tx) => {
+): Promise<void> => {
+  assertCanDo(ctx, 'import')
+  return mutate(ctx, 'import_run', async (tx) => {
     const [run] = await tx
       .select({ objectType: importRun.objectType, importKind: importRun.importKind, state: importRun.state })
       .from(importRun)
@@ -1664,6 +1673,7 @@ export const setImportMapping = async (
       audit: { entity: 'import_run', entityId: id, action: 'map', before: null, after: { mapping } },
     }
   })
+}
 
 /** One imported note or logged email. Written straight rather than through
  *  `recordActivity`, because that stamps the importing user as the person who made

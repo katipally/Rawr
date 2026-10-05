@@ -12,7 +12,7 @@ import {
 } from '../src/dal/context.ts'
 import { purgeField } from '../src/dal/admin-fields.ts'
 import { exportCsv } from '../src/dal/export.ts'
-import { startImportRun } from '../src/dal/imports.ts'
+import { beginImportRun, beginImportUpload, setImportMapping, startImportRun } from '../src/dal/imports.ts'
 import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
@@ -323,6 +323,13 @@ try {
   // Guarded before the row is looked up, so a missing id proves the order: no
   // grant is a refusal, the grant is the ordinary "it is not there" error.
   const missing = '00000000-0000-0000-0000-000000000000'
+  const runInput = { objectKey: 'contact', filename: 'guard.csv', headers: ['Email'] }
+  check(await forbidden(() => beginImportRun(none, runInput)), 'uploading a file to import is refused without the import grant')
+  check(await forbidden(() => setImportMapping(none, missing, {})), 'and so is mapping it')
+  check(
+    await forbidden(() => beginImportUpload(none, { objectKey: 'contact', filename: 'guard.csv', sizeBytes: 10 } as never)),
+    'and so is a large upload',
+  )
   check(await forbidden(() => startImportRun(none, missing)), 'starting an import is refused without the import grant')
   check(
     !(await forbidden(() => startImportRun(criticalCtx(['import']), missing))),
