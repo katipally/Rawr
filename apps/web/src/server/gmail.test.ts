@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import { htmlToText, parseAddresses, sanitiseHtml } from './gmail.ts'
+import { mock, test } from 'node:test'
+import type { AccountContext } from '@rawr/db'
+import { authorised, htmlToText, parseAddresses, RevokedError, sanitiseHtml } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -61,4 +62,71 @@ test('flattening to text keeps the words and the line breaks', () => {
   assert.equal(text.includes('Two'), true)
   assert.equal(text.includes('Three & four'), true)
   assert.equal(text.includes('<'), false)
+})
+
+// ------------------------------------------------------------ token handling
+
+type Reply = { status: number; body: unknown; headers?: Record<string, string> }
+
+/** Routes the two hosts this module talks to: the token endpoint and Gmail. */
+const google = (token: () => Reply | Error, gmail: (bearer: string, call: number) => Reply | Error) => {
+  const calls = { token: 0, gmail: 0 }
+  mock.method(globalThis, 'fetch', async (url: URL | string, init?: RequestInit) => {
+    let answer: Reply | Error
+    if (String(url).startsWith('https://oauth2.googleapis.com/token')) {
+      calls.token += 1
+      answer = token()
+    } else {
+      calls.gmail += 1
+      answer = gmail(String(((init as RequestInit).headers as Record<string, string>).authorization), calls.gmail)
+    }
+    if (answer instanceof Error) throw answer
+    return new Response(JSON.stringify(answer.body), { status: answer.status, headers: answer.headers ?? {} })
+  })
+  return calls
+}
+
+const expired = { accessToken: 'old', refreshToken: 'refresh', accessTokenExpiresAt: new Date(0) }
+const noStore = (async () => {}) as never
+const ctx = {} as AccountContext
+const fresh: Reply = { status: 200, body: { access_token: 'new', expires_in: 3600 } }
+
+test('a refresh that fails for any reason but invalid_grant is not a revocation', async () => {
+  for (const failure of [
+    { status: 503, body: { error: 'temporarily_unavailable' } },
+    { status: 400, body: { error: 'invalid_client' } },
+    new TypeError('fetch failed'),
+  ]) {
+    google(() => failure, () => ({ status: 200, body: {} }))
+    await assert.rejects(authorised(ctx, 'm', expired, noStore), (cause) => !(cause instanceof RevokedError))
+    mock.restoreAll()
+  }
+})
+
+test('invalid_grant on refresh is the one answer that revokes', async () => {
+  google(() => ({ status: 400, body: { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' } }), () => ({ status: 200, body: {} }))
+  await assert.rejects(authorised(ctx, 'm', expired, noStore), RevokedError)
+  mock.restoreAll()
+})
+
+test('a token that lapses mid-pass is refreshed once and the call retried', async () => {
+  const live = { ...expired, accessTokenExpiresAt: new Date(Date.now() + 3_600_000) }
+  const calls = google(
+    () => fresh,
+    (bearer) => (bearer === 'Bearer new' ? { status: 200, body: { ok: true } } : { status: 401, body: { error: { status: 'UNAUTHENTICATED' } } }),
+  )
+  const { fetcher } = await authorised(ctx, 'm', live, noStore)
+  assert.deepEqual(await fetcher('/profile'), { ok: true })
+  assert.equal(calls.token, 1)
+  assert.equal(calls.gmail, 2)
+  mock.restoreAll()
+})
+
+test('a 401 that survives a fresh token is a withdrawal, not a loop', async () => {
+  const live = { ...expired, accessTokenExpiresAt: new Date(Date.now() + 3_600_000) }
+  const calls = google(() => fresh, () => ({ status: 401, body: {} }))
+  const { fetcher } = await authorised(ctx, 'm', live, noStore)
+  await assert.rejects(fetcher('/profile'), RevokedError)
+  assert.equal(calls.gmail, 2)
+  mock.restoreAll()
 })

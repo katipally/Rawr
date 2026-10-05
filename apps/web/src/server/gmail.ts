@@ -17,7 +17,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
-import { googleRefresher } from './auth/google.ts'
+import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
 
 /** Reading is what every mailbox is connected for. Nothing about the CRM needs
  *  more than this, and every extra scope widens the blast radius of a leaked
@@ -97,47 +97,61 @@ type Fetcher = (
   send?: { method: 'POST'; body: string },
 ) => Promise<unknown>
 
-/** Refreshes the access token when it is within a minute of expiry, and hands the
- *  new one back so the caller can store it. An access token lasts an hour, and a
- *  back-fill can easily run longer than that. */
-const authorised = async (
+/** Refreshes the access token when it is within a minute of expiry, and again once
+ *  on a 401 for one that expired mid-pass: a back-fill page is fifty sequential
+ *  reads, so a token can lapse part way through. Each new one is stored. */
+export const authorised = async (
   ctx: AccountContext,
   mailboxId: string,
   tokens: { accessToken: string; refreshToken: string; accessTokenExpiresAt: Date | null },
+  persist: typeof updateMailboxCursor = updateMailboxCursor,
 ): Promise<{ fetcher: Fetcher; accessToken: string }> => {
   let accessToken = tokens.accessToken
-  const expiring = tokens.accessTokenExpiresAt && tokens.accessTokenExpiresAt.getTime() - Date.now() < 60_000
 
-  if (expiring && googleConfigured) {
+  const refresh = async (): Promise<void> => {
     try {
       const refreshed = await googleRefresher().refreshAccessToken(tokens.refreshToken)
       accessToken = refreshed.accessToken()
-      await updateMailboxCursor(ctx, mailboxId, {
+      await persist(ctx, mailboxId, {
         accessToken,
         accessTokenExpiresAt: refreshed.accessTokenExpiresAt(),
       })
     } catch (cause) {
-      throw new RevokedError(
-        `Google refused to refresh this mailbox's access: ${cause instanceof Error ? cause.message : String(cause)}`,
-      )
+      // Only invalid_grant says Google withdrew the grant. A timeout, a 5xx or a
+      // DNS failure says nothing about it, and treating one as revocation stops
+      // the mailbox and tells its owner to reconnect over something a retry fixes.
+      if (cause instanceof OAuth2RequestError && cause.code === 'invalid_grant') {
+        throw new RevokedError(`Google refused to refresh this mailbox's access: ${cause.message}`)
+      }
+      throw cause
     }
   }
+
+  const expiring = tokens.accessTokenExpiresAt && tokens.accessTokenExpiresAt.getTime() - Date.now() < 60_000
+  if (expiring && googleConfigured) await refresh()
 
   const fetcher: Fetcher = async (path, params, send) => {
     const url = new URL(`${API}${path}`)
     for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value)
 
-    const response = await fetch(url, {
-      method: send?.method ?? 'GET',
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        ...(send ? { 'content-type': 'application/json' } : {}),
-      },
-      ...(send ? { body: send.body } : {}),
-      // Sending is slower than reading, and a timeout here means a mail that may
-      // or may not have gone out, so it is given longer.
-      signal: AbortSignal.timeout(send ? 45_000 : 20_000),
-    })
+    const request = () =>
+      fetch(url, {
+        method: send?.method ?? 'GET',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          ...(send ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(send ? { body: send.body } : {}),
+        // Sending is slower than reading, and a timeout here means a mail that may
+        // or may not have gone out, so it is given longer.
+        signal: AbortSignal.timeout(send ? 45_000 : 20_000),
+      })
+
+    let response = await request()
+    if (response.status === 401 && googleConfigured) {
+      await refresh()
+      response = await request()
+    }
     if (response.ok) return response.json()
 
     const body = await response.text()
