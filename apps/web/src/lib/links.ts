@@ -225,10 +225,12 @@ export const consentRecordsPath = (
 ): string =>
   `/settings/subscriptions/consent${query(params)}`
 
-/** Outgoing webhooks and unmatched inbound events. Connecting a provider is an
- *  app's own settings tab, so a "connect X" link lands there. */
-export const integrationsPath = (kind?: string): string =>
-  kind ? appPath(kind, 'settings') : '/settings/integrations'
+/** Connecting a provider is an app's own settings tab, so a "connect X" link
+ *  lands there. */
+export const integrationsPath = (kind: string): string => appPath(kind, 'settings')
+
+/** Outgoing webhooks and unmatched inbound events, a tab of Connected apps. */
+export const webhooksPath = (): string => '/apps/webhooks'
 
 /** Connected apps sit above an account, because the credential belongs to the
  *  account, and outside settings, because they have a frame of their own the

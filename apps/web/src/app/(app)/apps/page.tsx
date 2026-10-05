@@ -31,7 +31,7 @@ const AppsPage = async () => {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Connected apps"
-        lead={`${session.accountName} · ${connected.length} connected`}
+        lead={`${session.accountName} · ${connected.length - attention.length} working${attention.length ? `, ${attention.length} needing attention` : ''}`}
         why={
           <p>
             An app is connected once for the whole account and everybody in it uses the same

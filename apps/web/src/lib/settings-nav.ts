@@ -3,10 +3,9 @@ import {
   agentAccessPath,
   auditPath,
   automationsPath,
-  calendarsPath,
+  appsPath,
   defaultsPath,
   failedJobsPath,
-  integrationsPath,
   lifecyclePath,
   mailboxesPath,
   membersPath,
@@ -35,7 +34,7 @@ export type SettingsGroup = { label: string; sections: SettingsSection[] }
  *  `keywords` are for the top bar, not the rail: the word somebody types is often
  *  HubSpot's or their own rather than ours, and "billing" finding nothing is
  *  indistinguishable from the page not existing. */
-export const settingsGroups = (account: string): SettingsGroup[] => [
+export const settingsGroups = (): SettingsGroup[] => [
   {
     label: 'Your preferences',
     sections: [
@@ -61,9 +60,6 @@ export const settingsGroups = (account: string): SettingsGroup[] => [
       { href: lifecyclePath(), label: 'Lifecycle', keywords: ['stages', 'lead', 'customer'] },
       { href: subscriptionsPath(), label: 'Subscriptions', keywords: ['billing', 'unsubscribe', 'consent', 'opt out'] },
       { href: mailboxesPath(), label: 'Mailboxes', keywords: ['gmail', 'email', 'inbox', 'connect'] },
-      // Which Google accounts Rawr may read free-busy from. It sat in the Sales
-      // rail under "Calendar", where people opened it looking for a month.
-      { href: calendarsPath(account), label: 'Calendar connections', keywords: ['google calendar', 'availability'] },
       { href: sitesPath(), label: 'Tracked sites', keywords: ['analytics', 'tracking', 'website', 'pixel'] },
     ],
   },
@@ -71,7 +67,7 @@ export const settingsGroups = (account: string): SettingsGroup[] => [
     label: 'Tools',
     sections: [
       { href: automationsPath(), label: 'Automations', keywords: ['workflows', 'rules', 'triggers'] },
-      { href: integrationsPath(), label: 'Integrations', keywords: ['apps', 'connect', 'apollo', 'brevo', 'slack', 'webhooks'] },
+      { href: appsPath(), label: 'Connected apps', keywords: ['integrations', 'apps', 'connect', 'apollo', 'brevo', 'slack', 'webhooks', 'google calendar', 'calendar connections'] },
       { href: trackingPath(), label: 'Tracking domain', keywords: ['cname', 'links', 'open tracking'] },
       { href: failedJobsPath(), label: 'Failed jobs', keywords: ['queue', 'errors', 'dead letters'] },
     ],

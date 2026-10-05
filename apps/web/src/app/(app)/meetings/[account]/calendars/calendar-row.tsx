@@ -222,8 +222,21 @@ export const CalendarRow = ({
       </div>
 
       {!isSelf && canConnectGoogle ? (
-        <p className="text-xs text-secondary">
-          Only {name} can grant access to their own calendar. Send them this screen.
+        <p className="flex flex-wrap items-center gap-2 text-xs text-secondary">
+          Only {name} can grant access to their own calendar.
+          <Button
+            type="button"
+            variant="tertiary"
+            className="px-1 py-0"
+            onClick={() =>
+              void navigator.clipboard.writeText(window.location.href).then(
+                () => show('success', `Link copied. Send it to ${name}, who connects from it.`),
+                () => show('error', 'Your browser would not let this page use the clipboard. Copy the address by hand.'),
+              )
+            }
+          >
+            Copy link to send
+          </Button>
         </p>
       ) : null}
 

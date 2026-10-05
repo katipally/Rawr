@@ -1,5 +1,5 @@
 import { Tabs } from '@rawr/ui'
-import { appsPath, availableAppsPath } from '~/lib/links.ts'
+import { appsPath, availableAppsPath, webhooksPath } from '~/lib/links.ts'
 
 /** The two halves HubSpot splits its Connected Apps into, minus the marketplace:
  *  what is installed, and what could be. Shared by both screens so the count and
@@ -8,7 +8,7 @@ export const AppsTabs = ({
   current,
   connectedCount,
 }: {
-  current: 'home' | 'available'
+  current: 'home' | 'available' | 'webhooks'
   connectedCount: number
 }) => (
   <Tabs
@@ -26,6 +26,12 @@ export const AppsTabs = ({
         label: 'Available apps',
         href: availableAppsPath(),
         current: current === 'available',
+      },
+      {
+        key: 'webhooks',
+        label: 'Webhooks',
+        href: webhooksPath(),
+        current: current === 'webhooks',
       },
     ]}
   />

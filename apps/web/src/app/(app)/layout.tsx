@@ -8,9 +8,6 @@ import { CommandPalette, type Action } from '~/components/crm/command-palette.ts
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
   accountPath,
-  availabilityPath,
-  bookedPath,
-  bookingPagesPath,
   calendarPath,
   createRecordPath,
   formsPath,
@@ -77,7 +74,6 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           items: [
             { href: segmentsPath(account), label: 'Segments (Lists)', match: `/contacts/${account}/segments` },
             { href: inboxPath(account), label: 'Inbox', match: `/contacts/${account}/inbox` },
-            { href: bookedPath(account), label: 'Meetings', match: `/meetings/${account}/booked` },
             { href: tasksPath(account), label: 'Tasks' },
           ],
         },
@@ -115,9 +111,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
         {
           label: 'Selling',
           items: [
-            { href: calendarPath(account), label: 'Calendar', match: `/meetings/${account}/calendar` },
-            { href: availabilityPath(account), label: 'Availability', match: `/meetings/${account}/availability` },
-            { href: bookingPagesPath(account), label: 'Meetings Scheduler', match: `/meetings/${account}/pages` },
+            { href: calendarPath(account), label: 'Meetings', match: `/meetings/${account}` },
             { href: templatesPath(account), label: 'Templates', match: `/contacts/${account}/templates` },
             { href: sequencesPath(account), label: 'Sequences', match: `/contacts/${account}/sequences` },
           ],
@@ -270,7 +264,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
                     ? [{ label: section.label, section: section.label, href: section.href }]
                     : [],
               ),
-              ...settingsGroups(account).flatMap((group) =>
+              ...settingsGroups().flatMap((group) =>
                 group.sections.map((entry) => ({
                   label: entry.label,
                   section: `Settings · ${group.label}`,

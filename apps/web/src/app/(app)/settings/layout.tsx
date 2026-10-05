@@ -13,7 +13,7 @@ const SettingsLayout = async ({ children }: { children: ReactNode }) => {
   <div className="grid min-h-full bg-surface lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] lg:overflow-hidden">
     <div className="z-10 bg-surface shadow-panel lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       <SettingsNav
-        groups={settingsGroups(session?.accountSlug ?? '')}
+        groups={settingsGroups()}
         backHref={session ? accountHome(session.accountSlug) : '/'}
       />
     </div>
