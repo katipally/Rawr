@@ -34,7 +34,7 @@ test('a Meet room is asked for by name, with the version that makes Google act o
 
   const sent = requests[0]!
   assert.equal(sent.url.searchParams.get('conferenceDataVersion'), '1')
-  const createRequest = (sent.body?.conferenceData as { createRequest: Record<string, unknown> }).createRequest
+  const createRequest = (sent.body!.conferenceData as { createRequest: Record<string, unknown> }).createRequest
   assert.deepEqual(createRequest.conferenceSolutionKey, { type: 'hangoutsMeet' })
   assert.match(String(createRequest.requestId), /^rawr-host-1-/)
   assert.equal(written.conferenceUrl, 'https://meet.google.com/abc-defg-hij')
