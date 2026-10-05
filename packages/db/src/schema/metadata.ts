@@ -84,6 +84,7 @@ export const fieldDef = pgTable(
   (t) => [
     uniqueIndex('field_def_key_key').on(t.accountId, t.objectId, t.key),
     index('field_def_object_idx').on(t.accountId, t.objectId, t.position),
+    index('field_def_object_id_idx').on(t.objectId),
   ],
 )
 
@@ -100,5 +101,9 @@ export const fieldIndex = pgTable(
     lastError: text('last_error'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('field_index_name_key').on(t.pgIndexName)],
+  (t) => [
+    uniqueIndex('field_index_name_key').on(t.pgIndexName),
+    index('field_index_account_id_idx').on(t.accountId),
+    index('field_index_field_id_idx').on(t.fieldId),
+  ],
 )

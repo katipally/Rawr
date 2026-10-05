@@ -54,6 +54,7 @@ export const form = pgTable(
   (t) => [
     uniqueIndex('form_slug_key').on(t.accountId, t.slug),
     index('form_folder_member_idx').on(t.accountId, t.folderId),
+    index('form_folder_id_idx').on(t.folderId),
   ],
 )
 
@@ -84,6 +85,7 @@ export const formView = pgTable(
   (t) => [
     primaryKey({ columns: [t.accountId, t.formId, t.day, t.pagePath] }),
     index('form_view_day_idx').on(t.accountId, t.day, t.formId),
+    index('form_view_form_id_idx').on(t.formId),
   ],
 )
 
@@ -129,6 +131,9 @@ export const formSubmission = pgTable(
     uniqueIndex('form_submission_idempotency_key')
       .on(t.accountId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),
+    index('form_submission_company_id_idx').on(t.companyId),
+    index('form_submission_contact_id_idx').on(t.contactId),
+    index('form_submission_form_id_idx').on(t.formId),
   ],
 )
 
@@ -160,6 +165,8 @@ export const formUpload = pgTable(
       .on(t.accountId, t.at)
       .where(sql`${t.submissionId} is null`),
     index('form_upload_submission_idx').on(t.accountId, t.submissionId),
+    index('form_upload_form_id_idx').on(t.formId),
+    index('form_upload_submission_id_idx').on(t.submissionId),
   ],
 )
 

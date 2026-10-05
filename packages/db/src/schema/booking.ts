@@ -81,6 +81,7 @@ export const bookingPage = pgTable(
   (t) => [
     uniqueIndex('booking_page_slug_key').on(t.accountId, t.slug),
     index('booking_page_owner_idx').on(t.accountId, t.ownerId),
+    index('booking_page_owner_id_idx').on(t.ownerId),
   ],
 )
 
@@ -111,6 +112,8 @@ export const bookingHost = pgTable(
   (t) => [
     primaryKey({ columns: [t.accountId, t.bookingPageId, t.userId] }),
     index('booking_host_user_idx').on(t.accountId, t.userId),
+    index('booking_host_booking_page_id_idx').on(t.bookingPageId),
+    index('booking_host_table_user_id_idx').on(t.userId),
   ],
 )
 
@@ -134,7 +137,10 @@ export const availability = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('availability_user_key').on(t.accountId, t.userId)],
+  (t) => [
+    uniqueIndex('availability_user_key').on(t.accountId, t.userId),
+    index('availability_user_id_idx').on(t.userId),
+  ],
 )
 
 export const availabilityOverride = pgTable(
@@ -153,7 +159,10 @@ export const availabilityOverride = pgTable(
     note: text('note'),
     createdAt: createdAt(),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.userId, t.day] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.userId, t.day] }),
+    index('availability_override_user_id_idx').on(t.userId),
+  ],
 )
 
 export const booking = pgTable(
@@ -210,6 +219,11 @@ export const booking = pgTable(
     index('booking_contact_idx').on(t.accountId, t.contactId),
     uniqueIndex('booking_cancel_token_key').on(t.cancelToken),
     uniqueIndex('booking_reschedule_token_key').on(t.rescheduleToken),
+    index('booking_booking_page_id_idx').on(t.bookingPageId),
+    index('booking_company_id_idx').on(t.companyId),
+    index('booking_contact_id_idx').on(t.contactId),
+    index('booking_host_user_id_idx').on(t.hostUserId),
+    index('booking_reschedule_of_idx').on(t.rescheduleOf),
   ],
 )
 
@@ -255,6 +269,8 @@ export const bookingParticipant = pgTable(
     uniqueIndex('booking_participant_slot_key').on(t.accountId, t.userId, t.startsAt),
     /** The overlap read: one person's commitments in a window. */
     index('booking_participant_window_idx').on(t.accountId, t.userId, t.startsAt, t.endsAt),
+    index('booking_participant_booking_id_idx').on(t.bookingId),
+    index('booking_participant_user_id_idx').on(t.userId),
   ],
 )
 
@@ -277,6 +293,7 @@ export const bookingHold = pgTable(
   (t) => [
     uniqueIndex('booking_hold_token_key').on(t.token),
     index('booking_hold_slot_idx').on(t.accountId, t.bookingPageId, t.startsAt, t.expiresAt),
+    index('booking_hold_booking_page_id_idx').on(t.bookingPageId),
   ],
 )
 
@@ -309,7 +326,10 @@ export const calendarGrant = pgTable(
   /** One connection per person, not one per provider. Two would let free-busy be
    *  read through the development provider while a real Google calendar sat next
    *  to it, which reports no commitments and so offers times somebody is busy. */
-  (t) => [uniqueIndex('calendar_grant_user_key').on(t.accountId, t.userId)],
+  (t) => [
+    uniqueIndex('calendar_grant_user_key').on(t.accountId, t.userId),
+    index('calendar_grant_user_id_idx').on(t.userId),
+  ],
 )
 
 /** One pre-meeting reminder, as the number and unit somebody chose rather than as
@@ -326,7 +346,10 @@ export const bookingReminder = pgTable(
     unit: text('unit').notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('booking_reminder_page_key').on(t.accountId, t.bookingPageId, t.unit, t.amount)],
+  (t) => [
+    uniqueIndex('booking_reminder_page_key').on(t.accountId, t.bookingPageId, t.unit, t.amount),
+    index('booking_reminder_booking_page_id_idx').on(t.bookingPageId),
+  ],
 )
 
 /** Which reminder has already gone for which meeting. The primary key is the whole
@@ -344,7 +367,11 @@ export const bookingReminderSent = pgTable(
       .references(() => bookingReminder.id, { onDelete: 'cascade' }),
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.bookingId, t.reminderId] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.bookingId, t.reminderId] }),
+    index('booking_reminder_sent_booking_id_idx').on(t.bookingId),
+    index('booking_reminder_sent_reminder_id_idx').on(t.reminderId),
+  ],
 )
 
 /** Views per page per day rather than one row per view: a link in a signature is
@@ -360,5 +387,8 @@ export const bookingPageView = pgTable(
     day: date('day').notNull(),
     views: integer('views').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.bookingPageId, t.day] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.bookingPageId, t.day] }),
+    index('booking_page_view_booking_page_id_idx').on(t.bookingPageId),
+  ],
 )

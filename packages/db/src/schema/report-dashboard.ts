@@ -34,5 +34,8 @@ export const reportDashboard = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('report_dashboard_owner_idx').on(t.accountId, t.ownerId)],
+  (t) => [
+    index('report_dashboard_owner_idx').on(t.accountId, t.ownerId),
+    index('report_dashboard_owner_id_idx').on(t.ownerId),
+  ],
 )

@@ -67,6 +67,7 @@ export const visitor = pgTable(
   (t) => [
     primaryKey({ columns: [t.accountId, t.id] }),
     index('visitor_contact_idx').on(t.accountId, t.contactId),
+    index('visitor_contact_id_idx').on(t.contactId),
   ],
 )
 
@@ -96,6 +97,7 @@ export const visitorAlias = pgTable(
       .on(t.createdAt)
       .where(sql`resolved_at is null`),
     index('visitor_alias_contact_idx').on(t.accountId, t.contactId),
+    index('visitor_alias_contact_id_idx').on(t.contactId),
   ],
 )
 
@@ -125,6 +127,7 @@ export const visitorSession = pgTable(
     index('visitor_session_visitor_idx').on(t.accountId, t.visitorId, t.endedAt.desc()),
     index('visitor_session_started_idx').on(t.accountId, t.startedAt.desc()),
     index('visitor_session_channel_idx').on(t.accountId, t.channel, t.startedAt.desc()),
+    index('visitor_session_site_id_idx').on(t.siteId),
   ],
 )
 
@@ -158,6 +161,9 @@ export const pageView = pgTable(
     index('page_view_visitor_idx').on(t.accountId, t.visitorId, t.at.desc()),
     index('page_view_contact_idx').on(t.accountId, t.contactId, t.at.desc()),
     index('page_view_session_idx').on(t.accountId, t.sessionId, t.at),
+    index('page_view_contact_id_idx').on(t.contactId),
+    index('page_view_session_id_idx').on(t.sessionId),
+    index('page_view_site_id_idx').on(t.siteId),
   ],
 )
 
@@ -180,6 +186,9 @@ export const customEvent = pgTable(
       .where(sql`contact_id is null`),
     index('custom_event_visitor_idx').on(t.accountId, t.visitorId, t.at.desc()),
     index('custom_event_contact_idx').on(t.accountId, t.contactId, t.at.desc()),
+    index('custom_event_contact_id_idx').on(t.contactId),
+    index('custom_event_session_id_idx').on(t.sessionId),
+    index('custom_event_site_id_idx').on(t.siteId),
   ],
 )
 
@@ -230,6 +239,7 @@ export const campaign = pgTable(
   (t) => [
     uniqueIndex('campaign_utm_idx').on(t.accountId, sql`lower(${t.utmCampaign})`),
     index('campaign_listing_idx').on(t.accountId, sql`lower(${t.name})`),
+    index('campaign_created_by_idx').on(t.createdBy),
   ],
 )
 
@@ -248,7 +258,10 @@ export const contactActivity = pgTable(
     firstSeenAt: timestamp('first_seen_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.contactId] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.contactId] }),
+    index('contact_activity_contact_id_idx').on(t.contactId),
+  ],
 )
 
 /** Raw page views live 25 months, then collapse to one row per contact per day.
@@ -264,7 +277,10 @@ export const pageViewDaily = pgTable(
     day: date('day').notNull(),
     views: integer('views').notNull().default(0),
   },
-  (t) => [primaryKey({ columns: [t.accountId, t.contactId, t.day] })],
+  (t) => [
+    primaryKey({ columns: [t.accountId, t.contactId, t.day] }),
+    index('page_view_daily_contact_id_idx').on(t.contactId),
+  ],
 )
 
 /** Names seen today, per account. Counting rows here is how the cardinality cap
@@ -306,5 +322,6 @@ export const collectorNotice = pgTable(
   (t) => [
     primaryKey({ columns: [t.accountId, t.siteId, t.kind, t.key, t.day] }),
     index('collector_notice_recent_idx').on(t.accountId, t.lastAt.desc()),
+    index('collector_notice_site_id_idx').on(t.siteId),
   ],
 )

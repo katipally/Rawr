@@ -680,6 +680,13 @@
       "when": 1792169634179,
       "tag": "0095_an_errored_mailbox_is_retried",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792256034179,
+      "tag": "0096_deleting_a_parent_finds_its_children_by_index",
+      "breakpoints": true
     }
   ]
 }

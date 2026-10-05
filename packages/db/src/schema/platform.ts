@@ -25,7 +25,10 @@ export const integration = pgTable(
     installedBy: uuid('installed_by').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('integration_kind_key').on(t.accountId, t.kind)],
+  (t) => [
+    uniqueIndex('integration_kind_key').on(t.accountId, t.kind),
+    index('integration_installed_by_idx').on(t.installedBy),
+  ],
 )
 
 /** A job that fails without landing a row here is a bug, not an incident. */
@@ -48,7 +51,10 @@ export const deadLetter = pgTable(
     replayedAt: timestamp('replayed_at', { withTimezone: true }),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('dead_letter_open_idx').on(t.accountId, t.replayedAt, t.at.desc())],
+  (t) => [
+    index('dead_letter_open_idx').on(t.accountId, t.replayedAt, t.at.desc()),
+    index('dead_letter_integration_id_idx').on(t.integrationId),
+  ],
 )
 
 /** F6 §1. An idempotency key per outbound call, so a retry cannot double-write at
@@ -67,7 +73,10 @@ export const outboundCall = pgTable(
     response: jsonb('response'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('outbound_call_key').on(t.accountId, t.idempotencyKey)],
+  (t) => [
+    uniqueIndex('outbound_call_key').on(t.accountId, t.idempotencyKey),
+    index('outbound_call_integration_id_idx').on(t.integrationId),
+  ],
 )
 
 /** F6 §1. Inbound webhooks, deduplicated on the provider's own event id. A webhook
@@ -190,5 +199,8 @@ export const webhookEndpoint = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('webhook_endpoint_live_idx').on(t.accountId, t.isActive)],
+  (t) => [
+    index('webhook_endpoint_live_idx').on(t.accountId, t.isActive),
+    index('webhook_endpoint_created_by_idx').on(t.createdBy),
+  ],
 )

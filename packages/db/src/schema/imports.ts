@@ -67,6 +67,7 @@ export const importRun = pgTable(
   (t) => [
     index('import_run_recent_idx').on(t.accountId, t.createdAt.desc()),
     index('import_run_signature_idx').on(t.accountId, t.fileSignature, t.createdAt.desc()),
+    index('import_run_created_by_idx').on(t.createdBy),
   ],
 )
 
@@ -95,5 +96,8 @@ export const importRow = pgTable(
      *  file can hand back every one of them, not the first thousand. */
     reason: text('reason'),
   },
-  (t) => [primaryKey({ columns: [t.runId, t.position] })],
+  (t) => [
+    primaryKey({ columns: [t.runId, t.position] }),
+    index('import_row_account_id_idx').on(t.accountId),
+  ],
 )

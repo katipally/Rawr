@@ -1,4 +1,4 @@
-import { jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { accountId, pk } from './columns.ts'
 import { account, userAccount } from './identity.ts'
 
@@ -23,5 +23,8 @@ export const preference = pgTable(
     value: jsonb('value').notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('preference_scope_key_idx').on(t.accountId, t.userId, t.key)],
+  (t) => [
+    uniqueIndex('preference_scope_key_idx').on(t.accountId, t.userId, t.key),
+    index('preference_user_id_idx').on(t.userId),
+  ],
 )

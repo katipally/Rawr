@@ -64,7 +64,11 @@ export const sequence = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('sequence_account_name_key').on(t.accountId, t.name)],
+  (t) => [
+    uniqueIndex('sequence_account_name_key').on(t.accountId, t.name),
+    index('sequence_created_by_idx').on(t.createdBy),
+    index('sequence_owner_id_idx').on(t.ownerId),
+  ],
 )
 
 export const sequenceStep = pgTable(
@@ -92,7 +96,10 @@ export const sequenceStep = pgTable(
     taskTitle: text('task_title'),
     taskBody: text('task_body'),
   },
-  (t) => [index('sequence_step_order_idx').on(t.accountId, t.sequenceId, t.position)],
+  (t) => [
+    index('sequence_step_order_idx').on(t.accountId, t.sequenceId, t.position),
+    index('sequence_step_sequence_id_idx').on(t.sequenceId),
+  ],
 )
 
 export const sequenceEnrollment = pgTable(
@@ -140,6 +147,12 @@ export const sequenceEnrollment = pgTable(
     index('sequence_enrollment_queue_idx').on(t.nextRunAt).where(sql`state = 'active'`),
     index('sequence_enrollment_contact_idx').on(t.accountId, t.contactId),
     index('sequence_enrollment_sequence_idx').on(t.accountId, t.sequenceId, t.state),
+    index('sequence_enrollment_contact_id_idx').on(t.contactId),
+    index('sequence_enrollment_enrolled_by_idx').on(t.enrolledBy),
+    index('sequence_enrollment_mailbox_id_idx').on(t.mailboxId),
+    index('sequence_enrollment_sequence_id_idx').on(t.sequenceId),
+    index('sequence_enrollment_thread_id_idx').on(t.threadId),
+    index('sequence_enrollment_waiting_task_id_idx').on(t.waitingTaskId),
   ],
 )
 
@@ -188,6 +201,11 @@ export const sequenceSend = pgTable(
       .where(sql`enrollment_id is not null and provider_message_id is not null`),
     // The record timeline asks for one contact's tracked mail, newest first.
     index('sequence_send_contact_idx').on(t.accountId, t.contactId, t.sentAt.desc()),
+    index('sequence_send_contact_id_idx').on(t.contactId),
+    index('sequence_send_enrollment_id_idx').on(t.enrollmentId),
+    index('sequence_send_mailbox_id_idx').on(t.mailboxId),
+    index('sequence_send_message_id_idx').on(t.messageId),
+    index('sequence_send_step_id_idx').on(t.stepId),
   ],
 )
 
@@ -206,7 +224,10 @@ export const sequenceLink = pgTable(
     url: text('url').notNull(),
     clickCount: integer('click_count').notNull().default(0),
   },
-  (t) => [index('sequence_link_send_idx').on(t.accountId, t.sendId)],
+  (t) => [
+    index('sequence_link_send_idx').on(t.accountId, t.sendId),
+    index('sequence_link_send_id_idx').on(t.sendId),
+  ],
 )
 
 export const sequenceEvent = pgTable(
@@ -221,7 +242,11 @@ export const sequenceEvent = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
     detail: jsonb('detail'),
   },
-  (t) => [index('sequence_event_enrollment_idx').on(t.accountId, t.enrollmentId, t.at)],
+  (t) => [
+    index('sequence_event_enrollment_idx').on(t.accountId, t.enrollmentId, t.at),
+    index('sequence_event_enrollment_id_idx').on(t.enrollmentId),
+    index('sequence_event_send_id_idx').on(t.sendId),
+  ],
 )
 
 /** A reusable email. Not a sequence step: this is what somebody drops into one,
@@ -247,5 +272,6 @@ export const emailTemplate = pgTable(
     // Two templates called "Intro" is how somebody picks the wrong one.
     uniqueIndex('email_template_name_key').on(t.accountId, sql`lower(${t.name})`),
     index('email_template_recent_idx').on(t.accountId, t.updatedAt),
+    index('email_template_created_by_idx').on(t.createdBy),
   ],
 )

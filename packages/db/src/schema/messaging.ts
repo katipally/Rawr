@@ -76,6 +76,7 @@ export const mailbox = pgTable(
     // than producing a second cursor over the same messages.
     uniqueIndex('mailbox_user_key').on(t.accountId, t.userId),
     index('mailbox_state_idx').on(t.accountId, t.state),
+    index('mailbox_user_id_idx').on(t.userId),
   ],
 )
 
@@ -135,6 +136,8 @@ export const message = pgTable(
     uniqueIndex('message_provider_key').on(t.accountId, t.providerMessageId),
     index('message_thread_idx').on(t.accountId, t.threadId, t.sentAt),
     index('message_internet_id_idx').on(t.accountId, t.internetMessageId),
+    index('message_mailbox_id_idx').on(t.mailboxId),
+    index('message_thread_id_idx').on(t.threadId),
   ],
 )
 
@@ -142,22 +145,28 @@ export const message = pgTable(
  *  page, and a wide row full of a 2MB HTML mail makes every one of those scans
  *  read pages it does not need; Postgres would TOAST the value anyway, so this is
  *  the same storage with an honest name and a narrow parent. */
-export const messageBody = pgTable('message_body', {
-  id: pk(),
-  accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
-  messageId: uuid('message_id')
-    .notNull()
-    .unique()
-    .references(() => message.id, { onDelete: 'cascade' }),
-  textBody: text('text_body').notNull(),
-  /** Sanitised before it is stored, and rendered inside a sandboxed frame with
-   *  images blocked until asked for. Null when it was too large or absent. */
-  htmlBody: text('html_body'),
-  textBytes: integer('text_bytes').notNull().default(0),
-  htmlBytes: integer('html_bytes').notNull().default(0),
-  truncated: boolean('truncated').notNull().default(false),
-  storedAt: timestamp('stored_at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const messageBody = pgTable(
+  'message_body',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .unique()
+      .references(() => message.id, { onDelete: 'cascade' }),
+    textBody: text('text_body').notNull(),
+    /** Sanitised before it is stored, and rendered inside a sandboxed frame with
+     *  images blocked until asked for. Null when it was too large or absent. */
+    htmlBody: text('html_body'),
+    textBytes: integer('text_bytes').notNull().default(0),
+    htmlBytes: integer('html_bytes').notNull().default(0),
+    truncated: boolean('truncated').notNull().default(false),
+    storedAt: timestamp('stored_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('message_body_account_id_idx').on(t.accountId),
+  ],
+)
 
 /** What was attached, not the bytes. A list is what a reader needs; fetching one
  *  goes back to Gmail while a mailbox that can still do so exists. */
@@ -176,7 +185,10 @@ export const messageAttachment = pgTable(
     /** An inline image referenced by the HTML rather than a real attachment. */
     inline: boolean('inline').notNull().default(false),
   },
-  (t) => [index('message_attachment_message_idx').on(t.accountId, t.messageId)],
+  (t) => [
+    index('message_attachment_message_idx').on(t.accountId, t.messageId),
+    index('message_attachment_message_id_idx').on(t.messageId),
+  ],
 )
 
 /** How far each person has read each thread. Per person, because "unread" is not
@@ -194,7 +206,11 @@ export const messageThreadRead = pgTable(
       .references(() => userAccount.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('message_thread_read_key').on(t.accountId, t.threadId, t.userId)],
+  (t) => [
+    uniqueIndex('message_thread_read_key').on(t.accountId, t.threadId, t.userId),
+    index('message_thread_read_thread_id_idx').on(t.threadId),
+    index('message_thread_read_user_id_idx').on(t.userId),
+  ],
 )
 
 export const messageParticipant = pgTable(
@@ -212,6 +228,8 @@ export const messageParticipant = pgTable(
   (t) => [
     uniqueIndex('message_participant_key').on(t.accountId, t.messageId, t.address, t.role),
     index('message_participant_contact_idx').on(t.accountId, t.contactId),
+    index('message_participant_contact_id_idx').on(t.contactId),
+    index('message_participant_message_id_idx').on(t.messageId),
   ],
 )
 
@@ -230,5 +248,8 @@ export const messageBlocklist = pgTable(
     note: text('note'),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('message_blocklist_key').on(t.accountId, t.userId, t.pattern)],
+  (t) => [
+    uniqueIndex('message_blocklist_key').on(t.accountId, t.userId, t.pattern),
+    index('message_blocklist_user_id_idx').on(t.userId),
+  ],
 )

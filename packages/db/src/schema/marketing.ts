@@ -59,6 +59,8 @@ export const subscriptionState = pgTable(
     uniqueIndex('subscription_state_confirm_token_key')
       .on(t.confirmToken)
       .where(sql`confirm_token is not null`),
+    index('subscription_state_contact_id_idx').on(t.contactId),
+    index('subscription_state_subscription_type_id_idx').on(t.subscriptionTypeId),
   ],
 )
 
@@ -82,7 +84,10 @@ export const segment = pgTable(
     lastEvaluatedAt: timestamp('last_evaluated_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('segment_name_key').on(t.accountId, t.name)],
+  (t) => [
+    uniqueIndex('segment_name_key').on(t.accountId, t.name),
+    index('segment_object_id_idx').on(t.objectId),
+  ],
 )
 
 /** Entry and exit are kept, not overwritten, because both are timeline events. */
@@ -101,6 +106,7 @@ export const segmentMembership = pgTable(
   (t) => [
     index('segment_membership_segment_idx').on(t.accountId, t.segmentId, t.entityId),
     index('segment_membership_entity_idx').on(t.accountId, t.entityId),
+    index('segment_membership_segment_id_idx').on(t.segmentId),
   ],
 )
 
@@ -136,5 +142,8 @@ export const savedView = pgTable(
   (t) => [
     index('saved_view_object_idx').on(t.accountId, t.objectId, t.pinned.desc(), t.position),
     uniqueIndex('saved_view_slug_key').on(t.accountId, t.objectId, t.slug),
+    index('saved_view_group_by_field_id_idx').on(t.groupByFieldId),
+    index('saved_view_object_id_idx').on(t.objectId),
+    index('saved_view_owner_id_idx').on(t.ownerId),
   ],
 )

@@ -31,5 +31,8 @@ export const bulkOperation = pgTable(
     updatedAt: updatedAt(),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
-  (t) => [index('bulk_operation_recent_idx').on(t.accountId, t.createdAt.desc())],
+  (t) => [
+    index('bulk_operation_recent_idx').on(t.accountId, t.createdAt.desc()),
+    index('bulk_operation_created_by_idx').on(t.createdBy),
+  ],
 )

@@ -81,6 +81,8 @@ export const company = pgTable(
     index('company_owner_idx').on(t.accountId, t.ownerId),
     index('company_domain_idx').on(t.accountId, t.domain),
     index('company_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
+    index('company_lifecycle_stage_id_idx').on(t.lifecycleStageId),
+    index('company_owner_id_idx').on(t.ownerId),
   ],
 )
 
@@ -146,6 +148,11 @@ export const contact = pgTable(
     index('contact_company_idx').on(t.accountId, t.companyId),
     index('contact_owner_idx').on(t.accountId, t.ownerId),
     index('contact_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
+    index('contact_company_id_idx').on(t.companyId),
+    index('contact_first_campaign_id_idx').on(t.firstCampaignId),
+    index('contact_last_campaign_id_idx').on(t.lastCampaignId),
+    index('contact_lifecycle_stage_id_idx').on(t.lifecycleStageId),
+    index('contact_owner_id_idx').on(t.ownerId),
   ],
 )
 
@@ -174,7 +181,10 @@ export const pipelineStage = pgTable(
     isClosedWon: boolean('is_closed_won').notNull().default(false),
     isClosedLost: boolean('is_closed_lost').notNull().default(false),
   },
-  (t) => [index('pipeline_stage_pipeline_idx').on(t.accountId, t.pipelineId, t.position)],
+  (t) => [
+    index('pipeline_stage_pipeline_idx').on(t.accountId, t.pipelineId, t.position),
+    index('pipeline_stage_pipeline_id_idx').on(t.pipelineId),
+  ],
 )
 
 export const deal = pgTable(
@@ -218,6 +228,10 @@ export const deal = pgTable(
     index('deal_owner_idx').on(t.accountId, t.ownerId),
     index('deal_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
     index('deal_score_idx').on(t.accountId, t.score.desc().nullsLast()),
+    index('deal_company_id_idx').on(t.companyId),
+    index('deal_owner_id_idx').on(t.ownerId),
+    index('deal_pipeline_id_idx').on(t.pipelineId),
+    index('deal_stage_id_idx').on(t.stageId),
   ],
 )
 
@@ -270,6 +284,7 @@ export const activity = pgTable(
     index('activity_occurred_idx').on(t.accountId, t.occurredAt.desc(), t.id.desc()),
     index('activity_search_idx').using('gin', t.search),
     uniqueIndex('activity_import_key_idx').on(t.accountId, t.importKey).where(sql`import_key is not null`),
+    index('activity_mailbox_id_idx').on(t.mailboxId),
   ],
 )
 
@@ -305,6 +320,7 @@ export const activityLink = pgTable(
       t.activityId.desc(),
     ),
     index('activity_link_type_idx').on(t.accountId, t.entityType, t.entityId, t.type),
+    index('activity_link_mailbox_id_idx').on(t.mailboxId),
   ],
 )
 
@@ -329,7 +345,10 @@ export const taskQueue = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex('task_queue_name_idx').on(t.accountId, sql`lower(${t.name})`)],
+  (t) => [
+    uniqueIndex('task_queue_name_idx').on(t.accountId, sql`lower(${t.name})`),
+    index('task_queue_created_by_idx').on(t.createdBy),
+  ],
 )
 
 /** A9. One task hangs on at most one record, which is how HubSpot's task queue
@@ -365,6 +384,9 @@ export const task = pgTable(
     index('task_remind_idx')
       .on(t.remindAt)
       .where(sql`status = 'open' and remind_at is not null`),
+    index('task_assignee_id_idx').on(t.assigneeId),
+    index('task_created_by_idx').on(t.createdBy),
+    index('task_queue_id_idx').on(t.queueId),
   ],
 )
 
@@ -399,6 +421,7 @@ export const attachment = pgTable(
     /** An upload retried writes the same key, and without this the record would
      *  show the same file twice. */
     uniqueIndex('attachment_storage_key').on(t.accountId, t.storageKey),
+    index('attachment_uploaded_by_idx').on(t.uploadedBy),
   ],
 )
 
@@ -429,6 +452,7 @@ export const attachmentUpload = pgTable(
     uniqueIndex('attachment_upload_key_idx').on(t.accountId, t.storageKey),
     /** What the sweep in `beginAttachment` filters on. */
     index('attachment_upload_expiry_idx').on(t.expiresAt),
+    index('attachment_upload_user_id_idx').on(t.userId),
   ],
 )
 
@@ -451,7 +475,10 @@ export const duplicateDismissal = pgTable(
     dismissedBy: uuid('dismissed_by').references(() => userAccount.id, { onDelete: 'set null' }),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('duplicate_dismissal_pair_idx').on(t.accountId, t.entityType, t.leftId, t.rightId)],
+  (t) => [
+    uniqueIndex('duplicate_dismissal_pair_idx').on(t.accountId, t.entityType, t.leftId, t.rightId),
+    index('duplicate_dismissal_dismissed_by_idx').on(t.dismissedBy),
+  ],
 )
 
 /** A row of an object an admin invented.
@@ -480,5 +507,10 @@ export const customRecord = pgTable(
     updatedAt: updatedAt(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (t) => [index('custom_record_object_idx').on(t.accountId, t.objectId, t.createdAt.desc())],
+  (t) => [
+    index('custom_record_object_idx').on(t.accountId, t.objectId, t.createdAt.desc()),
+    index('custom_record_account_id_idx').on(t.accountId),
+    index('custom_record_object_id_idx').on(t.objectId),
+    index('custom_record_owner_id_idx').on(t.ownerId),
+  ],
 )

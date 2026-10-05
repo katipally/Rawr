@@ -41,6 +41,7 @@ export const mcpToken = pgTable(
     uniqueIndex('mcp_token_hash_key').on(t.tokenHash),
     uniqueIndex('mcp_token_refresh_key').on(t.refreshHash),
     index('mcp_token_user_idx').on(t.accountId, t.userId, t.createdAt.desc()),
+    index('mcp_token_user_id_idx').on(t.userId),
   ],
 )
 
@@ -77,7 +78,11 @@ export const mcpOauthCode = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('mcp_oauth_code_hash_key').on(t.codeHash)],
+  (t) => [
+    uniqueIndex('mcp_oauth_code_hash_key').on(t.codeHash),
+    index('mcp_oauth_code_account_id_idx').on(t.accountId),
+    index('mcp_oauth_code_user_id_idx').on(t.userId),
+  ],
 )
 
 /** F5 §Edge cases, "the same write is retried after a timeout".
@@ -104,5 +109,6 @@ export const mcpCall = pgTable(
   (t) => [
     uniqueIndex('mcp_call_key_key').on(t.accountId, t.tokenId, t.idempotencyKey),
     index('mcp_call_age_idx').on(t.createdAt),
+    index('mcp_call_token_id_idx').on(t.tokenId),
   ],
 )

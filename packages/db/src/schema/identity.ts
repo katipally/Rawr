@@ -96,7 +96,12 @@ export const membership = pgTable(
     sessionsValidAfter: timestamp('sessions_valid_after', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('membership_account_user_key').on(t.accountId, t.userId)],
+  (t) => [
+    uniqueIndex('membership_account_user_key').on(t.accountId, t.userId),
+    index('membership_deactivated_by_idx').on(t.deactivatedBy),
+    index('membership_invited_by_idx').on(t.invitedBy),
+    index('membership_user_id_idx').on(t.userId),
+  ],
 )
 
 /** A seat offered to an address, with the grants it will carry. The token is
@@ -121,7 +126,10 @@ export const invitation = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
-  (t) => [index('invitation_account_idx').on(t.accountId, t.createdAt.desc())],
+  (t) => [
+    index('invitation_account_idx').on(t.accountId, t.createdAt.desc()),
+    index('invitation_invited_by_idx').on(t.invitedBy),
+  ],
 )
 
 /** A team inside the account. Round robin assignment rotates within a team, so a
@@ -152,7 +160,10 @@ export const teamMember = pgTable(
     isLead: boolean('is_lead').notNull().default(false),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex('team_member_team_user_key').on(t.teamId, t.userId)],
+  (t) => [
+    uniqueIndex('team_member_team_user_key').on(t.teamId, t.userId),
+    index('team_member_account_id_idx').on(t.accountId),
+  ],
 )
 
 /** Append only. The migration revokes UPDATE and DELETE from the app role, so a

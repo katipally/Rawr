@@ -45,6 +45,7 @@ export const automation = pgTable(
   (t) => [
     /** The only query the runner makes: what is armed for this event. */
     index('automation_trigger_idx').on(t.accountId, t.trigger, t.isActive),
+    index('automation_created_by_idx').on(t.createdBy),
   ],
 )
 
@@ -105,5 +106,6 @@ export const automationRun = pgTable(
     uniqueIndex('automation_run_scan_idx')
       .on(t.accountId, t.automationId, t.entityId, t.scanDay)
       .where(sql`scan_day is not null`),
+    index('automation_run_automation_id_idx').on(t.automationId),
   ],
 )

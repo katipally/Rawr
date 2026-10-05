@@ -47,5 +47,7 @@ export const notification = pgTable(
     index('notification_unread_idx').on(t.accountId, t.userId, t.at.desc()),
     index('notification_all_idx').on(t.accountId, t.userId, t.at.desc()),
     index('notification_trash_idx').on(t.accountId, t.userId, t.trashedAt.desc()),
+    index('notification_actor_id_idx').on(t.actorId),
+    index('notification_user_id_idx').on(t.userId),
   ],
 )
