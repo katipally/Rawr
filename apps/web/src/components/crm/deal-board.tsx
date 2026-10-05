@@ -29,6 +29,7 @@ export type BoardCard = {
   daysInStage: number
   daysSinceActivity: number | null
   score: number | null
+  updatedAt: string
   nextTask: { title: string; dueDate: string | null } | null
   contacts: string[]
   contactCount: number
@@ -180,9 +181,11 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
   }
 
   const move = async (dealId: string, columnKey: string) => {
+    const card = columns.flatMap(shownCards).find((candidate) => candidate.id === dealId)
+    if (!card) return
     setMoving(dealId)
     try {
-      await api.crm.board.moveCard.mutate({ dealId, field: groupByKey, value: columnKey })
+      await api.crm.board.moveCard.mutate({ dealId, field: groupByKey, value: columnKey, expectedUpdatedAt: card.updatedAt })
       toast(
         'success',
         groupByKey === 'stage_id'
@@ -192,8 +195,11 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
       setPages({})
       router.refresh()
     } catch (cause) {
-      // The card snaps back because the server never accepted the move.
+      // The card snaps back because the server never accepted the move. Reread,
+      // because a refusal for a stale card is only fixed by the card it is now.
       toast('error', errorMessage(cause))
+      setPages({})
+      router.refresh()
     } finally {
       setMoving(null)
       setDragging(null)

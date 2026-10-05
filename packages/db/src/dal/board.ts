@@ -24,6 +24,9 @@ export type BoardCard = {
   /** 0 to 100, computed by the nightly job and on a stage change. Null until it
    *  has been computed once. */
   score: number | null
+  /** What the board last read, sent back with a move so a card somebody else has
+   *  changed since is refused rather than dragged over their edit. */
+  updatedAt: string
   /** The next open task on the deal, which is what the card's activity chip
    *  offers to change. Null when there is none, and the chip offers to make one. */
   nextTask: { title: string; dueDate: string | null } | null
@@ -128,6 +131,7 @@ type CardRow = {
   days_in_stage: number
   days_since_activity: number | null
   score: number | null
+  updated_at: Date | string
   next_task_title: string | null
   next_task_due: string | null
   contact_names: string[] | null
@@ -157,6 +161,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
              "deal"."next_step" as next_step,
              "deal"."next_step_date"::text as next_step_date,
              "deal"."created_at" as created_at,
+             "deal"."updated_at" as updated_at,
              "deal"."score" as score,
              u."name" as owner_name,
              coalesce(c."name", c."domain") as company_name,
@@ -171,7 +176,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
     ),
     visible as (select * from ranked where rank > ${after} and rank <= ${upTo})
     select w.id, w.group_key, w.name, w.amount, w.currency, w.close_date, w.next_step,
-           w.next_step_date, w.owner_name, w.company_name, w.score,
+           w.next_step_date, w.owner_name, w.company_name, w.score, w.updated_at,
            -- Two correlated reads per visible card, over the index the timeline
            -- already has. Not a join: a deal with four hundred activities would
            -- multiply every row of the board.
@@ -237,6 +242,7 @@ const toCard = (object: RegistryObject, card: CardRow): BoardCard => ({
       ? null
       : Number(card.days_since_activity),
   score: card.score === null || card.score === undefined ? null : Number(card.score),
+  updatedAt: new Date(card.updated_at).toISOString(),
   nextTask: card.next_task_title ? { title: card.next_task_title, dueDate: card.next_task_due } : null,
   contacts: card.contact_names ?? [],
   contactCount: Number(card.contact_count ?? 0),

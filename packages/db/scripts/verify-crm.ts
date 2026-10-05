@@ -304,6 +304,18 @@ try {
     return 'conflict raised, the other edit survived'
   })
 
+  await check('two writes holding the same version cannot both land', async () => {
+    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const held = await getRecord(sales, 'deal', deal!.id)
+    const settled = await Promise.allSettled([
+      updateRecord(sales, 'deal', deal!.id, { next_step: 'Race A' }, held!.updatedAt),
+      updateRecord(sales, 'deal', deal!.id, { next_step: 'Race B' }, held!.updatedAt),
+    ])
+    const refused = settled.filter((outcome) => outcome.status === 'rejected' && outcome.reason instanceof ConflictError)
+    expect(settled.filter((outcome) => outcome.status === 'fulfilled').length === 1 && refused.length === 1, 'both writes were accepted, or neither')
+    return 'one landed, the other was told it was stale'
+  })
+
   await check('a 500-character name is stored, not rejected', async () => {
     const long = 'x'.repeat(500)
     const created = await createRecord(sales, 'company', { name: long, domain: `long${Date.now()}.example` })

@@ -261,9 +261,9 @@ export const crmRouter = router({
           object: anyObject,
           id: z.uuid(),
           values: recordValues,
-          /** Sent by every editor. A stale write is refused rather than silently
-           *  overwriting whoever saved in between. */
-          expectedUpdatedAt: z.coerce.date().nullish(),
+          /** What the editor last read. A stale write is refused rather than
+           *  silently overwriting whoever saved in between. */
+          expectedUpdatedAt: z.coerce.date(),
         }),
       )
       .mutation(({ ctx, input }) =>
@@ -273,7 +273,7 @@ export const crmRouter = router({
             input.object,
             input.id,
             input.values,
-            input.expectedUpdatedAt ?? null,
+            input.expectedUpdatedAt,
           )
           announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, input.object, input.id, result)
@@ -485,13 +485,18 @@ export const crmRouter = router({
           dealId: z.uuid(),
           field: z.string().min(1).max(64),
           value: z.string().min(1).max(200),
+          expectedUpdatedAt: z.coerce.date(),
         }),
       )
       .mutation(({ ctx, input }) =>
         call(async () => {
-          const result = await updateRecord(ctx.account, 'deal', input.dealId, {
-            [input.field]: input.value,
-          })
+          const result = await updateRecord(
+            ctx.account,
+            'deal',
+            input.dealId,
+            { [input.field]: input.value },
+            input.expectedUpdatedAt,
+          )
           announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, 'deal', input.dealId, result)
           return result

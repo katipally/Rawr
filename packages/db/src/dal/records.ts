@@ -1073,7 +1073,7 @@ const updateRecordIn = async (
     throw new Error('Nothing was changed.')
   }
 
-  const before = await readForWrite(tx, object, id)
+  const before = await readForWrite(tx, object, id, false, true)
   if (!before) throw new Error('That record no longer exists.')
   if (expectedUpdatedAt && before.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
     throw new ConflictError(before.updated_at)
@@ -1221,6 +1221,9 @@ const readForWrite = async (
   /** A soft-deleted row is still the row somebody ticked, and reading it is the
    *  difference between naming it in a refusal and printing its uuid. */
   includeDeleted = false,
+  /** Holds the row until the transaction ends, so a check against what was read
+   *  and the write that follows cannot have a second writer between them. */
+  lock = false,
 ): Promise<(RecordValues & { updated_at: Date }) | undefined> => {
   const fields = object.fields.map((field) => fieldOrThrow(object, field.key))
   const [row] = await tx.execute<RecordValues & { updated_at: Date }>(sql`
@@ -1229,7 +1232,7 @@ const readForWrite = async (
       from ${tableFor(object)}
      where ${sql.raw(`"${object.key}"."id"`)} = ${id}
        and ${includeDeleted ? rowsOf(object) : NOT_DELETED(object)}
-     limit 1`)
+     limit 1${lock ? sql` for update` : sql``}`)
   if (!row) return undefined
   return { ...row, updated_at: asDate(row.updated_at), created_at: asDate(row.created_at) }
 }
