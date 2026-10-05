@@ -12,7 +12,7 @@ import { dispatchEnrichment, enrichmentJobs } from './jobs/enrichment.ts'
 import { evaluateSegments } from './jobs/evaluate-segments.ts'
 import { fillFieldRates } from './jobs/fill-rates.ts'
 import { dispatchImports, importJobs } from './jobs/imports.ts'
-import { notificationReminders, notificationSweep } from './jobs/notification-sweep.ts'
+import { notificationOverdue, notificationReminders, notificationSweep } from './jobs/notification-sweep.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
 import { syncApollo } from './jobs/sync-apollo.ts'
 import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
@@ -28,6 +28,7 @@ const JOBS: Job[] = [
   stitchVisitor,
   rollUpActivity,
   notificationSweep,
+  notificationOverdue,
   notificationReminders,
   evaluateSegments,
   fillFieldRates,
@@ -104,10 +105,9 @@ await boss.schedule(dispatchStitches.name, '* * * * *', {})
 // The daily jobs, declared once so the boot-time catch-up below asks about
 // the same times the schedule fires at. The roll-up is nightly: retention is
 // measured in months, so the hour it runs does not matter, only that it runs off
-// the request path. The sweep is early morning. The only notice with no event
-// behind it is "this task is overdue", because a task does not become overdue, it
-// stops not being, and telling somebody at seven is telling them before they
-// start rather than during. The same pass is what bounds the table.
+// the request path. The sweep is early morning and is what bounds the notification
+// table. Neither is tied to an account's day, so both stay on UTC; the one notice
+// that is, "this task is overdue", runs hourly below.
 const DAILY: { job: Job; at: DailyAt }[] = [
   { job: rollUpActivity, at: { hourUtc: 3, minuteUtc: 30 } },
   { job: notificationSweep, at: { hourUtc: 7, minuteUtc: 0 } },
@@ -125,6 +125,8 @@ for (const daily of DAILY) await boss.schedule(daily.job.name, cronFor(daily.at)
 // A reminder is set for an instant, so it cannot wait for the nightly sweep. A
 // quarter hour is the bound on how late one arrives.
 await boss.schedule(notificationReminders.name, '*/15 * * * *', {})
+// Hourly because each account's morning falls at a different UTC hour.
+await boss.schedule(notificationOverdue.name, '0 * * * *', {})
 await boss.schedule(evaluateSegments.name, '0 * * * *', {})
 // F1 phase B. Every ten minutes: connected mailboxes catch up, and one still
 // reading its history queues its own next page immediately rather than waiting.

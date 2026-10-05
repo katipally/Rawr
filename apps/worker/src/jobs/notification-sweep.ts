@@ -5,7 +5,8 @@ import { defineJob } from './registry.ts'
 /** The two things a stored notification needs that no write path can do.
  *
  *  First, the one notice with no event behind it: a task does not become overdue,
- *  it simply stops not being. Somebody has to notice, once a day, in the morning.
+ *  it simply stops not being. Somebody has to notice, each morning of the account's
+ *  own timezone.
  *
  *  Second, a bound. Every other table here is bounded by what people create; this
  *  one is bounded by what happens, which is unbounded. Four rules rather than one
@@ -18,6 +19,8 @@ import { defineJob } from './registry.ts'
 /** Trash is an undo window, not an archive. */
 const TRASHED_DAYS = 30
 const READ_DAYS = 90
+/** Telling somebody at seven is telling them before they start rather than during. */
+const MORNING_HOUR = 7
 /** An unread notice about a task from six months ago is noise, and leaving it
  *  makes the badge permanently non-zero, which is how a badge stops being read. */
 const UNREAD_DAYS = 180
@@ -27,15 +30,18 @@ const KEEP_PER_PERSON = 500
  *  page. */
 const BATCH = 10_000
 
-export const notificationSweep = defineJob({
-  name: 'notifications.sweep',
+/** Hourly rather than daily, because the morning is the account's and a cron
+ *  string has one timezone. From seven local on, an account's tasks that are past
+ *  due get their notice; the key carries the due date, so the later passes of the
+ *  same day and a worker that slept through seven are both no-ops. One statement
+ *  across every account, from the owner pool: the assignee is the recipient, so
+ *  there is no per-account fan-out. Rides task_queue_idx rather than scanning task. */
+export const notificationOverdue = defineJob({
+  name: 'notifications.overdue',
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 300,
   handle: async () => {
-    // One statement across every account, from the owner pool: the assignee is
-    // the recipient, so there is no per-account fan-out to do. Rides
-    // task_queue_idx rather than scanning task.
     const [made] = await owner`
       insert into notification (account_id, user_id, kind, dedupe_key, title, body, entity, entity_id)
       select t.account_id, t.assignee_id, 'task_overdue',
@@ -49,9 +55,20 @@ export const notificationSweep = defineJob({
          and t.assignee_id is not null
          and t.due_date is not null
          and t.due_date < (now() at time zone a.timezone)::date
+         and extract(hour from now() at time zone a.timezone) >= ${MORNING_HOUR}::int
       on conflict (account_id, user_id, dedupe_key) do nothing
       returning 1`.then((rows) => [rows.length])
 
+    if (made) console.log(`[notifications] ${made} overdue notices.`)
+  },
+})
+
+export const notificationSweep = defineJob({
+  name: 'notifications.sweep',
+  schema: z.object({}),
+  retryLimit: 3,
+  retryDelaySeconds: 300,
+  handle: async () => {
     let removed = 0
     for (const rule of [
       owner`delete from notification where ctid in (
@@ -78,7 +95,7 @@ export const notificationSweep = defineJob({
       removed += result.count ?? 0
     }
 
-    console.log(`[notifications] ${made ?? 0} overdue notices, ${removed} rows retired.`)
+    console.log(`[notifications] ${removed} rows retired.`)
   },
 })
 
