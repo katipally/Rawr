@@ -1,4 +1,5 @@
 import {
+  canView,
   listAssignable,
   listAutomationRuns,
   listAutomations,
@@ -61,9 +62,9 @@ const AutomationsPage = async () => {
     listLifecycleStages(ctx),
     listFields(ctx),
     getRegistry(ctx),
-    listEmailTemplates(ctx),
+    canView(ctx, 'sales') ? listEmailTemplates(ctx) : [],
     listMailboxes(ctx),
-    listSequences(ctx),
+    canView(ctx, 'sales') ? listSequences(ctx) : [],
   ])
 
   // Every object in the account, not the three written out: "a record is

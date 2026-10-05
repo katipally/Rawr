@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { MAX_ROWS, type Range } from './reporting.ts'
 
@@ -146,6 +146,7 @@ export const eventCountsByDay = async (
   names: string[] = [],
 ): Promise<EventDayCount[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'events')
     const only = names.length > 0
       ? sql`and e.name = any(array[${sql.join(names.map((name) => sql`${name}::text`), sql`, `)}])`
       : sql``
@@ -195,6 +196,7 @@ export const eventFunnel = async (
   if (steps.length < FUNNEL_MIN_STEPS) return []
 
   return withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'events')
     // Each step's CTE is the visitors who reached the one before it, plus the
     // first time they fired this step's name at or after that moment.
     const reached = steps.map((name, index) => {

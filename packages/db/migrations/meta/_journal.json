@@ -624,6 +624,13 @@
       "when": 1791478434179,
       "tag": "0087_account_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1791564834179,
+      "tag": "0088_view_hub_reads_the_seat",
+      "breakpoints": true
     }
   ]
 }

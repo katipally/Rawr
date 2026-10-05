@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { addDays, dayKey, zonedTimeToUtc } from './slots.ts'
 
@@ -148,6 +148,7 @@ const closedDeals = (range: Range, zone: string) => sql`
  *  many closed either way, where the open ones are sitting, and who holds them. */
 export const pipelineReport = async (ctx: AccountContext, range: Range): Promise<PipelineReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     const zone = await accountZone(ctx, tx)
 
     const weeks = await tx.execute<{ week: string; created: number; won: number; lost: number }>(sql`
@@ -289,6 +290,7 @@ export type FormsReport = {
  *  is filling in, unless both lines are on the chart. */
 export const formsReport = async (ctx: AccountContext, range: Range): Promise<FormsReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     const zone = await accountZone(ctx, tx)
     const days = await tx.execute<{ day: string; clean: number; held: number }>(sql`
       with days as (${calendar(range, 'day', zone)})
@@ -379,6 +381,7 @@ export type SequencesReport = {
  *  same send opened by a privacy proxy and by the recipient is still one. */
 export const sequencesReport = async (ctx: AccountContext, range: Range): Promise<SequencesReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     const sequences = await tx.execute<{
       sequence: string
       sent: number
@@ -450,6 +453,7 @@ export type EmailReport = {
  *  look like it replies within a day. */
 export const emailReport = async (ctx: AccountContext, range: Range): Promise<EmailReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     const mailboxes = await tx.execute<{ mailbox: string | null; sent: number; received: number; threads: number }>(sql`
       select coalesce(b.email, 'A disconnected mailbox') as mailbox,
              count(*) filter (where m.direction = 'outbound')::int as sent,
@@ -513,6 +517,7 @@ export type WebsiteReport = {
  *  CRM. */
 export const websiteReport = async (ctx: AccountContext, range: Range): Promise<WebsiteReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     const channels = await tx.execute<{ channel: string | null; sessions: number; identified: number }>(sql`
       select coalesce(s.channel, 'Not attributed') as channel,
              count(*)::int as sessions,
@@ -590,6 +595,7 @@ export type AttributionReport = {
  *  report that quietly excludes half the contacts is worse than one that admits it. */
 export const attributionReport = async (ctx: AccountContext, range: Range): Promise<AttributionReport> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'reports')
     // Last touch falls back to the first: if the only touch anybody recorded is
     // the one that found them, then it is also the most recent one. Without this,
     // every contact who arrived once and never came back reads as unattributed on

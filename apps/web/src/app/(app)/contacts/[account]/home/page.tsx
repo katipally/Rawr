@@ -1,4 +1,5 @@
 import {
+  canView,
   listForms,
   listGrants,
   listImportRuns,
@@ -178,7 +179,7 @@ const HomePage = async ({
       // What an admin still has to switch on. Read only for them: nobody else can
       // act on it, and six extra queries for a viewer would buy nothing.
       isAdmin
-        ? Promise.all([listIntegrations(ctx), listGrants(ctx), listForms(ctx), listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
+        ? Promise.all([listIntegrations(ctx), listGrants(ctx), canView(ctx, 'marketing') ? listForms(ctx) : [], listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
         : null,
     ]),
   )

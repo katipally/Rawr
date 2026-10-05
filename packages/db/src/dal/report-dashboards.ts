@@ -1,7 +1,7 @@
 import { asc, eq, isNull, or } from 'drizzle-orm'
 import { reportDashboard } from '../schema/report-dashboard.ts'
 import { userAccount } from '../schema/identity.ts'
-import { isAdmin, type AccountContext } from './context.ts'
+import { assertCanView, isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 
 /** B11. Reports somebody assembled.
@@ -34,6 +34,7 @@ const cardsOf = (value: unknown): string[] =>
  *  the viewer's role can already open. */
 export const listReportDashboards = async (ctx: AccountContext): Promise<ReportDashboardRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'dashboards')
     const rows = await tx
       .select({
         id: reportDashboard.id,
@@ -58,6 +59,7 @@ export const listReportDashboards = async (ctx: AccountContext): Promise<ReportD
 
 export const readReportDashboard = async (ctx: AccountContext, id: string): Promise<ReportDashboardRow | null> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'dashboards')
     const [row] = await tx
       .select({
         id: reportDashboard.id,

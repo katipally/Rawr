@@ -227,6 +227,13 @@ export const canWrite = (ctx: AccountContext, entity: string): boolean => {
   return VIEW_IS_ENOUGH.has(entity) ? canView(ctx, hub) : canEdit(ctx, hub)
 }
 
+/** The read side of the same map: a screen belongs to a hub, and holding neither
+ *  its view nor its edit grant refuses the read itself, not only the link to it.
+ *  Asked in the layer so a page, a procedure and an agent token all meet it. */
+export const assertCanView = (ctx: AccountContext, hub: Hub, what: string): void => {
+  if (!canView(ctx, hub)) throw new ForbiddenError(hub, `see ${what}`)
+}
+
 export const assertCanWrite = (ctx: AccountContext, entity: string): void => {
   if (!canWrite(ctx, entity)) {
     throw new ForbiddenError(WRITE_HUB[entity] ?? 'account', `change ${entity} records`)

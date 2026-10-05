@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { HubGate } from '~/components/hub-gate.tsx'
 import { ZoneProvider } from '~/components/zone.tsx'
 import { readSession } from '~/server/session.ts'
 
@@ -11,9 +12,11 @@ import { readSession } from '~/server/session.ts'
 const ReportsLayout = async ({ children }: { children: ReactNode }) => {
   const session = await readSession()
   return (
-    <ZoneProvider zone={session?.accountTimezone ?? 'UTC'}>
-      <div className="flex min-w-0 flex-col gap-4">{children}</div>
-    </ZoneProvider>
+    <HubGate hub="reports" what="Reports">
+      <ZoneProvider zone={session?.accountTimezone ?? 'UTC'}>
+        <div className="flex min-w-0 flex-col gap-4">{children}</div>
+      </ZoneProvider>
+    </HubGate>
   )
 }
 

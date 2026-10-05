@@ -551,8 +551,10 @@ try {
   section('roles and tenancy')
 
   const viewer = await actorCtx(SANDBOX.slug, 'viewer@sandbox.test', [])
-  check('a viewer can read the queue', (await listSubmissions(viewer, { state: 'clean' })).length >= 0,
-    'read allowed')
+  check('a viewer with no marketing hub cannot read the queue', await refusesAsync(() => listSubmissions(viewer, { state: 'clean' })),
+    'refused in the data access layer')
+  check('a viewer holding the marketing view grant can',
+    (await listSubmissions({ ...viewer, viewHubs: ['marketing'] }, { state: 'clean' })).length >= 0, 'read allowed')
   check('a viewer cannot release a held lead',
     await refusesAsync(() => releaseSubmission(viewer, quarantined.submissionId)), 'refused in the data access layer')
   check('a viewer cannot change a form',

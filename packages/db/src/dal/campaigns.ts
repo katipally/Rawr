@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { MAX_ROWS, type Range } from './reporting.ts'
 
@@ -235,6 +235,7 @@ export const campaignPerformance = async (
   range: Range,
 ): Promise<CampaignPerformance[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'reports', 'campaign results')
     const rows = await tx.execute<{
       id: string
       name: string

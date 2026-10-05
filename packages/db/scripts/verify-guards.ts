@@ -15,6 +15,11 @@ import { startImportRun } from '../src/dal/imports.ts'
 import { deleteView } from '../src/dal/views.ts'
 import { deleteSegment, evaluateSegment, saveSegment } from '../src/dal/segments.ts'
 import { rematchInbound } from '../src/dal/integrations.ts'
+import { formsReport, pipelineReport } from '../src/dal/reporting.ts'
+import { listForms } from '../src/dal/forms.ts'
+import { listSequences } from '../src/dal/sequences.ts'
+import { listSegments } from '../src/dal/segments.ts'
+import { listReportDashboards } from '../src/dal/report-dashboards.ts'
 import { bulkDeleteRecords, deleteRecord, listRecords, mergeRecords } from '../src/dal/records.ts'
 import { setMemberGrants } from '../src/dal/members.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
@@ -421,6 +426,50 @@ try {
   await owner`insert into contact (account_id, first_name, last_name, email)
     values (${accountId}, 'Scope', 'Unowned', ${`scope.u.${scopeStamp}@guard.test`})`
   check(await held(salesSeat.id) === ownOnly + 1, 'an unassigned record is visible at every scope')
+
+  // ------------------------------------------------------------ view hubs
+  // A hub nobody granted is not readable, not merely not linked to. The record
+  // tables are refused by the policy (so the exporter and an agent meet it too),
+  // the screens by the layer.
+  const dealsHeld = async (userId: string, hubs: Hub[]) => {
+    const ctx: AccountContext = {
+      accountId, actorId: userId, actorKind: 'user', isSuperAdmin: false, viewHubs: hubs, editHubs: [],
+    }
+    return (await listRecords(ctx, { object: 'deal', limit: 1, count: true })).total ?? 0
+  }
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: ['contacts', 'sales'], editHubs: [] })
+  const dealsWithHub = await dealsHeld(salesSeat.id, ['contacts', 'sales'])
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: ['contacts'], editHubs: [] })
+  check(dealsWithHub > 0 && (await dealsHeld(salesSeat.id, ['contacts'])) === 0,
+    'a seat without the sales hub reads no deals, however it asks', `${dealsWithHub} with the hub`)
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: [], editHubs: [] })
+  check((await held(salesSeat.id)) === 0, 'a seat with no hubs reads no contacts')
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: [], editHubs: ['contacts'] })
+  check((await held(salesSeat.id)) > 0, 'an edit grant reads what a view grant would')
+
+  const [outsider] = await owner<{ id: string }[]>`
+    select u.id from user_account u
+     where not exists (select 1 from membership m where m.user_id = u.id and m.account_id = ${accountId}) limit 1`
+  if (outsider) {
+    check((await held(outsider.id)) === 0, 'a user with no seat in the account reads nothing in it')
+  }
+
+  const screenCtx = (seat: Seat, view: Hub[] = []): AccountContext => ({
+    accountId, actorId, actorKind: 'user', isSuperAdmin: false, viewHubs: view, editHubs: [...SEATS[seat]],
+  })
+  const range = { from: new Date(Date.now() - 7 * 864e5), to: new Date() }
+  const screens: [string, (ctx: AccountContext) => Promise<unknown>, Hub][] = [
+    ['the pipeline report', (c) => pipelineReport(c, range), 'reports'],
+    ['the forms report', (c) => formsReport(c, range), 'reports'],
+    ['report dashboards', (c) => listReportDashboards(c), 'reports'],
+    ['the form list', (c) => listForms(c), 'marketing'],
+    ['the sequence list', (c) => listSequences(c), 'sales'],
+    ['the segment list', (c) => listSegments(c), 'contacts'],
+  ]
+  for (const [label, read, hub] of screens) {
+    check(await forbidden(() => read(screenCtx('viewer'))), `${label} is refused to a seat with no hubs`)
+    check(!(await forbidden(() => read(screenCtx('viewer', [hub])))), `and read with only the ${hub} view grant`)
+  }
 
   for (const seat of [salesSeat, marketingSeat]) {
     await setMemberGrants(superAdmin, {

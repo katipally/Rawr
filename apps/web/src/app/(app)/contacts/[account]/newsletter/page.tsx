@@ -1,4 +1,4 @@
-import { canWrite, listSegments, recentActivity } from '@rawr/db'
+import { canView, canWrite, listSegments, recentActivity } from '@rawr/db'
 import { Badge, Card, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
@@ -27,7 +27,7 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
 
   const [integrations, segments, events] = await Promise.all([
     readIntegrations(ctx),
-    listSegments(ctx, 'contact'),
+    canView(ctx, 'contacts') ? listSegments(ctx, 'contact') : [],
     recentActivity(ctx, 25, ['marketing_email']),
   ])
 

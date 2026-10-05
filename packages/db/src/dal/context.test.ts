@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { canWrite, systemContext } from './context.ts'
+import { assertCanView, canWrite, ForbiddenError, systemContext } from './context.ts'
 import { publicEdgeContext } from './forms.ts'
 
 /** The two non-interactive contexts, and the line between them.
@@ -58,4 +58,18 @@ test('the public edge stays narrow', () => {
   for (const entity of ['calendar_grant', 'sequence_enrollment', 'sequence', 'deal', 'field_def', 'membership']) {
     assert.equal(canWrite(ctx, entity), false, `the public edge can write ${entity}`)
   }
+})
+
+test('a read needs the view or the edit grant for its hub, and the system context holds every one', () => {
+  const seat = (viewHubs: ('reports' | 'sales')[], editHubs: ('reports' | 'sales')[]) => ({
+    ...systemContext('11111111-1111-1111-1111-111111111111'),
+    actorKind: 'user' as const,
+    viewHubs,
+    editHubs,
+  })
+  assert.throws(() => assertCanView(seat([], []), 'reports', 'reports'), ForbiddenError)
+  assert.throws(() => assertCanView(seat([], ['sales']), 'reports', 'reports'), /You need reports access to see reports\./)
+  assertCanView(seat(['reports'], []), 'reports', 'reports')
+  assertCanView(seat([], ['reports']), 'reports', 'reports')
+  assertCanView(systemContext('11111111-1111-1111-1111-111111111111'), 'reports', 'reports')
 })

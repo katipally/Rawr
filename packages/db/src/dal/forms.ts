@@ -3,7 +3,7 @@ import { appDb } from '../internal/pool.ts'
 import { consentRecord, form, formFolder, formSubmission, formUpload } from '../schema/forms.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type Attribution, type AttributionInput } from './attribution.ts'
-import { assertCanWrite, type AccountContext } from './context.ts'
+import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
 import {
   assertSchemaIsUsable,
   FORM_SLUG,
@@ -665,6 +665,7 @@ export type FormSummary = {
 
 export const listForms = async (ctx: AccountContext): Promise<FormSummary[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'marketing', 'forms')
     const rows = await tx.execute<{
       id: string
       name: string
@@ -727,6 +728,7 @@ export type FormDetail = {
 export const getForm = async (ctx: AccountContext, id: string): Promise<FormDetail | null> => {
   if (!isUuid(id)) return null
   return withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'marketing', 'forms')
     const [row] = await tx.select().from(form).where(eq(form.id, id)).limit(1)
     if (!row) return null
     return {
@@ -868,6 +870,7 @@ export const listSubmissions = async (
   } = {},
 ): Promise<SubmissionRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'marketing', 'form submissions')
     const rows = await tx
       .select({
         id: formSubmission.id,
@@ -1053,6 +1056,7 @@ export type FormFolderRow = { id: string; name: string; forms: number }
 
 export const listFormFolders = async (ctx: AccountContext): Promise<FormFolderRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'marketing', 'forms')
     const rows = await tx.execute<{ id: string; name: string; forms: string }>(sql`
       select d.id, d.name, count(f.id) as forms
         from form_folder d
@@ -1263,6 +1267,7 @@ export const formPerformance = async (
   const from = input.from
   const to = input.to
   return withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'marketing', 'forms')
     const [exists] = await tx
       .select({ id: form.id })
       .from(form)

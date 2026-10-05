@@ -1005,6 +1005,14 @@ try {
     viewerWrite.text,
   )
 
+  // A hub the person was never given is not readable through an agent either. The
+  // sales seat holds no marketing grant; the viewer does.
+  const salesForms = await call(salesToken, 'forms_list', {})
+  check('a token whose person lacks the marketing hub is refused the forms, in a sentence',
+    salesForms.isError && /marketing access/i.test(salesForms.text), salesForms.text)
+  const viewerForms = await call(viewerToken, 'forms_list', {})
+  check('and one that holds it reads them', !viewerForms.isError, viewerForms.text)
+
   const viewerNote = await call(viewerToken, 'create_note', { object: 'deal', id: mggId, body: 'nope' })
   check('nor add a note', viewerNote.isError)
 

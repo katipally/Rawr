@@ -2,7 +2,7 @@ import { asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import { recordActivityFanout } from './activity.ts'
-import { assertCanWrite, type AccountContext } from './context.ts'
+import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup, type QueryScope } from './query.ts'
 import { assertIdsBelong, displayName } from './records.ts'
@@ -46,6 +46,7 @@ const toObjectKey = (value: string): ObjectKey => {
 
 export const listSegments = async (ctx: AccountContext, objectKey?: string): Promise<SegmentRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
     const registry = await getRegistryIn(tx)
     const rows = await tx
       .select({
@@ -353,6 +354,7 @@ export const readSegmentMembers = async (
   offset = 0,
 ): Promise<SegmentMember[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
     const registry = await getRegistryIn(tx)
     const [row] = await tx
       .select({ objectId: segment.objectId })
@@ -413,6 +415,7 @@ export const previewSegment = async (
   input: { objectKey: string; filters: FilterGroup[] },
 ): Promise<{ count: number; sample: { id: string; displayName: string }[] }> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
     const ids = matchingIds(object, input.filters, scopeFor(ctx.actorId, await accountZone(ctx, tx)))
@@ -440,6 +443,7 @@ export const previewSegment = async (
 /** One segment on its own, for the list detail page. */
 export const readSegment = async (ctx: AccountContext, id: string): Promise<SegmentRow | null> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
     const registry = await getRegistryIn(tx)
     const [row] = await tx
       .select({

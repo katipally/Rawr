@@ -14,7 +14,7 @@ import {
   sequenceStep,
   type SequenceSettings } from '../schema/sequences.ts'
 import { contactLabels, linksForContacts, recordActivity } from './activity.ts'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import {
   DEFAULT_WINDOW,
@@ -128,6 +128,7 @@ const statsSql = sql`
 
 export const listSequences = async (ctx: AccountContext): Promise<SequenceRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
     const rows = await tx.execute<{
       id: string
       name: string
@@ -171,6 +172,7 @@ export const readSequence = async (
   id: string,
 ): Promise<{ sequence: SequenceRow; steps: SequenceStep[]; variants: VariantResult[] } | null> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
     const rows = await tx.execute<{
       id: string
       name: string
@@ -769,6 +771,7 @@ export const listEnrollments = async (
   input: { sequenceId: string; state?: EnrollmentState | null | undefined; limit?: number | undefined },
 ): Promise<EnrollmentRow[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 500)
     const rows = await tx.execute<{
       id: string
@@ -834,6 +837,7 @@ export const enrollmentsForContact = async (
   contactId: string,
 ): Promise<ContactEnrollment[]> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
     const rows = await tx
       .select({
         id: sequenceEnrollment.id,
@@ -1920,8 +1924,9 @@ export type EmailTemplateRow = {
 /** Every template in the account, most recently edited first. Shared, not
  *  personal: the reason to write one down is that a colleague sends it too. */
 export const listEmailTemplates = async (ctx: AccountContext): Promise<EmailTemplateRow[]> =>
-  withAccount(ctx, (tx) =>
-    tx
+  withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'email templates')
+    return tx
       .select({
         id: emailTemplate.id,
         name: emailTemplate.name,
@@ -1933,8 +1938,8 @@ export const listEmailTemplates = async (ctx: AccountContext): Promise<EmailTemp
       .from(emailTemplate)
       .leftJoin(userAccount, eq(userAccount.id, emailTemplate.createdBy))
       .orderBy(desc(emailTemplate.updatedAt))
-      .limit(200),
-  )
+      .limit(200)
+  })
 
 export const saveEmailTemplate = async (
   ctx: AccountContext,
@@ -2048,6 +2053,7 @@ export const listSends = async (
   },
 ): Promise<{ rows: SequenceSendRow[]; hasMore: boolean }> =>
   withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
     const limit = Math.min(Math.max(input.limit ?? SENDS_PAGE, 1), 200)
     const offset = Math.max(input.offset ?? 0, 0)
 

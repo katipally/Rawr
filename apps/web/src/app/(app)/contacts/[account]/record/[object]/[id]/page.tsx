@@ -1,5 +1,6 @@
 import {
   ACTIVITY_GROUPS,
+  canView,
   enrichmentQueued,
   getRecord,
   getRegistry,
@@ -618,7 +619,7 @@ const RecordPage = async ({
               rows={[]}
             />
           ) : null}
-          {objectParam === 'contact' ? <Suspense fallback={waiting}><ContactSequences /></Suspense> : null}
+          {objectParam === 'contact' && canView(ctx, 'sales') ? <Suspense fallback={waiting}><ContactSequences /></Suspense> : null}
           {objectParam === 'contact' ? <Suspense fallback={waiting}><MailSection /></Suspense> : null}
           {objectParam === 'contact' ? <Suspense fallback={waiting}><SubscriptionsSection /></Suspense> : null}
         </div>
