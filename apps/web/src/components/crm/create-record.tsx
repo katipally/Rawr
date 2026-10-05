@@ -4,6 +4,7 @@ import { matchesConditional } from '@rawr/db/registry'
 import { Button, Field, SidePanel, useToast } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useId, useState } from 'react'
 import { useDraft } from '~/lib/drafts.ts'
@@ -44,6 +45,7 @@ export const CreateRecordPanel = ({
   onCreated,
 }: CreateRecordPanelProps) => {
   const { navigate } = useNavigation()
+  const router = useRouter()
   const toast = useToast()
   const prefix = useId()
   // A deal starts on the first pipeline's first stage, the way HubSpot opens the
@@ -133,7 +135,9 @@ export const CreateRecordPanel = ({
         setContact(null)
         setNeedle('')
         document.getElementById(`${prefix}-${lead[0]?.key}`)?.focus()
+        // The list behind the panel is where the new record has to show up.
         if (onCreated) await onCreated(created.id)
+        else router.refresh()
         return
       }
       toast('success', `${objectLabel} created.`)
