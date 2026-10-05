@@ -445,6 +445,83 @@ try {
     values (${accountId}, 'Scope', 'Unowned', ${`scope.u.${scopeStamp}@guard.test`})`
   check(await held(salesSeat.id) === ownOnly + 1, 'an unassigned record is visible at every scope')
 
+  // What hangs off a record is judged by the record: the sales seat is scoped to
+  // its own contacts, so everything said about the marketing seat's contact is
+  // out of its reach, and everything about its own is in.
+  const hung = `hung-${scopeStamp}`
+  const [mine, theirs] = await Promise.all(
+    [`scope.s.${scopeStamp}@guard.test`, `scope.m.${scopeStamp}@guard.test`].map(
+      async (email) => (await owner<{ id: string }[]>`select id from contact where account_id = ${accountId} and email = ${email}`)[0]!.id,
+    ),
+  )
+  const [hungSegment] = await owner<{ id: string }[]>`
+    insert into segment (account_id, name, object_id, query)
+    values (${accountId}, ${hung}, ${contactObject!.id}, '{}'::jsonb) returning id`
+  const [hungThread] = await owner<{ id: string }[]>`
+    insert into message_thread (account_id, provider_thread_id, subject)
+    values (${accountId}, ${hung}, ${hung}) returning id`
+  for (const [entityId, who] of [[mine!, 'mine'], [theirs!, 'theirs']] as const) {
+    const [note] = await owner<{ id: string }[]>`
+      insert into activity (account_id, type, subject, occurred_at, actor_kind, actor_id)
+      values (${accountId}, 'note', ${`${hung} ${who}`}, now(), 'user', ${marketingSeat.id}) returning id`
+    await owner`insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
+      values (${accountId}, ${note!.id}, 'contact', ${entityId}, 'note', now())`
+    await owner`insert into task (account_id, title, entity_type, entity_id, assignee_id)
+      values (${accountId}, ${`${hung} ${who}`}, 'contact', ${entityId}, ${marketingSeat.id})`
+    await owner`insert into attachment (account_id, entity_type, entity_id, storage_key, filename, bytes, mime)
+      values (${accountId}, 'contact', ${entityId}, ${`${hung}/${who}`}, ${`${hung} ${who}`}, 1, 'text/plain')`
+    await owner`insert into segment_membership (account_id, segment_id, entity_id)
+      values (${accountId}, ${hungSegment!.id}, ${entityId})`
+    await owner`insert into notification (account_id, user_id, kind, dedupe_key, title, entity, entity_id)
+      values (${accountId}, ${salesSeat.id}, 'task_assigned', ${`${hung}:${who}`}, ${`${hung} ${who}`}, 'contact', ${entityId})`
+    const [mail] = await owner<{ id: string }[]>`
+      insert into message (account_id, thread_id, provider_message_id, direction, sent_at, snippet)
+      values (${accountId}, ${hungThread!.id}, ${`${hung}-${who}`}, 'inbound', now(), ${`${hung} ${who}`}) returning id`
+    await owner`insert into message_participant (account_id, message_id, address, contact_id, role)
+      values (${accountId}, ${mail!.id}, ${`${who}.${hung}@guard.test`}, ${entityId}, 'from')`
+  }
+  await owner`insert into association (account_id, from_type, from_id, to_type, to_id)
+    values (${accountId}, 'contact', ${mine!}, 'contact', ${theirs!})`
+  await owner`insert into task (account_id, title, entity_type, entity_id, assignee_id)
+    values (${accountId}, ${`${hung} assigned`}, 'contact', ${theirs!}, ${salesSeat.id})`
+  await owner`insert into task (account_id, title) values (${accountId}, ${`${hung} standalone`})`
+
+  const sees = async (ctx: AccountContext, table: string, column: string) =>
+    withAccount(ctx, async (tx) =>
+      (await tx.execute(sql`select ${sql.raw(column)} as v from ${sql.raw(table)} where ${sql.raw(column)}::text like ${`%${hung}%`} order by 1`))
+        .map((row) => String(row.v).replace(/.*hung-\d+[ .:\-/]?/, '')),
+    )
+  const narrowed: AccountContext = { accountId, actorId: salesSeat.id, actorKind: 'user', isSuperAdmin: false, viewHubs: ['contacts'], editHubs: [] }
+  const reads = (await Promise.all([
+    sees(narrowed, 'activity', 'subject'),
+    sees(narrowed, 'task', 'title'),
+    sees(narrowed, 'attachment', 'filename'),
+    sees(narrowed, 'notification', 'title'),
+    sees(narrowed, 'message', 'snippet'),
+  ])) as string[][]
+  const labels = ['timeline entries', 'tasks', 'files', 'notices', 'mail']
+  reads.forEach((got, i) => {
+    const expected = labels[i] === 'tasks' ? ['assigned', 'mine', 'standalone'] : ['mine']
+    check(JSON.stringify(got) === JSON.stringify(expected),
+      `a seat scoped to its own records reads the ${labels[i]} of its own and no colleague's`, got.join(', '))
+  })
+  const memberOf = await withAccount(narrowed, (tx) => tx.execute(sql`select entity_id from segment_membership where segment_id = ${hungSegment!.id}`))
+  check(memberOf.length === 1 && memberOf[0]!.entity_id === mine, 'and a list shows it only its own members', `${memberOf.length}`)
+  const linked = await withAccount(narrowed, (tx) => tx.execute(sql`select 1 from association where to_id = ${theirs!} or from_id = ${theirs!}`))
+  check(linked.length === 0, 'and no association that ends at a record it cannot open')
+  const wholeThread = await withAccount(narrowed, (tx) => tx.execute(sql`select 1 from message_thread where id = ${hungThread!.id}`))
+  check(wholeThread.length === 1, 'while a thread it can read through its own contact stays')
+  const wide = await withAccount(superAdmin, (tx) => tx.execute(sql`select 1 from activity where subject like ${`${hung}%`}`))
+  check(wide.length === 2, 'a super admin reads them all', `${wide.length}`)
+
+  await owner`delete from activity where subject like ${`${hung}%`}`
+  await owner`delete from task where title like ${`${hung}%`}`
+  await owner`delete from attachment where storage_key like ${`${hung}/%`}`
+  await owner`delete from notification where dedupe_key like ${`${hung}:%`}`
+  await owner`delete from association where from_id = ${mine!} and to_id = ${theirs!}`
+  await owner`delete from segment where id = ${hungSegment!.id}`
+  await owner`delete from message_thread where id = ${hungThread!.id}`
+
   // ------------------------------------------------------------ view hubs
   // A hub nobody granted is not readable, not merely not linked to. The record
   // tables are refused by the policy (so the exporter and an agent meet it too),
