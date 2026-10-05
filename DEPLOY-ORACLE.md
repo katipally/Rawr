@@ -1,14 +1,12 @@
 # Deploying to Oracle Cloud (Always Free)
 
-Render's Hobby workspace suspends on billing once the 5GB/month bandwidth grant
-runs out. Oracle's Always Free tier gives an Ampere VM with 4 OCPU / 24GB and
-10TB/month outbound at no ongoing cost, which is the point of moving here: not
-cheaper bandwidth, bandwidth that does not run out on a normal month.
+Oracle's Always Free tier gives an Ampere VM with 4 OCPU / 24GB and 10TB/month
+outbound at no ongoing cost: not cheaper bandwidth, bandwidth that does not run
+out on a normal month.
 
 Nothing about the app changes. Same image, same `Dockerfile`, same environment
 variables described in `DEPLOY.md` — this file covers only what is specific to
-getting a Docker container running on a bare Oracle VM instead of a host that
-already speaks Docker natively.
+getting a Docker container running on a bare Oracle VM.
 
 ## Sign-up gives you two things, not one
 
@@ -179,12 +177,10 @@ running — this can happen after removing `docker.io` mid-setup:
 
 From a second terminal on your own machine, copy the environment file over —
 **`.env.production`, not `.env.local`**. `.env.local` carries dev-only keys
-(`RAWR_DEV_*` overrides, the Render-specific `RENDER` flag) that do not belong
-on a production host, and is missing production-only ones `.env.production` has
+(`RAWR_DEV_*` overrides) that do not belong on a production host, and is missing production-only ones `.env.production` has
 (`PUBLIC_BASE_URL`, `TRUSTED_PROXY_HOPS`, `DATABASE_POOL_MAX`,
 `RAWR_VISITOR_ACCOUNT`). Check `PUBLIC_BASE_URL` inside it points at wherever
-this deploy is actually reachable from before copying it over, not a leftover
-Render URL.
+this deploy is actually reachable from before copying it over.
 
 ```
  scp -i ~/.ssh/<downloaded-key>.key /path/to/Rawr/.env.production ubuntu@<public-ip>:~/Rawr/.env.production
@@ -245,8 +241,7 @@ but it's a real code change to the image, not something to make silently.
 
 ## DNS, HTTPS, and OAuth
 
-Oracle gives a public IP and nothing else — no free subdomain the way Render
-gives every service a `*.onrender.com` URL. A real domain is needed to get a
+Oracle gives a public IP and nothing else, with no free subdomain. A real domain is needed to get a
 working TLS certificate and, separately, because Google OAuth generally
 refuses a bare IP as an authorized redirect URI for anything but a localhost
 client.
@@ -302,12 +297,11 @@ at the OS level and in the OCI console's Default Security List:
  sudo netfilter-persistent save
 ```
 
-**Point the app at the real domain.** `.env.production` still carries the
-Render URL in three places from before the move — `AUTH_URL` and
-`PUBLIC_BASE_URL` need to become the new domain, and `RAWR_INTERNAL_URL`
-should be cleared entirely rather than repointed: per `DEPLOY.md`, that
-variable is only for when the app and worker run on separate hosts, and here
-they're one container behind Caddy, same as the Render setup was.
+**Point the app at the real domain.** `AUTH_URL` and `PUBLIC_BASE_URL` in
+`.env.production` need to be the new domain, and `RAWR_INTERNAL_URL` should be
+empty rather than repointed: per `DEPLOY.md`, that variable is only for when the
+app and worker run on separate hosts, and here they're one container behind
+Caddy.
 
 ```
  AUTH_URL="https://yourdomain.com"
@@ -327,12 +321,47 @@ values:
  docker run -d --restart unless-stopped -p 3000:3000 --env-file .env.docker --name rawr rawr node scripts/both.mjs
 ```
 
-**Google OAuth still points at Render until told otherwise.** Google Cloud
+**Google OAuth has to allow-list the redirect.** Google Cloud
 Console → APIs & Services → Credentials → the OAuth client → Authorized
 redirect URIs → add `https://yourdomain.com/api/auth/google/callback`. Sign-in
-redirects to Render regardless of where the app is actually running until this
-is added — `AUTH_URL` controls what the app *sends* Google, but Google still
-has to have that exact URL allow-listed on its side.
+fails until this is added: `AUTH_URL` controls what the app *sends* Google, but
+Google still has to have that exact URL allow-listed on its side.
+
+## Closing sign-up
+
+The container reads its environment from `.env.docker` on the VM, which is built
+from `.env.production` on your machine. Both of these belong in that file:
+
+```
+ GOOGLE_HOSTED_DOMAIN="datasaur.ai"
+ RAWR_ALLOW_NEW_ACCOUNTS=""
+```
+
+`GOOGLE_HOSTED_DOMAIN` refuses every Google account outside that Workspace
+domain. `RAWR_ALLOW_NEW_ACCOUNTS` is off unless it is `1`: with it off, a
+sign-in from a domain no account claims opens no tenant, and neither does the
+first sign-in on an empty database. People who already have a seat, and people
+holding an invitation, sign in as before. Set it to `1` only for the sign-in
+that opens the first account on a fresh database, then clear it.
+
+Re-copy, rebuild the env file, run the migration (`0085` adds the argument the
+sign-in function checks) and restart, exactly as under "Point the app at the real
+domain":
+
+```
+ scp -i ~/.ssh/<downloaded-key>.key .env.production ubuntu@<public-ip>:~/Rawr/.env.production
+```
+```
+ cd ~/Rawr
+ sed 's/^\([A-Z0-9_]*\)="\(.*\)"$/\1=\2/' .env.production > .env.docker
+ DOCKER_BUILDKIT=1 docker build -t rawr .
+ docker run --user root --env-file .env.docker rawr pnpm db:migrate
+ docker stop rawr && docker rm rawr
+ docker run -d --restart unless-stopped -p 3000:3000 --env-file .env.docker --name rawr rawr node scripts/both.mjs
+```
+
+The migration has to land before the new app does: the new code calls the
+seven-argument function, and the old six-argument one is dropped.
 
 ## Cleaning up the bridge instance
 

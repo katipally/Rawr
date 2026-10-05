@@ -23,7 +23,7 @@ export const INTERNAL_SECRET = required('RAWR_INTERNAL_SECRET')
  *  dead-letters every one of them once a cycle. */
 required('DATABASE_URL')
 
-/** Where the worker reaches the web app. Both run in one container on Render, so
+/** Where the worker reaches the web app. Both run in one container, so
  *  the loopback address and the port the app was told to listen on is the answer
  *  whenever nobody has named an external one. An empty string is a variable
  *  somebody set and then cleared, which has to fall back like an absent one, or

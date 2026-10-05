@@ -38,6 +38,13 @@ whatever they are set to.
 Every script reads `.env.local` through `node --env-file-if-exists`, so that file
 is how a laptop supplies configuration and its absence is how a deployment does.
 
+The seed, the verify suites, `db:reclaim`, `db:probe:large` and `reset-account`
+write or delete rows, so they refuse any `DATABASE_URL*` whose host is not this
+machine. Point `.env.local` at a local Postgres (`docker run -e
+POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17`), or set
+`RAWR_ALLOW_REMOTE_DB=1` to run one against a hosted database on purpose.
+`db:migrate` is not guarded: it is how a deploy reaches production.
+
 The app connects as `rawr_app`, which owns no tables and cannot bypass row level
 security. `DATABASE_URL_OWNER` is the table owner, used by migrations and by
 pg-boss, and must not be a transaction pooler: both need a session that outlives
@@ -68,7 +75,10 @@ What that sign-in gets you is settled in `rawr.sign_in_google`, in order:
 ```
  the database is empty   whoever signs in first opens the account and owns it.
                          Fires once, ever, which is how this starts from nothing.
+                         Only with RAWR_ALLOW_NEW_ACCOUNTS=1.
  a claimed domain        they join that account on its default view grants
+ an unclaimed domain     a Workspace domain no account claims opens one, owned by
+                         whoever arrived. Only with RAWR_ALLOW_NEW_ACCOUNTS=1.
  an invitation           the seat it was written for, checked against the
                          address they actually signed in with
  anybody else            RAWR_VISITOR_ACCOUNT, able to read and change nothing,
@@ -76,7 +86,9 @@ What that sign-in gets you is settled in `rawr.sign_in_google`, in order:
 ```
 
 Set `RAWR_VISITOR_ACCOUNT` on a deployment anyone may look around; leave it empty
-and set `GOOGLE_HOSTED_DOMAIN` on one that serves a single company.
+and set `GOOGLE_HOSTED_DOMAIN` on one that serves a single company. Leave
+`RAWR_ALLOW_NEW_ACCOUNTS` unset everywhere except the one sign-in that opens the
+first account.
 
 The seeded fixture accounts are for the verify suites, which reach the database
 directly. Nothing signs in as them.
@@ -333,7 +345,8 @@ day.
 ## In production
 
 **DEPLOY.md** has the whole of it: the image, the three database URLs, the bucket,
-the Google client, and what a host that sleeps needs.
+the Google client, and the sign-in rules. **DEPLOY-ORACLE.md** is the runbook for
+the Oracle VM it runs on.
 
 The app refuses to boot on the development placeholders for `AUTH_SECRET`,
 `RAWR_INTERNAL_SECRET` or `EDGE_IP_SALT`, or on an empty `TOKEN_ENCRYPTION_KEY`,

@@ -40,10 +40,6 @@ starts, serves every page, and refuses the first file somebody uploads with
 now refuses to start on a value that still has its quotes, so a file made the
 wrong way fails loudly instead of waiting for a user to find it.
 
-A real host does not have this problem. Render's Environment tab has an "Add
-from .env" import that parses the file properly, quotes included, and turns each
-line into an ordinary environment variable.
-
 **Do not put a `.env` file in the image and expect it to be read.** It half
 works, which is worse than not working:
 
@@ -54,11 +50,8 @@ works, which is worse than not working:
                               "DATABASE_URL_OWNER is not set"
 ```
 
-Render's Secret Files are not a way around that either: they are written to
-`/etc/secrets/<name>` and deliberately not loaded into the environment, and for
-a Docker service they are not copied to the repository root. Nothing here reads
-them. Configuration reaches both processes as environment variables or it
-reaches one of them.
+Configuration reaches both processes as environment variables or it reaches one
+of them.
 
 Nothing is baked in but code: every value arrives at boot. The build stage sets
 four placeholder variables because `next build` renders pages that read the
@@ -125,7 +118,7 @@ Who gets a seat, in order:
 
 ```
  the database is empty   whoever signs in first opens the account and owns it.
-                         Fires once, ever.
+                         Fires once, ever. Only with RAWR_ALLOW_NEW_ACCOUNTS=1.
  a claimed domain        they join that account on its default view grants
  an invitation           the seat it was written for
  anybody else            RAWR_VISITOR_ACCOUNT, able to read and change nothing,
@@ -135,6 +128,12 @@ Who gets a seat, in order:
 Set `RAWR_VISITOR_ACCOUNT` to the slug of the account the first sign-in opened.
 For a deployment serving one company, leave it empty and set
 `GOOGLE_HOSTED_DOMAIN` instead.
+
+A Workspace domain that no account claims also opens a new account for whoever
+arrives from it, and so does the first sign-in on an empty database. Both need
+`RAWR_ALLOW_NEW_ACCOUNTS=1`, which is off unless set: set it for the one sign-in
+that opens the first account, then remove it. Seating in an account that exists,
+by domain or by invitation, never needs it.
 
 ## Secrets
 
@@ -184,30 +183,14 @@ config next to the certificate.
 `GET /healthz` returns 200 with the database round-trip time, or 503 naming the
 failure. Point the host's health check at it.
 
-### A free tier that sleeps
+### One container for both
 
-A host that suspends an idle service, and a Postgres that pauses itself after a
-quiet week, are both answered by the same thing: something outside calling
-`/healthz` on a schedule. Outside is the whole point — a sleeping service cannot
-wake itself.
+`node scripts/both.mjs` runs the app and the job daemon in the one process a host
+gives you. The image's own `CMD` starts the app alone, which is the shape to
+prefer, so this is set as the container's command rather than in the Dockerfile.
+The app binds `PORT`, and the worker reaches it at `127.0.0.1` on the same port.
 
-Run `node scripts/both.mjs` there, so the job daemon lives in the one process the
-host gives you. The image's own `CMD` starts the app alone, which is the shape to
-prefer, so this is set as the service's Docker Command rather than in the
-Dockerfile. Nothing else changes: Render supplies `PORT`, the app binds it, and
-the worker reaches the app at `127.0.0.1` on the same port.
-
-**Keep it up, and catch up on boot.** UptimeRobot calls
-
-```
- https://rawr-qutv.onrender.com/healthz    every 5 minutes
-```
-
-which is well inside Render's 15-minute idle window, so the service never
-suspends and Postgres never reaches its own inactivity pause.
-
-That is belt, and the worker carries braces. Four schedules run at a fixed time
-of day:
+The worker also catches up on boot. Four schedules run at a fixed time of day:
 
 ```
  30 3 * * *   activity roll-up
@@ -216,30 +199,19 @@ of day:
  0 7 * * *    the notification sweep
 ```
 
-pg-boss creates those jobs when the clock strikes, so a service asleep at 03:30
-misses that day's roll-up entirely and an interval pinger cannot be aimed finely
-enough to guarantee otherwise. On boot the worker looks for a completed run since
-each schedule's last due time and sends the missed one itself, keyed on the job
-name and the day so a restart loop cannot run it twice.
+pg-boss creates those jobs when the clock strikes, so a container that is down at
+03:30 misses that day's roll-up entirely. On boot the worker looks for a completed
+run since each schedule's last due time and sends the missed one itself, keyed on
+the job name and the day so a restart loop cannot run it twice.
 
-**750 instance hours per workspace per month, not per service.** Staying up costs
-744 of them in a 31-day month, so exactly one always-on free service fits in a
-workspace. The other two Render services stay suspended; resuming a second one
-exhausts the grant part way through the month and Render then suspends every free
-service in the workspace, this one included.
+**`RAWR_INTERNAL_URL` is not set when app and worker are one container.** The
+worker reaches the app at `127.0.0.1:$PORT`, and going out through the public
+hostname would leave the box and pay for TLS and the proxy. Set it only where the
+two run on separate hosts.
 
-**`RAWR_INTERNAL_URL` is not set on Render.** App and worker are one container, so
-the worker reaches the app at `127.0.0.1:$PORT` and going out through the public
-hostname would leave the box, pay for TLS and the proxy, and count against the
-same instance. Set it only where the two run on separate hosts.
-
-**`RAWR_WORKER_SKIPS_FIXTURES` is `1` on Render, and nowhere else.** The verify
-suites share this database and drive their own import and bulk runs a chunk at a
-time, so the worker has to leave the fixture tenants — the ones whose domain ends
-`.test` — alone here. On a laptop those fixtures are the only tenants there are to
-test an import against, and a worker that steps over them looks exactly like a
-worker that is not running.
-
-Everything on `* * * * *`, which is sequence steps, automations, enrichment and
-visitor stitching, runs while the service is up and waits while it is not. Drop
-the pinger and a visitor arriving cold waits about a minute for the first page.
+**`RAWR_WORKER_SKIPS_FIXTURES` is `1` wherever the verify suites share the
+database.** They drive their own import and bulk runs a chunk at a time, so the
+worker has to leave the fixture tenants, the ones whose domain ends `.test`,
+alone. On a laptop those fixtures are the only tenants there are to test an
+import against, and a worker that steps over them looks exactly like a worker
+that is not running.
