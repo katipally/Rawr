@@ -5,6 +5,7 @@ import { useEffect, useRef, type RefObject } from 'react'
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),' +
   'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+const FIELD = 'input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled])'
 
 /** Everything a dialog owes the person using it: Escape closes, the page behind
  *  stops scrolling, Tab cannot walk out into it, and focus returns to whatever
@@ -28,13 +29,15 @@ export const useOverlay = (
 
     const box = dialog.current
     // First focusable is the close button in every dialog that has a header, which
-    // is the wrong place to land in one built around a single field. A dialog says
-    // where it wants focus with data-autofocus; without it the old order holds.
+    // is the wrong place to land in one built around a field. A dialog says where
+    // it wants focus with data-autofocus; otherwise the first field takes it, and a
+    // dialog with none (a confirmation) falls back to the first control.
     // The dialog itself takes focus when it holds nothing focusable, so Tab has
     // somewhere to start and the screen reader announces the label.
     const asked = box?.querySelector<HTMLElement>('[data-autofocus]')
+    const field = [...(box?.querySelectorAll<HTMLElement>(FIELD) ?? [])].find((node) => node.offsetParent !== null)
     const first = box?.querySelector<HTMLElement>(FOCUSABLE)
-    ;(asked ?? first ?? box)?.focus()
+    ;(asked ?? field ?? first ?? box)?.focus()
 
     const onKey = (event: KeyboardEvent) => {
       // An inner control that handles Escape itself (a combobox closing its list)
@@ -45,7 +48,7 @@ export const useOverlay = (
       }
       if (event.key !== 'Tab' || !box) return
       const stops = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-        (node) => node.offsetParent !== null,
+        (node) => node.offsetParent !== null && !node.closest('[inert]'),
       )
       if (stops.length === 0) {
         event.preventDefault()
