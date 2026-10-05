@@ -1,3 +1,4 @@
+import './local-only.ts'
 import postgres from 'postgres'
 
 /** Empties one account's CRM data and leaves the account itself set up.

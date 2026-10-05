@@ -1,3 +1,4 @@
+import './local-only.ts'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { withAccount } from '../src/dal/index.ts'

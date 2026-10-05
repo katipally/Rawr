@@ -1,3 +1,4 @@
+import './local-only.ts'
 import postgres from 'postgres'
 
 /** Returns the disk the scale suite borrowed.

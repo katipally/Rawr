@@ -1,3 +1,4 @@
+import './local-only.ts'
 import postgres from 'postgres'
 
 /** Whether this database connection can carry a large value intact.
