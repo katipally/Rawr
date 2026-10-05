@@ -23,9 +23,15 @@ export const useOverlay = (
   const close = useRef(onClose)
   close.current = onClose
 
+  // Taken on the render that opens the dialog, not in the effect: React's autoFocus
+  // runs at commit, before any effect, so by then focus has already moved into the
+  // dialog and the opener would be recorded as one of its own fields.
+  if (open && !dialog.current && typeof document !== 'undefined') {
+    opener.current = document.activeElement as HTMLElement | null
+  }
+
   useEffect(() => {
     if (!open) return
-    opener.current = document.activeElement as HTMLElement | null
 
     const box = dialog.current
     // First focusable is the close button in every dialog that has a header, which
