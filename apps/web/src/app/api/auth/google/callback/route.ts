@@ -8,7 +8,7 @@ import {
   saveGrant,
   signInWithGoogle,
 } from '@rawr/db'
-import { env, googleCalendarConfigured, hostedDomainRequired } from '~/lib/env.ts'
+import { env, googleCalendarConfigured, hostedDomainRequired, newAccountsAllowed } from '~/lib/env.ts'
 import { accountInPath } from '~/lib/links.ts'
 import { GOOGLE_CALLBACK_PATH, decodeIdToken, googleClient, identityFromIdToken, type GoogleIdentity, type GoogleTokens } from '~/server/auth/google.ts'
 import { safeNext } from '~/server/auth/next.ts'
@@ -77,6 +77,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     picture: identity.picture,
     hostedDomain: identity.hostedDomain,
     visitorAccount: env.RAWR_VISITOR_ACCOUNT,
+    mayOpenAccount: newAccountsAllowed,
   })
   // A link somebody followed before signing in. It seats them, and it is checked
   // against the address they actually signed in with, so a forwarded link cannot

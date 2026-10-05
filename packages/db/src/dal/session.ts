@@ -75,17 +75,23 @@ export type GoogleSignIn = {
    *  RAWR_VISITOR_ACCOUNT. Empty seats them nowhere, which is what a deployment
    *  that never named one should do. */
   visitorAccount: string
+  /** From RAWR_ALLOW_NEW_ACCOUNTS. False means a sign-in never opens an account:
+   *  neither the first one on an empty database nor one for a domain nobody
+   *  claims. Somebody who already has a seat, or holds an invitation, is
+   *  unaffected. */
+  mayOpenAccount: boolean
 }
 
-/** Links or creates the person, then settles what account they land in: an empty
- *  database is opened by whoever signs in first, a domain some account claims joins
- *  it on that account's terms, a domain no account claims opens one, and anybody
- *  else takes a read-only seat in the visitor account. Returns the user id; the
+/** Links or creates the person, then settles what account they land in: where
+ *  `mayOpenAccount` is set, an empty database is opened by whoever signs in first
+ *  and a domain no account claims opens one. A domain some account claims joins it
+ *  on that account's terms, and anybody else takes a read-only seat in the visitor
+ *  account. Returns the user id; the
  *  memberships are read separately so sign-in and every later request go through
  *  the same function. */
 export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> => {
   const [row] = await appDb.execute<{ id: string }>(
-    sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}, ${identity.visitorAccount}) as id`,
+    sql`select rawr.sign_in_google(${identity.sub}, ${identity.email}, ${identity.name}, ${identity.picture}, ${identity.hostedDomain}, ${identity.visitorAccount}, ${identity.mayOpenAccount}) as id`,
   )
   if (!row) throw new Error('Sign-in did not return an account.')
   return row.id

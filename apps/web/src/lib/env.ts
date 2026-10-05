@@ -15,6 +15,12 @@ const schema = z.object({
    *  sign-in that matches no domain and holds no invitation gets no seat, which is
    *  the right answer for a deployment that serves one company. */
   RAWR_VISITOR_ACCOUNT: z.string().default(''),
+  /** Set to 1 to let a sign-in open an account: the first one on an empty
+   *  database, or one for a Workspace domain no account claims. Off otherwise, so
+   *  a deployment whose GOOGLE_HOSTED_DOMAIN is empty does not hand a tenant to
+   *  every stranger with a Workspace address. Seating in an existing account is
+   *  never affected. */
+  RAWR_ALLOW_NEW_ACCOUNTS: z.string().optional(),
 
   /** Where the public edge is reachable from the outside. The embed script and
    *  the hosted form page both build absolute URLs from it, and they are served
@@ -114,6 +120,8 @@ export const googleConfigured = env.GOOGLE_CLIENT_ID !== '' && env.GOOGLE_CLIENT
 /** A deployment that serves one company locks sign-in to its domain; one that does
  *  not leaves this empty and seats people by invitation. */
 export const hostedDomainRequired = env.GOOGLE_HOSTED_DOMAIN !== ''
+
+export const newAccountsAllowed = env.RAWR_ALLOW_NEW_ACCOUNTS === '1'
 
 /** Whether anybody who can sign in gets a read-only seat. True on the demo
  *  deployment, false where seats are earned by a domain or an invitation. */

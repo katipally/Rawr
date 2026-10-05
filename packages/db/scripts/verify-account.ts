@@ -14,7 +14,7 @@ import {
 import type { AccountContext } from '../src/dal/context.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { ROLE_TEMPLATES, addMember, copyMemberGrants, listMembers, setMemberGrants } from '../src/dal/members.ts'
-import { membershipsForUser } from '../src/dal/session.ts'
+import { membershipsForUser, signInWithGoogle } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
 import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
 
@@ -243,6 +243,34 @@ try {
   await setTeamMembers(superAdmin, { teamId: team.id, members: [{ userId: salesId }] })
   const [teamCount] = await owner`select count(*)::int n from team_member where team_id = ${team.id}`
   check((teamCount!.n as number) === 1, 'a team holds the people put in it')
+
+  console.log('\n-- opening an account is a choice -----------------------------')
+
+  const strangerDomain = `stranger-${Date.now()}.test`
+  const stranger = {
+    sub: `verify-${Date.now()}`,
+    email: `owner@${strangerDomain}`,
+    name: 'Verify Stranger',
+    picture: null,
+    hostedDomain: strangerDomain,
+    visitorAccount: '',
+  }
+  const strangerId = await signInWithGoogle({ ...stranger, mayOpenAccount: false })
+  const [opened] = await owner`select count(*)::int n from account where google_hosted_domain = ${strangerDomain}`
+  check(
+    (opened!.n as number) === 0 && (await membershipsForUser(strangerId)).length === 0,
+    'a domain nobody claims opens no account while that is off, and the person is left unseated',
+  )
+  await signInWithGoogle({ ...stranger, mayOpenAccount: true })
+  const [made] = await owner`select id from account where google_hosted_domain = ${strangerDomain}`
+  const [owned] = await membershipsForUser(strangerId)
+  check(made !== undefined && owned?.isSuperAdmin === true, 'and opens one they own when it is on')
+  await signInWithGoogle({ ...stranger, mayOpenAccount: false })
+  check((await membershipsForUser(strangerId)).length === 1, 'somebody who already has a seat signs in either way')
+
+  await owner`delete from membership where user_id = ${strangerId}`
+  await owner`delete from account where google_hosted_domain = ${strangerDomain}`
+  await owner`delete from user_account where id = ${strangerId}`
 
   console.log('\n-- history -----------------------------------------------------')
 

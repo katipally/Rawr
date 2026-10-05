@@ -603,6 +603,13 @@
       "when": 1791219234179,
       "tag": "0084_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791305634179,
+      "tag": "0085_account_creation_is_a_choice",
+      "breakpoints": true
     }
   ]
 }
