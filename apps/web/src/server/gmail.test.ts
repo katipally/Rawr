@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorised, collectHistory, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
+import { authorisedAddress, authorised, collectHistory, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -230,4 +230,16 @@ test('an aged-out history id is null, which means list everything again', async 
 test('nothing new keeps the cursor moving to the head', async () => {
   const fetcher: Fetcher = async () => ({ historyId: '700' })
   assert.deepEqual(await collectHistory(fetcher, '100'), { ids: [], cursor: '700', more: false })
+})
+
+test('the mailbox is named by the address Google authorised, not the one hinted at', async () => {
+  google(() => fresh, () => ({ status: 200, body: { emailAddress: 'other@elsewhere.test', historyId: '1' } }))
+  assert.equal(await authorisedAddress('token'), 'other@elsewhere.test')
+  mock.restoreAll()
+})
+
+test('a profile Google will not give is an error, never a guessed address', async () => {
+  google(() => fresh, () => ({ status: 200, body: {} }))
+  await assert.rejects(authorisedAddress('token'))
+  mock.restoreAll()
 })

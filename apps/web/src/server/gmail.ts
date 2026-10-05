@@ -44,6 +44,21 @@ export const grantedSending = (scopes: string[]): boolean =>
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
+/** The address Google actually authorised. `login_hint` only suggests an account
+ *  on the consent screen, so the person can pick another, and the session's email
+ *  is then the wrong name for the mail that comes in. */
+export const authorisedAddress = async (accessToken: string): Promise<string> => {
+  const response = await sendWithBackoff(
+    () => fetch(`${API}/profile`, { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(20_000) }),
+    { repeatable: true },
+  )
+  const profile = (await response.json().catch(() => null)) as { emailAddress?: string } | null
+  if (!response.ok || !profile?.emailAddress) {
+    throw new Error(`Gmail would not say which address was connected (${response.status}).`)
+  }
+  return profile.emailAddress
+}
+
 /** How many message ids one back-fill pass claims. Small enough that killing the
  *  worker mid-run loses at most this much progress, large enough that four years
  *  of mail does not take all week. */

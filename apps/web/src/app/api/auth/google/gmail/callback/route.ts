@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { mailboxesPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
-import { grantedSending } from '~/server/gmail.ts'
+import { authorisedAddress, grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Stores the mailbox. The tokens are encrypted with a key held outside this
@@ -49,7 +49,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     }
     await saveMailbox(contextFrom(session), {
       userId: session.userId,
-      email: session.email,
+      email: await authorisedAddress(tokens.accessToken()),
       accessToken: tokens.accessToken(),
       refreshToken: tokens.refreshToken(),
       accessTokenExpiresAt: tokens.accessTokenExpiresAt(),
