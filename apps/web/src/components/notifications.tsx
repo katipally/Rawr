@@ -8,6 +8,7 @@ import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { plainError } from '~/lib/provider-errors.ts'
+import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useZone } from '~/components/zone.tsx'
 
@@ -72,8 +73,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
 
   useEffect(() => {
     refreshCount()
-    const timer = window.setInterval(refreshCount, REFRESH_MS)
-    return () => window.clearInterval(timer)
+    return pollWhileVisible(refreshCount, REFRESH_MS)
   }, [refreshCount])
 
   const load = useCallback(

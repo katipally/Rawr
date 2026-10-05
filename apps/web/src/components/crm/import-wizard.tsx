@@ -4,6 +4,7 @@ import { FIELD_TYPES, isNewProperty, type FieldType, type Mapping, type NewPrope
 import { Alert, Button, buttonClass, ConfirmDialog, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatNumber } from './value.tsx'
 
@@ -106,10 +107,10 @@ export const ImportWizard = ({
       }
     }
     void ask()
-    const timer = setInterval(() => void ask(), POLL_MS)
+    const stop = pollWhileVisible(() => void ask(), POLL_MS)
     return () => {
       dropped = true
-      clearInterval(timer)
+      stop()
     }
   }, [live.state, runId, router, toast])
 

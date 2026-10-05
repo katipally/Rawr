@@ -69,8 +69,12 @@ export const TaskTray = ({ account }: { account: string }) => {
 
   useEffect(() => {
     let dropped = false
+    let running = false
     let timer: ReturnType<typeof setTimeout>
     const ask = async () => {
+      // A hidden tab ends the chain; coming back starts it again.
+      if (document.hidden || running) return
+      running = true
       let found: Running[] = []
       try {
         const rows = await api.crm.imports.list.query()
@@ -91,13 +95,20 @@ export const TaskTray = ({ account }: { account: string }) => {
       } catch {
         // A poll that misses is a poll. The next one answers.
       } finally {
+        running = false
         if (!dropped) timer = setTimeout(ask, found.length > 0 ? POLL_ACTIVE_MS : POLL_IDLE_MS)
       }
     }
+    const resume = () => {
+      clearTimeout(timer)
+      void ask()
+    }
+    document.addEventListener('visibilitychange', resume)
     void ask()
     return () => {
       dropped = true
       clearTimeout(timer)
+      document.removeEventListener('visibilitychange', resume)
     }
   }, [])
 

@@ -3,6 +3,7 @@
 import { Button, Modal, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
+import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** The gate in front of every credit an enricher charges for.
@@ -61,8 +62,7 @@ export const EnrichmentConsent = ({ canWrite }: { canWrite: boolean }) => {
   useEffect(() => {
     if (!canWrite) return
     load()
-    const timer = window.setInterval(load, REFRESH_MS)
-    return () => window.clearInterval(timer)
+    return pollWhileVisible(load, REFRESH_MS)
   }, [canWrite, load])
 
   if (!canWrite || !pending || pending.total === 0) return null

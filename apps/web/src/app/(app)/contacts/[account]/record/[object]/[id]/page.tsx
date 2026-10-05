@@ -26,9 +26,10 @@ import {
   withAccountReads,
   type ObjectKey,
 } from '@rawr/db'
-import { Avatar, EmptyState, cn } from '@rawr/ui'
+import { Avatar, EmptyState, SkeletonRows, cn } from '@rawr/ui'
 import { ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { LinkButton } from '~/components/link-button.tsx'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
@@ -109,46 +110,34 @@ const RecordPage = async ({
   const activeTab = tab === 'activities' ? 'activities' : 'overview'
 
   const ctx = contextFrom(session)
-  // Every read on this screen runs at once, each on its own connection; see
-  // withAccountReads for why they are not pinned to one transaction. The
-  // panels all take the id as given, so a mangled link is stopped here rather
-  // than by whichever of them Postgres rejects first.
+  // A timeline entry, an association, a task and a file all name an object key,
+  // and that is text rather than an enum of three, so every panel below works
+  // the same whether the object is one Rawr ships or one an admin invented.
+  // `core` survives for the one panel that is genuinely core-only: enrichment
+  // matches on an email or a domain, which a custom object does not have.
+  const core = isObjectKey(objectParam) ? objectParam : null
+  const entity = { entityType: objectParam, entityId: id }
+  // Only what the frame of the page needs is waited for: the record, the
+  // registry, the counts on the Activities tab, and the association rail, which
+  // the email shortcut reads. Every panel below it fetches for itself inside its
+  // own Suspense, so one slow read leaves a placeholder instead of a blank page.
+  // The reads each run on their own connection; see withAccountReads for why
+  // they are not pinned to one transaction. The panels all take the id as given,
+  // so a mangled link is stopped here rather than by whichever of them Postgres
+  // rejects first.
   const screen = !isUuid(id) ? null : await withAccountReads(ctx, async () => {
-    // A timeline entry, an association, a task and a file all name an object key,
-    // and that is text rather than an enum of three, so every panel below works
-    // the same whether the object is one Rawr ships or one an admin invented.
-    // `core` survives for the one panel that is genuinely core-only: enrichment
-    // matches on an email or a domain, which a custom object does not have.
-    const core = isObjectKey(objectParam) ? objectParam : null
-    const entity = { entityType: objectParam, entityId: id }
-    const enrichable = objectParam === 'contact' || objectParam === 'company'
-    // The record itself is fetched alongside its panels, not before them: the
-    // panels only need the id, and a missing record just discards their answers.
-    const [{ object, lookups, canWrite }, registry, record, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore] = await Promise.all([
+    // The record itself is fetched alongside the rest, not before them: a
+    // missing record just discards their answers.
+    const [{ object, lookups, canWrite }, registry, record, counts, rail, queues] = await Promise.all([
       loadCrmContext(ctx, objectParam),
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
-      // A hand-edited type in a link is dropped rather than failing the page.
-      readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 }),
       timelineCounts(ctx, entity),
       readAssociations(ctx, entity),
-      listTasks(ctx, { entity }),
       listTaskQueues(ctx),
-      objectParam === 'contact' ? readSubscriptions(ctx, id) : Promise.resolve([]),
-      objectParam === 'contact' ? websiteActivity(ctx, id) : Promise.resolve(null),
-      readMemberships(ctx, id),
-      objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([]),
-      enrichable ? listSuggestions(ctx, objectParam, id) : Promise.resolve([]),
-      enrichable ? listIntegrations(ctx) : Promise.resolve([]),
-      // Only when storage is connected: reading a table to draw a panel that
-      // can only say "not connected" is a query for nothing.
-      storageConfigured ? listAttachments(ctx, entity) : Promise.resolve([]),
-      enrichable ? enrichmentQueued(ctx, objectParam, id) : Promise.resolve(null),
-      objectParam === 'contact' ? enrollmentsForContact(ctx, id) : Promise.resolve([]),
-      objectParam === 'deal' ? readDealScore(ctx, id) : Promise.resolve(null),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore }
+    return { object, lookups, canWrite, registry, record, counts, rail, queues }
   })
 
   if (!screen) {
@@ -162,12 +151,8 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, entity, core, timeline, counts, rail, tasks, queues, subscriptions, activity, memberships, threads, suggestions, integrations, attachments, queued, enrollments, dealScore } = screen
+  const { object, lookups, canWrite, registry, record, counts, rail, queues } = screen
 
-  const health = (kind: 'apollo' | 'lusha' | 'clay') => {
-    const row = integrations.find((i) => i.kind === kind)
-    return { state: row?.state ?? ('not_configured' as const), lastError: row?.lastError ?? null }
-  }
   const email = typeof record.values.email === 'string' && record.values.email ? record.values.email : null
   // A company and a deal have no address of their own. The rail is already
   // loaded, so the composer opens on the first contact linked to this record that
@@ -264,6 +249,256 @@ const RecordPage = async ({
     .filter(Boolean)
     .join(' at ') || record.labels.stage_id || null
 
+  const waiting = (
+    <div className="rounded-panel border border-line bg-surface p-4 shadow-panel">
+      <SkeletonRows rows={3} columns={2} />
+    </div>
+  )
+  // Started once the record is known to exist and shared by the two panels that
+  // read a contact's mail, so the Overview and the Mail card cost one query.
+  const threadsPromise = objectParam === 'contact' ? threadsForContact(ctx, id) : Promise.resolve([])
+
+  const DealScoreSection = async () => {
+    const dealScore = await readDealScore(ctx, id)
+    return dealScore ? (
+      // The number and the arithmetic behind it. HubSpot's own deal score
+      // is an AI figure with no explanation, which is why nobody argues
+      // with it and nobody acts on it either.
+      <section className="rounded-panel border border-line bg-surface p-4 shadow-panel">
+        <div className="flex items-center gap-3">
+          <ScoreRing score={dealScore.score} className="text-base" />
+          <div className="min-w-0">
+            <h2 className="font-medium">Deal score</h2>
+            <p className="text-small text-secondary">
+              {dealScore.scoredAt
+                ? `Out of 100, worked out ${formatDateTime(dealScore.scoredAt.toISOString(), zone)}.`
+                : 'Not worked out yet. It is computed nightly and whenever the stage changes.'}
+            </p>
+          </div>
+        </div>
+        {dealScore.score === null ? null : (
+          <dl className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3 text-small">
+            {SCORE_COMPONENTS.map((component) => (
+              <div key={component.key} className="flex items-baseline justify-between gap-3">
+                <dt className="min-w-0" title={component.why}>
+                  {component.label}
+                </dt>
+                <dd className="shrink-0 tabular-nums">
+                  {dealScore.detail[component.key] ?? 0} / {component.max}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+    ) : null
+  }
+
+  const WebsiteSection = async () => {
+    const activity = await websiteActivity(ctx, id)
+    return activity ? (
+      <WebsiteActivity
+        account={account}
+        contactId={id}
+        contactName={record.displayName}
+        siteVisits={activity.siteVisits}
+        pagesViewed={activity.pagesViewed}
+        lastSeenAt={activity.lastSeenAt?.toISOString() ?? null}
+        devices={activity.devices}
+        isAdmin={sessionIsAdmin(session)}
+      />
+    ) : null
+  }
+
+  const SegmentsSection = async () => {
+    const memberships = await readMemberships(ctx, id)
+    return memberships.length > 0 || objectParam === 'contact' ? (
+      <SegmentsPanel zone={zone} account={account} recordName={record.displayName} rows={memberships} />
+    ) : null
+  }
+
+  const EnrichmentSection = async ({ core }: { core: 'contact' | 'company' }) => {
+    const [suggestions, integrations, queued] = await Promise.all([
+      listSuggestions(ctx, core, id),
+      listIntegrations(ctx),
+      enrichmentQueued(ctx, core, id),
+    ])
+    const health = (kind: 'apollo' | 'lusha' | 'clay') => {
+      const row = integrations.find((i) => i.kind === kind)
+      return { state: row?.state ?? ('not_configured' as const), lastError: row?.lastError ?? null }
+    }
+    return (
+      <EnrichmentPanel
+        account={account}
+        object={core}
+        recordId={id}
+        matchKey={core === 'contact' ? email : domain}
+        blankFields={blankFields}
+        apolloUrl={email ? apolloContactUrl(email) : null}
+        apollo={health('apollo')}
+        lusha={health('lusha')}
+        clay={health('clay')}
+        queued={queued}
+        tracked={counts.email_tracking ?? 0}
+        sequenced={counts.sequence_activity ?? 0}
+        suggestions={suggestions.map((s) => ({
+          id: s.id,
+          fieldKey: s.fieldKey,
+          fieldLabel: object.byKey.get(s.fieldKey)?.label ?? s.fieldKey,
+          suggested: s.suggested,
+          current: s.current,
+          provider: s.provider,
+          at: s.at.toISOString(),
+        }))}
+        canWrite={canWrite}
+      />
+    )
+  }
+
+  const ContactSequences = async () => {
+    const enrollments = await enrollmentsForContact(ctx, id)
+    return (
+      <SequencesPanel
+        account={account}
+        contactId={id}
+        contactName={record.displayName}
+        canWrite={canWrite}
+        rows={enrollments.map((row) => ({
+          id: row.id,
+          sequenceId: row.sequenceId,
+          sequenceName: row.sequenceName,
+          state: row.state,
+          currentStep: row.currentStep,
+          stepCount: row.stepCount,
+          nextRunAt: row.nextRunAt?.toISOString() ?? null,
+          lastSentAt: row.lastSentAt?.toISOString() ?? null,
+          stopReason: row.stopReason,
+          enrolledAt: row.enrolledAt.toISOString(),
+        }))}
+      />
+    )
+  }
+
+  const MailSection = async () => {
+    const threads = await threadsPromise
+    return (
+      <MailPanel zone={zone} contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
+    )
+  }
+
+  const SubscriptionsSection = async () => {
+    const subscriptions = await readSubscriptions(ctx, id)
+    return (
+      <SubscriptionsPanel
+        contactId={id}
+        contactName={record.displayName}
+        rows={subscriptions}
+        canWrite={canWrite}
+      />
+    )
+  }
+
+  const OverviewSection = async () => {
+    const threads = await threadsPromise
+    return (
+      <RecordOverview zone={zone}
+        account={account}
+        object={objectParam}
+        threads={threads.map((thread) => ({
+          threadId: thread.id,
+          subject: thread.subject,
+          lastAt: thread.lastAt?.toISOString() ?? thread.firstAt?.toISOString() ?? null,
+          messageCount: thread.messageCount,
+        }))}
+        firstTouch={touchFrom(record.values.original_source)}
+        lastTouch={touchFrom(record.values.latest_source)}
+      />
+    )
+  }
+
+  const TimelineSection = async () => {
+    // A hand-edited type in a link is dropped rather than failing the page.
+    const timeline = await readTimeline(ctx, { entity, types: (type?.split(',') ?? []).filter(isActivityType), limit: 50 })
+    return (
+      <Timeline
+        object={objectParam}
+        recordId={id}
+        account={account}
+        recordName={record.displayName}
+        initial={timeline.rows.map((row) => ({
+          id: row.id,
+          type: row.type,
+          subject: row.subject,
+          body: row.body,
+          occurredAt: row.occurredAt.toISOString(),
+          actorId: row.actorId,
+          actorName: row.actorName,
+          actorKind: row.actorKind,
+          payload: row.payload,
+          stats: row.stats,
+        }))}
+        initialCursor={
+          timeline.nextCursor
+            ? { occurredAt: timeline.nextCursor.occurredAt.toISOString(), id: timeline.nextCursor.id }
+            : null
+        }
+        counts={counts}
+        groups={ACTIVITY_GROUPS}
+        canWrite={canWrite}
+        viewer={{ userId: session.userId, isAdmin: sessionIsAdmin(session) }}
+      />
+    )
+  }
+
+  const TasksSection = async () => {
+    const tasks = await listTasks(ctx, { entity })
+    return (
+      <TasksPanel
+        account={account}
+        rows={tasks.map((row) => ({
+          id: row.id,
+          title: row.title,
+          body: row.body,
+          type: row.type,
+          priority: row.priority,
+          dueDate: row.dueDate,
+          remindAt: row.remindAt,
+          queueId: row.queueId,
+          queueName: row.queueName,
+          status: row.status,
+          assigneeId: row.assigneeId,
+          assigneeName: row.assigneeName,
+          entityType: row.entityType,
+          entityId: row.entityId,
+          entityName: row.entityName,
+        }))}
+        entity={entity}
+        canWrite={canWrite}
+      />
+    )
+  }
+
+  const AttachmentsSection = async () => {
+    // Only when storage is connected: reading a table to draw a panel that
+    // can only say "not connected" is a query for nothing.
+    const attachments = storageConfigured ? await listAttachments(ctx, entity) : []
+    return (
+      <AttachmentsPanel
+        object={objectParam}
+        recordId={id}
+        configured={storageConfigured}
+        canWrite={canWrite}
+        rows={attachments.map((row) => ({
+          id: row.id,
+          filename: row.filename,
+          bytes: row.bytes,
+          mime: row.mime,
+          at: row.at.toISOString(),
+        }))}
+      />
+    )
+  }
+
   return (
     // HubSpot's record page: three columns of cards straight on the canvas. One
     // column when there is no room, measured against the shell's card rather
@@ -353,38 +588,7 @@ const RecordPage = async ({
           </div>
         </div>
 
-          {dealScore ? (
-            // The number and the arithmetic behind it. HubSpot's own deal score
-            // is an AI figure with no explanation, which is why nobody argues
-            // with it and nobody acts on it either.
-            <section className="rounded-panel border border-line bg-surface p-4 shadow-panel">
-              <div className="flex items-center gap-3">
-                <ScoreRing score={dealScore.score} className="text-base" />
-                <div className="min-w-0">
-                  <h2 className="font-medium">Deal score</h2>
-                  <p className="text-small text-secondary">
-                    {dealScore.scoredAt
-                      ? `Out of 100, worked out ${formatDateTime(dealScore.scoredAt.toISOString(), zone)}.`
-                      : 'Not worked out yet. It is computed nightly and whenever the stage changes.'}
-                  </p>
-                </div>
-              </div>
-              {dealScore.score === null ? null : (
-                <dl className="mt-3 flex flex-col gap-1.5 border-t border-line pt-3 text-small">
-                  {SCORE_COMPONENTS.map((component) => (
-                    <div key={component.key} className="flex items-baseline justify-between gap-3">
-                      <dt className="min-w-0" title={component.why}>
-                        {component.label}
-                      </dt>
-                      <dd className="shrink-0 tabular-nums">
-                        {dealScore.detail[component.key] ?? 0} / {component.max}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </section>
-          ) : null}
+          {objectParam === 'deal' ? <Suspense fallback={waiting}><DealScoreSection /></Suspense> : null}
 
           <PropertyPanel
             object={objectParam}
@@ -396,46 +600,14 @@ const RecordPage = async ({
             sections={sections}
             canWrite={canWrite}
           />
-          {objectParam === 'contact' && activity ? (
-            <WebsiteActivity
-              account={account}
-              contactId={id}
-              contactName={record.displayName}
-              siteVisits={activity.siteVisits}
-              pagesViewed={activity.pagesViewed}
-              lastSeenAt={activity.lastSeenAt?.toISOString() ?? null}
-              devices={activity.devices}
-              isAdmin={sessionIsAdmin(session)}
-            />
-          ) : null}
-          {memberships.length > 0 || objectParam === 'contact' ? (
-            <SegmentsPanel zone={zone} account={account} recordName={record.displayName} rows={memberships} />
-          ) : null}
+          {objectParam === 'contact' ? <Suspense fallback={waiting}><WebsiteSection /></Suspense> : null}
+          <Suspense fallback={waiting}>
+            <SegmentsSection />
+          </Suspense>
           {core && core !== 'deal' ? (
-            <EnrichmentPanel
-              account={account}
-              object={core}
-              recordId={id}
-              matchKey={core === 'contact' ? email : domain}
-              blankFields={blankFields}
-              apolloUrl={email ? apolloContactUrl(email) : null}
-              apollo={health('apollo')}
-              lusha={health('lusha')}
-              clay={health('clay')}
-              queued={queued}
-              tracked={counts.email_tracking ?? 0}
-              sequenced={counts.sequence_activity ?? 0}
-              suggestions={suggestions.map((s) => ({
-                id: s.id,
-                fieldKey: s.fieldKey,
-                fieldLabel: object.byKey.get(s.fieldKey)?.label ?? s.fieldKey,
-                suggested: s.suggested,
-                current: s.current,
-                provider: s.provider,
-                at: s.at.toISOString(),
-              }))}
-              canWrite={canWrite}
-            />
+            <Suspense fallback={waiting}>
+              <EnrichmentSection core={core} />
+            </Suspense>
           ) : null}
           {objectParam === 'company' ? (
             <SequencesPanel
@@ -446,37 +618,9 @@ const RecordPage = async ({
               rows={[]}
             />
           ) : null}
-          {objectParam === 'contact' ? (
-            <SequencesPanel
-              account={account}
-              contactId={id}
-              contactName={record.displayName}
-              canWrite={canWrite}
-              rows={enrollments.map((row) => ({
-                id: row.id,
-                sequenceId: row.sequenceId,
-                sequenceName: row.sequenceName,
-                state: row.state,
-                currentStep: row.currentStep,
-                stepCount: row.stepCount,
-                nextRunAt: row.nextRunAt?.toISOString() ?? null,
-                lastSentAt: row.lastSentAt?.toISOString() ?? null,
-                stopReason: row.stopReason,
-                enrolledAt: row.enrolledAt.toISOString(),
-              }))}
-            />
-          ) : null}
-          {objectParam === 'contact' ? (
-            <MailPanel zone={zone} contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
-          ) : null}
-          {objectParam === 'contact' ? (
-            <SubscriptionsPanel
-              contactId={id}
-              contactName={record.displayName}
-              rows={subscriptions}
-              canWrite={canWrite}
-            />
-          ) : null}
+          {objectParam === 'contact' ? <Suspense fallback={waiting}><ContactSequences /></Suspense> : null}
+          {objectParam === 'contact' ? <Suspense fallback={waiting}><MailSection /></Suspense> : null}
+          {objectParam === 'contact' ? <Suspense fallback={waiting}><SubscriptionsSection /></Suspense> : null}
         </div>
 
         <div className={COLUMN}>
@@ -502,46 +646,13 @@ const RecordPage = async ({
           </nav>
 
           {activeTab === 'overview' ? (
-            <RecordOverview zone={zone}
-              account={account}
-              object={objectParam}
-              threads={threads.map((thread) => ({
-                threadId: thread.id,
-                subject: thread.subject,
-                lastAt: thread.lastAt?.toISOString() ?? thread.firstAt?.toISOString() ?? null,
-                messageCount: thread.messageCount,
-              }))}
-              firstTouch={touchFrom(record.values.original_source)}
-              lastTouch={touchFrom(record.values.latest_source)}
-            />
+            <Suspense fallback={waiting}>
+              <OverviewSection />
+            </Suspense>
           ) : (
-          <Timeline
-            object={objectParam}
-            recordId={id}
-            account={account}
-            recordName={record.displayName}
-            initial={timeline.rows.map((row) => ({
-              id: row.id,
-              type: row.type,
-              subject: row.subject,
-              body: row.body,
-              occurredAt: row.occurredAt.toISOString(),
-              actorId: row.actorId,
-              actorName: row.actorName,
-              actorKind: row.actorKind,
-              payload: row.payload,
-              stats: row.stats,
-            }))}
-            initialCursor={
-              timeline.nextCursor
-                ? { occurredAt: timeline.nextCursor.occurredAt.toISOString(), id: timeline.nextCursor.id }
-                : null
-            }
-            counts={counts}
-            groups={ACTIVITY_GROUPS}
-            canWrite={canWrite}
-            viewer={{ userId: session.userId, isAdmin: sessionIsAdmin(session) }}
-          />
+          <Suspense fallback={waiting}>
+            <TimelineSection />
+          </Suspense>
           )}
         </div>
 
@@ -556,41 +667,12 @@ const RecordPage = async ({
             createInitial={createInitial}
             canWrite={canWrite}
           />
-          <TasksPanel
-            account={account}
-            rows={tasks.map((row) => ({
-              id: row.id,
-              title: row.title,
-              body: row.body,
-              type: row.type,
-              priority: row.priority,
-              dueDate: row.dueDate,
-              remindAt: row.remindAt,
-              queueId: row.queueId,
-              queueName: row.queueName,
-              status: row.status,
-              assigneeId: row.assigneeId,
-              assigneeName: row.assigneeName,
-              entityType: row.entityType,
-              entityId: row.entityId,
-              entityName: row.entityName,
-            }))}
-            entity={entity}
-            canWrite={canWrite}
-          />
-          <AttachmentsPanel
-            object={objectParam}
-            recordId={id}
-            configured={storageConfigured}
-            canWrite={canWrite}
-            rows={attachments.map((row) => ({
-              id: row.id,
-              filename: row.filename,
-              bytes: row.bytes,
-              mime: row.mime,
-              at: row.at.toISOString(),
-            }))}
-          />
+          <Suspense fallback={waiting}>
+            <TasksSection />
+          </Suspense>
+          <Suspense fallback={waiting}>
+            <AttachmentsSection />
+          </Suspense>
         </div>
 
         <RecordComposer

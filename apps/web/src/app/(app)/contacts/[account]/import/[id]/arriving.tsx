@@ -3,6 +3,7 @@
 import { Alert, Button } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { pollWhileVisible } from '~/lib/poll.ts'
 import { api } from '~/lib/rpc.ts'
 import { useUploads } from '~/lib/store/uploads.ts'
 
@@ -60,10 +61,10 @@ export const ImportArriving = ({
       }
     }
     void ask()
-    const timer = setInterval(() => void ask(), POLL_MS)
+    const stop = pollWhileVisible(() => void ask(), POLL_MS)
     return () => {
       dropped = true
-      clearInterval(timer)
+      stop()
     }
   }, [runId, router])
 
