@@ -2,8 +2,10 @@ import { decodeJwt } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
 
 /** A CRM or meetings link carries its account in the path, so opening someone else's link
- *  while signed in to a different account has to switch rather than quietly
- *  show the wrong tenant's screen or 404.
+ *  while signed in to a different account has to offer the switch rather than
+ *  quietly show the wrong tenant's screen or 404. It only offers: the switch is a
+ *  button on /switch, a POST, because moving the session under a tab that is still
+ *  working in the other account sends that tab's next write to the wrong tenant.
  *
  *  The claim is only read here, never trusted: this decides whether to bother
  *  redirecting. The switch handler verifies the signature and the membership
@@ -31,7 +33,7 @@ export const proxy = (request: NextRequest): NextResponse => {
 
   if (!current || current === wanted) return NextResponse.next()
 
-  const switchTo = new URL('/api/auth/account', request.nextUrl.origin)
+  const switchTo = new URL('/switch', request.nextUrl.origin)
   switchTo.searchParams.set('to', wanted)
   // The whole original address, so the person lands on the record they were sent,
   // not on the account's front page.

@@ -328,10 +328,11 @@ const Shell = ({
 
   const switchTo = (slug: string) => {
     // The switch handler re-reads the membership before it changes anything, so
-    // the selection is a request, never proof.
-    const target = new URL('/api/auth/account', window.location.origin)
-    target.searchParams.set('to', slug)
-    window.location.assign(target.toString())
+    // the selection is a request, never proof. A form, because it is a POST.
+    const form = Object.assign(document.createElement('form'), { method: 'post', action: '/api/auth/account' })
+    form.append(Object.assign(document.createElement('input'), { type: 'hidden', name: 'to', value: slug }))
+    document.body.append(form)
+    form.submit()
   }
 
   const accountMenu: MenuGroup[] = [
@@ -405,7 +406,7 @@ const Shell = ({
     // The shell owns the scroll: the viewport is exactly one screen tall and only
     // the page card moves. That is what lets a table header stick and keeps the
     // rail and the top bar from scrolling away.
-    <div className="flex h-dvh flex-col overflow-hidden bg-nav">
+    <div className="flex h-dvh flex-col overflow-hidden bg-nav" data-account={accountSlug}>
       <header className="relative z-topbar flex h-topbar shrink-0 items-center gap-2 pr-3 text-nav-text">
         <NavigationProgress />
 

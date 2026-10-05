@@ -7,11 +7,14 @@ import { contextFrom, readSession, type Session } from './session.ts'
 export type Context = {
   session: Session | null
   account: AccountContext | null
+  /** The account slug the calling tab says it is showing. Absent for a caller that
+   *  is not a tab, which is then judged by the session alone. */
+  requestedAccount?: string | null
 }
 
-export const createContext = async (): Promise<Context> => {
+export const createContext = async ({ req }: { req: Request }): Promise<Context> => {
   const session = await readSession()
-  return { session, account: session ? contextFrom(session) : null }
+  return { session, account: session ? contextFrom(session) : null, requestedAccount: req.headers.get('x-rawr-account') }
 }
 
 const t = initTRPC.context<Context>().create({
@@ -25,6 +28,12 @@ export const publicProcedure = t.procedure
 export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   if (!ctx.session || !ctx.account) {
     throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Sign in to continue.' })
+  }
+  if (ctx.requestedAccount && ctx.requestedAccount !== ctx.session.accountSlug) {
+    throw new TRPCError({
+      code: 'CONFLICT',
+      message: `This tab is showing another account than the one you are signed in to now (${ctx.session.accountName}). Reload it before changing anything.`,
+    })
   }
   return next({ ctx: { ...ctx, session: ctx.session, account: ctx.account } })
 })

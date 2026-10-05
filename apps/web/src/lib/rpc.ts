@@ -6,9 +6,23 @@ import type { AppRouter } from '~/server/routers/_app.ts'
 
 /** The typed client the interactive surfaces call. Server components read through
  *  the data access layer directly, so this carries the mutations and the handful
- *  of reads that happen after a click. */
+ *  of reads that happen after a click.
+ *
+ *  Every request names the account this tab is showing, read from the shell. The
+ *  session cookie is shared by every tab, so a tab that is still on one account
+ *  would otherwise write into whichever the cookie was moved to since; the server
+ *  refuses the request instead. */
 export const api = createTRPCClient<AppRouter>({
-  links: [httpBatchLink({ url: '/api/trpc', transformer: superjson })],
+  links: [
+    httpBatchLink({
+      url: '/api/trpc',
+      transformer: superjson,
+      headers: () => {
+        const account = document.querySelector('[data-account]')?.getAttribute('data-account')
+        return account ? { 'x-rawr-account': account } : {}
+      },
+    }),
+  ],
 })
 
 /** Every message a procedure throws is written for a person to read, so it is

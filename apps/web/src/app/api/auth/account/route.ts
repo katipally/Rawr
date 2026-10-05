@@ -4,22 +4,27 @@ import { env } from '~/lib/env.ts'
 import { safePath } from '~/lib/links.ts'
 import { readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
-/** Switches the signed-in account so a link into another tenant opens where it
- *  was meant to. Membership is re-read from the database here; the slug in the URL
- *  is a request, never proof. */
-export const GET = async (request: NextRequest): Promise<NextResponse> => {
+/** Switches the signed-in account. A POST, so a link or an image cannot do it on
+ *  somebody's behalf: the session cookie is not sent on a cross-site POST, and the
+ *  origin is checked besides. Membership is re-read from the database here; the
+ *  slug is a request, never proof. */
+export const POST = async (request: NextRequest): Promise<NextResponse> => {
+  const origin = request.headers.get('origin')
+  if (origin && origin !== new URL(env.AUTH_URL).origin) return new NextResponse(null, { status: 403 })
+
   const session = await readSession()
   if (!session) {
     const back = new URL('/sign-in', env.AUTH_URL)
     back.searchParams.set('error', 'Sign in to open that link.')
-    return NextResponse.redirect(back)
+    return NextResponse.redirect(back, 303)
   }
 
-  const wanted = request.nextUrl.searchParams.get('to') ?? ''
-  const next = safePath(request.nextUrl.searchParams.get('next'))
+  const form = await request.formData()
+  const wanted = String(form.get('to') ?? '')
+  const next = safePath(String(form.get('next') ?? ''))
 
   if (wanted === session.accountSlug) {
-    return NextResponse.redirect(new URL(next, env.AUTH_URL))
+    return NextResponse.redirect(new URL(next, env.AUTH_URL), 303)
   }
 
   const memberships = await membershipsForUser(session.userId)
@@ -30,9 +35,9 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
       'error',
       `That link belongs to an account called "${wanted}", and you do not have a seat in it.`,
     )
-    return NextResponse.redirect(back)
+    return NextResponse.redirect(back, 303)
   }
 
   await writeSessionCookie(sessionFromMembership(target))
-  return NextResponse.redirect(new URL(next, env.AUTH_URL))
+  return NextResponse.redirect(new URL(next, env.AUTH_URL), 303)
 }
