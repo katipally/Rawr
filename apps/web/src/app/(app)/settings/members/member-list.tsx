@@ -471,16 +471,13 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
         </ul>
       )}
 
-      <Modal open={editing !== null} onClose={() => setEditing(null)} title={`Permissions for ${editing?.name ?? ''}`}>
-        {editing ? (
-          <div className="flex flex-col gap-4">
-            <GrantGrid
-              value={editing.grants}
-              onChange={(grants) => setEditing({ ...editing, grants })}
-              templates={templates}
-              copyFrom={[]}
-            />
-            <div className="flex justify-end gap-2">
+      <Modal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={`Permissions for ${editing?.name ?? ''}`}
+        footer={
+          editing ? (
+            <>
               <Button variant="secondary" onClick={() => setEditing(null)}>
                 Cancel
               </Button>
@@ -499,12 +496,51 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               >
                 Save
               </Button>
-            </div>
+            </>
+          ) : null
+        }
+      >
+        {editing ? (
+          <div className="flex flex-col gap-4">
+            <GrantGrid
+              value={editing.grants}
+              onChange={(grants) => setEditing({ ...editing, grants })}
+              templates={templates}
+              copyFrom={[]}
+            />
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={inviting !== null} onClose={() => setInviting(null)} title="Create member">
+      <Modal
+        open={inviting !== null}
+        onClose={() => setInviting(null)}
+        title="Create member"
+        dirty={inviting !== null && inviting.email !== ''}
+        onSubmit={() => {
+          if (!inviting) return
+          void run(async () => {
+            const { token } = await api.account.members.invite.mutate({
+              email: inviting.email.trim(),
+              ...inviting.grants,
+            })
+            setInviting(null)
+            setLink(`${window.location.origin}${invitePath(token)}`)
+          }, 'Invitation ready.')
+        }}
+        footer={
+          inviting ? (
+            <>
+              <Button variant="secondary" onClick={() => setInviting(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy || inviting.email.trim() === ''}>
+                Send invitation
+              </Button>
+            </>
+          ) : null
+        }
+      >
         {inviting ? (
           <div className="flex flex-col gap-4">
             <Field id="invite-email" label="Email address">
@@ -522,50 +558,17 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               templates={templates}
               copyFrom={rows}
             />
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setInviting(null)}>
-                Cancel
-              </Button>
-              <Button
-                disabled={busy || inviting.email.trim() === ''}
-                onClick={() =>
-                  run(async () => {
-                    const { token } = await api.account.members.invite.mutate({
-                      email: inviting.email.trim(),
-                      ...inviting.grants,
-                    })
-                    setInviting(null)
-                    setLink(`${window.location.origin}${invitePath(token)}`)
-                  }, 'Invitation ready.')
-                }
-              >
-                Send invitation
-              </Button>
-            </div>
           </div>
         ) : null}
       </Modal>
 
-      <Modal open={copying !== null} onClose={() => setCopying(null)} title={`Copy permissions to ${copying?.name ?? ''}`}>
-        {copying ? (
-          <div className="flex flex-col gap-4">
-            <Field id="copy-from" label="Copy from" hint="They end up holding exactly what this person holds now.">
-              <Select
-                id="copy-from"
-                value={copying.fromUserId}
-                onChange={(e) => setCopying({ ...copying, fromUserId: e.target.value })}
-              >
-                <option value="">Pick somebody</option>
-                {rows
-                  .filter((row) => row.userId !== copying.toUserId)
-                  .map((row) => (
-                    <option key={row.userId} value={row.userId}>
-                      {row.name} - {summarise(row)}
-                    </option>
-                  ))}
-              </Select>
-            </Field>
-            <div className="flex justify-end gap-2">
+      <Modal
+        open={copying !== null}
+        onClose={() => setCopying(null)}
+        title={`Copy permissions to ${copying?.name ?? ''}`}
+        footer={
+          copying ? (
+            <>
               <Button variant="secondary" onClick={() => setCopying(null)}>
                 Cancel
               </Button>
@@ -588,7 +591,28 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
               >
                 Copy
               </Button>
-            </div>
+            </>
+          ) : null
+        }
+      >
+        {copying ? (
+          <div className="flex flex-col gap-4">
+            <Field id="copy-from" label="Copy from" hint="They end up holding exactly what this person holds now.">
+              <Select
+                id="copy-from"
+                value={copying.fromUserId}
+                onChange={(e) => setCopying({ ...copying, fromUserId: e.target.value })}
+              >
+                <option value="">Pick somebody</option>
+                {rows
+                  .filter((row) => row.userId !== copying.toUserId)
+                  .map((row) => (
+                    <option key={row.userId} value={row.userId}>
+                      {row.name} - {summarise(row)}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
           </div>
         ) : null}
       </Modal>
