@@ -1,9 +1,11 @@
 'use client'
 
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
 import { api } from '~/lib/rpc.ts'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Group } from './filter-builder.tsx'
 
 type Kpi = { key: string; label: string; count: number; filters: Group[] }
@@ -41,6 +43,13 @@ export type KpiStripProps = {
  *  fails: a broken count is not worth an error above somebody's list. */
 export const KpiStrip = ({ account, object, view, params, filters, hasRecords }: KpiStripProps) => {
   const [tiles, setTiles] = useState<Kpi[] | null>(null)
+  // Collapsed is a statement about this person's screen, not about the list, so it
+  // follows them to every list rather than riding in an address they might paste.
+  // Open until their preferences arrive, so the first paint matches the server's.
+  const stripId = useId()
+  const collapsed = useUi((state) => state.panelOpen.kpis) === false
+  const setPanelOpen = useUi((state) => state.setPanelOpen)
+  const expanded = !useUiReady() || !collapsed
   // Filters arrive as a fresh array every render, so the effect keys off what is
   // in them rather than their identity, and reads them back from that same key.
   const filterKey = JSON.stringify(filters)
@@ -74,29 +83,47 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
   const shells = tiles ?? PLACEHOLDERS
 
   return (
-    // Wraps rather than scrolls: four short tiles on a phone are two rows, and a
-    // row that scrolls sideways hides the tile nobody thought to look for.
-    <ul aria-busy={tiles ? undefined : true} className="flex shrink-0 flex-wrap gap-2">
-      {shells.map((tile) => (
-        <li key={tile.key} className="min-w-0 flex-1 basis-[min(12rem,100%)]">
-          <Link
-            aria-hidden={tiles ? undefined : true}
-            tabIndex={tiles ? undefined : -1}
-            href={objectView(account, object, view, 'list', {
-              ...params,
-              filters: encodeFilters([...filters, ...tile.filters]),
-              // A cursor and an offset from the unfiltered list mean nothing to
-              // the filtered one.
-              cursor: undefined,
-              skip: undefined,
-            })}
-            className={`flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
-          >
-            <span className="text-small text-secondary">{tile.label}</span>
-            <span className="text-base font-semibold tabular-nums">{tile.count.toLocaleString()}</span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+    <div className="flex shrink-0 flex-col gap-2">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={stripId}
+        onClick={() => setPanelOpen('kpis', !expanded)}
+        className="flex w-fit items-center gap-1 text-small text-secondary hover:text-body"
+      >
+        {expanded ? (
+          <ChevronDown aria-hidden="true" className="size-4 shrink-0" />
+        ) : (
+          <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+        )}
+        Data gaps
+      </button>
+      {/* Wraps rather than scrolls: four short tiles on a phone are two rows, and a
+          row that scrolls sideways hides the tile nobody thought to look for. */}
+      {expanded ? (
+        <ul id={stripId} aria-busy={tiles ? undefined : true} className="flex flex-wrap gap-2">
+          {shells.map((tile) => (
+            <li key={tile.key} className="min-w-0 flex-1 basis-[min(12rem,100%)]">
+              <Link
+                aria-hidden={tiles ? undefined : true}
+                tabIndex={tiles ? undefined : -1}
+                href={objectView(account, object, view, 'list', {
+                  ...params,
+                  filters: encodeFilters([...filters, ...tile.filters]),
+                  // A cursor and an offset from the unfiltered list mean nothing to
+                  // the filtered one.
+                  cursor: undefined,
+                  skip: undefined,
+                })}
+                className={`flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
+              >
+                <span className="text-small text-secondary">{tile.label}</span>
+                <span className="text-base font-semibold tabular-nums">{tile.count.toLocaleString()}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   )
 }

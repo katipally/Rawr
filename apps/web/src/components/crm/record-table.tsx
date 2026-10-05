@@ -177,7 +177,9 @@ export const RecordTable = ({
   const pageHref = (next: ListParams): string => objectView(account, object, view, 'list', next)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    // The rows keep room to be read when the chrome above them is tall: past this
+    // the page scrolls instead of the table shrinking to a header.
+    <div className="flex min-h-[calc(var(--spacing-row)*8)] flex-1 flex-col gap-2">
       <DataTable
         fill
         storageKey={`${object}.${view}`}
