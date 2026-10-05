@@ -1,6 +1,7 @@
 import { membershipsForUser } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
+import { safePath } from '~/lib/links.ts'
 import { readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
 /** Switches the signed-in account so a link into another tenant opens where it
@@ -15,9 +16,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   const wanted = request.nextUrl.searchParams.get('to') ?? ''
-  const requested = request.nextUrl.searchParams.get('next') ?? '/'
-  // Only same-origin paths, so this cannot be turned into an open redirect.
-  const next = requested.startsWith('/') && !requested.startsWith('//') ? requested : '/'
+  const next = safePath(request.nextUrl.searchParams.get('next'))
 
   if (wanted === session.accountSlug) {
     return NextResponse.redirect(new URL(next, env.AUTH_URL))

@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env, googleCalendarConfigured } from '~/lib/env.ts'
-import { calendarsPath } from '~/lib/links.ts'
+import { calendarsPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_CALENDAR_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { CALENDAR_SCOPES } from '~/server/calendar.ts'
 import { readSession } from '~/server/session.ts'
@@ -52,7 +52,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   jar.set('rawr_cal_verifier', codeVerifier, options)
   // Where to land afterwards. Read from the request rather than guessed, so
   // connecting from the page editor comes back to the page editor.
-  jar.set('rawr_cal_return', request.nextUrl.searchParams.get('return') ?? back.pathname, options)
+  jar.set('rawr_cal_return', safePath(request.nextUrl.searchParams.get('return'), back.pathname), options)
 
   return NextResponse.redirect(url)
 }

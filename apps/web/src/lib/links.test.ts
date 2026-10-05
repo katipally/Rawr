@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, objectView, recordPath, accountInPath, safeFrom } from './links.ts'
+import { exportCsvPath, exportPath, objectView, recordPath, accountInPath, safeFrom, safePath } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -124,4 +124,23 @@ test('the origin travels in the record address and comes back out of it', () => 
   const list = '/contacts/datasaur/objects/deal/views/all/list?sort=-amount'
   const href = recordPath('datasaur', 'deal', 'abc', { from: list })
   assert.equal(safeFrom(new URL(href, 'http://x').searchParams.get('from'), 'datasaur'), list)
+})
+
+/** Every redirect that follows an address, a cookie or a form field ends in
+ *  safePath, so the parser's reading of a value is what decides where it goes. */
+test('a path on this site comes back as written, query string and hash included', () => {
+  for (const ok of ['/', '/contacts/datasaur/home', '/oauth/authorize?client_id=x&state=y', '/settings/mailboxes?error=a%20b#top', '/%5Cevil.com']) {
+    assert.equal(safePath(ok), ok)
+  }
+})
+
+test('anything the browser would read as another host falls back', () => {
+  for (const hostile of ['/\\evil.com', '//evil.com', '///evil.com', '\\\\evil.com', 'https://evil.com', '//\\evil.com', 'javascript:alert(1)', '/\t/evil.com', '/\n/evil.com', '/\r/evil.com', '/\t\\evil.com', '\t//evil.com', 'evil.com', '', null, undefined]) {
+    assert.equal(safePath(hostile), '/', JSON.stringify(hostile))
+    assert.equal(safePath(hostile, '/settings/mailboxes'), '/settings/mailboxes', JSON.stringify(hostile))
+  }
+})
+
+test('a path is handed back in the parser\'s form, so dot segments are resolved', () => {
+  assert.equal(safePath('/contacts/../settings?x=1'), '/settings?x=1')
 })

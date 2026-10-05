@@ -2,7 +2,7 @@ import { saveMailbox } from '@rawr/db'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
-import { mailboxesPath } from '~/lib/links.ts'
+import { mailboxesPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
 import { grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -18,7 +18,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const jar = await cookies()
   const expectedState = jar.get('rawr_gmail_state')?.value
   const codeVerifier = jar.get('rawr_gmail_verifier')?.value
-  const returnTo = jar.get('rawr_gmail_return')?.value ?? mailboxesPath()
+  const returnTo = safePath(jar.get('rawr_gmail_return')?.value, mailboxesPath())
   jar.delete('rawr_gmail_state')
   jar.delete('rawr_gmail_verifier')
   jar.delete('rawr_gmail_return')

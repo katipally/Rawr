@@ -1,5 +1,6 @@
 import { Alert } from '@rawr/ui'
 import { calendarAtSignIn, env, googleConfigured, hostedDomainRequired, visitorAccessOpen } from '~/lib/env.ts'
+import { safePath } from '~/lib/links.ts'
 
 type Props = { searchParams: Promise<{ error?: string; next?: string }> }
 
@@ -8,7 +9,7 @@ type Props = { searchParams: Promise<{ error?: string; next?: string }> }
  *  magic links, and nothing that takes an address on trust. */
 const SignIn = async ({ searchParams }: Props) => {
   const { error, next } = await searchParams
-  const after = next && next.startsWith('/') && !next.startsWith('//') ? next : ''
+  const after = safePath(next, '')
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-8 p-6">

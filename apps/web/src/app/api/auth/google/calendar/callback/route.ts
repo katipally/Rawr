@@ -2,7 +2,7 @@ import { saveGrant } from '@rawr/db'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
-import { calendarsPath } from '~/lib/links.ts'
+import { calendarsPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_CALENDAR_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -17,7 +17,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const jar = await cookies()
   const expectedState = jar.get('rawr_cal_state')?.value
   const codeVerifier = jar.get('rawr_cal_verifier')?.value
-  const returnTo = jar.get('rawr_cal_return')?.value ?? calendarsPath(session.accountSlug)
+  const returnTo = safePath(jar.get('rawr_cal_return')?.value, calendarsPath(session.accountSlug))
   jar.delete('rawr_cal_state')
   jar.delete('rawr_cal_verifier')
   jar.delete('rawr_cal_return')

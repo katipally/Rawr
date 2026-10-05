@@ -121,20 +121,30 @@ export const recordPath = (
 const MAX_FROM_LENGTH = 2048
 const PARSE_BASE = 'http://rawr.invalid'
 
-/** The origin a record link asked Back to return to, or null when it is anything
- *  else. `from` is typed into an address by whoever wrote the link, so it is only
- *  followed when the browser would resolve it to this site, on this account.
+/** A path somebody typed into an address, cookie or form, as a path on this site,
+ *  or `fallback` when the browser would take it anywhere else.
  *
  *  Asking the URL parser rather than matching the string is the point: it reads
- *  `/\evil.com` and a tab inside `//` the way a browser does, as another host. */
-export const safeFrom = (value: string | null | undefined, account: string): string | null => {
-  if (!value || value.length > MAX_FROM_LENGTH || !value.startsWith('/')) return null
+ *  `/\evil.com` and a tab inside `//` the way a browser does, as another host.
+ *  What comes back is the parser's own rendering, so nothing it would have
+ *  stripped or rewritten reaches a Location header. */
+export const safePath = (value: string | null | undefined, fallback = '/'): string => {
+  if (!value?.startsWith('/')) return fallback
   try {
-    if (new URL(value, PARSE_BASE).origin !== PARSE_BASE) return null
+    const parsed = new URL(value, PARSE_BASE)
+    return parsed.origin === PARSE_BASE ? `${parsed.pathname}${parsed.search}${parsed.hash}` : fallback
   } catch {
-    return null
+    return fallback
   }
-  return accountInPath(value) === account ? value : null
+}
+
+/** The origin a record link asked Back to return to, or null when it is anything
+ *  else. `from` is typed into an address by whoever wrote the link, so it is only
+ *  followed when it is a path on this site, on this account. */
+export const safeFrom = (value: string | null | undefined, account: string): string | null => {
+  if (!value || value.length > MAX_FROM_LENGTH) return null
+  const path = safePath(value, '')
+  return path && accountInPath(path) === account ? path : null
 }
 
 /** The + in the top bar. It lands on the object's own list, which is where the

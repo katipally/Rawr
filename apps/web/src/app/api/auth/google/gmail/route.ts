@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { devGmailEnabled, env, googleConfigured } from '~/lib/env.ts'
-import { mailboxesPath } from '~/lib/links.ts'
+import { mailboxesPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { GMAIL_READ_SCOPES, GMAIL_SEND_SCOPES } from '~/server/gmail.ts'
 import { readSession } from '~/server/session.ts'
@@ -57,7 +57,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   } as const
   jar.set('rawr_gmail_state', state, options)
   jar.set('rawr_gmail_verifier', codeVerifier, options)
-  jar.set('rawr_gmail_return', request.nextUrl.searchParams.get('return') ?? back.pathname, options)
+  jar.set('rawr_gmail_return', safePath(request.nextUrl.searchParams.get('return'), back.pathname), options)
 
   return NextResponse.redirect(url)
 }
