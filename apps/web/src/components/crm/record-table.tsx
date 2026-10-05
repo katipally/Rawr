@@ -3,15 +3,17 @@
 import { DataTable, EmptyState, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
 import { Download } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { FieldType } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
 import { Value, isPast } from './value.tsx'
+import { RecordPreview } from './record-preview.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -41,6 +43,9 @@ export type RecordTableProps = {
   bulkFields: EditableField[]
   /** The CSV of exactly this list: same filters, columns and sort. */
   exportHref: string
+  /** The properties the preview panel opens on. */
+  previewFields: TableColumn[]
+  canWrite: boolean
 }
 
 const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
@@ -62,10 +67,13 @@ export const RecordTable = ({
   objectPlural,
   bulkFields,
   exportHref,
+  previewFields,
+  canWrite,
 }: RecordTableProps) => {
   const zone = useZone()
   const router = useRouter()
   const origin = useOrigin()
+  const preview = useSearchParams().get('preview')
   const { navigate } = useNavigation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const canBulk = bulkFields.length > 0
@@ -92,14 +100,30 @@ export const RecordTable = ({
         const own = row.labels[column.key] || (value === null || value === undefined ? '' : String(value))
         const text = own.trim() || row.displayName
         return (
-          <Link
-            href={recordPath(account, object, row.id, { from: origin })}
-            className="block truncate font-medium"
-            title={text}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {text}
-          </Link>
+          <span className="relative flex items-center">
+            <Link
+              href={recordPath(account, object, row.id, { from: origin })}
+              className="block min-w-0 flex-1 truncate font-medium"
+              title={text}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {text}
+            </Link>
+            {/* Over the end of the name rather than beside it, so showing it does not
+                cut the name short. Shown with the row hovered or the button focused,
+                and always on a device with no hover to show it with. */}
+            <button
+              type="button"
+              aria-label={`Preview ${text}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                replaceParams({ preview: row.id })
+              }}
+              className="absolute top-1/2 right-0 -translate-y-1/2 rounded-hs border border-line-strong bg-surface px-2 py-0.5 text-small opacity-0 hover:bg-fill focus-visible:opacity-100 [@media(hover:none)]:opacity-100 [tr:hover_&]:opacity-100"
+            >
+              Preview
+            </button>
+          </span>
         )
       }
 
@@ -177,6 +201,16 @@ export const RecordTable = ({
             }
           />
         }
+      />
+
+      <RecordPreview
+        account={account}
+        object={object}
+        id={preview}
+        fields={previewFields}
+        canWrite={canWrite}
+        from={origin}
+        onClose={() => replaceParams({ preview: null })}
       />
 
       {/* Below the list, not above it. The bar appears the moment a row is ticked,
