@@ -1340,11 +1340,30 @@ const advance = async (
   }
 }
 
+/** Minutes before each retry of a step whose send failed for a reason that is
+ *  Google's rather than the enrollment's: a quota, a 5xx, a timeout. Five tries in
+ *  all, spread over about eight hours, then the enrollment fails like any other. */
+const TRANSIENT_RETRY_MINUTES = [5, 30, 120, 360]
+
+/** Records a send that did not happen. Returns true when the step is left to run
+ *  again later, false when the enrollment has failed.
+ *
+ *  A permanent failure (a bad address, a missing merge field, a refused scope)
+ *  stops the enrollment, because trying again repeats it. A transient one is only
+ *  retried, so a Gmail hiccup does not end a sequence for that contact. */
 export const recordSendFailure = async (
   ctx: AccountContext,
-  input: { enrollmentId: string; stepId: string | null; mailboxId: string; error: string },
-): Promise<void> =>
+  input: { enrollmentId: string; stepId: string | null; mailboxId: string; error: string; transient?: boolean },
+): Promise<boolean> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
+    const [tried] =
+      input.transient && input.stepId
+        ? await tx.execute<{ failed: number }>(sql`
+            select count(*)::int as failed from sequence_send
+             where enrollment_id = ${input.enrollmentId}::uuid and step_id = ${input.stepId}::uuid and state = 'failed'`)
+        : []
+    const wait = tried ? TRANSIENT_RETRY_MINUTES[tried.failed] : undefined
+
     await tx.insert(sequenceSend).values({
       accountId: ctx.accountId,
       enrollmentId: input.enrollmentId,
@@ -1356,17 +1375,26 @@ export const recordSendFailure = async (
     })
     await tx
       .update(sequenceEnrollment)
-      .set({
-        state: 'failed',
-        stopReason: input.error.slice(0, 500),
-        nextRunAt: null,
-        finishedAt: new Date(),
-        leaseUntil: null,
-      })
+      .set(
+        wait === undefined
+          ? {
+              state: 'failed',
+              stopReason: input.error.slice(0, 500),
+              nextRunAt: null,
+              finishedAt: new Date(),
+              leaseUntil: null,
+            }
+          : { nextRunAt: new Date(Date.now() + wait * 60_000), leaseUntil: null },
+      )
       .where(eq(sequenceEnrollment.id, input.enrollmentId))
     return {
-      result: undefined,
-      audit: { entity: 'sequence_enrollment', entityId: input.enrollmentId, action: 'send_failed', after: { error: input.error } },
+      result: wait !== undefined,
+      audit: {
+        entity: 'sequence_enrollment',
+        entityId: input.enrollmentId,
+        action: 'send_failed',
+        after: { error: input.error, ...(wait === undefined ? {} : { retryInMinutes: wait }) },
+      },
     }
   })
 

@@ -19,6 +19,7 @@ import {
   recordClick,
   recordOpen,
   recordSend,
+  recordSendFailure,
   saveSequence,
   saveSteps,
   setSequenceState,
@@ -376,6 +377,51 @@ try {
     (row) => row.contactId === second_person.id,
   )
   check(afterAuto?.state === 'active', 'an out-of-office does not stop it', afterAuto?.state ?? '')
+
+  // Google being busy is not the enrollment's fault: the step is tried again, a
+  // finite number of times, and only then does the enrollment fail. A failure
+  // that is about what was asked for stops it at once.
+  const [flaky, refusedMail] = await Promise.all(
+    ['flaky', 'refused'].map((name) =>
+      createRecord(admin, 'contact', { first_name: name, last_name: 'Send', email: `${name}-${stamp}@partner1.example` }),
+    ),
+  )
+  await enroll(sales, { sequenceId: created.id, contactIds: [flaky!.id, refusedMail!.id], mailboxId: box.id })
+  const attemptFor = async (contactId: string) => {
+    const row = (await listEnrollments(sales, { sequenceId: created.id })).find((entry) => entry.contactId === contactId)!
+    const claimed = (await claimEnrollmentRun(sales, row.id)).claimed
+    return { enrollmentId: row.id, stepId: claimed!.step!.id, mailboxId: box.id, error: 'Gmail answered 503' }
+  }
+  const flakyAttempt = await attemptFor(flaky!.id)
+  const retries: boolean[] = []
+  for (let i = 0; i < 5; i++) retries.push(await recordSendFailure(sales, { ...flakyAttempt, transient: true }))
+  check(
+    retries.slice(0, 4).every(Boolean) && retries[4] === false,
+    'a transient send failure is retried four times and the fifth fails the enrollment',
+    retries.join(','),
+  )
+  const [flakyState] = await owner`select state from sequence_enrollment where id = ${flakyAttempt.enrollmentId}`
+  check(flakyState?.state === 'failed', 'and it is then failed', String(flakyState?.state))
+
+  const refusedAttempt = await attemptFor(refusedMail!.id)
+  check(
+    (await recordSendFailure(sales, { ...refusedAttempt, error: 'Gmail answered 400', transient: false })) === false,
+    'a permanent send failure fails it at once',
+  )
+  const [refusedState] = await owner`select state from sequence_enrollment where id = ${refusedAttempt.enrollmentId}`
+  check(refusedState?.state === 'failed', 'and the enrollment is failed', String(refusedState?.state))
+
+  const waiter = await createRecord(admin, 'contact', { first_name: 'Wait', last_name: 'Send', email: `wait-${stamp}@partner1.example` })
+  await enroll(sales, { sequenceId: created.id, contactIds: [waiter.id], mailboxId: box.id })
+  const waitAttempt = await attemptFor(waiter.id)
+  await recordSendFailure(sales, { ...waitAttempt, transient: true })
+  const [queuedAgain] = await owner`
+    select state, next_run_at > now() + interval '4 minutes' as later, lease_until is null as free
+      from sequence_enrollment where id = ${waitAttempt.enrollmentId}`
+  check(
+    queuedAgain?.state === 'active' && queuedAgain.later === true && queuedAgain.free === true,
+    'a retried step waits for its next try, still active, with its lease released',
+  )
 
   // A bounce.
   const third = await createRecord(admin, 'contact', {

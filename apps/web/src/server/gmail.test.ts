@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorised, htmlToText, parseAddresses, RevokedError, sanitiseHtml } from './gmail.ts'
+import { authorised, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -145,4 +145,49 @@ test('a rate limit is waited out and is not a withdrawal', async () => {
   assert.deepEqual(await fetcher('/profile'), { ok: true })
   assert.equal(calls.gmail, 2)
   mock.restoreAll()
+})
+
+// ------------------------------------------------------------------- sending
+
+const failure = (status: number | undefined, transient = false) =>
+  Object.assign(new Error(`Gmail answered ${status}`), { status, transient })
+
+const mail = { raw: 'cmF3', threadId: null, internetMessageId: '<abc@rawr.test>' }
+
+test('a send that timed out is looked up by its Message-ID, and not sent again if Gmail has it', async () => {
+  const seen: string[] = []
+  const fetcher: Fetcher = async (path, params) => {
+    seen.push(path)
+    if (path === '/messages/send') throw Object.assign(new Error('timeout'), { name: 'TimeoutError' })
+    assert.equal(params?.q, 'rfc822msgid:<abc@rawr.test>')
+    return { messages: [{ id: 'gm-1', threadId: 'gt-1' }] }
+  }
+  assert.deepEqual(await sendMail(fetcher, mail), { id: 'gm-1', threadId: 'gt-1' })
+  assert.deepEqual(seen, ['/messages/send', '/messages'])
+})
+
+test('a 5xx with nothing in the mailbox is raised so it can be tried again', async () => {
+  const fetcher: Fetcher = async (path) => {
+    if (path === '/messages/send') throw failure(503, true)
+    return {}
+  }
+  await assert.rejects(sendMail(fetcher, mail), (cause) => isTransient(cause))
+})
+
+test('a refused send was not sent, so nothing is looked up', async () => {
+  let calls = 0
+  const fetcher: Fetcher = async () => {
+    calls += 1
+    throw failure(400)
+  }
+  await assert.rejects(sendMail(fetcher, mail), (cause) => !isTransient(cause))
+  assert.equal(calls, 1)
+})
+
+test('busy, unreachable and slow are transient; refused and withdrawn are not', () => {
+  assert.equal(isTransient(failure(503, true)), true)
+  assert.equal(isTransient(Object.assign(new Error('x'), { name: 'TimeoutError' })), true)
+  assert.equal(isTransient(new TypeError('fetch failed')), true)
+  assert.equal(isTransient(failure(400)), false)
+  assert.equal(isTransient(new RevokedError('gone')), false)
 })

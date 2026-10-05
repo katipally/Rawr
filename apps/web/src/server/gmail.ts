@@ -82,6 +82,16 @@ const recordRevocation = async (
   )
 }
 
+type GmailError = Error & { status?: number; transient?: boolean }
+
+/** Whether a failure is Google being busy or unreachable rather than refusing the
+ *  request, which is the difference between trying again later and giving up. */
+export const isTransient = (cause: unknown): boolean =>
+  (cause as GmailError).transient === true ||
+  (cause as Error).name === 'TimeoutError' ||
+  (cause instanceof TypeError && cause.message === 'fetch failed') ||
+  (cause instanceof OAuth2RequestError && /^http_5/.test(cause.code))
+
 /** Google's own signal that the grant is gone. Anything else is a transient error
  *  and is retried; this one stops the mailbox, because a withdrawn consent does
  *  not come back on its own and retrying would be the wrong answer to it. */
@@ -90,7 +100,7 @@ const isRevocation = (status: number, body: string): boolean =>
   (status === 403 && /insufficient|forbidden|scope/i.test(body)) ||
   /invalid_grant/i.test(body)
 
-type Fetcher = (
+export type Fetcher = (
   path: string,
   params?: Record<string, string>,
   /** Set to POST a body. Reads pass neither and get a GET, which is every call
@@ -168,7 +178,8 @@ export const authorised = async (
     // A 404 on history.list means the stored historyId has aged out. The caller
     // turns that into a full re-list rather than a crash. B2.
     const error = new Error(`Gmail answered ${response.status}: ${body.slice(0, 300)}`)
-    ;(error as Error & { status?: number }).status = response.status
+    ;(error as GmailError).status = response.status
+    ;(error as GmailError).transient = isRateLimited(response.status, body) || response.status >= 500
     throw error
   }
 
@@ -703,3 +714,27 @@ const guarding = async <T>(
 }
 
 
+
+/** One send, safe to ask for again. Gmail takes no idempotency key, and a timeout or
+ *  a 5xx does not say whether the mail went, so before such a failure is allowed to
+ *  mean "try again" the mailbox is asked whether a message with this Message-ID is
+ *  already in it. A refused request (any 4xx) was not sent and is raised as it is. */
+export const sendMail = async (
+  fetcher: Fetcher,
+  mail: { raw: string; threadId: string | null; internetMessageId: string },
+): Promise<{ id?: string; threadId?: string }> => {
+  try {
+    return (await fetcher('/messages/send', undefined, {
+      method: 'POST',
+      body: JSON.stringify({ raw: mail.raw, ...(mail.threadId ? { threadId: mail.threadId } : {}) }),
+    })) as { id?: string; threadId?: string }
+  } catch (cause) {
+    const status = (cause as GmailError).status
+    if (cause instanceof RevokedError || (status !== undefined && status < 500)) throw cause
+    const found = (await fetcher('/messages', { q: `rfc822msgid:${mail.internetMessageId}`, maxResults: '1' }).catch(
+      () => null,
+    )) as { messages?: { id: string; threadId: string }[] } | null
+    if (found?.messages?.[0]) return found.messages[0]
+    throw cause
+  }
+}

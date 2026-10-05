@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { trackingBase, type ClaimedRun, type AccountContext } from '@rawr/db'
 import { env } from '~/lib/env.ts'
-import { gmailFetcherFor } from '../gmail.ts'
+import { gmailFetcherFor, sendMail } from '../gmail.ts'
 import { buildMessage } from './mime.ts'
 import type { OutgoingStep, Sender, SentMessage } from './sender.ts'
 
@@ -34,16 +34,14 @@ export const gmailSender: Sender = {
     })
 
     const fetcher = await gmailFetcherFor(ctx, run.mailboxId)
-    const sent = (await fetcher('/messages/send', undefined, {
-      method: 'POST',
-      body: JSON.stringify({
-        raw: built.raw,
-        // Gmail threads on its own id, not on the headers. The header is what the
-        // recipient's client threads on; this is what keeps the sender's own copy
-        // in the same conversation.
-        ...(run.providerThreadId && step.inReplyTo ? { threadId: run.providerThreadId } : {}),
-      }),
-    })) as { id?: string; threadId?: string }
+    const sent = await sendMail(fetcher, {
+      raw: built.raw,
+      // Gmail threads on its own id, not on the headers. The header is what the
+      // recipient's client threads on; this is what keeps the sender's own copy
+      // in the same conversation.
+      threadId: run.providerThreadId && step.inReplyTo ? run.providerThreadId : null,
+      internetMessageId: built.internetMessageId,
+    })
 
     return {
       providerMessageId: sent.id ?? null,

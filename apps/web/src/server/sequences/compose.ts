@@ -13,7 +13,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { env } from '~/lib/env.ts'
-import { gmailFetcherFor } from '../gmail.ts'
+import { gmailFetcherFor, sendMail } from '../gmail.ts'
 import { describe, logError } from '../log.ts'
 import { toEmailHtml } from './markdown-email.ts'
 import { buildMessage } from './mime.ts'
@@ -92,13 +92,11 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   })
 
   const fetcher = await gmailFetcherFor(ctx, box.id)
-  const sent = (await fetcher('/messages/send', undefined, {
-    method: 'POST',
-    body: JSON.stringify({
-      raw: built.raw,
-      ...(providerThreadId ? { threadId: providerThreadId } : {}),
-    }),
-  })) as { id?: string; threadId?: string }
+  const sent = await sendMail(fetcher, {
+    raw: built.raw,
+    threadId: providerThreadId,
+    internetMessageId: built.internetMessageId,
+  })
 
   // The mail is out, and Gmail takes no idempotency key: an error from here on
   // would show the sender a failure and invite a second send. So what follows is

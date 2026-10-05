@@ -16,7 +16,7 @@ import {
   type MergeFieldKey,
 } from '@rawr/db'
 import { createHash } from 'node:crypto'
-import { RevokedError } from '../gmail.ts'
+import { isTransient, RevokedError } from '../gmail.ts'
 import { describe, logError } from '../log.ts'
 import { addProspect } from '../integrations/woodpecker.ts'
 import { canSendFrom, gmailSender } from './gmail-sender.ts'
@@ -201,8 +201,14 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
     // A withdrawn grant is not this enrollment's fault and stops every enrollment
     // on that mailbox, so it is raised rather than recorded here.
     if (cause instanceof RevokedError) throw cause
-    await recordSendFailure(ctx, { enrollmentId, stepId: run.step.id, mailboxId: run.mailboxId, error })
-    return { ran: false, reason: error }
+    const retrying = await recordSendFailure(ctx, {
+      enrollmentId,
+      stepId: run.step.id,
+      mailboxId: run.mailboxId,
+      error,
+      transient: isTransient(cause),
+    })
+    return { ran: false, reason: retrying ? `${error} It will be tried again later.` : error }
   }
 
   // From here the mail is out, and Gmail takes no idempotency key: anything that
