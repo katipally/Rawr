@@ -189,8 +189,12 @@ try {
 
   const contactId = withBody.stored ? withBody.contactIds[0]! : ''
   const contactRef = { entityType: 'contact' as const, entityId: contactId }
+  // This thread's rows only: the contact is one a colleague's earlier mail also hangs on.
   const timelineHas = async (ctx: AccountContext) =>
-    (await readTimeline(ctx, { entity: contactRef, types: ['email'] })).rows.length
+    (await readTimeline(ctx, { entity: contactRef, types: ['email'], limit: 200 })).rows.filter(
+      (row) => (row.payload as { threadId?: string } | null)?.threadId === threadId,
+    ).length
+  const sharedCount = (await timelineCounts(marketing, contactRef)).email ?? 0
   const sharedTimeline = await timelineHas(marketing)
   check(contactId !== '' && sharedTimeline > 0, 'a shared mailbox puts its mail on the contact timeline', `${sharedTimeline} rows`)
   check((await threadsForContact(marketing, contactId)).some((thread) => thread.id === threadId), 'and its threads on the record')
@@ -198,7 +202,7 @@ try {
   await setMailboxVisibility(sales, { mailboxId: box.id, visibility: 'private' })
   check((await readThread(marketing, threadId)) === null, 'a private mailbox is not')
   check((await timelineHas(marketing)) === 0, 'its mail is off a colleague’s timeline too, not only out of the inbox')
-  check((await timelineCounts(marketing, contactRef)).email === undefined, 'and out of the timeline counts')
+  check(((await timelineCounts(marketing, contactRef)).email ?? 0) < sharedCount, 'and out of the timeline counts')
   check(!(await threadsForContact(marketing, contactId)).some((thread) => thread.id === threadId), 'and out of the threads on the record')
   check((await timelineHas(sales)) === sharedTimeline, 'its owner still reads it on the timeline')
   check((await timelineHas(admin)) === sharedTimeline, 'and so does an admin')
