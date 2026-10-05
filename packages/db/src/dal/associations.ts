@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import { recordActivity, recordActivityFanout, type EntityRef, type EntityType } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
+import { assertIdsBelong } from './records.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type Registry, type RegistryObject } from './registry.ts'
 
 export type AssociatedRecord = {
@@ -270,8 +271,10 @@ export const associate = async (
     // Both keys resolved before anything is written: the column is text now, and
     // the registry is what says a key names an object in this account.
     const registry = await getRegistryIn(tx)
-    objectOrThrow(registry, a.entityType)
-    objectOrThrow(registry, b.entityType)
+    // A uuid is not a record: both ends have to exist in this account, or a typo,
+    // a stale tab and another tenant's id all become a link to nothing.
+    await assertIdsBelong(tx, objectOrThrow(registry, a.entityType), [a.entityId])
+    await assertIdsBelong(tx, objectOrThrow(registry, b.entityType), [b.entityId])
 
     const [from, to] = orderedPair(a, b)
     await tx.execute(sql`
@@ -337,11 +340,10 @@ export const associateMany = async (
 ): Promise<{ linked: number }> =>
   mutate(ctx, 'association', async (tx) => {
     const registry = await getRegistryIn(tx)
-    objectOrThrow(registry, objectKey)
-    objectOrThrow(registry, target.entityType)
-
     const others = ids.filter((id) => !(objectKey === target.entityType && id === target.entityId))
     if (others.length === 0) throw new Error('A record cannot be associated with itself.')
+    await assertIdsBelong(tx, objectOrThrow(registry, objectKey), [...new Set(others)])
+    await assertIdsBelong(tx, objectOrThrow(registry, target.entityType), [target.entityId])
     // A Postgres array literal, not a JavaScript array: drizzle expands the
     // latter into one placeholder per element, which turns `unnest` into a
     // syntax error. The `::uuid[]` cast is what validates the contents.

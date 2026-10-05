@@ -53,7 +53,7 @@ import {
   resolveView,
   saveView,
   setViewPinned } from '../src/dal/views.ts'
-import { readAssociations, groupFor } from '../src/dal/associations.ts'
+import { associate, associateMany, readAssociations, groupFor } from '../src/dal/associations.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { readBulkOperation, runBulkChunk, startBulkOperation } from '../src/dal/bulk.ts'
 import {
@@ -302,6 +302,23 @@ try {
     const after = await getRecord(sales, 'deal', deal!.id)
     expect(after?.values.next_step === 'Someone else got there first', 'the stale write landed anyway')
     return 'conflict raised, the other edit survived'
+  })
+
+  await check('an association needs both records to exist in this account', async () => {
+    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const ghost = { entityType: 'contact', entityId: crypto.randomUUID() } as const
+    const refused = async (run: () => Promise<unknown>) => {
+      try {
+        await run()
+        return false
+      } catch (cause) {
+        return cause instanceof Error && /not in this account/.test(cause.message)
+      }
+    }
+    expect(await refused(() => associate(sales, { entityType: 'deal', entityId: deal!.id }, ghost)), 'a link to nothing was written')
+    expect(await refused(() => associateMany(sales, 'deal', [deal!.id], ghost)), 'a bulk link to nothing was written')
+    expect(await refused(() => associateMany(sales, 'deal', [crypto.randomUUID()], { entityType: 'deal', entityId: deal!.id })), 'a bulk link from nothing was written')
+    return 'a link to a record that is not here is refused at both ends'
   })
 
   await check('two writes holding the same version cannot both land', async () => {
