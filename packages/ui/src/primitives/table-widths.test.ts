@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DEFAULT_WIDTH, layoutWidths, MIN_WIDTH, parseWidths, widthFor, widthsKey } from './table-widths.ts'
+import { DEFAULT_WIDTH, layoutWidths, MIN_WIDTH, parseWidths, READABLE_WIDTH, widthFor, widthsKey } from './table-widths.ts'
 
 /** A resize that is stored and then not rendered is the same to somebody using
  *  the table as a resize that was never stored at all. */
@@ -51,9 +51,9 @@ test('columns nobody has dragged fill the box exactly', () => {
 test('two columns and forty columns both fit', () => {
   const forty = Array.from({ length: 40 }, (_, index) => ({ key: `c${index}` }))
   const wide = layoutWidths({}, forty, 1000)
-  // Forty columns cannot fit 1000px without going under the minimum, so this is
-  // the case that is meant to overflow, at exactly the minimum each.
-  assert.deepEqual(new Set(wide), new Set([MIN_WIDTH]))
+  // Forty columns cannot fit 1000px without going under the readable width, so
+  // this is the case that is meant to overflow, at exactly that width each.
+  assert.deepEqual(new Set(wide), new Set([READABLE_WIDTH]))
   assert.equal(
     layoutWidths({}, [{ key: 'a' }, { key: 'b' }], 900).reduce((sum, width) => sum + width, 0),
     900,
@@ -77,4 +77,9 @@ test('dragging past the box is what makes the table overflow', () => {
 
 test('an unmeasured box renders the asked-for widths', () => {
   assert.deepEqual(layoutWidths({}, [{ key: 'a', width: 300 }, { key: 'b' }], 0), [300, DEFAULT_WIDTH])
+})
+
+test('a narrow table scrolls before a column goes under what it can be read at', () => {
+  const columns = [{ key: 'name', width: 320 }, { key: 'views', width: 80 }, { key: 'type', width: 130 }]
+  assert.deepEqual(layoutWidths({}, columns, 100), [READABLE_WIDTH, 80, READABLE_WIDTH])
 })

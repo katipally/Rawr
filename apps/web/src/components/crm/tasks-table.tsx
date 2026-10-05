@@ -10,6 +10,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { recordPath, tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { TaskForm } from './task-form.tsx'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-labels.ts'
@@ -69,7 +70,9 @@ export const TasksTable = ({
   // remounting it, and reading the param in an effect opens it only after
   // hydration, which on a cold load is late enough to look broken.
   const creating = openCreate && canWrite
-  const [editing, setEditing] = useState<TaskRow | null>(null)
+  const [editId, setEditId] = useUrlParam('edit')
+  const editing = rows.find((row) => row.id === editId) ?? null
+  const setEditing = (row: TaskRow | null) => setEditId(row?.id ?? null)
   const [removing, setRemoving] = useState<TaskRow | null>(null)
   const [busy, setBusy] = useState(false)
   const { page, pager } = usePagedRows(rows, 'task')

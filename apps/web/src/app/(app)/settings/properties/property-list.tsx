@@ -8,6 +8,7 @@ import { FilterBuilder, type FilterField, type Group } from '~/components/crm/fi
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 
 export type PropertyListProps = {
   object: string
@@ -60,8 +61,12 @@ export const PropertyList = ({
   const router = useRouter()
   const toast = useToast()
 
-  const [creating, setCreating] = useState(false)
-  const [editing, setEditing] = useState<AdminField | null>(null)
+  const [action, setAction] = useUrlParam('action')
+  const creating = action === 'create'
+  const setCreating = (open: boolean) => setAction(open ? 'create' : null)
+  const [editId, setEditId] = useUrlParam('edit')
+  const editing = rows.find((field) => field.id === editId) ?? null
+  const setEditing = (field: AdminField | null) => setEditId(field?.id ?? null)
   const [removing, setRemoving] = useState<AdminField | null>(null)
   const [usage, setUsage] = useState<{ filled: number; usedIn: { kind: string; name: string }[] } | null>(null)
   /** Which row has its "Used in" open, and what came back. Loaded on the click,
@@ -177,16 +182,19 @@ export const PropertyList = ({
     if (ok) setEditing(null)
   }
 
-  const openEdit = (field: AdminField) => {
-    setEditing(field)
-    setLabel(field.label)
-    setOptions(field.options.join('\n'))
-    setHelpText(field.helpText ?? '')
-    setGroupName(field.groupName ?? '')
-    setIsRequired(field.isRequired)
-    setTrackChanges(field.trackChanges)
-    setConditional(field.conditional)
-  }
+  // Seeded from the address rather than from the click, so a reloaded or pasted
+  // ?edit= opens with the property's values and not with an empty form.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different property reseeds the drafts, not a refreshed copy of the same one
+  useEffect(() => {
+    if (!editing) return
+    setLabel(editing.label)
+    setOptions(editing.options.join('\n'))
+    setHelpText(editing.helpText ?? '')
+    setGroupName(editing.groupName ?? '')
+    setIsRequired(editing.isRequired)
+    setTrackChanges(editing.trackChanges)
+    setConditional(editing.conditional)
+  }, [editing?.id])
 
   const openRemove = async (field: AdminField) => {
     setRemoving(field)
@@ -463,7 +471,7 @@ export const PropertyList = ({
                 <IconButton
                   label={`Edit ${field.label}`}
                   icon={<ACTION_ICONS.edit size={16} />}
-                  onClick={() => openEdit(field)}
+                  onClick={() => setEditing(field)}
                 />
               )}
               <Button

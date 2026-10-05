@@ -3,10 +3,11 @@
 import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { automationRunsPath } from '~/lib/links.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -568,7 +569,9 @@ export const AutomationList = ({
   const zone = useZone()
   const router = useRouter()
   const toast = useToast()
-  const [editing, setEditing] = useState<AutomationRowView | 'new' | null>(null)
+  const [automationParam, setAutomationParam] = useUrlParam('automation')
+  const editing: AutomationRowView | 'new' | null = automationParam === 'new' ? 'new' : (rows.find((row) => row.id === automationParam) ?? null)
+  const setEditing = (next: AutomationRowView | 'new' | null) => setAutomationParam(next === null ? null : next === 'new' ? 'new' : next.id)
   const [removing, setRemoving] = useState<AutomationRowView | null>(null)
   const { page, pager } = usePagedRows(rows, 'automations')
   const [busy, setBusy] = useState(false)
@@ -601,25 +604,19 @@ export const AutomationList = ({
     sequences,
   }
 
-  const openNew = () => {
-    setName('')
-    setTrigger('record_created')
-    setObject('contact')
-    setConditions([])
-    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30' })
-    setSteps([{ kind: 'action', type: 'create_task', config: {} }])
-    setEditing('new')
-  }
-
-  const openEdit = (row: AutomationRowView) => {
-    setName(row.name)
-    setTrigger(row.trigger)
-    setObject(row.objectKey)
-    setConditions(row.conditions)
-    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...row.triggerConfig })
-    setSteps(row.steps.length > 0 ? row.steps : [{ kind: 'action', type: 'create_task', config: {} }])
-    setEditing(row)
-  }
+  // Seeded from the address rather than the click, so a reloaded or pasted
+  // ?automation= opens with the rule's own values.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different rule reseeds the form, not a refreshed copy of the same one
+  useEffect(() => {
+    if (editing === null) return
+    const seed = editing === 'new' ? null : editing
+    setName(seed?.name ?? '')
+    setTrigger(seed?.trigger ?? 'record_created')
+    setObject(seed?.objectKey ?? 'contact')
+    setConditions(seed?.conditions ?? [])
+    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...seed?.triggerConfig })
+    setSteps(seed && seed.steps.length > 0 ? seed.steps : [{ kind: 'action', type: 'create_task', config: {} }])
+  }, [automationParam])
 
   const run = async (what: () => Promise<unknown>, said: string, undo?: () => void) => {
     setBusy(true)
@@ -658,7 +655,7 @@ export const AutomationList = ({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <Button variant="primary" onClick={openNew}>
+        <Button variant="primary" onClick={() => setEditing('new')}>
           Create automation
         </Button>
       </div>
@@ -716,7 +713,7 @@ export const AutomationList = ({
                 <IconButton
                   label={`Edit ${row.name}`}
                   icon={<ACTION_ICONS.edit size={16} />}
-                  onClick={() => openEdit(row)}
+                  onClick={() => setEditing(row)}
                 />
                 <IconButton
                   label={`Delete ${row.name}`}

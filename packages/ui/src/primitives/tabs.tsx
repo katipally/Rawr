@@ -22,7 +22,7 @@ export type TabsProps = {
 export const Tabs = ({ label, items, className }: TabsProps) => (
   <nav
     aria-label={label}
-    className={cn('flex min-w-0 overflow-x-auto rounded-t-hs border-b border-line', className)}
+    className={cn('scroll-fade-x flex min-w-0 overflow-x-auto rounded-t-hs border-b border-line', className)}
   >
     {items.map((item) => (
       <a

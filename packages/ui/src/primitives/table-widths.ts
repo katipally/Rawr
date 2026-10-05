@@ -7,6 +7,12 @@
 /** Narrower than this is a column nobody can grab the handle of again. */
 export const MIN_WIDTH = 64
 
+/** What a column that asked for more is squeezed to at the narrowest: under this,
+ *  a header or a value such as "Round robin" breaks a letter at a time. A table
+ *  too wide for its box at this width scrolls instead. A column that asked for
+ *  less keeps what it asked for. */
+export const READABLE_WIDTH = 96
+
 /** What a column with no opinion asks for. */
 export const DEFAULT_WIDTH = 180
 
@@ -43,8 +49,8 @@ export const widthFor = (
  *
  *  A column the reader has dragged keeps exactly the width it was dragged to.
  *  Every other column shares what is left in proportion to the width it asked
- *  for, never going under MIN_WIDTH, so the default table ends on the edge of
- *  its box rather than off the side of it. The result overflows only when the
+ *  for, never going under READABLE_WIDTH (or what they asked for, if less), so
+ *  the default table ends on the edge of its box rather than off the side of it. The result overflows only when the
  *  dragged widths plus the minimums cannot fit, which is when a scrollbar is the
  *  honest answer. O(n) in the number of columns, twice over.
  *
@@ -76,7 +82,7 @@ export const layoutWidths = (
   let last = -1
   const out = sized.map((column, index) => {
     if (column.dragged) return column.width
-    const width = Math.max(MIN_WIDTH, Math.floor(column.width * scale))
+    const width = Math.max(MIN_WIDTH, Math.min(column.width, READABLE_WIDTH), Math.floor(column.width * scale))
     used += width
     last = index
     return width

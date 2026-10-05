@@ -4,13 +4,14 @@ import { Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, 
 import { MoreVertical, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { usePagedRows } from '~/components/paged.tsx'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -49,7 +50,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
   const toast = useToast()
   const [busy, setBusy] = useState(false)
 
-  const [editing, setEditing] = useState<SegmentRow | 'new' | null>(null)
+  const [segmentParam, setSegmentParam] = useUrlParam('segment')
+  const editing: SegmentRow | 'new' | null = segmentParam === 'new' ? 'new' : (rows.find((row) => row.id === segmentParam) ?? null)
+  const setEditing = (next: SegmentRow | 'new' | null) => setSegmentParam(next === null ? null : next === 'new' ? 'new' : next.id)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [object, setObject] = useState<ObjectKey>('contact')
@@ -60,7 +63,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
   const [needle, setNeedle] = useState('')
   const [kind, setKind] = useState<'all' | 'active' | 'static'>('all')
   const [objectFilter, setObjectFilter] = useState<'all' | ObjectKey>('all')
-  const [creatingList, setCreatingList] = useState(false)
+  const [action, setAction] = useUrlParam('action')
+  const creatingList = action === 'create-list'
+  const setCreatingList = (open: boolean) => setAction(open ? 'create-list' : null)
   const [viewing, setViewing] = useState<SegmentRow | null>(null)
   const [removing, setRemoving] = useState<SegmentRow | null>(null)
   const [members, setMembers] = useState<{ id: string; displayName: string; enteredAt: Date }[] | null>(null)
@@ -80,23 +85,18 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     }
   }
 
-  const openNew = () => {
-    setEditing('new')
-    setName('')
-    setDescription('')
-    setObject('contact')
-    setFilters([{ conjunction: 'and', conditions: [] }])
+  // Seeded from the address rather than the click, so a reloaded or pasted
+  // ?segment= opens with the segment's own values.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different segment reseeds the form, not a refreshed copy of the same one
+  useEffect(() => {
+    if (editing === null) return
+    const seed = editing === 'new' ? null : editing
+    setName(seed?.name ?? '')
+    setDescription(seed?.description ?? '')
+    setObject(seed?.objectKey ?? 'contact')
+    setFilters(seed && seed.filters.length > 0 ? seed.filters : [{ conjunction: 'and', conditions: [] }])
     setPreview(null)
-  }
-
-  const openEdit = (row: SegmentRow) => {
-    setEditing(row)
-    setName(row.name)
-    setDescription(row.description ?? '')
-    setObject(row.objectKey)
-    setFilters(row.filters.length > 0 ? row.filters : [{ conjunction: 'and', conditions: [] }])
-    setPreview(null)
-  }
+  }, [segmentParam])
 
   const runPreview = async (next: Group[]) => {
     setFilters(next)
@@ -257,7 +257,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                           key: 'write',
                           items: [
                             { key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) },
-                            { key: 'edit', label: 'Edit', onSelect: () => openEdit(row) },
+                            { key: 'edit', label: 'Edit', onSelect: () => setEditing(row) },
                           ],
                         },
                       ]),
@@ -324,7 +324,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
               >
                 Create list
               </Button>
-              <Button variant="primary" onClick={openNew}>
+              <Button variant="primary" onClick={() => setEditing('new')}>
                 Create segment
               </Button>
             </span>
@@ -392,7 +392,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             <EmptyState
               title="No segments yet"
               description="A saved query that remembers who is in it."
-              {...(canWrite ? { action: <Button variant="primary" onClick={openNew}>Create segment</Button> } : {})}
+              {...(canWrite ? { action: <Button variant="primary" onClick={() => setEditing('new')}>Create segment</Button> } : {})}
             />
           )}
           </div>

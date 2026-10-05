@@ -6,7 +6,7 @@ import { safePath } from './links.ts'
 
 /** Panels and dialogs a screen can have open over it. A link out of the screen
  *  must not carry them, or Back would reopen the preview the person just left. */
-const OVERLAY_PARAMS = ['preview', 'log', 'task', 'new', 'compose']
+const OVERLAY_PARAMS = ['preview', 'log', 'task', 'new', 'compose', 'action', 'edit', 'segment', 'member', 'automation', 'embed', 'move']
 
 /** The address of the screen on show, as the `from` of a link that leaves it. */
 export const useOrigin = (): string => {

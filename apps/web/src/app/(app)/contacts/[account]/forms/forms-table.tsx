@@ -6,6 +6,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EmbedSnippet } from './embed-snippet.tsx'
 import { formatDate } from '~/components/crm/value.tsx'
@@ -62,8 +63,12 @@ export const FormsTable = ({
   const params = useSearchParams()
   const toast = useToast()
 
-  const [embedding, setEmbedding] = useState<FormRow | null>(null)
-  const [moving, setMoving] = useState<FormRow | null>(null)
+  const [embedId, setEmbedId] = useUrlParam('embed')
+  const embedding = rows.find((row) => row.id === embedId) ?? null
+  const setEmbedding = (row: FormRow | null) => setEmbedId(row?.id ?? null)
+  const [moveId, setMoveId] = useUrlParam('move')
+  const moving = rows.find((row) => row.id === moveId) ?? null
+  const setMoving = (row: FormRow | null) => setMoveId(row?.id ?? null)
   const [naming, setNaming] = useState<{ id: string | null; name: string } | null>(null)
   const [removingFolder, setRemovingFolder] = useState<FolderRow | null>(null)
   const [busy, setBusy] = useState(false)

@@ -153,3 +153,22 @@
   40% { transform: scaleX(0.7); }
   100% { transform: scaleX(0.92); }
 }
+
+/* A row that scrolls sideways fades on whichever edge has more behind it, so a
+   tab strip wider than its box does not look like it ends at the last tab it
+   happens to show. Browsers without scroll-driven animation get a plain row. */
+@property --fade-start { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --fade-end { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@keyframes rawr-scroll-fade {
+  0% { --fade-start: 0px; --fade-end: 1.5rem; }
+  5% { --fade-start: 1.5rem; }
+  95% { --fade-end: 1.5rem; }
+  100% { --fade-start: 1.5rem; --fade-end: 0px; }
+}
+@supports (animation-timeline: scroll()) {
+  .scroll-fade-x {
+    mask-image: linear-gradient(to right, transparent, #000 var(--fade-start), #000 calc(100% - var(--fade-end)), transparent);
+    animation: rawr-scroll-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}

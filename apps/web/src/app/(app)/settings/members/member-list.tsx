@@ -5,6 +5,7 @@ import { Copy, MoreHorizontal } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { invitePath } from '~/lib/links.ts'
 import {
   CRITICAL_ACTIONS,
@@ -293,7 +294,11 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const toast = useToast()
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('active')
-  const [editing, setEditing] = useState<{ userId: string; name: string; grants: Grants } | null>(null)
+  const [editingId, setEditingId] = useUrlParam('member')
+  /** What has been changed in the grid and not saved; the member's own grants until then. */
+  const [grantDraft, setGrantDraft] = useState<Grants | null>(null)
+  const editingRow = isSuperAdmin ? rows.find((row) => row.userId === editingId) : undefined
+  const editing = editingRow ? { userId: editingRow.userId, name: editingRow.name, grants: grantDraft ?? grantsOf(editingRow) } : null
   const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
@@ -434,8 +439,10 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                     {
                       key: 'edit',
                       label: 'Edit permissions',
-                      onSelect: () =>
-                        setEditing({ userId: row.userId, name: row.name, grants: grantsOf(row) }),
+                      onSelect: () => {
+                        setGrantDraft(null)
+                        setEditingId(row.userId)
+                      },
                     },
                     row.state === 'deactivated'
                       ? {
@@ -473,12 +480,12 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
 
       <Modal
         open={editing !== null}
-        onClose={() => setEditing(null)}
+        onClose={() => setEditingId(null)}
         title={`Permissions for ${editing?.name ?? ''}`}
         footer={
           editing ? (
             <>
-              <Button variant="secondary" onClick={() => setEditing(null)}>
+              <Button variant="secondary" onClick={() => setEditingId(null)}>
                 Cancel
               </Button>
               <Button
@@ -487,7 +494,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                   run(
                     async () => {
                       await api.account.members.setGrants.mutate({ userId: editing.userId, ...editing.grants })
-                      setEditing(null)
+                      setEditingId(null)
                     },
                     'Permissions saved.',
                     { userId: editing.userId, patch: editing.grants },
@@ -504,7 +511,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
           <div className="flex flex-col gap-4">
             <GrantGrid
               value={editing.grants}
-              onChange={(grants) => setEditing({ ...editing, grants })}
+              onChange={setGrantDraft}
               templates={templates}
               copyFrom={[]}
             />
