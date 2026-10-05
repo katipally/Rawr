@@ -36,8 +36,13 @@ test('one HubSpot-shaped header is not enough on its own', () => {
 
 test('the columns HubSpot puts in every export are dismissed, not offered', () => {
   const preset = hubspotPreset('contact', CONTACT_EXPORT)
-  assert.equal(preset['Record ID'], null)
   assert.equal(preset['Last Activity Date'], null)
+})
+
+test('the Record ID of a contact, company or deal export is kept, not dismissed', () => {
+  for (const object of ['contact', 'company', 'deal'] as const) {
+    assert.equal(hubspotPreset(object, ['Record ID'])['Record ID'], 'hubspot_id')
+  }
 })
 
 test('an association column becomes the relation it names', () => {

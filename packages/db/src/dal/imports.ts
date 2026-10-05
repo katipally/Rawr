@@ -8,6 +8,8 @@ import {
   hubspotActivityPreset,
   hubspotFieldType,
   hubspotPreset,
+  HUBSPOT_ID,
+  HUBSPOT_ID_FIELD,
   hubspotShapePreset,
   LIST_IMPORT,
   looksLikeHubspot,
@@ -29,7 +31,7 @@ import { linksForContacts } from './activity.ts'
 import { createField, createFields, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
 import { bulkWriteRecords, createRecord, updateRecord, DuplicateError, type BulkRow } from './records.ts'
-import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { getRegistry, objectOrThrow, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { choiceOf, coerce, ValueError } from './values.ts'
 
@@ -290,16 +292,12 @@ const RELATION_LOOKUPS: Record<string, { what: string; find: (names: SQL) => SQL
     what: 'pipeline',
     find: (names) => sql`select id, lower(name) as a, null as b from pipeline where lower(name) in ${names}`,
   },
-  stage_id: {
-    what: 'deal stage',
-    find: (names) => sql`select id, lower(name) as a, null as b from pipeline_stage where lower(name) in ${names}`,
-  },
 }
 
 const DOMAIN = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i
-// A HubSpot export puts the numeric id of a merged or deleted company here instead
-// of its name, and a name-based lookup would otherwise create a company literally
-// called that number.
+// A HubSpot export puts the company's numeric id here instead of its name, and a
+// name-based lookup would otherwise create a company literally called that number.
+// The id is looked up among the companies a file brought in with their Record ID.
 const NUMERIC_ID = /^\d+$/
 
 /** Resolves the relation values in one run, remembering every answer, a miss
@@ -319,6 +317,46 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
    *  thousand rows that used to be eighty-eight thousand identical errors. */
   const unmatchedOwners = new Set<string>()
 
+  /** A stage name belongs to a pipeline, and "Closed Won" is in several, so the
+   *  stages are kept by name with every pipeline that has one, first pipeline
+   *  first. */
+  const stages = new Map<string, { id: string; pipelineId: string; pipeline: string }[]>()
+
+  const lookUpStages = async (names: string[]): Promise<void> => {
+    const fresh = [...new Set(names.map((name) => name.trim().toLowerCase()))].filter(
+      (name) => name && !isUuid(name) && !stages.has(name),
+    )
+    if (fresh.length === 0) return
+    const list = sql`(select jsonb_array_elements_text(${JSON.stringify(fresh)}::jsonb))`
+    const rows = await withAccount(ctx, (tx) =>
+      tx.execute<{ id: string; pipeline_id: string; name: string; pipeline: string }>(
+        sql`select s.id, s.pipeline_id, lower(s.name) as name, lower(p.name) as pipeline
+              from pipeline_stage s join pipeline p on p.id = s.pipeline_id
+             where lower(s.name) in ${list}
+             order by p.position, s.position`,
+      ),
+    )
+    for (const name of fresh) stages.set(name, [])
+    for (const row of rows) stages.get(row.name)!.push({ id: row.id, pipelineId: row.pipeline_id, pipeline: row.pipeline })
+  }
+
+  /** Companies by the HubSpot id they were imported with, a miss included. */
+  const hubspotCompanies = new Map<string, string | null>()
+
+  const lookUpHubspotCompanies = async (ids: string[]): Promise<void> => {
+    const fresh = [...new Set(ids.map((id) => id.trim()))].filter((id) => NUMERIC_ID.test(id) && !hubspotCompanies.has(id))
+    if (fresh.length === 0) return
+    const list = sql`(select jsonb_array_elements_text(${JSON.stringify(fresh)}::jsonb))`
+    const rows = await withAccount(ctx, (tx) =>
+      tx.execute<{ id: string; hubspot: string }>(
+        sql`select id, external_ids ->> 'hubspot' as hubspot from company
+             where deleted_at is null and external_ids ->> 'hubspot' in ${list}`,
+      ),
+    )
+    for (const id of fresh) hubspotCompanies.set(id, null)
+    for (const row of rows) hubspotCompanies.set(row.hubspot, row.id)
+  }
+
   const lookUp = async (field: RegistryField, names: string[]): Promise<void> => {
     const lookup = RELATION_LOOKUPS[field.key]
     const fresh = [...new Set(names.map((name) => name.trim().toLowerCase()))].filter(
@@ -336,11 +374,33 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
     for (const name of fresh) remembered.set(keyOf(field, name), found.get(name) ?? null)
   }
 
-  const resolve = async (field: RegistryField, raw: string): Promise<{ id: string | null; warning?: string }> => {
+  /** `pipeline` is what the same row says its pipeline is. With one, the stage
+   *  has to be in it; without, a deal lands in the first pipeline, as one made by
+   *  hand with no pipeline does. */
+  const resolve = async (
+    field: RegistryField,
+    raw: string,
+    pipeline?: string,
+  ): Promise<{ id: string | null; warning?: string }> => {
     const needle = raw.trim()
     if (isUuid(needle)) return { id: needle }
+    if (field.key === 'stage_id') {
+      await lookUpStages([needle])
+      const wanted = pipeline?.trim().toLowerCase()
+      const found = (stages.get(needle.toLowerCase()) ?? []).find(
+        (stage) => !wanted || stage.pipeline === wanted || stage.pipelineId === wanted,
+      )
+      if (!found) {
+        throw new ValueError(field, `no deal stage called "${needle}" exists in ${wanted ? `the pipeline "${pipeline!.trim()}"` : 'this account'}.`)
+      }
+      return { id: found.id }
+    }
     if (field.key === 'company_id' && NUMERIC_ID.test(needle)) {
-      return { id: null, warning: `"${needle}" looks like a HubSpot company id, not a name, so no company was linked.` }
+      await lookUpHubspotCompanies([needle])
+      const id = hubspotCompanies.get(needle) ?? null
+      return id
+        ? { id }
+        : { id: null, warning: `"${needle}" looks like a HubSpot company id, and no company here was imported with it, so no company was linked.` }
     }
     const lookup = RELATION_LOOKUPS[field.key]
     if (!lookup) throw new ValueError(field, 'has to be picked from the list, not typed.')
@@ -388,7 +448,12 @@ const relationResolver = (ctx: AccountContext, options: { create: boolean }) => 
       const field = object.byKey.get(target)
       if (!field || (field.type !== 'relation' && field.type !== 'user')) continue
       const named = rows.flatMap((row) => row[header] ?? [])
+      if (field.key === 'stage_id') {
+        await lookUpStages(named)
+        continue
+      }
       await lookUp(field, named)
+      if (field.key === 'company_id') await lookUpHubspotCompanies(named)
       if (field.key !== 'company_id' || !options.create) continue
 
       // Remembered as null is what a miss looks like, and a miss is what needs
@@ -438,6 +503,8 @@ export const planRow = async (
   const values: Record<string, unknown> = {}
   const warnings: string[] = []
   const dedupeKey = dedupeKeyOf(kind, object)
+  const pipelineHeader = Object.keys(mapping).find((header) => mapping[header] === 'pipeline_id')
+  const pipeline = pipelineHeader ? row[pipelineHeader] : undefined
   for (const [header, target] of Object.entries(mapping)) {
     if (!target) continue
     // A proposal is skipped rather than resolved: the field does not exist until
@@ -451,7 +518,7 @@ export const planRow = async (
     try {
       let named: unknown = raw
       if (field.type === 'relation' || field.type === 'user') {
-        const resolved = await resolve(field, String(raw))
+        const resolved = await resolve(field, String(raw), pipeline)
         if (resolved.warning) warnings.push(resolved.warning)
         named = resolved.id
       }
@@ -508,6 +575,13 @@ const dedupeIdentity = (object: RegistryObject, values: Record<string, unknown>)
   return `${key}:${key === 'domain' ? value : value.toLowerCase()}`
 }
 
+/** The id the file gave the record, which outranks every other way of matching it:
+ *  an email can change and a name is shared, but the id is the record. */
+const hubspotIdentity = (values: Record<string, unknown>): string | null => {
+  const id = values[HUBSPOT_ID]
+  return typeof id === 'string' && id.trim() ? `${HUBSPOT_ID}:${id.trim()}` : null
+}
+
 const dedupeLookup = async (
   ctx: AccountContext,
   object: RegistryObject,
@@ -544,38 +618,71 @@ const dedupeLookup = async (
   })
 }
 
-/** Which of these rows already name a record, by the same identity the run
- *  matches on, in one query for all of them, and which record each one is.
+/** What the batch's rows already name, by every identity they can be matched on,
+ *  in two queries for all of them: the record, and the HubSpot id it already
+ *  carries, if any.
  *
  *  The id rather than a bare yes is what lets the run update without asking again
  *  per row: `dedupeLookup` is a transaction and a query each, so two hundred of
- *  them are a thousand round trips before a single record is written. */
+ *  them are a thousand round trips before a single record is written. O(1) queries
+ *  per batch, O(1) per row to read the answer back. */
+type Known = Map<string, { id: string; hubspotId: string | null }>
+
 const knownIdentities = async (
   ctx: AccountContext,
   object: RegistryObject,
   rows: Record<string, unknown>[],
-): Promise<Map<string, string>> => {
+): Promise<Known> => {
+  const known: Known = new Map()
   const key = object.isCustom ? object.labelFieldKey : CORE_MATCH[object.key]
   const identities = new Set(rows.flatMap((values) => dedupeIdentity(object, values) ?? []))
-  if (!key || identities.size === 0) return new Map()
-  const wanted = [...identities].map((identity) => identity.slice(key.length + 1))
-  const list = sql`(select jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb))`
-  if (object.isCustom) assertUsableFieldKey(key)
-  const found = await withAccount(ctx, (tx) =>
-    tx.execute<{ id: string; value: string }>(
-      object.isCustom
-        ? sql`select id, lower(custom ->> ${key}) as value from custom_record
-               where object_id = ${object.id}::uuid and deleted_at is null and lower(custom ->> ${key}) in ${list}`
-        : key === 'email'
-          ? sql`select id, lower(email) as value from contact where deleted_at is null and lower(email) in ${list}`
-          : key === 'domain'
-            ? sql`select id, domain as value from company where deleted_at is null and domain in ${list}`
-            : sql`select distinct on (lower(name)) id, lower(name) as value from deal
-                   where deleted_at is null and lower(name) in ${list}
-                   order by lower(name), created_at`,
-    ),
-  )
-  return new Map(found.map((row) => [`${key}:${row.value}`, row.id]))
+  if (key && identities.size > 0) {
+    const wanted = [...identities].map((identity) => identity.slice(key.length + 1))
+    const list = sql`(select jsonb_array_elements_text(${JSON.stringify(wanted)}::jsonb))`
+    if (object.isCustom) assertUsableFieldKey(key)
+    const found = await withAccount(ctx, (tx) =>
+      tx.execute<{ id: string; value: string; hubspot: string | null }>(
+        object.isCustom
+          ? sql`select id, lower(custom ->> ${key}) as value, null as hubspot from custom_record
+                 where object_id = ${object.id}::uuid and deleted_at is null and lower(custom ->> ${key}) in ${list}`
+          : key === 'email'
+            ? sql`select id, lower(email) as value, external_ids ->> 'hubspot' as hubspot from contact
+                   where deleted_at is null and lower(email) in ${list}`
+            : key === 'domain'
+              ? sql`select id, domain as value, external_ids ->> 'hubspot' as hubspot from company
+                     where deleted_at is null and domain in ${list}`
+              : sql`select distinct on (lower(name)) id, lower(name) as value, external_ids ->> 'hubspot' as hubspot from deal
+                     where deleted_at is null and lower(name) in ${list}
+                     order by lower(name), (external_ids ->> 'hubspot') is not null, created_at`,
+      ),
+    )
+    for (const row of found) known.set(`${key}:${row.value}`, { id: row.id, hubspotId: row.hubspot })
+  }
+
+  const linked = new Set(rows.flatMap((values) => hubspotIdentity(values) ?? []))
+  if (!object.isCustom && linked.size > 0) {
+    const list = sql`(select jsonb_array_elements_text(${JSON.stringify([...linked].map((id) => id.slice(HUBSPOT_ID.length + 1)))}::jsonb))`
+    const found = await withAccount(ctx, (tx) =>
+      tx.execute<{ id: string; hubspot: string }>(
+        sql`select id, external_ids ->> 'hubspot' as hubspot from ${tableFor(object)}
+             where deleted_at is null and external_ids ->> 'hubspot' in ${list}`,
+      ),
+    )
+    for (const row of found) known.set(`${HUBSPOT_ID}:${row.hubspot}`, { id: row.id, hubspotId: row.hubspot })
+  }
+  return known
+}
+
+/** The record a row is, if there is one. Its HubSpot id first. Failing that, the
+ *  email, domain or name, but only a record that has no HubSpot id of its own: one
+ *  that has is another record which happens to share the name. */
+const matchOf = (known: Known, object: RegistryObject, values: Record<string, unknown>): string | null => {
+  const linked = hubspotIdentity(values)
+  const byId = linked ? known.get(linked) : undefined
+  if (byId) return byId.id
+  const natural = dedupeIdentity(object, values)
+  const byKey = natural ? known.get(natural) : undefined
+  return byKey && !(linked && byKey.hubspotId) ? byKey.id : null
 }
 
 /** Every kind but `records` is mapped against a fixed shape rather than the
@@ -595,12 +702,20 @@ export const importShapeFor = (kind: ImportKind): RegistryObject | null =>
     submissions: SUBMISSION_IMPORT,
   })[kind as string] ?? null
 
+/** The object a file of records is mapped into, with the column HubSpot calls
+ *  "Record ID" offered beside its fields. A custom object has no `external_ids`
+ *  to keep it in. */
+export const withExternalId = (object: RegistryObject): RegistryObject =>
+  object.isCustom
+    ? object
+    : { ...object, fields: [...object.fields, HUBSPOT_ID_FIELD], byKey: new Map([...object.byKey, [HUBSPOT_ID, HUBSPOT_ID_FIELD]]) }
+
 const objectFor = async (
   ctx: AccountContext,
   kind: ImportKind,
   objectKey: string,
 ): Promise<RegistryObject> =>
-  importShapeFor(kind) ?? objectOrThrow(await getRegistry(ctx), objectKey)
+  importShapeFor(kind) ?? withExternalId(objectOrThrow(await getRegistry(ctx), objectKey))
 
 const SHAPE_OF: Partial<Record<ImportKind, string>> = {
   properties: 'property',
@@ -870,9 +985,9 @@ const preview = async (
   for (const row of checked) plans.push(await planRow(object, mapping, row, resolve, kind))
   // One lookup for the whole window rather than one per row. Each is a round trip
   // to the database, and five hundred of them made a preview take minutes.
-  const known =
+  const known: Known =
     writer || kind === 'activities'
-      ? new Map<string, string>()
+      ? new Map()
       : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
   for (const [index, row] of checked.entries()) {
     const planned = plans[index]!
@@ -926,8 +1041,8 @@ const preview = async (
       }
       continue
     }
-    const identity = dedupeIdentity(object, planned.values)
-    if (identity && (willExist.has(identity) || known.has(identity))) {
+    const identity = hubspotIdentity(planned.values) ?? dedupeIdentity(object, planned.values)
+    if (matchOf(known, object, planned.values) !== null || (identity && willExist.has(identity))) {
       result.willUpdate += 1
       if (result.samples.update.length < SAMPLE_SIZE) result.samples.update.push(row)
     } else {
@@ -2176,9 +2291,9 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
     // mid-write and done again from the same position, for ever.
     if (Date.now() >= deadline) break
   }
-  const known =
+  const known: Known =
     writer || kind === 'activities'
-      ? new Map<string, string>()
+      ? new Map()
       : await knownIdentities(ctx, object, plans.flatMap((plan) => (plan.error ? [] : [plan.values])))
 
   /** Rows this chunk finished with. Short of the slice when the budget ran out,
@@ -2206,13 +2321,14 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
         notes.push({ row: run.processedRows + offset + 2, reason: warning, warning: true })
       }
       // Create date is Rawr's to keep, so only a record this row brings into
-      // being takes the one the file carries.
-      const { created_at: createdAt, ...values } = planned.values
-      const identity = dedupeIdentity(object, values)
+      // being takes the one the file carries. The HubSpot id is kept beside the
+      // record, not in a field of it.
+      const { created_at: createdAt, [HUBSPOT_ID]: hubspotId, ...values } = planned.values
       batch.push({
         position: offset,
         values,
-        existingId: identity ? (known.get(identity) ?? null) : null,
+        existingId: matchOf(known, object, planned.values),
+        ...(typeof hubspotId === 'string' ? { externalIds: { hubspot: hubspotId.trim() } } : {}),
         ...(createdAt instanceof Date ? { createdAt } : {}),
       })
     }
@@ -2231,17 +2347,24 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
     // dropped, so they go the way every row used to.
     await withAccount(ctx, async (tx) => {
       for (const position of outcome.contested) {
-        const values = batch.find((row) => row.position === position)!.values
+        const { values, externalIds, existingId } = batch.find((row) => row.position === position)!
         // A savepoint per row, as in the shape branch: the chunk is one
         // transaction now, and a database error in one row's update would
         // otherwise abort every row after it.
         await tx.execute(sql`savepoint rawr_row`)
         try {
-          const existing = await dedupeLookup(ctx, object, values)
+          // A row that matched a record and was handed back to be updated one at a
+          // time already knows which; matching on the name again would send two
+          // deals that share one to the same record.
+          const existing = existingId ?? (await dedupeLookup(ctx, object, values))
           if (!existing) {
             refuse(position, 'Another record took that value while this file was importing.')
           } else {
             await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
+            if (externalIds) {
+              await tx.execute(sql`update ${tableFor(object)} set external_ids = external_ids || ${JSON.stringify(externalIds)}::jsonb
+                                    where id = ${existing}::uuid and external_ids ->> 'hubspot' is null`)
+            }
             updated += 1
           }
         } catch (cause) {

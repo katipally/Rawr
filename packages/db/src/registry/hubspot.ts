@@ -26,6 +26,7 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
     numberofemployees: 'employee_count',
     countryregion: 'country',
     createdate: 'created_at',
+    recordid: 'hubspot_id',
   },
   contact: {
     firstname: 'first_name',
@@ -46,6 +47,7 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
     originalsource: 'lead_source',
     marketingcontactstatus: 'marketing_status',
     createdate: 'created_at',
+    recordid: 'hubspot_id',
   },
   deal: {
     dealname: 'name',
@@ -56,6 +58,7 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
     closedate: 'close_date',
     dealprobability: '',
     createdate: 'created_at',
+    recordid: 'hubspot_id',
   },
 }
 
@@ -63,7 +66,6 @@ const ALIASES: Record<ObjectKey, Record<string, string>> = {
  *  on purpose, so the mapper shows them already dismissed rather than as work. */
 const IGNORED = new Set(
   [
-    'Record ID',
     'Object ID',
     'HubSpot Team',
     'Merged Record IDs',
@@ -142,6 +144,14 @@ const fieldIn = (shape: string) => (
 })
 
 const field = fieldIn('activity')
+
+export const HUBSPOT_ID = 'hubspot_id'
+
+/** What a contact, company or deal export calls "Record ID", offered beside the
+ *  fields of the object it is mapped into. Not a field of the account: it is kept
+ *  on the record as `external_ids.hubspot`, which is how a second run of the same
+ *  file finds the record the first one made. */
+export const HUBSPOT_ID_FIELD: RegistryField = fieldIn('record')(HUBSPOT_ID, 'HubSpot Record ID', 'text')
 
 /** A RegistryObject that is not one of the account's objects: a fixed shape the
  *  mapper, the preview and the coercion rules run against unchanged, so a file

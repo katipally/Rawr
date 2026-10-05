@@ -28,6 +28,7 @@ import {
   runImportChunk,
   startImportRun,
   suggestMapping,
+  withExternalId,
   type ImportKind,
   type NewProperty,
   type ImportRow,
@@ -331,7 +332,7 @@ try {
   console.log('\n-- the mapper --------------------------------------------------------')
 
   await check('a real HubSpot contact export maps its own columns', async () => {
-    const object = objectOrThrow(await getRegistry(admin), 'contact')
+    const object = withExternalId(objectOrThrow(await getRegistry(admin), 'contact'))
     // Through the preset, which is the path a real upload takes: the run detects
     // the export from the headers themselves, without being told where it came from.
     expect(looksLikeHubspot(HUBSPOT_CONTACT_HEADERS), 'the file was not recognised as a HubSpot export')
@@ -344,6 +345,7 @@ try {
       'Associated Company': 'company_id',
       'Contact owner': 'owner_id',
       'LinkedIn URL': 'linkedin_url',
+      'Record ID': 'hubspot_id',
     }
     for (const [header, key] of Object.entries(wanted)) {
       expect(mapping[header] === key, `"${header}" mapped to ${String(mapping[header])}, wanted ${key}`)
@@ -951,7 +953,6 @@ try {
   await check('columns the preset dismisses, associations and fields Rawr keeps become no properties', async () => {
     const stamp = String(Date.now())
     const dismissed = [
-      'Record ID',
       'Last Activity Date',
       'Associated Deal',
       'Associated Deal IDs',
@@ -981,9 +982,10 @@ try {
       expect(run.suggested[header] === null, `"${header}" went to ${JSON.stringify(run.suggested[header])}`)
     }
     expect(run.suggested['Create Date'] === 'created_at', `Create Date went to ${JSON.stringify(run.suggested['Create Date'])}`)
+    expect(run.suggested['Record ID'] === 'hubspot_id', `Record ID went to ${JSON.stringify(run.suggested['Record ID'])}`)
     await previewImportRun(admin, run.id)
     await cancelImportRun(admin, run.id)
-    return `${dismissed.length} dismissed, Create Date kept, and the preview answers`
+    return `${dismissed.length} dismissed, Create Date and Record ID kept, and the preview answers`
   })
 
   await check('a create date lands on a new record and is never written over', async () => {
@@ -1115,6 +1117,181 @@ try {
     expect(done.created + done.updated + done.skipped + done.errored === done.totalRows, 'the counts do not add up to the file')
     expect(done.errors.some((note) => note.warning && note.reason.includes('cut')), 'the cut title was not mentioned')
     return 'two created, the cut title noted on the side'
+  })
+
+  console.log('\n-- what a record is, across runs ---------------------------------------')
+
+  /** A HubSpot export mapped the way the upload screen opens it, then run. */
+  const runHubspotFile = async (objectKey: string, headers: string[], rows: ImportRow[], stamp: string) => {
+    const object = objectOrThrow(await getRegistry(admin), objectKey)
+    const mapping = suggestMapping(withExternalId(object), headers, hubspotPreset(objectKey as 'deal', headers))
+    const run = await createImportRun(admin, { objectKey, filename: `hubspot-${objectKey}-${stamp}.csv`, headers, rows, mapping, source: 'hubspot' })
+    created.push(run.id)
+    await runToEnd(admin, run.id)
+    return (await readImportRun(admin, run.id))!
+  }
+
+  await check('a HubSpot deals file whose stages exist only in another pipeline imports, keeps its ids and its create dates', async () => {
+    const stamp = String(Date.now())
+    const [pipe] = await db
+      .insert(s.pipeline)
+      .values({ accountId: sandbox.id, name: `Verify Enterprise ${stamp}`, position: 90 })
+      .returning({ id: s.pipeline.id })
+    await db.insert(s.pipelineStage).values(
+      ['Research (Agree to 2nd Meeting)', 'Interest (Meeting Occurred)', 'Closed Won'].map((name, position) => ({
+        accountId: sandbox.id,
+        pipelineId: pipe!.id,
+        name,
+        probability: '10',
+        position,
+      })),
+    )
+    const headers = ['Record ID', 'Deal Name', 'Pipeline', 'Deal Stage', 'Amount', 'Close Date', 'Create Date']
+    const file = (name: (i: number) => string): ImportRow[] =>
+      [
+        ['101', 'Research (Agree to 2nd Meeting)', '2024-03-05 10:11'],
+        ['102', 'Interest (Meeting Occurred)', '2025-06-17 09:30'],
+        ['103', 'Closed Won', '2025-11-02 16:45'],
+        ['104', 'Closed Won', '2026-01-20 08:05'],
+      ].map(([id, stage, made], i) => ({
+        'Record ID': `${stamp}${id}`,
+        'Deal Name': name(i),
+        Pipeline: `Verify Enterprise ${stamp}`,
+        'Deal Stage': stage!,
+        Amount: '1000',
+        'Close Date': '2026-12-01',
+        'Create Date': made!,
+      }))
+    try {
+      // Two of the four share a name: they are two deals, and only their ids say so.
+      const once = await runHubspotFile('deal', headers, file((i) => (i >= 2 ? `Verify shared ${stamp}` : `Verify deal ${stamp} ${i}`)), stamp)
+      expect(once.created === 4 && once.errored === 0, `${once.created} created, ${once.errored} refused: ${once.errors.map((n) => n.reason).join('; ')}`)
+      const stored = await db.execute<{ id: string; pipeline_id: string; hubspot: string; made: string }>(sql`
+        select id, pipeline_id, external_ids ->> 'hubspot' as hubspot, created_at::date::text as made
+          from deal where account_id = ${sandbox.id} and external_ids ->> 'hubspot' like ${`${stamp}%`} order by hubspot`)
+      expect(stored.length === 4, `${stored.length} deals carry a HubSpot id, expected 4`)
+      expect(stored.every((deal) => deal.pipeline_id === pipe!.id), 'a deal landed outside the pipeline the file named')
+      expect(stored.map((deal) => deal.made).join() === '2024-03-05,2025-06-17,2025-11-02,2026-01-20', `create dates were ${stored.map((deal) => deal.made).join()}`)
+
+      // The same file again, one deal renamed: the same four deals, not five.
+      const again = await runHubspotFile('deal', headers, file((i) => (i === 0 ? `Verify renamed ${stamp}` : i >= 2 ? `Verify shared ${stamp}` : `Verify deal ${stamp} ${i}`)), stamp)
+      const [count] = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from deal where account_id = ${sandbox.id} and external_ids ->> 'hubspot' like ${`${stamp}%`}`)
+      const [renamed] = await db.execute<{ name: string }>(sql`
+        select name from deal where account_id = ${sandbox.id} and external_ids ->> 'hubspot' = ${`${stamp}101`}`)
+      expect(again.created === 0 && again.updated === 4, `re-run: ${again.created} created, ${again.updated} updated`)
+      expect(Number(count?.n) === 4, `${count?.n} deals after the re-run, expected 4`)
+      expect(renamed?.name === `Verify renamed ${stamp}`, `the renamed deal is called "${renamed?.name}"`)
+      return '4 created with ids and create dates, two sharing a name; re-run updated the same 4'
+    } finally {
+      await db.execute(sql`delete from deal where account_id = ${sandbox.id} and pipeline_id = ${pipe!.id}::uuid`)
+      await db.delete(s.pipeline).where(eq(s.pipeline.id, pipe!.id))
+    }
+  })
+
+  await check('a stage name resolves in the pipeline the row names, and without one in the first pipeline that has it', async () => {
+    const stamp = String(Date.now())
+    const [pipe] = await db
+      .insert(s.pipeline)
+      .values({ accountId: sandbox.id, name: `Verify Other ${stamp}`, position: 91 })
+      .returning({ id: s.pipeline.id })
+    await db.insert(s.pipelineStage).values([{ accountId: sandbox.id, pipelineId: pipe!.id, name: 'Closed Won', probability: '100', position: 0 }])
+    const [first] = await db.select({ id: s.pipeline.id }).from(s.pipeline).where(eq(s.pipeline.accountId, sandbox.id)).orderBy(s.pipeline.position).limit(1)
+    try {
+      const headers = ['Deal Name', 'Pipeline', 'Deal Stage']
+      const done = await runHubspotFile(
+        'deal',
+        headers,
+        [
+          { 'Deal Name': `Verify scoped ${stamp} a`, Pipeline: `Verify Other ${stamp}`, 'Deal Stage': 'Closed Won' },
+          { 'Deal Name': `Verify scoped ${stamp} b`, Pipeline: '', 'Deal Stage': 'Closed Won' },
+          { 'Deal Name': `Verify scoped ${stamp} c`, Pipeline: `Verify Other ${stamp}`, 'Deal Stage': 'Research (Agree to 2nd Meeting)' },
+        ],
+        stamp,
+      )
+      const rows = await db.execute<{ name: string; pipeline_id: string }>(sql`
+        select name, pipeline_id from deal where account_id = ${sandbox.id} and name like ${`Verify scoped ${stamp}%`} order by name`)
+      expect(done.created === 2 && done.errored === 1, `${done.created} created, ${done.errored} refused`)
+      expect(rows[0]?.pipeline_id === pipe!.id, 'a row naming the other pipeline landed in the first one')
+      expect(rows[1]?.pipeline_id === first!.id, 'a row naming no pipeline did not land in the first one')
+      const refusal = done.errors.find((note) => !note.warning)?.reason ?? ''
+      expect(refusal.includes(`Verify Other ${stamp}`), `the refusal does not name the pipeline: "${refusal}"`)
+      return 'by pipeline when named, the first pipeline when not, and a stage the pipeline lacks is refused by name'
+    } finally {
+      await db.execute(sql`delete from deal where account_id = ${sandbox.id} and name like ${`Verify scoped ${stamp}%`}`)
+      await db.delete(s.pipeline).where(eq(s.pipeline.id, pipe!.id))
+    }
+  })
+
+  await check('contacts without an email and companies without a domain are updated by their HubSpot id, not created again', async () => {
+    const stamp = String(Date.now())
+    try {
+      const contactHeaders = ['Record ID', 'First Name', 'Last Name', 'Email']
+      const people = (suffix: string): ImportRow[] =>
+        [0, 1, 2].map((i) => ({ 'Record ID': `${stamp}${i}`, 'First Name': `Verify${stamp}`, 'Last Name': `Person ${i}${suffix}`, Email: '' }))
+      const first = await runHubspotFile('contact', contactHeaders, people(''), stamp)
+      const second = await runHubspotFile('contact', contactHeaders, people(' renamed'), stamp)
+      const [heads] = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from contact where account_id = ${sandbox.id} and first_name = ${`Verify${stamp}`} and deleted_at is null`)
+      expect(first.created === 3 && second.created === 0 && second.updated === 3, `contacts: ${first.created} created, then ${second.created} created and ${second.updated} updated`)
+      expect(Number(heads?.n) === 3, `${heads?.n} contacts exist, expected 3`)
+
+      const companyHeaders = ['Record ID', 'Company name']
+      const firms = (suffix: string): ImportRow[] => [0, 1, 2].map((i) => ({ 'Record ID': `${stamp}${i}`, 'Company name': `Verify firm ${stamp} ${i}${suffix}` }))
+      const firmsFirst = await runHubspotFile('company', companyHeaders, firms(''), stamp)
+      const firmsSecond = await runHubspotFile('company', companyHeaders, firms(' renamed'), stamp)
+      const [named] = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from company where account_id = ${sandbox.id} and name like ${`Verify firm ${stamp}%`} and deleted_at is null`)
+      expect(firmsFirst.created === 3 && firmsSecond.created === 0 && firmsSecond.updated === 3, `companies: ${firmsFirst.created} created, then ${firmsSecond.created} created and ${firmsSecond.updated} updated`)
+      expect(Number(named?.n) === 3, `${named?.n} companies exist, expected 3`)
+      return '3 contacts and 3 companies with no natural key, each updated on the second run'
+    } finally {
+      await db.execute(sql`delete from contact where account_id = ${sandbox.id} and first_name = ${`Verify${stamp}`}`)
+      await db.execute(sql`delete from company where account_id = ${sandbox.id} and name like ${`Verify firm ${stamp}%`}`)
+    }
+  })
+
+  await check('a contact file links its company by the HubSpot id the company file brought in', async () => {
+    const stamp = String(Date.now())
+    const email = `verify.linked.${stamp}@partner7.example`
+    try {
+      await runHubspotFile('company', ['Record ID', 'Company name'], [{ 'Record ID': `${stamp}5`, 'Company name': `Verify linked firm ${stamp}` }], stamp)
+      const done = await runHubspotFile(
+        'contact',
+        ['Record ID', 'Email', 'Primary Associated Company ID'],
+        [{ 'Record ID': `${stamp}6`, Email: email, 'Primary Associated Company ID': `${stamp}5` }],
+        stamp,
+      )
+      const [row] = await db.execute<{ name: string | null }>(sql`
+        select co.name from contact c left join company co on co.id = c.company_id
+         where c.account_id = ${sandbox.id} and c.email = ${email}`)
+      expect(done.created === 1, `${done.created} created: ${done.errors.map((n) => n.reason).join('; ')}`)
+      expect(row?.name === `Verify linked firm ${stamp}`, `the contact's company is ${String(row?.name)}`)
+      return 'linked to the company that carries that Record ID'
+    } finally {
+      await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email = ${email}`)
+      await db.execute(sql`delete from company where account_id = ${sandbox.id} and name = ${`Verify linked firm ${stamp}`}`)
+    }
+  })
+
+  await check('a contact that already exists takes the HubSpot id on its next import, and keeps another provider\'s', async () => {
+    const stamp = String(Date.now())
+    const email = `verify.adopt.${stamp}@partner7.example`
+    try {
+      const [made] = await db.execute<{ id: string }>(sql`
+        insert into contact (account_id, email, first_name, external_ids)
+        values (${sandbox.id}, ${email}, 'Before', ${JSON.stringify({ brevo: 'b-1' })}::jsonb) returning id`)
+      const done = await runHubspotFile('contact', ['Record ID', 'Email', 'First Name'], [{ 'Record ID': `${stamp}9`, Email: email, 'First Name': 'After' }], stamp)
+      const [row] = await db.execute<{ first_name: string; ids: Record<string, string>; n: number }>(sql`
+        select first_name, external_ids as ids, (select count(*)::int from contact where account_id = ${sandbox.id} and email = ${email}) as n
+          from contact where id = ${made!.id}::uuid`)
+      expect(done.created === 0 && done.updated === 1, `${done.created} created, ${done.updated} updated`)
+      expect(row?.first_name === 'After' && row.n === 1, `${row?.n} contacts with that email, first name ${row?.first_name}`)
+      expect(row?.ids.hubspot === `${stamp}9` && row.ids.brevo === 'b-1', `external ids were ${JSON.stringify(row?.ids)}`)
+      return 'updated in place, hubspot id added beside brevo'
+    } finally {
+      await db.execute(sql`delete from contact where account_id = ${sandbox.id} and email = ${email}`)
+    }
   })
 
   console.log('\n-- a chunk is one transaction ----------------------------------------')

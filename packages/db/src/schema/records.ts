@@ -83,6 +83,9 @@ export const company = pgTable(
     index('company_created_idx').on(t.accountId, t.createdAt.desc(), t.id.desc()),
     index('company_lifecycle_stage_id_idx').on(t.lifecycleStageId),
     index('company_owner_id_idx').on(t.ownerId),
+    uniqueIndex('company_hubspot_id_key')
+      .on(t.accountId, sql`(external_ids ->> 'hubspot')`)
+      .where(sql`external_ids ->> 'hubspot' is not null and deleted_at is null`),
   ],
 )
 
@@ -153,6 +156,9 @@ export const contact = pgTable(
     index('contact_last_campaign_id_idx').on(t.lastCampaignId),
     index('contact_lifecycle_stage_id_idx').on(t.lifecycleStageId),
     index('contact_owner_id_idx').on(t.ownerId),
+    uniqueIndex('contact_hubspot_id_key')
+      .on(t.accountId, sql`(external_ids ->> 'hubspot')`)
+      .where(sql`external_ids ->> 'hubspot' is not null and deleted_at is null`),
   ],
 )
 
@@ -216,6 +222,10 @@ export const deal = pgTable(
     originalSource: jsonb('original_source'),
     latestSource: jsonb('latest_source'),
     custom: jsonb('custom').notNull().default({}),
+    /** The id the deal had where it came from, keyed by provider. `hubspot` is
+     *  unique among live deals, which is what lets an import find the deal it
+     *  made before instead of matching on a name two deals can share. */
+    externalIds: jsonb('external_ids').notNull().default({}),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -232,6 +242,9 @@ export const deal = pgTable(
     index('deal_owner_id_idx').on(t.ownerId),
     index('deal_pipeline_id_idx').on(t.pipelineId),
     index('deal_stage_id_idx').on(t.stageId),
+    uniqueIndex('deal_hubspot_id_key')
+      .on(t.accountId, sql`(external_ids ->> 'hubspot')`)
+      .where(sql`external_ids ->> 'hubspot' is not null and deleted_at is null`),
   ],
 )
 

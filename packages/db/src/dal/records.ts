@@ -684,6 +684,9 @@ export type BulkRow = {
   /** When the record really began, for a migration that carries it. Taken only
    *  by a record this write brings into being, as everywhere else. */
   createdAt?: Date | undefined
+  /** The id the record has where it came from, keyed by provider. Merged into what
+   *  the record already carries, so another provider's id is not lost. */
+  externalIds?: Record<string, string> | undefined
 }
 
 export type BulkOutcome = {
@@ -798,6 +801,7 @@ export const bulkWriteRecords = async (
       try {
         const prepared = prepare(object, row.values)
         assertIdentified(object, prepared.columns)
+        if (row.externalIds) prepared.columns.external_ids = row.externalIds
         for (const warning of prepared.warnings) outcome.warnings.push({ position: row.position, reason: warning })
         planned.push({ ...row, id: randomUUID(), columns: prepared.columns, custom: prepared.custom })
       } catch (cause) {
@@ -904,7 +908,9 @@ export const bulkWriteRecords = async (
       const sets = [
         ...touched.map((column) => {
           const quoted = sql.raw(`"${column}"`)
-          return sql`${quoted} = coalesce(s.${quoted}, t.${quoted})`
+          return column === 'external_ids'
+            ? sql`${quoted} = t.${quoted} || coalesce(s.${quoted}, '{}'::jsonb)`
+            : sql`${quoted} = coalesce(s.${quoted}, t.${quoted})`
         }),
         sql`"custom" = coalesce(t."custom", '{}'::jsonb) || s."custom"`,
         sql`"updated_at" = now()`,
@@ -963,7 +969,9 @@ export const bulkWriteRecords = async (
         sql`${ctx.accountId}::uuid`,
         sql`s."custom"`,
         sql`coalesce(s."created_at", now())`,
-        ...touched.map((column) => sql`s.${sql.raw(`"${column}"`)}`),
+        ...touched.map((column) =>
+          column === 'external_ids' ? sql`coalesce(s."external_ids", '{}'::jsonb)` : sql`s.${sql.raw(`"${column}"`)}`,
+        ),
         ...(object.isCustom
           ? [sql`${object.id}::uuid`, searchVectorFrom(object, sql`s."custom"`)]
           : []),

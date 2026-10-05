@@ -8,6 +8,7 @@ import {
   schema,
   suggestMapping,
   withAccount,
+  withExternalId,
   type Mapping,
 } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
@@ -80,7 +81,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
   // Every kind but `records` is mapped against a fixed shape rather than the
   // account's registry: those columns say which record something belongs to,
   // not what to write on one.
-  const object = importShapeFor(run.importKind) ?? objectOrThrow(await getRegistry(ctx), run.objectType)
+  const object = importShapeFor(run.importKind) ?? withExternalId(objectOrThrow(await getRegistry(ctx), run.objectType))
 
   const stored = (detail?.mapping as Mapping | undefined) ?? {}
   const mapping = Object.keys(stored).length > 0 ? stored : suggestMapping(object, headers)
