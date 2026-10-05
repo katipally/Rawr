@@ -23,7 +23,7 @@ const dispatch = defineJob({
         from bulk_operation o
         join account a on a.id = o.account_id
        where o.state = 'running'
-         ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
+         ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
 
     for (const row of rows) {
       // One chunk in flight per operation. Without it the tick that lands while a

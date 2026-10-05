@@ -1431,6 +1431,20 @@ try {
     return 'refused with the rows gone, cancellable'
   })
 
+  await check('the fixture tenants are marked, so the worker can leave them out by flag instead of by domain', async () => {
+    // The worker's dispatch query with the skip on, run against a running fixture.
+    const id = await startRun(admin, 'records', String(Date.now()), 3)
+    await startImportRun(admin, id)
+    const dispatched = await db.execute<{ id: string }>(sql`
+      select r.id from import_run r join account a on a.id = r.account_id
+       where r.id = ${id}::uuid and r.state = 'running' and not a.is_fixture`)
+    const marked = await db.execute<{ slug: string }>(sql`select slug from account where id in (${sandbox.id}, ${peer.id}) and is_fixture`)
+    await cancelImportRun(admin, id)
+    expect(dispatched.length === 0, 'a fixture tenant\'s running import would still be dispatched')
+    expect(marked.length === 2, `${marked.length} of the 2 fixture tenants are marked`)
+    return 'sandbox and peer skipped, and neither is picked by its domain'
+  })
+
   console.log('\n-- tenancy -----------------------------------------------------------')
 
   await check("another tenant cannot read or run this account's import", async () => {

@@ -40,6 +40,9 @@ export const account = pgTable('account', {
    *  the account, so two people reading a report read the same numbers; a trigger
    *  refuses a name Postgres does not know. */
   timezone: text('timezone').notNull().default('UTC'),
+  /** A tenant the seed built for the verify suites to drive. The worker leaves it
+   *  alone where those suites share its database. */
+  isFixture: boolean('is_fixture').notNull().default(false),
   createdAt: createdAt(),
 })
 

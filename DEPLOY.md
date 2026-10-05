@@ -211,7 +211,7 @@ two run on separate hosts.
 
 **`RAWR_WORKER_SKIPS_FIXTURES` is `1` wherever the verify suites share the
 database.** They drive their own import and bulk runs a chunk at a time, so the
-worker has to leave the fixture tenants, the ones whose domain ends `.test`,
+worker has to leave the fixture tenants, the ones the seed marks `is_fixture`,
 alone. On a laptop those fixtures are the only tenants there are to test an
 import against, and a worker that steps over them looks exactly like a worker
 that is not running.

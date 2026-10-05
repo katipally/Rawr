@@ -134,6 +134,7 @@ try {
         name: a.name,
         slug: a.slug,
         googleHostedDomain: a.domain,
+        isFixture: true,
         seatLimit: a.seatLimit,
         defaultViewHubs: ['contacts', 'sales', 'marketing', 'reports'] as ('contacts' | 'sales' | 'marketing' | 'reports')[],
       })),

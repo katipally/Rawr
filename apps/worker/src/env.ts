@@ -34,7 +34,7 @@ export const resolveAppBase = (env: { RAWR_INTERNAL_URL?: string; PORT?: string 
 export const APP_BASE = resolveAppBase(process.env)
 
 /** Whether the import and bulk dispatchers step over the fixture tenants, the
- *  ones whose domain ends `.test`.
+ *  ones the seed marks `is_fixture`.
  *
  *  On the deployment that shares its database with those fixtures they have to be
  *  stepped over: the verify suites drive their own runs there, one chunk at a

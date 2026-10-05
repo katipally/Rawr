@@ -77,7 +77,7 @@ const dispatch = defineJob({
         from import_run r
         join account a on a.id = r.account_id
        where r.state = 'parsing'
-         ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
+         ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
     for (const row of reading) {
       await boss().send('import.parse', { accountId: row.account_id, runId: row.id }, { singletonKey: String(row.id) })
     }
@@ -88,7 +88,7 @@ const dispatch = defineJob({
         from import_run r
         join account a on a.id = r.account_id
        where r.state = 'running'
-         ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
+         ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
 
     for (const row of rows) {
       // Not this key: a queue created without a policy is `standard`, and pg-boss
