@@ -5,7 +5,6 @@ import {
   pipelineReport,
   sequencesReport,
   websiteReport,
-  type Amounts,
   type AttributionReport,
   type EmailReport,
   type FormsReport,
@@ -15,7 +14,7 @@ import {
   type WebsiteReport,
   type AccountContext,
 } from '@rawr/db'
-import { formatAmounts } from '~/components/crm/value.tsx'
+import type { Format } from '~/lib/format.ts'
 
 /** B11. The catalogue a dashboard is assembled from.
  *
@@ -48,7 +47,7 @@ type CardDef = {
   /** Which of the six it reads. Also the tab a card links back to. */
   report: ReportKey
   group: string
-  render: (reports: Reports) => CardData
+  render: (reports: Reports, fmt: Format) => CardData
 }
 
 const sum = <T,>(rows: T[], pick: (row: T) => number): number =>
@@ -56,13 +55,6 @@ const sum = <T,>(rows: T[], pick: (row: T) => number): number =>
 
 const percent = (part: number, whole: number): string =>
   whole === 0 ? '—' : `${Math.round((part / whole) * 100)}%`
-
-const count = (value: number): string => value.toLocaleString()
-
-/** The same formatting the reports overview uses, so a card and the report it
- *  came from never show the same figure two different ways. Amounts arrive as one
- *  total per currency and are never converted or added across them. */
-const money = (amounts: Amounts): string => formatAmounts(amounts)
 
 /** Longest table a card shows. A card is a glance; the report behind it is the
  *  place to read all forty rows, and every card links there. */
@@ -74,12 +66,12 @@ const CARDS: CardDef[] = [
     label: 'Deals created',
     report: 'pipeline',
     group: 'Pipeline',
-    render: ({ pipeline }) => {
+    render: ({ pipeline }, fmt) => {
       const weeks = pipeline?.weeks ?? []
       return {
         kind: 'metric',
-        value: count(sum(weeks, (week) => week.created)),
-        hint: `${count(sum(weeks, (week) => week.won))} won, ${count(sum(weeks, (week) => week.lost))} lost`,
+        value: fmt.number(sum(weeks, (week) => week.created)),
+        hint: `${fmt.number(sum(weeks, (week) => week.won))} won, ${fmt.number(sum(weeks, (week) => week.lost))} lost`,
       }
     },
   },
@@ -88,12 +80,12 @@ const CARDS: CardDef[] = [
     label: 'Won',
     report: 'pipeline',
     group: 'Pipeline',
-    render: ({ pipeline }) => {
+    render: ({ pipeline }, fmt) => {
       const won = sum(pipeline?.weeks ?? [], (week) => week.won)
       return {
         kind: 'metric',
-        value: money(pipeline?.wonAmounts ?? []),
-        hint: `across ${count(won)} deal${won === 1 ? '' : 's'}, one total per currency`,
+        value: fmt.amounts(pipeline?.wonAmounts ?? []),
+        hint: `across ${fmt.number(won)} deal${won === 1 ? '' : 's'}, one total per currency`,
       }
     },
   },
@@ -102,7 +94,7 @@ const CARDS: CardDef[] = [
     label: 'Where the open deals sit',
     report: 'pipeline',
     group: 'Pipeline',
-    render: ({ pipeline }) => {
+    render: ({ pipeline }, fmt) => {
       const funnel = pipeline?.funnel ?? []
       // Stage names repeat across pipelines, so the pipeline is prefixed once
       // there is more than one. With a single pipeline it is only noise.
@@ -112,7 +104,7 @@ const CARDS: CardDef[] = [
         columns: ['Stage', 'Deals', 'Amount'],
         rows: funnel
           .slice(0, TOP)
-          .map((row) => [many ? `${row.pipeline} · ${row.stage}` : row.stage, row.deals, money(row.amounts)]),
+          .map((row) => [many ? `${row.pipeline} · ${row.stage}` : row.stage, row.deals, fmt.amounts(row.amounts)]),
       }
     },
   },
@@ -133,13 +125,13 @@ const CARDS: CardDef[] = [
     label: 'Form fills',
     report: 'forms',
     group: 'Forms',
-    render: ({ forms }) => {
+    render: ({ forms }, fmt) => {
       const days = forms?.days ?? []
       const held = sum(days, (day) => day.held)
       return {
         kind: 'metric',
-        value: count(sum(days, (day) => day.clean + day.held)),
-        hint: held === 0 ? 'none held for review' : `${count(held)} held for review`,
+        value: fmt.number(sum(days, (day) => day.clean + day.held)),
+        hint: held === 0 ? 'none held for review' : `${fmt.number(held)} held for review`,
       }
     },
   },
@@ -173,12 +165,12 @@ const CARDS: CardDef[] = [
     label: 'Sequence emails sent',
     report: 'sequences',
     group: 'Sequences',
-    render: ({ sequences }) => {
+    render: ({ sequences }, fmt) => {
       const rows = sequences?.sequences ?? []
       const sent = sum(rows, (row) => row.sent)
       return {
         kind: 'metric',
-        value: count(sent),
+        value: fmt.number(sent),
         hint: `${percent(sum(rows, (row) => row.replied), sent)} replied`,
       }
     },
@@ -188,11 +180,11 @@ const CARDS: CardDef[] = [
     label: 'Sequence bounces',
     report: 'sequences',
     group: 'Sequences',
-    render: ({ sequences }) => {
+    render: ({ sequences }, fmt) => {
       const rows = sequences?.sequences ?? []
       const sent = sum(rows, (row) => row.sent)
       const bounced = sum(rows, (row) => row.bounced)
-      return { kind: 'metric', value: count(bounced), hint: `${percent(bounced, sent)} of what went out` }
+      return { kind: 'metric', value: fmt.number(bounced), hint: `${percent(bounced, sent)} of what went out` }
     },
   },
   {
@@ -214,11 +206,11 @@ const CARDS: CardDef[] = [
     label: 'Mail through connected inboxes',
     report: 'email',
     group: 'Email',
-    render: ({ email }) => {
+    render: ({ email }, fmt) => {
       const rows = email?.mailboxes ?? []
       const out = sum(rows, (row) => row.sent)
       const back = sum(rows, (row) => row.received)
-      return { kind: 'metric', value: count(out + back), hint: `${count(out)} out, ${count(back)} in` }
+      return { kind: 'metric', value: fmt.number(out + back), hint: `${fmt.number(out)} out, ${fmt.number(back)} in` }
     },
   },
   {
@@ -240,11 +232,11 @@ const CARDS: CardDef[] = [
     label: 'Site visits',
     report: 'website',
     group: 'Website',
-    render: ({ website }) => {
+    render: ({ website }, fmt) => {
       const share = website?.identifiedShare ?? { sessions: 0, identified: 0 }
       return {
         kind: 'metric',
-        value: count(share.sessions),
+        value: fmt.number(share.sessions),
         hint: `${percent(share.identified, share.sessions)} by somebody Rawr can name`,
       }
     },
@@ -279,12 +271,12 @@ const CARDS: CardDef[] = [
     label: 'First touch',
     report: 'attribution',
     group: 'Attribution',
-    render: ({ attribution }) => ({
+    render: ({ attribution }, fmt) => ({
       kind: 'table',
       columns: ['Channel', 'Contacts', 'Deals', 'Won'],
       rows: (attribution?.first ?? [])
         .slice(0, TOP)
-        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmounts)]),
+        .map((row) => [row.channel, row.contacts, row.deals, fmt.amounts(row.wonAmounts)]),
     }),
   },
   {
@@ -292,12 +284,12 @@ const CARDS: CardDef[] = [
     label: 'Last touch',
     report: 'attribution',
     group: 'Attribution',
-    render: ({ attribution }) => ({
+    render: ({ attribution }, fmt) => ({
       kind: 'table',
       columns: ['Channel', 'Contacts', 'Deals', 'Won'],
       rows: (attribution?.last ?? [])
         .slice(0, TOP)
-        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmounts)]),
+        .map((row) => [row.channel, row.contacts, row.deals, fmt.amounts(row.wonAmounts)]),
     }),
   },
 ]
@@ -322,6 +314,7 @@ export const renderCards = async (
   ctx: AccountContext,
   keys: string[],
   range: Range,
+  fmt: Format,
 ): Promise<RenderedCard[]> => {
   const chosen = keys.flatMap((key) => {
     const card = BY_KEY.get(key)
@@ -347,6 +340,6 @@ export const renderCards = async (
     label: card.label,
     group: card.group,
     report: card.report,
-    data: card.render(reports),
+    data: card.render(reports, fmt),
   }))
 }

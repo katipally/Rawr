@@ -2,7 +2,7 @@ import { calendarFields, listViews, parseFilters, readCalendar, resolveView } fr
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
-import { todayIn } from '~/components/crm/value.tsx'
+import { todayIn } from '~/lib/format.ts'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'

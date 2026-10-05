@@ -4,8 +4,7 @@ import { Badge, Button, Card, Combobox, EmptyState, NOTHING_MATCHED, Spinner, us
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Fragment, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Row = {
   id: string
@@ -81,7 +80,7 @@ export const AuditTable = ({
   entity: string | null
   actorId: string | null
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const pathname = usePathname()
@@ -158,7 +157,7 @@ export const AuditTable = ({
               <li key={row.id} className="px-4 py-2">
                 <div className="flex flex-wrap items-baseline gap-2">
                   <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
-                    {formatDateTime(row.at, zone)}
+                    {fmt.dateTime(row.at)}
                   </time>
                   <span className="min-w-0 flex-1">{sentence(row)}</span>
                   {row.actorKind === 'user' ? null : (

@@ -13,8 +13,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import type { Group } from './filter-builder.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { TaskForm } from './task-form.tsx'
-import { formatCurrency, formatDate, isPast } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type BoardCard = {
   id: string
@@ -111,7 +110,7 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
 )
 
 export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: DealBoardProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const { navigate } = useNavigation()
   const origin = useOrigin()
@@ -359,15 +358,15 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           />
                         ) : null}
                       </div>
-                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '—' : formatCurrency(card.amount, card.currency)}</p>
+                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '—' : fmt.money(card.amount, card.currency)}</p>
                       <p className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
                         Close date:
                         {card.closeDate === null ? (
                           <span>--</span>
-                        ) : isPast(card.closeDate) ? (
-                          <Badge tone="error">{formatDate(card.closeDate, zone)}</Badge>
+                        ) : fmt.isPast(card.closeDate) ? (
+                          <Badge tone="error">{fmt.date(card.closeDate)}</Badge>
                         ) : (
-                          <span>{formatDate(card.closeDate, zone)}</span>
+                          <span>{fmt.date(card.closeDate)}</span>
                         )}
                       </p>
                       {card.ownerName ? <p className="truncate">Deal owner: {card.ownerName}</p> : null}
@@ -405,21 +404,21 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           onClick={() => setScheduling(card)}
                           className={cn(
                             'mt-2 flex w-full items-center gap-1.5 rounded-pill border border-line-strong px-2 py-1 text-left hover:bg-fill',
-                            isPast(card.nextTask?.dueDate) && 'border-error text-error',
+                            fmt.isPast(card.nextTask?.dueDate) && 'border-error text-error',
                           )}
                         >
                           <CalendarPlus aria-hidden="true" className="size-3.5 shrink-0" />
                           <span className="min-w-0 flex-1 truncate">
                             {card.nextTask
-                              ? `${card.nextTask.dueDate ? `${formatDate(card.nextTask.dueDate, zone)}: ` : ''}${card.nextTask.title}`
+                              ? `${card.nextTask.dueDate ? `${fmt.date(card.nextTask.dueDate)}: ` : ''}${card.nextTask.title}`
                               : 'Schedule next activity'}
                           </span>
                         </button>
                       ) : null}
                       {card.nextStep ? (
                         <p className="mt-1 break-words text-small text-secondary">
-                          <span className={cn(isPast(card.nextStepDate) && 'font-medium text-error')}>
-                            {card.nextStepDate ? `${formatDate(card.nextStepDate, zone)}: ` : ''}
+                          <span className={cn(fmt.isPast(card.nextStepDate) && 'font-medium text-error')}>
+                            {card.nextStepDate ? `${fmt.date(card.nextStepDate)}: ` : ''}
                           </span>
                           {card.nextStep}
                         </p>
@@ -524,18 +523,18 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
             <footer className="mt-auto border-t border-line px-2 py-1 text-small">
               {column.totals.length === 0 ? (
                 <p>
-                  <span className="font-semibold">{formatCurrency(0, 'USD')}</span> | Total amount
+                  <span className="font-semibold">{fmt.money(0)}</span> | Total amount
                 </p>
               ) : (
                 column.totals.map((total) => (
                   <div key={total.currency} className="tabular-nums">
                     <p>
-                      <span className="font-semibold">{formatCurrency(total.total, total.currency)}</span> | Total amount
+                      <span className="font-semibold">{fmt.money(total.total, total.currency)}</span> | Total amount
                     </p>
                     {column.probability !== null ? (
                       <p>
                         <span className="font-semibold">
-                          {formatCurrency(total.weighted, total.currency)} ({column.probability}%)
+                          {fmt.money(total.weighted, total.currency)} ({column.probability}%)
                         </span>{' '}
                         | Weighted amount
                       </p>

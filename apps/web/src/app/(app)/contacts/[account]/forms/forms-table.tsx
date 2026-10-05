@@ -1,5 +1,6 @@
 'use client'
 
+import type { Format } from '~/lib/format.ts'
 import { Button, DataTable, EmptyState, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
@@ -9,8 +10,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { formsPath, submissionsPath } from '~/lib/links.ts'
 import { EmbedSnippet } from './embed-snippet.tsx'
-import { formatDate } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type FormRow = {
   id: string
@@ -36,8 +36,8 @@ const UNFILED = 'none'
 
 /** A rate somebody has to act on, not a rate somebody has to admire. One decimal
  *  is enough to tell 2.1% from 2.8%; a second is noise from a counter. */
-const rate = (part: number, whole: number): string =>
-  whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`
+const rate = (fmt: Format, part: number, whole: number): string =>
+  whole === 0 ? '—' : fmt.percent(part / whole, 1)
 
 /** HubSpot's forms list: a table with the form's status under its name, and the
  *  numbers that matter in the columns. The embed code is one click away on each
@@ -57,7 +57,7 @@ export const FormsTable = ({
   folders: FolderRow[]
   canEdit: boolean
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -125,23 +125,23 @@ export const FormsTable = ({
       header: 'Page views',
       width: 130,
       align: 'right',
-      render: (row) => (row.pageViews === 0 ? '—' : row.pageViews.toLocaleString()),
+      render: (row) => (row.pageViews === 0 ? '—' : fmt.number(row.pageViews)),
     },
     {
       key: 'rate',
       header: 'Submissions / page view',
       width: 190,
       align: 'right',
-      render: (row) => rate(row.submissions, row.pageViews),
+      render: (row) => rate(fmt, row.submissions, row.pageViews),
     },
     {
       key: 'spam',
       header: 'Spam submissions',
       width: 160,
       align: 'right',
-      render: (row) => row.spam.toLocaleString(),
+      render: (row) => fmt.number(row.spam),
     },
-    { key: 'submissions', header: 'Form submissions', width: 160, align: 'right', render: (row) => row.submissions.toLocaleString() },
+    { key: 'submissions', header: 'Form submissions', width: 160, align: 'right', render: (row) => fmt.number(row.submissions) },
     {
       key: 'appears',
       header: 'Appears on',
@@ -158,7 +158,7 @@ export const FormsTable = ({
       render: (row) =>
         row.quarantined > 0 ? (
           <Link href={submissionsPath(account, { state: 'quarantined', form: row.id })} onClick={(event) => event.stopPropagation()}>
-            {row.quarantined.toLocaleString()}
+            {fmt.number(row.quarantined)}
           </Link>
         ) : (
           '0'
@@ -170,7 +170,7 @@ export const FormsTable = ({
       width: 180,
       render: (row) =>
         row.lastSubmissionAt
-          ? formatDate(row.lastSubmissionAt, zone)
+          ? fmt.date(row.lastSubmissionAt)
           : '—',
     },
     {
@@ -325,7 +325,7 @@ export const FormsTable = ({
         <div className="flex flex-col gap-3">
           <p>
             {removingFolder && removingFolder.forms > 0
-              ? `Deleting a folder empties it: the ${removingFolder.forms.toLocaleString()} ${removingFolder.forms === 1 ? 'form' : 'forms'} filed here move to Unfiled and keep collecting. A filing decision never takes a live capture path down with it.`
+              ? `Deleting a folder empties it: the ${fmt.number(removingFolder.forms)} ${removingFolder.forms === 1 ? 'form' : 'forms'} filed here move to Unfiled and keep collecting. A filing decision never takes a live capture path down with it.`
               : 'The folder is empty, so nothing else changes.'}
           </p>
         </div>

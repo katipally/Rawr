@@ -5,12 +5,11 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, EmptyState, IconButton, Spinner, cn } from '@rawr/ui'
 import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr/db'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { plainError } from '~/lib/provider-errors.ts'
 import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** How stale the badge may get. Long enough that moving around the app is not a
  *  request per page; short enough that clearing a queue shows while the person is
@@ -51,7 +50,7 @@ const hrefFor = (row: Row, account: string): string | null => {
 }
 
 export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<NotificationTab>('unread')
   const [count, setCount] = useState(0)
@@ -224,7 +223,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                     )}
                     {row.body ? <span className="text-secondary">{plainError(row.body) ?? row.body}</span> : null}
                     <span className="text-small text-secondary">
-                      {formatDateTime(row.at, zone)}
+                      {fmt.dateTime(row.at)}
                       {row.count > 1 ? ` · ${row.count} times` : ''}
                     </span>
                   </span>

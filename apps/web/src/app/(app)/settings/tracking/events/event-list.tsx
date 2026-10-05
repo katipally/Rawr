@@ -4,8 +4,7 @@ import { Badge, Button, Card, DataTable, Field, IconButton, Modal, Pagination, S
 import { Trash2 } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export type EventDefView = {
@@ -35,7 +34,7 @@ const rowsFrom = (properties: Record<string, unknown>): PropertyRow[] =>
   }))
 
 export const EventDefList = ({ initial, search: initialSearch }: { initial: Page; search: string }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const pathname = usePathname()
@@ -168,12 +167,13 @@ export const EventDefList = ({ initial, search: initialSearch }: { initial: Page
               key: 'updated',
               header: 'Updated',
               width: 190,
-              render: (row) => <span className="text-secondary">{formatDateTime(row.updatedAt, zone)}</span>,
+              render: (row) => <span className="text-secondary">{fmt.dateTime(row.updatedAt)}</span>,
             },
           ]}
         />
 
         <Pagination
+          format={fmt.number}
           count={page.rows.length}
           offset={offset}
           total={page.total}

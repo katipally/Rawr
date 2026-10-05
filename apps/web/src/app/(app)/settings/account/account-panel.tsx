@@ -5,9 +5,8 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
-import { formatDate } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Service = {
   /** Null when nothing is connected. Otherwise the provider's own health word. */
@@ -92,7 +91,7 @@ const ServiceRow = ({
 }
 
 export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [timezone, setTimezone] = useState(initialTimezone)
@@ -177,7 +176,7 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
                   What you may do here is under Settings, Members &amp; Teams.
                 </p>
               </div>
-              <p className="shrink-0 text-small text-secondary">Joined {formatDate(w.joinedAt, zone)}</p>
+              <p className="shrink-0 text-small text-secondary">Joined {fmt.date(w.joinedAt)}</p>
             </li>
           ))}
         </ul>

@@ -21,8 +21,7 @@ import {
   type Hub,
   type Scope,
 } from '~/lib/hubs.ts'
-import { formatDate } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type HubScopes = Partial<Record<Hub, Scope>>
 
@@ -290,7 +289,7 @@ const GrantGrid = ({
 )
 
 export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin }: Props) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('active')
@@ -373,7 +372,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                   <p className="text-body">{row.email}</p>
                   <p className="text-small text-secondary">
                     {summarise(row)} · invited by {row.invitedByName ?? 'somebody'} · expires{' '}
-                    {formatDate(row.expiresAt, zone)}
+                    {fmt.date(row.expiresAt)}
                   </p>
                 </div>
                 {isSuperAdmin ? (

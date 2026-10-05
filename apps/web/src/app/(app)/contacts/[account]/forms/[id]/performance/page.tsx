@@ -1,12 +1,12 @@
 import { formPerformance, getForm } from '@rawr/db'
 import { Breadcrumb, Card, Tabs } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
-import { formatDayShort } from '~/components/crm/value.tsx'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
 import { formPerformancePath, formsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { reportRange } from '../../../reports/range.ts'
 import { PerformanceCharts } from './charts.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** What one form did, over a range somebody chose.
  *
@@ -22,6 +22,7 @@ const PerformancePage = async ({
   params: Promise<{ account: string; id: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const { account, id } = await params
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -65,7 +66,7 @@ const PerformancePage = async ({
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Tile
           label="Views"
-          value={report.totals.views.toLocaleString()}
+          value={fmt.number(report.totals.views)}
           detail={
             delta === null
               ? 'Nothing to compare with in the period before this one.'
@@ -74,18 +75,18 @@ const PerformancePage = async ({
         />
         <Tile
           label="Conversion rate"
-          value={conversion === null ? '—' : `${(conversion * 100).toFixed(1)}%`}
+          value={conversion === null ? '—' : fmt.percent(conversion, 1)}
           detail="Submissions as a share of the times the form appeared."
         />
         <Tile
           label="Submissions"
-          value={report.totals.submissions.toLocaleString()}
+          value={fmt.number(report.totals.submissions)}
           detail="Kept submissions. Held and spam are on the list."
         />
       </div>
 
       <PerformanceCharts
-        days={report.days.map((row) => ({ ...row, label: formatDayShort(row.day) }))}
+        days={report.days.map((row) => ({ ...row, label: fmt.dayShort(row.day) }))}
         funnel={[
           { id: 'visits', label: 'Page visits', value: report.totals.pageVisits },
           { id: 'renders', label: 'Visible on page', value: report.totals.renders },
@@ -146,7 +147,7 @@ const Tile = ({ label, value, detail }: { label: string; value: string; detail: 
   </div>
 )
 
-const Breakdown = ({
+const Breakdown = async ({
   first,
   rows,
   empty,
@@ -154,7 +155,9 @@ const Breakdown = ({
   first: string
   rows: { key: string; label: string; views: number; submissions: number }[]
   empty: string
-}) =>
+}) => {
+  const fmt = await getFormat()
+  return (
   rows.length === 0 ? (
     <p className="text-secondary">{empty}</p>
   ) : (
@@ -172,10 +175,10 @@ const Breakdown = ({
           {rows.map((row) => (
             <tr key={row.key} className="border-b border-divider last:border-0">
               <th scope="row" className="min-w-0 break-all py-1 pr-3 text-left font-normal">{row.label}</th>
-              <td className="py-1 pr-3 text-right tabular-nums">{row.views.toLocaleString()}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">{row.submissions.toLocaleString()}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.views)}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.submissions)}</td>
               <td className="py-1 text-right tabular-nums">
-                {row.views === 0 ? '—' : `${((row.submissions / row.views) * 100).toFixed(1)}%`}
+                {row.views === 0 ? '—' : fmt.percent(row.submissions / row.views, 1)}
               </td>
             </tr>
           ))}
@@ -183,5 +186,7 @@ const Breakdown = ({
       </table>
     </div>
   )
+  )
+}
 
 export default PerformancePage

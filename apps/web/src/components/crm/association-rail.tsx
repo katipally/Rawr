@@ -14,6 +14,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type Associated = {
   id: string
@@ -69,6 +70,7 @@ export const AssociationRail = ({
   createInitial,
   canWrite,
 }: AssociationRailProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const origin = useOrigin()
   const toast = useToast()
@@ -138,7 +140,7 @@ export const AssociationRail = ({
             key={card.objectKey}
             flush
             collapsible
-            title={`${card.namePlural} (${card.total.toLocaleString()})`}
+            title={`${card.namePlural} (${fmt.number(card.total)})`}
             {...(panelsReady
               ? {
                   open: panelOpen[panelKey] ?? true,

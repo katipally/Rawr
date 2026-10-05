@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { dashboardPath, reportsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CardPicker, type CardChoice } from '../card-picker.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type CardData =
   | { kind: 'metric'; value: string; hint: string }
@@ -41,6 +42,7 @@ export const DashboardView = ({
   all,
   canEdit,
 }: DashboardViewProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [editing, setEditing] = useState(false)
@@ -202,7 +204,7 @@ export const DashboardView = ({
                                   : 'py-1 pr-2 text-right tabular-nums'
                               }
                             >
-                              {typeof cell === 'number' ? cell.toLocaleString() : cell}
+                              {typeof cell === 'number' ? fmt.number(cell) : cell}
                             </td>
                           ))}
                         </tr>

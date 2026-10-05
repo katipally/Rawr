@@ -3,9 +3,8 @@
 import { Badge, EmptyState, FilterRow } from '@rawr/ui'
 import Link from 'next/link'
 import { usePagedRows } from '~/components/paged.tsx'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type RunLogEntry = {
   id: string
@@ -44,7 +43,7 @@ export const RunLog = ({
   capped: boolean
   accountSlug: string
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const { page, pager } = usePagedRows(runs, 'runs')
 
   return (
@@ -86,8 +85,8 @@ export const RunLog = ({
                     has two more days to sit. */}
                 <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
                   {run.resumeAt
-                    ? `continues ${formatDateTime(run.resumeAt, zone)}`
-                    : formatDateTime(run.at, zone)}
+                    ? `continues ${fmt.dateTime(run.resumeAt)}`
+                    : fmt.dateTime(run.at)}
                 </span>
               </div>
 

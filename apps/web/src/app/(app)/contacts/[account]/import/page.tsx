@@ -11,11 +11,11 @@ import { Badge, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
 import { availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import type { ImportKindOption } from './import-kind-field.tsx'
 import { ImportUploader } from './import-uploader.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** What each of the five shape files is for, in the picker's own words. The
  *  columns beside them are read off the shapes themselves. */
@@ -42,12 +42,10 @@ const SHAPE_LABEL: Record<Exclude<ImportKind, 'records'>, { label: string; what:
   },
 }
 
-const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
-
 const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
 
   const { account } = await params
   const ctx = contextFrom(session)
@@ -159,14 +157,14 @@ const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) 
                           column read "0 / 0" for the length of an upload. What it
                           has at that point is bytes, so that is what it says. */}
                       {run.state === 'uploading'
-                        ? `${megabytes(run.uploadedBytes)} / ${megabytes(run.fileBytes)}`
-                        : `${formatNumber(run.processedRows)} / ${formatNumber(run.totalRows)}`}
+                        ? `${fmt.bytes(run.uploadedBytes)} / ${fmt.bytes(run.fileBytes)}`
+                        : `${fmt.number(run.processedRows)} / ${fmt.number(run.totalRows)}`}
                     </td>
-                    <td className="px-6 tabular-nums">{formatNumber(run.created)}</td>
-                    <td className="px-6 tabular-nums">{formatNumber(run.updated)}</td>
-                    <td className="px-6 tabular-nums">{formatNumber(run.skipped)}</td>
-                    <td className="px-6 tabular-nums">{formatNumber(run.errored)}</td>
-                    <td className="px-6 whitespace-nowrap text-secondary">{formatDateTime(run.createdAt, zone)}</td>
+                    <td className="px-6 tabular-nums">{fmt.number(run.created)}</td>
+                    <td className="px-6 tabular-nums">{fmt.number(run.updated)}</td>
+                    <td className="px-6 tabular-nums">{fmt.number(run.skipped)}</td>
+                    <td className="px-6 tabular-nums">{fmt.number(run.errored)}</td>
+                    <td className="px-6 whitespace-nowrap text-secondary">{fmt.dateTime(run.createdAt)}</td>
                   </tr>
                 ))}
               </tbody>

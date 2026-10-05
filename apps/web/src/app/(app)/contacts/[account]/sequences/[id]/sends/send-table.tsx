@@ -3,8 +3,7 @@
 import { Badge, Breadcrumb, Card, EmptyState, Pagination } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { recordPath, sequencePath, sequenceSendsPath, sequencesPath, threadPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 
@@ -56,7 +55,7 @@ export const SendTable = ({
   perPage: number
   hasMore: boolean
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
 
@@ -151,7 +150,7 @@ export const SendTable = ({
                 </span>
 
                 <span className="w-44 shrink-0 text-small text-secondary">
-                  {formatDateTime(row.sentAt, zone)}
+                  {fmt.dateTime(row.sentAt)}
                 </span>
 
                 {/* Null until the mailbox sync reads the sent copy back, so the
@@ -169,6 +168,7 @@ export const SendTable = ({
 
       {offset > 0 || hasMore ? (
         <Pagination
+          format={fmt.number}
           count={rows.length}
           offset={offset}
           hasMore={hasMore}

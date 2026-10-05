@@ -36,6 +36,7 @@ export type Account = {
   seatsUsed: number
   activityRetentionMonths: number
   timezone: string
+  currency: string
 }
 
 export const readAccount = async (ctx: AccountContext): Promise<Account> =>
@@ -51,6 +52,7 @@ export const readAccount = async (ctx: AccountContext): Promise<Account> =>
       seats_used: number
       activity_retention_months: number
       timezone: string
+      currency: string
     }>(sql`
       select a.*,
              (select count(*) from membership m
@@ -70,6 +72,7 @@ export const readAccount = async (ctx: AccountContext): Promise<Account> =>
       seatsUsed: Number(row.seats_used),
       activityRetentionMonths: Number(row.activity_retention_months),
       timezone: row.timezone,
+      currency: row.currency,
     }
   })
 
@@ -80,6 +83,10 @@ const assertHubs = (hubs: readonly string[]): Hub[] => {
   return hubs as Hub[]
 }
 
+const CURRENCIES = new Set(Intl.supportedValuesOf('currency'))
+
+export const isKnownCurrency = (code: string): boolean => CURRENCIES.has(code)
+
 export const saveAccount = async (
   ctx: AccountContext,
   input: {
@@ -89,6 +96,7 @@ export const saveAccount = async (
     seatLimit?: number | null | undefined
     activityRetentionMonths?: number | undefined
     timezone?: string | undefined
+    currency?: string | undefined
   },
 ): Promise<void> =>
   mutate(ctx, 'account', async (tx) => {
@@ -107,6 +115,9 @@ export const saveAccount = async (
     if (input.timezone !== undefined && !isKnownTimezone(input.timezone)) {
       throw new Error(`"${input.timezone}" is not a timezone this system recognises.`)
     }
+    if (input.currency !== undefined && !isKnownCurrency(input.currency)) {
+      throw new Error(`"${input.currency}" is not a currency this system recognises.`)
+    }
     const hubs = input.defaultViewHubs === undefined ? undefined : assertHubs(input.defaultViewHubs)
     await tx
       .update(account)
@@ -117,6 +128,7 @@ export const saveAccount = async (
         ...(input.seatLimit === undefined ? {} : { seatLimit: input.seatLimit }),
         ...(months === undefined ? {} : { activityRetentionMonths: months }),
         ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+        ...(input.currency === undefined ? {} : { currency: input.currency }),
       })
       .where(eq(account.id, ctx.accountId))
     return {

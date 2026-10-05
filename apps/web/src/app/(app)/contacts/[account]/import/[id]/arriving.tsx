@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { pollWhileVisible } from '~/lib/poll.ts'
 import { api } from '~/lib/rpc.ts'
 import { useUploads } from '~/lib/store/uploads.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 /** The run before there is anything to map: its file is still going up, or it is
  *  up and the server is reading it.
@@ -19,8 +20,6 @@ const POLL_MS = 1_500
 
 const percent = (sent: number, total: number): number =>
   total > 0 ? Math.min(100, Math.floor((sent / total) * 100)) : 0
-
-const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 export const ImportArriving = ({
   runId,
@@ -37,6 +36,7 @@ export const ImportArriving = ({
   fileBytes: number
   backHref: string
 }) => {
+  const fmt = useFormat()
   const router = useRouter()
   const upload = useUploads((store) => store.uploads.find((row) => row.runId === runId))
   const stop = useUploads((store) => store.stop)
@@ -107,7 +107,7 @@ export const ImportArriving = ({
       <p className="text-secondary tabular-nums" aria-live="polite">
         {reading
           ? 'The whole file is here. The server is reading it into rows, which takes seconds. The mapper opens by itself.'
-          : `${done}% sent (${megabytes(sent)} of ${megabytes(fileBytes)}). This carries on if you move to another page, and what has arrived is kept if you close the tab.`}
+          : `${done}% sent (${fmt.bytes(sent)} of ${fmt.bytes(fileBytes)}). This carries on if you move to another page, and what has arrived is kept if you close the tab.`}
       </p>
 
       {upload?.state === 'failed' && upload.error ? <Alert>{upload.error}</Alert> : null}

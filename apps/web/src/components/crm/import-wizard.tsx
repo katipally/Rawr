@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatNumber } from './value.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** How often a running import is asked where it got to. Short enough that the bar
  *  moves, long enough that a 90,000-row run is not thousands of requests. */
@@ -67,6 +67,7 @@ export const ImportWizard = ({
   errors,
   unmatchedOwners,
 }: ImportWizardProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [mapping, setMapping] = useState<Mapping>(initialMapping)
@@ -182,7 +183,7 @@ export const ImportWizard = ({
       <div className="flex flex-col gap-3">
         <h2 className="font-medium">{filename}</h2>
         <p className="tabular-nums">
-          {formatNumber(live.processed)} of {formatNumber(totalRows)} rows ({pct}%)
+          {fmt.number(live.processed)} of {fmt.number(totalRows)} rows ({pct}%)
         </p>
         <div
           role="progressbar"
@@ -203,7 +204,7 @@ export const ImportWizard = ({
           ].map(([label, value]) => (
             <div key={String(label)}>
               <dt className="text-small text-secondary">{label}</dt>
-              <dd className="text-lg">{formatNumber(Number(value))}</dd>
+              <dd className="text-lg">{fmt.number(Number(value))}</dd>
             </div>
           ))}
         </dl>
@@ -213,8 +214,8 @@ export const ImportWizard = ({
             first thing worth knowing. */}
         {finished && accounted !== totalRows ? (
           <Alert tone="warning">
-            {formatNumber(totalRows)} rows went in and {formatNumber(accounted)} are accounted
-            for. The {formatNumber(Math.abs(totalRows - accounted))} in between are rows where
+            {fmt.number(totalRows)} rows went in and {fmt.number(accounted)} are accounted
+            for. The {fmt.number(Math.abs(totalRows - accounted))} in between are rows where
             every mapped column was empty.
           </Alert>
         ) : null}
@@ -245,7 +246,7 @@ export const ImportWizard = ({
         {failed ? (
           <p className="text-secondary">
             This import could not go on{failure ? `: ${failure.reason}` : '.'} The first{' '}
-            {formatNumber(live.processed)} rows were imported, and resuming carries on from there.
+            {fmt.number(live.processed)} rows were imported, and resuming carries on from there.
           </p>
         ) : null}
 
@@ -290,7 +291,7 @@ export const ImportWizard = ({
 
         {live.counts.errored > 0 ? (
           <section className="flex flex-col gap-2">
-            <h3 className="font-medium">Rows that need a person ({formatNumber(live.counts.errored)})</h3>
+            <h3 className="font-medium">Rows that need a person ({fmt.number(live.counts.errored)})</h3>
             <p className="text-secondary">
               Everything else was imported. Fix these rows and upload just them again.
             </p>
@@ -325,7 +326,7 @@ export const ImportWizard = ({
       <div>
         <h2 className="font-medium">{filename}</h2>
         <p className="text-secondary tabular-nums">
-          {formatNumber(totalRows)} rows, {headers.length} columns
+          {fmt.number(totalRows)} rows, {headers.length} columns
         </p>
       </div>
 
@@ -452,7 +453,7 @@ export const ImportWizard = ({
         </Button>
         {preview ? (
           <Button variant="primary" busy={busy} onClick={() => void start()}>
-            Import {formatNumber(totalRows)} rows
+            Import {fmt.number(totalRows)} rows
           </Button>
         ) : null}
       </div>
@@ -469,7 +470,7 @@ export const ImportWizard = ({
             ].map(([label, value]) => (
               <div key={String(label)}>
                 <dt className="text-small text-secondary">{label}</dt>
-                <dd className="text-lg">{formatNumber(Number(value))}</dd>
+                <dd className="text-lg">{fmt.number(Number(value))}</dd>
               </div>
             ))}
           </dl>
@@ -479,7 +480,7 @@ export const ImportWizard = ({
           {preview.newProperties.length > 0 ? (
             <div>
               <p className="font-medium">
-                Creates {formatNumber(preview.newProperties.length)} propert
+                Creates {fmt.number(preview.newProperties.length)} propert
                 {preview.newProperties.length === 1 ? 'y' : 'ies'}
               </p>
               <p className="text-secondary">
@@ -522,8 +523,8 @@ export const ImportWizard = ({
               not. */}
           <p className="text-secondary">
             {preview.checked >= preview.total
-              ? `Every one of the ${formatNumber(preview.total)} rows was checked against the CRM.`
-              : `The first ${formatNumber(preview.checked)} of ${formatNumber(preview.total)} rows were checked against the CRM. The other ${formatNumber(preview.total - preview.checked)} are counted as new; any that already exist will be updated instead when the run reaches them.`}
+              ? `Every one of the ${fmt.number(preview.total)} rows was checked against the CRM.`
+              : `The first ${fmt.number(preview.checked)} of ${fmt.number(preview.total)} rows were checked against the CRM. The other ${fmt.number(preview.total - preview.checked)} are counted as new; any that already exist will be updated instead when the run reaches them.`}
           </p>
 
           {/* The counts say how many; these say which. A dry run whose only
@@ -561,7 +562,9 @@ export const ImportWizard = ({
 /** The first twenty-five of a run's notes. The run keeps a hundred for this, and
  *  every refused row for the CSV, so a count past what is listed says where the
  *  rest are. */
-const NoteList = ({ notes, total }: { notes: { row: number; reason: string }[]; total?: number }) => (
+const NoteList = ({ notes, total }: { notes: { row: number; reason: string }[]; total?: number }) => {
+  const fmt = useFormat()
+  return (
   <>
     <ul className="flex flex-col rounded-panel border border-line bg-surface">
       {notes.slice(0, 25).map((note) => (
@@ -573,16 +576,17 @@ const NoteList = ({ notes, total }: { notes: { row: number; reason: string }[]; 
     </ul>
     {total !== undefined && total > Math.min(notes.length, 25) ? (
       <p className="text-secondary">
-        Showing {Math.min(notes.length, 25)}. The CSV has all {formatNumber(total)}.
+        Showing {Math.min(notes.length, 25)}. The CSV has all {fmt.number(total)}.
       </p>
     ) : notes.length > 25 ? (
       // No total to point at: a note about a row that still imported is not in
       // the error CSV, and the run keeps only the first hundred. Saying which
       // slice this is beats a list that looks complete and is not.
-      <p className="text-secondary">Showing 25 of {formatNumber(notes.length)}.</p>
+      <p className="text-secondary">Showing 25 of {fmt.number(notes.length)}.</p>
     ) : null}
   </>
 )
+}
 
 /** A handful of rows exactly as they will be written. Columns come from the rows
  *  themselves rather than the mapping, because a value the mapping drops is

@@ -2,15 +2,15 @@ import { attributionReport, campaignPerformance, type CampaignPerformance } from
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { BarChart } from '~/components/reports/chart.tsx'
-import { formatAmounts, formatCurrency } from '~/components/crm/value.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** Both touches, side by side and never blended. First touch credits what found
  *  somebody, last touch credits what closed them, and one number that mixes the
  *  two hides which of the two a channel is actually good at. */
-const Touch = ({
+const Touch = async ({
   title,
   explanation,
   rows,
@@ -18,9 +18,12 @@ const Touch = ({
   title: string
   explanation: string
   rows: { channel: string; contacts: number; deals: number; wonAmounts: { currency: string; amount: number }[] }[]
-}) => (
+}) => {
+  const fmt = await getFormat()
+  return (
       <Card>
     <BarChart
+      format={fmt.number}
       title={title}
       labels={rows.map((row) => row.channel)}
       series={[
@@ -42,7 +45,7 @@ const Touch = ({
             {rows.map((row) => (
               <tr key={row.channel} className="border-b border-divider last:border-0">
                 <th scope="row" className="py-1 pr-3 text-left font-normal">{row.channel}</th>
-                <td className="py-1 text-right tabular-nums">{formatAmounts(row.wonAmounts)}</td>
+                <td className="py-1 text-right tabular-nums">{fmt.amounts(row.wonAmounts)}</td>
               </tr>
             ))}
           </tbody>
@@ -51,6 +54,7 @@ const Touch = ({
     ) : null}
   </Card>
 )
+}
 
 /** Item 14. What each campaign bought, and what it cost.
  *
@@ -59,7 +63,9 @@ const Touch = ({
  *  the campaign that found somebody rather than the one they last clicked. A
  *  cost-per is blank rather than zero when the campaign has no spend against it
  *  or reached nobody: dividing by nobody is not a cost of nothing. */
-const Campaigns = ({ rows }: { rows: CampaignPerformance[] }) => (
+const Campaigns = async ({ rows }: { rows: CampaignPerformance[] }) => {
+  const fmt = await getFormat()
+  return (
   <Card title="Campaigns">
     {rows.length === 0 ? (
       <p className="max-w-prose text-secondary">
@@ -89,17 +95,17 @@ const Campaigns = ({ rows }: { rows: CampaignPerformance[] }) => (
                   <span className="break-words font-medium">{row.name}</span>
                   <span className="ml-2 break-all text-secondary">{row.utmCampaign}</span>
                 </th>
-                <td className="py-1 pr-3 text-right tabular-nums">{formatCurrency(row.spend, row.currency)}</td>
-                <td className="py-1 pr-3 text-right tabular-nums">{row.visits.toLocaleString()}</td>
-                <td className="py-1 pr-3 text-right tabular-nums">{row.submissions.toLocaleString()}</td>
-                <td className="py-1 pr-3 text-right tabular-nums">{row.contacts.toLocaleString()}</td>
-                <td className="py-1 pr-3 text-right tabular-nums">{row.deals.toLocaleString()}</td>
-                <td className="py-1 pr-3 text-right tabular-nums">{formatCurrency(row.wonAmount, row.currency)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.money(row.spend, row.currency)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.visits)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.submissions)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.contacts)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(row.deals)}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{fmt.money(row.wonAmount, row.currency)}</td>
                 <td className="py-1 pr-3 text-right tabular-nums">
-                  {row.costPerContact === null ? 'Not yet' : formatCurrency(row.costPerContact, row.currency)}
+                  {row.costPerContact === null ? 'Not yet' : fmt.money(row.costPerContact, row.currency)}
                 </td>
                 <td className="py-1 text-right tabular-nums">
-                  {row.costPerDeal === null ? 'Not yet' : formatCurrency(row.costPerDeal, row.currency)}
+                  {row.costPerDeal === null ? 'Not yet' : fmt.money(row.costPerDeal, row.currency)}
                 </td>
               </tr>
             ))}
@@ -109,6 +115,7 @@ const Campaigns = ({ rows }: { rows: CampaignPerformance[] }) => (
     )}
   </Card>
 )
+}
 
 const AttributionReport = async ({
   params,

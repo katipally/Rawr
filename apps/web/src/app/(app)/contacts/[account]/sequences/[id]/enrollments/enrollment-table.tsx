@@ -9,8 +9,8 @@ import { useState } from 'react'
 import { enrollmentsPath, recordPath, sequencePath, sequencesPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE, formatDate, formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { ENROLLMENT_LABEL as LABEL, ENROLLMENT_TONE as TONE } from '~/components/crm/value.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Row = {
   id: string
@@ -44,7 +44,7 @@ export const EnrollmentTable = ({
   rows: Row[]
   canWrite: boolean
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
@@ -124,9 +124,9 @@ export const EnrollmentTable = ({
 
                 <span className="w-40 shrink-0 text-small text-secondary">
                   {row.state === 'active' && row.nextRunAt
-                    ? `Next ${formatDateTime(row.nextRunAt, zone)}`
+                    ? `Next ${fmt.dateTime(row.nextRunAt)}`
                     : row.lastSentAt
-                      ? `Last ${formatDate(row.lastSentAt, zone)}`
+                      ? `Last ${fmt.date(row.lastSentAt)}`
                       : 'Nothing sent yet'}
                 </span>
 

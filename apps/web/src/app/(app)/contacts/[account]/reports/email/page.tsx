@@ -6,6 +6,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 import { MessageTable } from './message-table.tsx'
+import { getFormat } from '~/server/format.ts'
 
 const hours = (value: number | null): string => {
   if (value === null) return '—'
@@ -21,6 +22,7 @@ const EmailReport = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
@@ -36,6 +38,7 @@ const EmailReport = async ({
       <div className="flex flex-col gap-4">
         <Card>
           <BarChart
+            format={fmt.number}
             title="Mail through connected inboxes"
             labels={report.mailboxes.map((row) => row.mailbox)}
             series={[

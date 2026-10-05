@@ -3,9 +3,10 @@ import { Breadcrumb, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { Value, formatDateTime } from '~/components/crm/value.tsx'
+import { Value } from '~/components/crm/value.tsx'
 import { objectView, pageViewPath, recordPath, reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** One thing a person did on the site, addressed by its own id. F4 §4's third
  *  surface.
@@ -39,9 +40,9 @@ const PageViewScreen = async ({
 }: {
   params: Promise<{ account: string; id: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
 
   const { account, id } = await params
   const ctx = contextFrom(session)
@@ -67,7 +68,7 @@ const PageViewScreen = async ({
             ) : (
               <span>Not attributed to anyone. This visitor has not identified themselves.</span>
             )}{' '}
-            · {formatDateTime(event.at.toISOString(), zone)}
+            · {fmt.dateTime(event.at.toISOString())}
             {event.siteName ? ` · ${event.siteName}` : ''}
           </p>
         </header>
@@ -85,14 +86,14 @@ const PageViewScreen = async ({
                   {/* A property is whatever the site sent, so a nested object is
                       as likely as a string. Same renderer as a json field on a
                       record, rather than a second answer to the same question. */}
-                  <Value zone={zone} type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
+                  <Value format={fmt} type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
                 </Row>
               ))}
             </dl>
           )}
         </section>
 
-        <Visit account={account} session={event.session} currentId={event.id} zone={zone} />
+        <Visit account={account} session={event.session} currentId={event.id} />
       </div>
     )
   }
@@ -125,7 +126,7 @@ const PageViewScreen = async ({
             // empty slot that reads like a bug.
             <span>Not attributed to anyone. This visitor has not identified themselves.</span>
           )}{' '}
-          · {formatDateTime(view.at.toISOString(), zone)}
+          · {fmt.dateTime(view.at.toISOString())}
         </p>
       </header>
 
@@ -160,36 +161,36 @@ const PageViewScreen = async ({
         </section>
       ) : null}
 
-      <Visit account={account} session={view.session} currentId={view.id} zone={zone} />
+      <Visit account={account} session={view.session} currentId={view.id} />
     </div>
   )
 }
 
 /** The visit a page view or an event belonged to, and what else happened in it.
  *  The reason this screen exists rather than a tooltip on the timeline. */
-const Visit = ({
+const Visit = async ({
   account,
   session,
   currentId,
-  zone,
 }: {
   account: string
   session: PageViewDetail['session']
   currentId: string
-  zone: string
-}) => (
+}) => {
+  const fmt = await getFormat()
+  return (
   <section className="rounded-panel border border-line bg-surface shadow-panel">
     <h2 className="px-6 pt-6 pb-4 text-base font-semibold">
       {session
-        ? `This visit · ${session.pageCount.toLocaleString()} page${session.pageCount === 1 ? '' : 's'}`
+        ? `This visit · ${fmt.number(session.pageCount)} page${session.pageCount === 1 ? '' : 's'}`
         : 'This visit'}
     </h2>
 
     {session ? (
       <>
         <p className="px-3 py-2 text-secondary">
-          {formatDateTime(session.startedAt.toISOString(), zone)} to{' '}
-          {formatDateTime(session.endedAt.toISOString(), zone)}
+          {fmt.dateTime(session.startedAt.toISOString())} to{' '}
+          {fmt.dateTime(session.endedAt.toISOString())}
           {session.referrer ? ` · arrived from ${session.referrer}` : ''}
         </p>
         <ol className="flex flex-col">
@@ -211,7 +212,7 @@ const Visit = ({
                 dateTime={row.at.toISOString()}
                 className="ml-auto shrink-0 text-small text-secondary"
               >
-                {formatDateTime(row.at.toISOString(), zone)}
+                {fmt.dateTime(row.at.toISOString())}
               </time>
             </li>
           ))}
@@ -224,5 +225,6 @@ const Visit = ({
     )}
   </section>
 )
+}
 
 export default PageViewScreen

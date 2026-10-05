@@ -206,7 +206,9 @@ export const deal = pgTable(
       .notNull()
       .references(() => pipelineStage.id, { onDelete: 'restrict' }),
     amount: numeric('amount', { precision: 18, scale: 2 }),
-    currency: text('currency').notNull().default('USD'),
+    /** Filled from the account's currency on insert by a trigger when the writer
+     *  names none, so a deal made without one follows the account. */
+    currency: text('currency').notNull(),
     closeDate: date('close_date'),
     nextStep: text('next_step'),
     nextStepDate: date('next_step_date'),

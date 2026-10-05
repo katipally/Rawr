@@ -20,9 +20,6 @@ const STROKE: Record<Tone, string> = {
   muted: 'var(--color-secondary)',
 }
 
-const nice = (value: number): string =>
-  Math.abs(value) >= 1000 ? value.toLocaleString(undefined, { maximumFractionDigits: 0 }) : String(value)
-
 /** The largest value across every series, rounded up so the tallest bar does not
  *  touch the top edge. Zero everywhere gives 1, so an empty chart draws a flat
  *  baseline rather than dividing by nothing. */
@@ -35,8 +32,9 @@ export type ChartProps = {
    *  overlapping them. */
   labels: string[]
   series: Series[]
-  /** How each value reads in the table below: a count, or money. */
-  format?: (value: number) => string
+  /** How each value reads in the table below: a count, or money. Always the
+   *  caller's, because only the caller knows the reader's locale. */
+  format: (value: number) => string
   className?: string
 }
 
@@ -108,7 +106,7 @@ const Table = ({
  *  it: a stretched SVG scales its text with it, which turns a three-column chart
  *  into distorted letterforms. How many of them are drawn is measured in the
  *  browser; see AxisLabels. */
-export const BarChart = ({ title, labels, series, format = nice, className }: ChartProps) => {
+export const BarChart = ({ title, labels, series, format, className }: ChartProps) => {
   const top = ceiling(series)
   const columns = labels.length
   const height = 180
@@ -190,12 +188,12 @@ export type FunnelStep = { id: string; label: string; value: number; detail?: st
 export const Funnel = ({
   title,
   steps,
-  format = nice,
+  format,
   className,
 }: {
   title: string
   steps: FunnelStep[]
-  format?: (value: number) => string
+  format: (value: number) => string
   className?: string
 }) => {
   const top = Math.max(1, ...steps.map((step) => step.value))
@@ -244,12 +242,12 @@ export type Slice = { id: string; label: string; value: number; tone: Tone }
 export const Donut = ({
   title,
   slices,
-  format = nice,
+  format,
   className,
 }: {
   title: string
   slices: Slice[]
-  format?: (value: number) => string
+  format: (value: number) => string
   className?: string
 }) => {
   const total = slices.reduce((sum, slice) => sum + slice.value, 0)

@@ -2,8 +2,8 @@ import { listCollectorNotices, listSites } from '@rawr/db'
 import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { SiteList } from './site-list.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** F4. The hosts that may send events, and what the collector refused.
  *
@@ -11,9 +11,9 @@ import { SiteList } from './site-list.tsx'
  *  and if not, why. A PII rejection is a bug in the product that fired it, and it
  *  is invisible unless somebody puts it on a screen. */
 const SitesPage = async () => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) return null
-  const zone = session.timezone
 
   if (!sessionIsAdmin(session)) {
     return (
@@ -78,8 +78,8 @@ const SitesPage = async () => {
                   {row.kind === 'pii'
                     ? `The offending properties were dropped and the rest of the event was kept. Fix it where it is fired, on ${row.siteName}.`
                     : 'Extra names were bucketed into "_overflow" so the table survives.'}{' '}
-                  {row.n.toLocaleString()} time{row.n === 1 ? '' : 's'} on {row.day}, last{' '}
-                  {formatDateTime(row.lastAt.toISOString(), zone)}.
+                  {fmt.number(row.n)} time{row.n === 1 ? '' : 's'} on {row.day}, last{' '}
+                  {fmt.dateTime(row.lastAt.toISOString())}.
                 </p>
                 <pre className="mt-1 overflow-x-auto text-small text-secondary">
                   {JSON.stringify(row.detail)}

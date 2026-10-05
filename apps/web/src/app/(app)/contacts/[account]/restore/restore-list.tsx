@@ -3,8 +3,7 @@
 import { Button, EmptyState, Field, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Deleted = { id: string; name: string; deletedAt: string; deletedBy: string | null }
@@ -28,7 +27,7 @@ type Failure = { id: string; displayName: string; reason: string }
  *  back everything on screen: a bulk delete of fifty is undone in one click, and a
  *  search narrows what "everything" means. */
 export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial }: RestoreListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const [rows, setRows] = useState(initial.rows)
@@ -60,7 +59,7 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
       const back = new Set(ids.filter((id) => !result.failed.some((row) => row.id === id)))
       setRows((current) => current.filter((row) => !back.has(row.id)))
       setTotal((current) => current - back.size)
-      if (result.restored > 0) toast('success', `${result.restored.toLocaleString()} put back.`)
+      if (result.restored > 0) toast('success', `${fmt.number(result.restored)} put back.`)
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -122,8 +121,8 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
         <>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-secondary tabular-nums">
-              {total.toLocaleString()} deleted {(total === 1 ? objectLabel : objectPlural).toLowerCase()}
-              {capped ? `, showing the newest ${rows.length.toLocaleString()}` : ''}
+              {fmt.number(total)} deleted {(total === 1 ? objectLabel : objectPlural).toLowerCase()}
+              {capped ? `, showing the newest ${fmt.number(rows.length)}` : ''}
             </p>
             <Button
               variant="secondary"
@@ -131,7 +130,7 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
               disabled={busy !== null && busy !== 'all'}
               onClick={() => void restore(rows.map((row) => row.id), 'all')}
             >
-              Restore {rows.length === 1 ? 'it' : `these ${rows.length.toLocaleString()}`}
+              Restore {rows.length === 1 ? 'it' : `these ${fmt.number(rows.length)}`}
             </Button>
           </div>
           <ul className="flex flex-col gap-2">
@@ -144,7 +143,7 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
                   {row.name}
                 </span>
                 <span className="text-small text-secondary">
-                  deleted {formatDateTime(row.deletedAt, zone)}
+                  deleted {fmt.dateTime(row.deletedAt)}
                   {row.deletedBy ? ` by ${row.deletedBy}` : ''}
                 </span>
                 <Button

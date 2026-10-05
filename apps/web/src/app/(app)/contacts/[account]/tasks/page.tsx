@@ -6,11 +6,11 @@ import { redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-labels.ts'
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
-import { formatDate } from '~/components/crm/value.tsx'
 import { objectView, recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { QueueSidebar } from './queue-sidebar.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** HubSpot's task views, each one an address so it can be linked into. */
 const VIEWS: { key: TaskView; label: string; empty: string }[] = [
@@ -39,9 +39,9 @@ const TasksPage = async ({
     new?: string
   }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
 
   const { account } = await params
   const search = await searchParams
@@ -165,7 +165,7 @@ const TasksPage = async ({
 
       {capped ? (
         <Alert>
-          Showing the first {TASK_LIST_CAP.toLocaleString()} tasks of this view. Narrow it by
+          Showing the first {fmt.number(TASK_LIST_CAP)} tasks of this view. Narrow it by
           queue, type or assignee to see the rest.
         </Alert>
       ) : null}
@@ -202,7 +202,7 @@ const TasksPage = async ({
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
                     <time dateTime={deal.nextStepDate} className="shrink-0 font-medium text-error">
-                      {formatDate(deal.nextStepDate, zone)}
+                      {fmt.date(deal.nextStepDate)}
                     </time>
                   </p>
                   {deal.nextStep ? <p className="break-words">{deal.nextStep}</p> : null}

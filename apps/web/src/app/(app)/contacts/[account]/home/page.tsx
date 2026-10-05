@@ -18,7 +18,8 @@ import { ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { activityActor, activityLabel, formatCurrency, formatDate, formatDateTime, todayIn } from '~/components/crm/value.tsx'
+import { activityActor, activityLabel } from '~/components/crm/value.tsx'
+import { todayIn } from '~/lib/format.ts'
 import {
   accountHome,
   bookedPath,
@@ -36,6 +37,7 @@ import {
   tasksPath,
 } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** The Monday screen. D10 replaced the spreadsheet ritual with a shared view; this
  *  is that view, opened first. Every number on it is a link to the list that
@@ -162,9 +164,9 @@ const HomePage = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ error?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
   const [{ account }, { error }] = await Promise.all([params, searchParams])
   const ctx = contextFrom(session)
   const isAdmin = sessionIsAdmin(session)
@@ -216,8 +218,8 @@ const HomePage = async ({
   }
   const money = (pick: (m: { total: number; weighted: number }) => number) =>
     byCurrency.size === 0
-      ? formatCurrency(0)
-      : [...byCurrency.entries()].map(([currency, m]) => formatCurrency(pick(m), currency)).join(' · ')
+      ? fmt.money(0)
+      : [...byCurrency.entries()].map(([currency, m]) => fmt.money(pick(m), currency)).join(' · ')
   const allPipelines = [...new Map(board.stages.map((s) => [s.pipelineId, s.pipelineName])).entries()]
   // A pipeline nobody has put a deal in is a column of zeroes the length of its
   // stage list, and it pushed the work below it off the screen. Kept when it is
@@ -233,19 +235,19 @@ const HomePage = async ({
   const tiles: Tile[] = [
     ...(sales
       ? [
-          { label: 'Open deals', value: `${openCount.toLocaleString()} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
+          { label: 'Open deals', value: `${fmt.number(openCount)} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
           { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(account, 'deal', 'all', 'board') },
-          { label: 'Next step overdue', value: overdue.length.toLocaleString(), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
+          { label: 'Next step overdue', value: fmt.number(overdue.length), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
         ]
       : []),
     ...(people
       ? [
           { label: 'My open tasks', value: board.myOverdueTasks ? `${board.myOpenTasks} · ${board.myOverdueTasks} overdue` : String(board.myOpenTasks), href: tasksPath(account, { mine: '1' }), ...(board.myOverdueTasks ? { tone: 'warning' as const } : {}) },
-          { label: 'New contacts, 7 days', value: board.newContacts.toLocaleString(), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at', filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'on_or_after', value: newContactsSince }] }]) }) },
+          { label: 'New contacts, 7 days', value: fmt.number(board.newContacts), href: objectView(account, 'contact', 'all', 'list', { sort: '-created_at', filters: encodeFilters([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'on_or_after', value: newContactsSince }] }]) }) },
         ]
       : []),
     ...(marketing
-      ? [{ label: 'Submissions to review', value: board.quarantined.toLocaleString(), href: submissionsPath(account, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) }]
+      ? [{ label: 'Submissions to review', value: fmt.number(board.quarantined), href: submissionsPath(account, { state: 'quarantined' }), ...(board.quarantined ? { tone: 'warning' as const } : {}) }]
       : []),
   ]
 
@@ -256,7 +258,7 @@ const HomePage = async ({
         <div>
           <h1 className="text-xl font-medium">Home</h1>
           <p className="text-secondary">
-            {session.accountName}, {formatDate(new Date(), zone)}. Every number opens the list behind it.
+            {session.accountName}, {fmt.date(new Date())}. Every number opens the list behind it.
           </p>
         </div>
         {sales ? <LinkButton href={objectView(account, 'deal', 'all', 'board')}>Open the board</LinkButton> : null}
@@ -347,10 +349,10 @@ const HomePage = async ({
                           </td>
                           <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
                           <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
-                            {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.total, m.currency)).join(' · ') : formatCurrency(0)}
+                            {stage.totals.length ? stage.totals.map((m) => fmt.money(m.total, m.currency)).join(' · ') : fmt.money(0)}
                           </td>
                           <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
-                            {stage.totals.length ? stage.totals.map((m) => formatCurrency(m.weighted, m.currency)).join(' · ') : formatCurrency(0)}
+                            {stage.totals.length ? stage.totals.map((m) => fmt.money(m.weighted, m.currency)).join(' · ') : fmt.money(0)}
                           </td>
                         </tr>
                       ))}
@@ -375,7 +377,7 @@ const HomePage = async ({
                     <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
                       {deal.name ?? 'Unnamed deal'}
                     </Link>
-                    <span className="shrink-0 text-small text-error">{formatDate(deal.nextStepDate, zone)}</span>
+                    <span className="shrink-0 text-small text-error">{fmt.date(deal.nextStepDate)}</span>
                   </div>
                   <p className="truncate text-small text-secondary">
                     {deal.nextStep ?? 'No next step written'}
@@ -405,8 +407,8 @@ const HomePage = async ({
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="tabular-nums">{deal.amount === null ? '—' : formatCurrency(deal.amount, deal.currency)}</p>
-                    <p className="text-small text-secondary">{formatDate(deal.closeDate, zone)}</p>
+                    <p className="tabular-nums">{deal.amount === null ? '—' : fmt.money(deal.amount, deal.currency)}</p>
+                    <p className="text-small text-secondary">{fmt.date(deal.closeDate)}</p>
                   </div>
                 </li>
               ))}
@@ -434,7 +436,7 @@ const HomePage = async ({
                       {b.hostName ? ` · with ${b.hostName}` : ''}
                     </p>
                   </div>
-                  <span className="shrink-0 text-small text-secondary">{formatDateTime(b.startsAt, zone)}</span>
+                  <span className="shrink-0 text-small text-secondary">{fmt.dateTime(b.startsAt)}</span>
                 </li>
               ))}
             </ul>
@@ -458,7 +460,7 @@ const HomePage = async ({
                   </div>
                   {t.dueDate ? (
                     <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.accountTimezone) ? 'text-error' : 'text-secondary'}`}>
-                      {formatDate(t.dueDate, zone)}
+                      {fmt.date(t.dueDate)}
                     </span>
                   ) : null}
                 </li>
@@ -481,7 +483,7 @@ const HomePage = async ({
                       {entry.subject ?? ''}
                     </p>
                     <time dateTime={entry.occurredAt.toISOString()} className="shrink-0 text-small text-secondary">
-                      {formatDateTime(entry.occurredAt, zone)}
+                      {fmt.dateTime(entry.occurredAt)}
                     </time>
                   </div>
                   <p className="truncate text-small text-secondary">

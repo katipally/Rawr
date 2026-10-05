@@ -3,6 +3,7 @@ import { EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { reportsPath } from '~/lib/links.ts'
+import { getFormat } from '~/server/format.ts'
 import { cardCatalogue, renderCards } from '~/server/dashboard-cards.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { ReportsHeader } from '../../header.tsx'
@@ -47,7 +48,7 @@ const DashboardScreen = async ({
     )
   }
 
-  const cards = await renderCards(ctx, found.cards, range)
+  const cards = await renderCards(ctx, found.cards, range, await getFormat())
   // Every key that is no longer in the catalogue. Said out loud rather than
   // silently dropped, because a card that quietly stopped appearing looks like a
   // number that went to zero.

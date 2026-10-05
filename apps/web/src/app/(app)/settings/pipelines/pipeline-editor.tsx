@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { PipelineRow, StageRow } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type PipelineEditorProps = {
   pipelines: PipelineRow[]
@@ -14,6 +15,7 @@ export type PipelineEditorProps = {
 }
 
 export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -104,7 +106,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
               <span className="text-base font-semibold">{pipeline.name}</span>
               <span className="text-small text-secondary">
                 {pipeline.stages.length} stage{pipeline.stages.length === 1 ? '' : 's'} ·{' '}
-                {pipeline.dealCount.toLocaleString()} deal{pipeline.dealCount === 1 ? '' : 's'}
+                {fmt.number(pipeline.dealCount)} deal{pipeline.dealCount === 1 ? '' : 's'}
               </span>
             </h3>
             <span className="flex flex-wrap gap-2">
@@ -141,7 +143,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                     {stage.isClosedWon ? <span className="text-small text-success">Closed won</span> : null}
                     {stage.isClosedLost ? <span className="text-small text-error">Closed lost</span> : null}
                     <span className="text-small text-secondary tabular-nums">
-                      {stage.dealCount.toLocaleString()} deal{stage.dealCount === 1 ? '' : 's'}
+                      {fmt.number(stage.dealCount)} deal{stage.dealCount === 1 ? '' : 's'}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-0.5">
@@ -275,7 +277,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
             ) : (
               <>
                 <p>
-                  {removing.stage.dealCount.toLocaleString()} deal
+                  {fmt.number(removing.stage.dealCount)} deal
                   {removing.stage.dealCount === 1 ? '' : 's'} sit here. Every one of them moves to
                   the stage you pick, and each move is written to its timeline as a stage change,
                   so nobody opens a deal later and finds its history rewritten.
@@ -441,7 +443,9 @@ const StageForm = ({
   )
 }
 
-const ReadOnlyPipeline = ({ pipeline }: { pipeline: PipelineRow }) => (
+const ReadOnlyPipeline = ({ pipeline }: { pipeline: PipelineRow }) => {
+  const fmt = useFormat()
+  return (
   <section className="rounded-panel border border-line bg-surface shadow-panel">
     <header className="px-6 pt-6 pb-4 text-base font-semibold">{pipeline.name}</header>
     <ul className="flex flex-col">
@@ -453,10 +457,11 @@ const ReadOnlyPipeline = ({ pipeline }: { pipeline: PipelineRow }) => (
           <span>{stage.name}</span>
           <span className="text-small text-secondary tabular-nums">
             {stage.probability === null ? 'no probability' : `${stage.probability}%`} ·{' '}
-            {stage.dealCount.toLocaleString()} deal{stage.dealCount === 1 ? '' : 's'}
+            {fmt.number(stage.dealCount)} deal{stage.dealCount === 1 ? '' : 's'}
           </span>
         </li>
       ))}
     </ul>
   </section>
 )
+}

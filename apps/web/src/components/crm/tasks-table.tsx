@@ -15,8 +15,7 @@ import { useOrigin } from '~/lib/use-origin.ts'
 import { TaskForm } from './task-form.tsx'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-labels.ts'
 import type { TaskRow } from './tasks-panel.tsx'
-import { formatDate, isPast } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type TasksTableProps = {
   account: string
@@ -58,7 +57,7 @@ export const TasksTable = ({
   openCreate = false,
   filtered = false,
 }: TasksTableProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -161,7 +160,7 @@ export const TasksTable = ({
       width: 160,
       render: (row) =>
         row.dueDate ? (
-          <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>{formatDate(row.dueDate, zone)}</span>
+          <span className={cn(row.status === 'open' && fmt.isPast(row.dueDate) && 'font-medium text-error')}>{fmt.date(row.dueDate)}</span>
         ) : (
           <span className="text-secondary">--</span>
         ),
@@ -260,7 +259,7 @@ export const TasksTable = ({
       />
       <div className="-mx-3 flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-          {rows.length.toLocaleString()} {rows.length === 1 ? 'task' : 'tasks'}
+          {fmt.number(rows.length)} {rows.length === 1 ? 'task' : 'tasks'}
         </span>
         {pager}
       </div>

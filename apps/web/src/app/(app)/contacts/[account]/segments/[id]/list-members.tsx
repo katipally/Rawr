@@ -5,8 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -32,7 +31,7 @@ export type ListMembersProps = {
 }
 
 export const ListMembers = ({ account, list, initial, pageSize, canWrite }: ListMembersProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
@@ -90,7 +89,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
       key: 'entered',
       header: 'Added',
       width: 220,
-      render: (row) => formatDateTime(row.enteredAt, zone),
+      render: (row) => fmt.dateTime(row.enteredAt),
     },
     ...(canWrite && list.isStatic
       ? [
@@ -114,7 +113,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
     <div className="flex h-full min-h-0 flex-col gap-3">
       <PageHeader
         title={list.name}
-        lead={`${list.memberCount.toLocaleString()} member${list.memberCount === 1 ? '' : 's'}${
+        lead={`${fmt.number(list.memberCount)} member${list.memberCount === 1 ? '' : 's'}${
           list.description ? ` · ${list.description}` : ''
         }`}
         why={
@@ -182,7 +181,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
         <span className="text-small text-secondary">
           {members.length === 0
             ? 'Nothing on this page'
-            : `${(offset + 1).toLocaleString()} to ${(offset + members.length).toLocaleString()} of ${list.memberCount.toLocaleString()}`}
+            : `${fmt.number(offset + 1)} to ${fmt.number(offset + members.length)} of ${fmt.number(list.memberCount)}`}
         </span>
         <Button
           disabled={busy || offset + members.length >= list.memberCount}
@@ -194,7 +193,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
 
       <ConfirmDialog
         open={removing !== null}
-        title={`Take ${(removing?.length ?? 0).toLocaleString()} off ${list.name}?`}
+        title={`Take ${fmt.number(removing?.length ?? 0)} off ${list.name}?`}
         confirm="Remove from list"
         busy={busy}
         onCancel={() => setRemoving(null)}

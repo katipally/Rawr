@@ -1,4 +1,5 @@
 import { clampRange, type Range } from '@rawr/db'
+import { dayKey } from '~/lib/format.ts'
 import type { Session } from '~/server/session.ts'
 
 /** The range every report page reads out of its own URL. One place, so a link
@@ -41,17 +42,13 @@ const dayStart = (day: string, timeZone: string): Date => {
   return new Date(target - offsetAt(new Date(once), timeZone))
 }
 
-/** The calendar day an instant falls on, in `timeZone`. en-CA is YYYY-MM-DD. */
-const dayOf = (at: Date, timeZone: string): string =>
-  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at)
-
 export const rangeFrom = (
   params: RangeParams,
   timeZone: string,
 ): Range & { fromDay: string; toDay: string } => {
   // A date with no time means the whole of that day, so the end is exclusive at
   // midnight the following morning rather than excluding the day it names.
-  const lastDay = params.to ?? dayOf(new Date(), timeZone)
+  const lastDay = params.to ?? dayKey(new Date(), timeZone)
   const last = dayStart(lastDay, timeZone)
   const range = clampRange({
     // Thirty whole days ending on `lastDay`, so the default range is the one the
@@ -61,8 +58,8 @@ export const rangeFrom = (
   })
   return {
     ...range,
-    fromDay: dayOf(range.from, timeZone),
-    toDay: dayOf(new Date(range.to.getTime() - 1), timeZone),
+    fromDay: dayKey(range.from, timeZone),
+    toDay: dayKey(new Date(range.to.getTime() - 1), timeZone),
   }
 }
 

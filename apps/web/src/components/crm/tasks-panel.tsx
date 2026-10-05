@@ -10,8 +10,7 @@ import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { replaceParams } from '~/lib/url-params.ts'
 import { TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
-import { formatDate, isPast } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type TaskRow = {
   id: string
@@ -51,7 +50,7 @@ export const TasksPanel = ({
   canWrite,
   heading = 'Tasks',
 }: TasksPanelProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -146,8 +145,8 @@ export const TasksPanel = ({
                 ) : null}
                 <span className="block text-small text-secondary">
                   {row.dueDate ? (
-                    <span className={cn(row.status === 'open' && isPast(row.dueDate) && 'font-medium text-error')}>
-                      {formatDate(row.dueDate, zone)}
+                    <span className={cn(row.status === 'open' && fmt.isPast(row.dueDate) && 'font-medium text-error')}>
+                      {fmt.date(row.dueDate)}
                     </span>
                   ) : (
                     'No due date'

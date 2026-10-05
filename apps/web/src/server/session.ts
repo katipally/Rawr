@@ -46,6 +46,8 @@ export type Session = {
    *  in, the same for everybody in it. Not `timezone`, which is how one person
    *  reads instants. */
   accountTimezone: string
+  /** What an amount is written in when its own row does not name one. */
+  accountCurrency: string
 }
 
 export const sessionFromMembership = (m: Membership): Session => ({
@@ -65,6 +67,7 @@ export const sessionFromMembership = (m: Membership): Session => ({
   // The sign-in path writes the cookie before that row can be looked up.
   timezone: 'UTC',
   accountTimezone: m.accountTimezone,
+  accountCurrency: m.accountCurrency,
 })
 
 export const writeSessionCookie = async (session: Session): Promise<void> => {

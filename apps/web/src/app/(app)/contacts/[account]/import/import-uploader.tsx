@@ -3,11 +3,11 @@
 import { Alert, Button, Field, Select } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { formatNumber } from '~/components/crm/value.tsx'
 import { importsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUploads } from '~/lib/store/uploads.ts'
 import { ImportKindField, type ImportKindOption } from './import-kind-field.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** An upload that never finished, offered back. The file itself cannot be kept --
  *  a browser will not hand the same one over without somebody choosing it -- so
@@ -24,8 +24,6 @@ type Unfinished = {
 
 const percent = (sent: number, total: number): number =>
   total > 0 ? Math.min(100, Math.floor((sent / total) * 100)) : 0
-
-const megabytes = (bytes: number): string => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 /** Picks the file and sends it to storage, a part at a time.
  *
@@ -155,6 +153,7 @@ const ResumeCard = ({
   run: Unfinished
   onGone: () => void
 }) => {
+  const fmt = useFormat()
   const router = useRouter()
   const resume = useUploads((state) => state.resume)
   const picker = useRef<HTMLInputElement>(null)
@@ -163,7 +162,7 @@ const ResumeCard = ({
   const chosen = (file: File | undefined) => {
     if (!file) return
     if (file.size !== run.fileBytes) {
-      setError(`That is not the same file: ${run.filename} was ${megabytes(run.fileBytes)}.`)
+      setError(`That is not the same file: ${run.filename} was ${fmt.bytes(run.fileBytes)}.`)
       return
     }
     resume({
@@ -186,8 +185,8 @@ const ResumeCard = ({
     <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
       <h2 className="text-base font-semibold">Carry on uploading {run.filename}?</h2>
       <p className="text-secondary">
-        {percent(run.uploadedBytes, run.fileBytes)}% of it is here: {megabytes(run.uploadedBytes)} of{' '}
-        {megabytes(run.fileBytes)}, in {run.have.length === 1 ? '1 piece' : `${formatNumber(run.have.length)} pieces`}.
+        {percent(run.uploadedBytes, run.fileBytes)}% of it is here: {fmt.bytes(run.uploadedBytes)} of{' '}
+        {fmt.bytes(run.fileBytes)}, in {run.have.length === 1 ? '1 piece' : `${fmt.number(run.have.length)} pieces`}.
         Choose the same file again and the rest goes; nothing that arrived is sent twice.
       </p>
       {error ? <Alert>{error}</Alert> : null}

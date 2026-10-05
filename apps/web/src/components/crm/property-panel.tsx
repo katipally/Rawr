@@ -10,7 +10,7 @@ import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
 import { Value } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type PropertySection = {
   title: string
@@ -43,7 +43,7 @@ export const PropertyPanel = ({
   sections,
   canWrite,
 }: PropertyPanelProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [local, setLocal] = useState(values)
@@ -223,7 +223,7 @@ export const PropertyPanel = ({
                       // note is read as itself and the pencil sits beside it.
                       <div className="flex min-w-0 items-start gap-1">
                         <div className="min-w-0 flex-1 px-1.5 py-0.5">
-                          <Value zone={zone}
+                          <Value format={fmt}
                             type={field.type}
                             value={local[field.key]}
                             label={labels[field.key]}
@@ -256,11 +256,11 @@ export const PropertyPanel = ({
                           !editable && 'cursor-default',
                         )}
                       >
-                        <Value zone={zone}
+                        <Value format={fmt}
                           type={field.type}
                           value={local[field.key]}
                           label={labels[field.key]}
-                          currency={String(local.currency ?? 'USD')}
+                          currency={local.currency}
                           placeholder="—"
                         />
                         {editable ? (
@@ -306,7 +306,7 @@ export const PropertyPanel = ({
               ) : (
                 <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
               )}
-              All properties ({secondaryCount.toLocaleString()})
+              All properties ({fmt.number(secondaryCount)})
             </button>
           </h2>
           {showAll ? (

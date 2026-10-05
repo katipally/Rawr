@@ -3,6 +3,7 @@
 import { Pagination } from '@rawr/ui'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { ReactNode } from 'react'
+import { useFormat } from '~/components/zone.tsx'
 
 /** The first size the per-page control offers, so a settings list opens short
  *  and the reader decides when to make it long. */
@@ -19,6 +20,7 @@ export const usePagedRows = <Row,>(
   rows: Row[],
   noun: string,
 ): { page: Row[]; pager: ReactNode; offset: number } => {
+  const fmt = useFormat()
   const router = useRouter()
   const pathname = usePathname()
   const params = useSearchParams()
@@ -47,6 +49,7 @@ export const usePagedRows = <Row,>(
     pager:
       rows.length > perPage ? (
         <Pagination
+          format={fmt.number}
           count={page.length}
           offset={offset}
           total={rows.length}

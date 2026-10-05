@@ -4,8 +4,7 @@ import { Button, ConfirmDialog, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type TokenRow = {
   id: string
@@ -34,7 +33,7 @@ export const TokenList = ({
   userId: string
   isAdmin: boolean
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const [name, setName] = useState('')
@@ -217,11 +216,11 @@ export const TokenList = ({
                   </p>
                   <p className="text-secondary text-small">
                     {row.revokedAt
-                      ? `Revoked ${formatDateTime(row.revokedAt, zone)}`
+                      ? `Revoked ${fmt.dateTime(row.revokedAt)}`
                       : row.lastUsedAt
-                        ? `Last used ${formatDateTime(row.lastUsedAt, zone)}`
+                        ? `Last used ${fmt.dateTime(row.lastUsedAt)}`
                         : 'Never used'}{' '}
-                    · created {formatDateTime(row.createdAt, zone)}
+                    · created {fmt.dateTime(row.createdAt)}
                   </p>
                 </div>
                 {row.revokedAt ? null : (

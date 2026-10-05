@@ -13,6 +13,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type CreateField = EditableField
 
@@ -44,6 +45,7 @@ export const CreateRecordPanel = ({
   initial = {},
   onCreated,
 }: CreateRecordPanelProps) => {
+  const fmt = useFormat()
   const { navigate } = useNavigation()
   const router = useRouter()
   const toast = useToast()
@@ -251,9 +253,9 @@ export const CreateRecordPanel = ({
                 ) : (
                   <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
                 )}
-                More properties ({rest.length.toLocaleString()})
+                More properties ({fmt.number(rest.length)})
                 {restFilled > 0 ? (
-                  <span className="text-small font-normal text-secondary">{restFilled.toLocaleString()} filled</span>
+                  <span className="text-small font-normal text-secondary">{fmt.number(restFilled)} filled</span>
                 ) : null}
               </button>
             </h3>

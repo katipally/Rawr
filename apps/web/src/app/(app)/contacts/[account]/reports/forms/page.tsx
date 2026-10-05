@@ -1,11 +1,11 @@
 import { formsReport } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
-import { formatDayShort } from '~/components/crm/value.tsx'
 import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
+import { getFormat } from '~/server/format.ts'
 
 const FormsReport = async ({
   params,
@@ -14,6 +14,7 @@ const FormsReport = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
@@ -28,8 +29,9 @@ const FormsReport = async ({
       <div className="flex flex-col gap-4">
         <Card>
           <BarChart
+            format={fmt.number}
             title="Fills each day"
-            labels={report.days.map((row) => formatDayShort(row.day))}
+            labels={report.days.map((row) => fmt.dayShort(row.day))}
             series={[
               { label: 'Kept', values: report.days.map((row) => row.clean), tone: 'accent' },
               { label: 'Held for review', values: report.days.map((row) => row.held), tone: 'warning' },
@@ -64,11 +66,11 @@ const FormsReport = async ({
                     <tr key={row.id} className="border-b border-divider last:border-0">
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.form}</th>
                       <td className="py-1 pr-3 text-right tabular-nums">
-                        {row.views === 0 ? '—' : row.views.toLocaleString()}
+                        {row.views === 0 ? '—' : fmt.number(row.views)}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.submissions}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">
-                        {row.views === 0 ? '—' : `${((row.submissions / row.views) * 100).toFixed(1)}%`}
+                        {row.views === 0 ? '—' : fmt.percent(row.submissions / row.views, 1)}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">
                         {row.appearsOn === 0 ? '—' : row.appearsOn}

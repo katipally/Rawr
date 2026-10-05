@@ -8,6 +8,7 @@ import { inboxPath, mailboxesPath } from '~/lib/links.ts'
 import type { Session } from '~/server/session.ts'
 import { contextFrom } from '~/server/session.ts'
 import { InboxList } from './inbox-list.tsx'
+import { getFormat } from '~/server/format.ts'
 
 type Query = Record<string, string | string[] | undefined>
 
@@ -56,6 +57,7 @@ export const InboxFrame = async ({
   selected: string | null
   children: ReactNode
 }) => {
+  const fmt = await getFormat()
   const ctx = contextFrom(session)
   const [page, mailboxes, counts] = await Promise.all([
     listInboxThreads(ctx, { ...filters, limit: 25 }),
@@ -121,7 +123,7 @@ export const InboxFrame = async ({
                   className={cn(link, current === view.key && 'bg-canvas font-semibold')}
                 >
                   <span className="truncate">{view.label}</span>
-                  <span className="shrink-0 text-small tabular-nums">{view.count.toLocaleString()}</span>
+                  <span className="shrink-0 text-small tabular-nums">{fmt.number(view.count)}</span>
                 </Link>
               </li>
             ))}

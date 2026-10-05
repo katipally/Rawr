@@ -4,10 +4,10 @@ import { cn, IconButton } from '@rawr/ui'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { formatNumber } from './crm/value.tsx'
 import { importsPath } from '~/lib/links.ts'
 import { api } from '~/lib/rpc.ts'
 import { useUploads, type Upload } from '~/lib/store/uploads.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 /** Work that outlives the screen it was started on.
  *
@@ -62,6 +62,7 @@ const percent = (done: number, total: number): number =>
   total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0
 
 export const TaskTray = ({ account }: { account: string }) => {
+  const fmt = useFormat()
   const uploads = useUploads((store) => store.uploads)
   const dismiss = useUploads((store) => store.dismiss)
   const [runs, setRuns] = useState<Running[]>([])
@@ -150,7 +151,7 @@ export const TaskTray = ({ account }: { account: string }) => {
                 <p className="text-small text-secondary tabular-nums">
                   {run.state === 'parsing'
                     ? 'Reading the file'
-                    : `${formatNumber(run.processedRows)} of ${formatNumber(run.totalRows)} rows`}
+                    : `${fmt.number(run.processedRows)} of ${fmt.number(run.totalRows)} rows`}
                 </p>
               </li>
             ))}

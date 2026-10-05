@@ -8,6 +8,7 @@ import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { zoomReady } from '~/server/zoom.ts'
 import { PageEditor } from './editor.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** One booking page, everything about it on one screen: what it offers, who hosts
  *  it, what it asks, and what lands on the calendar. */
@@ -17,6 +18,7 @@ const BookingPageEditorScreen = async ({
 }: {
   params: Promise<{ account: string; id: string }>
 }) => {
+  const fmt = await getFormat()
   const { account, id } = await params
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -92,8 +94,8 @@ const BookingPageEditorScreen = async ({
 
       <dl className="mb-4 grid gap-2 sm:grid-cols-3">
         {[
-          { label: `Views, last ${stats.sinceDays} days`, value: stats.views.toLocaleString() },
-          { label: 'Meetings booked', value: stats.booked.toLocaleString() },
+          { label: `Views, last ${stats.sinceDays} days`, value: fmt.number(stats.views) },
+          { label: 'Meetings booked', value: fmt.number(stats.booked) },
           {
             label: 'Booked per view',
             // Zero per cent and "nobody has opened the link yet" are different

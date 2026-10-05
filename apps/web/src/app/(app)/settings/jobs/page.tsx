@@ -1,8 +1,8 @@
 import { listDeadLetters, queueHealth } from '@rawr/db'
 import { Alert, EmptyState, PageHeader } from '@rawr/ui'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { DeadLetterTable } from './table.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** How long the dispatcher may be quiet before it is worth saying so. Generous on
  *  purpose: this deployment sleeps when nobody is using it, so a quiet half hour
@@ -11,6 +11,7 @@ import { DeadLetterTable } from './table.tsx'
 const QUIET_MS = 30 * 60_000
 
 const JobsPage = async () => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) return null
 
@@ -62,14 +63,14 @@ const JobsPage = async () => {
           {queue.waiting === 1 ? '1 job is waiting' : `${queue.waiting} jobs are waiting`} and
           nothing has finished{' '}
           {queue.lastCompletedAt
-            ? `since ${formatDateTime(queue.lastCompletedAt, session.timezone)}`
+            ? `since ${fmt.dateTime(queue.lastCompletedAt)}`
             : 'at all'}
           . The worker is not picking work up.
         </Alert>
       ) : (
         <p className="text-secondary">
           {queue.lastCompletedAt
-            ? `Dispatcher last finished a job ${formatDateTime(queue.lastCompletedAt, session.timezone)}.`
+            ? `Dispatcher last finished a job ${fmt.dateTime(queue.lastCompletedAt)}.`
             : 'The dispatcher has not finished a job yet.'}
           {queue.waiting > 0
             ? ` ${queue.waiting === 1 ? '1 job is' : `${queue.waiting} jobs are`} waiting.`

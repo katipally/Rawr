@@ -3,8 +3,8 @@
 import { Button, Card, DataTable, Field, Modal, Pagination, TextInput, useToast } from '@rawr/ui'
 import { usePathname, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
-import { formatCurrency } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type CampaignView = {
   id: string
@@ -30,13 +30,14 @@ const BLANK: CampaignView = {
   medium: null,
   utmCampaign: '',
   spend: 0,
-  currency: 'USD',
+  currency: '',
   startsOn: null,
   endsOn: null,
   updatedAt: '',
 }
 
 export const CampaignList = ({ initial, search: initialSearch }: { initial: Page; search: string }) => {
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const pathname = usePathname()
@@ -100,7 +101,7 @@ export const CampaignList = ({ initial, search: initialSearch }: { initial: Page
               />
             </Field>
           </div>
-          <Button variant="secondary" onClick={() => setEditing(BLANK)}>
+          <Button variant="secondary" onClick={() => setEditing({ ...BLANK, currency: fmt.currency })}>
             New campaign
           </Button>
         </div>
@@ -152,7 +153,7 @@ export const CampaignList = ({ initial, search: initialSearch }: { initial: Page
               width: 130,
               align: 'right',
               render: (row) => (
-                <span className="tabular-nums">{formatCurrency(row.spend, row.currency)}</span>
+                <span className="tabular-nums">{fmt.money(row.spend, row.currency)}</span>
               ),
             },
             {
@@ -169,6 +170,7 @@ export const CampaignList = ({ initial, search: initialSearch }: { initial: Page
         />
 
         <Pagination
+          format={fmt.number}
           count={page.rows.length}
           offset={offset}
           total={page.total}

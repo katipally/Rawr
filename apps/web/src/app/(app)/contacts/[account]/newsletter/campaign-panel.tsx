@@ -1,9 +1,11 @@
 'use client'
 
+import type { Format } from '~/lib/format.ts'
 import { Alert, Button, EmptyState, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 type Template = { id: number; name: string; subject: string | null; isActive: boolean }
 
@@ -42,8 +44,8 @@ const BREVO_APP = 'https://app.brevo.com/'
 
 type Handoff = { name: string; listId: string; scheduled: boolean }
 
-const rate = (part: number, whole: number): string =>
-  whole === 0 ? '—' : `${((part / whole) * 100).toFixed(1)}%`
+const rate = (fmt: Format, part: number, whole: number): string =>
+  whole === 0 ? '—' : fmt.percent(part / whole, 1)
 
 /** B12. Aim a Brevo campaign from here, and read what it did.
  *
@@ -56,6 +58,7 @@ const rate = (part: number, whole: number): string =>
  *  are calls to Brevo, and a marketing page that will not load because a third
  *  party is slow is worse than one that says it is loading. */
 export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: CampaignPanelProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
 
@@ -228,19 +231,19 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
                       not as zero: "nobody opened it" and "it has not gone out" are
                       different facts. */}
                   <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? campaign.stats.delivered.toLocaleString() : '—'}
+                    {campaign.stats ? fmt.number(campaign.stats.delivered) : '—'}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? rate(campaign.stats.uniqueOpens, campaign.stats.delivered) : '—'}
+                    {campaign.stats ? rate(fmt, campaign.stats.uniqueOpens, campaign.stats.delivered) : '—'}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? rate(campaign.stats.uniqueClicks, campaign.stats.delivered) : '—'}
+                    {campaign.stats ? rate(fmt, campaign.stats.uniqueClicks, campaign.stats.delivered) : '—'}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? campaign.stats.bounces.toLocaleString() : '—'}
+                    {campaign.stats ? fmt.number(campaign.stats.bounces) : '—'}
                   </td>
                   <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? campaign.stats.unsubscribes.toLocaleString() : '—'}
+                    {campaign.stats ? fmt.number(campaign.stats.unsubscribes) : '—'}
                   </td>
                   <td className="py-1.5 text-right">
                     {campaign.status === 'draft' ? (

@@ -5,6 +5,7 @@ import { BarChart } from '~/components/reports/chart.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
+import { getFormat } from '~/server/format.ts'
 
 const WebsiteReport = async ({
   params,
@@ -13,6 +14,7 @@ const WebsiteReport = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
@@ -28,6 +30,7 @@ const WebsiteReport = async ({
       <div className="flex flex-col gap-4">
         <Card>
           <BarChart
+            format={fmt.number}
             title="Visits by channel"
             labels={report.channels.map((row) => row.channel)}
             series={[

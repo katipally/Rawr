@@ -6,6 +6,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 import { FunnelBuilder } from './funnel-builder.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** Item 13. What the tracked sites fired, and how far people got through a
  *  sequence of it.
@@ -20,6 +21,7 @@ const EventsReport = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
@@ -63,6 +65,7 @@ const EventsReport = async ({
             </p>
           ) : (
             <BarChart
+              format={fmt.number}
               title="Events by day"
               labels={days}
               series={top.slice(0, 4).map(([name], index) => ({
@@ -94,8 +97,8 @@ const EventsReport = async ({
                           <span className="ml-2 text-secondary">{name}</span>
                         ) : null}
                       </th>
-                      <td className="py-1 pr-3 text-right tabular-nums">{count.events.toLocaleString()}</td>
-                      <td className="py-1 text-right tabular-nums">{count.visitors.toLocaleString()}</td>
+                      <td className="py-1 pr-3 text-right tabular-nums">{fmt.number(count.events)}</td>
+                      <td className="py-1 text-right tabular-nums">{fmt.number(count.visitors)}</td>
                     </tr>
                   ))}
                 </tbody>

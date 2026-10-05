@@ -7,8 +7,7 @@ import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type MailboxSummary = {
   id: string
@@ -242,7 +241,7 @@ export const MailboxList = ({
   googleReady,
   devReady,
 }: MailboxListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -331,13 +330,13 @@ export const MailboxList = ({
                       </p>
                       <p className="text-small text-secondary">{copy.hint}</p>
                       <p className="text-small text-secondary">
-                        {row.lastSyncAt ? `Last pass ${formatDateTime(row.lastSyncAt, zone)}` : 'Never run'} ·{' '}
+                        {row.lastSyncAt ? `Last pass ${fmt.dateTime(row.lastSyncAt)}` : 'Never run'} ·{' '}
                         {row.backfillDone ? 'History read in full' : 'History still being read'}
                       </p>
                       <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
                         {row.canSend ? (
                           <Badge tone="ok">
-                            Can send, up to {row.dailyCap.toLocaleString()} a day
+                            Can send, up to {fmt.number(row.dailyCap)} a day
                             {row.sendWindow ? `, ${row.sendWindow.start} to ${row.sendWindow.end}` : ''}
                           </Badge>
                         ) : (
@@ -345,11 +344,11 @@ export const MailboxList = ({
                         )}
                         {row.pendingBodies > 0 ? (
                           <Badge tone="warn">
-                            {row.storedBodies.toLocaleString()} of{' '}
-                            {(row.storedBodies + row.pendingBodies).toLocaleString()} bodies stored
+                            {fmt.number(row.storedBodies)} of{' '}
+                            {fmt.number(row.storedBodies + row.pendingBodies)} bodies stored
                           </Badge>
                         ) : row.storedBodies > 0 ? (
-                          <Badge tone="ok">{row.storedBodies.toLocaleString()} bodies stored</Badge>
+                          <Badge tone="ok">{fmt.number(row.storedBodies)} bodies stored</Badge>
                         ) : null}
                         {row.pendingBodies > 0
                           ? 'The rest arrive over the next few passes; a thread is readable in the meantime from its snippets.'
@@ -358,7 +357,7 @@ export const MailboxList = ({
                       {row.lastError ? (
                         <p role="alert" className="break-words text-small text-error">
                           {plainError(row.lastError) ?? row.lastError}
-                          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt, zone)})` : ''}
+                          {row.lastErrorAt ? ` (${fmt.dateTime(row.lastErrorAt)})` : ''}
                         </p>
                       ) : null}
                     </div>

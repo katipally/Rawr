@@ -9,8 +9,7 @@ import { LinkButton } from '~/components/link-button.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** Each held submission shows what was submitted and exactly which rule caught
  *  it, because "score 45" tells a person nothing about whether this is a real
@@ -27,7 +26,7 @@ export const ReviewList = ({
   canReview: boolean
   state: string
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
@@ -75,7 +74,7 @@ export const ReviewList = ({
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
             <span className="font-medium">{row.formName}</span>
             <span className="text-xs text-secondary">
-              {formatDateTime(row.at, zone)}
+              {fmt.dateTime(row.at)}
               {' · score '}
               {row.spamScore}
             </span>
@@ -109,7 +108,7 @@ export const ReviewList = ({
                     className="inline-flex max-w-full items-center gap-1.5 rounded-pill border border-line-strong px-3 py-1 text-small hover:bg-fill"
                   >
                     <span className="truncate">{file.filename}</span>
-                    <span className="shrink-0 text-secondary">{sizeOf(file.bytes)}</span>
+                    <span className="shrink-0 text-secondary">{fmt.bytes(file.bytes)}</span>
                   </button>
                 </li>
               ))}
@@ -177,6 +176,3 @@ export const ReviewList = ({
   )
 }
 
-/** Rounded to the unit a person reads, not the one the disk uses. */
-const sizeOf = (bytes: number): string =>
-  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`

@@ -48,7 +48,7 @@ import { AttachmentsPanel } from '~/components/crm/attachments-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
-import { Value, formatDateTime } from '~/components/crm/value.tsx'
+import { Value } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
 import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
 import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
@@ -58,6 +58,7 @@ import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** The two or three values worth reading before anything else. */
 const HEADER_FIELDS: Record<ObjectKey, string[]> = {
@@ -96,9 +97,9 @@ const RecordPage = async ({
     from?: string
   }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
 
   const { account, object: objectParam, id } = await params
   // Not `isObjectKey`: an admin can invent an object, and its records are opened
@@ -272,7 +273,7 @@ const RecordPage = async ({
             <h2 className="font-medium">Deal score</h2>
             <p className="text-small text-secondary">
               {dealScore.scoredAt
-                ? `Out of 100, worked out ${formatDateTime(dealScore.scoredAt.toISOString(), zone)}.`
+                ? `Out of 100, worked out ${fmt.dateTime(dealScore.scoredAt.toISOString())}.`
                 : 'Not worked out yet. It is computed nightly and whenever the stage changes.'}
             </p>
           </div>
@@ -314,7 +315,7 @@ const RecordPage = async ({
   const SegmentsSection = async () => {
     const memberships = canView(ctx, 'contacts') ? await readMemberships(ctx, id) : []
     return memberships.length > 0 || objectParam === 'contact' ? (
-      <SegmentsPanel zone={zone} account={account} recordName={record.displayName} rows={memberships} />
+      <SegmentsPanel account={account} recordName={record.displayName} rows={memberships} />
     ) : null
   }
 
@@ -383,7 +384,7 @@ const RecordPage = async ({
   const MailSection = async () => {
     const threads = await threadsPromise
     return (
-      <MailPanel zone={zone} contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
+      <MailPanel contactName={record.displayName} threads={threads} engagement={readEmailEngagement(record.values)} />
     )
   }
 
@@ -402,7 +403,7 @@ const RecordPage = async ({
   const OverviewSection = async () => {
     const threads = await threadsPromise
     return (
-      <RecordOverview zone={zone}
+      <RecordOverview
         account={account}
         object={objectParam}
         threads={threads.map((thread) => ({
@@ -568,11 +569,11 @@ const RecordPage = async ({
                   <div key={field.key} className="min-w-0">
                     <dt className="text-small text-secondary">{field.label}</dt>
                     <dd className="min-w-0">
-                      <Value zone={zone}
+                      <Value format={fmt}
                         type={field.type}
                         value={record.values[field.key]}
                         label={record.labels[field.key]}
-                        currency={String(record.values.currency ?? 'USD')}
+                        currency={record.values.currency}
                         placeholder="—"
                         oneLine
                       />
@@ -631,7 +632,7 @@ const RecordPage = async ({
           <nav aria-label="Record sections" className="sticky top-0 z-10 flex shrink-0 overflow-hidden rounded-t-hs border-b border-line bg-canvas">
             {[
               { key: 'overview', label: 'Overview', href: recordPath(account, objectParam, id, { from: origin ?? undefined }) },
-              { key: 'activities', label: `Activities (${timelineTotal.toLocaleString()})`, href: recordPath(account, objectParam, id, { tab: 'activities', from: origin ?? undefined }) },
+              { key: 'activities', label: `Activities (${fmt.number(timelineTotal)})`, href: recordPath(account, objectParam, id, { tab: 'activities', from: origin ?? undefined }) },
             ].map((item) => (
               <Link
                 key={item.key}

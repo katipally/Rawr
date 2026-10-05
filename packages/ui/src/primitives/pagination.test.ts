@@ -2,19 +2,21 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { pageRange } from './pagination.ts'
 
+const format = (value: number) => new Intl.NumberFormat('de-DE').format(value)
+
 /** What the pager may claim. The lists behind it are keyset paged, so "how many
  *  in total" is often unknown, and saying so is the point. */
 
 test('counts from one and names the total', () => {
-  const range = pageRange({ count: 50, offset: 0, total: 1204 })
-  assert.equal(range.label, 'Showing 1-50 of 1,204')
+  const range = pageRange({ count: 50, offset: 0, total: 1204, format })
+  assert.equal(range.label, 'Showing 1-50 of 1.204')
   assert.equal(range.canPrevious, false)
   assert.equal(range.canNext, true)
 })
 
 test('a later page can go back', () => {
-  const range = pageRange({ count: 50, offset: 50, total: 1204 })
-  assert.equal(range.label, 'Showing 51-100 of 1,204')
+  const range = pageRange({ count: 50, offset: 50, total: 1204, format })
+  assert.equal(range.label, 'Showing 51-100 of 1.204')
   assert.equal(range.canPrevious, true)
 })
 
@@ -46,4 +48,8 @@ test('an explicit hasMore beats the total arithmetic', () => {
 
 test('a single row reads as a range of one', () => {
   assert.equal(pageRange({ count: 1, offset: 0, total: 1 }).label, 'Showing 1-1 of 1')
+})
+
+test('counts are written by the caller, and plain digits when it gives no writer', () => {
+  assert.equal(pageRange({ count: 50, offset: 0, total: 1204 }).label, 'Showing 1-50 of 1204')
 })

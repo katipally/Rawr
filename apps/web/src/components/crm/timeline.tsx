@@ -9,8 +9,8 @@ import { useEffect, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, activityLabel, formatDateTime, formatMonth } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, activityLabel } from './value.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
 export type TimelineEntry = {
@@ -129,7 +129,7 @@ export const Timeline = ({
   canWrite,
   viewer,
 }: TimelineProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const params = useSearchParams()
@@ -339,7 +339,7 @@ export const Timeline = ({
               type="button"
               className={buttonClass('secondary', selected.length > 0 ? 'bg-fill-hover' : undefined)}
             >
-              Activity ({shownCount.toLocaleString()}/{total.toLocaleString()})
+              Activity ({fmt.number(shownCount)}/{fmt.number(total)})
               <ChevronDown aria-hidden="true" className="size-3.5" />
             </button>
           )}
@@ -378,8 +378,8 @@ export const Timeline = ({
           {shown.map((entry, index) => {
             // HubSpot heads each month; the rows arrive newest first, so a month
             // starts wherever it differs from the row before.
-            const month = formatMonth(entry.occurredAt, zone)
-            const heads = index === 0 || formatMonth(shown[index - 1]!.occurredAt, zone) !== month
+            const month = fmt.month(entry.occurredAt)
+            const heads = index === 0 || fmt.month(shown[index - 1]!.occurredAt) !== month
             const folded = collapsed.has(entry.id)
             const mail = emailOf(entry)
             const who = activityActor(entry.type, { ...entry, recordName })
@@ -423,7 +423,7 @@ export const Timeline = ({
                   className="ml-auto shrink-0 text-small text-secondary"
                   title={entry.occurredAt}
                 >
-                  {formatDateTime(entry.occurredAt, zone)}
+                  {fmt.dateTime(entry.occurredAt)}
                 </time>
               </p>
               {folded ? null : editing?.id === entry.id ? (

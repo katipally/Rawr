@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { AppLogo } from '~/components/app-logo.tsx'
-import { formatAgo } from '~/components/crm/value.tsx'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { appPath } from '~/lib/links.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
@@ -12,6 +11,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTable } from './apps-table.tsx'
 import { errorSummary } from './health.ts'
 import { AppsTabs } from './tabs.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** Connections home: what this company has connected, what is wrong with any of
  *  it, and who connected it.
@@ -20,6 +20,7 @@ import { AppsTabs } from './tabs.tsx'
  *  account, so "who installed it" is a question about the company rather than
  *  about whichever person happens to be looking at it. */
 const AppsPage = async () => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
@@ -66,7 +67,7 @@ const AppsPage = async () => {
                       <AppLogo kind={row.kind} />
                     </span>
                     <span className="flex min-w-0 flex-1 flex-col">
-                      {row.lastErrorAt ? <span className="text-small text-secondary">{formatAgo(row.lastErrorAt)}</span> : null}
+                      {row.lastErrorAt ? <span className="text-small text-secondary">{fmt.ago(row.lastErrorAt)}</span> : null}
                       <span className="break-words">
                         <Link href={appPath(row.kind)} className="font-medium text-link no-underline hover:underline">
                           {meta.name}

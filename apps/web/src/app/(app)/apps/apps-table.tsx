@@ -5,11 +5,10 @@ import Link from 'next/link'
 import { useState } from 'react'
 import type { HealthState, IntegrationKind } from '@rawr/db'
 import { AppLogo } from '~/components/app-logo.tsx'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { appPath } from '~/lib/links.ts'
 import { AppActions } from './app-actions.tsx'
 import { HEALTH, errorSummary } from './health.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type AppRow = {
   kind: IntegrationKind
@@ -32,7 +31,7 @@ const Muted = ({ children }: { children: string }) => <span className="text-seco
  *  leads on: what it is, whether it is working, who installed it and when, when
  *  it last did anything, and an Actions menu on the row. */
 export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: boolean }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const [query, setQuery] = useState('')
   const [state, setState] = useState('')
 
@@ -73,7 +72,7 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
       key: 'installed',
       header: 'Installed date',
       width: 190,
-      render: (row) => (row.installedAt ? formatDateTime(row.installedAt, zone) : <Muted>--</Muted>),
+      render: (row) => (row.installedAt ? fmt.dateTime(row.installedAt) : <Muted>--</Muted>),
     },
     {
       key: 'by',
@@ -84,7 +83,7 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
           // Granted person by person, so no single installer: the count is the
           // honest answer and the link is where the names are.
           <Link href={row.connectPath} className="text-link no-underline hover:underline">
-            {row.people === 1 ? '1 person' : `${row.people.toLocaleString()} people`}
+            {row.people === 1 ? '1 person' : `${fmt.number(row.people)} people`}
           </Link>
         ) : row.installedByName ? (
           <span className="flex min-w-0 items-center gap-2">
@@ -102,7 +101,7 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
       key: 'activity',
       header: 'Last activity',
       width: 190,
-      render: (row) => (row.lastActivityAt ? formatDateTime(row.lastActivityAt, zone) : <Muted>Never</Muted>),
+      render: (row) => (row.lastActivityAt ? fmt.dateTime(row.lastActivityAt) : <Muted>Never</Muted>),
     },
     {
       key: 'actions',

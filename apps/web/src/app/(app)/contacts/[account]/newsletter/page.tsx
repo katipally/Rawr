@@ -2,12 +2,12 @@ import { canView, canWrite, listSegments, recentActivity } from '@rawr/db'
 import { Badge, Card, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { CampaignPanel } from './campaign-panel.tsx'
 import { NewsletterPanel } from './newsletter-panel.tsx'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { readIntegrations } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** B5. The newsletter, which Rawr deliberately does not send.
  *
@@ -18,9 +18,9 @@ import { contextFrom, readSession } from '~/server/session.ts'
 const TONE = { connected: 'ok', degraded: 'warn', disconnected: 'error', not_configured: 'neutral' } as const
 
 const NewsletterPage = async ({ params }: { params: Promise<{ account: string }> }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const zone = session.timezone
 
   const { account } = await params
   const ctx = contextFrom(session)
@@ -61,7 +61,7 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
         <div className="flex flex-col gap-1">
           <p className="text-secondary">
             {brevo?.lastOkAt
-              ? `Last succeeded ${formatDateTime(brevo.lastOkAt, zone)}.`
+              ? `Last succeeded ${fmt.dateTime(brevo.lastOkAt)}.`
               : 'Brevo has never answered successfully yet.'}
             {listId ? ` Pushes go to list ${listId}.` : ' No list is configured, so a push has nowhere to land.'}
           </p>
@@ -115,7 +115,7 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
                   )}{' '}
                   <span className="text-secondary">{event.subject}</span>
                 </span>
-                <span className="text-small text-secondary">{formatDateTime(event.occurredAt, zone)}</span>
+                <span className="text-small text-secondary">{fmt.dateTime(event.occurredAt)}</span>
               </li>
             ))}
           </ul>

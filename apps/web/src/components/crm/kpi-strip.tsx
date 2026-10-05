@@ -7,6 +7,7 @@ import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
 import { api } from '~/lib/rpc.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Group } from './filter-builder.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Kpi = { key: string; label: string; count: number; filters: Group[] }
 
@@ -42,6 +43,7 @@ export type KpiStripProps = {
  *  for it. Nothing is rendered until it answers, and nothing is rendered if it
  *  fails: a broken count is not worth an error above somebody's list. */
 export const KpiStrip = ({ account, object, view, params, filters, hasRecords }: KpiStripProps) => {
+  const fmt = useFormat()
   const [tiles, setTiles] = useState<Kpi[] | null>(null)
   // Collapsed is a statement about this person's screen, not about the list, so it
   // follows them to every list rather than riding in an address they might paste.
@@ -118,7 +120,7 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
                 className={`flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
               >
                 <span className="text-small text-secondary">{tile.label}</span>
-                <span className="text-base font-semibold tabular-nums">{tile.count.toLocaleString()}</span>
+                <span className="text-base font-semibold tabular-nums">{fmt.number(tile.count)}</span>
               </Link>
             </li>
           ))}

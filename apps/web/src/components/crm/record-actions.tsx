@@ -13,7 +13,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { Value } from './value.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { sameWords } from '~/lib/same-words.ts'
 
 export type RecordActionsProps = {
@@ -48,7 +48,7 @@ export const RecordActions = ({
   canWrite,
   startCompose,
 }: RecordActionsProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const { navigate } = useNavigation()
   const toast = useToast()
@@ -236,7 +236,7 @@ export const RecordActions = ({
                             onChange={() => setPicks((current) => ({ ...current, [field.key]: side }))}
                           />
                           <span className="min-w-0">
-                            <Value zone={zone}
+                            <Value format={fmt}
                               type={field.type}
                               value={side === 'survivor' ? values[field.key] : absorbed.values[field.key]}
                               label={side === 'survivor' ? labels[field.key] : absorbed.labels[field.key]}

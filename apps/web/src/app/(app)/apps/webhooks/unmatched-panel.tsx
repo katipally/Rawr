@@ -3,9 +3,8 @@
 import { Badge, Button, Card, EmptyState, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type UnmatchedRow = { id: string; source: string; kind: string; payload: unknown; at: string }
 
@@ -13,7 +12,7 @@ export type UnmatchedRow = { id: string; source: string; kind: string; payload: 
  *  dropped, because "nobody opened it" and "we could not tell who opened it" are
  *  different answers. */
 export const UnmatchedPanel = ({ rows }: { rows: UnmatchedRow[] }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -54,7 +53,7 @@ export const UnmatchedPanel = ({ rows }: { rows: UnmatchedRow[] }) => {
                 <li key={row.id} className="flex flex-wrap items-baseline gap-x-2 border-b border-divider px-3 py-1.5 last:border-0">
                   <span className="min-w-0 font-medium">{(row.payload as { email?: string }).email ?? 'an unknown address'}</span>
                   <span className="text-small text-secondary">
-                    {row.kind} via {row.source} · {formatDateTime(row.at, zone)}
+                    {row.kind} via {row.source} · {fmt.dateTime(row.at)}
                   </span>
                 </li>
               ))}

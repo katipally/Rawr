@@ -40,6 +40,10 @@ export const account = pgTable('account', {
    *  the account, so two people reading a report read the same numbers; a trigger
    *  refuses a name Postgres does not know. */
   timezone: text('timezone').notNull().default('UTC'),
+  /** What an amount is written in when its own row does not say: a deal's currency,
+   *  a campaign's spend, an empty report's zero. An ISO 4217 code; the database
+   *  checks its shape and the data access layer checks the engine knows it. */
+  currency: text('currency').notNull().default('USD'),
   /** A tenant the seed built for the verify suites to drive. The worker leaves it
    *  alone where those suites share its database. */
   isFixture: boolean('is_fixture').notNull().default(false),

@@ -10,6 +10,7 @@ import { usePagedRows } from '~/components/paged.tsx'
 import { availabilityPath, bookedPath, bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { BookingLinkSnippet } from './snippet.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type PageRow = {
   id: string
@@ -58,6 +59,7 @@ export const PagesTable = ({
    *  admin. A control that always throws is worse than no control. */
   viewer: { id: string; isAdmin: boolean }
 }) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [embedding, setEmbedding] = useState<PageRow | null>(null)
@@ -152,7 +154,7 @@ export const PagesTable = ({
       align: 'right',
       render: (row) => (
         <Link href={bookedPath(account, { page: row.id })} onClick={(event) => event.stopPropagation()}>
-          {row.upcoming.toLocaleString()}
+          {fmt.number(row.upcoming)}
         </Link>
       ),
     },

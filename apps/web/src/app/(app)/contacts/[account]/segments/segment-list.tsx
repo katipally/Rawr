@@ -12,8 +12,7 @@ import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type SegmentRow = {
   id: string
@@ -44,7 +43,7 @@ const OBJECT_LABEL: Record<ObjectKey, string> = {
 }
 
 export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: SegmentListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
@@ -182,7 +181,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
           <span className="text-secondary" title="Never recomputed, so the count is unknown rather than zero">--</span>
         ) : (
           <button type="button" onClick={() => void openMembers(row)} className="font-semibold text-link hover:underline">
-            {row.memberCount.toLocaleString()}
+            {fmt.number(row.memberCount)}
           </button>
         ),
     },
@@ -221,7 +220,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         ) : row.lastEvaluatedAt === null ? (
           <span className="text-secondary">Never</span>
         ) : (
-          formatDateTime(row.lastEvaluatedAt, zone)
+          fmt.dateTime(row.lastEvaluatedAt)
         ),
     },
     {
@@ -287,7 +286,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     <div className="flex h-full min-h-0 flex-col gap-3">
       <PageHeader
         title="Segments"
-        lead={`${rows.length.toLocaleString()} segment${rows.length === 1 ? '' : 's'}`}
+        lead={`${fmt.number(rows.length)} segment${rows.length === 1 ? '' : 's'}`}
         why={
           <p>
             Membership is recomputed on a schedule and whenever you ask; entering and leaving both
@@ -403,7 +402,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
 
       <div className="-mx-3 flex shrink-0 items-center border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-          {shown.length.toLocaleString()} {shown.length === 1 ? 'segment' : 'segments'}
+          {fmt.number(shown.length)} {shown.length === 1 ? 'segment' : 'segments'}
         </span>
       </div>
 
@@ -500,7 +499,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
           {preview ? (
             <div className="rounded-hs border border-line bg-fill px-3 py-2">
               <p className="font-medium">
-                {preview.count.toLocaleString()} record{preview.count === 1 ? '' : 's'} match right now
+                {fmt.number(preview.count)} record{preview.count === 1 ? '' : 's'} match right now
               </p>
               {preview.sample.length > 0 ? (
                 <p className="text-small text-secondary">
@@ -606,7 +605,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                   {member.displayName}
                 </Link>
                 <span className="text-small text-secondary">
-                  joined {formatDateTime(member.enteredAt.toISOString(), zone)}
+                  joined {fmt.dateTime(member.enteredAt.toISOString())}
                 </span>
               </li>
             ))}

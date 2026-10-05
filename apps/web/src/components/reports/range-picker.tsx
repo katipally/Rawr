@@ -3,7 +3,7 @@
 import { Button, Select } from '@rawr/ui'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
-import { todayIn } from '~/components/crm/value.tsx'
+import { todayIn } from '~/lib/format.ts'
 import { useZone } from '~/components/zone.tsx'
 
 /** The range every report reads, kept in the URL so a report somebody found worth

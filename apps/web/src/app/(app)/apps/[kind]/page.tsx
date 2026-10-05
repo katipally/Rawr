@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { notFound, redirect } from 'next/navigation'
 import { AppLogo } from '~/components/app-logo.tsx'
-import { formatDateTime } from '~/components/crm/value.tsx'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { appPath, appsPath, availableAppsPath, failedJobsPath, importsPath, type AppTab } from '~/lib/links.ts'
 import { listEmailAccounts, listSequences } from '~/server/integrations/apollo.ts'
@@ -14,6 +13,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { AppActions } from '../app-actions.tsx'
 import { HEALTH, errorSummary } from '../health.ts'
 import { ConnectForm } from './connect-form.tsx'
+import { getFormat } from '~/server/format.ts'
 
 const TABS: AppTab[] = ['overview', 'settings', 'insights']
 
@@ -43,6 +43,7 @@ const AppPage = async ({
   params: Promise<{ kind: string }>
   searchParams: Promise<{ tab?: string }>
 }) => {
+  const fmt = await getFormat()
   const { kind } = await params
   if (!INTEGRATION_KINDS.includes(kind as IntegrationKind)) notFound()
   const { tab: wanted } = await searchParams
@@ -51,7 +52,6 @@ const AppPage = async ({
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
-  const zone = session.timezone
 
   const ctx = contextFrom(session)
   const [rows, sites] = await Promise.all([listIntegrationsForAccount(ctx), listSites(ctx)])
@@ -155,7 +155,7 @@ const AppPage = async ({
       {reported ? (
         <Alert tone="warning">
           {meta.name} last reported: {reported.headline}
-          {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt.toISOString(), zone)})` : ''}
+          {row.lastErrorAt ? ` (${fmt.dateTime(row.lastErrorAt.toISOString())})` : ''}
           {reported.detail ? (
             <details className="mt-1">
               <summary className="cursor-pointer">What the provider answered</summary>
@@ -176,10 +176,10 @@ const AppPage = async ({
               {personal
                 ? detail(
                     'Connected by',
-                    row.people === 0 ? 'Nobody yet' : row.people === 1 ? '1 person' : `${row.people.toLocaleString()} people`,
+                    row.people === 0 ? 'Nobody yet' : row.people === 1 ? '1 person' : `${fmt.number(row.people)} people`,
                   )
                 : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : '—'))}
-              {detail('Installed date', row.installedAt ? formatDateTime(row.installedAt.toISOString(), zone) : '—')}
+              {detail('Installed date', row.installedAt ? fmt.dateTime(row.installedAt.toISOString()) : '—')}
               {detail(
                 'App type',
                 <>
@@ -285,10 +285,10 @@ const AppPage = async ({
           <Card title="Health">
             <dl className="flex flex-col gap-3">
               {detail('Status', <Badge tone={HEALTH[row.state].tone} dot>{HEALTH[row.state].label}</Badge>)}
-              {detail('Last succeeded', row.lastOkAt ? formatDateTime(row.lastOkAt.toISOString(), zone) : 'Never yet')}
+              {detail('Last succeeded', row.lastOkAt ? fmt.dateTime(row.lastOkAt.toISOString()) : 'Never yet')}
               {detail(
                 'Last failure',
-                row.lastErrorAt ? `${formatDateTime(row.lastErrorAt.toISOString(), zone)} · ${reported?.headline ?? ''}` : 'None recorded',
+                row.lastErrorAt ? `${fmt.dateTime(row.lastErrorAt.toISOString())} · ${reported?.headline ?? ''}` : 'None recorded',
               )}
               {detail(
                 'Failed jobs',
@@ -296,7 +296,7 @@ const AppPage = async ({
                   'None waiting'
                 ) : (
                   <>
-                    {row.deadLetters.toLocaleString()} can be replayed.{' '}
+                    {fmt.number(row.deadLetters)} can be replayed.{' '}
                     <Link href={failedJobsPath()} className="font-medium text-link">
                       Open failed jobs
                     </Link>
@@ -320,8 +320,8 @@ const AppPage = async ({
                     <li key={op.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="min-w-0 break-words">{op.label}</span>
                       <span className="text-small text-secondary tabular-nums">
-                        {op.calls.toLocaleString()}
-                        {op.lastAt ? ` · ${formatDateTime(op.lastAt.toISOString(), zone)}` : ''}
+                        {fmt.number(op.calls)}
+                        {op.lastAt ? ` · ${fmt.dateTime(op.lastAt.toISOString())}` : ''}
                       </span>
                     </li>
                   ))}
@@ -341,8 +341,8 @@ const AppPage = async ({
                     <li key={event.label} className="flex flex-wrap items-baseline justify-between gap-x-3">
                       <span className="min-w-0 break-words">{event.label}</span>
                       <span className="text-small text-secondary tabular-nums">
-                        {event.calls.toLocaleString()}
-                        {event.lastAt ? ` · ${formatDateTime(event.lastAt.toISOString(), zone)}` : ''}
+                        {fmt.number(event.calls)}
+                        {event.lastAt ? ` · ${fmt.dateTime(event.lastAt.toISOString())}` : ''}
                       </span>
                     </li>
                   ))}
@@ -350,7 +350,7 @@ const AppPage = async ({
               )}
               {traffic.unmatched > 0 ? (
                 <p className="pt-2 text-small text-secondary">
-                  {traffic.unmatched.toLocaleString()} matched nobody here and are kept rather than dropped.
+                  {fmt.number(traffic.unmatched)} matched nobody here and are kept rather than dropped.
                 </p>
               ) : null}
             </Card>
@@ -358,7 +358,7 @@ const AppPage = async ({
           {traffic && traffic.enriched > 0 ? (
             <Card title="Fields it filled">
               <p className="text-secondary">
-                {traffic.enriched.toLocaleString()} value
+                {fmt.number(traffic.enriched)} value
                 {traffic.enriched === 1 ? '' : 's'} on records here came from {meta.name} and no human has
                 overwritten them.
               </p>

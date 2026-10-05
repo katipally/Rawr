@@ -8,6 +8,7 @@ import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
 import { objectView, propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type ObjectView = {
   id: string
@@ -27,6 +28,7 @@ export const ObjectList = ({
   account: string
   canWrite: boolean
 }) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -87,7 +89,7 @@ export const ObjectList = ({
                   <code className="text-small text-secondary">{row.key}</code>
                 </p>
                 <p className="text-small text-secondary tabular-nums">
-                  {row.recordCount.toLocaleString()} record{row.recordCount === 1 ? '' : 's'} ·{' '}
+                  {fmt.number(row.recordCount)} record{row.recordCount === 1 ? '' : 's'} ·{' '}
                   <Link href={propertiesPath(row.key)}>
                     {row.fieldCount} field{row.fieldCount === 1 ? '' : 's'}
                   </Link>
@@ -229,7 +231,7 @@ export const ObjectList = ({
         }
       >
         <p>
-          Its {removing?.recordCount.toLocaleString()} record
+          Its {fmt.number(removing?.recordCount)} record
           {removing?.recordCount === 1 ? '' : 's'} and {removing?.fieldCount} field
           {removing?.fieldCount === 1 ? '' : 's'} go with it, and none of it comes back. Deleting an
           object is not a soft delete, because an object that still occupies its key and still

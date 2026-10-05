@@ -2,10 +2,12 @@ import { PageHeader } from '@rawr/ui'
 import { listLifecycleStages } from '@rawr/db'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { StageList } from './stage-list.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** A2: the lifecycle list is ordered, editable and reorderable, and a change on a
  *  record writes its own timeline event. The list itself lives here. */
 const LifecyclePage = async () => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) return null
 
@@ -33,7 +35,7 @@ const LifecyclePage = async () => {
           detail:
             stage.usedBy === 0
               ? 'On no records'
-              : `On ${stage.usedBy.toLocaleString()} record${stage.usedBy === 1 ? '' : 's'}`,
+              : `On ${fmt.number(stage.usedBy)} record${stage.usedBy === 1 ? '' : 's'}`,
           usedBy: stage.usedBy,
         }))}
         canWrite={sessionIsAdmin(session)}

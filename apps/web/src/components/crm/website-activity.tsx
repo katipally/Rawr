@@ -6,8 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
-import { formatDateTime } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type WebsiteActivityProps = {
   account: string
@@ -39,7 +38,7 @@ export const WebsiteActivity = ({
   devices,
   isAdmin,
 }: WebsiteActivityProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<'export' | 'erase' | null>(null)
@@ -97,15 +96,15 @@ export const WebsiteActivity = ({
           <dl className="flex flex-wrap gap-x-6 gap-y-2 px-6 py-2">
             <div>
               <dt className="text-small text-secondary uppercase">Site visits</dt>
-              <dd className="text-lg">{siteVisits.toLocaleString()}</dd>
+              <dd className="text-lg">{fmt.number(siteVisits)}</dd>
             </div>
             <div>
               <dt className="text-small text-secondary uppercase">Pages viewed</dt>
-              <dd className="text-lg">{pagesViewed.toLocaleString()}</dd>
+              <dd className="text-lg">{fmt.number(pagesViewed)}</dd>
             </div>
             <div className="min-w-0">
               <dt className="text-small text-secondary uppercase">Most recent visit</dt>
-              <dd className="break-words">{lastSeenAt ? formatDateTime(lastSeenAt, zone) : '—'}</dd>
+              <dd className="break-words">{lastSeenAt ? fmt.dateTime(lastSeenAt) : '—'}</dd>
             </div>
           </dl>
 

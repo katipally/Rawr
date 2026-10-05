@@ -13,6 +13,8 @@ export type PaginationProps = {
   hasMore?: boolean | undefined
   perPage: number
   noun?: string | undefined
+  /** How a count is written; see `pageRange`. */
+  format?: ((value: number) => string) | undefined
   onPrevious: () => void
   onNext: () => void
   onPerPage?: ((size: number) => void) | undefined
@@ -29,12 +31,13 @@ export const Pagination = ({
   hasMore,
   perPage,
   noun = 'rows',
+  format,
   onPrevious,
   onNext,
   onPerPage,
   className,
 }: PaginationProps) => {
-  const range = pageRange({ count, offset, total, hasMore, noun })
+  const range = pageRange({ count, offset, total, hasMore, noun, format })
   const face =
     'inline-flex min-h-8 items-center gap-1 rounded-pill px-2 font-semibold hover:bg-fill disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent'
 

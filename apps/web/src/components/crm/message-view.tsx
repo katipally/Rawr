@@ -4,8 +4,7 @@ import type { MessageEngagement, ThreadMessage } from '@rawr/db'
 import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { formatDateTime } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** Item 16. What this mail did after it left, for the ones that carried tracking.
  *
@@ -14,19 +13,21 @@ import { useZone } from '~/components/zone.tsx'
  *  the pixel on the recipient's behalf, so an open is weaker evidence than a
  *  click. The strip says both numbers and lets the reader weigh them rather than
  *  presenting one confident figure. */
-const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone: string }) => (
+const Engagement = ({ engagement }: { engagement: MessageEngagement }) => {
+  const fmt = useFormat()
+  return (
   <div className="mt-2 flex flex-col gap-1 rounded-hs bg-fill px-3 py-2 text-small">
     <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
       <span className="font-medium">
         {engagement.opens === 0
           ? 'Not opened yet'
-          : `Opened ${engagement.opens.toLocaleString()} time${engagement.opens === 1 ? '' : 's'}`}
+          : `Opened ${fmt.number(engagement.opens)} time${engagement.opens === 1 ? '' : 's'}`}
       </span>
       {engagement.firstOpenedAt ? (
-        <span className="text-secondary">First {formatDateTime(engagement.firstOpenedAt, zone)}</span>
+        <span className="text-secondary">First {fmt.dateTime(engagement.firstOpenedAt)}</span>
       ) : null}
       {engagement.lastOpenedAt && engagement.opens > 1 ? (
-        <span className="text-secondary">Last {formatDateTime(engagement.lastOpenedAt, zone)}</span>
+        <span className="text-secondary">Last {fmt.dateTime(engagement.lastOpenedAt)}</span>
       ) : null}
     </p>
     {engagement.links.length > 0 ? (
@@ -35,7 +36,7 @@ const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone:
           <li key={link.url} className="flex flex-wrap items-baseline justify-between gap-x-3">
             <span className="min-w-0 break-all text-secondary">{link.url}</span>
             <span className="shrink-0 tabular-nums">
-              {link.clicks.toLocaleString()} click{link.clicks === 1 ? '' : 's'}
+              {fmt.number(link.clicks)} click{link.clicks === 1 ? '' : 's'}
             </span>
           </li>
         ))}
@@ -43,6 +44,7 @@ const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone:
     ) : null}
   </div>
 )
+}
 
 /** One message, with its stored body.
  *
@@ -55,7 +57,7 @@ const Engagement = ({ engagement, zone }: { engagement: MessageEngagement; zone:
  *  asked for, because loading one tells the sender the mail was opened and by
  *  whom. */
 export const MessageView = ({ message }: { message: ThreadMessage }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const [showHtml, setShowHtml] = useState(true)
   const [loadImages, setLoadImages] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -114,7 +116,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
             : (message.fromAddr ?? '(unknown)')}
         </span>
         <time className="text-secondary tabular-nums" dateTime={new Date(message.sentAt).toISOString()}>
-          {formatDateTime(message.sentAt, zone)}
+          {fmt.dateTime(message.sentAt)}
         </time>
       </header>
       {message.ccAddrs.length > 0 ? (
@@ -151,7 +153,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
         </pre>
       )}
 
-      {message.engagement ? <Engagement engagement={message.engagement} zone={zone} /> : null}
+      {message.engagement ? <Engagement engagement={message.engagement} /> : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-small">
         {html !== null ? (

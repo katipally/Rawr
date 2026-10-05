@@ -17,16 +17,19 @@ type Account = {
   seatsUsed: number
   activityRetentionMonths: number
   timezone: string
+  currency: string
 }
 
 export const DefaultsPanel = ({
   account,
   canWrite,
   zones,
+  currencies,
 }: {
   account: Account
   canWrite: boolean
   zones: string[]
+  currencies: string[]
 }) => {
   const router = useRouter()
   const toast = useToast()
@@ -37,6 +40,7 @@ export const DefaultsPanel = ({
   const [defaultHubs, setDefaultHubs] = useState<Hub[]>(account.defaultViewHubs)
   const [retention, setRetention] = useState(String(account.activityRetentionMonths))
   const [timezone, setTimezone] = useState(account.timezone)
+  const [currency, setCurrency] = useState(account.currency)
   // Only the browser knows it, so it is read after mount: reading it during render
   // would put the server's zone in the markup and the reader's in the hydrated page.
   const [browserZone, setBrowserZone] = useState<string | null>(null)
@@ -52,6 +56,7 @@ export const DefaultsPanel = ({
         seatLimit: seatLimit.trim() === '' ? null : Number(seatLimit),
         activityRetentionMonths: Number(retention),
         timezone,
+        currency,
       })
       toast('success', 'Saved.')
       router.refresh()
@@ -67,6 +72,7 @@ export const DefaultsPanel = ({
     autoJoin === account.autoJoinHostedDomain &&
     retention === String(account.activityRetentionMonths) &&
     timezone === account.timezone &&
+    currency === account.currency &&
     (seatLimit.trim() === '' ? null : Number(seatLimit)) === account.seatLimit &&
     defaultHubs.join() === account.defaultViewHubs.join()
 
@@ -110,6 +116,16 @@ export const DefaultsPanel = ({
               </Button>
             ) : null}
           </div>
+
+          <Combobox
+            id="account-currency"
+            label="Currency"
+            hint="What an amount is written in when its own record does not say. A deal keeps the currency it was made in."
+            value={currency}
+            onChange={(value) => value && setCurrency(value)}
+            options={currencies.map((code) => ({ value: code, label: code }))}
+            disabled={!canWrite}
+          />
 
           <Field
             id="account-retention"

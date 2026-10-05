@@ -4,8 +4,7 @@ import { Button, DataTable, EmptyState, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type DeadLetter = {
   id: string
@@ -18,7 +17,7 @@ export type DeadLetter = {
 }
 
 export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -44,7 +43,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       key: 'at',
       header: 'Failed at',
       width: 200,
-      render: (row) => formatDateTime(row.at, zone),
+      render: (row) => fmt.dateTime(row.at),
     },
     {
       key: 'attempts',

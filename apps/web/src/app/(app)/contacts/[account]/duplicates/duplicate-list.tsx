@@ -4,11 +4,11 @@ import { Alert, Button, EmptyState, Field, Modal, Select, useToast } from '@rawr
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { formatDate, shortName } from '~/components/crm/value.tsx'
+import { shortName } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Side = { id: string; displayName: string; createdAt: string }
 
@@ -54,7 +54,7 @@ const RULES: Record<string, string> = {
  *  record holds, which is what the queue proposes; anything finer is one click
  *  away on the record itself. */
 export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
@@ -188,7 +188,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                 >
                   {survivor.displayName}
                 </Link>
-                <span className="text-small text-secondary">kept, here since {formatDate(survivor.createdAt, zone)}</span>
+                <span className="text-small text-secondary">kept, here since {fmt.date(survivor.createdAt)}</span>
                 <span aria-hidden="true" className="text-secondary">
                   &larr;
                 </span>
@@ -199,7 +199,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
                 >
                   {absorbed.displayName}
                 </Link>
-                <span className="text-small text-secondary">merged in, here since {formatDate(absorbed.createdAt, zone)}</span>
+                <span className="text-small text-secondary">merged in, here since {fmt.date(absorbed.createdAt)}</span>
               </div>
 
               <div className="flex flex-wrap gap-2">

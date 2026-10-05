@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { ToastProvider } from '@rawr/ui'
 import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell.tsx'
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
-import { AdoptZone, ZoneProvider } from '~/components/zone.tsx'
+import { AdoptZone, FormatProvider } from '~/components/zone.tsx'
 import { CommandPalette, type Action } from '~/components/crm/command-palette.tsx'
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
@@ -36,6 +36,7 @@ import { settingsGroups } from '~/lib/settings-nav.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import type { Hub } from '~/lib/hubs.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** A rail section before its grants are applied. The hub on a group overrides the
  *  section's, which is how Data Management lists moving contacts next to the
@@ -48,6 +49,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
 
   const account = session.accountSlug
   const ctx = contextFrom(session)
+  const format = await getFormat()
   const [mine, registry] = await Promise.all([memberships(session.userId), getRegistry(ctx)])
   // Built from the session, because every CRM address carries its account.
   // The sections are HubSpot's hubs in HubSpot's order. Home is the logo, and
@@ -227,7 +229,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   ]
 
   return (
-    <ZoneProvider zone={session.timezone}>
+    <FormatProvider locale={format.locale} zone={session.timezone} currency={session.accountCurrency}>
     <ToastProvider>
       <AppShell
         accountName={session.accountName}
@@ -285,7 +287,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       <ShortcutSheet />
       <AdoptZone stored={session.timezone} />
     </ToastProvider>
-    </ZoneProvider>
+    </FormatProvider>
   )
 }
 

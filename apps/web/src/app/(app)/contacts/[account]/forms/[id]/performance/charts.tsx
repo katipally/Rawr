@@ -3,6 +3,7 @@
 import { Card, Select } from '@rawr/ui'
 import { useState } from 'react'
 import { BarChart, Donut, Funnel, type FunnelStep } from '~/components/reports/chart.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 /** The three shapes that need a click: a series whose metric the reader picks,
  *  the step funnel, and the split between people we already had and people this
@@ -27,6 +28,7 @@ export const PerformanceCharts = ({
   funnel: FunnelStep[]
   contactType: { existing: number; created: number }
 }) => {
+  const fmt = useFormat()
   const [metric, setMetric] = useState<Metric>('conversion')
 
   // A rate is a percentage with one decimal; the other two are counts. Kept as
@@ -64,12 +66,12 @@ export const PerformanceCharts = ({
           title={label}
           labels={days.map((day) => day.label)}
           series={[{ label, values, tone: 'accent' }]}
-          format={(value) => (metric === 'conversion' ? `${value}%` : value.toLocaleString())}
+          format={(value) => (metric === 'conversion' ? `${value}%` : fmt.number(value))}
         />
       </Card>
 
       <Card>
-        <Funnel title="Step completion" steps={funnel} />
+        <Funnel format={fmt.number} title="Step completion" steps={funnel} />
         <p className="mt-2 max-w-prose text-small text-secondary">
           The middle two steps are reported by the embed as it paints and as somebody
           first touches a field. A form only ever opened on its hosted page has no
@@ -79,6 +81,7 @@ export const PerformanceCharts = ({
 
       <Card>
         <Donut
+          format={fmt.number}
           title="Contact type"
           slices={[
             { id: 'existing', label: 'Existing contacts', value: contactType.existing, tone: 'muted' },

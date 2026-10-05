@@ -9,11 +9,11 @@ import {
 import { Card } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { formatAmounts } from '~/components/crm/value.tsx'
 import { reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from './header.tsx'
 import { reportRange } from './range.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** The headline from each of the six, with a link into the one somebody wants.
  *
@@ -52,6 +52,7 @@ const ReportsOverview = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
@@ -90,7 +91,7 @@ const ReportsOverview = async ({
             href={link('pipeline')}
             label="Deals created"
             value={String(created)}
-            hint={`${won} won, ${formatAmounts(pipeline.wonAmounts)}`}
+            hint={`${won} won, ${fmt.amounts(pipeline.wonAmounts)}`}
           />
           <Tile
             href={link('forms')}
@@ -120,7 +121,7 @@ const ReportsOverview = async ({
             href={link('attribution')}
             label="Biggest first touch"
             value={topFirst?.channel ?? '—'}
-            hint={topFirst ? `${topFirst.contacts} contacts, ${formatAmounts(topFirst.wonAmounts)} won` : 'Nothing attributed in this range'}
+            hint={topFirst ? `${topFirst.contacts} contacts, ${fmt.amounts(topFirst.wonAmounts)} won` : 'Nothing attributed in this range'}
           />
         </div>
       </Card>

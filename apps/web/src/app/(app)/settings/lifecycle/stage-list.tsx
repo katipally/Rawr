@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 type Stage = { id: string; name: string; detail: string; usedBy: number }
 
 /** The lifecycle list: ordered, named, and deleting one entry means deciding where
  *  its records go. The same shape as a pipeline stage, without the probability. */
 export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean }) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -182,7 +184,7 @@ export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean
             ) : (
               <>
                 <p>
-                  {removing.usedBy.toLocaleString()} record{removing.usedBy === 1 ? '' : 's'} are set
+                  {fmt.number(removing.usedBy)} record{removing.usedBy === 1 ? '' : 's'} are set
                   to this. Leaving them pointing at nothing would read as "never had one", which is
                   a different thing, so pick where they go.
                 </p>

@@ -8,8 +8,8 @@ import { useState } from 'react'
 import { sequencePath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { EnrollDialog } from './enroll-dialog.tsx'
-import { ENROLLMENT_LABEL, ENROLLMENT_TONE, formatDateTime } from './value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { ENROLLMENT_LABEL, ENROLLMENT_TONE } from './value.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type SequencesPanelRow = {
   id: string
@@ -48,7 +48,7 @@ export const SequencesPanel = ({
   rows,
   canWrite,
 }: SequencesPanelProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState<string | null>(null)
@@ -103,8 +103,8 @@ export const SequencesPanel = ({
               </div>
               <p className="text-small text-secondary">
                 {row.stepCount > 0 ? `Step ${Math.min(row.currentStep + 1, row.stepCount)} of ${row.stepCount}` : 'No steps yet'}
-                {row.state === 'active' && row.nextRunAt ? ` · next ${formatDateTime(row.nextRunAt, zone)}` : ''}
-                {row.lastSentAt ? ` · last sent ${formatDateTime(row.lastSentAt, zone)}` : ''}
+                {row.state === 'active' && row.nextRunAt ? ` · next ${fmt.dateTime(row.nextRunAt)}` : ''}
+                {row.lastSentAt ? ` · last sent ${fmt.dateTime(row.lastSentAt)}` : ''}
                 {!LIVE.includes(row.state) && row.stopReason ? ` · ${row.stopReason}` : ''}
               </p>
               {canWrite && LIVE.includes(row.state) ? (

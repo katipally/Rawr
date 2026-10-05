@@ -9,6 +9,7 @@ import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type PropertyListProps = {
   object: string
@@ -58,6 +59,7 @@ export const PropertyList = ({
   hub,
   canWrite,
 }: PropertyListProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
 
@@ -346,7 +348,7 @@ export const PropertyList = ({
       {canWrite && picked.size > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-hs border border-line bg-fill px-3 py-2">
           <span className="min-w-0 flex-1 tabular-nums">
-            {picked.size.toLocaleString()} selected
+            {fmt.number(picked.size)} selected
           </span>
           <Select
             aria-label="Move the selected properties to a group"
@@ -382,8 +384,8 @@ export const PropertyList = ({
 
       <p className="text-secondary tabular-nums">
         {filtered
-          ? `${visible.length.toLocaleString()} of ${rows.length.toLocaleString()} properties`
-          : `${rows.length.toLocaleString()} propert${rows.length === 1 ? 'y' : 'ies'}`}
+          ? `${fmt.number(visible.length)} of ${fmt.number(rows.length)} properties`
+          : `${fmt.number(rows.length)} propert${rows.length === 1 ? 'y' : 'ies'}`}
         {filtered ? '. Clear the filter to reorder.' : ''}
       </p>
 
@@ -425,8 +427,8 @@ export const PropertyList = ({
                   ? 'Fill rate not measured yet'
                   : recordCount === 0
                     ? 'No records yet'
-                    : `${Math.round((field.filledCount / recordCount) * 100)}% filled · ${field.filledCount.toLocaleString()} of ${recordCount.toLocaleString()}`}
-                {field.filledAt ? ` · as of ${new Date(field.filledAt).toLocaleDateString()}` : ''}
+                    : `${fmt.percent(field.filledCount / recordCount)} filled · ${fmt.number(field.filledCount)} of ${fmt.number(recordCount)}`}
+                {field.filledAt ? ` · as of ${fmt.date(field.filledAt)}` : ''}
               </p>
 
               {openUse === field.id ? (
@@ -771,7 +773,7 @@ export const PropertyList = ({
               ? 'Counting how many records hold a value…'
               : usage.filled === 0
                 ? 'No record holds a value for it.'
-                : `${usage.filled.toLocaleString()} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
+                : `${fmt.number(usage.filled)} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
           </p>
           <p className="text-secondary">
             Nothing is lost here. Restoring puts it back. Purging, which is a separate action, is
@@ -799,7 +801,7 @@ export const PropertyList = ({
                 if (!field) return
                 void run(async () => {
                   const result = await api.admin.fields.purge.mutate({ id: field.id })
-                  toast('info', `${result.stripped.toLocaleString()} records had the value stripped.`)
+                  toast('info', `${fmt.number(result.stripped)} records had the value stripped.`)
                 }, 'Purged.').then((ok) => ok && setPurging(null))
               }}
             >
@@ -893,7 +895,9 @@ const GroupLink = ({
   count: number
   active: boolean
   onPick: () => void
-}) => (
+}) => {
+  const fmt = useFormat()
+  return (
   <button
     type="button"
     aria-current={active ? 'true' : undefined}
@@ -904,9 +908,10 @@ const GroupLink = ({
     )}
   >
     <span className="min-w-0 break-words">{label}</span>
-    <span className="shrink-0 text-small text-secondary tabular-nums">{count.toLocaleString()}</span>
+    <span className="shrink-0 text-small text-secondary tabular-nums">{fmt.number(count)}</span>
   </button>
 )
+}
 
 /** Conditional property logic, written with the filter builder rather than a
  *  second control that means the same thing. HubSpot puts the rule on the

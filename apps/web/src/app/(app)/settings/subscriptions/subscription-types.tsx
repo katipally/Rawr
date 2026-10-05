@@ -6,6 +6,7 @@ import { useState } from 'react'
 import type { SubscriptionTypeRow } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type SubscriptionTypesProps = {
   rows: SubscriptionTypeRow[]
@@ -14,6 +15,7 @@ export type SubscriptionTypesProps = {
 }
 
 export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -133,10 +135,10 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
                 </p>
                 {row.description ? <p className="text-small text-secondary">{row.description}</p> : null}
                 <p className="text-small text-secondary tabular-nums">
-                  {row.subscribed.toLocaleString()} subscribed · {row.unsubscribed.toLocaleString()} opted out ·
+                  {fmt.number(row.subscribed)} subscribed · {fmt.number(row.unsubscribed)} opted out ·
                   everybody else has not specified
                   {row.awaitingConfirmation > 0
-                    ? ` · ${row.awaitingConfirmation.toLocaleString()} waiting to confirm`
+                    ? ` · ${fmt.number(row.awaitingConfirmation)} waiting to confirm`
                     : ''}
                 </p>
                 <label className="mt-1 flex flex-wrap items-center gap-2 text-small">
@@ -216,14 +218,14 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
           <div className="flex flex-col gap-3">
             {removing.unsubscribed > 0 ? (
               <Alert>
-                {removing.unsubscribed.toLocaleString()} people have opted out of this. Deleting it
+                {fmt.number(removing.unsubscribed)} people have opted out of this. Deleting it
                 discards every one of those opt-outs, and nothing anywhere else remembers them.
               </Alert>
             ) : (
               <p>Nobody has opted out of this, so no consent is discarded.</p>
             )}
             <p className="text-secondary">
-              {removing.subscribed.toLocaleString()} explicit opt-ins go too.
+              {fmt.number(removing.subscribed)} explicit opt-ins go too.
             </p>
           </div>
         ) : null}

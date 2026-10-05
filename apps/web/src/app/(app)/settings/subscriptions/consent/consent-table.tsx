@@ -5,8 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { ConsentFilter } from '@rawr/db'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { consentRecordsPath, recordPath } from '~/lib/links.ts'
 
 export type ConsentRow = {
@@ -43,7 +42,7 @@ export const ConsentTable = ({
   category: ConsentFilter | null
   account: string
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const [draft, setDraft] = useState(search)
 
@@ -159,7 +158,7 @@ export const ConsentTable = ({
                 </span>
 
                 <span className="w-44 shrink-0 text-small text-secondary">
-                  {formatDateTime(row.at, zone)}
+                  {fmt.dateTime(row.at)}
                 </span>
               </li>
             ))}
@@ -169,6 +168,7 @@ export const ConsentTable = ({
 
       {offset > 0 || hasMore ? (
         <Pagination
+          format={fmt.number}
           count={rows.length}
           offset={offset}
           hasMore={hasMore}

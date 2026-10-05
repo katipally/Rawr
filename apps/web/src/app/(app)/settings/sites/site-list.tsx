@@ -4,8 +4,7 @@ import { Button, Field, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type SiteListRow = {
   id: string
@@ -30,7 +29,7 @@ const snippet = (baseUrl: string, siteKey: string): string =>
   `<script async src="${baseUrl}/embed.js" data-rawr-site="${siteKey}" data-rawr-consent></script>`
 
 export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [name, setName] = useState('')
@@ -140,8 +139,8 @@ export const SiteList = ({ rows, baseUrl }: SiteListProps) => {
                   {row.name} <span className="text-secondary">· {row.host}</span>
                 </p>
                 <p className="text-small text-secondary">
-                  {row.pageViews.toLocaleString()} page views
-                  {row.lastEventAt ? ` · last ${formatDateTime(row.lastEventAt, zone)}` : ' · nothing yet'}
+                  {fmt.number(row.pageViews)} page views
+                  {row.lastEventAt ? ` · last ${fmt.dateTime(row.lastEventAt)}` : ' · nothing yet'}
                 </p>
               </div>
 

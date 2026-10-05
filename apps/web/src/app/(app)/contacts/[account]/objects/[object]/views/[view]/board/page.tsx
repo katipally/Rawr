@@ -9,6 +9,7 @@ import { decodeFilters, exportCsvPath, importsPath, objectView, type ListParams,
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
+import { getFormat } from '~/server/format.ts'
 
 type Params = { account: string; object: string; view: string }
 type Search = { q?: string; filters?: string; pipeline?: string; group?: string; new?: string; view?: string }
@@ -28,6 +29,7 @@ const BoardPage = async ({
   params: Promise<Params>
   searchParams: Promise<Search>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
@@ -184,7 +186,7 @@ const BoardPage = async ({
 
       {board && board.unassigned > 0 ? (
         <Alert tone="warning">
-          {board.unassigned.toLocaleString()} deal{board.unassigned === 1 ? '' : 's'}{' '}
+          {fmt.number(board.unassigned)} deal{board.unassigned === 1 ? '' : 's'}{' '}
           {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
           {byStage
             ? 'Switch pipelines above to find them.'

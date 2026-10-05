@@ -1,6 +1,7 @@
 import type { CriticalAction, Hub } from '@rawr/db'
 import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
+import { FALLBACK } from '~/lib/format.ts'
 import { appRouter } from '~/server/routers/_app.ts'
 import type { Session } from '~/server/session.ts'
 import type { ToolDefinition, ToolResult } from './tools.ts'
@@ -105,6 +106,7 @@ export const sessionFor = (caller: {
   // through `todayFor`, which reads it where it is needed.
   timezone: 'UTC',
   accountTimezone: caller.ctx.timezone ?? 'UTC',
+  accountCurrency: FALLBACK.currency,
 })
 
 const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {

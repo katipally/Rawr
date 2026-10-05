@@ -55,6 +55,7 @@ export const accountRouter = router({
         seatLimit: z.number().int().min(1).max(10_000).nullable().optional(),
         activityRetentionMonths: z.number().int().min(1).max(120).optional(),
         timezone: z.string().min(1).max(64).optional(),
+        currency: z.string().trim().length(3).optional(),
       }),
     )
     .mutation(({ ctx, input }) => call(() => saveAccount(ctx.account, input))),

@@ -6,8 +6,7 @@ import { Clock, Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
@@ -46,9 +45,9 @@ export const CalendarRow = ({
   editable: boolean
   availabilityHref: string
 }) => {
+  const fmt = useFormat()
   const show = useToast()
   const router = useRouter()
-  const zone = useZone()
   const [busy, setBusy] = useState(false)
   const [editingCalendar, setEditingCalendar] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
@@ -139,7 +138,7 @@ export const CalendarRow = ({
         <div>
           <dt className="inline">Last worked </dt>
           <dd className="inline font-medium text-body">
-            {grant?.lastOkAt ? formatDateTime(grant.lastOkAt, zone) : 'never'}
+            {grant?.lastOkAt ? fmt.dateTime(grant.lastOkAt) : 'never'}
           </dd>
         </div>
         {grant && !grant.hasRefreshToken && grant.provider === 'google' ? (
@@ -153,7 +152,7 @@ export const CalendarRow = ({
       {grant?.lastError ? (
         <p className="text-xs text-error">
           {plainError(grant.lastError) ?? grant.lastError}
-          {grant.lastErrorAt ? ` (${formatDateTime(grant.lastErrorAt, zone)})` : ''}
+          {grant.lastErrorAt ? ` (${fmt.dateTime(grant.lastErrorAt)})` : ''}
         </p>
       ) : null}
 

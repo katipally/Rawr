@@ -3,8 +3,7 @@
 import { Card, DataTable, Pagination, Select, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -40,7 +39,7 @@ export const MessageTable = ({
   from: string
   to: string
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const origin = useOrigin()
   const toast = useToast()
   const [rows, setRows] = useState<Row[] | null>(null)
@@ -146,21 +145,21 @@ export const MessageTable = ({
               key: 'sent',
               header: 'Sent',
               width: 190,
-              render: (row) => <span className="text-secondary">{formatDateTime(row.sentAt, zone)}</span>,
+              render: (row) => <span className="text-secondary">{fmt.dateTime(row.sentAt)}</span>,
             },
             {
               key: 'opens',
               header: 'Opens',
               width: 100,
               align: 'right',
-              render: (row) => <span className="tabular-nums">{row.opens.toLocaleString()}</span>,
+              render: (row) => <span className="tabular-nums">{fmt.number(row.opens)}</span>,
             },
             {
               key: 'clicks',
               header: 'Clicks',
               width: 100,
               align: 'right',
-              render: (row) => <span className="tabular-nums">{row.clicks.toLocaleString()}</span>,
+              render: (row) => <span className="tabular-nums">{fmt.number(row.clicks)}</span>,
             },
             {
               key: 'first',
@@ -168,7 +167,7 @@ export const MessageTable = ({
               width: 190,
               render: (row) => (
                 <span className="text-secondary">
-                  {row.firstOpenedAt ? formatDateTime(row.firstOpenedAt, zone) : 'Not yet'}
+                  {row.firstOpenedAt ? fmt.dateTime(row.firstOpenedAt) : 'Not yet'}
                 </span>
               ),
             },
@@ -176,6 +175,7 @@ export const MessageTable = ({
         />
 
         <Pagination
+          format={fmt.number}
           count={rows?.length ?? 0}
           offset={offset}
           total={total}

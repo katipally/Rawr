@@ -11,8 +11,7 @@ import { useUrlParam } from '~/lib/url-params.ts'
 import { automationRunsPath } from '~/lib/links.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { formatDateTime, formatNumber } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Trigger =
   | 'record_created'
@@ -566,7 +565,7 @@ export const AutomationList = ({
   mailboxes,
   sequences,
 }: AutomationListProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [automationParam, setAutomationParam] = useUrlParam('automation')
@@ -685,7 +684,7 @@ export const AutomationList = ({
                 <p className="text-small text-secondary tabular-nums">
                   {row.runCount === 0
                     ? 'Has not fired yet'
-                    : `Fired ${formatNumber(row.runCount)} time${row.runCount === 1 ? '' : 's'}, last ${formatDateTime(row.lastRunAt ?? row.createdAt, zone)}`}
+                    : `Fired ${fmt.number(row.runCount)} time${row.runCount === 1 ? '' : 's'}, last ${fmt.dateTime(row.lastRunAt ?? row.createdAt)}`}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -745,8 +744,8 @@ export const AutomationList = ({
                     has two more days to sit. */}
                 <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
                   {entry.resumeAt
-                    ? `continues ${formatDateTime(entry.resumeAt, zone)}`
-                    : formatDateTime(entry.at, zone)}
+                    ? `continues ${fmt.dateTime(entry.resumeAt)}`
+                    : fmt.dateTime(entry.at)}
                 </span>
               </li>
             ))}

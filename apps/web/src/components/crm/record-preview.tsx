@@ -4,7 +4,7 @@ import { Alert, SidePanel, Spinner, buttonClass } from '@rawr/ui'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { LinkButton } from '~/components/link-button.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api } from '~/lib/rpc.ts'
 import type { TableColumn } from './record-table.tsx'
@@ -35,7 +35,7 @@ const NAMED = 3
  *  leaving the list. It reads through the same procedures the record page does,
  *  and holds nothing the address does not, so a reload reopens it. */
 export const RecordPreview = ({ account, object, id, fields, canWrite, from, onClose }: RecordPreviewProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const [loaded, setLoaded] = useState<{ id: string; data: Loaded | null } | null>(null)
 
   useEffect(() => {
@@ -96,11 +96,11 @@ export const RecordPreview = ({ account, object, id, fields, canWrite, from, onC
                   <dt className="text-small text-secondary">{field.label}</dt>
                   <dd className="min-w-0">
                     <Value
-                      zone={zone}
+                      format={fmt}
                       type={field.type}
                       value={data.record.values[field.key]}
                       label={data.record.labels[field.key]}
-                      currency={String(data.record.values.currency ?? 'USD')}
+                      currency={data.record.values.currency}
                       placeholder="—"
                     />
                   </dd>
@@ -116,7 +116,7 @@ export const RecordPreview = ({ account, object, id, fields, canWrite, from, onC
                 {data.groups.map((group) => (
                   <li key={group.objectKey} className="min-w-0">
                     <p className="text-small text-secondary">
-                      {group.namePlural} ({group.total.toLocaleString()})
+                      {group.namePlural} ({fmt.number(group.total)})
                     </p>
                     <ul>
                       {group.records.slice(0, NAMED).map((row) => (
@@ -128,7 +128,7 @@ export const RecordPreview = ({ account, object, id, fields, canWrite, from, onC
                       ))}
                     </ul>
                     {group.total > NAMED ? (
-                      <p className="text-small text-secondary">and {(group.total - NAMED).toLocaleString()} more</p>
+                      <p className="text-small text-secondary">and {fmt.number(group.total - NAMED)} more</p>
                     ) : null}
                   </li>
                 ))}

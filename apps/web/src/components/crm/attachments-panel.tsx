@@ -5,6 +5,7 @@ import { Paperclip } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type AttachmentView = {
   id: string
@@ -39,14 +40,12 @@ export const AttachmentsPanel = ({
   configured: boolean
   canWrite: boolean
 }) => {
+  const fmt = useFormat()
   const toast = useToast()
   const picker = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [files, setFiles] = useState(rows)
   const [removing, setRemoving] = useState<AttachmentView | null>(null)
-
-  const size = (bytes: number): string =>
-    bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
 
   const upload = async (file: File) => {
     setBusy('upload')
@@ -154,7 +153,7 @@ export const AttachmentsPanel = ({
               >
                 {row.filename}
               </button>
-              <span className="shrink-0 text-small text-secondary tabular-nums">{size(row.bytes)}</span>
+              <span className="shrink-0 text-small text-secondary tabular-nums">{fmt.bytes(row.bytes)}</span>
               {canWrite ? (
                 <IconButton
                   label={`Delete ${row.filename}`}

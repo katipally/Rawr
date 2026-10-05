@@ -1,7 +1,7 @@
 import { Badge, Card, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { threadPath } from '~/lib/links.ts'
-import { formatDate } from './value.tsx'
+import { getFormat } from '~/server/format.ts'
 
 export type OverviewThread = {
   threadId: string
@@ -21,22 +21,20 @@ export type RecordOverviewProps = {
   threads: OverviewThread[]
   firstTouch: Touch
   lastTouch: Touch
-  /** The reader's zone, from the page's session. */
-  zone: string
 }
 
 /** The answer to "what is going on with this record" without reading a timeline:
  *  what was last said and where they came from. What is owed and what money is
  *  open live in the rail beside it, which shows the same rows with more on them,
  *  so this tab no longer repeats them. */
-export const RecordOverview = ({
+export const RecordOverview = async ({
   account,
   object,
   threads,
   firstTouch,
   lastTouch,
-  zone,
 }: RecordOverviewProps) => {
+  const fmt = await getFormat()
   return (
     <div className="flex flex-col gap-3">
       {object === 'contact' ? (
@@ -54,7 +52,7 @@ export const RecordOverview = ({
                   </Link>
                   <p className="text-small text-secondary">
                     {thread.messageCount} message{thread.messageCount === 1 ? '' : 's'}
-                    {thread.lastAt ? ` · last ${formatDate(thread.lastAt, zone)}` : ''}
+                    {thread.lastAt ? ` · last ${fmt.date(thread.lastAt)}` : ''}
                   </p>
                 </li>
               ))}
@@ -78,7 +76,7 @@ export const RecordOverview = ({
                   <>
                     <Badge tone="info">{firstTouch.channel}</Badge>
                     {firstTouch.at ? (
-                      <span className="ml-2 text-secondary">{formatDate(firstTouch.at, zone)}</span>
+                      <span className="ml-2 text-secondary">{fmt.date(firstTouch.at)}</span>
                     ) : null}
                   </>
                 ) : (
@@ -93,7 +91,7 @@ export const RecordOverview = ({
                   <>
                     <Badge tone="info">{lastTouch.channel}</Badge>
                     {lastTouch.at ? (
-                      <span className="ml-2 text-secondary">{formatDate(lastTouch.at, zone)}</span>
+                      <span className="ml-2 text-secondary">{fmt.date(lastTouch.at)}</span>
                     ) : null}
                   </>
                 ) : (

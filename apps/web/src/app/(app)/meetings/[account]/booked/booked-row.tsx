@@ -4,8 +4,7 @@ import { Badge, Button, Field, Modal, TextArea, TextInput, buttonClass, type Bad
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { formatDateTime } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useZone, useFormat } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** One booked meeting.
@@ -43,6 +42,7 @@ export const BookedRow = ({
   contactHref: string | null
   editable: boolean
 }) => {
+  const fmt = useFormat()
   const show = useToast()
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -108,9 +108,9 @@ export const BookedRow = ({
     <li className="flex flex-col gap-1 rounded-panel border border-line bg-surface p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="font-medium">
-          {formatDateTime(booking.startsAt, zone)}
+          {fmt.dateTime(booking.startsAt)}
           {' – '}
-          {end.toLocaleTimeString('en-US', { timeZone: zone, hour: 'numeric', minute: '2-digit' })}
+          {fmt.time(end)}
         </span>
         <span className="text-xs text-secondary">{zone}</span>
         <Badge tone={STATES[booking.state] ?? 'neutral'} dot>

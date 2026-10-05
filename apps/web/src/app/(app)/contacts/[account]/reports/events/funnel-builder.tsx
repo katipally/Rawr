@@ -5,6 +5,7 @@ import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Funnel } from '~/components/reports/chart.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 type Step = { name: string; visitors: number; contacts: number }
 
@@ -25,6 +26,7 @@ export const FunnelBuilder = ({
   to: string
   names: { name: string; label: string }[]
 }) => {
+  const fmt = useFormat()
   const toast = useToast()
   const [steps, setSteps] = useState<string[]>(() =>
     names.slice(0, MIN_STEPS).map((option) => option.name),
@@ -113,12 +115,13 @@ export const FunnelBuilder = ({
 
         {result ? (
           <Funnel
+            format={fmt.number}
             title="Visitors reaching each step, in order"
             steps={result.map((step, index) => ({
               id: `${index}-${step.name}`,
               label: labelOf(step.name),
               value: step.visitors,
-              detail: `${step.contacts.toLocaleString()} known`,
+              detail: `${fmt.number(step.contacts)} known`,
             }))}
           />
         ) : null}

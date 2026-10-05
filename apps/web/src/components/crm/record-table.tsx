@@ -12,10 +12,10 @@ import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
-import { Value, isPast } from './value.tsx'
+import { Value } from './value.tsx'
 import { RecordPreview } from './record-preview.tsx'
 import { ScoreRing } from './score-ring.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
 
@@ -72,7 +72,7 @@ export const RecordTable = ({
   previewFields,
   canWrite,
 }: RecordTableProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const router = useRouter()
   const origin = useOrigin()
   const preview = useSearchParams().get('preview')
@@ -92,7 +92,7 @@ export const RecordTable = ({
     width: index === 0 ? 240 : column.width,
     render: (row) => {
       const value = row.values[column.key]
-      const overdue = OVERDUE_FIELDS.has(column.key) && isPast(value)
+      const overdue = OVERDUE_FIELDS.has(column.key) && fmt.isPast(value)
 
       if (index === 0) {
         // The first column is the way into the record. It shows its own field's
@@ -157,11 +157,11 @@ export const RecordTable = ({
             overdue && 'font-medium text-error',
           )}
         >
-          <Value zone={zone}
+          <Value format={fmt}
             type={column.type}
             value={value}
             label={row.labels[column.key]}
-            currency={String(row.values.currency ?? 'USD')}
+            currency={row.values.currency}
             placeholder="—"
             oneLine
           />
@@ -239,6 +239,7 @@ export const RecordTable = ({
       {/* Previous is the browser's own history, because a keyset cursor points
           forward only and there is no address to jump back to. */}
       <Pagination
+        format={fmt.number}
         className="shrink-0"
         count={rows.length}
         offset={offset}
@@ -268,7 +269,7 @@ export const RecordTable = ({
           it survives a closed tab. */}
       <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
         <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-          {(totalHint ?? rows.length).toLocaleString()}{' '}
+          {fmt.number(totalHint ?? rows.length)}{' '}
           {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
         </span>
         <a

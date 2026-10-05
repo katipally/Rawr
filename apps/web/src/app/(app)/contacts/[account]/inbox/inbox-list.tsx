@@ -6,8 +6,7 @@ import { useState } from 'react'
 import { threadPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import type { InboxFilters } from './inbox-frame.tsx'
-import { formatDate } from '~/components/crm/value.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 type Thread = {
   id: string
@@ -43,7 +42,7 @@ export const InboxList = ({
   filters: InboxFilters
   selected: string | null
 }) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const [threads, setThreads] = useState(initial)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
@@ -77,7 +76,7 @@ export const InboxList = ({
     >
       <p className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 text-small">
         <span className="text-secondary">{filters.q ? `Matching “${filters.q}”` : 'Newest first'}</span>
-        <span className="font-semibold">{threads.length.toLocaleString()}{cursor ? '+' : ''}</span>
+        <span className="font-semibold">{fmt.number(threads.length)}{cursor ? '+' : ''}</span>
       </p>
 
       {threads.length === 0 ? (
@@ -104,7 +103,7 @@ export const InboxList = ({
                     <span className="flex items-baseline justify-between gap-2">
                       <span className={cn('truncate text-body', thread.unread ? 'font-semibold' : 'font-medium')}>{whoOf(thread)}</span>
                       <time className="shrink-0 text-small text-secondary tabular-nums" dateTime={thread.lastAt ?? undefined}>
-                        {thread.lastAt ? formatDate(thread.lastAt, zone) : ''}
+                        {thread.lastAt ? fmt.date(thread.lastAt) : ''}
                       </time>
                     </span>
                     <span className={cn('truncate text-body', thread.unread && 'font-semibold')}>{thread.subject ?? '(no subject)'}</span>

@@ -3,6 +3,7 @@ import type { BadgeTone } from '@rawr/ui'
 import { Markdown } from './markdown.tsx'
 import { toPlainText } from './markdown.ts'
 import type { ReactNode } from 'react'
+import type { Format } from '~/lib/format.ts'
 
 /** How a stored value is read on screen. One rule per field type, matching the
  *  CSV rule and the editor, so a table cell, a card and a record page can never
@@ -11,85 +12,6 @@ import type { ReactNode } from 'react'
  *  Deliberately free of event handlers: this renders inside server components as
  *  well as client ones, and a handler here would make every one of them a client
  *  component. Stopping a click from reaching a clickable row is the table's job. */
-
-/** Every format here names its locale.
- *
- *  `undefined` means "whatever this runtime is set to", which is one thing in the
- *  container and another in the browser: the server wrote "Sep 9" where the reader
- *  would write "9 Sept", React saw two different strings for one node and threw
- *  the server's markup away to re-render it. The app is written in English, so it
- *  reads dates and numbers in one. */
-const LOCALE = 'en-US'
-
-const numberFormat = new Intl.NumberFormat(LOCALE)
-
-/** A count, grouped the same way on the server and in the browser. `toLocaleString`
- *  with no locale is whatever the runtime is set to, which is one thing in the
- *  container and another in the reader's browser: React saw two different strings
- *  for one node and threw the server's markup away (#418). */
-export const formatNumber = (value: number): string =>
-  Number.isFinite(value) ? numberFormat.format(value) : ''
-
-export const formatCurrency = (value: unknown, currency = 'USD'): string => {
-  const amount = Number(value)
-  if (!Number.isFinite(amount)) return ''
-  try {
-    return new Intl.NumberFormat(LOCALE, {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: amount % 1 === 0 ? 0 : 2,
-    }).format(amount)
-  } catch {
-    // An unknown currency code is a data problem, not a reason to render nothing.
-    return `${numberFormat.format(amount)} ${currency}`
-  }
-}
-
-/** Totals in more than one currency, side by side: a report never adds dollars to
- *  euros, so what it holds is a list. Nothing won reads as zero rather than blank. */
-export const formatAmounts = (amounts: readonly { currency: string; amount: number }[]): string =>
-  amounts.length === 0 ? formatCurrency(0) : amounts.map((each) => formatCurrency(each.amount, each.currency)).join(', ')
-
-/** A stored value read as a moment, and whether it is one.
- *
- *  A `date` column is "2026-08-07": a day somebody wrote down, the same day in
- *  every zone. A timestamp is an instant, and which day it falls on depends on
- *  where you are standing. Telling them apart is the whole job here, because
- *  putting a day through a zone moves it, and leaving an instant out of one shows
- *  the wrong hour.
- *
- *  A day is read as UTC midnight and written back in UTC, so it never moves. An
- *  instant is written in the reader's own zone, which the caller passes. */
-type Moment = { date: Date; dayOnly: boolean }
-
-const asMoment = (value: unknown): Moment | null => {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : { date: value, dayOnly: false }
-  if (typeof value !== 'string' || !value) return null
-  const dayOnly = value.length === 10
-  const parsed = new Date(dayOnly ? `${value}T00:00:00Z` : value)
-  return Number.isNaN(parsed.getTime()) ? null : { date: parsed, dayOnly }
-}
-
-/** The zone a moment is written in. A day carries its own and ignores the
- *  reader's; anything else is the reader's. */
-const zoneFor = (moment: Moment, zone: Zone): string => (moment.dayOnly ? 'UTC' : zone)
-
-/** An IANA name, from the signed-in person. `useZone` on the client, `session`
- *  on the server; both sides pass the same one, which is what lets a timestamp be
- *  rendered before it reaches the browser. */
-export type Zone = string
-
-export const formatDate = (value: unknown, zone: Zone): string => {
-  const moment = asMoment(value)
-  return moment
-    ? moment.date.toLocaleDateString(LOCALE, {
-        timeZone: zoneFor(moment, zone),
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      })
-    : ''
-}
 
 /** A record's name, cut to something that can be a tooltip or an accessible name.
  *
@@ -101,89 +23,22 @@ export const formatDate = (value: unknown, zone: Zone): string => {
 export const shortName = (value: string, max = 40): string =>
   value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`
 
-/** A calendar day, as month and day, for a chart axis where the year is already
- *  in the range above it. An axis is days, never instants, so it names UTC and
- *  takes no zone: reading "2026-08-07" and writing it in the reader's own zone
- *  moves it to the 6th for everybody west of Greenwich, and the axis then
- *  disagreed with the range printed above it. */
-export const formatDayShort = (value: unknown): string => {
-  const moment = asMoment(value)
-  return moment
-    ? moment.date.toLocaleDateString(LOCALE, { timeZone: zoneFor(moment, 'UTC'), month: 'short', day: 'numeric' })
-    : ''
-}
-
-/** A month, for the headings a long timeline is broken up by. */
-export const formatMonth = (value: unknown, zone: Zone): string => {
-  const moment = asMoment(value)
-  return moment
-    ? moment.date.toLocaleDateString(LOCALE, { timeZone: zoneFor(moment, zone), month: 'long', year: 'numeric' })
-    : ''
-}
-
-export const formatDateTime = (value: unknown, zone: Zone): string => {
-  const moment = asMoment(value)
-  return moment
-    ? moment.date.toLocaleString(LOCALE, { timeZone: zoneFor(moment, zone), dateStyle: 'medium', timeStyle: 'short' })
-    : ''
-}
-
-/** The calendar day it is right now where the reader is standing, as YYYY-MM-DD.
- *
- *  A stored day is a string and is compared as one, so "today" has to be a string
- *  in the same shape. Taking it from the server's clock in UTC rings the wrong
- *  square on a calendar and marks a task overdue hours early for anyone west of
- *  Greenwich, which is most of the people using this. */
-export const todayIn = (zone: Zone): string => {
-  const parts = new Intl.DateTimeFormat(LOCALE, {
-    timeZone: zone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const part = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((entry) => entry.type === type)?.value ?? ''
-  return `${part('year')}-${part('month')}-${part('day')}`
-}
-
-/** "3 days ago", in the reader's language. Only for a timeline the reader scans
- *  for recency; anything they might quote gets the full date and time. */
-export const formatAgo = (value: unknown): string => {
-  const date = asMoment(value)?.date
-  if (!date) return ''
-  const seconds = Math.round((date.getTime() - Date.now()) / 1000)
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [['day', 86_400], ['hour', 3_600], ['minute', 60]]
-  const [unit, size] = units.find(([, s]) => Math.abs(seconds) >= s) ?? ['minute', 60]
-  const amount = Math.trunc(seconds / size)
-  return amount === 0
-    ? 'just now'
-    : new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' }).format(amount, unit)
-}
-
-export const isPast = (value: unknown): boolean => {
-  const date = asMoment(value)?.date
-  if (!date) return false
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return date < today
-}
-
-const formatValue = (type: FieldType, value: unknown, zone: Zone, currency = 'USD'): string => {
+const formatValue = (type: FieldType, value: unknown, format: Format, currency: string): string => {
   if (value === null || value === undefined || value === '') return ''
   switch (type) {
     case 'currency':
-      return formatCurrency(value, currency)
+      return format.money(value, currency)
     case 'number':
     case 'rating':
-      return Number.isFinite(Number(value)) ? numberFormat.format(Number(value)) : String(value)
+      return Number.isFinite(Number(value)) ? format.number(Number(value)) : String(value)
     case 'percent':
-      return `${numberFormat.format(Number(value))}%`
+      return `${format.number(Number(value))}%`
     case 'boolean':
       return value ? 'Yes' : 'No'
     case 'date':
-      return formatDate(value, zone)
+      return format.date(value)
     case 'datetime':
-      return formatDateTime(value, zone)
+      return format.dateTime(value)
     case 'multi_select':
       return Array.isArray(value) ? value.join(', ') : String(value)
     case 'json':
@@ -204,12 +59,14 @@ const href = (type: FieldType, value: string): string | null => {
 export type ValueProps = {
   type: FieldType
   value: unknown
-  /** The reader's zone, so a datetime cell says the same thing before and after
-   *  the page reaches the browser. */
-  zone: Zone
+  /** The reader's formatter (`useFormat` in a client component, `getFormat` in a
+   *  server one), so a cell says the same thing before and after the page reaches
+   *  the browser. */
+  format: Format
   /** A relation or user field renders its label, never its uuid. */
   label?: string | undefined
-  currency?: string
+  /** The row's own currency; the account's when it names none. */
+  currency?: unknown
   /** Renders the empty state as the placeholder rather than nothing at all. */
   placeholder?: string
   /** A row of a table, where the value has one line and the container is a span.
@@ -241,21 +98,21 @@ const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/
  *  {referrer}}` is two things a person can read, not one thing and a wall of
  *  JSON. A null means "we did not learn this", which is not worth a line, and a
  *  leaf name that repeats keeps the first one it was given. */
-const readableEntries = (value: unknown, zone: Zone, seen: Set<string> = new Set()): [string, string][] => {
+const readableEntries = (value: unknown, format: Format, seen: Set<string> = new Set()): [string, string][] => {
   if (value === null || typeof value !== 'object') return []
   return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]): [string, string][] => {
     if (entry === null || entry === undefined || entry === '') return []
-    if (typeof entry === 'object' && !Array.isArray(entry)) return readableEntries(entry, zone, seen)
+    if (typeof entry === 'object' && !Array.isArray(entry)) return readableEntries(entry, format, seen)
     if (seen.has(key)) return []
     seen.add(key)
     const text = Array.isArray(entry) ? entry.join(', ') : String(entry)
     if (!text) return []
-    if (ISO_INSTANT.test(text)) return [[humanKey(key), formatDateTime(text, zone)]]
+    if (ISO_INSTANT.test(text)) return [[humanKey(key), format.dateTime(text)]]
     return [[humanKey(key), /^https?:\/\//i.test(text) ? shortLink(text) : text]]
   })
 }
 
-export const Value = ({ type, value, zone, label, currency = 'USD', placeholder = '', oneLine = false }: ValueProps): ReactNode => {
+export const Value = ({ type, value, format, label, currency, placeholder = '', oneLine = false }: ValueProps): ReactNode => {
   if (label !== undefined && label !== '') return <span className="break-words">{label}</span>
 
   // A relation or user holds a uuid, which means nothing to a reader. With no
@@ -267,7 +124,7 @@ export const Value = ({ type, value, zone, label, currency = 'USD', placeholder 
     return <span className="text-secondary">Unnamed record</span>
   }
 
-  const text = formatValue(type, value, zone, currency)
+  const text = formatValue(type, value, format, typeof currency === 'string' && currency ? currency : format.currency)
   if (!text) {
     return placeholder ? <span className="text-secondary">{placeholder}</span> : null
   }
@@ -330,7 +187,7 @@ export const Value = ({ type, value, zone, label, currency = 'USD', placeholder 
     // useful part is always the handful of leaves that carry a value. D17 stores
     // the whole payload verbatim; this renders the part a person can act on and
     // keeps the rest on hover.
-    const entries = readableEntries(value, zone).slice(0, 8)
+    const entries = readableEntries(value, format).slice(0, 8)
     if (entries.length === 0) {
       return placeholder ? <span className="text-secondary">{placeholder}</span> : null
     }

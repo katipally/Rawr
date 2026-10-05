@@ -1,7 +1,7 @@
 import { listGrants, listMembers, readAgenda } from '@rawr/db'
 import { Alert, Button, PageHeader, Select, buttonClass } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
-import { todayIn } from '~/components/crm/value.tsx'
+import { todayIn } from '~/lib/format.ts'
 import { redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import {

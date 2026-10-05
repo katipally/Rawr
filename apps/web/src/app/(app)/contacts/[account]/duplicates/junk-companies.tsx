@@ -3,10 +3,9 @@
 import { Button, EmptyState, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useState } from 'react'
-import { formatDate } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type JunkCompany = { id: string; name: string; createdAt: string; contactCount: number }
 
@@ -33,7 +32,7 @@ const MAX = 200
  *  are still here, so this lists them for a person to judge one at a time. Nothing
  *  here deletes anything. */
 export const JunkCompanies = ({ account, companies, limit, total }: JunkCompaniesProps) => {
-  const zone = useZone()
+  const fmt = useFormat()
   const toast = useToast()
   const [rows, setRows] = useState(companies)
   const [asked, setAsked] = useState(limit)
@@ -83,7 +82,7 @@ export const JunkCompanies = ({ account, companies, limit, total }: JunkCompanie
                 <Link href={recordPath(account, 'company', company.id)} className="min-w-0 truncate font-medium">
                   {company.name}
                 </Link>
-                <span className="text-small text-secondary">created {formatDate(company.createdAt, zone)}</span>
+                <span className="text-small text-secondary">created {fmt.date(company.createdAt)}</span>
                 <span className="text-small text-secondary">
                   &middot; {company.contactCount} contact{company.contactCount === 1 ? '' : 's'} attached
                 </span>

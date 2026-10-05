@@ -1,17 +1,13 @@
-import { type Amounts, pipelineReport } from '@rawr/db'
+import { pipelineReport } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { BarChart, Funnel } from '~/components/reports/chart.tsx'
-import { formatAmounts, formatDayShort } from '~/components/crm/value.tsx'
 import { reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
-
-/** One total per currency, never converted or added across them: converting at
- *  today's rate would make last quarter's number move every morning. */
-const money = (amounts: Amounts) => formatAmounts(amounts)
+import { getFormat } from '~/server/format.ts'
 
 const PipelineReport = async ({
   params,
@@ -20,6 +16,7 @@ const PipelineReport = async ({
   params: Promise<{ account: string }>
   searchParams: Promise<{ from?: string; to?: string; pipelines?: string }>
 }) => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
@@ -51,8 +48,9 @@ const PipelineReport = async ({
       <div className="grid gap-4 @4xl:grid-cols-2">
         <Card className="@4xl:col-span-2">
           <BarChart
+            format={fmt.number}
             title="Deals made and closed each week"
-            labels={report.weeks.map((row) => formatDayShort(row.week))}
+            labels={report.weeks.map((row) => fmt.dayShort(row.week))}
             series={[
               { label: 'Created', values: report.weeks.map((row) => row.created), tone: 'accent' },
               { label: 'Won', values: report.weeks.map((row) => row.won), tone: 'success' },
@@ -64,12 +62,13 @@ const PipelineReport = async ({
         {shown.map((group) => (
           <Card key={group.id}>
             <Funnel
+              format={fmt.number}
               title={`${group.name}: where the deals created in this range are now`}
               steps={group.steps.map((row) => ({
                 id: row.stageId,
                 label: row.stage,
                 value: row.deals,
-                detail: row.amounts.length > 0 ? money(row.amounts) : undefined,
+                detail: row.amounts.length > 0 ? fmt.amounts(row.amounts) : undefined,
               }))}
             />
           </Card>
@@ -105,7 +104,7 @@ const PipelineReport = async ({
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.owner}</th>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.open}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.won}</td>
-                      <td className="py-1 text-right tabular-nums">{money(row.wonAmounts)}</td>
+                      <td className="py-1 text-right tabular-nums">{fmt.amounts(row.wonAmounts)}</td>
                     </tr>
                   ))}
                 </tbody>

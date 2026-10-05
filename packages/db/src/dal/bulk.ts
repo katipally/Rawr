@@ -124,7 +124,7 @@ export const startBulkOperation = async (
   if (ids.some((id) => !isUuid(id))) throw new Error('That selection holds something that is not a record.')
   if (ids.length > MAX_IDS) {
     throw new Error(
-      `That is ${ids.length.toLocaleString()} records in one action; ${MAX_IDS.toLocaleString()} is the limit. Narrow the view and run it twice.`,
+      `That is ${ids.length} records in one action; ${MAX_IDS} is the limit. Narrow the view and run it twice.`,
     )
   }
   if (input.action.type === 'merge') {

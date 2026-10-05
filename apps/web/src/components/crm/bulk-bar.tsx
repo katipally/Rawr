@@ -7,6 +7,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
+import { useFormat } from '~/components/zone.tsx'
 
 export type BulkBarProps = {
   object: string
@@ -42,6 +43,7 @@ const POLL_MS = 2000
  *  selection becomes a job rather than a request, and the toolbar shows how far
  *  it has got, because closing the tab must not stop it. */
 export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fields, onDone, onClear }: BulkBarProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [fieldKey, setFieldKey] = useState('')
@@ -191,7 +193,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
       setPending(null)
       if (result.mode === 'queued') {
         setProgress({ id: result.operationId, processed: 0, total: result.total })
-        toast('info', `${result.total.toLocaleString()} ${noun} queued. You can close this page.`)
+        toast('info', `${fmt.number(result.total)} ${noun} queued. You can close this page.`)
         return
       }
       if (result.failed.length > 0) {
@@ -336,7 +338,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
 
       {progress ? (
         <p role="status" className="text-small text-secondary">
-          {progress.processed.toLocaleString()} of {progress.total.toLocaleString()} done. This
+          {fmt.number(progress.processed)} of {fmt.number(progress.total)} done. This
           keeps running if you leave the page.
         </p>
       ) : null}

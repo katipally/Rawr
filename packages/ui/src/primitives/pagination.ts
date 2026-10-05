@@ -22,11 +22,13 @@ export const pageRange = (input: {
   /** Whether the reader may go forward. A cursor list knows this from its cursor. */
   hasMore?: boolean | undefined
   noun?: string | undefined
+  /** How a count is written, so the reader's grouping is used; plain digits when
+   *  the caller does not know it. */
+  format?: ((value: number) => string) | undefined
 }): PageRange => {
-  const { count, offset, total, hasMore, noun = 'rows' } = input
+  const { count, offset, total, hasMore, noun = 'rows', format: number = String } = input
   const from = count === 0 ? 0 : offset + 1
   const to = offset + count
-  const number = (value: number) => value.toLocaleString()
 
   return {
     from,

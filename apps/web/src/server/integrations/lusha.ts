@@ -1,6 +1,7 @@
 import { applyEnrichment, readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** B5. The third enricher, between Apollo and Clay.
  *
@@ -26,6 +27,7 @@ const credentials = async (ctx: AccountContext) => {
 const headers = (key: string) => ({ api_key: key })
 
 export const testLusha = async (ctx: AccountContext): Promise<ConnectionTest> => {
+  const fmt = await getFormat()
   try {
     if (devIntegrationsEnabled) {
       await recordHealth(ctx, 'lusha', { ok: true })
@@ -45,7 +47,7 @@ export const testLusha = async (ctx: AccountContext): Promise<ConnectionTest> =>
       ok: true,
       detail:
         typeof left === 'number'
-          ? `Connected. ${left.toLocaleString()} credits left on this plan.`
+          ? `Connected. ${fmt.number(left)} credits left on this plan.`
           : 'Connected. Lusha accepted the key.',
     }
   } catch (cause) {

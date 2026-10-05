@@ -84,6 +84,28 @@ try {
   check(account.hostedDomain === SANDBOX.domain, 'and carries the domain that claims it', account.hostedDomain)
   check(account.seatsUsed > 0, 'seats in use are counted from live memberships', `${account.seatsUsed}`)
 
+  console.log('\n-- currency -----------------------------------------------------')
+
+  check((await refused(() => saveAccount(superAdmin, { currency: 'ZZZ' }))) !== null, 'a currency the engine does not know is refused')
+  check((await refused(() => saveAccount(superAdmin, { currency: 'eur' }))) !== null, 'and so is a code that is not in capitals')
+  await saveAccount(superAdmin, { currency: 'EUR' })
+  check((await readAccount(superAdmin)).currency === 'EUR', 'the account currency is saved')
+  const mine = (await membershipsForUser(adminId)).find((m) => m.accountSlug === SANDBOX.slug)
+  check(mine?.accountCurrency === 'EUR', 'and the session reads it with the membership', mine?.accountCurrency)
+  const probe = (currency: string | null) => owner`
+    insert into deal (account_id, name, pipeline_id, stage_id, currency)
+    select a.id, 'currency probe', s.pipeline_id, s.id, ${currency}
+      from account a join pipeline_stage s on s.account_id = a.id
+     where a.slug = ${SANDBOX.slug}
+     limit 1
+    returning currency`
+  const [followed] = await probe(null)
+  check(followed?.currency === 'EUR', 'a deal made with no currency takes the account\'s', followed?.currency)
+  const [named] = await probe('GBP')
+  check(named?.currency === 'GBP', 'and one that names its own keeps it', named?.currency)
+  await owner`delete from deal where name = 'currency probe'`
+  await saveAccount(superAdmin, { currency: 'USD' })
+
   console.log('\n-- seating is a super admin act --------------------------------')
 
   check(

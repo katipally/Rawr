@@ -4,11 +4,13 @@ import { agentAccessPath, availabilityPath, calendarsPath, mailboxesPath } from 
 import { plainError } from '~/lib/provider-errors.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import { AccountPanel } from './account-panel.tsx'
+import { getFormat } from '~/server/format.ts'
 
 /** The one screen that is about the signed-in person rather than the account:
  *  who Rawr thinks they are, what they may do here and who can change that, which
  *  Google services they have connected, and the sessions they hold. */
 const AccountPage = async () => {
+  const fmt = await getFormat()
   const session = await readSession()
   if (!session) return null
 
@@ -42,7 +44,7 @@ const AccountPage = async () => {
         detail: mailbox?.lastError
           ? (plainError(mailbox.lastError) ?? mailbox.lastError)
           : mailbox
-            ? `${mailbox.threadCount.toLocaleString()} threads on records.`
+            ? `${fmt.number(mailbox.threadCount)} threads on records.`
             : null,
         canConnect: googleConfigured || devGmailEnabled,
         href: googleConfigured ? '/api/auth/google/gmail' : mailboxesPath(),

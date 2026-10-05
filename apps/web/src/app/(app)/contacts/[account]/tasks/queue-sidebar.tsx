@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { tasksPath, type TaskView } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 export type QueueRow = { id: string; name: string; openCount: number }
 
@@ -28,6 +29,7 @@ const row =
  *  everything, and the tasks nobody filed. Scrolls on its own so a hundred
  *  queues never push the table off the screen. */
 export const QueueSidebar = ({ account, queues, current, keep, canWrite }: QueueSidebarProps) => {
+  const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [adding, setAdding] = useState(false)
@@ -85,7 +87,7 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
               className={cn(row, 'min-w-0 flex-1', current === queue.id && 'bg-fill-hover font-medium')}
             >
               <span className="min-w-0 flex-1 truncate">{queue.name}</span>
-              <span className="shrink-0 text-small text-secondary">{queue.openCount.toLocaleString()}</span>
+              <span className="shrink-0 text-small text-secondary">{fmt.number(queue.openCount)}</span>
             </Link>
             {canWrite ? (
               <>
@@ -188,7 +190,7 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
         }
       >
         <p>
-          The {removing?.openCount.toLocaleString() ?? 0} open{' '}
+          The {fmt.number(removing?.openCount ?? 0)} open{' '}
           {removing?.openCount === 1 ? 'task' : 'tasks'} in it go back to no queue. Nothing is deleted
           but the list itself.
         </p>
