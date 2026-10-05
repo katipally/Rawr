@@ -2080,15 +2080,36 @@ const NOTES_KEPT = 100
  *  the same position, and never finishing. */
 const CHUNK_MS = 45_000
 
+type ChunkResult = { done: boolean; processed: number; total: number }
+
 /** One chunk of an import. Called repeatedly by the worker, so an interrupted run
  *  continues from processed_rows instead of restarting, and re-running the same
- *  file updates rather than duplicating because the dedupe key drives it. A8. */
-export const runImportChunk = async (
-  ctx: AccountContext,
-  id: string,
-): Promise<{ done: boolean; processed: number; total: number }> => {
+ *  file updates rather than duplicating because the dedupe key drives it. A8.
+ *
+ *  The whole chunk is one transaction, run row included, so what it wrote and the
+ *  position it reports commit together or not at all: a crash anywhere in it leaves
+ *  the run where it was and the retry does the chunk over, instead of applying the
+ *  rows twice or counting rows that never landed. The run row is locked first, so a
+ *  second worker, or the retry of a chunk the first caller gave up waiting for,
+ *  queues behind this one and reads the position it left rather than the one it
+ *  started from. */
+export const runImportChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult> => {
   assertCanWrite(ctx, 'contact')
+  if (!isUuid(id)) throw new Error('That import no longer exists.')
+  const result = await withAccount(ctx, async (tx) => {
+    await tx.select({ id: importRun.id }).from(importRun).where(eq(importRun.id, id)).for('update')
+    return importChunk(ctx, id)
+  })
+  // Outside the transaction above, which a thrown error rolls back along with the
+  // note of why the run stopped.
+  if ('failure' in result) {
+    await failImportRun(ctx, id, result.failure)
+    throw result.failure
+  }
+  return result
+}
 
+const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult | { failure: unknown }> => {
   const [run] = await withAccount(ctx, (tx) =>
     tx
       .select({
@@ -2107,16 +2128,18 @@ export const runImportChunk = async (
       .limit(1),
   )
   if (!run) throw new Error('That import no longer exists.')
-  if (run.state === 'done' || run.state === 'cancelled') {
+  if (run.state === 'done' || run.state === 'cancelled' || run.state === 'failed') {
     return { done: true, processed: run.processedRows, total: run.totalRows }
   }
   if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
 
   const kind = run.importKind
-  const object = await objectFor(ctx, kind, run.objectType).catch(async (cause: unknown) => {
-    await failImportRun(ctx, id, cause)
-    throw cause
-  })
+  let object: RegistryObject
+  try {
+    object = await objectFor(ctx, kind, run.objectType)
+  } catch (failure) {
+    return { failure }
+  }
   const mapping = run.mapping as Mapping
   const slice = await readImportRows(ctx, id, run.processedRows, CHUNK)
 
@@ -2206,20 +2229,29 @@ export const runImportChunk = async (
     // the record the first one made, or a unique value somebody else committed
     // in between. Rare enough to cost one round trip each, and they must not be
     // dropped, so they go the way every row used to.
-    for (const position of outcome.contested) {
-      const values = batch.find((row) => row.position === position)!.values
-      try {
-        const existing = await dedupeLookup(ctx, object, values)
-        if (!existing) {
-          refuse(position, 'Another record took that value while this file was importing.')
-          continue
+    await withAccount(ctx, async (tx) => {
+      for (const position of outcome.contested) {
+        const values = batch.find((row) => row.position === position)!.values
+        // A savepoint per row, as in the shape branch: the chunk is one
+        // transaction now, and a database error in one row's update would
+        // otherwise abort every row after it.
+        await tx.execute(sql`savepoint rawr_row`)
+        try {
+          const existing = await dedupeLookup(ctx, object, values)
+          if (!existing) {
+            refuse(position, 'Another record took that value while this file was importing.')
+          } else {
+            await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
+            updated += 1
+          }
+        } catch (cause) {
+          await tx.execute(sql`rollback to savepoint rawr_row`)
+          refuse(position, reasonOf(cause))
+        } finally {
+          await tx.execute(sql`release savepoint rawr_row`)
         }
-        await updateRecord(ctx, object.key, existing, values, null, NO_ENRICH)
-        updated += 1
-      } catch (cause) {
-        refuse(position, reasonOf(cause))
       }
-    }
+    })
   } else {
     // A shape file: one instruction per row, each of which reads the account back
     // before it writes, so these stay one at a time. One transaction for the whole
@@ -2282,39 +2314,34 @@ export const runImportChunk = async (
   const done = processed >= run.totalRows || slice.length === 0
   const previousNotes = (run.errors as RunNote[] | null) ?? []
 
-  try {
-    await withAccount(ctx, async (tx) => {
-      await tx
-        .update(importRun)
-        .set({
-          processedRows: processed,
-          createdCount: sql`${importRun.createdCount} + ${created}`,
-          updatedCount: sql`${importRun.updatedCount} + ${updated}`,
-          skippedCount: sql`${importRun.skippedCount} + ${skipped}`,
-          erroredCount: sql`${importRun.erroredCount} + ${refused.length}`,
-          // The first few, for the screen. Every refused row, with its reason, is
-          // in import_row for the error file, so this list never has to be whole.
-          errors: [...previousNotes, ...notes].slice(0, NOTES_KEPT),
-          unmatchedOwners,
-          state: done ? 'done' : 'running',
-          finishedAt: done ? new Date() : null,
-          updatedAt: new Date(),
-        })
-        // A run cancelled while this chunk was in flight stays cancelled. Without
-        // the state in the predicate the chunk that lost the race wrote 'done' over
-        // it and the screen claimed a stopped import had finished.
-        .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running'])))
-      if (refused.length > 0) {
-        await tx.execute(sql`
-          update import_row r set reason = e.reason
-            from jsonb_to_recordset(${JSON.stringify(refused)}::jsonb) as e(position int, reason text)
-           where r.run_id = ${id}::uuid and r.position = e.position`)
-      }
-    })
-  } catch (cause) {
-    await failImportRun(ctx, id, cause)
-    throw cause
-  }
+  await withAccount(ctx, async (tx) => {
+    await tx
+      .update(importRun)
+      .set({
+        processedRows: processed,
+        createdCount: sql`${importRun.createdCount} + ${created}`,
+        updatedCount: sql`${importRun.updatedCount} + ${updated}`,
+        skippedCount: sql`${importRun.skippedCount} + ${skipped}`,
+        erroredCount: sql`${importRun.erroredCount} + ${refused.length}`,
+        // The first few, for the screen. Every refused row, with its reason, is
+        // in import_row for the error file, so this list never has to be whole.
+        errors: [...previousNotes, ...notes].slice(0, NOTES_KEPT),
+        unmatchedOwners,
+        state: done ? 'done' : 'running',
+        finishedAt: done ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      // A run cancelled while this chunk was in flight stays cancelled. Without
+      // the state in the predicate the chunk that lost the race wrote 'done' over
+      // it and the screen claimed a stopped import had finished.
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running'])))
+    if (refused.length > 0) {
+      await tx.execute(sql`
+        update import_row r set reason = e.reason
+          from jsonb_to_recordset(${JSON.stringify(refused)}::jsonb) as e(position int, reason text)
+         where r.run_id = ${id}::uuid and r.position = e.position`)
+    }
+  })
 
   if (done) await dropImportRows(ctx, id)
   return { done, processed, total: run.totalRows }
@@ -2333,6 +2360,8 @@ export const startImportRun = async (ctx: AccountContext, id: string): Promise<v
         importKind: importRun.importKind,
         mapping: importRun.mapping,
         state: importRun.state,
+        processedRows: importRun.processedRows,
+        totalRows: importRun.totalRows,
       })
       .from(importRun)
       .where(eq(importRun.id, id))
@@ -2340,6 +2369,11 @@ export const startImportRun = async (ctx: AccountContext, id: string): Promise<v
   )
   if (!run) throw new Error('That import no longer exists.')
   if (run.state === 'uploading' || run.state === 'parsing') throw new Error(STILL_ARRIVING)
+  // A run that stopped keeps the rest of its file, so it can go on from where it
+  // got to. One that failed before that was kept has nothing left to read.
+  if (run.state === 'failed' && run.processedRows < run.totalRows && (await readImportRows(ctx, id, run.processedRows, 1)).length === 0) {
+    throw new Error('The rest of this file was cleared when the import stopped, so it cannot go on. Upload the file again.')
+  }
 
   // Before the first chunk, not during it: a column whose field or choice appears
   // halfway through the file is a column that imported nothing above that point.
@@ -2358,16 +2392,23 @@ export const startImportRun = async (ctx: AccountContext, id: string): Promise<v
   const updated = await withAccount(ctx, (tx) =>
     tx
       .update(importRun)
-      .set({ state: 'running', finishedAt: null, updatedAt: new Date() })
-      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running'])))
+      .set({
+        state: 'running',
+        finishedAt: null,
+        updatedAt: new Date(),
+        // The reason it stopped is row 0, and a second stop would otherwise be
+        // shown with the first one's reason.
+        errors: sql`coalesce((select jsonb_agg(note) from jsonb_array_elements(${importRun.errors}) note where note ->> 'row' <> '0'), '[]'::jsonb)`,
+      })
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['mapping', 'previewing', 'running', 'failed'])))
       .returning({ id: importRun.id }),
   )
   if (updated.length === 0) throw new Error('That import is already over, so there is nothing to start.')
 }
 
 /** A run that cannot go on. Written so the screen can say so and stop implying
- *  the file is still being read; the rows are dropped because a failed run is not
- *  resumed. */
+ *  the file is still being read. The rows stay: they are what `startImportRun`
+ *  reads to go on from `processed_rows` once whatever stopped it is put right. */
 const failImportRun = async (ctx: AccountContext, id: string, cause: unknown): Promise<void> => {
   const reason = cause instanceof Error ? cause.message : String(cause)
   await withAccount(ctx, (tx) =>
@@ -2381,11 +2422,7 @@ const failImportRun = async (ctx: AccountContext, id: string, cause: unknown): P
       })
       .where(eq(importRun.id, id)),
   ).catch(() => {
-    // The run is already unrecoverable; failing to record why must not replace
-    // the original error with a second one.
-  })
-  await dropImportRows(ctx, id).catch(() => {
-    // Same reason: the rows are dead weight, not the failure worth reporting.
+    // Failing to record why must not replace the original error with a second one.
   })
 }
 
@@ -2399,7 +2436,7 @@ export const cancelImportRun = async (ctx: AccountContext, id: string): Promise<
     tx
       .update(importRun)
       .set({ state: 'cancelled', finishedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(importRun.id, id), inArray(importRun.state, ['uploading', 'parsing', 'mapping', 'previewing', 'running']))),
+      .where(and(eq(importRun.id, id), inArray(importRun.state, ['uploading', 'parsing', 'mapping', 'previewing', 'running', 'failed']))),
   )
   await dropImportRows(ctx, id)
 }

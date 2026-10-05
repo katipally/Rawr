@@ -91,11 +91,11 @@ const dispatch = defineJob({
          ${SKIPS_FIXTURES ? owner`and a.google_hosted_domain not like '%.test'` : owner``}`
 
     for (const row of rows) {
-      // What keeps two workers off the same position range is that the queue has
-      // one worker and it awaits each handler, not this key: a queue created
-      // without a policy is `standard`, and pg-boss enforces singletonKey only on
-      // the policies that carry a unique index for it. Kept because it is the
-      // right key the day this queue is given one, and it costs nothing today.
+      // Not this key: a queue created without a policy is `standard`, and pg-boss
+      // enforces singletonKey only on the policies that carry a unique index for
+      // it. What keeps two workers off the same chunk is the lock `runImportChunk`
+      // takes on the run, so a second worker waits and then reads the position the
+      // first one left.
       await boss().send(
         'import.run',
         { accountId: row.account_id, runId: row.id },

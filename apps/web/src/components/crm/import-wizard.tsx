@@ -79,9 +79,11 @@ export const ImportWizard = ({
   const [live, setLive] = useState({ state, counts, processed: processedRows, unmatchedOwners })
 
   const finished = live.state === 'done'
-  /** Over, one way or another. A cancelled or failed run keeps its counts and
-   *  its error list; what it must not keep is a Resume button. */
-  const stoppedForGood = live.state === 'cancelled' || live.state === 'failed'
+  /** Over for good. A cancelled run keeps its counts and its error list; what it
+   *  must not keep is a Resume button. A failed one keeps its place in the file
+   *  as well, and goes on from it. */
+  const stoppedForGood = live.state === 'cancelled'
+  const failed = live.state === 'failed'
 
   /** The tab watches; the worker works. Closing this page stops nothing, and
    *  reopening it picks the run up wherever the worker has got to. A8. */
@@ -172,7 +174,7 @@ export const ImportWizard = ({
   const refused = errors.filter((note) => !note.warning && note.row > 0)
   const warnings = errors.filter((note) => note.warning)
 
-  if (finished || stoppedForGood || running) {
+  if (finished || stoppedForGood || failed || running) {
     const pct = totalRows === 0 ? 100 : Math.round((live.processed / totalRows) * 100)
     const accounted =
       live.counts.created + live.counts.updated + live.counts.skipped + live.counts.errored
@@ -236,9 +238,14 @@ export const ImportWizard = ({
 
         {stoppedForGood ? (
           <p className="text-secondary">
-            {live.state === 'cancelled'
-              ? 'Stopped. Everything imported before it stopped is in the CRM; upload the file again to bring in the rest.'
-              : `This import could not go on${failure ? `: ${failure.reason}` : '.'} Fix it and upload the file again.`}
+            Stopped. Everything imported before it stopped is in the CRM; upload the file again to bring in the rest.
+          </p>
+        ) : null}
+
+        {failed ? (
+          <p className="text-secondary">
+            This import could not go on{failure ? `: ${failure.reason}` : '.'} The first{' '}
+            {formatNumber(live.processed)} rows were imported, and resuming carries on from there.
           </p>
         ) : null}
 

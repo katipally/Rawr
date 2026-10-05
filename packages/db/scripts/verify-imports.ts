@@ -659,7 +659,8 @@ try {
 
   await check('start marks the run running and leaves the work to the worker', async () => {
     const stamp = String(Date.now())
-    const id = await startRun(admin, 'records', stamp, 400)
+    const total = 5_100
+    const id = await startRun(admin, 'records', stamp, total)
     await startImportRun(admin, id)
     const started = (await readImportRun(admin, id))!
     expect(started.state === 'running', `the run is ${started.state}`)
@@ -1114,6 +1115,143 @@ try {
     expect(done.created + done.updated + done.skipped + done.errored === done.totalRows, 'the counts do not add up to the file')
     expect(done.errors.some((note) => note.warning && note.reason.includes('cut')), 'the cut title was not mentioned')
     return 'two created, the cut title noted on the side'
+  })
+
+  console.log('\n-- a chunk is one transaction ----------------------------------------')
+
+  const contactsOf = async (stamp: string): Promise<number> => {
+    const [row] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from contact
+       where account_id = ${sandbox.id} and email like ${`verify.imports.${stamp}.%`} and deleted_at is null`)
+    return Number(row?.n ?? 0)
+  }
+  const forgetContacts = (stamp: string) =>
+    db.execute(sql`delete from contact where account_id = ${sandbox.id} and email like ${`verify.imports.${stamp}.%`}`)
+
+  await check('two workers asking for the same chunk apply it once', async () => {
+    const stamp = String(Date.now())
+    const total = 5_100
+    const id = await startRun(admin, 'records', stamp, total)
+    await startImportRun(admin, id)
+    // The first chunk is held for a second just before it commits, so the second
+    // arrives while the first is still open and has read the run's position, which
+    // is what a second worker and the retry of a chunk the first caller gave up
+    // waiting for both look like.
+    const slow = `verify_imports_slow_${stamp}`
+    await db.execute(sql.raw(`
+      create function ${slow}() returns trigger language plpgsql as $$
+      begin perform pg_sleep(1); return new; end $$`))
+    await db.execute(sql.raw(`
+      create trigger ${slow} before update of processed_rows on import_run
+        for each row when (new.id = '${id}'::uuid and new.processed_rows > old.processed_rows)
+        execute function ${slow}()`))
+    try {
+      const first = runImportChunk(admin, id)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await Promise.all([first, runImportChunk(admin, id)])
+    } finally {
+      await db.execute(sql.raw(`drop trigger if exists ${slow} on import_run`))
+      await db.execute(sql.raw(`drop function if exists ${slow}()`))
+    }
+    await runToEnd(admin, id)
+    const done = (await readImportRun(admin, id))!
+    const stored = await contactsOf(stamp)
+    await forgetContacts(stamp)
+    expect(done.state === 'done' && done.processedRows === total, `${done.state} at ${done.processedRows} of ${total}`)
+    expect(done.created === total && done.updated === 0, `${done.created} created, ${done.updated} updated, expected ${total} and 0`)
+    expect(stored === total, `${stored} contacts exist, expected ${total}`)
+    return 'a second chunk arriving mid-write waited, 5,100 created once, none updated'
+  })
+
+  await check('a chunk that dies after writing leaves nothing behind, and the retry counts every row once', async () => {
+    const stamp = String(Date.now())
+    const id = await startRun(admin, 'records', stamp, 300)
+    await startImportRun(admin, id)
+    const trap = `verify_imports_crash_${stamp}`
+    await db.execute(sql.raw(`
+      create function ${trap}() returns trigger language plpgsql as $$
+      begin raise exception 'simulated crash after the rows were written'; end $$`))
+    await db.execute(sql.raw(`
+      create trigger ${trap} before update of processed_rows on import_run
+        for each row when (new.id = '${id}'::uuid and new.processed_rows > old.processed_rows)
+        execute function ${trap}()`))
+    try {
+      let crashed = false
+      try {
+        await runImportChunk(admin, id)
+      } catch {
+        crashed = true
+      }
+      expect(crashed, 'the chunk did not fail')
+      const after = (await readImportRun(admin, id))!
+      expect(after.state === 'running', `the run was left ${after.state}`)
+      expect(after.processedRows === 0 && after.created === 0, `${after.processedRows} processed, ${after.created} counted`)
+      expect((await contactsOf(stamp)) === 0, 'the rows of the dead chunk were kept')
+    } finally {
+      await db.execute(sql.raw(`drop trigger if exists ${trap} on import_run`))
+      await db.execute(sql.raw(`drop function if exists ${trap}()`))
+    }
+    await runToEnd(admin, id)
+    const done = (await readImportRun(admin, id))!
+    const stored = await contactsOf(stamp)
+    await forgetContacts(stamp)
+    expect(done.created === 300 && done.updated === 0 && done.errored === 0, `${done.created} created, ${done.updated} updated, ${done.errored} refused`)
+    expect(stored === 300, `${stored} contacts exist, expected 300`)
+    return 'rolled back whole, then 300 created once'
+  })
+
+  await check('a failed run keeps its file and goes on from where it stopped', async () => {
+    const stamp = String(Date.now())
+    const total = 5_100
+    const id = await startRun(admin, 'records', stamp, total)
+    await startImportRun(admin, id)
+    const first = await runImportChunk(admin, id)
+    expect(!first.done && first.processed > 0, `one chunk did ${first.processed} rows`)
+
+    // The object the run imports into stops existing, which is a run that cannot
+    // be read rather than a chunk that went wrong.
+    await db.execute(sql`update import_run set object_type = 'gone' where id = ${id}::uuid`)
+    let said = ''
+    try {
+      await runImportChunk(admin, id)
+    } catch (cause) {
+      said = cause instanceof Error ? cause.message : String(cause)
+    }
+    const failed = (await readImportRun(admin, id))!
+    expect(failed.state === 'failed', `the run is ${failed.state}, after "${said}"`)
+    expect(failed.processedRows === first.processed, `${failed.processedRows} processed after the failure`)
+    expect((await rowCount(id)) === total, `${await rowCount(id)} of ${total} rows kept`)
+
+    await db.execute(sql`update import_run set object_type = 'contact' where id = ${id}::uuid`)
+    await startImportRun(admin, id)
+    const resumed = (await readImportRun(admin, id))!
+    expect(resumed.state === 'running', `resuming left it ${resumed.state}`)
+    expect(!resumed.errors.some((note) => note.row === 0), 'the old reason for stopping was kept')
+    await runToEnd(admin, id)
+    const done = (await readImportRun(admin, id))!
+    const stored = await contactsOf(stamp)
+    await forgetContacts(stamp)
+    expect(done.state === 'done' && done.created === total, `${done.state}, ${done.created} created of ${total}`)
+    expect(stored === total, `${stored} contacts exist, expected ${total}`)
+    return `failed at ${first.processed}, resumed, ${total} created once`
+  })
+
+  await check('a failed run whose file was cleared says so instead of finishing short', async () => {
+    const stamp = String(Date.now())
+    const id = await startRun(admin, 'records', stamp, 20)
+    await startImportRun(admin, id)
+    await db.execute(sql`update import_run set object_type = 'gone' where id = ${id}::uuid`)
+    await runImportChunk(admin, id).catch(() => undefined)
+    await db.execute(sql`delete from import_row where run_id = ${id}::uuid`)
+    await db.execute(sql`update import_run set object_type = 'contact' where id = ${id}::uuid`)
+    let said = ''
+    await startImportRun(admin, id).catch((cause: unknown) => {
+      said = cause instanceof Error ? cause.message : String(cause)
+    })
+    expect(said.includes('cleared'), `resuming said "${said}"`)
+    await cancelImportRun(admin, id)
+    expect(((await readImportRun(admin, id))!).state === 'cancelled', 'a failed run could not be cancelled')
+    return 'refused with the rows gone, cancellable'
   })
 
   console.log('\n-- tenancy -----------------------------------------------------------')
