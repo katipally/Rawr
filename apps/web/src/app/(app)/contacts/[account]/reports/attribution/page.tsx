@@ -2,7 +2,7 @@ import { attributionReport, campaignPerformance, type CampaignPerformance } from
 import { Card } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { BarChart } from '~/components/reports/chart.tsx'
-import { formatCurrency } from '~/components/crm/value.tsx'
+import { formatAmounts, formatCurrency } from '~/components/crm/value.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
@@ -17,7 +17,7 @@ const Touch = ({
 }: {
   title: string
   explanation: string
-  rows: { channel: string; contacts: number; deals: number; wonAmount: number }[]
+  rows: { channel: string; contacts: number; deals: number; wonAmounts: { currency: string; amount: number }[] }[]
 }) => (
       <Card>
     <BarChart
@@ -42,7 +42,7 @@ const Touch = ({
             {rows.map((row) => (
               <tr key={row.channel} className="border-b border-divider last:border-0">
                 <th scope="row" className="py-1 pr-3 text-left font-normal">{row.channel}</th>
-                <td className="py-1 text-right tabular-nums">{formatCurrency(row.wonAmount)}</td>
+                <td className="py-1 text-right tabular-nums">{formatAmounts(row.wonAmounts)}</td>
               </tr>
             ))}
           </tbody>

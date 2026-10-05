@@ -95,8 +95,20 @@ const dayBounds = (range: Range, column: string, zone: string) =>
 
 // ------------------------------------------------------------------ pipeline
 
+/** Money is reported one total per currency and never added across them:
+ *  converting at today's rate would make last quarter's number move every
+ *  morning. Largest first. */
+export type Amounts = { currency: string; amount: number }[]
+
+const amountsOf = (rows: { currency: string; amount: string | number }[] | null): Amounts =>
+  (rows ?? []).map((row) => ({ currency: row.currency, amount: Number(row.amount) }))
+
 export type PipelineReport = {
-  weeks: { week: string; created: number; won: number; lost: number; wonAmount: number }[]
+  /** Deals made each week, and deals closed each week: a deal is won in the week
+   *  it was won, whenever it was made. */
+  weeks: { week: string; created: number; won: number; lost: number }[]
+  /** What the deals won over the range came to, per currency. */
+  wonAmounts: Amounts
   /** One entry per stage of every pipeline, in pipeline then stage order. Two
    *  pipelines routinely name a stage the same thing, so the stage id is what
    *  identifies a row and the pipeline is what a reader groups by. Merging them
@@ -108,41 +120,68 @@ export type PipelineReport = {
     stage: string
     position: number
     deals: number
-    amount: number
+    amounts: Amounts
   }[]
-  owners: { owner: string; open: number; won: number; wonAmount: number }[]
+  owners: { owner: string; open: number; won: number; wonAmounts: Amounts }[]
 }
 
-/** What the pipeline did over the range: how many deals arrived each week, how
- *  many closed either way, where the open ones are sitting, and who holds them.
+/** The deals that are closed now, each with when it closed: the last time a move
+ *  put it in a stage (the stage_change every move writes), else the close date it
+ *  was given, else when it was made, for a deal that was created already won.
  *
- *  Amounts are summed in the account's own currencies without conversion, so a
- *  mixed-currency pipeline reports one number per currency on the board and one
- *  unconverted total here. Converting at today's rate would make last quarter's
- *  number change every morning. */
+ *  A deal that closed inside the range has been written to since, so rows last
+ *  touched before it began are skipped before the lookup rather than after: the
+ *  lookup is one indexed probe per deal, and an account's history is mostly
+ *  deals that closed long ago. */
+const closedDeals = (range: Range, zone: string) => sql`
+  select d.id, d.amount, d.currency, s.is_closed_won as won,
+         coalesce(
+           (select max(l.occurred_at) from activity_link l
+             where l.entity_type = 'deal' and l.entity_id = d.id and l.type = 'stage_change'),
+           d.close_date::timestamp at time zone ${zone},
+           d.created_at) as closed_at
+    from deal d
+    join pipeline_stage s on s.id = d.stage_id and (s.is_closed_won or s.is_closed_lost)
+   where d.deleted_at is null and d.updated_at >= ${range.from.toISOString()}::timestamptz`
+
+/** What the pipeline did over the range: how many deals arrived each week, how
+ *  many closed either way, where the open ones are sitting, and who holds them. */
 export const pipelineReport = async (ctx: AccountContext, range: Range): Promise<PipelineReport> =>
   withAccount(ctx, async (tx) => {
     const zone = await accountZone(ctx, tx)
-    const weeks = await tx.execute<{
-      week: string
-      created: number
-      won: number
-      lost: number
-      won_amount: string | null
-    }>(sql`
-      with weeks as (${calendar(range, 'week', zone)})
-      select w.bucket as week,
-             count(d.id)::int as created,
-             count(d.id) filter (where s.is_closed_won)::int as won,
-             count(d.id) filter (where s.is_closed_lost)::int as lost,
-             coalesce(sum(d.amount) filter (where s.is_closed_won), 0)::text as won_amount
+
+    const weeks = await tx.execute<{ week: string; created: number; won: number; lost: number }>(sql`
+      with weeks as (${calendar(range, 'week', zone)}),
+      made as (
+        select ${weekly('d.created_at', zone)} as week, count(*)::int as n
+          from deal d
+         where d.deleted_at is null and ${bounds(range, 'd.created_at')}
+         group by 1
+      ),
+      closed as (${closedDeals(range, zone)}),
+      shut as (
+        select ${weekly('c.closed_at', zone)} as week,
+               count(*) filter (where c.won)::int as won,
+               count(*) filter (where not c.won)::int as lost
+          from closed c
+         where ${bounds(range, 'c.closed_at')}
+         group by 1
+      )
+      select w.bucket as week, coalesce(m.n, 0)::int as created,
+             coalesce(x.won, 0)::int as won, coalesce(x.lost, 0)::int as lost
         from weeks w
-        left join deal d
-          on ${weekly('d.created_at', zone)} = w.bucket
-         and d.deleted_at is null and ${bounds(range, 'd.created_at')}
-        left join pipeline_stage s on s.id = d.stage_id
-       group by w.bucket
+        left join made m on m.week = w.bucket
+        left join shut x on x.week = w.bucket
        order by w.bucket`)
+
+    const won = await tx.execute<{ currency: string; amount: string }>(sql`
+      with closed as (${closedDeals(range, zone)})
+      select c.currency, sum(c.amount)::text as amount
+        from closed c
+       where c.won and ${bounds(range, 'c.closed_at')}
+       group by c.currency
+      having coalesce(sum(c.amount), 0) > 0
+       order by sum(c.amount) desc`)
 
     const funnel = await tx.execute<{
       pipeline_id: string
@@ -151,31 +190,48 @@ export const pipelineReport = async (ctx: AccountContext, range: Range): Promise
       stage: string
       position: number
       deals: number
-      amount: string | null
+      amounts: { currency: string; amount: string }[]
     }>(sql`
+      with per as (
+        select d.stage_id, d.currency, count(*)::int as n, coalesce(sum(d.amount), 0) as amount
+          from deal d
+         where d.deleted_at is null and ${bounds(range, 'd.created_at')}
+         group by 1, 2
+      )
       select p.id as pipeline_id, p.name as pipeline,
              s.id as stage_id, s.name as stage, s.position::int as position,
-             count(d.id)::int as deals,
-             coalesce(sum(d.amount), 0)::text as amount
+             coalesce(sum(per.n), 0)::int as deals,
+             coalesce(json_agg(json_build_object('currency', per.currency, 'amount', per.amount) order by per.amount desc)
+                        filter (where per.amount > 0), '[]'::json) as amounts
         from pipeline_stage s
         join pipeline p on p.id = s.pipeline_id
-        left join deal d
-          on d.stage_id = s.id and d.deleted_at is null and ${bounds(range, 'd.created_at')}
+        left join per on per.stage_id = s.id
        group by p.id, p.name, p.position, s.id, s.name, s.position
        order by p.position, p.name, s.position
        limit ${MAX_ROWS}`)
 
-    const owners = await tx.execute<{ owner: string | null; open: number; won: number; won_amount: string | null }>(sql`
-      select coalesce(u.name, u.email, 'Unassigned') as owner,
-             count(*) filter (where not coalesce(s.is_closed_won, false) and not coalesce(s.is_closed_lost, false))::int as open,
-             count(*) filter (where s.is_closed_won)::int as won,
-             coalesce(sum(d.amount) filter (where s.is_closed_won), 0)::text as won_amount
-        from deal d
-        left join pipeline_stage s on s.id = d.stage_id
-        left join user_account u on u.id = d.owner_id
-       where d.deleted_at is null and ${bounds(range, 'd.created_at')}
-       group by 1
-       order by 4 desc
+    const owners = await tx.execute<{
+      owner: string
+      open: number
+      won: number
+      won_amounts: { currency: string; amount: string }[]
+    }>(sql`
+      select o.owner, sum(o.open)::int as open, sum(o.won)::int as won,
+             coalesce(json_agg(json_build_object('currency', o.currency, 'amount', o.won_amount) order by o.won_amount desc)
+                        filter (where o.won_amount > 0), '[]'::json) as won_amounts
+        from (
+          select coalesce(u.name, u.email, 'Unassigned') as owner, d.currency,
+                 count(*) filter (where not coalesce(s.is_closed_won, false) and not coalesce(s.is_closed_lost, false)) as open,
+                 count(*) filter (where s.is_closed_won) as won,
+                 coalesce(sum(d.amount) filter (where s.is_closed_won), 0) as won_amount
+            from deal d
+            left join pipeline_stage s on s.id = d.stage_id
+            left join user_account u on u.id = d.owner_id
+           where d.deleted_at is null and ${bounds(range, 'd.created_at')}
+           group by 1, 2
+        ) o
+       group by o.owner
+       order by sum(o.won) desc, sum(o.open) desc, o.owner
        limit ${MAX_ROWS}`)
 
     return {
@@ -184,8 +240,8 @@ export const pipelineReport = async (ctx: AccountContext, range: Range): Promise
         created: Number(row.created),
         won: Number(row.won),
         lost: Number(row.lost),
-        wonAmount: Number(row.won_amount ?? 0),
       })),
+      wonAmounts: amountsOf(won),
       funnel: funnel.map((row) => ({
         pipelineId: row.pipeline_id,
         pipeline: row.pipeline,
@@ -193,13 +249,13 @@ export const pipelineReport = async (ctx: AccountContext, range: Range): Promise
         stage: row.stage,
         position: Number(row.position),
         deals: Number(row.deals),
-        amount: Number(row.amount ?? 0),
+        amounts: amountsOf(row.amounts),
       })),
       owners: owners.map((row) => ({
-        owner: row.owner ?? 'Unassigned',
+        owner: row.owner,
         open: Number(row.open),
         won: Number(row.won),
-        wonAmount: Number(row.won_amount ?? 0),
+        wonAmounts: amountsOf(row.won_amounts),
       })),
     }
   })
@@ -520,8 +576,8 @@ export const websiteReport = async (ctx: AccountContext, range: Range): Promise<
 // --------------------------------------------------------------- attribution
 
 export type AttributionReport = {
-  first: { channel: string; contacts: number; deals: number; wonAmount: number }[]
-  last: { channel: string; contacts: number; deals: number; wonAmount: number }[]
+  first: { channel: string; contacts: number; deals: number; wonAmounts: Amounts }[]
+  last: { channel: string; contacts: number; deals: number; wonAmounts: Amounts }[]
 }
 
 /** The question the whole block exists for: which channels bring people who
@@ -545,7 +601,12 @@ export const attributionReport = async (ctx: AccountContext, range: Range): Prom
         : sql`c.original_source`
 
     const byTouch = async (column: 'original_source' | 'latest_source') =>
-      tx.execute<{ channel: string | null; contacts: number; deals: number; won_amount: string | null }>(sql`
+      tx.execute<{
+        channel: string
+        contacts: number
+        deals: number
+        won_amounts: { currency: string; amount: string }[]
+      }>(sql`
         with touched as (
           select coalesce(${source(column)} ->> 'channel', 'Not attributed') as channel, c.id, c.company_id
             from contact c
@@ -558,29 +619,35 @@ export const attributionReport = async (ctx: AccountContext, range: Range): Prom
         -- somebody in January is credited with the deal that closed in June, and
         -- cutting the join at the range end would credit it with nothing.
         credited as (
-          select distinct t.channel, d.id, d.amount, coalesce(s.is_closed_won, false) as won
+          select distinct t.channel, d.id, d.amount, d.currency, coalesce(s.is_closed_won, false) as won
             from touched t
             join deal d on d.company_id = t.company_id and d.deleted_at is null
             left join pipeline_stage s on s.id = d.stage_id
         ),
-        deals as (
-          select channel, count(*)::int as deals,
+        per_currency as (
+          select channel, currency, count(*)::int as n,
                  coalesce(sum(amount) filter (where won), 0) as won_amount
-            from credited group by channel
+            from credited group by channel, currency
+        ),
+        deals as (
+          select channel, sum(n)::int as deals,
+                 coalesce(json_agg(json_build_object('currency', currency, 'amount', won_amount) order by won_amount desc)
+                            filter (where won_amount > 0), '[]'::json) as won_amounts
+            from per_currency group by channel
         )
         select p.channel, p.contacts, coalesce(k.deals, 0)::int as deals,
-               coalesce(k.won_amount, 0)::text as won_amount
+               coalesce(k.won_amounts, '[]'::json) as won_amounts
           from (select channel, count(*)::int as contacts from touched group by channel) p
           left join deals k on k.channel = p.channel
-         order by coalesce(k.won_amount, 0) desc, p.contacts desc
+         order by p.contacts desc, coalesce(k.deals, 0) desc, p.channel
          limit ${MAX_ROWS}`)
 
     const shape = (rows: Awaited<ReturnType<typeof byTouch>>) =>
       rows.map((row) => ({
-        channel: row.channel ?? 'Not attributed',
+        channel: row.channel,
         contacts: Number(row.contacts),
         deals: Number(row.deals),
-        wonAmount: Number(row.won_amount ?? 0),
+        wonAmounts: amountsOf(row.won_amounts),
       }))
 
     return {

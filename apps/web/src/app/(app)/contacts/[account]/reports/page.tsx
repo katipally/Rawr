@@ -9,7 +9,7 @@ import {
 import { Card } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { formatCurrency } from '~/components/crm/value.tsx'
+import { formatAmounts } from '~/components/crm/value.tsx'
 import { reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from './header.tsx'
@@ -72,7 +72,6 @@ const ReportsOverview = async ({
 
   const created = pipeline.weeks.reduce((total, week) => total + week.created, 0)
   const won = pipeline.weeks.reduce((total, week) => total + week.won, 0)
-  const wonAmount = pipeline.weeks.reduce((total, week) => total + week.wonAmount, 0)
   const submissions = forms.days.reduce((total, day) => total + day.clean + day.held, 0)
   const held = forms.days.reduce((total, day) => total + day.held, 0)
   const sent = sequences.sequences.reduce((total, row) => total + row.sent, 0)
@@ -91,7 +90,7 @@ const ReportsOverview = async ({
             href={link('pipeline')}
             label="Deals created"
             value={String(created)}
-            hint={`${won} won, ${formatCurrency(wonAmount)}`}
+            hint={`${won} won, ${formatAmounts(pipeline.wonAmounts)}`}
           />
           <Tile
             href={link('forms')}
@@ -121,7 +120,7 @@ const ReportsOverview = async ({
             href={link('attribution')}
             label="Biggest first touch"
             value={topFirst?.channel ?? '—'}
-            hint={topFirst ? `${topFirst.contacts} contacts, ${formatCurrency(topFirst.wonAmount)} won` : 'Nothing attributed in this range'}
+            hint={topFirst ? `${topFirst.contacts} contacts, ${formatAmounts(topFirst.wonAmounts)} won` : 'Nothing attributed in this range'}
           />
         </div>
       </Card>

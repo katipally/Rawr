@@ -529,14 +529,14 @@ try {
   const [salesRow] = await owner<{ id: string }[]>`
     select id from pipeline where account_id = ${probe.id} and name = 'Sales Pipeline'`
   const salesPipeline = salesRow!.id
-  const stageOf = async (kind: 'open' | 'won'): Promise<string> => {
+  const stageOf = async (kind: 'open' | 'won' | 'lost'): Promise<string> => {
     const [row] = await owner<{ id: string }[]>`
       select id from pipeline_stage
-       where pipeline_id = ${salesPipeline} and is_closed_won = ${kind === 'won'} and not is_closed_lost
+       where pipeline_id = ${salesPipeline} and is_closed_won = ${kind === 'won'} and is_closed_lost = ${kind === 'lost'}
        order by position limit 1`
     return row!.id
   }
-  const [openStage, wonStage] = [await stageOf('open'), await stageOf('won')]
+  const [openStage, wonStage, lostStage] = [await stageOf('open'), await stageOf('won'), await stageOf('lost')]
   const makeContact = async (label: string, at: string, companyId: string | null, channel: string | null) => {
     const [row] = await owner<{ id: string }[]>`
       insert into contact (account_id, email, company_id, created_at, original_source, latest_source)
@@ -557,6 +557,14 @@ try {
               ${extra.company ?? null}, ${extra.amount ?? null}, ${extra.currency ?? 'USD'}, ${extra.closeDate ?? null}::date)
       returning id`
     return row!.id
+  }
+  const makeStageChange = async (dealId: string, at: string) => {
+    const [act] = await owner<{ id: string }[]>`
+      insert into activity (account_id, type, subject, occurred_at, actor_kind)
+      values (${probe.id}, 'stage_change', ${`${tag} moved`}, ${at}::timestamptz, 'job') returning id`
+    await owner`
+      insert into activity_link (account_id, activity_id, entity_type, entity_id, type, occurred_at)
+      values (${probe.id}, ${act!.id}, 'deal', ${dealId}, 'stage_change', ${at}::timestamptz)`
   }
 
   await check('A-01: two fills at 9:21 and 9:32 PM Pacific are one Pacific day, not the next', async () => {
@@ -681,8 +689,8 @@ try {
     const report = await attributionReport(probeCtx, march)
     const row = report.first.find((each) => each.channel === channel)
     expect(row?.contacts === 3 && row.deals === 1, `${row?.contacts} contacts, ${row?.deals} deals`)
-    expect(row?.wonAmount === 100_000, `${row?.wonAmount} won`)
-    return '3 contacts, 1 deal, 100,000'
+    expect(JSON.stringify(row?.wonAmounts) === JSON.stringify([{ currency: 'USD', amount: 100_000 }]), `${JSON.stringify(row?.wonAmounts)} won`)
+    return '3 contacts, 1 deal, 100,000 USD'
   })
 
   await check('A-04: a campaign is not credited a deal once per contact either', async () => {
@@ -699,6 +707,30 @@ try {
     expect(row?.contacts === 2 && row.deals === 1, `${row?.contacts} contacts, ${row?.deals} deals`)
     expect(row?.wonAmount === 40_000, `${row?.wonAmount} won`)
     return '2 contacts, 1 deal, 40,000'
+  })
+
+  await check('A-05: a deal is won in the week it closed, not the week it was made', async () => {
+    const dueOn = await makeDeal('won-late', wonStage, '2001-01-15T18:00:00Z', { amount: 1000 })
+    await makeStageChange(dueOn, '2001-03-12T18:00:00Z')
+    await makeDeal('won-dated', wonStage, '2001-02-20T18:00:00Z', { amount: 500, currency: 'EUR', closeDate: '2001-03-14' })
+    await makeDeal('open', openStage, '2001-03-05T18:00:00Z')
+    const lost = await makeDeal('lost', lostStage, '2001-03-06T18:00:00Z')
+    await makeStageChange(lost, '2001-03-20T18:00:00Z')
+
+    const report = await pipelineReport(probeCtx, march)
+    const week = (day: string) => report.weeks.find((row) => row.week === day)
+    expect(week('2001-03-05')?.created === 2, `created ${week('2001-03-05')?.created} in the week of the 5th`)
+    expect(week('2001-03-12')?.won === 2, `won ${week('2001-03-12')?.won} in the week of the 12th`)
+    expect(week('2001-03-19')?.lost === 1, `lost ${week('2001-03-19')?.lost} in the week of the 19th`)
+    expect(week('2001-03-05')?.lost === 0 && week('2001-03-05')?.won === 0, 'a close was charted in the week the deal was created')
+    return 'created 2 in the week of the 5th, won 2 in the 12th, lost 1 in the 19th'
+  })
+
+  await check('A-05: what was won is one total per currency, never a sum of two', async () => {
+    const report = await pipelineReport(probeCtx, march)
+    const got = report.wonAmounts.map((each) => `${each.currency} ${each.amount}`).join(', ')
+    expect(got === 'USD 1000, EUR 500', `won ${got}`)
+    return got
   })
 
   console.log('')

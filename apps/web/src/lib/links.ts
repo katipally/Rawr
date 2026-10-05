@@ -279,10 +279,11 @@ export const threadPath = (account: string, threadId: string): string =>
 export const sequencesPath = (account: string): string => `/${CRM_ROOT}/${account}/sequences`
 
 /** The six reports. `tab` is the report, `from` and `to` are the range, so a
- *  report worth looking at is a link somebody can send. */
+ *  report worth looking at is a link somebody can send. `pipelines=all` is the
+ *  pipeline report with the ones that held no deals in the range left in. */
 export const reportsPath = (
   account: string,
-  params: { tab?: string; from?: string; to?: string } = {},
+  params: { tab?: string; from?: string; to?: string; pipelines?: 'all' } = {},
 ): string => {
   const { tab, ...rest } = params
   return `/${CRM_ROOT}/${account}/reports${tab ? `/${tab}` : ''}${query(rest)}`

@@ -1,28 +1,31 @@
-import { pipelineReport } from '@rawr/db'
+import { type Amounts, pipelineReport } from '@rawr/db'
 import { Card } from '@rawr/ui'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { BarChart, Funnel } from '~/components/reports/chart.tsx'
-import { formatCurrency, formatDayShort } from '~/components/crm/value.tsx'
+import { formatAmounts, formatDayShort } from '~/components/crm/value.tsx'
+import { reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 
-/** Amounts are summed without converting between currencies: converting at
+/** One total per currency, never converted or added across them: converting at
  *  today's rate would make last quarter's number move every morning. */
-const money = (value: number) => formatCurrency(value)
+const money = (amounts: Amounts) => formatAmounts(amounts)
 
 const PipelineReport = async ({
   params,
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ from?: string; to?: string }>
+  searchParams: Promise<{ from?: string; to?: string; pipelines?: string }>
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = reportRange(session, await searchParams)
+  const search = await searchParams
+  const range = reportRange(session, search)
   const report = await pipelineReport(contextFrom(session), range)
 
   // One funnel per pipeline. The rows arrive in pipeline then stage order, so
@@ -33,6 +36,13 @@ const PipelineReport = async ({
     if (last?.id === row.pipelineId) last.steps.push(row)
     else pipelines.push({ id: row.pipelineId, name: row.pipeline, steps: [row] })
   }
+  // A pipeline nobody has used, such as the default one beside the real one, is a
+  // chart of zeros. Hidden unless asked for, and kept when every one is empty so
+  // the page is never blank.
+  const used = pipelines.filter((group) => group.steps.some((row) => row.deals > 0))
+  const showAll = search.pipelines === 'all' || used.length === 0
+  const shown = showAll ? pipelines : used
+  const hidden = pipelines.length - shown.length
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -41,7 +51,7 @@ const PipelineReport = async ({
       <div className="grid gap-4 @4xl:grid-cols-2">
         <Card className="@4xl:col-span-2">
           <BarChart
-            title="Deals each week"
+            title="Deals made and closed each week"
             labels={report.weeks.map((row) => formatDayShort(row.week))}
             series={[
               { label: 'Created', values: report.weeks.map((row) => row.created), tone: 'accent' },
@@ -51,7 +61,7 @@ const PipelineReport = async ({
           />
         </Card>
 
-        {pipelines.map((group) => (
+        {shown.map((group) => (
           <Card key={group.id}>
             <Funnel
               title={`${group.name}: where the deals created in this range are now`}
@@ -59,11 +69,21 @@ const PipelineReport = async ({
                 id: row.stageId,
                 label: row.stage,
                 value: row.deals,
-                detail: row.amount > 0 ? money(row.amount) : undefined,
+                detail: row.amounts.length > 0 ? money(row.amounts) : undefined,
               }))}
             />
           </Card>
         ))}
+
+        {hidden > 0 ? (
+          <p className="text-small text-secondary @4xl:col-span-2">
+            {hidden} {hidden === 1 ? 'pipeline' : 'pipelines'} with no deals in this range{' '}
+            {hidden === 1 ? 'is' : 'are'} hidden.{' '}
+            <Link href={reportsPath(account, { tab: 'pipeline', from: range.fromDay, to: range.toDay, pipelines: 'all' })}>
+              Show {hidden === 1 ? 'it' : 'them'}
+            </Link>
+          </p>
+        ) : null}
 
         <Card title="By owner">
           {report.owners.length === 0 ? (
@@ -85,7 +105,7 @@ const PipelineReport = async ({
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.owner}</th>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.open}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.won}</td>
-                      <td className="py-1 text-right tabular-nums">{money(row.wonAmount)}</td>
+                      <td className="py-1 text-right tabular-nums">{money(row.wonAmounts)}</td>
                     </tr>
                   ))}
                 </tbody>

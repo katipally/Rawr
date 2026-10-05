@@ -45,6 +45,11 @@ export const formatCurrency = (value: unknown, currency = 'USD'): string => {
   }
 }
 
+/** Totals in more than one currency, side by side: a report never adds dollars to
+ *  euros, so what it holds is a list. Nothing won reads as zero rather than blank. */
+export const formatAmounts = (amounts: readonly { currency: string; amount: number }[]): string =>
+  amounts.length === 0 ? formatCurrency(0) : amounts.map((each) => formatCurrency(each.amount, each.currency)).join(', ')
+
 /** A stored value read as a moment, and whether it is one.
  *
  *  A `date` column is "2026-08-07": a day somebody wrote down, the same day in

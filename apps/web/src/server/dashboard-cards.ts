@@ -5,6 +5,7 @@ import {
   pipelineReport,
   sequencesReport,
   websiteReport,
+  type Amounts,
   type AttributionReport,
   type EmailReport,
   type FormsReport,
@@ -14,7 +15,7 @@ import {
   type WebsiteReport,
   type AccountContext,
 } from '@rawr/db'
-import { formatCurrency } from '~/components/crm/value.tsx'
+import { formatAmounts } from '~/components/crm/value.tsx'
 
 /** B11. The catalogue a dashboard is assembled from.
  *
@@ -59,10 +60,9 @@ const percent = (part: number, whole: number): string =>
 const count = (value: number): string => value.toLocaleString()
 
 /** The same formatting the reports overview uses, so a card and the report it
- *  came from never show the same figure two different ways. Amounts are summed
- *  across currencies without conversion upstream, exactly as the pipeline report
- *  does it, and this inherits that. */
-const money = (value: number): string => formatCurrency(value)
+ *  came from never show the same figure two different ways. Amounts arrive as one
+ *  total per currency and are never converted or added across them. */
+const money = (amounts: Amounts): string => formatAmounts(amounts)
 
 /** Longest table a card shows. A card is a glance; the report behind it is the
  *  place to read all forty rows, and every card links there. */
@@ -89,12 +89,11 @@ const CARDS: CardDef[] = [
     report: 'pipeline',
     group: 'Pipeline',
     render: ({ pipeline }) => {
-      const weeks = pipeline?.weeks ?? []
-      const won = sum(weeks, (week) => week.won)
+      const won = sum(pipeline?.weeks ?? [], (week) => week.won)
       return {
         kind: 'metric',
-        value: money(sum(weeks, (week) => week.wonAmount)),
-        hint: `across ${count(won)} deal${won === 1 ? '' : 's'}, unconverted`,
+        value: money(pipeline?.wonAmounts ?? []),
+        hint: `across ${count(won)} deal${won === 1 ? '' : 's'}, one total per currency`,
       }
     },
   },
@@ -113,7 +112,7 @@ const CARDS: CardDef[] = [
         columns: ['Stage', 'Deals', 'Amount'],
         rows: funnel
           .slice(0, TOP)
-          .map((row) => [many ? `${row.pipeline} · ${row.stage}` : row.stage, row.deals, money(row.amount)]),
+          .map((row) => [many ? `${row.pipeline} · ${row.stage}` : row.stage, row.deals, money(row.amounts)]),
       }
     },
   },
@@ -285,7 +284,7 @@ const CARDS: CardDef[] = [
       columns: ['Channel', 'Contacts', 'Deals', 'Won'],
       rows: (attribution?.first ?? [])
         .slice(0, TOP)
-        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmount)]),
+        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmounts)]),
     }),
   },
   {
@@ -298,7 +297,7 @@ const CARDS: CardDef[] = [
       columns: ['Channel', 'Contacts', 'Deals', 'Won'],
       rows: (attribution?.last ?? [])
         .slice(0, TOP)
-        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmount)]),
+        .map((row) => [row.channel, row.contacts, row.deals, money(row.wonAmounts)]),
     }),
   },
 ]
