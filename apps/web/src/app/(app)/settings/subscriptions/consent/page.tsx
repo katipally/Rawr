@@ -1,5 +1,6 @@
 import { CONSENT_FILTERS, CONSENT_PAGE, listConsentRecords, type ConsentFilter } from '@rawr/db'
-import { PageHeader } from '@rawr/ui'
+import { Breadcrumb, PageHeader } from '@rawr/ui'
+import { subscriptionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ConsentTable } from './consent-table.tsx'
 
@@ -30,6 +31,7 @@ const ConsentRecordsPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb items={[{ label: 'Subscriptions', href: subscriptionsPath() }, { label: 'Consent records' }]} />
       <PageHeader
         as="h2"
         title="Consent records"

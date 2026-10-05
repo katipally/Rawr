@@ -1,5 +1,5 @@
-import { listMembers, readAgenda } from '@rawr/db'
-import { Button, PageHeader, Select } from '@rawr/ui'
+import { listGrants, listMembers, readAgenda } from '@rawr/db'
+import { Alert, Button, PageHeader, Select, buttonClass } from '@rawr/ui'
 import { MeetingsTabs } from '../tabs.tsx'
 import { todayIn } from '~/components/crm/value.tsx'
 import { redirect } from 'next/navigation'
@@ -7,9 +7,11 @@ import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import {
   bookedPath,
   calendarPath,
+  calendarsPath,
   recordPath,
   tasksPath,
 } from '~/lib/links.ts'
+import { googleCalendarConfigured } from '~/lib/env.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
 /** The month, for one person.
@@ -44,10 +46,12 @@ const CalendarScreen = async ({
   const everyone = query.who === 'all' && sessionIsAdmin(session)
   const who = everyone ? null : query.who && sessionIsAdmin(session) ? query.who : session.userId
 
-  const [agenda, members] = await Promise.all([
+  const [agenda, members, grants] = await Promise.all([
     readAgenda(ctx, { month, userId: who }),
     sessionIsAdmin(session) ? listMembers(ctx) : Promise.resolve([]),
+    listGrants(ctx),
   ])
+  const connected = grants.some((grant) => grant.userId === session.userId && grant.state === 'connected')
 
   const whose =
     everyone
@@ -63,6 +67,22 @@ const CalendarScreen = async ({
       />
 
       <MeetingsTabs account={account} current="calendar" />
+
+      {connected ? null : (
+        <Alert
+          tone="warning"
+          action={
+            <a
+              href={googleCalendarConfigured ? `/api/auth/google/calendar?return=${encodeURIComponent(calendarPath(account))}` : calendarsPath(account)}
+              className={buttonClass('primary', 'no-underline')}
+            >
+              Connect calendar
+            </a>
+          }
+        >
+          Your calendar is not connected, so no meeting link can offer you a time and nothing here is checked against your real diary.
+        </Alert>
+      )}
 
       {sessionIsAdmin(session) && members.length > 1 ? (
         <form method="get" className="flex flex-wrap items-center gap-2">

@@ -1,5 +1,6 @@
 import { listEventDefs } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
+import { trackingPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { TrackingTabs } from '../tabs.tsx'
 import { EventDefList } from './event-list.tsx'
@@ -29,6 +30,7 @@ const TrackingEventsPage = async ({ searchParams }: { searchParams: Promise<{ q?
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb items={[{ label: 'Tracking', href: trackingPath() }, { label: 'Events' }]} />
       <PageHeader
         as="h2"
         title="Events"

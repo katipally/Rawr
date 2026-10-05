@@ -1,8 +1,9 @@
 import { inboxCounts, listInboxThreads, listMailboxes } from '@rawr/db'
-import { cn } from '@rawr/ui'
+import { Alert, buttonClass, cn } from '@rawr/ui'
 import { Search, Settings } from 'lucide-react'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { googleConfigured } from '~/lib/env.ts'
 import { inboxPath, mailboxesPath } from '~/lib/links.ts'
 import type { Session } from '~/server/session.ts'
 import { contextFrom } from '~/server/session.ts'
@@ -73,8 +74,24 @@ export const InboxFrame = async ({
   const current = views.find((view) => same(view.filters, filters))?.key ?? null
   const link = 'flex items-center justify-between gap-2 rounded-hs px-3 py-2 text-body no-underline hover:bg-fill'
 
+  const hasMailbox = mailboxes.some((box) => box.userId === session.userId && box.state !== 'revoked')
+
   return (
-    <div className="flex h-full min-h-0">
+    <div className="flex h-full min-h-0 flex-col">
+      {hasMailbox ? null : (
+        <Alert
+          tone="warning"
+          className="m-2"
+          action={
+            <a href={googleConfigured ? '/api/auth/google/gmail' : mailboxesPath()} className={buttonClass('primary', 'no-underline')}>
+              Connect mailbox
+            </a>
+          }
+        >
+          Your mailbox is not connected, so nothing of yours arrives here and replies are not read.
+        </Alert>
+      )}
+      <div className="flex min-h-0 flex-1">
       <aside className="hidden w-[14.75rem] shrink-0 flex-col border-r border-line bg-surface md:flex">
         <div className="flex flex-col gap-3 px-4 pt-4 pb-2">
           <h1 className="text-lg font-semibold">Inbox</h1>
@@ -144,6 +161,7 @@ export const InboxFrame = async ({
       />
 
       <section className="flex min-w-0 flex-1 flex-col bg-canvas">{children}</section>
+      </div>
     </div>
   )
 }

@@ -1,10 +1,10 @@
 import { readCustomEvent, readPageView, type PageViewDetail } from '@rawr/db'
-import { EmptyState } from '@rawr/ui'
+import { Breadcrumb, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { Value, formatDateTime } from '~/components/crm/value.tsx'
-import { objectView, pageViewPath, recordPath } from '~/lib/links.ts'
+import { objectView, pageViewPath, recordPath, reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** One thing a person did on the site, addressed by its own id. F4 §4's third
@@ -19,6 +19,19 @@ const Row = ({ label, children }: { label: string; children: React.ReactNode }) 
     <dt className="text-small text-secondary uppercase">{label}</dt>
     <dd className="min-w-0 break-words">{children}</dd>
   </div>
+)
+
+/** Where this was reached from, as far as the data says: the person it belongs to,
+ *  or the website report when it belongs to nobody. */
+const Trail = ({ account, contactId, contactName, what }: { account: string; contactId: string | null; contactName: string | null; what: string }) => (
+  <Breadcrumb
+    items={[
+      contactId
+        ? { label: contactName ?? 'Contact', href: recordPath(account, 'contact', contactId) }
+        : { label: 'Website activity', href: reportsPath(account, { tab: 'website' }) },
+      { label: what },
+    ]}
+  />
 )
 
 const PageViewScreen = async ({
@@ -42,6 +55,7 @@ const PageViewScreen = async ({
     const properties = Object.entries(event.properties)
     return (
       <div className="flex flex-col gap-4">
+        <Trail account={account} contactId={event.contactId} contactName={event.contactName} what="Tracked event" />
         <header className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
           <p className="text-small text-secondary uppercase">Tracked event</p>
           <h1 className="break-words text-lg font-medium">{event.name}</h1>
@@ -97,6 +111,7 @@ const PageViewScreen = async ({
 
   return (
     <div className="flex flex-col gap-4">
+      <Trail account={account} contactId={view.contactId} contactName={view.contactName} what="Page view" />
       <header className="flex flex-col gap-2 rounded-panel border border-line bg-surface p-3">
         <p className="text-small text-secondary uppercase">Page view</p>
         <h1 className="break-words text-lg font-medium">{view.title ?? view.path}</h1>

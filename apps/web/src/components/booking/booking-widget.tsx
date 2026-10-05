@@ -403,6 +403,13 @@ export const BookingWidget = ({
                 {notice}
               </p>
             ) : null}
+            {month.unavailable && monthIsEmpty && !stale ? (
+              <div className="rawr-b-blank" role="status">
+                <b>No times can be offered right now</b>
+                <p>{month.unavailable}</p>
+              </div>
+            ) : (
+              <>
             {month.unavailable ? (
               <p className="rawr-b-note" data-bad role="alert">
                 <Icon name="warn" />
@@ -473,6 +480,8 @@ export const BookingWidget = ({
                 )}
               </div>
             </div>
+              </>
+            )}
           </>
         )}
       </div>

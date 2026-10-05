@@ -28,6 +28,7 @@ import { NotificationBell } from './notifications.tsx'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
 import { useUi, useUiReady, usePreferencesSync } from '~/lib/store/ui.ts'
 import { TaskTray } from './task-tray.tsx'
+import { useRememberBeforeSettings } from '~/lib/use-origin.ts'
 
 export type NavItem = {
   href: string
@@ -123,6 +124,7 @@ const Shell = ({
   children,
 }: AppShellProps) => {
   const pathname = usePathname()
+  useRememberBeforeSettings()
   const { pendingHref, navigate } = useNavigation()
   // Where the person is going counts as where they are, from the click onward.
   const here = pendingHref?.split('?')[0] ?? pathname

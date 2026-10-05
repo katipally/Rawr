@@ -1,5 +1,6 @@
 import { listCampaigns } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
+import { trackingPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { TrackingTabs } from '../tabs.tsx'
 import { CampaignList } from './campaign-list.tsx'
@@ -29,6 +30,7 @@ const TrackingCampaignsPage = async ({ searchParams }: { searchParams: Promise<{
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb items={[{ label: 'Tracking', href: trackingPath() }, { label: 'Campaigns' }]} />
       <PageHeader
         as="h2"
         title="Campaigns"

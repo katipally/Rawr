@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import type { SettingsGroup } from '~/lib/settings-nav.ts'
+import { useBeforeSettings } from '~/lib/use-origin.ts'
 
 /** Labels only. Every settings page opens with its own title and a sentence
  *  saying what it is for, so repeating that sentence sixteen times in the rail
@@ -13,6 +14,7 @@ import type { SettingsGroup } from '~/lib/settings-nav.ts'
 export const SettingsNav = ({ groups, backHref }: { groups: SettingsGroup[]; backHref: string }) => {
   const pathname = usePathname()
   const [needle, setNeedle] = useState('')
+  const back = useBeforeSettings(backHref)
   // The query string on a properties link picks an object, not a page, so the
   // comparison is on the path alone.
   const pathOf = (href: string) => href.split('?')[0] ?? href
@@ -24,7 +26,7 @@ export const SettingsNav = ({ groups, backHref }: { groups: SettingsGroup[]; bac
   return (
     <nav aria-label="Settings" className="min-w-0">
       <div className="flex flex-col gap-3 border-b border-line p-6">
-        <Link href={backHref} className="flex items-center gap-1 text-small text-body no-underline hover:underline">
+        <Link href={back} className="flex items-center gap-1 text-small text-body no-underline hover:underline">
           <ChevronLeft aria-hidden="true" className="size-4" />
           Back
         </Link>

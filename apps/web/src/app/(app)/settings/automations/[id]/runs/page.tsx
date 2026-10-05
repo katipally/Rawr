@@ -1,6 +1,7 @@
 import { listAutomationRuns, readAutomation, RUN_PAGE } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
 import { notFound } from 'next/navigation'
+import { automationsPath } from '~/lib/links.ts'
 import { RunLog } from './run-log.tsx'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
@@ -47,6 +48,7 @@ const AutomationRunsPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb items={[{ label: 'Automations', href: automationsPath() }, { label: rule.name }]} />
       <PageHeader
         as="h2"
         title={rule.name}
