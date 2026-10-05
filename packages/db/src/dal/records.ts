@@ -1393,6 +1393,8 @@ const deleteRecordIn = async (
     sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${id}`,
   )
 
+  if (object.key === 'contact') await stopEnrollmentsOf(tx, id, 'The contact was deleted.')
+
   // Views are detached rather than deleted, so aggregate counts stay honest.
   // Erasure is a separate, explicit action. F4's edge case table.
   if (object.key === 'contact') {
@@ -1405,6 +1407,14 @@ const deleteRecordIn = async (
 
   return displayName(object, before)
 }
+
+/** A sequence keeps emailing whoever its enrollment names, so a contact that is
+ *  deleted or merged away takes its live enrollments with it. */
+const stopEnrollmentsOf = (tx: Tx, contactId: string, reason: string) =>
+  tx.execute(sql`
+    update sequence_enrollment
+       set state = 'removed', stop_reason = ${reason}, next_run_at = null, finished_at = now(), lease_until = null
+     where contact_id = ${contactId} and state in ('active', 'paused')`)
 
 export type BulkDeleteResult = { deleted: number; failed: { id: string; displayName: string; reason: string }[] }
 
@@ -1641,6 +1651,7 @@ export const mergeRecords = async (
     await tx.execute(
       sql`delete from enrichment_request where entity = ${object.key} and entity_id = ${input.absorbedId}`,
     )
+    if (object.key === 'contact') await stopEnrollmentsOf(tx, input.absorbedId, 'The contact was merged into another.')
 
     const chosen: RecordValues = {}
     for (const [key, side] of Object.entries(input.picks)) {

@@ -4,7 +4,7 @@ import type { AccountContext } from '../src/dal/context.ts'
 import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { ingestMessage, saveMailbox, type IncomingMessage } from '../src/dal/messages.ts'
-import { createRecord } from '../src/dal/records.ts'
+import { createRecord, deleteRecord, mergeRecords } from '../src/dal/records.ts'
 import { setSubscription } from '../src/dal/subscriptions.ts'
 import { setTaskStatus } from '../src/dal/tasks.ts'
 import {
@@ -172,6 +172,19 @@ try {
   check(
     outcomes.find((row) => row.contactId === noEmail.id)?.reason === 'No email address.',
     'and somebody without one is refused, by name',
+  )
+
+  // Whoever is deleted or merged away must stop receiving the sequence.
+  const goner = await createRecord(admin, 'contact', { first_name: 'Verify', last_name: 'Deleted', email: `seq-gone-${stamp}@partner1.example` })
+  const absorbed = await createRecord(admin, 'contact', { first_name: 'Verify', last_name: 'Merged', email: `seq-merged-${stamp}@partner1.example` })
+  await enroll(sales, { sequenceId: created.id, contactIds: [goner.id, absorbed.id], mailboxId: box.id })
+  await deleteRecord(admin, 'contact', goner.id)
+  await mergeRecords(admin, { objectKey: 'contact', survivorId: noEmail.id, absorbedId: absorbed.id, picks: {} })
+  const left = await owner`select contact_id, state from sequence_enrollment where contact_id in (${goner.id}, ${absorbed.id})`
+  check(
+    left.length === 2 && left.every((row) => row.state === 'removed'),
+    'a contact deleted or merged away is taken out of the sequence',
+    left.map((row) => row.state).join(', '),
   )
 
   const again = await enroll(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: box.id })

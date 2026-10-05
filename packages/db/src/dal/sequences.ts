@@ -1097,7 +1097,7 @@ export const claimEnrollmentRun = async (
              (select a.tracking_requires_consent from account a limit 1) as tracking_requires_consent
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
-        join contact c on c.id = e.contact_id
+        join contact c on c.id = e.contact_id and c.deleted_at is null
         left join company co on co.id = c.company_id
         left join mailbox m on m.id = e.mailbox_id
         left join message_thread t on t.id = e.thread_id
