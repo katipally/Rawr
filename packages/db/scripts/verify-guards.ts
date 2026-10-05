@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import { replayDeadLetter } from '../src/dal/jobs.ts'
@@ -22,6 +23,7 @@ import { listSegments } from '../src/dal/segments.ts'
 import { listReportDashboards } from '../src/dal/report-dashboards.ts'
 import { bulkDeleteRecords, deleteRecord, listRecords, mergeRecords } from '../src/dal/records.ts'
 import { setMemberGrants } from '../src/dal/members.ts'
+import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
@@ -446,6 +448,19 @@ try {
   check((await held(salesSeat.id)) === 0, 'a seat with no hubs reads no contacts')
   await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: [], editHubs: ['contacts'] })
   check((await held(salesSeat.id)) > 0, 'an edit grant reads what a view grant would')
+
+  // A hard DELETE is judged by the edit scope, like an UPDATE. The app only ever
+  // soft deletes, so this is the policy holding where the code does not look.
+  await setMemberGrants(superAdmin, {
+    userId: salesSeat.id, viewHubs: ['contacts'], editHubs: ['contacts'], editScopes: { contacts: 'own' },
+  })
+  const deleter: AccountContext = {
+    accountId, actorId: salesSeat.id, actorKind: 'user', isSuperAdmin: false, viewHubs: ['contacts'], editHubs: ['contacts'],
+  }
+  const hardDelete = (email: string) =>
+    withAccount(deleter, (tx) => tx.execute(sql`delete from contact where email = ${email} returning id`)).then((rows) => rows.length)
+  check((await hardDelete(`scope.m.${scopeStamp}@guard.test`)) === 0, 'a seat scoped to edit its own records cannot hard delete a colleague’s')
+  check((await hardDelete(`scope.s.${scopeStamp}@guard.test`)) === 1, 'and can hard delete its own')
 
   const [outsider] = await owner<{ id: string }[]>`
     select u.id from user_account u

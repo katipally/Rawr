@@ -638,6 +638,13 @@
       "when": 1791651234179,
       "tag": "0089_private_mailbox_stays_private",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1791737634179,
+      "tag": "0090_delete_follows_edit_scope",
+      "breakpoints": true
     }
   ]
 }
