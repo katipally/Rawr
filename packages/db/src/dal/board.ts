@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
-import { withAccount } from './index.ts'
+import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
@@ -85,7 +85,7 @@ type BoardInput = {
  *  Resolved the same way for the first page and for a "show more", so page two of
  *  a column continues page one instead of reshuffling it. */
 const boardShape = async (ctx: AccountContext, input: BoardInput) => {
-  const scope = scopeFor(ctx.actorId)
+  const scope = scopeFor(ctx.actorId, await accountZone(ctx))
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, 'deal')
 

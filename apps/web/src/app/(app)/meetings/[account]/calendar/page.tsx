@@ -38,7 +38,7 @@ const CalendarScreen = async ({
 
   const ctx = contextFrom(session)
   // The reader's own today decides the default month, not the server's.
-  const today = todayIn(session.timezone)
+  const today = todayIn(session.accountTimezone)
   const month = MONTH.test(query.month ?? '') ? `${query.month}-01` : `${today.slice(0, 7)}-01`
   // Everybody's is only an admin's to ask for: a rep's calendar is theirs.
   const everyone = query.who === 'all' && sessionIsAdmin(session)

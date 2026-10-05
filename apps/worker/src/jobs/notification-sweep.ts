@@ -44,10 +44,11 @@ export const notificationSweep = defineJob({
              'Was due ' || to_char(t.due_date, 'FMDay DD FMMonth') || '.',
              'task', t.id
         from task t
+        join account a on a.id = t.account_id
        where t.status = 'open'
          and t.assignee_id is not null
          and t.due_date is not null
-         and t.due_date < current_date
+         and t.due_date < (now() at time zone a.timezone)::date
       on conflict (account_id, user_id, dedupe_key) do nothing
       returning 1`.then((rows) => [rows.length])
 

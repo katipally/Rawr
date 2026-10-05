@@ -16,7 +16,7 @@ import {
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
-import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
+import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
 import { notify, resolveNotifications } from './notifications.ts'
 import { aliasVisitor } from './stitch.ts'
@@ -1205,10 +1205,9 @@ export const cloneForm = async (ctx: AccountContext, id: string): Promise<string
  *  touched it. Three counters on one row, upserted in a single statement so a
  *  beacon costs one round trip and never a read.
  *
- *  The day is UTC, like every other daily counter here. A window that starts on
- *  the reader's own today therefore includes a beacon their clock calls
- *  yesterday evening; the alternative is storing a timezone per beacon, which a
- *  counter cannot afford. */
+ *  The day is the account's, the same calendar the reports count in, read in the
+ *  same statement rather than stored per beacon. Rows written before an account
+ *  chose a zone stay on the UTC day they were counted on. */
 export const countFormView = async (input: {
   accountId: string
   formId: string
@@ -1226,7 +1225,8 @@ export const countFormView = async (input: {
   await withAccount(publicEdgeContext(input.accountId), async (tx) => {
     await tx.execute(sql`
       insert into form_view (account_id, form_id, day, page_path, views, renders, interactions)
-      values (${input.accountId}, ${input.formId}, current_date, ${path}, ${views}, ${renders}, ${interactions})
+      values (${input.accountId}, ${input.formId}, (now() at time zone (select timezone from account limit 1))::date,
+              ${path}, ${views}, ${renders}, ${interactions})
       on conflict (account_id, form_id, day, page_path) do update
          set views = form_view.views + excluded.views,
              renders = form_view.renders + excluded.renders,
@@ -1270,6 +1270,12 @@ export const formPerformance = async (
       .limit(1)
     if (!exists) return null
 
+    // The days asked for are the account's days, so the instants that bound them
+    // are its midnights, and a fill at 9:21 PM Pacific is on the day it was made.
+    const zone = await accountZone(ctx, tx)
+    const opens = sql`(${from}::date)::timestamp at time zone ${zone}`
+    const closes = sql`(${to}::date + 1)::timestamp at time zone ${zone}`
+
     const counters = await tx.execute<{
       day: string
       views: number
@@ -1283,15 +1289,15 @@ export const formPerformance = async (
          and v.day between ${from}::date and ${to}::date`)
 
     const submissions = await tx.execute<{ day: string; path: string | null; state: string; created: boolean }>(sql`
-      select s.at::date::text as day,
+      select (s.at at time zone ${zone})::date::text as day,
              s.attribution ->> 'pagePath' as path,
              s.spam_state::text as state,
              (c.id is not null and c.created_at >= s.at - interval '5 seconds') as created
         from form_submission s
         left join contact c on c.id = s.contact_id
        where s.form_id = ${input.formId}
-         and s.at >= ${from}::date
-         and s.at < (${to}::date + 1)`)
+         and s.at >= ${opens}
+         and s.at < ${closes}`)
 
     // Page visits for an embedded form come from the collector, not from here:
     // the beacon knows the form painted, and the page view next to it is what
@@ -1305,8 +1311,8 @@ export const formPerformance = async (
             from page_view p
             left join visitor_session e on e.id = p.session_id
            where p.path = any(array[${sql.join(paths.map((path) => sql`${path}::text`), sql`, `)}])
-             and p.at >= ${from}::date
-             and p.at < (${to}::date + 1)
+             and p.at >= ${opens}
+             and p.at < ${closes}
            group by p.path, e.channel`)
       : []
 
@@ -1322,8 +1328,8 @@ export const formPerformance = async (
              ) e on true
        where s.form_id = ${input.formId}
          and s.spam_state in ('clean', 'released')
-         and s.at >= ${from}::date
-         and s.at < (${to}::date + 1)
+         and s.at >= ${opens}
+         and s.at < ${closes}
        group by e.channel`)
 
     const [previous] = await tx.execute<{ views: number }>(sql`

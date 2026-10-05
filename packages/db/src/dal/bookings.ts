@@ -7,7 +7,7 @@ import { assertCanWrite, type AccountContext } from './context.ts'
 import { readSchema, type FormField } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
-import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
+import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { mapAnswersToColumns, upsertCapturedPerson } from './people.ts'
 import { aliasVisitor } from './stitch.ts'
 import {
@@ -408,6 +408,9 @@ export const readPageHosts = async (
     }
 
     const countByUser = new Map(counts.map((row) => [row.host_user_id, Number(row.n)]))
+    // A host who has never opened their schedule keeps the account's clock, the
+    // same one the working-hours screen shows them.
+    const zone = await accountZone(ctx, tx)
 
     return hosts.map((host) => ({
       userId: host.user_id,
@@ -416,7 +419,7 @@ export const readPageHosts = async (
       weight: host.weight,
       isRequired: host.is_required,
       lastAssignedAt: asDate(host.last_assigned_at),
-      timezone: host.timezone ?? 'America/Los_Angeles',
+      timezone: host.timezone ?? zone,
       // The same fallback the working-hours screen shows. Without it that screen
       // displayed nine to five for somebody with no row, while the engine read
       // nothing and held every slot back: hours on screen, an empty calendar in

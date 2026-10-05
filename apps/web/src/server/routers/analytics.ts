@@ -68,7 +68,7 @@ export const analyticsRouter = router({
         }),
       )
       .query(({ ctx, input }) =>
-        call(() => eventFunnel(ctx.account, { steps: input.steps, range: clampRange(input) })),
+        call(() => eventFunnel(ctx.account, { steps: input.steps, range: clampRange(input, ctx.session.accountTimezone) })),
       ),
   }),
 

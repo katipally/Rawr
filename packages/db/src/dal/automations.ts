@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import { automation, automationRun } from '../schema/automation.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
-import { isUuid, mutate, withAccount } from './index.ts'
+import { accountZone, isUuid, mutate, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import {
   fieldOrThrow,
@@ -480,7 +480,7 @@ export const conditionsHold = async (
   return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, objectKey)
-    const where = compileFilters(object, conditions, scopeFor(null))
+    const where = compileFilters(object, conditions, scopeFor(null, await accountZone(ctx, tx)))
     const [row] = await tx.execute<{ hit: number }>(sql`
       select 1 as hit from ${tableFor(object)}
        where ${sql.raw(`"${objectKey}"."id"`)} = ${entityId}::uuid

@@ -26,7 +26,7 @@ const DashboardScreen = async ({
   if (!session) redirect('/sign-in')
 
   const { account, id } = await params
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const ctx = contextFrom(session)
   const [found, all] = await Promise.all([readReportDashboard(ctx, id), listReportDashboards(ctx)])
 

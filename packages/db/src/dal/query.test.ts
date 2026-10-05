@@ -57,7 +57,7 @@ const contact: RegistryObject = {
   byKey: new Map(FIELDS.map((f) => [f.key, f])),
 }
 
-const scope = scopeFor('user-1', new Date('2026-09-03T10:00:00Z'))
+const scope = scopeFor('user-1', 'UTC', new Date('2026-09-03T10:00:00Z'))
 
 /** The SQL a builder produced, with bound values rendered as placeholders rather
  *  than inlined. That separation is the whole point: anything a person typed must
@@ -154,6 +154,15 @@ test('@me resolves to the caller and an anonymous caller matches nothing', () =>
   assert.ok(compileFilters(contact, mine, scope))
   // Saying "false" beats quietly dropping the filter and showing every record.
   assert.equal(built(compileFilters(contact, mine, scopeFor(null))).text, '(false)')
+})
+
+test('@today is the day in the account zone, not in UTC', () => {
+  // 3 AM UTC on the 3rd is still the evening of the 2nd on the Pacific coast, and
+  // already the afternoon of the 3rd in Auckland.
+  const at = new Date('2026-09-03T03:00:00Z')
+  assert.equal(scopeFor(null, 'UTC', at).today, '2026-09-03')
+  assert.equal(scopeFor(null, 'America/Los_Angeles', at).today, '2026-09-02')
+  assert.equal(scopeFor(null, 'Pacific/Auckland', at).today, '2026-09-03')
 })
 
 test('an empty group and an empty filter set compile to nothing at all', () => {

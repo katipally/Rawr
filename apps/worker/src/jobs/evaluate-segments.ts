@@ -15,8 +15,9 @@ import { defineJob } from './registry.ts'
  *  its own and does not take the others with it, which is why the layer reports per
  *  segment rather than throwing. Those failures are dead-lettered by name so an
  *  admin can see which query broke. */
-const jobContext = (accountId: string): AccountContext => ({
+const jobContext = (accountId: string, timezone: string): AccountContext => ({
   accountId,
+  timezone,
   actorId: null,
   actorKind: 'job',
   isSuperAdmin: false,
@@ -32,10 +33,10 @@ export const evaluateSegments = defineJob({
   handle: async () => {
     // Per account, so one tenant's slow query cannot stall another's. The only
     // query here that crosses tenants, and it reads nothing but ids.
-    const accounts = await owner`select id, slug from account`
+    const accounts = await owner`select id, slug, timezone from account`
 
     for (const row of accounts) {
-      const results = await evaluateAllSegments(jobContext(row.id))
+      const results = await evaluateAllSegments(jobContext(row.id, row.timezone))
       for (const result of results) {
         if (result.error !== null) {
           // One row per broken segment, not one failure for the pass. Throwing

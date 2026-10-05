@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
-import { withAccount } from './index.ts'
+import { accountZone, withAccount } from './index.ts'
+import { addDays, dayKey, zonedTimeToUtc } from './slots.ts'
 
 /** B7. Six reports, each one question answered over a date range.
  *
@@ -23,19 +24,27 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 /** Clamps whatever arrived to something answerable, rather than refusing. A range
  *  the wrong way round is a mistake in a link, not an attack, and the useful
- *  response is the range they meant. */
-export const clampRange = (input: {
-  from?: Date | string | null | undefined
-  to?: Date | string | null | undefined
-}): Range => {
+ *  response is the range they meant.
+ *
+ *  Left to itself the range is the last thirty whole days in `zone`, today
+ *  included: the account's own calendar, so that after 5 PM Pacific it does not
+ *  end on a tomorrow nobody has reached. */
+export const clampRange = (
+  input: {
+    from?: Date | string | null | undefined
+    to?: Date | string | null | undefined
+  },
+  zone = 'UTC',
+): Range => {
   const parse = (value: Date | string | null | undefined): Date | null => {
     if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
     if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return null
     return new Date(value)
   }
 
-  const to = parse(input.to) ?? new Date()
-  const from = parse(input.from) ?? new Date(to.getTime() - 29 * DAY_MS)
+  const midnight = (day: string) => zonedTimeToUtc(day, 0, zone)
+  const to = parse(input.to) ?? midnight(addDays(dayKey(new Date(), zone), 1))
+  const from = parse(input.from) ?? midnight(addDays(dayKey(new Date(to.getTime() - 1), zone), -29))
   const [start, end] = from.getTime() <= to.getTime() ? [from, to] : [to, from]
   const capped = end.getTime() - start.getTime() > MAX_DAYS * DAY_MS
     ? new Date(end.getTime() - MAX_DAYS * DAY_MS)
@@ -43,9 +52,14 @@ export const clampRange = (input: {
   return { from: capped, to: end }
 }
 
+/** The calendar day an instant falls on in `zone`. A bare `::date` reads it in the
+ *  session's zone, which is UTC, and filed a 9:21 PM Pacific fill under tomorrow. */
+const daily = (column: string, zone: string) => sql`(${sql.raw(column)} at time zone ${zone})::date`
+
 /** Sunday-free weeks: `date_trunc('week')` is ISO, so a week always starts on a
  *  Monday whatever the server's locale thinks. */
-const weekly = (column: string) => sql.raw(`date_trunc('week', ${column})::date`)
+const weekly = (column: string, zone: string) =>
+  sql`date_trunc('week', ${sql.raw(column)} at time zone ${zone})::date`
 
 /** Every bucket in the range, including the empty ones.
  *
@@ -59,19 +73,25 @@ const weekly = (column: string) => sql.raw(`date_trunc('week', ${column})::date`
  *  the queries with no MAX_ROWS on them. A `limit` on a calendar does not trim a
  *  chart, it silently ends it early — a year of submissions used to stop in
  *  August and look complete. */
-const calendar = (range: Range, step: 'day' | 'week') =>
-  step === 'week'
-    ? sql`select generate_series(
-            date_trunc('week', ${range.from.toISOString()}::timestamptz),
-            date_trunc('week', ${range.to.toISOString()}::timestamptz),
-            interval '1 week')::date as bucket`
-    : sql`select generate_series(
-            ${range.from.toISOString()}::timestamptz::date,
-            ${range.to.toISOString()}::timestamptz::date,
-            interval '1 day')::date as bucket`
+const calendar = (range: Range, step: 'day' | 'week', zone: string) => {
+  // `to` is exclusive, so the last bucket is the one holding the instant before
+  // it: a range that ends at midnight does not draw the day that begins there.
+  const first = sql`${range.from.toISOString()}::timestamptz at time zone ${zone}`
+  const last = sql`(${range.to.toISOString()}::timestamptz - interval '1 microsecond') at time zone ${zone}`
+  return step === 'week'
+    ? sql`select generate_series(date_trunc('week', ${first}), date_trunc('week', ${last}), interval '1 week')::date as bucket`
+    : sql`select generate_series((${first})::date, (${last})::date, interval '1 day')::date as bucket`
+}
 
 const bounds = (range: Range, column: string) =>
   sql`${sql.raw(column)} >= ${range.from.toISOString()}::timestamptz and ${sql.raw(column)} < ${range.to.toISOString()}::timestamptz`
+
+/** The same range for a column that is already a day. Comparing a date with the
+ *  range's instants reads the date as UTC midnight, which drops the first day of
+ *  a range for anyone west of Greenwich. */
+const dayBounds = (range: Range, column: string, zone: string) =>
+  sql`${sql.raw(column)} >= (${range.from.toISOString()}::timestamptz at time zone ${zone})::date
+      and ${sql.raw(column)} <= ((${range.to.toISOString()}::timestamptz - interval '1 microsecond') at time zone ${zone})::date`
 
 // ------------------------------------------------------------------ pipeline
 
@@ -102,6 +122,7 @@ export type PipelineReport = {
  *  number change every morning. */
 export const pipelineReport = async (ctx: AccountContext, range: Range): Promise<PipelineReport> =>
   withAccount(ctx, async (tx) => {
+    const zone = await accountZone(ctx, tx)
     const weeks = await tx.execute<{
       week: string
       created: number
@@ -109,7 +130,7 @@ export const pipelineReport = async (ctx: AccountContext, range: Range): Promise
       lost: number
       won_amount: string | null
     }>(sql`
-      with weeks as (${calendar(range, 'week')})
+      with weeks as (${calendar(range, 'week', zone)})
       select w.bucket as week,
              count(d.id)::int as created,
              count(d.id) filter (where s.is_closed_won)::int as won,
@@ -117,7 +138,7 @@ export const pipelineReport = async (ctx: AccountContext, range: Range): Promise
              coalesce(sum(d.amount) filter (where s.is_closed_won), 0)::text as won_amount
         from weeks w
         left join deal d
-          on ${weekly('d.created_at')} = w.bucket
+          on ${weekly('d.created_at', zone)} = w.bucket
          and d.deleted_at is null and ${bounds(range, 'd.created_at')}
         left join pipeline_stage s on s.id = d.stage_id
        group by w.bucket
@@ -212,14 +233,15 @@ export type FormsReport = {
  *  is filling in, unless both lines are on the chart. */
 export const formsReport = async (ctx: AccountContext, range: Range): Promise<FormsReport> =>
   withAccount(ctx, async (tx) => {
+    const zone = await accountZone(ctx, tx)
     const days = await tx.execute<{ day: string; clean: number; held: number }>(sql`
-      with days as (${calendar(range, 'day')})
+      with days as (${calendar(range, 'day', zone)})
       select c.bucket as day,
              count(s.id) filter (where s.spam_state = 'clean')::int as clean,
              count(s.id) filter (where s.spam_state <> 'clean')::int as held
         from days c
         left join form_submission s
-          on s.at::date = c.bucket and ${bounds(range, 's.at')}
+          on ${daily('s.at', zone)} = c.bucket and ${bounds(range, 's.at')}
        group by c.bucket
        order by c.bucket`)
 
@@ -235,7 +257,7 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
              sum(v.views)::int as views,
              count(distinct v.page_path)::int as pages
         from form_view v
-       where ${bounds(range, 'v.day')}
+       where ${dayBounds(range, 'v.day', zone)}
        group by 1
        limit ${MAX_ROWS}`)
     const viewsByForm = new Map(views.map((row) => [String(row.form_id), row]))

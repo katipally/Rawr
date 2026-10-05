@@ -1,6 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
-import { withAccount } from './index.ts'
+import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
@@ -81,13 +81,21 @@ export const readCalendar = async (
     const field = fieldOrThrow(object, candidate.key)
     const placed = fieldExpression(object, field)
     const start = monthStart(input.month)
+    // A date is the same day everywhere. An instant is on the day it is in the
+    // account's zone, so the month's edges and the square it sits on are read there.
+    const zone = await accountZone(ctx, tx)
+    const instant = field.type === 'datetime'
+    const monthEnd = sql`(${start}::date + interval '1 month')`
+    const from = instant ? sql`(${start}::date)::timestamp at time zone ${zone}` : sql`${start}::date`
+    const to = instant ? sql`${monthEnd} at time zone ${zone}` : monthEnd
+    const dayOfRow = instant ? sql`(${placed} at time zone ${zone})::date` : sql`(${placed})::date`
 
     const where: SQL[] = [sql.raw(`"${object.key}"."deleted_at" is null`)]
     // Half-open on the month: a record at 23:59 on the last day is in, and the
     // first instant of the next month is not. `>= start and < start + 1 month`
     // rather than `between`, which would include both ends of the boundary.
-    where.push(sql`${placed} >= ${start}::date`)
-    where.push(sql`${placed} < (${start}::date + interval '1 month')`)
+    where.push(sql`${placed} >= ${from}`)
+    where.push(sql`${placed} < ${to}`)
 
     const filters = compileFilters(object, input.filters ?? [], scopeFor(ctx.actorId))
     if (filters) where.push(filters)
@@ -97,8 +105,8 @@ export const readCalendar = async (
 
     const rows = await tx.execute<Record<string, unknown>>(sql`
       select ${sql.raw(`"${object.key}".*`)},
-             (${placed})::date as calendar_day,
-             ${field.type === 'datetime' ? sql`to_char(${placed}, 'HH24:MI')` : sql`null::text`} as calendar_time
+             ${dayOfRow} as calendar_day,
+             ${instant ? sql`to_char(${placed} at time zone ${zone}, 'HH24:MI')` : sql`null::text`} as calendar_time
         from ${sql.raw(`"${object.key}"`)}
        where ${sql.join(where, sql` and `)}
        order by ${placed} asc
@@ -158,6 +166,7 @@ export const readAgenda = async (
   withAccount(ctx, async (tx) => {
     const start = monthStart(input.month)
     const who = input.userId ?? null
+    const zone = await accountZone(ctx, tx)
 
     const rows = await tx.execute<{
       kind: 'meeting' | 'task'
@@ -170,15 +179,15 @@ export const readAgenda = async (
     }>(sql`
       select 'meeting' as kind, b.id as ref_id,
              p.name || ' · ' || b.attendee_name as name,
-             (b.starts_at at time zone 'UTC')::date::text as calendar_day,
-             to_char(b.starts_at at time zone 'UTC', 'HH24:MI') as calendar_time,
+             (b.starts_at at time zone ${zone})::date::text as calendar_day,
+             to_char(b.starts_at at time zone ${zone}, 'HH24:MI') as calendar_time,
              case when b.contact_id is null then null else 'contact' end as entity_type,
              b.contact_id::text as entity_id
         from booking b
         join booking_page p on p.id = b.booking_page_id
        where b.state = 'confirmed'
-         and b.starts_at >= ${start}::date
-         and b.starts_at < (${start}::date + interval '1 month')
+         and b.starts_at >= (${start}::date)::timestamp at time zone ${zone}
+         and b.starts_at < (${start}::date + interval '1 month') at time zone ${zone}
          and (${who}::uuid is null or b.host_user_id = ${who}::uuid)
 
       union all

@@ -121,7 +121,7 @@ const AttributionReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const ctx = contextFrom(session)
   const [report, campaigns] = await Promise.all([
     attributionReport(ctx, range),

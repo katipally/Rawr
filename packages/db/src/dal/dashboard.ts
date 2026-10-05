@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
-import { withAccount } from './index.ts'
+import { accountZone, withAccount } from './index.ts'
 
 /** The Monday screen. Everything Trevor exports to a spreadsheet to see, read in
  *  one transaction: the open pipeline per stage, what closes this month, what is
@@ -53,6 +53,9 @@ export type Dashboard = {
 
 export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
   withAccount(ctx, async (tx) => {
+    // Today and this month are the account's, not UTC's: a deal closing on the
+    // 31st stayed "this month" for five hours after it ended in Pacific time.
+    const today = sql`(now() at time zone ${await accountZone(ctx, tx)})::date`
     const [stages, closing, counts, upcoming] = await Promise.all([
       tx.execute<{
         pipeline_id: string
@@ -92,8 +95,8 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
           left join pipeline_stage s on s.id = d.stage_id
           left join user_account u on u.id = d.owner_id
          where d.deleted_at is null
-           and d.close_date >= date_trunc('month', current_date)
-           and d.close_date < date_trunc('month', current_date) + interval '1 month'
+           and d.close_date >= date_trunc('month', ${today})
+           and d.close_date < date_trunc('month', ${today}) + interval '1 month'
            and not coalesce(s.is_closed_won, false) and not coalesce(s.is_closed_lost, false)
          order by d.close_date asc
          limit 50`),
@@ -102,7 +105,7 @@ export const readDashboard = async (ctx: AccountContext): Promise<Dashboard> =>
                (select count(*) from form_submission where spam_state = 'quarantined')::int as quarantined,
                (select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid)::int as my_open,
                (select count(*) from task where status = 'open' and assignee_id = ${ctx.actorId}::uuid
-                   and due_date is not null and due_date < current_date)::int as my_overdue`),
+                   and due_date is not null and due_date < ${today})::int as my_overdue`),
       tx.execute<{
         id: string
         starts_at: Date

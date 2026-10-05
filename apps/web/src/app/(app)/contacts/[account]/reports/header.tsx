@@ -1,3 +1,4 @@
+import { MAX_DAYS } from '@rawr/db'
 import { PageHeader, Tabs } from '@rawr/ui'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
 import { reportsPath } from '~/lib/links.ts'
@@ -20,6 +21,9 @@ const TABS = [
   { key: 'dashboards', label: 'Dashboards' },
 ]
 
+const daysIn = (from: string, to: string): number =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1
+
 export const ReportsHeader = ({
   account,
   current,
@@ -35,7 +39,7 @@ export const ReportsHeader = ({
   <>
     <PageHeader
       title="Reports"
-      lead={`${from} to ${to}`}
+      lead={`${from} to ${to}${daysIn(from, to) >= MAX_DAYS ? `. Reports cover at most ${MAX_DAYS} days, so a longer range is cut to its most recent ${MAX_DAYS}.` : ''}`}
       why="Every chart carries the same figures as a table underneath it, so a number can be read off rather than estimated from a shape. The range lives in the URL, which means a link to a report is a link to the period somebody was looking at."
       action={<RangePicker from={from} to={to} />}
     />

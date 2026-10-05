@@ -25,7 +25,7 @@ const EmailReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const report = await emailReport(contextFrom(session), range)
   const lagOf = (mailbox: string) => report.replyLag.find((row) => row.mailbox === mailbox)
 

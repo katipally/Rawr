@@ -57,7 +57,7 @@ const ReportsOverview = async ({
 
   const { account } = await params
   const search = await searchParams
-  const range = await reportRange(session, search)
+  const range = reportRange(session, search)
   const ctx = contextFrom(session)
   const link = (tab: string) => reportsPath(account, { tab, from: range.fromDay, to: range.toDay })
 

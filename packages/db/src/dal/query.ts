@@ -6,7 +6,8 @@ import {
   type Operator,
 } from '../registry/types.ts'
 import type { AccountContext } from './context.ts'
-import { withAccount } from './index.ts'
+import { accountZone, withAccount } from './index.ts'
+import { dayKey } from './slots.ts'
 import {
   fieldOrThrow,
   getRegistry,
@@ -28,9 +29,11 @@ export type Cursor = { value: string | number | null; id: string }
  *  it resolves per request, so "My contacts" means the person reading it. */
 export type QueryScope = { userId: string | null; today: string }
 
-export const scopeFor = (userId: string | null, now = new Date()): QueryScope => ({
+/** `@today` is the day it is in the account's zone, not in UTC: a view of what is
+ *  due today must not move to tomorrow at 4 PM Pacific. */
+export const scopeFor = (userId: string | null, zone = 'UTC', now = new Date()): QueryScope => ({
   userId,
-  today: now.toISOString().slice(0, 10),
+  today: dayKey(now, zone),
 })
 
 const resolveToken = (value: unknown, scope: QueryScope): unknown => {
@@ -306,7 +309,7 @@ export const listKpis = async (
 ): Promise<Kpi[]> => {
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, objectKey)
-  const scope = scopeFor(ctx.actorId)
+  const scope = scopeFor(ctx.actorId, await accountZone(ctx))
   const quietBefore = new Date(Date.now() - QUIET_DAYS * 86_400_000).toISOString().slice(0, 10)
 
   // A field an admin deleted takes its tile with it rather than throwing the

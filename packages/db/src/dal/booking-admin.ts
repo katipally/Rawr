@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
 import { assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
 import { assertSchemaIsUsable } from './form-schema.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
+import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import {
   readQuestions,
   REMINDER_UNITS,
@@ -541,7 +541,7 @@ export const readSchedule = async (ctx: AccountContext, userId: string): Promise
 
     return {
       userId,
-      timezone: row?.timezone ?? 'America/Los_Angeles',
+      timezone: row?.timezone ?? (await accountZone(ctx, tx)),
       // A person who has never opened this screen still has working hours, so a
       // page is bookable the day it is created.
       weekly: row ? readWeekly(row.weekly) : DEFAULT_WEEKLY,

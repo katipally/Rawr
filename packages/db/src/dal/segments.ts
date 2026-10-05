@@ -3,8 +3,8 @@ import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import { recordActivityFanout } from './activity.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
-import { compileFilters, parseFilters, scopeFor, type FilterGroup } from './query.ts'
+import { accountZone, mutate, withAccount, type Tx } from './index.ts'
+import { compileFilters, parseFilters, scopeFor, type FilterGroup, type QueryScope } from './query.ts'
 import { assertIdsBelong, displayName } from './records.ts'
 import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
 
@@ -103,7 +103,7 @@ export const saveSegment = async (ctx: AccountContext, input: SaveSegmentInput):
     }
 
     // Throws with the field and operator named if the query is not runnable.
-    compileFilters(object, input.filters, scopeFor(ctx.actorId))
+    compileFilters(object, input.filters, scopeFor(ctx.actorId, await accountZone(ctx, tx)))
 
     if (input.id) {
       const [before] = await tx
@@ -218,7 +218,7 @@ export const evaluateSegmentIn = async (
   const object = registry.objects.find((candidate) => candidate.id === row.objectId)
   if (!object) throw new Error(`The object "${row.name}" is built on no longer exists.`)
 
-  const matching = matchingIds(object, parseFilters(row.query), ctx)
+  const matching = matchingIds(object, parseFilters(row.query), scopeFor(ctx.actorId, await accountZone(ctx, tx)))
 
   // Both sides are put into temporary tables first, and both are analysed.
   //
@@ -295,8 +295,8 @@ export const evaluateSegmentIn = async (
 }
 
 /** The id set a segment's query selects, as a subquery rather than a result. */
-const matchingIds = (object: RegistryObject, filters: FilterGroup[], ctx: AccountContext): SQL => {
-  const where = compileFilters(object, filters, scopeFor(ctx.actorId))
+const matchingIds = (object: RegistryObject, filters: FilterGroup[], scope: QueryScope): SQL => {
+  const where = compileFilters(object, filters, scope)
   const table = sql.raw(`"${object.key}"`)
   const notDeleted = sql.raw(`"${object.key}"."deleted_at" is null`)
   return sql`select ${sql.raw(`"${object.key}"."id"`)} as id from ${table} where ${notDeleted}${where ? sql` and ${where}` : sql``}`
@@ -415,7 +415,7 @@ export const previewSegment = async (
   withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
-    const ids = matchingIds(object, input.filters, ctx)
+    const ids = matchingIds(object, input.filters, scopeFor(ctx.actorId, await accountZone(ctx, tx)))
 
     const [countRow] = await tx.execute<{ n: number }>(sql`select count(*)::int as n from (${ids}) as matched`)
 

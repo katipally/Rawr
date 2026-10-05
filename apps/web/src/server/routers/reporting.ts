@@ -33,32 +33,33 @@ const range = z.object({
 /** Whatever arrives is clamped rather than refused: a range the wrong way round,
  *  or one that reaches back to 1970, is a mistake in a link and the useful answer
  *  is the range they meant. */
-const within = (input: z.infer<typeof range>) => clampRange(input)
+const within = (ctx: { session: { accountTimezone: string } }, input: z.infer<typeof range>) =>
+  clampRange(input, ctx.session.accountTimezone)
 
 export const reportingRouter = router({
   pipeline: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => pipelineReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => pipelineReport(ctx.account, within(ctx, input)))),
 
   forms: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => formsReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => formsReport(ctx.account, within(ctx, input)))),
 
   sequences: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => sequencesReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => sequencesReport(ctx.account, within(ctx, input)))),
 
   email: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => emailReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => emailReport(ctx.account, within(ctx, input)))),
 
   website: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => websiteReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => websiteReport(ctx.account, within(ctx, input)))),
 
   attribution: protectedProcedure
     .input(range)
-    .query(({ ctx, input }) => call(() => attributionReport(ctx.account, within(input)))),
+    .query(({ ctx, input }) => call(() => attributionReport(ctx.account, within(ctx, input)))),
 
   /** Item 14. The campaigns a contact can arrive through, and the spend behind
    *  each one. Edited under Settings. */
@@ -102,7 +103,7 @@ export const reportingRouter = router({
     )
     .query(({ ctx, input }) =>
       call(() =>
-        trackedMessages(ctx.account, within(input), {
+        trackedMessages(ctx.account, within(ctx, input), {
           ...(input.limit === undefined ? {} : { limit: input.limit }),
           ...(input.offset === undefined ? {} : { offset: input.offset }),
           ...(input.sort === undefined ? {} : { sort: input.sort }),

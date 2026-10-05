@@ -60,7 +60,7 @@ const CalendarPage = async ({
   // explanation of why it is empty.
   if (placeable.length === 0) redirect(objectView(account, objectParam, viewSlug, 'list'))
 
-  const today = todayIn(session.timezone)
+  const today = todayIn(session.accountTimezone)
   const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
   const month = search.month ?? today.slice(0, 7)
   // A saved view's group is a board's grouping, which is a stage, not a date.

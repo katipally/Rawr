@@ -1,10 +1,10 @@
-import { clampRange, type Range, readSchedule } from '@rawr/db'
-import { contextFrom, type Session } from '~/server/session.ts'
+import { clampRange, type Range } from '@rawr/db'
+import type { Session } from '~/server/session.ts'
 
 /** The range every report page reads out of its own URL. One place, so a link
  *  pasted between two reports means the same thing in both.
  *
- *  Every boundary is a calendar day in the reader's own timezone, never UTC. A
+ *  Every boundary is a calendar day in the account's timezone, never UTC. A
  *  day is not an instant: for anyone west of Greenwich, UTC midnight falls in
  *  the previous afternoon, so a UTC range put the last few hours of each day in
  *  the wrong bucket and, after 5pm Pacific, named tomorrow as the end of "last
@@ -66,12 +66,7 @@ export const rangeFrom = (
   }
 }
 
-/** The reader's timezone is the one they set under Settings, Your account, which
- *  is the same one their working hours and their meetings are shown in. */
-export const reportRange = async (
-  session: Session,
-  params: RangeParams,
-): Promise<Range & { fromDay: string; toDay: string }> => {
-  const schedule = await readSchedule(contextFrom(session), session.userId)
-  return rangeFrom(params, schedule.timezone)
-}
+/** The account's timezone, set under Settings, Account defaults, so everybody in
+ *  it reads the same days: two people on one report get one set of numbers. */
+export const reportRange = (session: Session, params: RangeParams): Range & { fromDay: string; toDay: string } =>
+  rangeFrom(params, session.accountTimezone)

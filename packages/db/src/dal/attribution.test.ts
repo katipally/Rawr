@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { channelOfSession, clampRange, MAX_DAYS, readAttribution, sourceFrom } from '../index.ts'
+import { addDays, dayKey, zonedTimeToUtc } from './slots.ts'
 
 /** Which bucket a visit lands in decides which channel gets credit for the money
  *  it eventually produced, so the rules are worth pinning down. */
@@ -81,8 +82,19 @@ test('a range reaching back to 1970 is cut to a year and a day', () => {
   assert.equal(Math.round(days), MAX_DAYS)
 })
 
-test('no range at all is the last thirty days', () => {
+test('no range at all is the last thirty whole days, today included', () => {
   const range = clampRange({})
   const days = (range.to.getTime() - range.from.getTime()) / 86_400_000
-  assert.equal(Math.round(days), 29)
+  assert.equal(Math.round(days), 30)
+})
+
+test('the default range runs on the account calendar, so it ends at the close of its own today', () => {
+  for (const zone of ['America/Los_Angeles', 'Pacific/Kiritimati', 'UTC']) {
+    const range = clampRange({}, zone)
+    assert.equal(dayKey(new Date(range.to.getTime() - 1), zone), dayKey(new Date(), zone), zone)
+    assert.equal(dayKey(range.to, zone), addDays(dayKey(new Date(), zone), 1), zone)
+    assert.equal(dayKey(range.from, zone), addDays(dayKey(new Date(), zone), -29), zone)
+    // Midnight to midnight: the instants are the first of their days.
+    assert.equal(range.from.getTime(), zonedTimeToUtc(dayKey(range.from, zone), 0, zone).getTime(), zone)
+  }
 })

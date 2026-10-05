@@ -4,7 +4,7 @@ import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
+import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { notify, resolveNotifications } from './notifications.ts'
 import { entityAlive } from './registry.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
@@ -81,8 +81,9 @@ export type TaskFilter = {
 export const TASK_LIST_CAP = 500
 
 export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): Promise<TaskRow[]> =>
-  withAccount(ctx, (tx) =>
-    tx
+  withAccount(ctx, async (tx) => {
+    const today = sql`(now() at time zone ${await accountZone(ctx, tx)})::date`
+    return tx
       .select(SELECT)
       .from(task)
       .leftJoin(userAccount, eq(userAccount.id, task.assigneeId))
@@ -98,10 +99,10 @@ export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): P
               ? eq(task.queueId, filter.queueId)
               : undefined,
           filter.overdueOnly
-            ? and(eq(task.status, 'open'), isNotNull(task.dueDate), lt(task.dueDate, sql`current_date`))
+            ? and(eq(task.status, 'open'), isNotNull(task.dueDate), lt(task.dueDate, today))
             : undefined,
-          filter.due === 'today' ? and(eq(task.status, 'open'), eq(task.dueDate, sql`current_date`)) : undefined,
-          filter.due === 'upcoming' ? and(eq(task.status, 'open'), gt(task.dueDate, sql`current_date`)) : undefined,
+          filter.due === 'today' ? and(eq(task.status, 'open'), eq(task.dueDate, today)) : undefined,
+          filter.due === 'upcoming' ? and(eq(task.status, 'open'), gt(task.dueDate, today)) : undefined,
           filter.entity
             ? and(eq(task.entityType, filter.entity.entityType), eq(task.entityId, filter.entity.entityId))
             : undefined,
@@ -110,8 +111,8 @@ export const listTasks = async (ctx: AccountContext, filter: TaskFilter = {}): P
       // Undated tasks sit after dated ones rather than jumping to the top. Written
       // as one fragment because asc() would put the direction after the modifier.
       .orderBy(sql`${task.dueDate} asc nulls last`, asc(task.id))
-      .limit(TASK_LIST_CAP),
-  ) as Promise<TaskRow[]>
+      .limit(TASK_LIST_CAP) as Promise<TaskRow[]>
+  })
 
 export type NewTask = {
   title: string
@@ -452,7 +453,7 @@ export const deleteTask = async (ctx: AccountContext, id: string): Promise<void>
 export const overdueNextSteps = async (ctx: AccountContext): Promise<
   { id: string; name: string | null; nextStep: string | null; nextStepDate: string; ownerName: string | null; stageName: string | null }[]
 > =>
-  withAccount(ctx, (tx) =>
+  withAccount(ctx, async (tx) =>
     tx.execute(sql`
       select d.id, d.name, d.next_step as "nextStep", d.next_step_date::text as "nextStepDate",
              u.name as "ownerName", s.name as "stageName"
@@ -461,7 +462,7 @@ export const overdueNextSteps = async (ctx: AccountContext): Promise<
         left join pipeline_stage s on s.id = d.stage_id
        where d.deleted_at is null
          and d.next_step_date is not null
-         and d.next_step_date < current_date
+         and d.next_step_date < (now() at time zone ${await accountZone(ctx, tx)})::date
          and coalesce(s.is_closed_won, false) = false
          and coalesce(s.is_closed_lost, false) = false
        order by d.next_step_date asc

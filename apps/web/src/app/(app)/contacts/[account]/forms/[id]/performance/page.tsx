@@ -27,7 +27,7 @@ const PerformancePage = async ({
   if (!session) redirect('/sign-in')
 
   const ctx = contextFrom(session)
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const [form, report] = await Promise.all([
     getForm(ctx, id),
     formPerformance(ctx, { formId: id, from: range.fromDay, to: range.toDay }),

@@ -443,7 +443,7 @@ const HomePage = async ({
                     ) : null}
                   </div>
                   {t.dueDate ? (
-                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(zone) ? 'text-error' : 'text-secondary'}`}>
+                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.accountTimezone) ? 'text-error' : 'text-secondary'}`}>
                       {formatDate(t.dueDate, zone)}
                     </span>
                   ) : null}

@@ -25,7 +25,7 @@ const EventsReport = async ({
   const { account } = await params
 
   const ctx = contextFrom(session)
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const [counts, defs] = await Promise.all([
     eventCountsByDay(ctx, range),
     listEventDefs(ctx, { limit: 100 }),

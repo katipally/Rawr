@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
+import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { MAX_ROWS, type Range } from './reporting.ts'
 
 /** P3 item 13. What a site's events are called, what they mean, and how far
@@ -150,8 +150,9 @@ export const eventCountsByDay = async (
       ? sql`and e.name = any(array[${sql.join(names.map((name) => sql`${name}::text`), sql`, `)}])`
       : sql``
 
+    const zone = await accountZone(ctx, tx)
     const rows = await tx.execute<{ day: string; name: string; events: number; visitors: number }>(sql`
-      select e.at::date::text as day, e.name,
+      select (e.at at time zone ${zone})::date::text as day, e.name,
              count(*)::int as events,
              count(distinct e.visitor_id)::int as visitors
         from custom_event e

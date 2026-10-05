@@ -22,7 +22,7 @@ const PipelineReport = async ({
   if (!session) redirect('/sign-in')
   const { account } = await params
 
-  const range = await reportRange(session, await searchParams)
+  const range = reportRange(session, await searchParams)
   const report = await pipelineReport(contextFrom(session), range)
 
   // One funnel per pipeline. The rows arrive in pipeline then stage order, so

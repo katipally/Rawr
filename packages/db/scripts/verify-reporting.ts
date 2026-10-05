@@ -12,6 +12,8 @@ import {
   websiteReport,
   MAX_DAYS,
 } from '../src/dal/reporting.ts'
+import { readDashboard } from '../src/dal/dashboard.ts'
+import { readAgenda, readCalendar } from '../src/dal/calendar.ts'
 import { campaignPerformance, listCampaigns, saveCampaign } from '../src/dal/campaigns.ts'
 import { trackedMessages } from '../src/dal/messages.ts'
 import { withAccount } from '../src/dal/index.ts'
@@ -102,10 +104,13 @@ try {
 
   console.log('-- the range -----------------------------------------------------')
 
-  await check('a range nobody asked for is the last thirty days', async () => {
-    const range = clampRange({})
-    expect(Math.round((range.to.getTime() - range.from.getTime()) / DAY) === 29, 'not 30 days')
-    return 'a report opens on something answerable'
+  await check('a range nobody asked for is the last thirty days, today included', async () => {
+    const range = clampRange({}, 'Pacific/Kiritimati')
+    const [today] = await owner<{ day: string }[]>`select (now() at time zone 'Pacific/Kiritimati')::date::text as day`
+    expect(Math.round((range.to.getTime() - range.from.getTime()) / DAY) === 30, 'not 30 days')
+    const closeOfToday = new Date(Date.parse(`${today!.day}T00:00:00Z`) + DAY - 14 * 3_600_000)
+    expect(range.to.getTime() === closeOfToday.getTime(), `ends ${range.to.toISOString()}, not ${closeOfToday.toISOString()}`)
+    return 'a report opens on something answerable, ending at the close of the account’s own today'
   })
 
   await check('no range can ask for the whole table', async () => {
@@ -514,9 +519,12 @@ try {
 
   // Everything below lives in the peer tenant in March 2001, a range nothing the
   // seed wrote reaches, so every figure can be asserted exactly. Day boundaries are
-  // Pacific midnights (UTC-8 until April 2001).
+  // Pacific midnights (UTC-8 until April 2001), because the account is set to
+  // America/Los_Angeles for the block and put back after.
+  const ZONE = 'America/Los_Angeles'
   const march = { from: new Date('2001-03-01T08:00:00Z'), to: new Date('2001-03-31T08:00:00Z') }
   const tag = `p2b-${stamp}`
+  await owner`update account set timezone = ${ZONE} where id = ${probe.id}`
 
   const [salesRow] = await owner<{ id: string }[]>`
     select id from pipeline where account_id = ${probe.id} and name = 'Sales Pipeline'`
@@ -550,6 +558,71 @@ try {
       returning id`
     return row!.id
   }
+
+  await check('A-01: two fills at 9:21 and 9:32 PM Pacific are one Pacific day, not the next', async () => {
+    const [form] = await owner<{ id: string }[]>`
+      insert into form (account_id, name, slug) values (${probe.id}, ${`${tag}-late`}, ${`${tag}-late`}) returning id`
+    for (const at of ['2001-03-10T05:21:00Z', '2001-03-10T05:32:00Z']) {
+      await owner`insert into form_submission (account_id, form_id, at) values (${probe.id}, ${form!.id}, ${at}::timestamptz)`
+    }
+    const report = await formsReport(probeCtx, march)
+    const evening = report.days.find((row) => row.day === '2001-03-09')
+    const nextDay = report.days.find((row) => row.day === '2001-03-10')
+    expect(evening?.clean === 2, `March 9 holds ${evening?.clean ?? 'no bucket'}, March 10 holds ${nextDay?.clean ?? 'no bucket'}`)
+    expect(nextDay?.clean === 0, `March 10 holds ${nextDay?.clean}`)
+    return 'both on March 9, where the people who filled them were'
+  })
+
+  await check('A-01: the axis ends on the last day asked for, not the day after', async () => {
+    const report = await formsReport(probeCtx, march)
+    const last = report.days.at(-1)?.day
+    expect(report.days.length === 30 && last === '2001-03-30', `${report.days.length} days ending ${last}`)
+    return 'thirty days, March 1 to March 30'
+  })
+
+  await check('A-01: overdue and closing this month follow the account zone, not UTC', async () => {
+    // Pago Pago and Kiritimati are 25 hours apart, so their calendar days differ
+    // at every instant: whatever time this runs, a task due on one's today is
+    // overdue on the other's.
+    const [pago] = await owner<{ west: string }[]>`select (now() at time zone 'Pacific/Pago_Pago')::date::text as west`
+    const west = pago!.west
+    const asOf = (timezone: string) => readDashboard({ ...probeCtx, timezone })
+    const [before, beforeEast] = [await asOf('Pacific/Pago_Pago'), await asOf('Pacific/Kiritimati')]
+    await owner`
+      insert into task (account_id, title, due_date, assignee_id, status)
+      values (${probe.id}, ${`${tag} due`}, ${west}::date, ${probeCtx.actorId}, 'open')`
+    const [after, afterEast] = [await asOf('Pacific/Pago_Pago'), await asOf('Pacific/Kiritimati')]
+    expect(after.myOverdueTasks === before.myOverdueTasks, `due today in Pago Pago counted overdue there: ${before.myOverdueTasks} to ${after.myOverdueTasks}`)
+    expect(afterEast.myOverdueTasks === beforeEast.myOverdueTasks + 1, `not overdue in Kiritimati: ${beforeEast.myOverdueTasks} to ${afterEast.myOverdueTasks}`)
+    return `due ${west}: today in Pago Pago, a day gone in Kiritimati`
+  })
+
+  await check('A-01: a meeting lands on the day it is on the wall in the account zone', async () => {
+    const [page] = await owner<{ id: string }[]>`
+      insert into booking_page (account_id, slug, name, title_tpl, description_tpl)
+      values (${probe.id}, ${tag}, ${`${tag} page`}, 't', 'd') returning id`
+    await owner`
+      insert into booking (account_id, booking_page_id, host_user_id, starts_at, ends_at, attendee_timezone,
+                           attendee_name, attendee_email, cancel_token, reschedule_token, state)
+      values (${probe.id}, ${page!.id}, ${probeCtx.actorId}, '2001-03-10T05:30:00Z', '2001-03-10T06:00:00Z', 'UTC',
+              'Late Guest', ${`${tag}-guest@example.com`}, ${`${tag}-c`}, ${`${tag}-r`}, 'confirmed')`
+    const agenda = await readAgenda(probeCtx, { month: '2001-03-01' })
+    const entry = agenda.entries.find((row) => row.displayName.endsWith('Late Guest'))
+    expect(entry?.day === '2001-03-09' && entry.time === '21:30', `${entry?.day} ${entry?.time}`)
+    return '9:30 PM on March 9, not 5:30 AM on March 10'
+  })
+
+  await check('A-01: a record dated by an instant sits on its day in the account zone, and in its month', async () => {
+    await makeContact('cal-late', '2001-03-10T05:21:00Z', null, null)
+    await makeContact('cal-edge', '2001-04-01T05:30:00Z', null, null)
+    const month = await readCalendar(probeCtx, { object: 'contact', month: '2001-03-01', fieldKey: 'created_at' })
+    const mine = month.entries.filter((entry) => entry.displayName.includes(tag))
+    const late = mine.find((entry) => entry.displayName.includes('cal-late'))
+    const edge = mine.find((entry) => entry.displayName.includes('cal-edge'))
+    expect(late?.day === '2001-03-09' && late.time === '21:21', `${late?.day} ${late?.time}`)
+    expect(edge?.day === '2001-03-31' && edge.time === '21:30', `${edge?.day} ${edge?.time}: 9:30 PM on the 31st is March, not April`)
+    return '9:21 PM on March 9, and 9:30 PM on March 31 stays in March'
+  })
 
   await check('A-02: a reply on a two-mail enrollment is one reply', async () => {
     const [seq] = await owner<{ id: string }[]>`
@@ -639,12 +712,17 @@ try {
   // Its own rows in the tables the seed fills, which `cleanup` leaves alone: the
   // seeded sequence sends and campaign are what the sequences report and the
   // campaign list read, so emptying those tables wholesale would blank them.
+  await owner`update account set timezone = 'UTC' where slug = ${PEER.slug}`
   await owner`delete from form where slug like ${`p2b-${stamp}%`}`
   await owner`delete from sequence where name like ${`p2b-${stamp}%`}`
   await owner`delete from deal where name like ${`p2b-${stamp}%`}`
   await owner`delete from contact where email like ${`p2b-${stamp}%`}`
   await owner`delete from company where name like ${`p2b-${stamp}%`}`
+  await owner`delete from activity where subject like ${`p2b-${stamp}%`}`
+  await owner`delete from task where title like ${`p2b-${stamp}%`}`
   await owner`delete from campaign where utm_campaign like ${`p2b-${stamp}%`}`
+  await owner`delete from booking where attendee_email like ${`p2b-${stamp}%`}`
+  await owner`delete from booking_page where slug = ${`p2b-${stamp}`}`
   await owner`delete from sequence_send where token like ${`vt${stamp}%`}`
   await owner`delete from contact where email = ${`campaign-${stamp}@example.com`}`
   await owner`delete from campaign where lower(utm_campaign) = ${`verify-${stamp}`}`
