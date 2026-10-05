@@ -143,6 +143,13 @@ const call = async (
   }
 }
 
+/** update_record the way an agent has to: read the record, then say which version it
+ *  is changing. */
+const edit = async (token: string, args: Record<string, unknown>): Promise<ToolAnswer> => {
+  const seen = await call(token, 'get_record', { object: args.object, id: args.id })
+  return call(token, 'update_record', { ...args, expectedUpdatedAt: seen.data?.updatedAt })
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -753,7 +760,7 @@ try {
   const byId = await call(salesToken, 'get_record', { object: 'deal', id: mggId })
   check('and so does an id', !byId.isError && byId.data?.id === mggId)
 
-  const ambiguous = await call(salesToken, 'update_record', {
+  const ambiguous = await edit(salesToken, {
     object: 'deal',
     id: `${MARK} Twinned`,
     fields: { amount: 99 },
@@ -782,7 +789,21 @@ try {
   // -----------------------------------------------------------------------
   section('the sentence this feature exists for')
 
-  const spoken = await call(salesToken, 'update_record', {
+  const stale = await call(salesToken, 'update_record', {
+    object: 'deal',
+    id: `${MARK} MGG Production Opportunity`,
+    fields: { amount: 1 },
+    expectedUpdatedAt: '2001-01-01T00:00:00.000Z',
+  })
+  check('an edit that names a stale version is refused and writes nothing', stale.isError && /changed|reload/i.test(stale.text), stale.text)
+  const unversioned = await call(salesToken, 'update_record', {
+    object: 'deal',
+    id: `${MARK} MGG Production Opportunity`,
+    fields: { amount: 1 },
+  })
+  check('and an edit that names none is refused', unversioned.isError && unversioned.text.includes('get_record'), unversioned.text)
+
+  const spoken = await edit(salesToken, {
     object: 'deal',
     id: `${MARK} MGG Production Opportunity`,
     fields: { close_date: 'October 15th' },
@@ -821,7 +842,7 @@ try {
     `${audited[0]?.actor_kind}, ${audited[0]?.actor_id === sales.actorId ? 'the real user' : 'somebody else'}`,
   )
 
-  const relative = await call(salesToken, 'update_record', {
+  const relative = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { close_date: 'next friday' },
@@ -832,7 +853,7 @@ try {
     relative.text.split('\n').at(-1) ?? '',
   )
 
-  const nonsenseDate = await call(salesToken, 'update_record', {
+  const nonsenseDate = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { close_date: 'the second tuesday of whenever' },
@@ -843,7 +864,7 @@ try {
     nonsenseDate.text,
   )
 
-  const byStageName = await call(salesToken, 'update_record', {
+  const byStageName = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { stage_id: stage.name },
@@ -854,7 +875,7 @@ try {
     byStageName.text.split('\n')[0] ?? '',
   )
 
-  const notAStage = await call(salesToken, 'update_record', {
+  const notAStage = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { stage_id: 'Sent To Legal For Vibes' },
@@ -865,7 +886,7 @@ try {
     notAStage.text,
   )
 
-  const notAnOption = await call(salesToken, 'update_record', {
+  const notAnOption = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { f5_verify_flavour: 'Strawberry' },
@@ -876,7 +897,7 @@ try {
     notAnOption.text,
   )
 
-  const goodOption = await call(salesToken, 'update_record', {
+  const goodOption = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { f5_verify_flavour: 'chocolate' },
@@ -887,7 +908,7 @@ try {
     goodOption.text.split('\n').at(-1) ?? '',
   )
 
-  const unknownKey = await call(salesToken, 'update_record', {
+  const unknownKey = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: { vibes: 'immaculate' },
@@ -898,7 +919,7 @@ try {
     unknownKey.text.slice(0, 120),
   )
 
-  const tooMany = await call(salesToken, 'update_record', {
+  const tooMany = await edit(salesToken, {
     object: 'deal',
     id: mggId,
     fields: Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`f${i}`, i])),
@@ -993,7 +1014,7 @@ try {
   const viewerRead = await call(viewerToken, 'get_record', { object: 'deal', id: mggId })
   check('a viewer token reads', !viewerRead.isError && viewerRead.data?.id === mggId)
 
-  const viewerWrite = await call(viewerToken, 'update_record', {
+  const viewerWrite = await edit(viewerToken, {
     object: 'deal',
     id: mggId,
     fields: { amount: 1 },
@@ -1038,7 +1059,7 @@ try {
     'row level security makes it invisible, so the error leaks nothing',
   )
 
-  const crossWrite = await call(probeToken, 'update_record', {
+  const crossWrite = await edit(probeToken, {
     object: 'deal',
     id: mggId,
     fields: { amount: 5 },

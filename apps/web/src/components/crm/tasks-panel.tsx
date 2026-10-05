@@ -30,6 +30,8 @@ export type TaskRow = {
   entityType: string | null
   entityId: string | null
   entityName: string | null
+  /** When it was read, sent back with an edit so a task changed since is refused. */
+  updatedAt: Date | string
 }
 
 export type TasksPanelProps = {

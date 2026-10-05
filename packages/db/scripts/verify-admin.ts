@@ -56,7 +56,7 @@ import {
   readSegmentMembers,
   saveSegment,
 } from '../src/dal/segments.ts'
-import { bulkUpdateRecords, createRecord, getRecord, updateRecord } from '../src/dal/records.ts'
+import { bulkUpdateRecords, createRecord, getRecord, listRecords, updateRecord } from '../src/dal/records.ts'
 import { readTimeline } from '../src/dal/activity.ts'
 import { readBoard, groupableFields } from '../src/dal/board.ts'
 import { recordOptions } from '../src/dal/search.ts'
@@ -756,12 +756,23 @@ try {
   console.log('-- bulk edit, boards and pickers -------------------------------')
 
   await check('one field is applied to a selection', async () => {
-    const deals = await recordOptions(admin, { object: 'deal', limit: 3 })
-    const ids = deals.map((row) => row.id)
-    const result = await bulkUpdateRecords(admin, 'deal', ids, { deal_type: 'Renewal' })
+    const read = (await listRecords(admin, { object: 'deal', limit: 3 })).rows
+    const ids = read.map((row) => row.id)
+    const seen = new Map(read.map((row) => [row.id, new Date(row.version)]))
+    const result = await bulkUpdateRecords(admin, 'deal', ids, { deal_type: 'Renewal' }, seen)
     expect(result.updated === ids.length, `${result.updated} of ${ids.length} updated`)
     expect(result.failed.length === 0, JSON.stringify(result.failed))
     return `${result.updated} deals changed in one call`
+  })
+
+  await check('a row somebody changed since it was read is refused, not overwritten', async () => {
+    const read = (await listRecords(admin, { object: 'deal', limit: 2 })).rows
+    const seen = new Map(read.map((row) => [row.id, new Date(row.version)]))
+    await bulkUpdateRecords(admin, 'deal', read.map((row) => row.id), { deal_type: 'New business' }, seen)
+    const stale = await bulkUpdateRecords(admin, 'deal', read.map((row) => row.id), { deal_type: 'Renewal' }, seen)
+    expect(stale.updated === 0 && stale.failed.length === read.length, `${stale.updated} written, ${stale.failed.length} refused`)
+    expect(stale.failed[0]!.reason.includes('Someone else'), stale.failed[0]!.reason)
+    return `${stale.failed.length} refused with the reason`
   })
 
   await check('a row that refuses the change is named, and the rest still save', async () => {
@@ -770,7 +781,7 @@ try {
       // Every contact would end up with the same address, so all but the first
       // collide on the unique index.
       email: `bulk-${stamp}@verify.example`,
-    })
+    }, null)
     expect(result.updated >= 1, 'nothing was written at all')
     expect(result.failed.length >= 1, 'a duplicate email was allowed')
     expect(Boolean(result.failed[0]?.displayName), 'a failure came back without a name')
@@ -780,7 +791,7 @@ try {
   await check('a read-only seat cannot bulk edit', async () => {
     const deals = await recordOptions(viewer, { object: 'deal', limit: 1 })
     const message = await refuses('a read-only seat bulk editing', () =>
-      bulkUpdateRecords(viewer, 'deal', [deals[0]!.id], { deal_type: 'Renewal' }),
+      bulkUpdateRecords(viewer, 'deal', [deals[0]!.id], { deal_type: 'Renewal' }, null),
     )
     // The refusal names the hub that was missing, so the person reading it knows
     // what to ask for rather than which role they are not.

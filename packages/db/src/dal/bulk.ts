@@ -81,7 +81,7 @@ const applyBatch = async (
       return { processed: result.deleted, failed: result.failed }
     }
     case 'assign': {
-      const result = await bulkUpdateRecords(ctx, objectKey, ids, { owner_id: action.ownerId })
+      const result = await bulkUpdateRecords(ctx, objectKey, ids, { owner_id: action.ownerId }, null)
       return { processed: result.updated, failed: result.failed }
     }
     case 'associate': {

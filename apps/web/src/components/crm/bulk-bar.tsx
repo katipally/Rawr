@@ -14,6 +14,8 @@ export type BulkBarProps = {
   objectPlural: string
   /** Ids ticked in the table. The bar only exists while this is non-empty. */
   ids: string[]
+  /** The version of each selected row as the table read it. */
+  versions: Record<string, string>
   fields: EditableField[]
   onDone: () => void
   onClear: () => void
@@ -39,7 +41,7 @@ const POLL_MS = 2000
  *  assign an owner, associate with a record, merge two, add to a list. A large
  *  selection becomes a job rather than a request, and the toolbar shows how far
  *  it has got, because closing the tab must not stop it. */
-export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone, onClear }: BulkBarProps) => {
+export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fields, onDone, onClear }: BulkBarProps) => {
   const router = useRouter()
   const toast = useToast()
   const [fieldKey, setFieldKey] = useState('')
@@ -105,21 +107,21 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
   /** Puts a bulk edit back. Not a transaction and not pretending to be one: a
    *  record somebody else changed in between is reported by name rather than
    *  quietly overwritten, which is the same promise the edit itself makes. */
-  const undo = async (key: string, previous: { id: string; values: Record<string, unknown> }[]) => {
-    const byValue = new Map<string, { value: unknown; ids: string[] }>()
+  const undo = async (key: string, previous: { id: string; values: Record<string, unknown>; version: Date }[]) => {
+    const byValue = new Map<string, { value: unknown; rows: { id: string; version: Date }[] }>()
     for (const row of previous) {
       const value = row.values[key] ?? null
       const bucket = JSON.stringify(value)
       const found = byValue.get(bucket)
-      if (found) found.ids.push(row.id)
-      else byValue.set(bucket, { value, ids: [row.id] })
+      if (found) found.rows.push({ id: row.id, version: row.version })
+      else byValue.set(bucket, { value, rows: [{ id: row.id, version: row.version }] })
     }
     try {
       let restored = 0
-      for (const { value, ids: group } of byValue.values()) {
+      for (const { value, rows } of byValue.values()) {
         const result = await api.crm.records.bulkUpdate.mutate({
           object,
-          ids: group,
+          rows,
           values: { [key]: value },
         })
         restored += result.updated
@@ -150,7 +152,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
     try {
       const result = await api.crm.records.bulkUpdate.mutate({
         object,
-        ids,
+        rows: ids.map((id) => ({ id, version: versions[id]! })),
         values: { [field.key]: value === '' ? null : value },
       })
       setFailed(result.failed)

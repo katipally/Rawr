@@ -38,7 +38,7 @@ import {
   removeAttachment,
   storageKeyFor } from '../src/dal/attachments.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
-import { createTask, logByHand } from '../src/dal/tasks.ts'
+import { createTask, deleteTask, listTasks, logByHand, updateTask } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
 import { listKpis } from '../src/dal/query.ts'
@@ -1144,10 +1144,39 @@ try {
     return `probe sees ${page.rows.length} of its own contacts, zero of Datasaur's, and cannot read one by id`
   })
 
+  await check('a view saved from a copy somebody else has since changed is refused', async () => {
+    const base = { objectKey: 'contact', name: 'D11 view', kind: 'table' as const, columns: ['first_name', 'email'], filters: [], sorts: [], isShared: true }
+    const made = await saveView(admin, { ...base, expectedUpdatedAt: null })
+    const seen = made.updatedAt!
+    await saveView(admin, { ...base, id: made.id, columns: ['first_name'], expectedUpdatedAt: seen })
+    const said = await refuses('saving a stale view', () =>
+      saveView(admin, { ...base, id: made.id, columns: ['email'], expectedUpdatedAt: seen }),
+    )
+    expect(said.includes('Someone else'), said)
+    const missing = await refuses('saving over a view without a version', () =>
+      saveView(admin, { ...base, id: made.id, expectedUpdatedAt: null }),
+    )
+    expect(missing.includes('Someone else'), missing)
+    await deleteView(admin, made.id!)
+    return 'the second save named the change it would have overwritten'
+  })
+
+  await check('a task edited from a copy somebody else has since changed is refused', async () => {
+    const { id } = await createTask(admin, { title: 'D11 task' } as never)
+    const [row] = (await listTasks(admin, {})).filter((task) => task.id === id)
+    const seen = row!.updatedAt
+    await updateTask(admin, { id, title: 'D11 task, renamed', expectedUpdatedAt: seen })
+    const said = await refuses('editing a stale task', () => updateTask(admin, { id, title: 'D11 lost', expectedUpdatedAt: seen }))
+    expect(said.includes('Someone else'), said)
+    await deleteTask(admin, id)
+    return 'the second edit was refused with the reason'
+  })
+
   await check('B8. a view duplicates, pins, reorders and renames', async () => {
     const made = await saveView(admin, {
       objectKey: 'contact',
       name: 'B8 arrangement',
+      expectedUpdatedAt: null,
       kind: 'table',
       columns: ['first_name', 'email'],
       filters: [],
@@ -1209,6 +1238,7 @@ try {
     const mine = await saveView(admin, {
       objectKey: 'deal',
       name: 'B8 admin only',
+      expectedUpdatedAt: null,
       kind: 'table',
       columns: ['name'],
       filters: [],

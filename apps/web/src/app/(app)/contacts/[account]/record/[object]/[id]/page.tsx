@@ -472,6 +472,7 @@ const RecordPage = async ({
           entityType: row.entityType,
           entityId: row.entityId,
           entityName: row.entityName,
+          updatedAt: row.updatedAt,
         }))}
         entity={entity}
         canWrite={canWrite}

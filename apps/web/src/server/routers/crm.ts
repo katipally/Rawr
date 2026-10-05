@@ -287,12 +287,21 @@ export const crmRouter = router({
       .input(
         z.object({
           object: anyObject,
-          ids: z.array(z.uuid()).min(1).max(500),
+          /** Each record with the version the caller last read of it. */
+          rows: z.array(z.object({ id: z.uuid(), version: z.coerce.date() })).min(1).max(500),
           values: recordValues,
         }),
       )
       .mutation(({ ctx, input }) =>
-        call(() => bulkUpdateRecords(ctx.account, input.object, input.ids, input.values)),
+        call(() =>
+          bulkUpdateRecords(
+            ctx.account,
+            input.object,
+            input.rows.map((row) => row.id),
+            input.values,
+            new Map(input.rows.map((row) => [row.id, row.version])),
+          ),
+        ),
       ),
 
     remove: protectedProcedure
@@ -374,11 +383,14 @@ export const crmRouter = router({
           filters: z.array(filterGroup).max(5),
           sorts: z.array(sortSchema).max(3),
           isShared: z.boolean(),
+          /** The version of the view being overwritten; absent only when creating. */
+          expectedUpdatedAt: z.coerce.date().nullable(),
         }),
       )
       .mutation(({ ctx, input }) =>
         call(() =>
           saveView(ctx.account, {
+            expectedUpdatedAt: input.expectedUpdatedAt,
             objectKey: input.object,
             id: input.id ?? null,
             name: input.name,
@@ -780,6 +792,7 @@ export const crmRouter = router({
           remindAt: z.coerce.date().nullish(),
           queueId: z.uuid().nullish(),
           assigneeId: z.uuid().nullish(),
+          expectedUpdatedAt: z.coerce.date(),
         }),
       )
       .mutation(({ ctx, input }) => call(() => updateTask(ctx.account, input))),

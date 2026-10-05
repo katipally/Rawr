@@ -151,6 +151,7 @@ const BoardPage = async ({
         objectLabel={object.nameSingular}
         view={resolved.view.slug}
         viewId={resolved.view.id}
+        viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
         viewLabel={resolved.view.name}
         kind="board"
         params={listParams}

@@ -179,7 +179,7 @@ export const TasksTable = ({
             onClick={(event) => event.stopPropagation()}
             onChange={(event) =>
               void run(
-                () => api.crm.tasks.update.mutate({ id: row.id, queueId: event.target.value || null }),
+                () => api.crm.tasks.update.mutate({ id: row.id, queueId: event.target.value || null, expectedUpdatedAt: row.updatedAt }),
                 'Task moved.',
               )
             }

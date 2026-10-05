@@ -210,8 +210,15 @@ const getRecordTool: ToolDefinition = {
       .filter(Boolean)
 
     return {
-      text: [`${record.displayName} (${key}, id ${record.id})`, ...lines].join('\n'),
-      data: { id: record.id, object: key, name: record.displayName, values: record.values, labels: record.labels },
+      text: [`${record.displayName} (${key}, id ${record.id}, updatedAt ${record.updatedAt.toISOString()})`, ...lines].join('\n'),
+      data: {
+        id: record.id,
+        object: key,
+        name: record.displayName,
+        updatedAt: record.updatedAt.toISOString(),
+        values: record.values,
+        labels: record.labels,
+      },
     }
   },
 }
@@ -455,8 +462,12 @@ const updateRecordTool: ToolDefinition = {
         description: `The fields to change, keyed by field key. Valid keys per object: ${registry.objects.map((o) => `${o.key} (${o.fields.map((f) => f.key).join(', ')})`).join('; ')}.`,
         additionalProperties: true,
       },
+      expectedUpdatedAt: {
+        type: 'string',
+        description: 'The updatedAt that get_record returned for this record. If somebody changed it since, nothing is written and the change is refused, so read it again first.',
+      },
     },
-    required: ['object', 'id', 'fields'],
+    required: ['object', 'id', 'fields', 'expectedUpdatedAt'],
     additionalProperties: false,
   }),
   run: async (context, args) => {
@@ -477,7 +488,11 @@ const updateRecordTool: ToolDefinition = {
     const before = await getRecord(context.caller.ctx, key, found.id)
     if (!before) return { text: 'That record no longer exists.', isError: true }
 
-    await updateRecord(context.caller.ctx, key, found.id, prepared.values)
+    const expected = new Date(String(args.expectedUpdatedAt ?? ''))
+    if (Number.isNaN(expected.getTime())) {
+      return { text: 'expectedUpdatedAt is required: call get_record and pass the updatedAt it returns.', isError: true }
+    }
+    await updateRecord(context.caller.ctx, key, found.id, prepared.values, expected)
     const after = await getRecord(context.caller.ctx, key, found.id)
 
     const changes = Object.keys(prepared.values).map((field) => ({

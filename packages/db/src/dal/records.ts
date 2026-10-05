@@ -196,6 +196,9 @@ export type ListRow = {
   values: RecordValues
   /** Relation and user values as their readable label, keyed by the same field key. */
   labels: Record<string, string>
+  /** `updated_at` as read, sent back with an edit so a row somebody changed since is
+   *  refused rather than overwritten. */
+  version: string
 }
 
 export type ListPage = {
@@ -223,6 +226,7 @@ export const listRecords = async (
 
   const selected = [
     sql.raw(`"${object.key}"."id" as "id"`),
+    sql.raw(`"${object.key}"."updated_at" as "__version"`),
     ...columns.map((field) => selectExpression(object, field)),
     ...displayFields(object)
       .filter((field) => !columns.some((c) => c.key === field.key))
@@ -283,10 +287,11 @@ export const listRecords = async (
               id: String(page.at(-1)!.id),
             }
           : null,
-      rows: page.map((row) => ({
+      rows: page.map(({ __version, ...row }) => ({
         id: String(row.id),
         displayName: displayName(object, row),
         values: row,
+        version: asDate(__version).toISOString(),
         labels: Object.fromEntries(
           columns
             .filter((field) => RELATION_TARGETS[field.key] && typeof row[field.key] === 'string')
@@ -1146,7 +1151,7 @@ export type BulkUpdateResult = {
   /** What each record held before, for the fields this edit touched. The one
    *  thing an undo needs, and the one thing the caller cannot work out
    *  afterwards. */
-  previous: { id: string; values: RecordValues }[]
+  previous: { id: string; values: RecordValues; version: Date }[]
 }
 
 const BULK_MAX = 500
@@ -1163,6 +1168,10 @@ export const bulkUpdateRecords = async (
   objectKey: string,
   ids: string[],
   values: RecordValues,
+  /** What the caller last read of each record. A record changed since is named back
+   *  as refused, like one that cannot take the value. Null only for a queued run,
+   *  which has no read to compare with and is a deliberate overwrite of one field. */
+  versions: ReadonlyMap<string, Date> | null,
 ): Promise<BulkUpdateResult> => {
   assertCanWrite(ctx, objectKey)
   const unique = [...new Set(ids)]
@@ -1186,13 +1195,14 @@ export const bulkUpdateRecords = async (
         // record's worth of columns, not the whole row: an undo restores what
         // this edit touched and nothing somebody else changed in between.
         const before = await readForWrite(tx, object, id).catch(() => undefined)
-        await updateRecordIn(tx, ctx, object, id, values, null)
+        const written = await updateRecordIn(tx, ctx, object, id, values, versions?.get(id) ?? null)
         await tx.execute(sql.raw(`release savepoint "${point}"`))
         result.updated += 1
         if (before) {
           result.previous.push({
             id,
             values: Object.fromEntries(changed.map((key) => [key, before[key] ?? null])),
+            version: written.updatedAt,
           })
         }
       } catch (cause) {

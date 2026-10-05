@@ -6,6 +6,7 @@ import { assertCanView, isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { notify, resolveNotifications } from './notifications.ts'
+import { ConflictError } from './records.ts'
 import { entityAlive } from './registry.ts'
 // A sequence step can make a task, and completing that task resumes the sequence.
 // The two modules import each other for exactly that pair of calls; Node resolves
@@ -29,6 +30,7 @@ export type TaskRow = {
   entityType: string | null
   entityId: string | null
   entityName: string | null
+  updatedAt: Date
 }
 
 const ENTITY_NAME = sql<string | null>`case
@@ -58,6 +60,7 @@ const SELECT = {
   status: task.status,
   assigneeId: task.assigneeId,
   assigneeName: userAccount.name,
+  updatedAt: task.updatedAt,
   entityType: sql<string | null>`case when ${entityAlive(task.entityType, task.entityId)} then ${task.entityType} end`,
   entityId: sql<string | null>`case when ${entityAlive(task.entityType, task.entityId)} then ${task.entityId} end`,
   entityName: ENTITY_NAME,
@@ -205,15 +208,19 @@ export type TaskEdit = {
   remindAt?: Date | null | undefined
   queueId?: string | null | undefined
   assigneeId?: string | null | undefined
+  /** What the editor last read. A task somebody changed since is refused. */
+  expectedUpdatedAt: Date
 }
 
 export const updateTask = async (ctx: AccountContext, input: TaskEdit): Promise<void> =>
   mutate(ctx, 'task', async (tx) => {
     const [before] = await tx
-      .select({ title: task.title, assigneeId: task.assigneeId, dueDate: task.dueDate, queueId: task.queueId })
+      .select({ title: task.title, assigneeId: task.assigneeId, dueDate: task.dueDate, queueId: task.queueId, updatedAt: task.updatedAt })
       .from(task)
       .where(eq(task.id, input.id))
+      .for('update')
     if (!before) throw new Error('That task no longer exists.')
+    if (before.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) throw new ConflictError(before.updatedAt)
 
     const title = input.title === undefined ? before.title : input.title.trim()
     if (!title) throw new Error('A task needs a title.')

@@ -49,6 +49,7 @@ export type EditableTask = {
   remindAt: Date | string | null
   queueId: string | null
   assigneeId: string | null
+  updatedAt: Date | string
 }
 
 export type TaskFormProps = {
@@ -138,7 +139,7 @@ export const TaskForm = ({
         assigneeId: assigneeId || null,
       }
       if (task) {
-        await api.crm.tasks.update.mutate({ id: task.id, ...fields })
+        await api.crm.tasks.update.mutate({ id: task.id, ...fields, expectedUpdatedAt: task.updatedAt })
         toast('success', 'Task saved.')
       } else {
         await api.crm.tasks.create.mutate({ ...fields, entity: entity ?? null })

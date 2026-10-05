@@ -224,6 +224,7 @@ const ListPage = async ({
         objectLabel={object.nameSingular}
         view={resolved.view.slug}
         viewId={resolved.view.id}
+        viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
         viewLabel={resolved.view.name}
         kind="list"
         params={listParams}
@@ -261,6 +262,7 @@ const ListPage = async ({
           rows={page!.rows.map((row) => ({
             id: row.id,
             displayName: row.displayName,
+            version: row.version,
             values: row.values,
             labels: row.labels,
           }))}

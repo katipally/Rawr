@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { createdAt, pk, accountId } from './columns.ts'
+import { createdAt, pk, accountId, updatedAt } from './columns.ts'
 import { subscriptionStateEnum, viewKindEnum } from './enums.ts'
 import { userAccount, account } from './identity.ts'
 import { objectDef, fieldDef } from './metadata.ts'
@@ -131,6 +131,7 @@ export const savedView = pgTable(
       onDelete: 'set null',
     }),
     createdAt: createdAt(),
+    updatedAt: updatedAt(),
   },
   (t) => [
     index('saved_view_object_idx').on(t.accountId, t.objectId, t.pinned.desc(), t.position),

@@ -5,6 +5,7 @@ import { CORE_VIEWS } from '../registry/core.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 import { parseFilters, parseSorts, type FilterGroup, type Sort } from './query.ts'
+import { ConflictError } from './records.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
 
 export type ViewDefinition = {
@@ -23,6 +24,8 @@ export type ViewDefinition = {
   pinned: boolean
   /** Board views only: the field whose values become columns. Null means stage. */
   groupByKey: string | null
+  /** What a save has to carry back. Null for a view that is not stored yet. */
+  updatedAt: Date | null
 }
 
 /** Reserved: /objects/:object/views/all/list must always resolve, even in a
@@ -47,6 +50,7 @@ const fallbackView = (objectKey: string, slug: string): ViewDefinition => {
     position: seeded?.position ?? 0,
     pinned: true,
     groupByKey: seeded?.groupBy ?? null,
+    updatedAt: null,
   }
 }
 
@@ -64,6 +68,7 @@ const toDefinition = (row: {
   pinned: boolean
   /** Board views only: the field whose values become columns. Null means stage. */
   groupByKey: string | null
+  updatedAt: Date
 }): ViewDefinition => ({
   id: row.id,
   slug: row.slug,
@@ -77,6 +82,7 @@ const toDefinition = (row: {
   position: row.position,
   pinned: row.pinned,
   groupByKey: row.groupByKey,
+  updatedAt: row.updatedAt,
 })
 
 /** The view tabs a person can see: the shared ones plus their own. */
@@ -102,6 +108,7 @@ export const listViews = async (
         position: savedView.position,
         pinned: savedView.pinned,
         groupByKey: fieldDef.key,
+        updatedAt: savedView.updatedAt,
       })
       .from(savedView)
       .leftJoin(fieldDef, eq(fieldDef.id, savedView.groupByFieldId))
@@ -152,6 +159,9 @@ export type SaveViewInput = {
   filters: FilterGroup[]
   sorts: Sort[]
   isShared: boolean
+  /** What the editor last read of the view it is overwriting; null when it is
+   *  creating one. */
+  expectedUpdatedAt: Date | null
 }
 
 export const saveView = async (
@@ -180,9 +190,17 @@ export const saveView = async (
     }
 
     if (input.id) {
+      const [current] = await tx
+        .select({ updatedAt: savedView.updatedAt })
+        .from(savedView)
+        .where(eq(savedView.id, input.id))
+        .for('update')
+      if (current && current.updatedAt.getTime() !== input.expectedUpdatedAt?.getTime()) {
+        throw new ConflictError(current.updatedAt)
+      }
       const [updated] = await tx
         .update(savedView)
-        .set(values)
+        .set({ ...values, updatedAt: new Date() })
         .where(eq(savedView.id, input.id))
         .returning()
       if (!updated) throw new Error('That view no longer exists.')

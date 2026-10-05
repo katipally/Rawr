@@ -15,6 +15,8 @@ export type ListToolbarProps = {
   objectLabel: string
   view: string
   viewId: string | null
+  /** The version of that view as this page read it. */
+  viewVersion: string | null
   kind: ViewKind
   params: ListParams
   filters: Group[]
@@ -46,6 +48,7 @@ export const ListToolbar = ({
   objectLabel,
   view,
   viewId,
+  viewVersion,
   kind,
   params,
   filters,
@@ -122,6 +125,7 @@ export const ListToolbar = ({
         filters: filters as never,
         sorts,
         isShared: shared,
+        expectedUpdatedAt: into ? viewVersion : null,
       })
       setSavePicked(false)
       setShowColumns(false)

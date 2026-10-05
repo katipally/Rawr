@@ -666,6 +666,13 @@
       "when": 1791996834179,
       "tag": "0093_ending_a_seat_ends_that_seat",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792083234179,
+      "tag": "0094_a_view_has_a_version",
+      "breakpoints": true
     }
   ]
 }

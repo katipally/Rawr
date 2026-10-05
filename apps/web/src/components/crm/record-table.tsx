@@ -24,6 +24,8 @@ export type TableRow = {
   displayName: string
   values: Record<string, unknown>
   labels: Record<string, string>
+  /** What the row was when it was read, sent back with a bulk edit. */
+  version: string
 }
 
 export type RecordTableProps = {
@@ -226,6 +228,7 @@ export const RecordTable = ({
             objectLabel={objectLabel}
             objectPlural={objectPlural}
             ids={live}
+            versions={Object.fromEntries(rows.map((row) => [row.id, row.version]))}
             fields={bulkFields}
             onDone={() => setSelected(new Set())}
             onClear={() => setSelected(new Set())}
