@@ -181,21 +181,14 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
         )}
       </ul>
 
-      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.name ?? ''}`} onClose={() => setRemoving(null)}>
-        {removing ? (
-          <div className="flex flex-col gap-3">
-            {removing.unsubscribed > 0 ? (
-              <Alert>
-                {removing.unsubscribed.toLocaleString()} people have opted out of this. Deleting it
-                discards every one of those opt-outs, and nothing anywhere else remembers them.
-              </Alert>
-            ) : (
-              <p>Nobody has opted out of this, so no consent is discarded.</p>
-            )}
-            <p className="text-secondary">
-              {removing.subscribed.toLocaleString()} explicit opt-ins go too.
-            </p>
-            <div className="flex flex-wrap gap-2">
+      <Modal
+        open={removing !== null}
+        size="sm"
+        title={`Delete ${removing?.name ?? ''}`}
+        onClose={() => setRemoving(null)}
+        footer={
+          removing ? (
+            <>
               <Button variant="tertiary" onClick={() => setRemoving(null)}>
                 Cancel
               </Button>
@@ -215,7 +208,23 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
               >
                 Delete permanently
               </Button>
-            </div>
+            </>
+          ) : null
+        }
+      >
+        {removing ? (
+          <div className="flex flex-col gap-3">
+            {removing.unsubscribed > 0 ? (
+              <Alert>
+                {removing.unsubscribed.toLocaleString()} people have opted out of this. Deleting it
+                discards every one of those opt-outs, and nothing anywhere else remembers them.
+              </Alert>
+            ) : (
+              <p>Nobody has opted out of this, so no consent is discarded.</p>
+            )}
+            <p className="text-secondary">
+              {removing.subscribed.toLocaleString()} explicit opt-ins go too.
+            </p>
           </div>
         ) : null}
       </Modal>

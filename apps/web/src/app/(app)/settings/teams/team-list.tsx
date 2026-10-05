@@ -127,22 +127,30 @@ export const TeamList = ({
           size="sm"
           title={editing.id ? `Rename ${editing.name}` : 'Create team'}
           onClose={() => setEditing(null)}
+          dirty={!editing.id && (editing.name !== '' || editing.description !== '')}
+          onSubmit={() =>
+            void run(
+              () =>
+                api.admin.teams.save.mutate({
+                  id: editing.id,
+                  name: editing.name.trim(),
+                  description: editing.description.trim() || null,
+                }),
+              editing.id ? 'Saved.' : `${editing.name} is ready. Add people to it next.`,
+            ).then((ok) => ok && setEditing(null))
+          }
+          footer={
+            <>
+              <Button variant="tertiary" onClick={() => setEditing(null)}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" busy={busy} disabled={editing.name.trim() === ''}>
+                Save
+              </Button>
+            </>
+          }
         >
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void run(
-                () =>
-                  api.admin.teams.save.mutate({
-                    id: editing.id,
-                    name: editing.name.trim(),
-                    description: editing.description.trim() || null,
-                  }),
-                editing.id ? 'Saved.' : `${editing.name} is ready. Add people to it next.`,
-              ).then((ok) => ok && setEditing(null))
-            }}
-          >
+          <div className="flex flex-col gap-3">
             <Field label="Name" id="team-name" required>
               <TextInput
                 id="team-name"
@@ -159,20 +167,42 @@ export const TeamList = ({
                 onChange={(event) => setEditing({ ...editing, description: event.target.value })}
               />
             </Field>
-            <div className="flex justify-end gap-2">
-              <Button variant="tertiary" type="button" onClick={() => setEditing(null)}>
-                Cancel
-              </Button>
-              <Button variant="primary" type="submit" busy={busy} disabled={editing.name.trim() === ''}>
-                Save
-              </Button>
-            </div>
-          </form>
+          </div>
         </Modal>
       ) : null}
 
       {members ? (
-        <Modal open title={`Who is on ${members.team.name}`} onClose={() => setMembers(null)}>
+        <Modal
+          open
+          title={`Who is on ${members.team.name}`}
+          onClose={() => setMembers(null)}
+          footer={
+            <>
+              <Button variant="tertiary" onClick={() => setMembers(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                busy={busy}
+                onClick={() =>
+                  void run(
+                    () =>
+                      api.admin.teams.setMembers.mutate({
+                        teamId: members.team.id,
+                        members: members.chosen.map((userId) => ({
+                          userId,
+                          isLead: members.leads.includes(userId),
+                        })),
+                      }),
+                    `${members.team.name} now has ${members.chosen.length} ${members.chosen.length === 1 ? 'member' : 'members'}.`,
+                  ).then((ok) => ok && setMembers(null))
+                }
+              >
+                Save
+              </Button>
+            </>
+          }
+        >
           <div className="flex flex-col gap-3">
             <Combobox
               label="Members"
@@ -218,43 +248,18 @@ export const TeamList = ({
                 })}
               </fieldset>
             ) : null}
-
-            <div className="flex justify-end gap-2">
-              <Button variant="tertiary" onClick={() => setMembers(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                busy={busy}
-                onClick={() =>
-                  void run(
-                    () =>
-                      api.admin.teams.setMembers.mutate({
-                        teamId: members.team.id,
-                        members: members.chosen.map((userId) => ({
-                          userId,
-                          isLead: members.leads.includes(userId),
-                        })),
-                      }),
-                    `${members.team.name} now has ${members.chosen.length} ${members.chosen.length === 1 ? 'member' : 'members'}.`,
-                  ).then((ok) => ok && setMembers(null))
-                }
-              >
-                Save
-              </Button>
-            </div>
           </div>
         </Modal>
       ) : null}
 
       {deleting ? (
-        <Modal open size="sm" title={`Delete ${deleting.name}`} onClose={() => setDeleting(null)}>
-          <div className="flex flex-col gap-3">
-            <p>
-              The team goes; nobody loses their seat. Anything set to round-robin within it falls back to
-              rotating through the whole account.
-            </p>
-            <div className="flex justify-end gap-2">
+        <Modal
+          open
+          size="sm"
+          title={`Delete ${deleting.name}`}
+          onClose={() => setDeleting(null)}
+          footer={
+            <>
               <Button variant="tertiary" onClick={() => setDeleting(null)}>
                 Cancel
               </Button>
@@ -269,7 +274,14 @@ export const TeamList = ({
               >
                 Delete
               </Button>
-            </div>
+            </>
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <p>
+              The team goes; nobody loses their seat. Anything set to round-robin within it falls back to
+              rotating through the whole account.
+            </p>
           </div>
         </Modal>
       ) : null}

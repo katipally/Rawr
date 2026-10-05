@@ -232,18 +232,41 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
         </section>
       ))}
 
-      <Modal open={editing !== null} title={`Edit ${editing?.name ?? ''}`} onClose={() => setEditing(null)}>
-        {editing ? <StageForm stage={editing} busy={busy} onSave={async (values) => {
-          const ok = await run(() => api.admin.pipelines.updateStage.mutate({ id: editing.id, ...values }), 'Stage saved.')
-          if (ok) setEditing(null)
-        }} /> : null}
-      </Modal>
+      {editing ? <StageForm stage={editing} busy={busy} onClose={() => setEditing(null)} onSave={async (values) => {
+        const ok = await run(() => api.admin.pipelines.updateStage.mutate({ id: editing.id, ...values }), 'Stage saved.')
+        if (ok) setEditing(null)
+      }} /> : null}
 
       <Modal
         open={removing !== null}
         size="sm"
         title={`Delete ${removing?.stage.name ?? ''}`}
         onClose={() => setRemoving(null)}
+        footer={
+          removing ? (
+            <>
+              <Button variant="tertiary" onClick={() => setRemoving(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                busy={busy}
+                disabled={removing.stage.dealCount > 0 && destination === ''}
+                onClick={() =>
+                  void run(async () => {
+                    const result = await api.admin.pipelines.removeStage.mutate({
+                      id: removing.stage.id,
+                      destinationStageId: destination || null,
+                    })
+                    if (result.moved > 0) toast('info', `${result.moved} deals moved.`)
+                  }, 'Stage deleted.').then((ok) => ok && setRemoving(null))
+                }
+              >
+                Delete stage
+              </Button>
+            </>
+          ) : null
+        }
       >
         {removing ? (
           <div className="flex flex-col gap-3">
@@ -275,27 +298,6 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                 </Field>
               </>
             )}
-            <div className="flex flex-wrap gap-2">
-              <Button variant="tertiary" onClick={() => setRemoving(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                busy={busy}
-                disabled={removing.stage.dealCount > 0 && destination === ''}
-                onClick={() =>
-                  void run(async () => {
-                    const result = await api.admin.pipelines.removeStage.mutate({
-                      id: removing.stage.id,
-                      destinationStageId: destination || null,
-                    })
-                    if (result.moved > 0) toast('info', `${result.moved} deals moved.`)
-                  }, 'Stage deleted.').then((ok) => ok && setRemoving(null))
-                }
-              >
-                Delete stage
-              </Button>
-            </div>
           </div>
         ) : null}
       </Modal>
@@ -305,15 +307,9 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
         size="sm"
         title={`Delete ${deleting?.name ?? ''}`}
         onClose={() => setDeleting(null)}
-      >
-        {deleting ? (
-          <div className="flex flex-col gap-3">
-            <p>
-              The pipeline and its {deleting.stages.length} stage
-              {deleting.stages.length === 1 ? '' : 's'} go. A pipeline with deals in it is refused,
-              so nothing is lost either way — but a board somebody had open stops existing.
-            </p>
-            <div className="flex flex-wrap gap-2">
+        footer={
+          deleting ? (
+            <>
               <Button variant="tertiary" onClick={() => setDeleting(null)}>
                 Cancel
               </Button>
@@ -329,7 +325,17 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
               >
                 Delete pipeline
               </Button>
-            </div>
+            </>
+          ) : null
+        }
+      >
+        {deleting ? (
+          <div className="flex flex-col gap-3">
+            <p>
+              The pipeline and its {deleting.stages.length} stage
+              {deleting.stages.length === 1 ? '' : 's'} go. A pipeline with deals in it is refused,
+              so nothing is lost either way — but a board somebody had open stops existing.
+            </p>
           </div>
         ) : null}
       </Modal>
@@ -355,10 +361,12 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
 const StageForm = ({
   stage,
   busy,
+  onClose,
   onSave,
 }: {
   stage: StageRow
   busy: boolean
+  onClose: () => void
   onSave: (values: { name: string; probability: number | null; isClosedWon: boolean; isClosedLost: boolean }) => void
 }) => {
   const [name, setName] = useState(stage.name)
@@ -366,65 +374,70 @@ const StageForm = ({
   const [won, setWon] = useState(stage.isClosedWon)
   const [lost, setLost] = useState(stage.isClosedLost)
 
+  const probabilityNow = probability === '' ? null : Number(probability)
+  const dirty =
+    name !== stage.name || probabilityNow !== stage.probability || won !== stage.isClosedWon || lost !== stage.isClosedLost
+
   return (
-    <div className="flex flex-col gap-3">
-      <Field id="edit-stage-name" label="Name">
-        <TextInput id="edit-stage-name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
-      </Field>
-      <Field
-        id="edit-stage-prob"
-        label="Probability"
-        hint="Weighted totals use this. Changing it recomputes them on the next board read."
-      >
-        <TextInput
+    <Modal
+      open
+      title={`Edit ${stage.name}`}
+      onClose={onClose}
+      dirty={dirty}
+      onSubmit={() => onSave({ name, probability: probabilityNow, isClosedWon: won, isClosedLost: lost })}
+      footer={
+        <>
+          <Button variant="tertiary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
+            Save stage
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Field id="edit-stage-name" label="Name">
+          <TextInput id="edit-stage-name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+        </Field>
+        <Field
           id="edit-stage-prob"
-          type="number"
-          min={0}
-          max={100}
-          value={probability}
-          onChange={(event) => setProbability(event.target.value)}
-        />
-      </Field>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={won}
-          onChange={(event) => {
-            setWon(event.target.checked)
-            if (event.target.checked) setLost(false)
-          }}
-        />
-        Closed won
-      </label>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={lost}
-          onChange={(event) => {
-            setLost(event.target.checked)
-            if (event.target.checked) setWon(false)
-          }}
-        />
-        Closed lost
-      </label>
-      <div>
-        <Button
-          variant="primary"
-          busy={busy}
-          disabled={!name.trim()}
-          onClick={() =>
-            onSave({
-              name,
-              probability: probability === '' ? null : Number(probability),
-              isClosedWon: won,
-              isClosedLost: lost,
-            })
-          }
+          label="Probability"
+          hint="Weighted totals use this. Changing it recomputes them on the next board read."
         >
-          Save stage
-        </Button>
+          <TextInput
+            id="edit-stage-prob"
+            type="number"
+            min={0}
+            max={100}
+            value={probability}
+            onChange={(event) => setProbability(event.target.value)}
+          />
+        </Field>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={won}
+            onChange={(event) => {
+              setWon(event.target.checked)
+              if (event.target.checked) setLost(false)
+            }}
+          />
+          Closed won
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={lost}
+            onChange={(event) => {
+              setLost(event.target.checked)
+              if (event.target.checked) setWon(false)
+            }}
+          />
+          Closed lost
+        </label>
       </div>
-    </div>
+    </Modal>
   )
 }
 

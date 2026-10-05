@@ -552,7 +552,23 @@ export const PropertyList = ({
       ) : null}
 
       {/* ---------------------------------------------------------- create */}
-      <Modal open={creating} title={`Create property on ${object}`} onClose={() => setCreating(false)}>
+      <Modal
+        open={creating}
+        title={`Create property on ${object}`}
+        onClose={() => setCreating(false)}
+        dirty={label !== '' || options !== '' || helpText !== '' || groupName !== ''}
+        onSubmit={() => void create()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!label.trim()}>
+              Create property
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <Field id="prop-label" label="Label" hint="What people see on the record.">
             <TextInput
@@ -633,20 +649,35 @@ export const PropertyList = ({
             onRequired={setIsRequired}
             onTrack={setTrackChanges}
           />
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setCreating(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void create()}>
-              Create property
-            </Button>
-          </div>
         </div>
       </Modal>
 
       {/* ------------------------------------------------------------ edit */}
-      <Modal open={editing !== null} title={`Edit ${editing?.label ?? ''}`} onClose={() => setEditing(null)}>
+      <Modal
+        open={editing !== null}
+        title={`Edit ${editing?.label ?? ''}`}
+        onClose={() => setEditing(null)}
+        dirty={
+          editing !== null &&
+          (label !== editing.label ||
+            options !== editing.options.join('\n') ||
+            helpText !== (editing.helpText ?? '') ||
+            groupName !== (editing.groupName ?? '') ||
+            isRequired !== editing.isRequired ||
+            trackChanges !== editing.trackChanges)
+        }
+        onSubmit={() => void saveEdit()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setEditing(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!label.trim()}>
+              Save
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p className="text-secondary">
             The key <code>{editing?.key}</code> and the type <code>{editing?.type}</code> are fixed.
@@ -695,34 +726,17 @@ export const PropertyList = ({
             onRequired={setIsRequired}
             onTrack={setTrackChanges}
           />
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button variant="primary" busy={busy} disabled={!label.trim()} onClick={() => void saveEdit()}>
-              Save
-            </Button>
-          </div>
         </div>
       </Modal>
 
       {/* ---------------------------------------------------------- delete */}
-      <Modal open={removing !== null} size="sm" title={`Delete ${removing?.label ?? ''}`} onClose={() => setRemoving(null)}>
-        <div className="flex flex-col gap-3">
-          <p>
-            The property disappears from every screen immediately.{' '}
-            {usage === null
-              ? 'Counting how many records hold a value…'
-              : usage.filled === 0
-                ? 'No record holds a value for it.'
-                : `${usage.filled.toLocaleString()} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
-          </p>
-          <p className="text-secondary">
-            Nothing is lost here. Restoring puts it back. Purging, which is a separate action, is
-            what actually removes the data.
-          </p>
-          <div className="flex flex-wrap gap-2">
+      <Modal
+        open={removing !== null}
+        size="sm"
+        title={`Delete ${removing?.label ?? ''}`}
+        onClose={() => setRemoving(null)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setRemoving(null)}>
               Cancel
             </Button>
@@ -739,18 +753,33 @@ export const PropertyList = ({
             >
               Delete property
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            The property disappears from every screen immediately.{' '}
+            {usage === null
+              ? 'Counting how many records hold a value…'
+              : usage.filled === 0
+                ? 'No record holds a value for it.'
+                : `${usage.filled.toLocaleString()} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
+          </p>
+          <p className="text-secondary">
+            Nothing is lost here. Restoring puts it back. Purging, which is a separate action, is
+            what actually removes the data.
+          </p>
         </div>
       </Modal>
 
       {/* ----------------------------------------------------------- purge */}
-      <Modal open={purging !== null} size="sm" title={`Purge ${purging?.label ?? ''}`} onClose={() => setPurging(null)}>
-        <div className="flex flex-col gap-3">
-          <Alert>
-            This strips <code>{purging?.key}</code> out of every record in the account and removes
-            the definition. It cannot be undone and there is no copy anywhere else.
-          </Alert>
-          <div className="flex flex-wrap gap-2">
+      <Modal
+        open={purging !== null}
+        size="sm"
+        title={`Purge ${purging?.label ?? ''}`}
+        onClose={() => setPurging(null)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setPurging(null)}>
               Cancel
             </Button>
@@ -768,7 +797,14 @@ export const PropertyList = ({
             >
               Purge permanently
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Alert>
+            This strips <code>{purging?.key}</code> out of every record in the account and removes
+            the definition. It cannot be undone and there is no copy anywhere else.
+          </Alert>
         </div>
       </Modal>
 
@@ -778,6 +814,38 @@ export const PropertyList = ({
         size="sm"
         title={grouping?.rename ? `Rename ${grouping.name}` : 'Create group'}
         onClose={() => setGrouping(null)}
+        onSubmit={() => {
+          if (!grouping) return
+          const target = grouping
+          const name = groupDraft.trim()
+          void run(
+            () =>
+              target.rename
+                ? api.admin.fields.renameGroup.mutate({ object, from: target.name, to: name })
+                : api.admin.fields.moveToGroup.mutate({
+                    object,
+                    fieldIds: [...picked],
+                    groupName: name,
+                  }),
+            target.rename ? 'Group renamed.' : 'Group created.',
+          ).then((ok) => {
+            if (!ok) return
+            if (target.rename) setRenamed({ from: target.name, to: name })
+            setGrouping(null)
+            setPicked(new Set())
+            setGroup(name)
+          })
+        }}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setGrouping(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!groupDraft.trim()}>
+              {grouping?.rename ? 'Rename group' : 'Create group'}
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           <Field id="group-name" label="Name">
@@ -794,40 +862,6 @@ export const PropertyList = ({
               under it. Select properties in the list and move them here.
             </p>
           )}
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setGrouping(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!groupDraft.trim()}
-              onClick={() => {
-                const target = grouping
-                if (!target) return
-                const name = groupDraft.trim()
-                void run(
-                  () =>
-                    target.rename
-                      ? api.admin.fields.renameGroup.mutate({ object, from: target.name, to: name })
-                      : api.admin.fields.moveToGroup.mutate({
-                          object,
-                          fieldIds: [...picked],
-                          groupName: name,
-                        }),
-                  target.rename ? 'Group renamed.' : 'Group created.',
-                ).then((ok) => {
-                  if (!ok) return
-                  if (target.rename) setRenamed({ from: target.name, to: name })
-                  setGrouping(null)
-                  setPicked(new Set())
-                  setGroup(name)
-                })
-              }}
-            >
-              {grouping?.rename ? 'Rename group' : 'Create group'}
-            </Button>
-          </div>
           {grouping && !grouping.rename && picked.size === 0 ? (
             <p className="text-secondary">
               Nothing is selected, so the group would have no properties in it and nowhere to be
