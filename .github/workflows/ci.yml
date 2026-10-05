@@ -35,13 +35,39 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
-  # The twelve suites run against a real Postgres with row level security on, which
-  # is the only way they prove anything. Skipped rather than failed where no
-  # database is configured, so this workflow is useful before open item 9 lands.
+  # The suites run against a real Postgres with row level security on, which is the
+  # only way they prove anything. It is a throwaway container of the same major
+  # version as production, never a hosted database: the suites and the seed empty
+  # tables, and scripts/local-only.ts refuses anything that is not on this machine.
   verify:
     runs-on: ubuntu-latest
     needs: check
-    if: github.event_name == 'push'
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://rawr_app:ci-app-password@localhost:5432/postgres
+      DATABASE_URL_OWNER: postgres://postgres:postgres@localhost:5432/postgres
+      DATABASE_URL_SESSION: postgres://rawr_app:ci-app-password@localhost:5432/postgres
+      APP_DB_PASSWORD: ci-app-password
+      # Throwaway values for a database that lives as long as this job.
+      AUTH_SECRET: ci-auth-secret-at-least-32-characters
+      AUTH_URL: http://localhost:3000
+      GOOGLE_HOSTED_DOMAIN: example.test
+      TOKEN_ENCRYPTION_KEY: WCpOyC3dKpA/lu2McaMPlWlzwRcfYPzPc7TV2zSvS+E=
+      RAWR_DEV_CALENDAR: 1
+      RAWR_DEV_GMAIL: 1
+      RAWR_DEV_INTEGRATIONS: 1
+      RAWR_INTERNAL_SECRET: ci-internal-secret-at-least-32-characters
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -51,35 +77,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: Is there a database to verify against
-        id: db
-        run: echo "present=${{ secrets.DATABASE_URL != '' }}" >> "$GITHUB_OUTPUT"
-
-      - name: Write the environment the scripts read
-        if: steps.db.outputs.present == 'true'
-        run: |
-          cat > .env.local <<'ENV'
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          DATABASE_URL_OWNER=${{ secrets.DATABASE_URL_OWNER }}
-          AUTH_SECRET=${{ secrets.AUTH_SECRET }}
-          AUTH_URL=http://localhost:3000
-          GOOGLE_HOSTED_DOMAIN=${{ secrets.GOOGLE_HOSTED_DOMAIN }}
-          TOKEN_ENCRYPTION_KEY=${{ secrets.TOKEN_ENCRYPTION_KEY }}
-          RAWR_DEV_CALENDAR=1
-          RAWR_DEV_GMAIL=1
-          RAWR_DEV_INTEGRATIONS=1
-          RAWR_INTERNAL_SECRET=${{ secrets.RAWR_INTERNAL_SECRET }}
-          ENV
-
       - name: Migrate
-        if: steps.db.outputs.present == 'true'
         run: pnpm db:migrate
+
+      # Every suite reads the sandbox and peer tenants and tells you to seed when
+      # they are missing.
+      - name: Seed
+        run: pnpm db:seed
 
       # verify:mcp calls the real endpoint, so the app has to be up. A small pool
       # on purpose: the suites and the server together otherwise exhaust the
-      # Supabase pooler and the failures read as logic errors.
+      # connection limit and the failures read as logic errors.
       - name: Start the app
-        if: steps.db.outputs.present == 'true'
         run: |
           DATABASE_POOL_MAX=5 pnpm dev > /tmp/dev.log 2>&1 &
           for _ in $(seq 1 60); do
@@ -89,13 +98,8 @@ jobs:
           echo "the app never came up:"; cat /tmp/dev.log; exit 1
 
       - name: Verify
-        if: steps.db.outputs.present == 'true'
         run: pnpm verify
 
       - name: The app's log, when something failed
-        if: failure() && steps.db.outputs.present == 'true'
+        if: failure()
         run: cat /tmp/dev.log
-
-      - name: No database configured
-        if: steps.db.outputs.present != 'true'
-        run: echo "DATABASE_URL is not set as a repository secret, so the twelve suites did not run."
