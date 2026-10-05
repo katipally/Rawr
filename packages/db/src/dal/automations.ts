@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
+import type { AutomationRunState } from '../enums.ts'
 import { automation, automationRun } from '../schema/automation.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
@@ -505,7 +506,7 @@ export const accountSlugFor = async (ctx: AccountContext): Promise<string> =>
     return String(row.slug)
   })
 
-export type AutomationRunState = 'waiting' | 'done' | 'skipped' | 'failed'
+export type { AutomationRunState }
 
 export type AutomationRunRow = {
   id: string

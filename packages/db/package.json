@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
+    "./enums": "./src/enums.ts",
     "./registry": "./src/registry/index.ts",
     "./forms": "./src/dal/form-schema.ts",
     "./templates": "./src/dal/templates.ts",

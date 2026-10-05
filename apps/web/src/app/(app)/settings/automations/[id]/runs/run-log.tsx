@@ -1,5 +1,6 @@
 'use client'
 
+import { STATE_TONE } from '../../run-state.ts'
 import { Badge, EmptyState, FilterRow } from '@rawr/ui'
 import Link from 'next/link'
 import { usePagedRows } from '~/components/paged.tsx'
@@ -19,8 +20,6 @@ export type RunLogEntry = {
   resumeAt: string | null
   at: string
 }
-
-const STATE_TONE = { waiting: 'accent', done: 'ok', skipped: 'neutral', failed: 'error' } as const
 
 const FILTERS: { key: string; label: string }[] = [
   { key: '', label: 'All' },

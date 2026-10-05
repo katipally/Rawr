@@ -1,29 +1,15 @@
-export const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
-export type Hub = (typeof HUBS)[number]
+import { CRITICAL_ACTIONS, HUBS, SCOPES, type CriticalAction, type Hub, type Scope } from '../enums.ts'
+
+export { CRITICAL_ACTIONS, HUBS, SCOPES }
+export type { CriticalAction, Hub, Scope }
 
 export type ActorKind = 'user' | 'mcp' | 'job' | 'integration' | 'public'
-
-/** How much of a granted hub a seat reaches. HubSpot's third axis, under view and
- *  edit: everything in the account, everything its team owns, or only its own.
- *
- *  A record's team is its owner's, so moving somebody between teams moves what
- *  they can reach without touching a single record. */
-export const SCOPES = ['everything', 'team', 'own'] as const
-export type Scope = (typeof SCOPES)[number]
 
 /** A hub left out reaches everything. Stored on the membership and read by the
  *  row level security policy rather than by any query, which is why it is not on
  *  AccountContext: one enforcement point, and no way for a caller to forget it. */
 export type HubScopes = Partial<Record<Hub, Scope>>
 
-/** The acts HubSpot marks Critical, in its own per-user editor: each one is either
- *  irreversible or a lever on the whole database rather than on one record, so
- *  each is granted on its own rather than falling out of an edit grant.
- *
- *  `purge` is HubSpot's "Permanently delete", deliberately narrower than `delete`:
- *  a soft delete is somebody's mistake to undo, a purge is not. */
-export const CRITICAL_ACTIONS = ['delete', 'merge', 'bulk_delete', 'import', 'export', 'purge'] as const
-export type CriticalAction = (typeof CRITICAL_ACTIONS)[number]
 
 /** Reads into "You cannot ...", so it is a verb phrase and not a label. */
 const CRITICAL_PHRASE: Record<CriticalAction, string> = {

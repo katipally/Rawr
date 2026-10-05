@@ -1,5 +1,6 @@
 'use client'
 
+import { STATE_TONE } from './run-state.ts'
 import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -120,8 +121,6 @@ const ACTIONS: { key: ActionType; label: string }[] = [
 /** The two that write to a person. A rule watching a company or a deal cannot
  *  offer them: only a contact has an inbox. */
 const CONTACT_ONLY: ActionType[] = ['send_email', 'enroll_in_sequence']
-
-const STATE_TONE = { waiting: 'accent', done: 'ok', skipped: 'neutral', failed: 'error' } as const
 
 /** The delays a person actually reaches for, so the common case is one click and
  *  the odd one is still typeable in minutes. */

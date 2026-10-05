@@ -1,11 +1,7 @@
-/** HubSpot's permission hubs, in the order its own grid reads them left to right.
- *
- *  Listed here as well as in the data access layer because a client bundle cannot
- *  import the database package. `hubs.test.ts` asserts the two lists agree, so the
- *  copy cannot drift. */
-export const HUBS = ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'] as const
+import { CRITICAL_ACTIONS, HUBS, SCOPES, type CriticalAction, type Hub, type Scope } from '@rawr/db/enums'
 
-export type Hub = (typeof HUBS)[number]
+export { CRITICAL_ACTIONS, HUBS, SCOPES }
+export type { CriticalAction, Hub, Scope }
 
 export const HUB_HINT: Record<Hub, string> = {
   contacts: 'Contacts, companies, activity, tasks, imports',
@@ -25,21 +21,11 @@ export const HUBS_WITHOUT_SCREENS = new Set<Hub>(['service'])
  *  belong to the account rather than to a person. */
 export const HUBS_WITH_RECORDS = new Set<Hub>(['contacts', 'sales'])
 
-/** How much of a hub a seat reaches. Mirrors SCOPES in the data access layer;
- *  hubs.test.ts asserts the two agree. */
-export const SCOPES = ['everything', 'team', 'own'] as const
-export type Scope = (typeof SCOPES)[number]
-
 export const SCOPE_LABEL: Record<Scope, string> = {
   everything: 'All',
   team: "Team's",
   own: 'Mine',
 }
-
-/** The acts HubSpot marks Critical. Mirrors CRITICAL_ACTIONS in the data access
- *  layer; hubs.test.ts asserts the two agree. */
-export const CRITICAL_ACTIONS = ['delete', 'merge', 'bulk_delete', 'import', 'export', 'purge'] as const
-export type CriticalAction = (typeof CRITICAL_ACTIONS)[number]
 
 export const CRITICAL_LABEL: Record<CriticalAction, string> = {
   delete: 'Delete',
