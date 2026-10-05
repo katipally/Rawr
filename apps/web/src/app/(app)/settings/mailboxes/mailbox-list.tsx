@@ -60,7 +60,7 @@ const STATE_COPY: Record<MailboxState, { label: string; tone: 'ok' | 'warn' | 'e
   backfilling: {
     label: 'Reading history',
     tone: 'warn',
-    hint: 'Working through the archive oldest first. It can be interrupted and resumes where it stopped.',
+    hint: 'Working through the archive, newest first. It can be interrupted and resumes where it stopped.',
   },
   revoked: {
     label: 'Access withdrawn',

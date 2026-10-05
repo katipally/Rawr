@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorised, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
+import { authorised, collectHistory, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -190,4 +190,44 @@ test('busy, unreachable and slow are transient; refused and withdrawn are not', 
   assert.equal(isTransient(new TypeError('fetch failed')), true)
   assert.equal(isTransient(failure(400)), false)
   assert.equal(isTransient(new RevokedError('gone')), false)
+})
+
+// ------------------------------------------------------------------- history
+
+const added = (...ids: string[]) => ids.map((id) => ({ id: `rec-${id}`, messagesAdded: [{ message: { id } }] }))
+
+test('every page of history is read, and the cursor is the last response\'s head', async () => {
+  const asked: (string | undefined)[] = []
+  const fetcher: Fetcher = async (_, params) => {
+    asked.push(params?.pageToken)
+    if (!params?.pageToken) return { history: added('a', 'b'), nextPageToken: 'p2', historyId: '500' }
+    if (params.pageToken === 'p2') return { history: added('b', 'c'), nextPageToken: 'p3', historyId: '510' }
+    return { history: added('d'), historyId: '520' }
+  }
+  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: ['a', 'b', 'c', 'd'], cursor: '520', more: false })
+  assert.deepEqual(asked, [undefined, 'p2', 'p3'])
+})
+
+test('a pass that hits its page limit keeps the last record it read, not the head', async () => {
+  let page = 0
+  const fetcher: Fetcher = async () => {
+    page += 1
+    return { history: added(`m${page}`), nextPageToken: `p${page + 1}`, historyId: '9999' }
+  }
+  const result = await collectHistory(fetcher, '100')
+  assert.equal(result?.more, true)
+  assert.equal(result?.cursor, 'rec-m5')
+  assert.equal(result?.ids.length, 5)
+})
+
+test('an aged-out history id is null, which means list everything again', async () => {
+  const fetcher: Fetcher = async () => {
+    throw Object.assign(new Error('Gmail answered 404'), { status: 404 })
+  }
+  assert.equal(await collectHistory(fetcher, '100'), null)
+})
+
+test('nothing new keeps the cursor moving to the head', async () => {
+  const fetcher: Fetcher = async () => ({ historyId: '700' })
+  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: [], cursor: '700', more: false })
 })

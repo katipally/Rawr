@@ -360,7 +360,7 @@ export type SyncOutcome = {
 /** One pass. The caller schedules it; this decides whether the pass is a back-fill
  *  page or an incremental catch-up, does the work, and moves the cursor.
  *
- *  Back-fill is oldest-first with the page token persisted, so an interrupted run
+ *  Back-fill is newest-first, as Gmail lists, with the page token persisted, so an interrupted run
  *  resumes rather than restarting, and provider_message_id being unique per
  *  account means a re-read writes nothing twice. B2. */
 export const syncMailbox = async (
@@ -436,14 +436,25 @@ const store = async (
   else tally.alreadyHad += 1
 }
 
+/** Bulk mail that never touches a record. Left out of the list so a large mailbox
+ *  is not read page by page only to be thrown away, at about five quota units a
+ *  message. Not `updates`, where receipts live but so can a person's notices. */
+const BACKFILL_QUERY = '-category:promotions -category:social -category:forums'
+
 const backfill = async (
   ctx: AccountContext,
-  box: { id: string; email: string; backfillCursor: string | null },
+  box: { id: string; email: string; backfillCursor: string | null; historyId: string | null },
   fetcher: Fetcher,
   options: Options,
 ): Promise<SyncOutcome> => {
+  // Read before the first page, because the list is a snapshot of the mailbox as
+  // it was then: mail that arrives while the back-fill runs is in no later page,
+  // and a cursor taken at the end would step over it.
+  const startedAt = box.backfillCursor ? null : await currentHistoryId(fetcher)
+
   const list = (await fetcher('/messages', {
     maxResults: String(PAGE_SIZE),
+    q: BACKFILL_QUERY,
     ...(box.backfillCursor ? { pageToken: box.backfillCursor } : {}),
   })) as { messages?: { id: string }[]; nextPageToken?: string }
 
@@ -464,12 +475,12 @@ const backfill = async (
   await updateMailboxCursor(ctx, box.id, {
     backfillCursor: list.nextPageToken ?? null,
     backfillDone: done,
-    // The first incremental pass needs a starting historyId, and the profile is
-    // where Gmail publishes it.
-    ...(done
-      ? { historyId: await currentHistoryId(fetcher), state: 'connected' as const }
-      : // A page that worked ends an error state, so the dispatcher keeps the pages coming.
-        { state: 'backfilling' as const }),
+    // A back-fill begun before this was taken at the start has no cursor yet, and
+    // the profile is where Gmail publishes the current one.
+    ...(startedAt || (done && !box.historyId)
+      ? { historyId: startedAt ?? (await currentHistoryId(fetcher)) }
+      : {}),
+    state: done ? 'connected' : 'backfilling',
   })
 
   return {
@@ -485,6 +496,56 @@ const currentHistoryId = async (fetcher: Fetcher): Promise<string | null> => {
   return profile.historyId ?? null
 }
 
+type HistoryPage = {
+  history?: { id?: string; messagesAdded?: { message: { id?: string } }[] }[]
+  nextPageToken?: string
+  historyId?: string
+}
+
+/** Pages per pass. A mailbox that was away for days can owe thousands of records,
+ *  and a pass has to end inside the worker's timeout. */
+const HISTORY_PAGES_PER_PASS = 5
+
+/** Every message added since `startHistoryId`, following `nextPageToken`, and the
+ *  cursor to continue from. A history list is a hundred records a page, so reading
+ *  one page and moving the cursor to the mailbox's head loses everything past it.
+ *
+ *  When the page limit stops the read, the cursor is the last record read rather
+ *  than the head, and `more` says to come back. Null is an expired cursor: Gmail
+ *  answers 404 once the history has aged out, which means a full re-list. */
+export const collectHistory = async (
+  fetcher: Fetcher,
+  startHistoryId: string,
+): Promise<{ ids: string[]; cursor: string; more: boolean } | null> => {
+  const ids = new Set<string>()
+  let cursor = startHistoryId
+  let pageToken: string | undefined
+
+  for (let page = 1; ; page++) {
+    let result: HistoryPage
+    try {
+      result = (await fetcher('/history', {
+        startHistoryId,
+        historyTypes: 'messageAdded',
+        ...(pageToken ? { pageToken } : {}),
+      })) as HistoryPage
+    } catch (cause) {
+      if ((cause as { status?: number }).status === 404) return null
+      throw cause
+    }
+
+    const records = result.history ?? []
+    for (const record of records) {
+      for (const added of record.messagesAdded ?? []) if (added.message.id) ids.add(added.message.id)
+    }
+
+    pageToken = result.nextPageToken
+    if (!pageToken) return { ids: [...ids], cursor: result.historyId ?? cursor, more: false }
+    cursor = records.at(-1)?.id ?? cursor
+    if (page === HISTORY_PAGES_PER_PASS) return { ids: [...ids], cursor, more: true }
+  }
+}
+
 const incremental = async (
   ctx: AccountContext,
   box: { id: string; email: string; historyId: string | null },
@@ -497,52 +558,41 @@ const incremental = async (
     return { read: 0, stored: 0, alreadyHad: 0, skipped: 0, done: false, reason: 'No history cursor, so the full read starts again.' }
   }
 
-  let history: { history?: { messagesAdded?: { message: GmailMessage }[] }[]; historyId?: string }
-  try {
-    history = (await fetcher('/history', {
-      startHistoryId: box.historyId,
-      historyTypes: 'messageAdded',
-    })) as typeof history
-  } catch (cause) {
+  const added = await collectHistory(fetcher, box.historyId)
+  if (!added) {
     // An expired historyId is a 404. Google says so in the documentation, and the
     // answer is a full re-list, not a crash. B2.
-    if ((cause as { status?: number }).status === 404) {
-      await updateMailboxCursor(ctx, box.id, { backfillDone: false, backfillCursor: null, historyId: null })
-      return {
-        read: 0,
-        stored: 0,
-        alreadyHad: 0,
-        skipped: 0,
-        done: false,
-        reason: 'The history cursor had aged out, so the full read starts again. Nothing is duplicated.',
-      }
+    await updateMailboxCursor(ctx, box.id, { backfillDone: false, backfillCursor: null, historyId: null })
+    return {
+      read: 0,
+      stored: 0,
+      alreadyHad: 0,
+      skipped: 0,
+      done: false,
+      reason: 'The history cursor had aged out, so the full read starts again. Nothing is duplicated.',
     }
-    throw cause
   }
 
   const tally: Tally = { stored: 0, alreadyHad: 0, skipped: 0 }
-  let read = 0
-  for (const entry of history.history ?? []) {
-    for (const added of entry.messagesAdded ?? []) {
-      read += 1
-      const raw = added.message.id ? await fetchMessage(fetcher, added.message.id) : null
-      const incoming = raw && toIncoming(raw)
-      if (!incoming) {
-        tally.skipped += 1
-        continue
-      }
-      await store(ctx, box, incoming, options, tally)
+  for (const id of added.ids) {
+    const raw = await fetchMessage(fetcher, id)
+    const incoming = raw && toIncoming(raw)
+    if (!incoming) {
+      tally.skipped += 1
+      continue
     }
+    await store(ctx, box, incoming, options, tally)
   }
 
-  await updateMailboxCursor(ctx, box.id, {
-    historyId: history.historyId ?? box.historyId,
-    state: 'connected',
-  })
+  await updateMailboxCursor(ctx, box.id, { historyId: added.cursor, state: 'connected' })
 
-  return { read, ...tally, done: true, reason: null }
+  return {
+    read: added.ids.length,
+    ...tally,
+    done: !added.more,
+    reason: added.more ? 'More recent mail to read; the next pass continues from here.' : null,
+  }
 }
-
 
 // --------------------------------------------------------------- hydrate
 

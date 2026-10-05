@@ -47,7 +47,7 @@ export const mailbox = pgTable(
     accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
     /** Gmail's incremental cursor. A 404 on this triggers a full re-list. B2. */
     historyId: text('history_id'),
-    /** Where the oldest-first back-fill got to. Null once it has finished. */
+    /** Where the newest-first back-fill got to. Null once it has finished. */
     backfillCursor: text('backfill_cursor'),
     backfillDone: boolean('backfill_done').notNull().default(false),
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
