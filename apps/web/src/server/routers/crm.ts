@@ -43,7 +43,7 @@ import {
   renameView,
   reorderViews,
   setViewPinned,
-  assertCanAttach,
+  beginAttachment,
   listAttachments,
   MAX_ATTACHMENT_BYTES,
   readAttachment,
@@ -51,7 +51,6 @@ import {
   readBoardColumn,
   recordAttachment,
   removeAttachment,
-  storageKeyFor,
   readCalendar,
   readImportRun,
   listImportRuns,
@@ -524,8 +523,7 @@ export const crmRouter = router({
           if (!storageConfigured) throw new Error(NOT_CONFIGURED)
           // Both refusals happen before a byte moves, so somebody is told while
           // they are still looking at the dialog rather than after the wait.
-          assertCanAttach(ctx.account, input.bytes)
-          return { storageKey: storageKeyFor(ctx.account, input) }
+          return beginAttachment(ctx.account, input)
         }),
       ),
 

@@ -610,6 +610,13 @@
       "when": 1791305634179,
       "tag": "0085_account_creation_is_a_choice",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791392034179,
+      "tag": "0086_attachment_upload",
+      "breakpoints": true
     }
   ]
 }

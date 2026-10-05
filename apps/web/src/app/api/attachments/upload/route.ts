@@ -1,4 +1,4 @@
-import { assertCanAttach, MAX_ATTACHMENT_BYTES } from '@rawr/db'
+import { assertCanAttach, beganUploadBytes, MAX_ATTACHMENT_BYTES } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { NOT_CONFIGURED, putObject, storageConfigured } from '~/server/storage.ts'
@@ -9,9 +9,11 @@ import { readCapped } from '~/server/uploads.ts'
  *  The key was minted by `attachments.begin`, which is where the permission and
  *  the size were already refused; this endpoint is the transport, and it checks
  *  both again because a key in a query string is a claim rather than a proof.
- *  The account is taken from the session and never from the key: a key whose
- *  first segment is not this account's id is somebody writing into another
- *  tenant's prefix, and it is refused without touching storage.
+ *  The proof is the row `begin` wrote: bytes are taken only for a key this person
+ *  began, that has not expired and has not been filed, and no more of them than
+ *  were declared. The account is taken from the session and never from the key: a
+ *  key whose first segment is not this account's id is somebody writing into
+ *  another tenant's prefix, and it is refused without touching storage.
  *
  *  The row is still written afterwards, by `attachments.confirm`, so a failed
  *  upload leaves nothing on the record. */
@@ -27,6 +29,11 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   const key = request.nextUrl.searchParams.get('key') ?? ''
   if (!key.startsWith(`${ctx.accountId}/`)) {
     return json({ error: 'That file does not belong to this account.' }, 403)
+  }
+
+  const begun = await beganUploadBytes(ctx, key)
+  if (begun === null) {
+    return json({ error: 'That upload was not started from here, or it has expired. Attach the file again.' }, 403)
   }
 
   // A declared size, or one byte when nothing was declared: the point of the
@@ -46,6 +53,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     return json({ error: `That file is larger than ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.` }, 413)
   }
   if (body.byteLength === 0) return json({ error: 'That file is empty.' }, 400)
+  if (body.byteLength > begun) return json({ error: 'That file is larger than it was said to be.' }, 413)
 
   await putObject(key, body, request.headers.get('content-type') || 'application/octet-stream')
   return json({ bytes: body.byteLength }, 200)

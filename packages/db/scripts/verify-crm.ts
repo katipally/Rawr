@@ -29,6 +29,8 @@ import {
   setAutomationActive } from '../src/dal/automations.ts'
 import {
   assertCanAttach,
+  beganUploadBytes,
+  beginAttachment,
   listAttachments,
   MAX_ATTACHMENT_BYTES,
   recordAttachment,
@@ -1549,6 +1551,29 @@ try {
     const after = await listAttachments(admin, { entityType: 'deal', entityId: dealId })
     expect(!after.some((row) => row.id === made.id), 'the file survived its deletion')
     return 'recorded after the bytes land, and the key comes back to delete them'
+  })
+
+  await check('bytes are taken only for an upload that was begun, by that person, and not yet filed', async () => {
+    const input = { entityType: 'deal' as const, entityId: dealId, filename: 'Begun.pdf', bytes: 4096 }
+    const { storageKey } = await beginAttachment(admin, input)
+    expect((await beganUploadBytes(admin, storageKey)) === 4096, 'the begun key was not accepted')
+    expect((await beganUploadBytes(sales, storageKey)) === null, 'somebody else sent to a key they did not begin')
+    expect((await beganUploadBytes(admin, storageKeyFor(admin, input))) === null, 'a key nobody began was accepted')
+    expect((await beganUploadBytes(probeCtx, storageKey)) === null, 'another account sent to this key')
+
+    await owner`update attachment_upload set expires_at = now() - interval '1 minute' where storage_key = ${storageKey}`
+    expect((await beganUploadBytes(admin, storageKey)) === null, 'an expired key was accepted')
+
+    const again = await beginAttachment(admin, input)
+    await recordAttachment(admin, { ...input, storageKey: again.storageKey, mime: 'application/pdf' })
+    expect((await beganUploadBytes(admin, again.storageKey)) === null, 'a filed key still accepted bytes')
+
+    // The sweep on begin removed the expired row, so the table does not grow without bound.
+    const [left] = await owner`select count(*)::int as n from attachment_upload where storage_key = ${storageKey}`
+    expect(left?.n === 0, 'the expired row was never swept')
+    const listed = await listAttachments(admin, { entityType: 'deal', entityId: dealId })
+    for (const row of listed.filter((r) => r.filename === 'Begun.pdf')) await removeAttachment(admin, row.id)
+    return 'begun, by that person, before it expires, until it is filed'
   })
 
   await check('one tenant cannot see another’s files', async () => {

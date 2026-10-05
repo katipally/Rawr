@@ -1,6 +1,6 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gt, lt } from 'drizzle-orm'
 import { randomToken } from '../internal/crypto.ts'
-import { attachment } from '../schema/records.ts'
+import { attachment, attachmentUpload } from '../schema/records.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
 import type { EntityType } from './activity.ts'
@@ -55,6 +55,57 @@ export const storageKeyFor = (
   ctx: AccountContext,
   input: { entityType: EntityType; entityId: string; filename: string },
 ): string => `${ctx.accountId}/${input.entityType}/${input.entityId}/${randomToken(9)}/${slug(input.filename)}`
+
+/** Long enough for a 25 MB file on a slow line, short enough that a key nobody
+ *  filed stops being writable the same hour. */
+const UPLOAD_WINDOW_MS = 60 * 60 * 1000
+
+/** Names where the bytes will go, and records that this person may send them
+ *  there. Everything refusable is refused here, before a byte moves.
+ *
+ *  Expired rows are swept on the way in, so the table stays the size of one
+ *  hour's uploads without a job to clear it. */
+export const beginAttachment = async (
+  ctx: AccountContext,
+  input: { entityType: EntityType; entityId: string; filename: string; bytes: number },
+): Promise<{ storageKey: string }> => {
+  assertCanAttach(ctx, input.bytes)
+  if (!ctx.actorId) throw new Error('Sign in to attach a file.')
+  const userId = ctx.actorId
+  const storageKey = storageKeyFor(ctx, input)
+  await withAccount(ctx, async (tx) => {
+    await tx.delete(attachmentUpload).where(lt(attachmentUpload.expiresAt, new Date()))
+    await tx.insert(attachmentUpload).values({
+      accountId: ctx.accountId,
+      userId,
+      storageKey,
+      bytes: input.bytes,
+      expiresAt: new Date(Date.now() + UPLOAD_WINDOW_MS),
+    })
+  })
+  return { storageKey }
+}
+
+/** The size this person was cleared to send to this key, or null when the key
+ *  was never begun by them, has expired, or has already been filed. */
+export const beganUploadBytes = async (ctx: AccountContext, storageKey: string): Promise<number | null> => {
+  const userId = ctx.actorId
+  if (!userId) return null
+  return withAccount(ctx, async (tx) => {
+    const [row] = await tx
+      .select({ bytes: attachmentUpload.bytes })
+      .from(attachmentUpload)
+      .where(
+        and(
+          eq(attachmentUpload.storageKey, storageKey),
+          eq(attachmentUpload.userId, userId),
+          gt(attachmentUpload.expiresAt, new Date()),
+        ),
+      )
+      .limit(1)
+    return row?.bytes ?? null
+  })
+}
 
 export const listAttachments = async (
   ctx: AccountContext,
@@ -122,6 +173,7 @@ export const recordAttachment = async (
       })
       .returning({ id: attachment.id })
     if (!created) throw new Error('The file could not be recorded.')
+    await tx.delete(attachmentUpload).where(eq(attachmentUpload.storageKey, input.storageKey))
     return {
       result: { id: created.id },
       audit: {

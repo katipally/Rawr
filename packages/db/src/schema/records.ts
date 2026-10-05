@@ -396,6 +396,36 @@ export const attachment = pgTable(
   ],
 )
 
+/** An upload that was started and has not been filed yet.
+ *
+ *  `attachments.begin` writes one, and the upload endpoint takes bytes only for a
+ *  key that has one, from the person it was begun for, before it expires. Without
+ *  it a key was only a claim: anybody holding the account's prefix could write to
+ *  any key under it, including one a filed attachment already points at.
+ *
+ *  Filing the attachment removes it, so a confirmed key stops accepting bytes. */
+export const attachmentUpload = pgTable(
+  'attachment_upload',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    /** The size the person said the file was, which is as much as the endpoint
+     *  will take for this key. */
+    bytes: bigint('bytes', { mode: 'number' }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('attachment_upload_key_idx').on(t.accountId, t.storageKey),
+    /** What the sweep in `beginAttachment` filters on. */
+    index('attachment_upload_expiry_idx').on(t.expiresAt),
+  ],
+)
+
 /** Two records somebody looked at and said are not the same.
  *
  *  The duplicate queue re-derives its pairs from the records on every visit, so
