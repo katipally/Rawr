@@ -31,6 +31,7 @@ import {
   getRecord,
   getRegistry,
   isActivityType,
+  listDeletedRecords,
   listKpis,
   listRecords,
   listTasks,
@@ -57,6 +58,7 @@ import {
   readSubscriptions,
   readTimeline,
   recordOptions,
+  restoreRecords,
   cancelImportRun,
   unfinishedImportUploads,
   UPLOAD_PART_BYTES,
@@ -296,6 +298,15 @@ export const crmRouter = router({
     remove: protectedProcedure
       .input(z.object({ object: anyObject, id: z.uuid() }))
       .mutation(({ ctx, input }) => call(() => deleteRecord(ctx.account, input.object, input.id))),
+
+    /** The Restore page: what a person deleted, and the way back. */
+    deleted: protectedProcedure
+      .input(z.object({ object: anyObject, search: z.string().max(200).optional(), limit: z.number().int().min(1).max(200).optional() }))
+      .query(({ ctx, input }) => call(() => listDeletedRecords(ctx.account, input.object, input))),
+
+    restore: protectedProcedure
+      .input(z.object({ object: anyObject, ids: z.array(z.uuid()).min(1).max(200) }))
+      .mutation(({ ctx, input }) => call(() => restoreRecords(ctx.account, input.object, input.ids))),
 
     /** The review queue behind the merge dialog. Read-only, gated on write: it
      *  lists two records side by side asserting they might be one person, which

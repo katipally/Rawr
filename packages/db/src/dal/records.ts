@@ -1455,6 +1455,123 @@ export const bulkDeleteRecords = async (
   })
 }
 
+export type DeletedRecord = { id: string; name: string; deletedAt: Date; deletedBy: string | null }
+
+/** What the Restore page lists: records a person deleted, newest first, named as
+ *  they were when it happened. Read from the delete's audit row rather than the
+ *  record, so a record merged away (which is also a soft delete, and which
+ *  restoring would turn into an empty duplicate) never shows up here.
+ *
+ *  `total` counts everything that matches, whatever `limit` shows, so the screen
+ *  can say how many there are. O(limit) off the audit index, plus the count. */
+export const listDeletedRecords = async (
+  ctx: AccountContext,
+  objectKey: string,
+  input: { search?: string | undefined; limit?: number | undefined } = {},
+): Promise<{ rows: DeletedRecord[]; total: number }> => {
+  assertCanDo(ctx, 'delete')
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
+  const needle = input.search?.trim()
+
+  return withAccount(ctx, async (tx) => {
+    const object = objectOrThrow(await getRegistryIn(tx), objectKey)
+    const id = sql.raw(`"${object.key}"."id"`)
+    const deletedAt = sql.raw(`"${object.key}"."deleted_at"`)
+    const found = await tx.execute<{
+      id: string
+      name: string | null
+      deleted_at: Date | string
+      deleted_by: string | null
+      total: number
+    }>(sql`
+      select ${id} as id, d.name, ${deletedAt} as deleted_at, u.name as deleted_by,
+             (count(*) over ())::int as total
+        from ${tableFor(object)}
+        join lateral (
+          select a.actor_id, a.before ->> 'name' as name
+            from audit_log a
+           where a.entity = ${object.key} and a.entity_id = ${id} and a.action = 'delete'
+           order by a.at desc
+           limit 1
+        ) d on true
+        left join user_account u on u.id = d.actor_id
+       where ${deletedAt} is not null and ${rowsOf(object)}
+         ${needle ? sql`and d.name ilike ${`%${needle.replace(/[\\%_]/g, '\\$&')}%`}` : sql``}
+       order by ${deletedAt} desc, ${id} desc
+       limit ${limit}`)
+
+    return {
+      total: found[0]?.total ?? 0,
+      rows: found.map((row) => ({
+        id: row.id,
+        name: row.name || `Unnamed ${object.nameSingular.toLowerCase()}`,
+        deletedAt: asDate(row.deleted_at),
+        deletedBy: row.deleted_by,
+      })),
+    }
+  })
+}
+
+export type RestoreResult = { restored: number; failed: BulkDeleteResult['failed'] }
+
+/** Puts deleted records back, the inverse of `bulkDeleteRecords` and with the
+ *  same savepoint each, so one that cannot come back (another record has taken
+ *  its email or domain since) is named and the rest still do. What the delete
+ *  detached, such as a contact's browsing history, stays detached. */
+export const restoreRecords = async (
+  ctx: AccountContext,
+  objectKey: string,
+  ids: string[],
+): Promise<RestoreResult> => {
+  assertCanWrite(ctx, objectKey)
+  assertCanDo(ctx, 'delete')
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) throw new Error('Nothing was selected.')
+
+  return withAccount(ctx, async (tx) => {
+    const object = objectOrThrow(await getRegistryIn(tx), objectKey)
+    const result: RestoreResult = { restored: 0, failed: [] }
+
+    for (const id of unique) {
+      const point = `restore_${result.restored + result.failed.length}`
+      await tx.execute(sql.raw(`savepoint "${point}"`))
+      try {
+        const before = await readForWrite(tx, object, id, true)
+        if (!before) throw new Error('That record no longer exists.')
+        const duplicate = await findDuplicate(tx, object, { email: before.email, domain: before.domain }, id)
+        if (duplicate) {
+          throw new Error(`${duplicate.what} now belongs to another record. Merge or change that one first.`)
+        }
+        const restored = await tx.execute(sql`
+          update ${tableFor(object)} set deleted_at = null, updated_at = now()
+           where ${sql.raw(`"${object.key}"."id"`)} = ${id}
+             and ${sql.raw(`"${object.key}"."deleted_at"`)} is not null and ${rowsOf(object)}
+          returning 1`)
+        if (restored.length === 0) throw new Error('That record is not deleted.')
+        await writeAudit(tx, ctx, {
+          entity: object.key,
+          entityId: id,
+          action: 'restore',
+          before: { deletedAt: 'previously' },
+          after: { deletedAt: null, name: displayName(object, before) },
+        })
+        await tx.execute(sql.raw(`release savepoint "${point}"`))
+        result.restored += 1
+      } catch (cause) {
+        await tx.execute(sql.raw(`rollback to savepoint "${point}"`))
+        const row = await readForWrite(tx, object, id, true).catch(() => undefined)
+        result.failed.push({
+          id,
+          displayName: row ? displayName(object, row) : id,
+          reason: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    }
+
+    return result
+  })
+}
+
 /** Refuses a selection that names records this account cannot see, by count, so
  *  a bulk action carrying an id from another tenant stops before it writes rather
  *  than silently doing less than it was asked to. Row-level security is what makes

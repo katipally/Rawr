@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, TextInput, useToast } from '@rawr/ui'
+import { Button, ConfirmDialog, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -40,6 +40,7 @@ export const TokenList = ({
   const [name, setName] = useState('')
   const [issued, setIssued] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [revoking, setRevoking] = useState<TokenRow | null>(null)
 
   const create = async () => {
     const trimmed = name.trim()
@@ -75,6 +76,7 @@ export const TokenList = ({
       toast('error', errorMessage(cause))
     } finally {
       setBusy(null)
+      setRevoking(null)
     }
   }
 
@@ -225,7 +227,7 @@ export const TokenList = ({
                 {row.revokedAt ? null : (
                   <Button
                     variant="destructive"
-                    onClick={() => void revoke(row)}
+                    onClick={() => setRevoking(row)}
                     disabled={busy === row.id}
                   >
                     {busy === row.id ? 'Revoking…' : 'Revoke'}
@@ -236,6 +238,20 @@ export const TokenList = ({
           </ul>
         )}
       </section>
+
+      <ConfirmDialog
+        open={revoking !== null}
+        title={`Revoke ${revoking?.name ?? 'this token'}?`}
+        confirm="Revoke"
+        busy={busy === revoking?.id}
+        onCancel={() => setRevoking(null)}
+        onConfirm={() => revoking && void revoke(revoking)}
+      >
+        <p>
+          Whatever uses it stops working on its next call, and it cannot be switched back on. Make a
+          new token to connect it again.
+        </p>
+      </ConfirmDialog>
     </div>
   )
 }

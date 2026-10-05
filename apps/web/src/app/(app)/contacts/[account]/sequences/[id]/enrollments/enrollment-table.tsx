@@ -1,7 +1,7 @@
 'use client'
 
 import type { EnrollmentState } from '@rawr/db'
-import { Badge, Breadcrumb, Button, Card, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
+import { Badge, Breadcrumb, Button, Card, ConfirmDialog, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
 import { MoreHorizontal } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -49,6 +49,7 @@ export const EnrollmentTable = ({
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState<Row | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -159,11 +160,7 @@ export const EnrollmentTable = ({
                             key: 'remove',
                             label: 'Take them out',
                             destructive: true,
-                            onSelect: () =>
-                              void run(
-                                () => api.sequences.enrollments.remove.mutate({ id: row.id }),
-                                `${row.contactName} is out of this sequence.`,
-                              ),
+                            onSelect: () => setRemoving(row),
                           },
                         ],
                       },
@@ -180,6 +177,23 @@ export const EnrollmentTable = ({
           </ul>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={`Take ${removing?.contactName ?? 'them'} out of ${sequenceName}?`}
+        confirm="Take them out"
+        busy={busy}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() =>
+          removing &&
+          void run(
+            () => api.sequences.enrollments.remove.mutate({ id: removing.id }),
+            `${removing.contactName} is out of this sequence.`,
+          ).then(() => setRemoving(null))
+        }
+      >
+        <p>No further step of this sequence is sent to them.</p>
+      </ConfirmDialog>
     </div>
   )
 }

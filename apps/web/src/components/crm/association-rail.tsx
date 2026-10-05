@@ -1,6 +1,6 @@
 'use client'
 
-import { Badge, Button, Card, IconButton, Select, TextInput, useToast } from '@rawr/ui'
+import { Badge, Button, Card, ConfirmDialog, IconButton, Select, TextInput, useToast } from '@rawr/ui'
 import { ArrowDownUp, ExternalLink, Plus, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -77,6 +77,7 @@ export const AssociationRail = ({
   const [linkLabel, setLinkLabel] = useState('')
   const [creating, setCreating] = useState<AssociationCard | null>(null)
   const [busy, setBusy] = useState(false)
+  const [unlinking, setUnlinking] = useState<Associated | null>(null)
   // Per card, because a person searching a company's contacts is not searching
   // its deals at the same time.
   const [needles, setNeedles] = useState<Record<string, string>>({})
@@ -309,16 +310,7 @@ export const AssociationRail = ({
                         label={`Unlink ${shortName(row.displayName)}`}
                         icon={<ACTION_ICONS.unlink size={16} />}
                         disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () =>
-                              api.crm.associations.remove.mutate({
-                                a: { entityType: object, entityId: recordId },
-                                b: { entityType: row.objectKey, entityId: row.id },
-                              }),
-                            'Unlinked.',
-                          )
-                        }
+                        onClick={() => setUnlinking(row)}
                       />
                     ) : null}
                   </li>
@@ -345,6 +337,30 @@ export const AssociationRail = ({
           </Card>
         )
       })}
+
+      <ConfirmDialog
+        open={unlinking !== null}
+        title={`Unlink ${shortName(unlinking?.displayName ?? '')}?`}
+        confirm="Unlink"
+        busy={busy}
+        onCancel={() => setUnlinking(null)}
+        onConfirm={() =>
+          unlinking &&
+          void run(
+            () =>
+              api.crm.associations.remove.mutate({
+                a: { entityType: object, entityId: recordId },
+                b: { entityType: unlinking.objectKey, entityId: unlinking.id },
+              }),
+            'Unlinked.',
+          ).then(() => setUnlinking(null))
+        }
+      >
+        <p>
+          The two records stay. Only the link between them goes, along with its label and whether it
+          was primary.
+        </p>
+      </ConfirmDialog>
 
       {creating && createFields[creating.objectKey] ? (
         <CreateRecordPanel

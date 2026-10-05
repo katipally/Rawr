@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, DataTable, EmptyState, PageHeader, useToast, type Column } from '@rawr/ui'
+import { Button, ConfirmDialog, DataTable, EmptyState, PageHeader, useToast, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -40,6 +40,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [removing, setRemoving] = useState<string[] | null>(null)
 
   const load = async (next: number) => {
     setBusy(true)
@@ -70,6 +71,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
       toast('error', errorMessage(cause))
     } finally {
       setBusy(false)
+      setRemoving(null)
     }
   }
 
@@ -97,7 +99,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
             header: '',
             width: 110,
             render: (row: Member) => (
-              <Button variant="tertiary" busy={busy} onClick={() => void remove([row.id])}>
+              <Button variant="tertiary" busy={busy} onClick={() => setRemoving([row.id])}>
                 Remove
               </Button>
             ),
@@ -140,7 +142,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
       {canWrite && list.isStatic && ticked.length > 0 ? (
         <div className="flex flex-wrap items-center gap-2 rounded-panel border border-line-interactive bg-accent-subtle p-3">
           <p className="font-medium">{ticked.length} selected</p>
-          <Button variant="destructive" busy={busy} onClick={() => void remove(ticked)}>
+          <Button variant="destructive" busy={busy} onClick={() => setRemoving(ticked)}>
             Remove from list
           </Button>
           <Button variant="tertiary" onClick={() => setSelected(new Set())}>
@@ -189,6 +191,20 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
           Next
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={`Take ${(removing?.length ?? 0).toLocaleString()} off ${list.name}?`}
+        confirm="Remove from list"
+        busy={busy}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => removing && void remove(removing)}
+      >
+        <p>
+          The records themselves stay. Each one&apos;s time on the list ends, and the timeline keeps
+          saying when it was on here.
+        </p>
+      </ConfirmDialog>
     </div>
   )
 }

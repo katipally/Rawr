@@ -1,7 +1,7 @@
 'use client'
 
 import { FIELD_TYPES, isNewProperty, type FieldType, type Mapping, type NewProperty } from '@rawr/db/registry'
-import { Alert, Button, buttonClass, Select, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, buttonClass, ConfirmDialog, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -72,6 +72,7 @@ export const ImportWizard = ({
   const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [stopping, setStopping] = useState(false)
   /** Everything the run changes while nobody is editing it. The server owns the
    *  run now, so the page reads it rather than driving it. */
   const [live, setLive] = useState({ state, counts, processed: processedRows, unmatchedOwners })
@@ -243,16 +244,34 @@ export const ImportWizard = ({
         {!finished && !stoppedForGood ? (
           <div className="flex flex-wrap gap-2">
             {running ? (
-              <Button
-                onClick={() => {
-                  void api.crm.imports.cancel.mutate({ id: runId }).then(
-                    () => setLive((current) => ({ ...current, state: 'cancelled' })),
-                    (cause: unknown) => setError(errorMessage(cause)),
-                  )
-                }}
-              >
-                Stop this import
-              </Button>
+              <>
+                <Button onClick={() => setStopping(true)}>Stop this import</Button>
+                <ConfirmDialog
+                  open={stopping}
+                  title="Stop this import?"
+                  confirm="Stop the import"
+                  busy={busy}
+                  onCancel={() => setStopping(false)}
+                  onConfirm={() => {
+                    setBusy(true)
+                    void api.crm.imports.cancel
+                      .mutate({ id: runId })
+                      .then(
+                        () => setLive((current) => ({ ...current, state: 'cancelled' })),
+                        (cause: unknown) => setError(errorMessage(cause)),
+                      )
+                      .finally(() => {
+                        setBusy(false)
+                        setStopping(false)
+                      })
+                  }}
+                >
+                  <p>
+                    Everything imported so far stays in the CRM. The rows after it are not brought in
+                    until the file is uploaded again.
+                  </p>
+                </ConfirmDialog>
+              </>
             ) : (
               <Button variant="primary" busy={busy} onClick={() => void start()}>
                 Resume the import

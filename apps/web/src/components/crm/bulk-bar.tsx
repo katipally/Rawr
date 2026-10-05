@@ -49,6 +49,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
   const [showEnroll, setShowEnroll] = useState(false)
 
   const [pending, setPending] = useState<Pending>(null)
+  const [typedCount, setTypedCount] = useState('')
   const [ownerId, setOwnerId] = useState<string | null>(null)
   const [owners, setOwners] = useState<{ id: string; name: string }[]>([])
   const [target, setTarget] = useState<PickedRecord | null>(null)
@@ -130,6 +131,18 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
     }
   }
 
+  /** The inverse of the delete that just ran: the Restore records page does the
+   *  same for a delete nobody undid in time. */
+  const bringBack = async (restoring: string[]) => {
+    try {
+      const result = await api.crm.records.restore.mutate({ object, ids: restoring })
+      toast('success', `Put back ${result.restored} ${nounFor(result.restored)}.`)
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
   const apply = async () => {
     if (!field) return
     setBusy(true)
@@ -182,7 +195,16 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
       if (result.failed.length > 0) {
         setFailed(result.failed)
       }
-      toast('success', done(result.processed))
+      const refused = new Set(result.failed.map((row) => row.id))
+      toast(
+        'success',
+        done(result.processed),
+        // Only an inline run is small enough for one restore call; a queued one is
+        // put back from the Restore records page.
+        action.type === 'delete'
+          ? { label: 'Undo', run: () => bringBack(ids.filter((id) => !refused.has(id))) }
+          : undefined,
+      )
       onDone()
       router.refresh()
     } catch (cause) {
@@ -266,7 +288,13 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         >
           Merge
         </Button>
-        <Button variant="destructive" onClick={() => setPending('delete')}>
+        <Button
+          variant="destructive"
+          onClick={() => {
+            setTypedCount('')
+            setPending('delete')
+          }}
+        >
           Delete
         </Button>
 
@@ -342,17 +370,17 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         open={pending === 'delete'}
         title={`Delete ${ids.length} ${noun}?`}
         onClose={() => setPending(null)}
+        onSubmit={() => void start({ type: 'delete' }, (n) => `${n} ${nounFor(n)} deleted.`)}
         footer={
           <>
             <Button variant="tertiary" onClick={() => setPending(null)}>
               Cancel
             </Button>
             <Button
+              type="submit"
               variant="destructive"
               busy={busy}
-              onClick={() =>
-                void start({ type: 'delete' }, (n) => `${n} ${nounFor(n)} deleted.`)
-              }
+              disabled={ids.length > 1 && typedCount.trim() !== String(ids.length)}
             >
               Delete {ids.length}
             </Button>
@@ -363,7 +391,19 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
           <p>
             They stop appearing in lists, reports and pickers. Their timelines are kept, so what
             already happened is still on record; nothing here erases {ids.length === 1 ? 'a record' : 'records'}.
+            Restore records, under Data Management, puts them back.
           </p>
+          {ids.length > 1 ? (
+            <label className="flex min-w-0 flex-col gap-1">
+              <span className="text-small text-secondary">Type {ids.length} to confirm</span>
+              <TextInput
+                inputMode="numeric"
+                autoComplete="off"
+                value={typedCount}
+                onChange={(event) => setTypedCount(event.target.value)}
+              />
+            </label>
+          ) : null}
         </div>
       </Modal>
 

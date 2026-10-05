@@ -161,6 +161,9 @@ export const exportPath = (account: string): string => `/${CRM_ROOT}/${account}/
 export const duplicatesPath = (account: string, object?: 'contact' | 'company'): string =>
   `/${CRM_ROOT}/${account}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`
 
+export const restorePath = (account: string, object?: string): string =>
+  `/${CRM_ROOT}/${account}/restore${object && object !== 'contact' ? `?object=${object}` : ''}`
+
 export const exportCsvPath = (
   account: string,
   params: { object: string; columns?: string; filters?: string; sort?: string; q?: string },

@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Button, EmptyState, IconButton, useToast } from '@rawr/ui'
+import { Alert, Button, ConfirmDialog, EmptyState, IconButton, useToast } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
@@ -43,6 +43,7 @@ export const AttachmentsPanel = ({
   const picker = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [files, setFiles] = useState(rows)
+  const [removing, setRemoving] = useState<AttachmentView | null>(null)
 
   const size = (bytes: number): string =>
     bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
@@ -116,6 +117,7 @@ export const AttachmentsPanel = ({
       toast('error', errorMessage(cause))
     } finally {
       setBusy(null)
+      setRemoving(null)
     }
   }
 
@@ -159,7 +161,7 @@ export const AttachmentsPanel = ({
                   tone="destructive"
                   icon={<ACTION_ICONS.delete size={16} />}
                   disabled={busy !== null}
-                  onClick={() => void remove(row)}
+                  onClick={() => setRemoving(row)}
                 />
               ) : null}
             </li>
@@ -185,6 +187,17 @@ export const AttachmentsPanel = ({
         </div>
       ) : null}
       </div>
+
+      <ConfirmDialog
+        open={removing !== null}
+        title={`Delete ${removing?.filename ?? 'file'}?`}
+        confirm="Delete file"
+        busy={busy === removing?.id}
+        onCancel={() => setRemoving(null)}
+        onConfirm={() => removing && void remove(removing)}
+      >
+        <p>The file is removed from this record and cannot be brought back.</p>
+      </ConfirmDialog>
     </section>
   )
 }

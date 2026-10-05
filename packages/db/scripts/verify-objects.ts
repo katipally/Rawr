@@ -6,7 +6,7 @@ import { listAttachments, recordAttachment } from '../src/dal/attachments.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { resolveRecord } from '../src/dal/resolve.ts'
 import { createField } from '../src/dal/admin-fields.ts'
-import { createRecord, getRecord, listRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
+import { createRecord, getRecord, listDeletedRecords, listRecords, restoreRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import type { AccountContext } from '../src/dal/context.ts'
@@ -212,6 +212,31 @@ try {
     const page = await listRecords(ctx, { object: key, limit: 50 })
     expect(!page.rows.some((row) => row.id === recordId), 'it is still listed')
     return `${page.rows.length} left`
+  })
+
+  await check('a deleted record is listed by name and restore puts it back', async () => {
+    const gone = await listDeletedRecords(ctx, key, { search: 'phase two' })
+    expect(gone.rows.length === 1 && gone.rows[0]!.id === recordId, `${gone.rows.length} deleted records matched`)
+    expect(gone.rows[0]!.name === 'Atlas rollout phase two', gone.rows[0]!.name)
+    const result = await restoreRecords(ctx, key, [recordId])
+    expect(result.restored === 1 && result.failed.length === 0, JSON.stringify(result.failed))
+    const back = await listRecords(ctx, { object: key, limit: 50 })
+    expect(back.rows.some((row) => row.id === recordId), 'it did not come back to the list')
+    expect((await listDeletedRecords(ctx, key)).total === 0, 'it is still listed as deleted')
+    await deleteRecord(ctx, key, recordId)
+    return 'listed under its old name, restored, and deleted again'
+  })
+
+  await check('a contact cannot come back over another that took its email', async () => {
+    const email = `restore.${Date.now()}@restore.example`
+    const first = await createRecord(ctx, 'contact', { first_name: 'Restore', last_name: 'First', email })
+    await deleteRecord(ctx, 'contact', first.id)
+    const second = await createRecord(ctx, 'contact', { first_name: 'Restore', last_name: 'Second', email })
+    const result = await restoreRecords(ctx, 'contact', [first.id])
+    expect(result.restored === 0 && result.failed.length === 1, `${result.restored} restored`)
+    expect(result.failed[0]!.reason.includes('now belongs to another record'), result.failed[0]!.reason)
+    await deleteRecord(ctx, 'contact', second.id)
+    return result.failed[0]!.reason
   })
 
   await check('deleting the object takes its records', async () => {

@@ -26,6 +26,7 @@ import {
   segmentsPath,
   newsletterPath,
   reportsPath,
+  restorePath,
   sequencesPath,
   templatesPath,
   sitesPath,
@@ -145,6 +146,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
             { href: importsPath(account), label: 'Import', match: `/contacts/${account}/import`, action: 'import' as const },
             { href: exportPath(account), label: 'Export', action: 'export' as const },
             { href: duplicatesPath(account), label: 'Duplicates', action: 'merge' as const },
+            { href: restorePath(account), label: 'Restore records', action: 'delete' as const },
           ].flatMap(({ action, ...item }) => (canDo(ctx, action) ? [item] : [])),
         },
         {
@@ -219,6 +221,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       : []),
     ...(canWrite(ctx, 'contact') && canDo(ctx, 'merge')
       ? [{ href: duplicatesPath(account), label: 'Find duplicates', keywords: ['merge', 'dedupe'] }]
+      : []),
+    ...(canDo(ctx, 'delete')
+      ? [{ href: restorePath(account), label: 'Restore deleted records', keywords: ['undelete', 'trash', 'recover'] }]
       : []),
     ...(canDo(ctx, 'export')
       ? [{ href: exportPath(account), label: 'Export to CSV', keywords: ['download', 'xlsx', 'spreadsheet'] }]

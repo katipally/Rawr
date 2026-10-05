@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Badge, Button, Checkbox, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
@@ -245,6 +245,8 @@ export const MailboxList = ({
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [disconnecting, setDisconnecting] = useState<MailboxSummary | null>(null)
+  const [unblocking, setUnblocking] = useState<BlocklistRow | null>(null)
   const [pattern, setPattern] = useState('')
   const [scope, setScope] = useState<'account' | 'mine'>('mine')
 
@@ -442,12 +444,7 @@ export const MailboxList = ({
                         <Button
                           variant="destructive"
                           busy={busy}
-                          onClick={() =>
-                            void run(
-                              () => api.mail.disconnect.mutate({ id: row.id }),
-                              'Disconnected. The threads already read stay on their records.',
-                            )
-                          }
+                          onClick={() => setDisconnecting(row)}
                         >
                           Disconnect
                         </Button>
@@ -522,15 +519,46 @@ export const MailboxList = ({
                   tone="destructive"
                   icon={<ACTION_ICONS.delete size={16} />}
                   disabled={busy}
-                  onClick={() =>
-                    void run(() => api.mail.blocklist.remove.mutate({ id: entry.id }), 'Removed.')
-                  }
+                  onClick={() => setUnblocking(entry)}
                 />
               </li>
             ))}
           </ul>
         )}
       </section>
+
+      <ConfirmDialog
+        open={disconnecting !== null}
+        title={`Disconnect ${disconnecting?.email ?? 'this mailbox'}?`}
+        confirm="Disconnect"
+        busy={busy}
+        onCancel={() => setDisconnecting(null)}
+        onConfirm={() =>
+          disconnecting &&
+          void run(
+            () => api.mail.disconnect.mutate({ id: disconnecting.id }),
+            'Disconnected. The threads already read stay on their records.',
+          ).then(() => setDisconnecting(null))
+        }
+      >
+        <p>Rawr stops reading and sending from it. The threads already read stay on their records.</p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={unblocking !== null}
+        title={`Stop excluding ${unblocking?.pattern ?? 'this sender'}?`}
+        confirm="Stop excluding"
+        busy={busy}
+        onCancel={() => setUnblocking(null)}
+        onConfirm={() =>
+          unblocking &&
+          void run(() => api.mail.blocklist.remove.mutate({ id: unblocking.id }), 'Removed.').then(() =>
+            setUnblocking(null),
+          )
+        }
+      >
+        <p>Mail to and from it is read and filed on records again from the next pass.</p>
+      </ConfirmDialog>
     </div>
   )
 }

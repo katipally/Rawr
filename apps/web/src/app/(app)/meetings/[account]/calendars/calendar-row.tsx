@@ -1,7 +1,7 @@
 'use client'
 
 import type { GrantSummary } from '@rawr/db'
-import { Badge, type BadgeTone, Button, TextInput, useToast } from '@rawr/ui'
+import { Badge, type BadgeTone, Button, ConfirmDialog, TextInput, useToast } from '@rawr/ui'
 import { Clock, Pencil } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { LinkButton } from '~/components/link-button.tsx'
@@ -50,6 +50,7 @@ export const CalendarRow = ({
   const zone = useZone()
   const [busy, setBusy] = useState(false)
   const [editingCalendar, setEditingCalendar] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
   const [calendarId, setCalendarId] = useState(grant?.calendarId ?? 'primary')
 
   const state = grant?.state ?? 'unconfigured'
@@ -208,12 +209,7 @@ export const CalendarRow = ({
             variant="destructive"
             busy={busy}
             disabled={!editable}
-            onClick={() =>
-              void run(
-                () => api.booking.disconnectCalendar.mutate(isSelf ? {} : { userId }),
-                `Disconnected. No times will be offered for ${isSelf ? 'you' : name}.`,
-              )
-            }
+            onClick={() => setDisconnecting(true)}
           >
             Disconnect
           </Button>
@@ -229,6 +225,22 @@ export const CalendarRow = ({
           Only {name} can grant access to their own calendar. Send them this screen.
         </p>
       ) : null}
+
+      <ConfirmDialog
+        open={disconnecting}
+        title={`Disconnect ${isSelf ? 'your' : `${name}’s`} calendar?`}
+        confirm="Disconnect"
+        busy={busy}
+        onCancel={() => setDisconnecting(false)}
+        onConfirm={() =>
+          void run(
+            () => api.booking.disconnectCalendar.mutate(isSelf ? {} : { userId }),
+            `Disconnected. No times will be offered for ${isSelf ? 'you' : name}.`,
+          ).then(() => setDisconnecting(false))
+        }
+      >
+        <p>No times are offered for {isSelf ? 'you' : name} until a calendar is connected again.</p>
+      </ConfirmDialog>
     </li>
   )
 }
