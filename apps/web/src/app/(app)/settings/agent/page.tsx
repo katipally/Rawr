@@ -24,17 +24,19 @@ const AgentAccessPage = async () => {
   // Read here rather than through a procedure: building the catalogue walks the
   // tRPC router, and a router that imports it back would be a cycle evaluated at
   // module load. A server component is already past that.
-  const catalogue = Object.entries(TOOLSETS).map(([key, set]) => ({
-    key,
-    label: set.label,
-    description: set.description,
-    isDefault: set.default === true,
-    tools: (TOOLS_BY_TOOLSET.get(key) ?? []).map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      writes: tool.writes,
-    })),
-  }))
+  const catalogue = Object.entries(TOOLSETS)
+    .filter(([key]) => TOOLS_BY_TOOLSET.has(key))
+    .map(([key, set]) => ({
+      key,
+      label: set.label,
+      description: set.description,
+      isDefault: set.default === true,
+      tools: (TOOLS_BY_TOOLSET.get(key) ?? []).map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        writes: tool.writes,
+      })),
+    }))
 
   return (
     <div className="flex flex-col gap-6">

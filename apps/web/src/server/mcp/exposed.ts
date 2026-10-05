@@ -1,0 +1,61 @@
+/** The procedures an assistant may call. A procedure is not a tool until it is
+ *  named here, so adding one to a router never widens what an agent can do by
+ *  itself.
+ *
+ *  Left out on purpose: minting or revoking agent tokens, signing out, seating
+ *  or re-granting members, changing a team's members, changing the account
+ *  itself, saving a provider's credentials, and webhook endpoints and their
+ *  signing secrets. Each is a way for a hijacked conversation to widen its own
+ *  access or send data elsewhere. */
+export const EXPOSED_PROCEDURES: ReadonlySet<string> = new Set([
+  'admin.members.list', 'admin.members.hubs', 'admin.teams.list', 'admin.teams.assignable', 'admin.teams.save',
+  'admin.teams.delete', 'admin.audit.entities', 'admin.audit.list', 'admin.objects.list', 'admin.objects.create',
+  'admin.objects.rename', 'admin.objects.remove', 'admin.fields.list', 'admin.fields.listDeleted',
+  'admin.fields.types', 'admin.fields.create', 'admin.fields.update', 'admin.fields.reorder',
+  'admin.fields.renameGroup', 'admin.fields.moveToGroup', 'admin.fields.usage', 'admin.fields.remove',
+  'admin.fields.restore', 'admin.fields.promoteToHot', 'admin.fields.purge', 'admin.pipelines.list',
+  'admin.pipelines.create', 'admin.pipelines.rename', 'admin.pipelines.remove', 'admin.pipelines.createStage',
+  'admin.pipelines.updateStage', 'admin.pipelines.reorderStages', 'admin.pipelines.removeStage',
+  'admin.lifecycle.list', 'admin.lifecycle.create', 'admin.lifecycle.rename', 'admin.lifecycle.reorder',
+  'admin.lifecycle.remove', 'admin.automations.list', 'admin.automations.get', 'admin.automations.save',
+  'admin.automations.setActive', 'admin.automations.remove', 'admin.automations.runs', 'admin.subscriptionTypes.list',
+  'admin.subscriptionTypes.create', 'admin.subscriptionTypes.update', 'admin.subscriptionTypes.remove',  'analytics.sites.create', 'analytics.sites.setActive', 'analytics.events.list', 'analytics.events.save',
+  'analytics.events.funnel', 'analytics.exportContact', 'analytics.eraseContact',  'booking.pages', 'booking.page', 'booking.hosts', 'booking.savePage', 'booking.setPageActive', 'booking.booked',
+  'booking.cancel', 'booking.reschedule', 'booking.schedule', 'booking.saveSchedule', 'booking.adoptTimezone',
+  'booking.saveOverride', 'booking.clearOverride', 'booking.connectDevCalendar', 'booking.setCalendar',
+  'booking.disconnectCalendar',  'crm.registry', 'crm.lookups', 'crm.records.list', 'crm.records.get', 'crm.records.options', 'crm.records.create',
+  'crm.records.update', 'crm.records.bulkUpdate', 'crm.records.remove', 'crm.records.deleted', 'crm.records.restore',
+  'crm.records.duplicates', 'crm.records.junkCompanies', 'crm.records.dismissDuplicate', 'crm.records.merge',
+  'crm.views.list', 'crm.views.save', 'crm.views.rename', 'crm.views.duplicate', 'crm.views.pin', 'crm.views.reorder',
+  'crm.views.remove', 'crm.kpis', 'crm.board.read', 'crm.board.more', 'crm.board.moveCard', 'crm.attachments.list',
+  'crm.attachments.begin', 'crm.attachments.confirm', 'crm.attachments.link', 'crm.attachments.remove',
+  'crm.calendar.read', 'crm.timeline.list', 'crm.timeline.counts', 'crm.timeline.log', 'crm.timeline.edit',
+  'crm.timeline.remove', 'crm.associations.read', 'crm.associations.add', 'crm.associations.remove', 'crm.bulk.start',
+  'crm.bulk.progress', 'crm.tasks.list', 'crm.tasks.create', 'crm.tasks.update', 'crm.tasks.queues.list',
+  'crm.tasks.queues.create', 'crm.tasks.queues.rename', 'crm.tasks.queues.remove', 'crm.tasks.setStatus',
+  'crm.tasks.remove', 'crm.tasks.overdueNextSteps', 'crm.subscriptions.read', 'crm.subscriptions.set', 'crm.search',
+  'crm.imports.list', 'crm.imports.read', 'crm.imports.unfinished', 'crm.imports.beginUpload',
+  'crm.imports.finishUpload', 'crm.imports.discardUpload', 'crm.imports.begin', 'crm.imports.append',
+  'crm.imports.finish', 'crm.imports.setMapping', 'crm.imports.dryRun', 'crm.imports.start', 'crm.imports.cancel',
+  'crm.nameOf', 'crm.countsByObject',  'forms.list', 'forms.get', 'forms.save', 'forms.remove', 'forms.clone', 'forms.folders', 'forms.saveFolder',
+  'forms.removeFolder', 'forms.moveToFolder', 'forms.submissions', 'forms.release', 'forms.confirmSpam',
+  'forms.uploadLink',  'integrations.list', 'integrations.catalogue', 'integrations.woodpeckerCampaigns', 'integrations.test',
+  'integrations.disconnect', 'integrations.brevoTemplates', 'integrations.brevoCampaigns',
+  'integrations.scheduleCampaign', 'integrations.sendCampaign', 'integrations.pushSegment', 'integrations.enrich',
+  'integrations.pendingEnrichment', 'integrations.approveEnrichment', 'integrations.discardEnrichment',
+  'integrations.enrichCompany', 'integrations.apolloStatus', 'integrations.suggestions',
+  'integrations.acceptSuggestion', 'integrations.dismissSuggestion', 'integrations.provenance',
+  'integrations.unmatched', 'integrations.rematch', 'integrations.apolloLink', 'integrations.webhooks.list',
+  'integrations.webhooks.events', 'integrations.webhooks.remove', 'integrations.replay',  'mail.mailboxes', 'mail.connectDev', 'mail.attachContact', 'mail.disconnect', 'mail.setVisibility',
+  'mail.setSending', 'mail.setOpenAlert', 'mail.bodyProgress', 'mail.hydrate', 'mail.sync', 'mail.blocklist.list',
+  'mail.blocklist.add', 'mail.blocklist.remove', 'mail.threadsFor', 'mail.thread', 'mail.inbox', 'mail.compose',
+  'mail.markRead',  'segments.list', 'segments.save', 'segments.remove', 'segments.read', 'segments.createList', 'segments.addMembers',
+  'segments.removeMembers', 'segments.evaluate', 'segments.evaluateAll', 'segments.members', 'segments.preview',
+  'segments.forRecord',  'sequences.list', 'sequences.get', 'sequences.save', 'sequences.setState', 'sequences.saveSteps', 'sequences.enroll',
+  'sequences.sends', 'sequences.enrollments.list', 'sequences.enrollments.forContact', 'sequences.enrollments.pause',
+  'sequences.enrollments.resume', 'sequences.enrollments.remove', 'sequences.templates.list',
+  'sequences.templates.save', 'sequences.templates.remove', 'sequences.tracking.get', 'sequences.tracking.set',
+  'sequences.tracking.consentRequired', 'sequences.tracking.setConsentRequired',  'reporting.pipeline', 'reporting.forms', 'reporting.sequences', 'reporting.email', 'reporting.website',
+  'reporting.attribution', 'reporting.campaigns.list', 'reporting.campaigns.save', 'reporting.messages',
+  'reporting.dashboards.list', 'reporting.dashboards.read', 'reporting.dashboards.save', 'reporting.dashboards.remove',  'account.get', 'account.members.list', 'account.members.invitations', 'account.audit.list',  'notifications.list', 'notifications.unreadCount', 'notifications.markRead', 'notifications.markAllRead',
+  'notifications.trash', 'notifications.restore',  'preferences.all', 'preferences.set',  'jobs.deadLetters',])

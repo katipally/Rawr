@@ -4,15 +4,17 @@ import { z } from 'zod'
 import { appRouter } from '~/server/routers/_app.ts'
 import type { Session } from '~/server/session.ts'
 import type { ToolDefinition, ToolResult } from './tools.ts'
+import { EXPOSED_PROCEDURES } from './exposed.ts'
 import { TOOLSETS, TOOLSET_ALIAS } from './toolsets.ts'
 
 /** F5 §2, the other half: every screen in Rawr, reachable from an assistant.
  *
  *  The ten hand-written tools answer the way a person talks: names, not ids, and
  *  dates as said. Everything else the app can do is a tRPC procedure with a zod
- *  input, and each one becomes a tool here with no per-procedure code. The tool
+ *  input, and each one named in `exposed.ts` becomes a tool here with no
+ *  per-procedure code. The tool
  *  calls the same procedure the screen calls, under the same session shape, so a
- *  feature added to the app is a tool the moment it has a procedure. One
+ *  feature added to the app is a tool the moment it is listed. One
  *  mechanism, the whole surface: O(procedures) at boot, O(1) per call. */
 
 type Procedure = {
@@ -157,5 +159,5 @@ const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {
 export const GENERATED_TOOLS: ToolDefinition[] = Object.entries(
   appRouter._def.procedures as unknown as Record<string, Procedure>,
 )
-  .filter(([, procedure]) => procedure._def.type !== 'subscription')
+  .filter(([path, procedure]) => procedure._def.type !== 'subscription' && EXPOSED_PROCEDURES.has(path))
   .map(([path, procedure]) => generatedTool(path, procedure))

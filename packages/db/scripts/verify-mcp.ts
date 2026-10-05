@@ -428,6 +428,27 @@ try {
     unknownTool.rpcError ?? '',
   )
 
+  // Procedures an assistant could use to widen its own access or send data
+  // elsewhere exist on the screens and are not tools: a procedure is exposed only
+  // when it is named in the allowlist.
+  const withheld = [
+    'mcp_create',
+    'mcp_revoke',
+    'session_sign_out_everywhere',
+    'account_members_set_grants',
+    'account_members_invite',
+    'admin_teams_set_members',
+    'integrations_save',
+    'integrations_webhooks_roll_secret',
+  ]
+  check(
+    'a procedure that is not on the allowlist is not a tool',
+    withheld.every((name) => !names.includes(name)),
+    withheld.filter((name) => names.includes(name)).join(', '),
+  )
+  const withheldCall = await call(salesToken, 'mcp_create', { name: 'smuggled' })
+  check('and calling it by name is refused as unknown', (withheldCall.rpcError ?? '').includes('Unknown tool'), withheldCall.rpcError ?? withheldCall.text)
+
   const generated = await call(salesToken, 'integrations_list', {})
   check(
     'a generated tool runs the same procedure the screen does',

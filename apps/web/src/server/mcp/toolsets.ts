@@ -87,7 +87,7 @@ export const TOOLSETS: Record<string, Toolset> = {
   },
   account: {
     label: 'Account and sessions',
-    description: "The signed-in person's own account and their sessions.",
+    description: "The account's name and settings, its members, and its audit log.",
   },
   jobs: {
     label: 'Jobs',
