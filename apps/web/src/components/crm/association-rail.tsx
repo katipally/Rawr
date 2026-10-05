@@ -11,7 +11,7 @@ import { encodeFilters, objectView, recordPath } from '~/lib/links.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { CreateRecordDialog, type CreateField } from './create-record.tsx'
+import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
@@ -347,7 +347,7 @@ export const AssociationRail = ({
       })}
 
       {creating && createFields[creating.objectKey] ? (
-        <CreateRecordDialog
+        <CreateRecordPanel
           account={account}
           object={creating.objectKey}
           objectLabel={creating.nameSingular}

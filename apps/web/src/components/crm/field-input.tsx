@@ -35,6 +35,9 @@ export type EditableField = {
   /** Conditional property logic. While this does not match the record's other
    *  values, the field is not on the record. */
   conditional?: Conditional | null
+  /** Where this field falls among the ones that name a record, which a create
+   *  form asks for first. Absent for every other field. */
+  identity?: number
 }
 
 const numericTypes = new Set(['number', 'currency', 'percent', 'rating'])

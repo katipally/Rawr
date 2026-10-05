@@ -121,6 +121,14 @@ export const toFilterFields = (object: RegistryObject): FilterField[] =>
     operators: field.operators,
   }))
 
+/** The fields a create form asks for before anything else, in the order it asks.
+ *  A custom object has no fixed set, so its label field is the identity. */
+const IDENTITY: Record<string, string[]> = {
+  contact: ['email', 'first_name', 'last_name'],
+  company: ['name', 'domain'],
+  deal: ['name', 'pipeline_id', 'stage_id', 'amount'],
+}
+
 /** Read-only fields are shown but never offered as an input, so nobody types into
  *  a source container the capture surfaces own or a create date the database keeps.
  *  Read-only is either a property of the type (json) or of the field itself
@@ -129,8 +137,9 @@ export const toEditableFields = (
   object: RegistryObject,
   lookups: Lookups,
   { includeReadOnly = false } = {},
-): EditableField[] =>
-  object.fields
+): EditableField[] => {
+  const identity = IDENTITY[object.key] ?? (object.labelFieldKey ? [object.labelFieldKey] : [])
+  return object.fields
     .filter((field) => includeReadOnly || !isReadOnly(field))
     .map((field) => {
       const choices = choicesFor(field, lookups)
@@ -144,10 +153,12 @@ export const toEditableFields = (
         options: field.options,
         readOnly: isReadOnly(field),
         conditional: field.conditional,
+        ...(identity.includes(field.key) ? { identity: identity.indexOf(field.key) } : {}),
         ...(choices ? { choices } : {}),
         ...(pickObject ? { pickObject } : {}),
       }
     })
+}
 
 const isReadOnly = (field: RegistryField): boolean =>
   field.isSystem || TYPE_META[field.type].readOnly === true

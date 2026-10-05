@@ -1,13 +1,14 @@
 'use client'
 
 import { matchesConditional } from '@rawr/db/registry'
-import { Button, IconButton, TextInput, cn, useToast } from '@rawr/ui'
-import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { Button, IconButton, cn, useToast } from '@rawr/ui'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, scoped, type EditableField } from './field-input.tsx'
+import { PropertySearch } from './property-search.tsx'
 import { Value } from './value.tsx'
 import { useZone } from '~/components/zone.tsx'
 
@@ -309,17 +310,7 @@ export const PropertyPanel = ({
             </button>
           </h2>
           {showAll ? (
-            <label className="relative mx-6 mb-6 block">
-              <span className="sr-only">Search all properties</span>
-              <TextInput
-                type="search"
-                value={needle}
-                placeholder="Search properties"
-                onChange={(event) => setNeedle(event.target.value)}
-                className="pr-9"
-              />
-              <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2" />
-            </label>
+            <PropertySearch value={needle} onChange={setNeedle} className="mx-6 mb-6" />
           ) : null}
         </section>
       ) : null}

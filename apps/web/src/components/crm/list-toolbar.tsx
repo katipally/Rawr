@@ -7,7 +7,7 @@ import { useState, type ReactNode } from 'react'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'
-import { CreateRecordDialog, type CreateField } from './create-record.tsx'
+import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 
 export type ListToolbarProps = {
   account: string
@@ -23,8 +23,8 @@ export type ListToolbarProps = {
   filterFields: FilterField[]
   createFields: CreateField[]
   canWrite: boolean
-  /** Deep links: ?new=1 opens the create dialog, ?view=new the save-view one.
-   *  Read from the address on the server so the dialog is there on first paint. */
+  /** Deep links: ?new=1 opens the create panel, ?view=new the save-view dialog.
+   *  Read from the address on the server so it is there on first paint. */
   openCreate?: boolean
   openView?: boolean
   /** The view's own name, so "update this view" can save without renaming it. */
@@ -422,7 +422,7 @@ export const ListToolbar = ({
       </Modal>
 
       {showCreate ? (
-        <CreateRecordDialog
+        <CreateRecordPanel
           account={account}
           object={object}
           objectLabel={objectLabel}
