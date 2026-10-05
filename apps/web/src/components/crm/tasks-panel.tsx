@@ -180,20 +180,17 @@ export const TasksPanel = ({
         open={removing !== null}
         title={`Delete “${removing?.title ?? ''}”?`}
         onClose={() => setRemoving(null)}
+        onSubmit={() =>
+          void run(() => api.crm.tasks.remove.mutate({ id: removing!.id }), 'Task deleted.').then(() =>
+            setRemoving(null),
+          )
+        }
         footer={
           <>
             <Button variant="tertiary" disabled={busy} onClick={() => setRemoving(null)}>
               Cancel
             </Button>
-            <Button
-              variant="destructive"
-              busy={busy}
-              onClick={() =>
-                void run(() => api.crm.tasks.remove.mutate({ id: removing!.id }), 'Task deleted.').then(() =>
-                  setRemoving(null),
-                )
-              }
-            >
+            <Button type="submit" variant="destructive" busy={busy}>
               Delete task
             </Button>
           </>

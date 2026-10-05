@@ -427,21 +427,30 @@ export const Timeline = ({
                 </time>
               </p>
               {folded ? null : editing?.id === entry.id ? (
-                <div className="mt-2 flex flex-col gap-2">
+                <form
+                  className="mt-2 flex flex-col gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (editing.body.trim() !== '') void saveEdit()
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') setEditing(null)
+                  }}
+                >
                   <TextArea
                     value={editing.body}
                     aria-label="Edit this entry"
                     onChange={(event) => setEditing({ id: entry.id, body: event.target.value })}
                   />
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="primary" busy={working} disabled={editing.body.trim() === ''} onClick={() => void saveEdit()}>
+                    <Button type="submit" variant="primary" busy={working} disabled={editing.body.trim() === ''}>
                       Save
                     </Button>
                     <Button variant="tertiary" onClick={() => setEditing(null)}>
                       Cancel
                     </Button>
                   </div>
-                </div>
+                </form>
               ) : mail ? (
                 <div className="mt-1 flex flex-col">
                   <Link className="break-words font-medium text-link" href={threadPath(account, mail.threadId)}>

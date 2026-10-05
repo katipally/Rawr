@@ -153,7 +153,13 @@ export const PageEditor = ({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <form
+      className="flex flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (editable && !saving) void save()
+      }}
+    >
       <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <h2 className="font-medium">This link</h2>
@@ -195,11 +201,10 @@ export const PageEditor = ({
           ) : null}
           <Button
             variant="primary"
-            type="button"
+            type="submit"
             className="ml-auto"
             busy={saving}
             disabled={!editable}
-            onClick={() => void save()}
           >
             {saving ? 'Saving…' : 'Save'}
           </Button>
@@ -785,10 +790,9 @@ export const PageEditor = ({
       <div className="flex justify-end">
         <Button
           variant="primary"
-          type="button"
+          type="submit"
           busy={saving}
           disabled={!editable}
-          onClick={() => void save()}
         >
           {saving ? 'Saving…' : 'Save'}
         </Button>
@@ -798,6 +802,6 @@ export const PageEditor = ({
         Working hours are per person, not per page. Set yours under{' '}
         <Link href={availabilityPath(account)}>My hours</Link>.
       </p>
-    </div>
+    </form>
   )
 }
