@@ -83,6 +83,7 @@ export const sessionFor = (caller: {
     viewHubs: readonly Hub[]
     editHubs: readonly Hub[]
     criticalGrants?: readonly CriticalAction[] | undefined
+    timezone?: string | undefined
   }
 }): Session => ({
   userId: caller.userId,
@@ -101,6 +102,7 @@ export const sessionFor = (caller: {
   // writes the sentence. The curated tools resolve dates in the caller's own zone
   // through `todayFor`, which reads it where it is needed.
   timezone: 'UTC',
+  accountTimezone: caller.ctx.timezone ?? 'UTC',
 })
 
 const generatedTool = (path: string, procedure: Procedure): ToolDefinition => {

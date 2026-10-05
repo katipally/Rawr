@@ -18,6 +18,7 @@ export type Membership = {
   joinedAt: Date
   /** Sessions issued before this are dead. Null means nobody has signed out everywhere. */
   sessionsValidAfter: Date | null
+  accountTimezone: string
 }
 
 type MembershipRow = {
@@ -35,6 +36,7 @@ type MembershipRow = {
   critical_grants: CriticalAction[]
   joined_at: Date | string
   sessions_valid_after: Date | string | null
+  account_timezone: string
 }
 
 const toMembership = (r: MembershipRow): Membership => ({
@@ -52,6 +54,7 @@ const toMembership = (r: MembershipRow): Membership => ({
   criticalGrants: r.critical_grants ?? [],
   joinedAt: new Date(r.joined_at),
   sessionsValidAfter: r.sessions_valid_after ? new Date(r.sessions_valid_after) : null,
+  accountTimezone: r.account_timezone,
 })
 
 /** The one question row level security cannot answer: which accounts does this

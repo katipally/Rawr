@@ -1,8 +1,8 @@
 'use client'
 
-import { Button, Card, Field, Switch, TextInput, useToast } from '@rawr/ui'
+import { Button, Card, Combobox, Field, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { HUBS, type Hub } from '~/lib/hubs.ts'
 
@@ -16,9 +16,18 @@ type Account = {
   seatLimit: number | null
   seatsUsed: number
   activityRetentionMonths: number
+  timezone: string
 }
 
-export const DefaultsPanel = ({ account, canWrite }: { account: Account; canWrite: boolean }) => {
+export const DefaultsPanel = ({
+  account,
+  canWrite,
+  zones,
+}: {
+  account: Account
+  canWrite: boolean
+  zones: string[]
+}) => {
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
@@ -27,6 +36,11 @@ export const DefaultsPanel = ({ account, canWrite }: { account: Account; canWrit
   const [autoJoin, setAutoJoin] = useState(account.autoJoinHostedDomain)
   const [defaultHubs, setDefaultHubs] = useState<Hub[]>(account.defaultViewHubs)
   const [retention, setRetention] = useState(String(account.activityRetentionMonths))
+  const [timezone, setTimezone] = useState(account.timezone)
+  // Only the browser knows it, so it is read after mount: reading it during render
+  // would put the server's zone in the markup and the reader's in the hydrated page.
+  const [browserZone, setBrowserZone] = useState<string | null>(null)
+  useEffect(() => setBrowserZone(Intl.DateTimeFormat().resolvedOptions().timeZone || null), [])
 
   const save = async () => {
     setBusy(true)
@@ -37,6 +51,7 @@ export const DefaultsPanel = ({ account, canWrite }: { account: Account; canWrit
         defaultViewHubs: defaultHubs,
         seatLimit: seatLimit.trim() === '' ? null : Number(seatLimit),
         activityRetentionMonths: Number(retention),
+        timezone,
       })
       toast('success', 'Saved.')
       router.refresh()
@@ -51,6 +66,7 @@ export const DefaultsPanel = ({ account, canWrite }: { account: Account; canWrit
     name === account.name &&
     autoJoin === account.autoJoinHostedDomain &&
     retention === String(account.activityRetentionMonths) &&
+    timezone === account.timezone &&
     (seatLimit.trim() === '' ? null : Number(seatLimit)) === account.seatLimit &&
     defaultHubs.join() === account.defaultViewHubs.join()
 
@@ -77,6 +93,23 @@ export const DefaultsPanel = ({ account, canWrite }: { account: Account; canWrit
               disabled={!canWrite}
             />
           </Field>
+
+          <div className="flex flex-col gap-1">
+            <Combobox
+              id="account-timezone"
+              label="Timezone"
+              hint="Reports, calendars and today count their days in this zone, for everyone in the account."
+              value={timezone}
+              onChange={(value) => value && setTimezone(value)}
+              options={zones.map((zone) => ({ value: zone, label: zone, keywords: [zone.replaceAll('_', ' ')] }))}
+              disabled={!canWrite}
+            />
+            {canWrite && browserZone && browserZone !== timezone && zones.includes(browserZone) ? (
+              <Button type="button" variant="secondary" className="self-start" onClick={() => setTimezone(browserZone)}>
+                Use {browserZone}, where this browser is
+              </Button>
+            ) : null}
+          </div>
 
           <Field
             id="account-retention"

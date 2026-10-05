@@ -4,13 +4,16 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { DefaultsPanel } from './defaults-panel.tsx'
 
 /** What the account itself is: its name, the domain it trusts, what a domain
- *  joiner arrives holding, how many seats there are and how long raw activity is
- *  kept. HubSpot files this under Account defaults, and so does Rawr. */
+ *  joiner arrives holding, how many seats there are, how long raw activity is
+ *  kept and which timezone its days are counted in. HubSpot files this under Account defaults, and so does Rawr. */
 const DefaultsPage = async () => {
   const session = await readSession()
   if (!session) return null
 
   const account = await readAccount(contextFrom(session))
+  // From the server's own list, so what is offered is what a save will accept,
+  // with the stored zone and UTC kept in it where an engine leaves them out.
+  const zones = [...new Set([account.timezone, 'UTC', ...Intl.supportedValuesOf('timeZone')])].sort()
 
   return (
     <div className="flex flex-col gap-4">
@@ -19,7 +22,7 @@ const DefaultsPage = async () => {
         title="Account defaults"
         lead={`Settings that apply to everyone in ${account.name}.`}
       />
-      <DefaultsPanel account={account} canWrite={session.isSuperAdmin} />
+      <DefaultsPanel account={account} canWrite={session.isSuperAdmin} zones={zones} />
     </div>
   )
 }

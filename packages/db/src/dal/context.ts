@@ -60,6 +60,9 @@ export type AccountContext = {
    *  granted. Every context built from a membership sets it, so an empty array is
    *  a real answer and means none of them. */
   criticalGrants?: readonly CriticalAction[] | undefined
+  /** The account's zone, when whoever built this context already holds it (a
+   *  session does). Absent means `accountZone` reads it. */
+  timezone?: string | undefined
 }
 
 /** A hub the seat does not hold, or one set to reach everything, is dropped

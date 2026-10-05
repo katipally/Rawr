@@ -13,6 +13,7 @@ import {
 } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { provisionAccount } from './provision.ts'
+import { isKnownTimezone } from './slots.ts'
 
 /** The account as a thing to administer rather than a thing to keep records in:
  *  its name, its domain, its seats, who holds one and who has been offered one.
@@ -33,6 +34,7 @@ export type Account = {
   seatLimit: number | null
   seatsUsed: number
   activityRetentionMonths: number
+  timezone: string
 }
 
 export const readAccount = async (ctx: AccountContext): Promise<Account> =>
@@ -47,6 +49,7 @@ export const readAccount = async (ctx: AccountContext): Promise<Account> =>
       seat_limit: number | null
       seats_used: number
       activity_retention_months: number
+      timezone: string
     }>(sql`
       select a.*,
              (select count(*) from membership m
@@ -65,6 +68,7 @@ export const readAccount = async (ctx: AccountContext): Promise<Account> =>
       seatLimit: row.seat_limit === null ? null : Number(row.seat_limit),
       seatsUsed: Number(row.seats_used),
       activityRetentionMonths: Number(row.activity_retention_months),
+      timezone: row.timezone,
     }
   })
 
@@ -83,6 +87,7 @@ export const saveAccount = async (
     defaultViewHubs?: readonly string[] | undefined
     seatLimit?: number | null | undefined
     activityRetentionMonths?: number | undefined
+    timezone?: string | undefined
   },
 ): Promise<void> =>
   mutate(ctx, 'account', async (tx) => {
@@ -98,6 +103,9 @@ export const saveAccount = async (
     if (months !== undefined && (!Number.isInteger(months) || months < 1 || months > 120)) {
       throw new Error('An activity retention window is a whole number of months between 1 and 120.')
     }
+    if (input.timezone !== undefined && !isKnownTimezone(input.timezone)) {
+      throw new Error(`"${input.timezone}" is not a timezone this system recognises.`)
+    }
     const hubs = input.defaultViewHubs === undefined ? undefined : assertHubs(input.defaultViewHubs)
     await tx
       .update(account)
@@ -107,6 +115,7 @@ export const saveAccount = async (
         ...(hubs === undefined ? {} : { defaultViewHubs: hubs }),
         ...(input.seatLimit === undefined ? {} : { seatLimit: input.seatLimit }),
         ...(months === undefined ? {} : { activityRetentionMonths: months }),
+        ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
       })
       .where(eq(account.id, ctx.accountId))
     return {

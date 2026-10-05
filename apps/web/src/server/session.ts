@@ -42,6 +42,10 @@ export type Session = {
    *  side happens to sit in made the two disagree, which React reports as a
    *  hydration failure and repairs by throwing the server's markup away. */
   timezone: string
+  /** The account's zone: the one reports, calendars and "today" bucket their days
+   *  in, the same for everybody in it. Not `timezone`, which is how one person
+   *  reads instants. */
+  accountTimezone: string
 }
 
 export const sessionFromMembership = (m: Membership): Session => ({
@@ -60,6 +64,7 @@ export const sessionFromMembership = (m: Membership): Session => ({
   // Overwritten by readSession, which knows the account context to read it in.
   // The sign-in path writes the cookie before that row can be looked up.
   timezone: 'UTC',
+  accountTimezone: m.accountTimezone,
 })
 
 export const writeSessionCookie = async (session: Session): Promise<void> => {
@@ -127,6 +132,7 @@ export const contextFrom = (session: Session): AccountContext => ({
   viewHubs: session.viewHubs,
   editHubs: session.editHubs,
   criticalGrants: session.criticalGrants,
+  timezone: session.accountTimezone,
 })
 
 /** The same question the data access layer asks, for screens deciding what to

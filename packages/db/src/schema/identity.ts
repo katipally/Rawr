@@ -36,6 +36,10 @@ export const account = pgTable('account', {
    *  keeps sequence mail from carrying links on the app's own domain, which is
    *  what gets an app domain classified as bulk mail. */
   trackingDomain: text('tracking_domain'),
+  /** The IANA zone every report, calendar and "today" buckets its days in. One for
+   *  the account, so two people reading a report read the same numbers; a trigger
+   *  refuses a name Postgres does not know. */
+  timezone: text('timezone').notNull().default('UTC'),
   createdAt: createdAt(),
 })
 

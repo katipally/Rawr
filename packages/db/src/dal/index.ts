@@ -89,6 +89,15 @@ export const withAccountReads = async <T>(ctx: AccountContext, fn: () => Promise
   return fn()
 }
 
+/** The zone this account buckets its days in. A context built from a session
+ *  already carries it; a job or an agent does not, and pays one primary key read
+ *  rather than every caller threading it through. */
+export const accountZone = async (tx: Tx, ctx: AccountContext): Promise<string> => {
+  if (ctx.timezone) return ctx.timezone
+  const [row] = await tx.execute<{ timezone: string }>(sql`select timezone from account limit 1`)
+  return row?.timezone ?? 'UTC'
+}
+
 export type AuditEntry = {
   entity: string
   entityId: string | null
