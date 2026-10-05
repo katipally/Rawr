@@ -7,8 +7,9 @@ import { useState } from 'react'
 import { shortName } from '~/components/crm/value.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Side = { id: string; displayName: string; createdAt: string }
 
@@ -54,6 +55,7 @@ const RULES: Record<string, string> = {
  *  record holds, which is what the queue proposes; anything finer is one click
  *  away on the record itself. */
 export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
@@ -126,7 +128,7 @@ export const DuplicateList = ({ account, object, pairs, limit }: DuplicateListPr
     const next = Math.min(asked + limit, MAX)
     setLoading(true)
     try {
-      const more = await api.crm.records.duplicates.query({ object, limit: next })
+      const more = await queryClient.fetchQuery({ ...trpc.crm.records.duplicates.queryOptions({ object, limit: next }), staleTime: 0 })
       setRows(
         more.map((pair) => ({
           ...pair,

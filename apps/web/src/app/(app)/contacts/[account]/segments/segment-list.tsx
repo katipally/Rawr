@@ -10,9 +10,10 @@ import { usePagedRows } from '~/components/paged.tsx'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type SegmentRow = {
   id: string
@@ -43,6 +44,7 @@ const OBJECT_LABEL: Record<ObjectKey, string> = {
 }
 
 export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: SegmentListProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
@@ -74,6 +76,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     try {
       await fn()
       toast('success', done)
+      void queryClient.invalidateQueries(trpc.segments.pathFilter())
       router.refresh()
       return true
     } catch (cause) {
@@ -101,7 +104,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     setFilters(next)
     setPreview(null)
     try {
-      setPreview(await api.segments.preview.query({ object, filters: next as never }))
+      setPreview(await queryClient.fetchQuery({ ...trpc.segments.preview.queryOptions({ object, filters: next as never }), staleTime: 0 }))
     } catch (cause) {
       toast('error', errorMessage(cause))
     }
@@ -126,7 +129,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     setViewing(row)
     setMembers(null)
     try {
-      setMembers(await api.segments.members.query({ id: row.id }))
+      setMembers(await queryClient.fetchQuery({ ...trpc.segments.members.queryOptions({ id: row.id }), staleTime: 0 }))
     } catch (cause) {
       toast('error', errorMessage(cause))
     }

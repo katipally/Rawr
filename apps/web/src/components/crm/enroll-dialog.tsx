@@ -2,7 +2,8 @@
 
 import { Badge, Button, Combobox, Modal, Spinner, useToast } from '@rawr/ui'
 import { useEffect, useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Sequence = { id: string; name: string; state: string; stepCount: number }
 type Mailbox = { id: string; email: string; canSend: boolean; state: string }
@@ -29,6 +30,7 @@ export const EnrollDialog = ({
   onClose: () => void
   onEnrolled?: () => void
 }) => {
+  const queryClient = useQueryClient()
   const toast = useToast()
   const [sequences, setSequences] = useState<Sequence[] | null>(null)
   const [mailboxes, setMailboxes] = useState<Mailbox[] | null>(null)
@@ -39,7 +41,7 @@ export const EnrollDialog = ({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    Promise.all([api.sequences.list.query(), api.mail.mailboxes.query()])
+    Promise.all([queryClient.fetchQuery({ ...trpc.sequences.list.queryOptions(), staleTime: 0 }), queryClient.fetchQuery({ ...trpc.mail.mailboxes.queryOptions(), staleTime: 0 })])
       .then(([found, boxes]) => {
         setSequences(found.filter((row) => row.state !== 'archived'))
         setMailboxes(boxes.map((box) => ({ id: box.id, email: box.email, canSend: box.canSend, state: box.state })))
@@ -49,7 +51,7 @@ export const EnrollDialog = ({
         if (sendable.length === 1) setMailboxId(sendable[0]?.id ?? null)
       })
       .catch((cause) => setError(errorMessage(cause)))
-  }, [])
+  }, [queryClient])
 
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
   const refused = outcomes?.filter((row) => !row.enrolled) ?? []

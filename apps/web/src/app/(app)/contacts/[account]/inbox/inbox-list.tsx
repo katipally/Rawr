@@ -4,9 +4,10 @@ import { Avatar, Badge, Button, EmptyState, Spinner, cn, useToast } from '@rawr/
 import Link from 'next/link'
 import { useState } from 'react'
 import { threadPath } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import type { InboxFilters } from './inbox-frame.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Thread = {
   id: string
@@ -42,6 +43,7 @@ export const InboxList = ({
   filters: InboxFilters
   selected: string | null
 }) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
   const [threads, setThreads] = useState(initial)
@@ -52,7 +54,7 @@ export const InboxList = ({
     if (!cursor) return
     setBusy(true)
     try {
-      const page = await api.mail.inbox.query({ ...filters, cursor, limit: 25 })
+      const page = await queryClient.fetchQuery({ ...trpc.mail.inbox.queryOptions({ ...filters, cursor, limit: 25 }), staleTime: 0 })
       setThreads((current) => [
         ...current,
         ...page.threads.map((thread) => ({ ...thread, lastAt: thread.lastAt?.toISOString() ?? null })),

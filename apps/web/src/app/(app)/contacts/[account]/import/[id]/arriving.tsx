@@ -4,9 +4,10 @@ import { Alert, Button } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { pollWhileVisible } from '~/lib/poll.ts'
-import { api } from '~/lib/rpc.ts'
+import { api, trpc } from '~/lib/rpc.ts'
 import { useUploads } from '~/lib/store/uploads.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 /** The run before there is anything to map: its file is still going up, or it is
  *  up and the server is reading it.
@@ -36,6 +37,7 @@ export const ImportArriving = ({
   fileBytes: number
   backHref: string
 }) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const upload = useUploads((store) => store.uploads.find((row) => row.runId === runId))
@@ -47,7 +49,7 @@ export const ImportArriving = ({
     let dropped = false
     const ask = async () => {
       try {
-        const run = await api.crm.imports.read.query({ id: runId })
+        const run = await queryClient.fetchQuery({ ...trpc.crm.imports.read.queryOptions({ id: runId }), staleTime: 0 })
         if (dropped || !run) return
         if (run.state !== 'uploading' && run.state !== 'parsing') {
           // The mapper, the preview or a failure: all of them are the server
@@ -66,7 +68,7 @@ export const ImportArriving = ({
       dropped = true
       stop()
     }
-  }, [runId, router])
+  }, [runId, router, queryClient])
 
   const reading = live.state === 'parsing'
   // This tab's own count is ahead of the run's, because a part is recorded after

@@ -1,9 +1,10 @@
 'use client'
 
+import { useQueryClient } from '@tanstack/react-query'
 import { Button, Combobox, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { FieldInput, type EditableField } from './field-input.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -45,6 +46,7 @@ const POLL_MS = 2000
 export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fields, onDone, onClear }: BulkBarProps) => {
   const fmt = useFormat()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const toast = useToast()
   const [fieldKey, setFieldKey] = useState('')
   const [value, setValue] = useState<unknown>(null)
@@ -210,6 +212,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
           : undefined,
       )
       onDone()
+      void queryClient.invalidateQueries(trpc.crm.pathFilter())
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -222,7 +225,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     setPending('assign')
     setOwnerId(null)
     try {
-      const lookups = await api.crm.lookups.query()
+      const lookups = await queryClient.fetchQuery(trpc.crm.lookups.queryOptions())
       setOwners(lookups.users.map((user) => ({ id: user.id, name: user.name })))
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -234,7 +237,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     setListId(null)
     try {
       // Safe because the button that opens this only exists for the three.
-      const rows = await api.segments.list.query({ object: object as 'contact' | 'company' | 'deal' })
+      const rows = await queryClient.fetchQuery(trpc.segments.list.queryOptions({ object: object as 'contact' | 'company' | 'deal' }))
       setLists(rows.filter((row) => row.isStatic).map((row) => ({ id: row.id, name: row.name })))
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -247,7 +250,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     setPair([])
     try {
       const names = await Promise.all(
-        ids.map(async (id) => ({ id, name: (await api.crm.nameOf.query({ object, id })) ?? id })),
+        ids.map(async (id) => ({ id, name: (await queryClient.fetchQuery(trpc.crm.nameOf.queryOptions({ object, id }))) ?? id })),
       )
       setPair(names)
     } catch (cause) {

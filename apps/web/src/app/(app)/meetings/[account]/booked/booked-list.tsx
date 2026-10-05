@@ -4,8 +4,9 @@ import { Button, Select } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { bookedPath, recordPath } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { BookedRow, type BookedRowData } from './booked-row.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 /** The list under the tabs.
  *
@@ -44,6 +45,7 @@ export const BookedList = ({
   contactHrefs: Record<string, string>
   editable: boolean
 }) => {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const [rows, setRows] = useState(initialRows)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
@@ -68,13 +70,13 @@ export const BookedList = ({
     setBusy(true)
     setError(null)
     try {
-      const result = await api.booking.booked.query({
+      const result = await queryClient.fetchQuery({ ...trpc.booking.booked.queryOptions({
         when: query.when,
         pageId: query.page,
         hostUserId: query.host,
         state: query.state,
         cursor: { startsAt: new Date(cursor.startsAt), id: cursor.id },
-      })
+      }), staleTime: 0 })
       setRows((all) => [
         ...all,
         ...result.rows.map((row) => ({

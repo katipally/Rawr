@@ -4,7 +4,8 @@ import { Button, EmptyState, Field, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useFormat } from '~/components/zone.tsx'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Deleted = { id: string; name: string; deletedAt: string; deletedBy: string | null }
 
@@ -27,6 +28,7 @@ type Failure = { id: string; displayName: string; reason: string }
  *  back everything on screen: a bulk delete of fifty is undone in one click, and a
  *  search narrows what "everything" means. */
 export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial }: RestoreListProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
@@ -40,7 +42,7 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
   const load = async (wanted: number, text: string) => {
     setBusy('load')
     try {
-      const found = await api.crm.records.deleted.query({ object, limit: wanted, ...(text ? { search: text } : {}) })
+      const found = await queryClient.fetchQuery({ ...trpc.crm.records.deleted.queryOptions({ object, limit: wanted, ...(text ? { search: text } : {}) }), staleTime: 0 })
       setRows(found.rows.map((row) => ({ ...row, deletedAt: new Date(row.deletedAt).toISOString() })))
       setTotal(found.total)
       setAsked(wanted)

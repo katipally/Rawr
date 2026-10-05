@@ -5,8 +5,9 @@ import { Alert, Button, buttonClass, ConfirmDialog, Select, TextInput, useToast 
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { pollWhileVisible } from '~/lib/poll.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 /** How often a running import is asked where it got to. Short enough that the bar
  *  moves, long enough that a 90,000-row run is not thousands of requests. */
@@ -67,6 +68,7 @@ export const ImportWizard = ({
   errors,
   unmatchedOwners,
 }: ImportWizardProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -93,7 +95,7 @@ export const ImportWizard = ({
     let dropped = false
     const ask = async () => {
       try {
-        const run = await api.crm.imports.read.query({ id: runId })
+        const run = await queryClient.fetchQuery({ ...trpc.crm.imports.read.queryOptions({ id: runId }), staleTime: 0 })
         if (dropped || !run) return
         setLive({
           state: run.state,
@@ -115,7 +117,7 @@ export const ImportWizard = ({
       dropped = true
       stop()
     }
-  }, [live.state, runId, router, toast])
+  }, [live.state, runId, router, toast, queryClient])
 
   /** What the mapper opened with, so switching a column back to "Create
    *  property" offers the same inferred name and type rather than an empty one. */

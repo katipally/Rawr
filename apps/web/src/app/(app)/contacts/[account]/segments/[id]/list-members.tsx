@@ -8,7 +8,8 @@ import type { ObjectKey } from '@rawr/db'
 import { useFormat } from '~/components/zone.tsx'
 import { recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Member = { id: string; displayName: string; enteredAt: string }
 
@@ -31,6 +32,7 @@ export type ListMembersProps = {
 }
 
 export const ListMembers = ({ account, list, initial, pageSize, canWrite }: ListMembersProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const origin = useOrigin()
   const router = useRouter()
@@ -44,7 +46,7 @@ export const ListMembers = ({ account, list, initial, pageSize, canWrite }: List
   const load = async (next: number) => {
     setBusy(true)
     try {
-      const rows = await api.segments.members.query({ id: list.id, limit: pageSize, offset: next })
+      const rows = await queryClient.fetchQuery({ ...trpc.segments.members.queryOptions({ id: list.id, limit: pageSize, offset: next }), staleTime: 0 })
       setMembers(rows.map((row) => ({ ...row, enteredAt: row.enteredAt.toISOString() })))
       setOffset(next)
       setSelected(new Set())

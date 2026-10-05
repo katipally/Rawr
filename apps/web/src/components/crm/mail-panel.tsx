@@ -3,9 +3,10 @@
 import type { EmailEngagement, ThreadMessage, ThreadSummary } from '@rawr/db'
 import { Spinner } from '@rawr/ui'
 import { useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { MessageView } from './message-view.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type MailPanelProps = {
   contactName: string
@@ -69,6 +70,7 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
 type Loaded = { state: 'idle' } | { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; messages: ThreadMessage[] }
 
 const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState<Loaded>({ state: 'idle' })
@@ -79,7 +81,7 @@ const ThreadRow = ({ thread }: { thread: ThreadSummary }) => {
     if (!next || loaded.state === 'ready' || loaded.state === 'loading') return
     setLoaded({ state: 'loading' })
     try {
-      const result = await api.mail.thread.query({ id: thread.id })
+      const result = await queryClient.fetchQuery({ ...trpc.mail.thread.queryOptions({ id: thread.id }), staleTime: 0 })
       setLoaded({ state: 'ready', messages: result?.messages ?? [] })
     } catch (cause) {
       setLoaded({ state: 'error', message: errorMessage(cause) })

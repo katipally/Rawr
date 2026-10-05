@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type Suggestion = {
   id: string
@@ -255,6 +256,7 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
  *  and stop when somebody replies. Anything already running in Apollo still shows
  *  here and still reaches the timeline. */
 const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () => void }) => {
+  const queryClient = useQueryClient()
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
   // One request, so it must run once per contact and not once per render of the
@@ -262,13 +264,13 @@ const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () 
   const load = useCallback(async () => {
     setLoaded({ state: 'loading' })
     try {
-      const status = await api.integrations.apolloStatus.query({ contactId })
+      const status = await queryClient.fetchQuery({ ...trpc.integrations.apolloStatus.queryOptions({ contactId }), staleTime: 0 })
       setLoaded({ state: 'ready', statuses: status.statuses })
       if (status.recorded > 0) onChanged()
     } catch (cause) {
       setLoaded({ state: 'error', message: errorMessage(cause) })
     }
-  }, [contactId, onChanged])
+  }, [contactId, onChanged, queryClient])
 
   useEffect(() => {
     void load()

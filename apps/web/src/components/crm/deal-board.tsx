@@ -9,11 +9,12 @@ import { shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import type { Group } from './filter-builder.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { TaskForm } from './task-form.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type BoardCard = {
   id: string
@@ -110,6 +111,7 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
 )
 
 export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: DealBoardProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -132,7 +134,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
   useEffect(() => {
     if (!scheduling || lookups) return
     let live = true
-    Promise.all([api.crm.lookups.query(), api.crm.tasks.queues.list.query()])
+    Promise.all([queryClient.fetchQuery({ ...trpc.crm.lookups.queryOptions(), staleTime: 0 }), queryClient.fetchQuery({ ...trpc.crm.tasks.queues.list.queryOptions(), staleTime: 0 })])
       .then(([crm, queues]) => {
         if (!live) return
         setLookups({
@@ -148,7 +150,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
     return () => {
       live = false
     }
-  }, [scheduling, lookups, toast])
+  }, [scheduling, lookups, toast, queryClient])
 
   const shownCards = (column: BoardColumn): BoardCard[] => {
     const page = pages[column.key]
@@ -160,14 +162,14 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
     setLoadingMore(column.key)
     const loaded = pages[column.key]?.cards ?? []
     try {
-      const page = await api.crm.board.more.query({
+      const page = await queryClient.fetchQuery({ ...trpc.crm.board.more.queryOptions({
         pipelineId: query.pipelineId,
         filters: query.filters as never,
         search: query.search,
         groupBy: query.groupBy,
         groupKey: column.key,
         offset: column.cards.length + loaded.length,
-      })
+      }), staleTime: 0 })
       setPages((current) => ({
         ...current,
         [column.key]: { cards: [...loaded, ...page.cards], hasMore: page.hasMore },

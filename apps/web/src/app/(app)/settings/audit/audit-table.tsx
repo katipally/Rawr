@@ -3,8 +3,9 @@
 import { Badge, Button, Card, Combobox, EmptyState, NOTHING_MATCHED, Spinner, useToast } from '@rawr/ui'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { Fragment, useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Row = {
   id: string
@@ -80,6 +81,7 @@ export const AuditTable = ({
   entity: string | null
   actorId: string | null
 }) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
@@ -105,12 +107,12 @@ export const AuditTable = ({
   const load = async (next: { entity?: string | null; actorId?: string | null; more?: boolean }) => {
     setBusy(true)
     try {
-      const page = await api.admin.audit.list.query({
+      const page = await queryClient.fetchQuery({ ...trpc.admin.audit.list.queryOptions({
         entity: next.entity === undefined ? entity : next.entity,
         actorId: next.actorId === undefined ? actorId : next.actorId,
         cursor: next.more ? cursor : null,
         limit: 50,
-      })
+      }), staleTime: 0 })
       // superjson revives the timestamps as Dates; the server component hands
       // them over as strings. One shape here, so the renderer never has to ask.
       const fetched = page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))

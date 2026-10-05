@@ -7,9 +7,10 @@ import type { AdminField, Conditional, FieldType } from '@rawr/db'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type PropertyListProps = {
   object: string
@@ -59,6 +60,7 @@ export const PropertyList = ({
   hub,
   canWrite,
 }: PropertyListProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -202,7 +204,7 @@ export const PropertyList = ({
     setRemoving(field)
     setUsage(null)
     try {
-      setUsage(await api.admin.fields.usage.query({ id: field.id }))
+      setUsage(await queryClient.fetchQuery({ ...trpc.admin.fields.usage.queryOptions({ id: field.id }), staleTime: 0 }))
     } catch (cause) {
       toast('error', errorMessage(cause))
     }
@@ -239,7 +241,7 @@ export const PropertyList = ({
     setOpenUse(field.id)
     if (uses[field.id]) return
     try {
-      const found = await api.admin.fields.usage.query({ id: field.id })
+      const found = await queryClient.fetchQuery({ ...trpc.admin.fields.usage.queryOptions({ id: field.id }), staleTime: 0 })
       setUses((current) => ({ ...current, [field.id]: found.usedIn }))
     } catch (cause) {
       toast('error', errorMessage(cause))

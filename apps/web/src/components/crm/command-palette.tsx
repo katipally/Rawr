@@ -4,10 +4,11 @@ import { Search } from 'lucide-react'
 import { cn, filterOptions } from '@rawr/ui'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { recordPath, tasksPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Item = { key: string; label: string; detail: string | null; href: string }
 type Group = { label: string; items: Item[] }
@@ -41,6 +42,7 @@ export const CommandPalette = ({
   pages: Page[]
   actions: Action[]
 }) => {
+  const queryClient = useQueryClient()
   const { navigate } = useNavigation()
   const origin = useOrigin()
   const listId = useId()
@@ -84,7 +86,7 @@ export const CommandPalette = ({
     let cancelled = false
     const timer = setTimeout(() => {
       setSearching(true)
-      api.crm.search.query({ query: term })
+      queryClient.fetchQuery({ ...trpc.crm.search.queryOptions({ query: term }), staleTime: 0 })
         .then((results) => {
           if (cancelled) return
           setError(null)
@@ -124,7 +126,7 @@ export const CommandPalette = ({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [text, account, origin])
+  }, [text, account, origin, queryClient])
 
   // The rail and Settings both reach a handful of the same pages under different
   // names: "Data Model" is /settings/objects, "Properties" is in both lists. One

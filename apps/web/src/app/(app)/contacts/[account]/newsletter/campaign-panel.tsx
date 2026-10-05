@@ -4,8 +4,9 @@ import type { Format } from '~/lib/format.ts'
 import { Alert, Button, EmptyState, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Template = { id: number; name: string; subject: string | null; isActive: boolean }
 
@@ -58,6 +59,7 @@ const rate = (fmt: Format, part: number, whole: number): string =>
  *  are calls to Brevo, and a marketing page that will not load because a third
  *  party is slow is worse than one that says it is loading. */
 export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: CampaignPanelProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -95,8 +97,8 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
     setError(null)
     try {
       const [rows, gallery] = await Promise.all([
-        api.integrations.brevoCampaigns.query(),
-        api.integrations.brevoTemplates.query(),
+        queryClient.fetchQuery({ ...trpc.integrations.brevoCampaigns.queryOptions(), staleTime: 0 }),
+        queryClient.fetchQuery({ ...trpc.integrations.brevoTemplates.queryOptions(), staleTime: 0 }),
       ])
       setCampaigns(rows as Campaign[])
       setTemplates(gallery as Template[])

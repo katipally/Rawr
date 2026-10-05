@@ -20,11 +20,12 @@ import { useEffect, useState } from 'react'
 import { Alert, Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
 import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useRowIds } from '~/lib/row-ids.ts'
 import { EmbedSnippet } from '../embed-snippet.tsx'
 import { FormPreview } from './preview.tsx'
 import { sameWords } from '~/lib/same-words.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 /** Edit the questions, the mapping and what happens on submit.
  *
@@ -88,6 +89,7 @@ export const FormBuilder = ({
    *  fixed by the URL and nothing this form asks for can change it. */
   slack: 'none' | 'webhook' | 'bot'
 }) => {
+  const queryClient = useQueryClient()
   const router = useRouter()
   const toast = useToast()
 
@@ -112,8 +114,8 @@ export const FormBuilder = ({
   useEffect(() => {
     // A seat that cannot read the list gets an empty one, and the Select still
     // offers what the form is already set to rather than losing it.
-    api.admin.lifecycle.list.query().then(setStages).catch(() => {})
-  }, [])
+    queryClient.fetchQuery({ ...trpc.admin.lifecycle.list.queryOptions(), staleTime: 0 }).then(setStages).catch(() => {})
+  }, [queryClient])
 
   const remove = async () => {
     setDeleting(true)

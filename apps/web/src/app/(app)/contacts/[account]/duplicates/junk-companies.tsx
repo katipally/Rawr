@@ -4,8 +4,9 @@ import { Button, EmptyState, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useState } from 'react'
 import { recordPath } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type JunkCompany = { id: string; name: string; createdAt: string; contactCount: number }
 
@@ -32,6 +33,7 @@ const MAX = 200
  *  are still here, so this lists them for a person to judge one at a time. Nothing
  *  here deletes anything. */
 export const JunkCompanies = ({ account, companies, limit, total }: JunkCompaniesProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
   const [rows, setRows] = useState(companies)
@@ -42,7 +44,7 @@ export const JunkCompanies = ({ account, companies, limit, total }: JunkCompanie
     const next = Math.min(asked + limit, MAX)
     setLoading(true)
     try {
-      const more = await api.crm.records.junkCompanies.query({ limit: next })
+      const more = await queryClient.fetchQuery({ ...trpc.crm.records.junkCompanies.queryOptions({ limit: next }), staleTime: 0 })
       setRows(more.rows.map((row) => ({ ...row, createdAt: new Date(row.createdAt).toISOString() })))
       setAsked(next)
     } catch (cause) {

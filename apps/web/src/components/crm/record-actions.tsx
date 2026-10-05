@@ -9,12 +9,13 @@ import { ComposeDialog } from './compose-dialog.tsx'
 import { EnrollDialog } from './enroll-dialog.tsx'
 import { useEffect, useState } from 'react'
 import { objectView } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { Value } from './value.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { sameWords } from '~/lib/same-words.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type RecordActionsProps = {
   account: string
@@ -48,6 +49,7 @@ export const RecordActions = ({
   canWrite,
   startCompose,
 }: RecordActionsProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const { navigate } = useNavigation()
@@ -72,7 +74,7 @@ export const RecordActions = ({
     setPicks({})
     if (!picked) return
     try {
-      const record = await api.crm.records.get.query({ object, id: picked.id })
+      const record = await queryClient.fetchQuery({ ...trpc.crm.records.get.queryOptions({ object, id: picked.id }), staleTime: 0 })
       if (record) setAbsorbed({ values: record.values, labels: record.labels })
     } catch (cause) {
       toast('error', errorMessage(cause))

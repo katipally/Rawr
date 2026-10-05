@@ -8,10 +8,11 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { useOnChange } from '~/lib/record-events.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, activityLabel } from './value.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { useQueryClient } from '@tanstack/react-query'
 
 export type TimelineEntry = {
   id: string
@@ -129,6 +130,7 @@ export const Timeline = ({
   canWrite,
   viewer,
 }: TimelineProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -180,12 +182,12 @@ export const Timeline = ({
     setLoading(true)
     setError(null)
     try {
-      const page = await api.crm.timeline.list.query({
+      const page = await queryClient.fetchQuery({ ...trpc.crm.timeline.list.queryOptions({
         entity: { entityType: object, entityId: recordId },
         types,
         limit: 50,
         cursor: from ? { occurredAt: new Date(from.occurredAt), id: from.id } : null,
-      })
+      }), staleTime: 0 })
       const mapped = page.rows.map((row) => ({
         id: row.id,
         type: row.type,

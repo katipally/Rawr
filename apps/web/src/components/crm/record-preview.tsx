@@ -6,9 +6,10 @@ import { useEffect, useState } from 'react'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { recordPath } from '~/lib/links.ts'
-import { api } from '~/lib/rpc.ts'
+import { trpc } from '~/lib/rpc.ts'
 import type { TableColumn } from './record-table.tsx'
 import { Value } from './value.tsx'
+import { useQueryClient } from '@tanstack/react-query'
 
 type Loaded = {
   record: { displayName: string; values: Record<string, unknown>; labels: Record<string, string> }
@@ -35,6 +36,7 @@ const NAMED = 3
  *  leaving the list. It reads through the same procedures the record page does,
  *  and holds nothing the address does not, so a reload reopens it. */
 export const RecordPreview = ({ account, object, id, fields, canWrite, from, onClose }: RecordPreviewProps) => {
+  const queryClient = useQueryClient()
   const fmt = useFormat()
   const [loaded, setLoaded] = useState<{ id: string; data: Loaded | null } | null>(null)
 
@@ -42,8 +44,8 @@ export const RecordPreview = ({ account, object, id, fields, canWrite, from, onC
     if (!id) return
     let live = true
     Promise.all([
-      api.crm.records.get.query({ object, id }),
-      api.crm.associations.read.query({ entity: { entityType: object, entityId: id } }),
+      queryClient.fetchQuery({ ...trpc.crm.records.get.queryOptions({ object, id }), staleTime: 0 }),
+      queryClient.fetchQuery({ ...trpc.crm.associations.read.queryOptions({ entity: { entityType: object, entityId: id } }), staleTime: 0 }),
     ])
       .then(([record, rail]) => {
         if (live) setLoaded({ id, data: record ? { record, groups: rail.groups.filter((group) => group.total > 0) } : null })
@@ -54,7 +56,7 @@ export const RecordPreview = ({ account, object, id, fields, canWrite, from, onC
     return () => {
       live = false
     }
-  }, [object, id])
+  }, [object, id, queryClient])
 
   const data = loaded?.id === id ? loaded.data : undefined
   const open = (params: Parameters<typeof recordPath>[3]) => recordPath(account, object, id ?? '', { from, ...params })

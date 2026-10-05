@@ -3,9 +3,10 @@
 import { cn, IconButton } from '@rawr/ui'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import Link from 'next/link'
+import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { importsPath } from '~/lib/links.ts'
-import { api } from '~/lib/rpc.ts'
+import { trpc } from '~/lib/rpc.ts'
 import { useUploads, type Upload } from '~/lib/store/uploads.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -43,20 +44,7 @@ type Running = {
 
 const ACTIVE = new Set(['parsing', 'running'])
 
-/** Field by field, because the whole point is not to hand React a new array that
- *  holds the same numbers. */
-const same = (a: Running[], b: Running[]): boolean =>
-  a.length === b.length &&
-  a.every((row, at) => {
-    const other = b[at]
-    return (
-      other !== undefined &&
-      row.id === other.id &&
-      row.state === other.state &&
-      row.processedRows === other.processedRows &&
-      row.totalRows === other.totalRows
-    )
-  })
+const NONE: Running[] = []
 
 const percent = (done: number, total: number): number =>
   total > 0 ? Math.min(100, Math.floor((done / total) * 100)) : 0
@@ -65,53 +53,27 @@ export const TaskTray = ({ account }: { account: string }) => {
   const fmt = useFormat()
   const uploads = useUploads((store) => store.uploads)
   const dismiss = useUploads((store) => store.dismiss)
-  const [runs, setRuns] = useState<Running[]>([])
   const [open, setOpen] = useState(true)
 
-  useEffect(() => {
-    let dropped = false
-    let running = false
-    let timer: ReturnType<typeof setTimeout>
-    const ask = async () => {
-      // A hidden tab ends the chain; coming back starts it again.
-      if (document.hidden || running) return
-      running = true
-      let found: Running[] = []
-      try {
-        const rows = await api.crm.imports.list.query()
-        if (dropped) return
-        found = rows
-          .filter((row) => ACTIVE.has(row.state))
-          .map((row) => ({
-            id: row.id,
-            filename: row.filename,
-            state: row.state,
-            processedRows: row.processedRows,
-            totalRows: row.totalRows,
-          }))
-        // Only when it differs. `setRuns` on an equal list is still a new array,
-        // and the shell re-rendering on a timer for ever is what made React give
-        // up on the page's Suspense boundary and leave it loading.
-        setRuns((held) => (same(held, found) ? held : found))
-      } catch {
-        // A poll that misses is a poll. The next one answers.
-      } finally {
-        running = false
-        if (!dropped) timer = setTimeout(ask, found.length > 0 ? POLL_ACTIVE_MS : POLL_IDLE_MS)
-      }
-    }
-    const resume = () => {
-      clearTimeout(timer)
-      void ask()
-    }
-    document.addEventListener('visibilitychange', resume)
-    void ask()
-    return () => {
-      dropped = true
-      clearTimeout(timer)
-      document.removeEventListener('visibilitychange', resume)
-    }
-  }, [])
+  // The cache pauses the timer while the tab is hidden and asks again the moment it
+  // is back, and hands over the same array while the numbers are the same, which
+  // is what keeps the shell from re-rendering on a timer for ever.
+  const { data: runs = NONE } = useQuery({
+    ...trpc.crm.imports.list.queryOptions(),
+    staleTime: 0,
+    select: (rows): Running[] =>
+      rows
+        .filter((row) => ACTIVE.has(row.state))
+        .map((row) => ({
+          id: row.id,
+          filename: row.filename,
+          state: row.state,
+          processedRows: row.processedRows,
+          totalRows: row.totalRows,
+        })),
+    refetchInterval: (query) =>
+      query.state.data?.some((row) => ACTIVE.has(row.state)) ? POLL_ACTIVE_MS : POLL_IDLE_MS,
+  })
 
   // A run in the tray is also an upload in the store once its parts have landed.
   // Showing both would be the same file twice, so the run wins: it is the one
