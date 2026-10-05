@@ -1,9 +1,9 @@
 'use client'
 
-import { Button, IconButton, TextArea, TextInput, cn, useToast } from '@rawr/ui'
+import { Button, IconButton, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { announceChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -43,13 +43,7 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
   // an effect to say so.
   const [foldedOn, setFoldedOn] = useState<string | null>(null)
   const field = useRef<HTMLTextAreaElement>(null)
-  // False for the server render and the hydrating one, which is what keeps a
-  // portal the server never drew from being a mismatch.
-  const mounted = useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  )
+  const mounted = useMounted()
 
   // A person who asked for a note wants the cursor in the box.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `mounted` is the trigger, for a box that only exists once it is true

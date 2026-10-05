@@ -29,14 +29,14 @@ export const SidePanel = ({
 }: SidePanelProps) => {
   const dialog = useRef<HTMLElement>(null)
   const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose)
-  useOverlay(open, dismiss, dialog)
+  const shown = useOverlay(open, dismiss, dialog)
   const Shell = onSubmit ? 'form' : 'div'
 
   // Portalled to the body for the same reason the modal is: `position: fixed` is
   // measured against the app shell's content card, which establishes a containing
   // block with `container-type: inline-size`, so in place the scrim covered the
   // card rather than the window.
-  if (!open || typeof document === 'undefined') return null
+  if (!shown) return null
 
   return createPortal(
     <div className="fixed inset-0 z-overlay flex justify-end">

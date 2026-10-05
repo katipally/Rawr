@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
+import { useMounted } from './overlay.ts'
 import { anchor, type Align, type Side } from './position.ts'
 
 export type PopoverProps = {
@@ -41,6 +42,8 @@ export const Popover = ({
   const [box, setBox] = useState<{ top: number; left: number } | null>(null)
   const close = useRef(onClose)
   close.current = onClose
+  const mounted = useMounted()
+  const shown = open && mounted
 
   const reposition = useCallback(() => {
     const trigger = anchorRef.current
@@ -53,9 +56,9 @@ export const Popover = ({
   // Layout effect: measure and place before the browser paints, or the panel is
   // visible at 0,0 for a frame and jumps.
   useLayoutEffect(() => {
-    if (open) reposition()
+    if (shown) reposition()
     else setBox(null)
-  }, [open, reposition])
+  }, [shown, reposition])
 
   // The panel's own height changes while it is open: a combobox list of twenty
   // rows becomes one as the query narrows, and a filter panel grows a section.
@@ -63,14 +66,14 @@ export const Popover = ({
   // height put it and drifts away from what it is anchored to.
   useEffect(() => {
     const layer = panel.current
-    if (!open || !layer || typeof ResizeObserver === 'undefined') return
+    if (!shown || !layer || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(reposition)
     observer.observe(layer)
     return () => observer.disconnect()
-  }, [open, reposition])
+  }, [shown, reposition])
 
   useEffect(() => {
-    if (!open) return
+    if (!shown) return
     if (autoFocus) panel.current?.focus()
 
     const onKey = (event: KeyboardEvent) => {
@@ -92,12 +95,12 @@ export const Popover = ({
       window.removeEventListener('resize', reposition)
       window.removeEventListener('scroll', reposition, true)
     }
-  }, [open, anchorRef, autoFocus, reposition])
+  }, [shown, anchorRef, autoFocus, reposition])
 
   // Portalled to the body: the coordinates come from getBoundingClientRect, which
   // is relative to the viewport, and a fixed element inside the shell's content
   // card is placed against the card instead.
-  if (!open || typeof document === 'undefined') return null
+  if (!shown) return null
 
   return createPortal(
     <div

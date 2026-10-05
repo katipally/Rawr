@@ -29,12 +29,12 @@ export type DrawerProps = {
  *  than one that holds on to you. */
 export const Drawer = ({ open, onClose, title, action, children, className }: DrawerProps) => {
   const dialog = useRef<HTMLElement>(null)
-  useOverlay(open, onClose, dialog)
+  const shown = useOverlay(open, onClose, dialog)
 
   // Portalled for the reason the modal is: a fixed panel inside the shell's
   // content card, which is a size container, would run the height of the card
   // rather than the window.
-  if (!open || typeof document === 'undefined') return null
+  if (!shown) return null
 
   return createPortal(
     <aside

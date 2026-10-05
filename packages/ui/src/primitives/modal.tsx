@@ -54,14 +54,14 @@ export const Modal = ({
 }: ModalProps) => {
   const dialog = useRef<HTMLDivElement>(null)
   const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose)
-  useOverlay(open, dismiss, dialog)
+  const shown = useOverlay(open, dismiss, dialog)
   const Shell = onSubmit ? 'form' : 'div'
 
   // Portalled to the body because `position: fixed` is measured against the
   // nearest ancestor that establishes a containing block, and the app shell's
   // content card is one: it carries `container-type: inline-size`. Rendered in
   // place, the scrim covered the card rather than the window.
-  if (!open || typeof document === 'undefined') return null
+  if (!shown) return null
 
   return createPortal(
     <div className="fixed inset-0 z-overlay flex items-end justify-center p-0 sm:items-center sm:p-4">
