@@ -88,7 +88,7 @@ export type AttemptOptions = {
 
 const BASE_DELAY_MS = 500
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Exponential backoff with jitter, a ceiling, and a dead letter at the end that
  *  carries the payload and the provider's real error so it can be replayed. */

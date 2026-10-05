@@ -10,7 +10,7 @@ import {
 } from '@rawr/db'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
 import { googleRefresher, OAuth2RequestError, type GoogleTokens } from './auth/google.ts'
-import { sendWithBackoff } from './integrations/provider.ts'
+import { sendWithBackoff, sleep } from './integrations/provider.ts'
 
 /** F2 §2. The calendar side of booking: what a host is already committed to, and
  *  writing the event once a booking is confirmed.
@@ -317,8 +317,30 @@ export const createCalendarEvent = async (
     return { eventId: null, calendarId: grant.calendarId, conferenceUrl: null }
   }
 
-  const token = await accessTokenFor(ctx, grant)
-  const url = new URL(`${GOOGLE_API}/calendars/${encodeURIComponent(grant.calendarId)}/events`)
+  return insertEvent(await accessTokenFor(ctx, grant), grant.calendarId, draft)
+}
+
+type CreatedEvent = {
+  id?: string
+  hangoutLink?: string
+  conferenceData?: {
+    entryPoints?: { entryPointType?: string; uri?: string }[]
+    createRequest?: { status?: { statusCode?: string } }
+  }
+}
+
+const meetLink = (event: CreatedEvent): string | null =>
+  event.conferenceData?.entryPoints?.find((entry) => entry.entryPointType === 'video')?.uri ??
+  event.hangoutLink ??
+  null
+
+/** Meet is made after the insert returns, so the answer can come back with the
+ *  conference still `pending` and no link. A few short reads of the event fetch it
+ *  rather than confirming a meeting with no room. */
+const MEET_READS = 3
+
+export const insertEvent = async (token: string, calendarId: string, draft: EventDraft): Promise<WrittenEvent> => {
+  const url = new URL(`${GOOGLE_API}/calendars/${encodeURIComponent(calendarId)}/events`)
   // Required for Google to act on conferenceData at all; without it the create
   // request is accepted and the conference is silently dropped.
   if (draft.requestConference) url.searchParams.set('conferenceDataVersion', '1')
@@ -336,30 +358,36 @@ export const createCalendarEvent = async (
       ...(draft.requestConference
         ? {
             conferenceData: {
-              // Google requires this to be unique per creation attempt, and
-              // reusing one returns the same conference, which is what a retry
-              // of the same booking wants.
-              createRequest: { requestId: `rawr-${draft.userId}-${draft.startsAt.getTime()}` },
+              createRequest: {
+                // Google requires this to be unique per creation attempt, and
+                // reusing one returns the same conference, which is what a retry
+                // of the same booking wants.
+                requestId: `rawr-${draft.userId}-${draft.startsAt.getTime()}`,
+                conferenceSolutionKey: { type: 'hangoutsMeet' },
+              },
             },
           }
         : {}),
     }),
   })
 
-  const event = (await response.json()) as {
-    id?: string
-    hangoutLink?: string
-    conferenceData?: { entryPoints?: { entryPointType?: string; uri?: string }[] }
+  let event = (await response.json()) as CreatedEvent
+  for (
+    let read = 0;
+    draft.requestConference &&
+    event.id &&
+    !meetLink(event) &&
+    event.conferenceData?.createRequest?.status?.statusCode === 'pending' &&
+    read < MEET_READS;
+    read++
+  ) {
+    await sleep(700)
+    const again = new URL(`${GOOGLE_API}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(event.id)}`)
+    again.searchParams.set('conferenceDataVersion', '1')
+    event = (await (await googleFetch(again.toString(), token, {}, true)).json()) as CreatedEvent
   }
-  const video = event.conferenceData?.entryPoints?.find(
-    (entry) => entry.entryPointType === 'video',
-  )?.uri
 
-  return {
-    eventId: event.id ?? null,
-    calendarId: grant.calendarId,
-    conferenceUrl: video ?? event.hangoutLink ?? null,
-  }
+  return { eventId: event.id ?? null, calendarId, conferenceUrl: meetLink(event) }
 }
 
 export const patchCalendarEvent = async (
