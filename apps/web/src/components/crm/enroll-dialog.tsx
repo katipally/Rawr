@@ -56,7 +56,43 @@ export const EnrollDialog = ({
   const enrolled = outcomes?.filter((row) => row.enrolled).length ?? 0
 
   return (
-    <Modal open title={`Add ${contactLabel} to a sequence`} onClose={onClose}>
+    <Modal
+      open
+      title={`Add ${contactLabel} to a sequence`}
+      onClose={onClose}
+      footer={
+        sequences && mailboxes && !outcomes ? (
+          <>
+            <Button variant="tertiary" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              busy={busy}
+              disabled={!sequenceId || !mailboxId}
+              onClick={() => {
+                if (!sequenceId || !mailboxId) return
+                setBusy(true)
+                void api.sequences.enroll
+                  .mutate(
+                    companyId
+                      ? { sequenceId, companyId, mailboxId }
+                      : { sequenceId, contactIds: contactIds ?? [], mailboxId },
+                  )
+                  .then((result) => {
+                    setOutcomes(result)
+                    onEnrolled?.()
+                  })
+                  .catch((cause) => toast('error', errorMessage(cause)))
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Enrol
+            </Button>
+          </>
+        ) : null
+      }
+    >
       {error ? <p className="text-error">{error}</p> : null}
       {!sequences || !mailboxes ? <Spinner label="Loading sequences" /> : null}
 
@@ -96,35 +132,6 @@ export const EnrollDialog = ({
               disabled: !box.canSend || box.state === 'revoked',
             }))}
           />
-
-          <div className="flex justify-end gap-2">
-            <Button variant="tertiary" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!sequenceId || !mailboxId}
-              onClick={() => {
-                if (!sequenceId || !mailboxId) return
-                setBusy(true)
-                void api.sequences.enroll
-                  .mutate(
-                    companyId
-                      ? { sequenceId, companyId, mailboxId }
-                      : { sequenceId, contactIds: contactIds ?? [], mailboxId },
-                  )
-                  .then((result) => {
-                    setOutcomes(result)
-                    onEnrolled?.()
-                  })
-                  .catch((cause) => toast('error', errorMessage(cause)))
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Enrol
-            </Button>
-          </div>
         </div>
       ) : null}
 

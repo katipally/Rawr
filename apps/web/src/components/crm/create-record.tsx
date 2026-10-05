@@ -119,14 +119,23 @@ export const CreateRecordDialog = ({
   }
 
   return (
-    <Modal open title={`Create ${objectLabel.toLowerCase()}`} onClose={close}>
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void submit()
-        }}
-      >
+    <Modal
+      open
+      title={`Create ${objectLabel.toLowerCase()}`}
+      onClose={close}
+      onSubmit={() => void submit()}
+      footer={
+        <>
+          <Button variant="tertiary" onClick={close}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={saving}>
+            Create {objectLabel.toLowerCase()}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
         {asked.map((field, index) => (
           <Field
             key={field.key}
@@ -177,16 +186,7 @@ export const CreateRecordDialog = ({
             ) : null}
           </p>
         ) : null}
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="tertiary" onClick={close}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" busy={saving}>
-            Create {objectLabel.toLowerCase()}
-          </Button>
-        </div>
-      </form>
+      </div>
     </Modal>
   )
 }

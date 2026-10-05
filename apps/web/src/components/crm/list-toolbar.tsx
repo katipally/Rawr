@@ -281,7 +281,23 @@ export const ListToolbar = ({
         />
       ) : null}
 
-      <Modal open={showSave} title="Save this view" onClose={() => closeSave()}>
+      <Modal
+        open={showSave}
+        title="Save this view"
+        onClose={() => closeSave()}
+        dirty={viewName !== ''}
+        onSubmit={() => void writeView(null, viewName.trim())}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => closeSave()}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={saving} disabled={viewName.trim() === ''}>
+              Save as new view
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-4">
           {viewId ? (
             <div className="flex flex-col gap-2 border-b border-divider pb-4">
@@ -312,24 +328,48 @@ export const ListToolbar = ({
               <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
               Everyone in this account can see it
             </label>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="tertiary" onClick={() => closeSave()}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                busy={saving}
-                disabled={viewName.trim() === ''}
-                onClick={() => void writeView(null, viewName.trim())}
-              >
-                Save as new view
-              </Button>
-            </div>
           </div>
         </div>
       </Modal>
 
-      <Modal open={showColumns} size="lg" title="Edit columns" onClose={() => setShowColumns(false)}>
+      <Modal
+        open={showColumns}
+        size="lg"
+        title="Edit columns"
+        onClose={() => setShowColumns(false)}
+        dirty={draftColumns.join() !== columns.join()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setShowColumns(false)}>
+              Cancel
+            </Button>
+            {params.cols ? (
+              <Button variant="tertiary" onClick={() => { setShowColumns(false); goTo({ cols: undefined }) }}>
+                Back to the view’s columns
+              </Button>
+            ) : null}
+            {canWrite && viewId ? (
+              <Button
+                busy={saving}
+                disabled={draftColumns.length === 0}
+                onClick={() => void writeView(viewId, viewLabel, draftColumns)}
+              >
+                Save to “{viewLabel}”
+              </Button>
+            ) : null}
+            <Button
+              variant="primary"
+              disabled={draftColumns.length === 0}
+              onClick={() => {
+                setShowColumns(false)
+                goTo({ cols: draftColumns.join(',') })
+              }}
+            >
+              Apply to this screen
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p className="text-secondary">
             {draftColumns.length} of {allColumns.length} fields. The order here is the order
@@ -377,36 +417,6 @@ export const ListToolbar = ({
                   onChange={() => setDraftColumns([...draftColumns, field.key])}
                 />
               ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setShowColumns(false)}>
-              Cancel
-            </Button>
-            {params.cols ? (
-              <Button variant="tertiary" onClick={() => { setShowColumns(false); goTo({ cols: undefined }) }}>
-                Back to the view’s columns
-              </Button>
-            ) : null}
-            {canWrite && viewId ? (
-              <Button
-                busy={saving}
-                disabled={draftColumns.length === 0}
-                onClick={() => void writeView(viewId, viewLabel, draftColumns)}
-              >
-                Save to “{viewLabel}”
-              </Button>
-            ) : null}
-            <Button
-              variant="primary"
-              disabled={draftColumns.length === 0}
-              onClick={() => {
-                setShowColumns(false)
-                goTo({ cols: draftColumns.join(',') })
-              }}
-            >
-              Apply to this screen
-            </Button>
           </div>
         </div>
       </Modal>

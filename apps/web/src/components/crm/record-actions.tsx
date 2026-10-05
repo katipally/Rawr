@@ -181,7 +181,21 @@ export const RecordActions = ({
         />
       ) : null}
 
-      <Modal open={showMerge} title={`Merge into ${shortName(displayName)}`} onClose={() => setShowMerge(false)}>
+      <Modal
+        open={showMerge}
+        title={`Merge into ${shortName(displayName)}`}
+        onClose={() => setShowMerge(false)}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setShowMerge(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" busy={busy} disabled={absorbedId === ''} onClick={() => void merge()}>
+              Merge, permanently
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <Alert tone="warning">
             Merging cannot be undone. Everything on the other record moves here: its timeline, its
@@ -241,19 +255,31 @@ export const RecordActions = ({
               </div>
             )
           ) : null}
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setShowMerge(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" busy={busy} disabled={absorbedId === ''} onClick={() => void merge()}>
-              Merge, permanently
-            </Button>
-          </div>
         </div>
       </Modal>
 
-      <Modal open={showDelete} size="sm" title={`Delete ${shortName(displayName)}`} onClose={() => setShowDelete(false)}>
+      <Modal
+        open={showDelete}
+        size="sm"
+        title={`Delete ${shortName(displayName)}`}
+        onClose={() => setShowDelete(false)}
+        onSubmit={() => void remove()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              busy={busy}
+              disabled={!sameWords(confirmText, displayName)}
+            >
+              Delete {objectLabel.toLowerCase()}
+            </Button>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p>
             The record is hidden everywhere immediately. Its timeline entries stay on the records
@@ -273,19 +299,6 @@ export const RecordActions = ({
             value={confirmText}
             onChange={(event) => setConfirmText(event.target.value)}
           />
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setShowDelete(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              busy={busy}
-              disabled={!sameWords(confirmText, displayName)}
-              onClick={() => void remove()}
-            >
-              Delete {objectLabel.toLowerCase()}
-            </Button>
-          </div>
         </div>
       </Modal>
     </>

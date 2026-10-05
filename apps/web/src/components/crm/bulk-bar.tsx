@@ -342,13 +342,8 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         open={pending === 'delete'}
         title={`Delete ${ids.length} ${noun}?`}
         onClose={() => setPending(null)}
-      >
-        <div className="flex flex-col gap-3">
-          <p>
-            They stop appearing in lists, reports and pickers. Their timelines are kept, so what
-            already happened is still on record; nothing here erases {ids.length === 1 ? 'a record' : 'records'}.
-          </p>
-          <div className="flex flex-wrap gap-2">
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setPending(null)}>
               Cancel
             </Button>
@@ -361,22 +356,23 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
             >
               Delete {ids.length}
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            They stop appearing in lists, reports and pickers. Their timelines are kept, so what
+            already happened is still on record; nothing here erases {ids.length === 1 ? 'a record' : 'records'}.
+          </p>
         </div>
       </Modal>
 
-      <Modal open={pending === 'assign'} title={`Assign ${ids.length} ${noun}`} onClose={() => setPending(null)}>
-        <div className="flex flex-col gap-3">
-          <Combobox
-            label="Owner"
-            value={ownerId}
-            onChange={setOwnerId}
-            options={owners.map((person) => ({ value: person.id, label: person.name }))}
-          />
-          <p className="text-small text-secondary">
-            Leaving it empty takes the owner off, which is what unassigning is.
-          </p>
-          <div className="flex flex-wrap gap-2">
+      <Modal
+        open={pending === 'assign'}
+        title={`Assign ${ids.length} ${noun}`}
+        onClose={() => setPending(null)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setPending(null)}>
               Cancel
             </Button>
@@ -387,7 +383,19 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
             >
               Assign {ids.length}
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Combobox
+            label="Owner"
+            value={ownerId}
+            onChange={setOwnerId}
+            options={owners.map((person) => ({ value: person.id, label: person.name }))}
+          />
+          <p className="text-small text-secondary">
+            Leaving it empty takes the owner off, which is what unassigning is.
+          </p>
         </div>
       </Modal>
 
@@ -395,6 +403,27 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
         open={pending === 'associate'}
         title={`Associate ${ids.length} ${noun} with`}
         onClose={() => setPending(null)}
+        onSubmit={() => {
+          if (!target || busy) return
+          void start(
+            {
+              type: 'associate',
+              target: { entityType: targetObject, entityId: target.id },
+              label: linkLabel.trim() || null,
+            },
+            (n) => `${n} ${noun} linked to ${target.label}.`,
+          )
+        }}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!target}>
+              Associate {ids.length}
+            </Button>
+          </>
+        }
       >
         <div className="flex flex-col gap-3">
           <label className="flex min-w-0 flex-col gap-1">
@@ -420,32 +449,31 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
               placeholder="Decision maker"
             />
           </label>
-          <div className="flex flex-wrap gap-2">
+        </div>
+      </Modal>
+
+      <Modal
+        open={pending === 'list'}
+        title={`Add ${ids.length} ${noun} to a list`}
+        onClose={() => setPending(null)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setPending(null)}>
               Cancel
             </Button>
             <Button
               variant="primary"
               busy={busy}
-              disabled={!target}
+              disabled={!listId}
               onClick={() =>
-                void start(
-                  {
-                    type: 'associate',
-                    target: { entityType: targetObject, entityId: target!.id },
-                    label: linkLabel.trim() || null,
-                  },
-                  (n) => `${n} ${noun} linked to ${target!.label}.`,
-                )
+                void start({ type: 'add_to_list', listId: listId! }, (n) => `${n} ${noun} added.`)
               }
             >
-              Associate {ids.length}
+              Add {ids.length}
             </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={pending === 'list'} title={`Add ${ids.length} ${noun} to a list`} onClose={() => setPending(null)}>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           {lists.length === 0 ? (
             <p className="text-secondary">
@@ -460,25 +488,31 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
               options={lists.map((row) => ({ value: row.id, label: row.name }))}
             />
           )}
-          <div className="flex flex-wrap gap-2">
+        </div>
+      </Modal>
+
+      <Modal
+        open={pending === 'merge'}
+        title="Merge two records"
+        onClose={() => setPending(null)}
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setPending(null)}>
               Cancel
             </Button>
             <Button
               variant="primary"
               busy={busy}
-              disabled={!listId}
+              disabled={!survivorId || pair.length < 2}
               onClick={() =>
-                void start({ type: 'add_to_list', listId: listId! }, (n) => `${n} ${noun} added.`)
+                void start({ type: 'merge', survivorId: survivorId! }, () => 'Merged.')
               }
             >
-              Add {ids.length}
+              Merge
             </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={pending === 'merge'} title="Merge two records" onClose={() => setPending(null)}>
+          </>
+        }
+      >
         <div className="flex flex-col gap-3">
           <p>
             Not reversible. Everything the absorbed record carries moves across: its timeline, its
@@ -502,21 +536,6 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, fields, onDone
               ))}
             </fieldset>
           )}
-          <div className="flex flex-wrap gap-2">
-            <Button variant="tertiary" onClick={() => setPending(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={!survivorId || pair.length < 2}
-              onClick={() =>
-                void start({ type: 'merge', survivorId: survivorId! }, () => 'Merged.')
-              }
-            >
-              Merge
-            </Button>
-          </div>
         </div>
       </Modal>
     </div>

@@ -71,36 +71,55 @@ export const ComposeDialog = ({
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
 
   return (
-    <Modal open size="lg" title={threadId ? `Reply to ${to}` : `Email ${to}`} onClose={close}>
+    <Modal
+      open
+      size="lg"
+      title={threadId ? `Reply to ${to}` : `Email ${to}`}
+      onClose={close}
+      onSubmit={() => {
+        if (!mailboxId) return
+        setBusy(true)
+        void api.mail.compose
+          .mutate({
+            mailboxId,
+            to,
+            subject: subject.trim(),
+            text,
+            threadId: threadId ?? null,
+            contactId: contactId ?? null,
+          })
+          .then(() => {
+            toast('success', 'Sent. It is on the record and in the inbox already.')
+            onSent?.()
+            router.refresh()
+            forget()
+            close()
+          })
+          .catch((cause) => toast('error', errorMessage(cause)))
+          .finally(() => setBusy(false))
+      }}
+      footer={
+        mailboxes ? (
+          <>
+            <Button variant="tertiary" onClick={close}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              busy={busy}
+              disabled={!mailboxId || subject.trim() === '' || text.trim() === ''}
+            >
+              Send
+            </Button>
+          </>
+        ) : null
+      }
+    >
       {!mailboxes ? <Spinner label="Loading mailboxes" /> : null}
 
       {mailboxes ? (
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!mailboxId) return
-            setBusy(true)
-            void api.mail.compose
-              .mutate({
-                mailboxId,
-                to,
-                subject: subject.trim(),
-                text,
-                threadId: threadId ?? null,
-                contactId: contactId ?? null,
-              })
-              .then(() => {
-                toast('success', 'Sent. It is on the record and in the inbox already.')
-                onSent?.()
-                router.refresh()
-                forget()
-                close()
-              })
-              .catch((cause) => toast('error', errorMessage(cause)))
-              .finally(() => setBusy(false))
-          }}
-        >
+        <div className="flex flex-col gap-3">
           {sendable.length === 0 ? (
             <p className="text-warning">
               No mailbox here can send yet. Under Settings, Mailboxes, reconnect one and allow sending.
@@ -137,21 +156,7 @@ export const ComposeDialog = ({
               onChange={(event) => setText(event.target.value)}
             />
           </Field>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="tertiary" type="button" onClick={close}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              type="submit"
-              busy={busy}
-              disabled={!mailboxId || subject.trim() === '' || text.trim() === ''}
-            >
-              Send
-            </Button>
-          </div>
-        </form>
+        </div>
       ) : null}
     </Modal>
   )

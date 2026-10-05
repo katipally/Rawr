@@ -270,21 +270,8 @@ export const ViewTabs = ({
         size="sm"
         title="Delete this view?"
         onClose={() => setDeleting(null)}
-      >
-        <div className="flex flex-col gap-3">
-          <p>
-            {/* The name in full and selectable rather than only in the title,
-                which truncates: a view named at length is still a view somebody
-                has to be able to recognise before they agree to lose it. */}
-            <span className="font-medium break-words select-all">{deleting?.name}</span> goes for
-            good. The records stay; only this arrangement of them is deleted.
-          </p>
-          {deleting?.isShared ? (
-            <p className="text-secondary">
-              It is shared, so it disappears for everybody in this account, not just for you.
-            </p>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
+        footer={
+          <>
             <Button variant="tertiary" onClick={() => setDeleting(null)}>
               Cancel
             </Button>
@@ -305,7 +292,22 @@ export const ViewTabs = ({
             >
               Delete view
             </Button>
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p>
+            {/* The name in full and selectable rather than only in the title,
+                which truncates: a view named at length is still a view somebody
+                has to be able to recognise before they agree to lose it. */}
+            <span className="font-medium break-words select-all">{deleting?.name}</span> goes for
+            good. The records stay; only this arrangement of them is deleted.
+          </p>
+          {deleting?.isShared ? (
+            <p className="text-secondary">
+              It is shared, so it disappears for everybody in this account, not just for you.
+            </p>
+          ) : null}
         </div>
       </Modal>
 
