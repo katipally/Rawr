@@ -466,7 +466,10 @@ const backfill = async (
     backfillDone: done,
     // The first incremental pass needs a starting historyId, and the profile is
     // where Gmail publishes it.
-    ...(done ? { historyId: await currentHistoryId(fetcher), state: 'connected' as const } : {}),
+    ...(done
+      ? { historyId: await currentHistoryId(fetcher), state: 'connected' as const }
+      : // A page that worked ends an error state, so the dispatcher keeps the pages coming.
+        { state: 'backfilling' as const }),
   })
 
   return {

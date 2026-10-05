@@ -53,6 +53,9 @@ export const mailbox = pgTable(
     lastSyncAt: timestamp('last_sync_at', { withTimezone: true }),
     lastError: text('last_error'),
     lastErrorAt: timestamp('last_error_at', { withTimezone: true }),
+    /** Passes that have failed in a row. Spaces out the retries of a mailbox in
+     *  the `error` state; a pass that works puts it back to zero. */
+    failures: integer('failures').notNull().default(0),
     /** True once the mailbox has been reconnected with the send scope. False by
      *  default, so an existing read-only grant cannot start sending because a
      *  sequence asked it to. */

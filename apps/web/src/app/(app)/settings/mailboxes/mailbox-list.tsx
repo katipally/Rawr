@@ -67,7 +67,7 @@ const STATE_COPY: Record<MailboxState, { label: string; tone: 'ok' | 'warn' | 'e
     tone: 'error',
     hint: 'Rawr was removed from this Google account, so reading has stopped. Nothing is retried until it is connected again.',
   },
-  error: { label: 'Not syncing', tone: 'error', hint: 'The last pass failed. The reason is below.' },
+  error: { label: 'Not syncing', tone: 'error', hint: 'The last pass failed, and it is tried again after a pause that grows with each failure. The reason is below.' },
   paused: { label: 'Paused', tone: 'warn', hint: 'Reading is stopped on purpose. Existing history stays.' },
 }
 

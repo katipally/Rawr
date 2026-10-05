@@ -232,7 +232,9 @@ export const updateMailboxCursor = async (
           ? { accessTokenExpiresAt: patch.accessTokenExpiresAt }
           : {}),
         lastSyncAt: new Date(),
-        ...(patch.state === 'connected' ? { lastError: null, lastErrorAt: null } : {}),
+        ...(patch.state === 'connected' || patch.state === 'backfilling'
+          ? { lastError: null, lastErrorAt: null, failures: 0 }
+          : {}),
       })
       .where(eq(mailbox.id, mailboxId))
   })
@@ -254,6 +256,7 @@ export const recordMailboxFailure = async (
         state: revoked ? 'revoked' : 'error',
         lastError: error.slice(0, 2000),
         lastErrorAt: new Date(),
+        failures: sql`${mailbox.failures} + 1`,
       })
       .where(eq(mailbox.id, mailboxId))
   })

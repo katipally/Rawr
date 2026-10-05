@@ -22,9 +22,14 @@ const dispatch = defineJob({
   retryLimit: 3,
   retryDelaySeconds: 120,
   handle: async () => {
+    // An errored mailbox is asked again once its pause is over: five minutes,
+    // doubling with each failure in a row, up to six hours. A transient fault (a
+    // Google 5xx, a quota) must not end syncing until somebody reconnects.
     const rows = await owner`
       select id, account_id from mailbox
-       where state in ('connected', 'backfilling')`
+       where state in ('connected', 'backfilling')
+          or (state = 'error'
+              and last_error_at + least(360, 5 * power(2, least(greatest(failures, 1) - 1, 10))) * interval '1 minute' < now())`
 
     for (const row of rows) {
       // One pass in flight per mailbox. A ten-minute tick landing while the

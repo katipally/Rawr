@@ -14,10 +14,12 @@ import {
   markThreadRead,
   pendingBodies,
   readThread,
+  recordMailboxFailure,
   saveMailbox,
   setMailboxVisibility,
   storeBody,
   TEXT_LIMIT_BYTES,
+  updateMailboxCursor,
   threadsForContact,
   type IncomingMessage,
 } from '../src/dal/messages.ts'
@@ -304,12 +306,37 @@ try {
     'the keyset page does not repeat a thread it already showed',
   )
 
+  console.log('-- a failing mailbox -------------------------------------------------')
+
+  const brokenBox = await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-fail-${stamp}`,
+    refreshToken: `refresh-fail-${stamp}`,
+    accessTokenExpiresAt: null,
+  })
+  const standing = async () =>
+    (await owner`select state, failures, last_error from mailbox where id = ${brokenBox.id}`)[0] as {
+      state: string
+      failures: number
+      last_error: string | null
+    }
+  await recordMailboxFailure(sales, brokenBox.id, 'Gmail answered 503', false)
+  await recordMailboxFailure(sales, brokenBox.id, 'Gmail answered 503', false)
+  const failing = await standing()
+  check(failing.state === 'error' && failing.failures === 2, 'each failed pass counts, so a retry can be spaced out', `${failing.state} ${failing.failures}`)
+  await updateMailboxCursor(sales, brokenBox.id, { state: 'backfilling' })
+  const recovered = await standing()
+  check(recovered.state === 'backfilling' && recovered.failures === 0 && recovered.last_error === null, 'a pass that works ends the error state and the count')
+  await recordMailboxFailure(sales, brokenBox.id, 'Access withdrawn', true)
+  check((await standing()).state === 'revoked', 'a withdrawal is still stopped, not retried')
+
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from message_thread where provider_thread_id like ${`mail-%${stamp}`}`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`mail-%-${stamp}`}`
-  await owner`delete from mailbox where id = ${box.id}`
+  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id})`
   await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
