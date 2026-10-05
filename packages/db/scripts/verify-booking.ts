@@ -782,12 +782,14 @@ try {
       startsAt: slotOne,
       body: { name: 'Priya Raman', email: 'priya@acme-booking.test', interest: 'labeling' },
       attendeeTimezone: 'Asia/Jakarta',
+      attendeeLocale: 'id-ID',
       attribution: { pagePath: '/b/datasaur/sales-team' },
     },
     hosts,
     fakeProvisioner,
   )
   check('a booking is confirmed and returns its host', !!result.bookingId && !!result.hostUserId, result.hostName)
+  check('the language it was made in is kept, for a reminder sent without a request', result.attendeeLocale === 'id-ID' && (await readBooking(datasaur, result.bookingId))?.attendeeLocale === 'id-ID', result.attendeeLocale ?? 'null')
   check('the contact was created', !!result.contactId)
   check('and the company, from the address domain', !!result.companyId)
 

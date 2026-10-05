@@ -183,6 +183,9 @@ export const booking = pgTable(
     /** Stored so a confirmation, a reschedule page and an ICS attachment all read
      *  back in the timezone the person actually booked from. */
     attendeeTimezone: text('attendee_timezone').notNull(),
+    /** The attendee's Accept-Language when they booked, so a reminder sent days
+     *  later from the worker writes the date the way they read it. */
+    attendeeLocale: text('attendee_locale'),
     attendeeName: text('attendee_name').notNull(),
     attendeeEmail: text('attendee_email').notNull(),
     answers: jsonb('answers').notNull().default({}),

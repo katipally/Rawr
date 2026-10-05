@@ -755,6 +755,7 @@ export type ConfirmInput = {
    *  answer to a question the page does not ask is refused rather than stored. */
   body: Record<string, unknown>
   attendeeTimezone: string
+  attendeeLocale?: string | null | undefined
   attribution: AttributionInput
   holdToken?: string | null | undefined
   /** Set when this booking replaces another. The old row becomes 'rescheduled'. */
@@ -789,6 +790,7 @@ export type ConfirmResult = {
   attendeeName: string
   attendeeEmail: string
   attendeeTimezone: string
+  attendeeLocale: string | null
   companyName: string | null
   conferenceUrl: string | null
   cancelToken: string
@@ -971,12 +973,12 @@ export const confirmBooking = async (
 
     const [row] = await tx.execute<{ id: string }>(sql`
       insert into booking (account_id, booking_page_id, host_user_id, contact_id, company_id,
-                           starts_at, ends_at, attendee_timezone, attendee_name, attendee_email,
+                           starts_at, ends_at, attendee_timezone, attendee_locale, attendee_name, attendee_email,
                            answers, conference_url, conference_ref, calendar_event_id, calendar_id,
                            state, reschedule_of, cancel_token, reschedule_token)
       values (${ctx.accountId}, ${input.page.bookingPageId}, ${host.userId},
               ${linked.contactId}, ${linked.companyId}, ${ts(input.startsAt)}, ${ts(endsAt)},
-              ${input.attendeeTimezone}, ${name || email}, ${email},
+              ${input.attendeeTimezone}, ${input.attendeeLocale ?? null}, ${name || email}, ${email},
               ${JSON.stringify(answers)}::jsonb, ${provisioned.conferenceUrl},
               ${provisioned.conferenceRef}, ${provisioned.calendarEventId},
               ${provisioned.calendarId}, 'confirmed', ${input.rescheduleOf ?? null},
@@ -1074,6 +1076,7 @@ export const confirmBooking = async (
       attendeeName: name,
       attendeeEmail: email,
       attendeeTimezone: input.attendeeTimezone,
+      attendeeLocale: input.attendeeLocale ?? null,
       companyName,
       conferenceUrl: provisioned.conferenceUrl,
       cancelToken,
@@ -1096,6 +1099,7 @@ const emptyResult = (input: ConfirmInput): ConfirmResult => ({
   attendeeName: '',
   attendeeEmail: '',
   attendeeTimezone: input.attendeeTimezone,
+  attendeeLocale: input.attendeeLocale ?? null,
   companyName: null,
   conferenceUrl: null,
   cancelToken: '',
@@ -1141,6 +1145,7 @@ export type BookingRecord = {
   attendeeName: string
   attendeeEmail: string
   attendeeTimezone: string
+  attendeeLocale: string | null
   answers: Record<string, unknown>
   conferenceUrl: string | null
   conferenceRef: string | null
@@ -1169,6 +1174,7 @@ type BookingRow = {
   attendee_name: string
   attendee_email: string
   attendee_timezone: string
+  attendee_locale: string | null
   answers: unknown
   conference_url: string | null
   conference_ref: string | null
@@ -1184,7 +1190,7 @@ const BOOKING_COLUMNS = sql`
   b.id, b.account_id, b.booking_page_id, p.name as page_name, p.slug as page_slug,
   a.slug as account_slug, b.host_user_id, u.name as host_name, u.email as host_email,
   b.contact_id, b.company_id, b.starts_at, b.ends_at, b.attendee_name, b.attendee_email,
-  b.attendee_timezone, b.answers, b.conference_url, b.conference_ref, b.calendar_event_id,
+  b.attendee_timezone, b.attendee_locale, b.answers, b.conference_url, b.conference_ref, b.calendar_event_id,
   b.calendar_id, b.state, b.cancel_token, b.reschedule_token, b.cancel_reason`
 
 const BOOKING_JOINS = sql`
@@ -1210,6 +1216,7 @@ const toBooking = (row: BookingRow): BookingRecord => ({
   attendeeName: row.attendee_name,
   attendeeEmail: row.attendee_email,
   attendeeTimezone: row.attendee_timezone,
+  attendeeLocale: row.attendee_locale,
   answers: (row.answers ?? {}) as Record<string, unknown>,
   conferenceUrl: row.conference_url,
   conferenceRef: row.conference_ref,
@@ -1537,6 +1544,7 @@ export type ReminderTarget = {
   attendeeName: string
   attendeeEmail: string
   attendeeTimezone: string
+  attendeeLocale: string | null
   startsAt: Date
   endsAt: Date
   conferenceUrl: string | null
@@ -1559,6 +1567,7 @@ export const readReminderTarget = async (
       attendee_name: string
       attendee_email: string
       attendee_timezone: string
+      attendee_locale: string | null
       starts_at: string
       ends_at: string
       conference_url: string | null
@@ -1570,7 +1579,7 @@ export const readReminderTarget = async (
     }>(sql`
       select b.booking_page_id, b.host_user_id, u.name as host_name, u.email as host_email,
              b.contact_id, b.attendee_name, b.attendee_email, b.attendee_timezone,
-             b.starts_at, b.ends_at, b.conference_url, co.name as company_name,
+             b.attendee_locale, b.starts_at, b.ends_at, b.conference_url, co.name as company_name,
              b.reschedule_token, b.cancel_token, r.amount, r.unit
         from booking b
         join user_account u on u.id = b.host_user_id
@@ -1596,6 +1605,7 @@ export const readReminderTarget = async (
       attendeeName: row.attendee_name,
       attendeeEmail: row.attendee_email,
       attendeeTimezone: row.attendee_timezone,
+      attendeeLocale: row.attendee_locale,
       startsAt: new Date(row.starts_at),
       endsAt: new Date(row.ends_at),
       conferenceUrl: row.conference_url,

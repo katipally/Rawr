@@ -7,6 +7,7 @@ import {
   type BookingPageConfig,
   type TemplateValues,
 } from '@rawr/db'
+import { FALLBACK, createFormat } from '~/lib/format.ts'
 import {
   DEFAULT_CONFIRMATION_BODY,
   DEFAULT_CONFIRMATION_SUBJECT,
@@ -36,6 +37,8 @@ export type BookingMailFacts = {
   attendeeName: string
   attendeeEmail: string
   attendeeTimezone: string
+  /** Their Accept-Language when they booked; null for a booking from before it was kept. */
+  attendeeLocale: string | null
   startsAt: Date
   companyName: string | null
   conferenceUrl: string | null
@@ -66,6 +69,7 @@ export const bookingMailValues = (facts: BookingMailFacts): TemplateValues => {
   const [hostFirst, hostLast] = splitName(facts.hostName)
   const [attendeeFirst, attendeeLast] = splitName(facts.attendeeName)
   const zone = facts.attendeeTimezone
+  const fmt = createFormat({ ...FALLBACK, locale: facts.attendeeLocale ?? FALLBACK.locale, zone })
 
   return {
     'contact.firstname': attendeeFirst,
@@ -78,18 +82,8 @@ export const bookingMailValues = (facts: BookingMailFacts): TemplateValues => {
     // over the account's. Better than an empty sign-off, and it becomes the
     // stored signature the day there is one.
     'host.signature': [facts.hostName, facts.page.accountName].filter(Boolean).join('\n'),
-    'meeting.date': facts.startsAt.toLocaleDateString('en-GB', {
-      timeZone: zone,
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }),
-    'meeting.time': `${facts.startsAt.toLocaleTimeString('en-GB', {
-      timeZone: zone,
-      hour: '2-digit',
-      minute: '2-digit',
-    })} (${zone})`,
+    'meeting.date': fmt.at(facts.startsAt, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+    'meeting.time': `${fmt.time(facts.startsAt)} (${zone})`,
     'meeting.location': locationLine(facts),
     'meeting.description': renderTemplate(facts.page.descriptionTpl, {
       'contact.first_name': attendeeFirst,

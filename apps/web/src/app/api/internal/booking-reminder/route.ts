@@ -56,6 +56,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
         attendeeName: target.attendeeName,
         attendeeEmail: target.attendeeEmail,
         attendeeTimezone: target.attendeeTimezone,
+        attendeeLocale: target.attendeeLocale,
         startsAt: target.startsAt,
         companyName: target.companyName,
         conferenceUrl: target.conferenceUrl,

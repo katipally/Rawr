@@ -159,6 +159,7 @@ export type BookInput = {
   startsAt: Date
   body: Record<string, unknown>
   attendeeTimezone: string
+  attendeeLocale?: string | null | undefined
   attribution: {
     rawQuery?: string | null
     referrer?: string | null
@@ -230,6 +231,7 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
         startsAt: input.startsAt,
         body: input.body,
         attendeeTimezone: timezone,
+        attendeeLocale: input.attendeeLocale ?? null,
         attribution: input.attribution,
         holdToken: input.holdToken ?? null,
         rescheduleOf: input.rescheduleOf?.id ?? null,
@@ -276,6 +278,7 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
             attendeeName: result.attendeeName,
             attendeeEmail: result.attendeeEmail,
             attendeeTimezone: result.attendeeTimezone,
+            attendeeLocale: result.attendeeLocale,
             startsAt: result.startsAt,
             companyName: result.companyName,
             conferenceUrl: result.conferenceUrl,
@@ -609,6 +612,7 @@ export const rescheduleWithProviders = async (input: RescheduleInput): Promise<B
       email: booking.attendeeEmail,
     },
     attendeeTimezone: input.attendeeTimezone ?? booking.attendeeTimezone,
+    attendeeLocale: booking.attendeeLocale,
     attribution: {},
     rescheduleOf: booking,
   })

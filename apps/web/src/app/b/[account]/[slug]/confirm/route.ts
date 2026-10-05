@@ -1,6 +1,7 @@
 import { publicBookingPage, publicEdgeContext, readBookingPage } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { publicBaseUrl } from '~/lib/env.ts'
+import { localeFrom } from '~/lib/format.ts'
 import { bookingIcsPath, bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
 import { book } from '~/server/booking.ts'
 import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
@@ -69,6 +70,7 @@ export const POST = async (
     startsAt,
     body: answers,
     attendeeTimezone: typeof body.timezone === 'string' ? body.timezone : 'UTC',
+    attendeeLocale: localeFrom(request.headers.get('accept-language')),
     attribution: {
       referrer: request.headers.get('referer'),
       pagePath: typeof body.pagePath === 'string' ? body.pagePath : null,
