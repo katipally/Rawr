@@ -865,6 +865,20 @@ export const recordGrantFailure = async (
   )
 }
 
+/** A calendar read that worked. Puts a `degraded` grant back to `connected` (a
+ *  transient failure is not a reason to stop offering the host for good) and keeps
+ *  `last_ok_at` current, at most once a minute so a busy booking page is not a
+ *  write per slot load. */
+export const markGrantOk = async (ctx: AccountContext, userId: string): Promise<void> => {
+  await withAccount(ctx, (tx) =>
+    tx.execute(sql`
+      update calendar_grant
+         set state = 'connected', last_ok_at = now(), last_error = null, last_error_at = null, updated_at = now()
+       where user_id = ${userId} and state in ('connected', 'degraded')
+         and (state = 'degraded' or last_ok_at is null or last_ok_at < now() - interval '1 minute')`),
+  )
+}
+
 export const disconnectGrant = async (ctx: AccountContext, userId: string): Promise<void> => {
   assertCanWrite(ctx, 'calendar_grant')
   assertOwnScheduleOrAdmin(ctx, userId)

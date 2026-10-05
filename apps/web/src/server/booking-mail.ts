@@ -154,11 +154,8 @@ export const sendBookingMail = async (input: SendInput): Promise<BookingMailOutc
   const subject = renderTemplate(subjectTpl, values) || facts.page.name
   const text = `${renderTemplate(bodyTpl, values)}\n${manageLines(facts)}`
 
-  const box = hostMailbox(await listMailboxes(ctx), input.hostUserId)
-  if (!box) {
-    const reason =
-      'The host has no mailbox connected for sending, so the meeting mail could not go out. Connect one on Settings, Mailboxes. It is never sent from a colleague’s.'
-    await withAccount(ctx, (tx) =>
+  const tellHost = (reason: string) =>
+    withAccount(ctx, (tx) =>
       notify(tx, ctx, {
         kind: 'integration_error',
         // One notice per booking per kind: three reminders on one meeting with no
@@ -171,15 +168,30 @@ export const sendBookingMail = async (input: SendInput): Promise<BookingMailOutc
         to: { userIds: [input.hostUserId] },
       }),
     )
+
+  const box = hostMailbox(await listMailboxes(ctx), input.hostUserId)
+  if (!box) {
+    const reason =
+      'The host has no mailbox connected for sending, so the meeting mail could not go out. Connect one on Settings, Mailboxes. It is never sent from a colleague’s.'
+    await tellHost(reason)
     return { sent: false, reason }
   }
 
-  await compose(ctx, {
-    mailboxId: box.id,
-    to: facts.attendeeEmail,
-    subject,
-    text,
-    contactId: input.contactId,
-  })
+  try {
+    await compose(ctx, {
+      mailboxId: box.id,
+      to: facts.attendeeEmail,
+      subject,
+      text,
+      contactId: input.contactId,
+    })
+  } catch (cause) {
+    // A reminder that throws is released and asked again on the next tick. A
+    // confirmation has nobody to ask again, and only a log line to say it failed.
+    if (input.kind !== 'confirmation') throw cause
+    const reason = `Gmail would not send it: ${cause instanceof Error ? cause.message : String(cause)}`
+    await tellHost(reason)
+    return { sent: false, reason }
+  }
   return { sent: true, reason: null }
 }

@@ -435,7 +435,9 @@ export const readPageHosts = async (
     }))
   })
 
-/** A host with no working calendar is unavailable, never free. Failing open here
+/** A host with no working calendar is unavailable, never free. A `degraded` one is
+ *  still asked: a transient failure must not end the offer, and if the calendar
+ *  cannot be read now the read itself fails closed. Failing open here
  *  double books a real person, which is the one outcome worse than offering fewer
  *  slots. F2 §2. */
 const grantProblem = (host: HostRow): string | null => {
@@ -444,9 +446,6 @@ const grantProblem = (host: HostRow): string | null => {
   }
   if (host.grant_state === 'revoked') {
     return `${host.name}'s calendar access was revoked and has to be reconnected.`
-  }
-  if (host.grant_state === 'degraded') {
-    return `${host.name}'s calendar is failing: ${host.last_error ?? 'no reason recorded'}`
   }
   if (host.weekly !== null && Object.keys(readWeekly(host.weekly)).length === 0) {
     return `${host.name} has no working hours set, so there is nothing to offer.`

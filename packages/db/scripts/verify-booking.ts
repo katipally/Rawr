@@ -21,6 +21,8 @@ import {
   dayKey,
   isKnownTimezone,
   listBookingPages,
+  markGrantOk,
+  recordGrantFailure,
   listBookings,
   offsetMs,
   placeHold,
@@ -753,6 +755,24 @@ try {
     hosts.length === 3 && hosts.every((host) => host.unavailableReason === null),
     hosts.map((host) => `${host.name}/${host.timezone}`).join(', '),
   )
+
+  // A calendar that failed once is asked again; only a revoked one stays out.
+  const failingHost = hosts[0]!
+  const failingWindow = { from: new Date('2026-09-01T00:00:00Z'), to: new Date('2026-12-01T00:00:00Z') }
+  const failingReason = async () =>
+    (await readPageHosts(datasaur, page.bookingPageId, failingWindow)).find((host) => host.userId === failingHost.userId)
+      ?.unavailableReason
+  await recordGrantFailure(systemContext(datasaur.accountId), { userId: failingHost.userId, error: 'Google answered 503', revoked: false })
+  check('a host whose calendar failed for a passing reason is still offered', (await failingReason()) === null)
+  await markGrantOk(systemContext(datasaur.accountId), failingHost.userId)
+  const [healed] = await scoped<{ state: string; last_error: string | null }>(
+    datasaur,
+    sql`select state, last_error from calendar_grant where user_id = ${failingHost.userId}`,
+  )
+  check('and a read that works puts the grant back to connected', healed?.state === 'connected' && healed.last_error === null, healed?.state)
+  await recordGrantFailure(systemContext(datasaur.accountId), { userId: failingHost.userId, error: 'invalid_grant', revoked: true })
+  check('a revoked grant still takes the host out', (await failingReason()) !== null)
+  await scoped(datasaur, sql`update calendar_grant set state = 'connected', last_error = null where user_id = ${failingHost.userId}`)
 
   const slotOne = new Date('2026-09-07T17:00:00.000Z')
   const result = await confirmBooking(

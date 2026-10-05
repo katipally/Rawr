@@ -1,4 +1,5 @@
 import {
+  markGrantOk,
   readGrant,
   systemContext,
   recordGrantFailure,
@@ -108,6 +109,10 @@ const accessTokenFor = async (
 // Free-busy
 // ---------------------------------------------------------------------------
 
+/** `degraded` is a grant whose last call failed for a reason that may have passed.
+ *  It is tried again, and a call that works puts it back to `connected`. */
+const isLive = (state: string): boolean => state === 'connected' || state === 'degraded'
+
 type CacheEntry = { at: number; busy: Interval[] }
 
 /** Sixty seconds, per host and per window, per F2 §2. Bypassed at submit time,
@@ -209,7 +214,7 @@ const busyForHost = async (
   }
 
   const grant = await readGrant(ctx, host.userId)
-  if (!grant || grant.state !== 'connected') {
+  if (!grant || !isLive(grant.state)) {
     throw new CalendarUnavailable(host.userId, 'That calendar is not connected.')
   }
 
@@ -237,6 +242,7 @@ const busyForHost = async (
     end: new Date(slot.end),
   }))
   remember(key, busy)
+  await markGrantOk(systemContext(ctx.accountId), host.userId)
   return busy
 }
 
@@ -306,7 +312,7 @@ export const createCalendarEvent = async (
   draft: EventDraft,
 ): Promise<WrittenEvent> => {
   const grant = await readGrant(ctx, draft.userId)
-  if (!grant || grant.state !== 'connected') {
+  if (!grant || !isLive(grant.state)) {
     throw new Error(`${draft.userId} has no connected calendar, so the event cannot be created.`)
   }
 
@@ -403,7 +409,7 @@ export const patchCalendarEvent = async (
   },
 ): Promise<void> => {
   const grant = await readGrant(ctx, input.userId)
-  if (!grant || grant.state !== 'connected') {
+  if (!grant || !isLive(grant.state)) {
     throw new Error('That calendar is no longer connected, so the event could not be updated.')
   }
   if (grant.provider === 'dev') return
@@ -435,7 +441,7 @@ export const deleteCalendarEvent = async (
   input: { userId: string; calendarId: string; eventId: string },
 ): Promise<void> => {
   const grant = await readGrant(ctx, input.userId)
-  if (!grant || grant.state !== 'connected') return
+  if (!grant || !isLive(grant.state)) return
   if (grant.provider === 'dev') return
 
   const token = await accessTokenFor(ctx, grant)

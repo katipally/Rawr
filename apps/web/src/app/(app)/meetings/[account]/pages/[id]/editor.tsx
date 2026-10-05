@@ -591,8 +591,9 @@ export const PageEditor = ({
       <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
         <h2 className="mb-1 font-medium">What the attendee is sent</h2>
         <p className="mb-3 text-xs text-secondary">
-          Sent from the host&apos;s connected mailbox, falling back to the first mailbox in the
-          account that can send. With none connected nothing goes out and the host is told.
+          Sent from the host&apos;s own connected mailbox, never a colleague&apos;s. With none that
+          can send, nothing goes out and the host is told. The calendar invitation is separate and
+          always goes.
         </p>
 
         <label className="mb-3 flex items-center gap-2 text-sm">
