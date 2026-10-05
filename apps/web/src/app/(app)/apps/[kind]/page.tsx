@@ -288,7 +288,7 @@ const AppPage = async ({
               {detail('Last succeeded', row.lastOkAt ? formatDateTime(row.lastOkAt.toISOString(), zone) : 'Never yet')}
               {detail(
                 'Last failure',
-                row.lastErrorAt ? `${formatDateTime(row.lastErrorAt.toISOString(), zone)} · ${row.lastError ?? ''}` : 'None recorded',
+                row.lastErrorAt ? `${formatDateTime(row.lastErrorAt.toISOString(), zone)} · ${reported?.headline ?? ''}` : 'None recorded',
               )}
               {detail(
                 'Failed jobs',

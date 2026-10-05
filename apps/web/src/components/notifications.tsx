@@ -7,6 +7,7 @@ import { Button, Drawer, EmptyState, IconButton, Spinner, cn } from '@rawr/ui'
 import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr/db'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
+import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useZone } from '~/components/zone.tsx'
 
@@ -221,7 +222,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                     ) : (
                       <span className="font-medium">{row.title}</span>
                     )}
-                    {row.body ? <span className="text-secondary">{row.body}</span> : null}
+                    {row.body ? <span className="text-secondary">{plainError(row.body) ?? row.body}</span> : null}
                     <span className="text-small text-secondary">
                       {formatDateTime(row.at, zone)}
                       {row.count > 1 ? ` · ${row.count} times` : ''}

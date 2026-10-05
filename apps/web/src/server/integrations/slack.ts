@@ -1,5 +1,6 @@
 import { isUuid, listPipelines, once, readCredentials, recordHealth, type AccountContext } from '@rawr/db'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
+import { plainError } from '~/lib/provider-errors.ts'
 import { attempt, json, providerError, type ConnectionTest } from './provider.ts'
 
 /** F6 §5. Slack, used by F3 for the thing Trevor flagged first: a form fill from a
@@ -107,7 +108,7 @@ export const testSlack = async (ctx: AccountContext): Promise<ConnectionTest> =>
       error: message,
       disconnected: (cause as { disconnected?: boolean }).disconnected === true,
     })
-    return { ok: false, detail: message }
+    return { ok: false, detail: plainError(message) ?? message }
   }
 }
 

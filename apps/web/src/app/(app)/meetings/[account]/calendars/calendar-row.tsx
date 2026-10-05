@@ -8,6 +8,7 @@ import { LinkButton } from '~/components/link-button.tsx'
 import { useState } from 'react'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
+import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** One person's calendar connection, with the real reason when it is not working.
@@ -151,7 +152,7 @@ export const CalendarRow = ({
 
       {grant?.lastError ? (
         <p className="text-xs text-error">
-          {grant.lastError}
+          {plainError(grant.lastError) ?? grant.lastError}
           {grant.lastErrorAt ? ` (${formatDateTime(grant.lastErrorAt, zone)})` : ''}
         </p>
       ) : null}

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { formatDateTime } from '~/components/crm/value.tsx'
 import { useZone } from '~/components/zone.tsx'
@@ -356,7 +357,7 @@ export const MailboxList = ({
                       </p>
                       {row.lastError ? (
                         <p role="alert" className="break-words text-small text-error">
-                          {row.lastError}
+                          {plainError(row.lastError) ?? row.lastError}
                           {row.lastErrorAt ? ` (${formatDateTime(row.lastErrorAt, zone)})` : ''}
                         </p>
                       ) : null}

@@ -1,4 +1,5 @@
 import type { HealthState } from '@rawr/db'
+import { plainError } from '~/lib/provider-errors.ts'
 
 /** F6 §1's four states as the Connected apps screens badge them. */
 export const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 'error' | 'neutral' }> = {
@@ -12,6 +13,8 @@ export const HEALTH: Record<HealthState, { label: string; tone: 'ok' | 'warn' | 
  *  body they only want while debugging. Gmail and Brevo both answer with a JSON
  *  document, and printing it verbatim buries the one line that says what happened. */
 export const errorSummary = (raw: string): { headline: string; detail: string | null } => {
+  const plain = plainError(raw)
+  if (plain) return { headline: plain, detail: raw.trim() }
   const brace = raw.indexOf('{')
   if (brace < 0) return { headline: raw.trim(), detail: null }
   const lead = raw.slice(0, brace).replace(/[\s:]+$/, '')

@@ -1,6 +1,7 @@
 import { listGrants, listMailboxes, listMcpTokens, listMembers, readSchedule } from '@rawr/db'
 import { devCalendarEnabled, devGmailEnabled, googleCalendarConfigured, googleConfigured } from '~/lib/env.ts'
 import { agentAccessPath, availabilityPath, calendarsPath, mailboxesPath } from '~/lib/links.ts'
+import { plainError } from '~/lib/provider-errors.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import { AccountPanel } from './account-panel.tsx'
 
@@ -38,14 +39,22 @@ const AccountPage = async () => {
       weekly={schedule.weekly}
       gmail={{
         state: mailbox?.state ?? null,
-        detail: mailbox?.lastError ?? (mailbox ? `${mailbox.threadCount.toLocaleString()} threads on records.` : null),
+        detail: mailbox?.lastError
+          ? (plainError(mailbox.lastError) ?? mailbox.lastError)
+          : mailbox
+            ? `${mailbox.threadCount.toLocaleString()} threads on records.`
+            : null,
         canConnect: googleConfigured || devGmailEnabled,
         href: googleConfigured ? '/api/auth/google/gmail' : mailboxesPath(),
         managePath: mailboxesPath(),
       }}
       calendar={{
         state: grant?.state ?? null,
-        detail: grant?.lastError ?? (grant ? `${grant.provider === 'dev' ? 'Development calendar' : grant.calendarId}.` : null),
+        detail: grant?.lastError
+          ? (plainError(grant.lastError) ?? grant.lastError)
+          : grant
+            ? `${grant.provider === 'dev' ? 'Development calendar' : grant.calendarId}.`
+            : null,
         canConnect: googleCalendarConfigured || devCalendarEnabled,
         href: googleCalendarConfigured ? `/api/auth/google/calendar?return=${encodeURIComponent('/settings/account')}` : calendarsPath(account),
         managePath: calendarsPath(account),
