@@ -95,7 +95,7 @@ try {
     'nor invite anybody',
   )
   check(
-    (await refused(() => deactivateMember(hubAdmin, adminId))) !== null,
+    (await refused(() => deactivateMember(hubAdmin, adminId, null))) !== null,
     "nor end somebody else's access",
   )
 
@@ -226,16 +226,57 @@ try {
 
   console.log('\n-- ending access -----------------------------------------------')
 
-  await deactivateMember(superAdmin, probeId)
+  const [peerAccount] = await owner`select id from account where slug = 'peer'`
+  if (peerAccount) {
+    await owner`insert into membership (account_id, user_id, state) values (${peerAccount.id}, ${probeId}, 'active')`
+  }
+  await owner`insert into contact (account_id, first_name, email, owner_id)
+    values (${accountId}, 'Handover', ${`handover.${probeId}@sandbox.test`}, ${probeId})`
+  await owner`insert into task (account_id, title, assignee_id) values (${accountId}, 'handover open', ${probeId})`
+  await owner`insert into task (account_id, title, assignee_id, status) values (${accountId}, 'handover done', ${probeId}, 'done')`
+  await owner`insert into mailbox (account_id, user_id, email, access_token, refresh_token)
+    values (${accountId}, ${probeId}, ${`handover.${probeId}@sandbox.test`}, 'x', 'x')`
+
   check(
-    (await membershipsForUser(probeId)).length === 0,
-    'a deactivated person holds no membership their session can use',
+    (await refused(() => deactivateMember(superAdmin, probeId, probeId))) !== null,
+    'their work cannot be handed to themselves',
   )
+  check(
+    (await refused(() => deactivateMember(superAdmin, probeId, crypto.randomUUID()))) !== null,
+    'nor to somebody who is not in the account',
+  )
+  const moved = await deactivateMember(superAdmin, probeId, adminId)
+  check(
+    moved.records >= 1 && moved.tasks === 1 && moved.mailboxes === 1,
+    'ending a seat hands its records and open tasks over and disconnects its mailbox',
+    JSON.stringify(moved),
+  )
+  const [handed] = await owner`select owner_id from contact where email = ${`handover.${probeId}@sandbox.test`}`
+  const [kept] = await owner`select count(*)::int n from task where title = 'handover done' and assignee_id = ${probeId}`
+  const [mail] = await owner`select count(*)::int n from mailbox where user_id = ${probeId} and account_id = ${accountId}`
+  check(handed?.owner_id === adminId, 'the contact is now the heir’s')
+  check(kept?.n === 1, 'while a finished task keeps the name of who did it')
+  check(mail?.n === 0, 'and the mailbox is gone')
+  check(
+    (await membershipsForUser(probeId)).length === (peerAccount ? 1 : 0),
+    'a deactivated person holds no membership their session can use here',
+  )
+  if (peerAccount) {
+    check(
+      (await membershipsForUser(probeId))[0]!.sessionsValidAfter === null,
+      'and their sessions in another account are not touched',
+    )
+  }
   const [stillThere] = await owner`select id from user_account where id = ${probeId}`
   check(stillThere !== undefined, 'but the row stays, so the audit trail still names them')
 
   await reactivateMember(superAdmin, probeId)
-  check((await membershipsForUser(probeId)).length === 1, 'restoring gives the seat back')
+  const restored = (await membershipsForUser(probeId)).find((m) => m.accountId === accountId)
+  check(restored !== undefined, 'restoring gives the seat back')
+  check(restored?.sessionsValidAfter !== null, 'but not the sessions it had before, which stay dead')
+  await owner`delete from membership where account_id = ${peerAccount?.id ?? null} and user_id = ${probeId}`
+  await owner`delete from task where title like 'handover %' and account_id = ${accountId}`
+  await owner`delete from contact where email = ${`handover.${probeId}@sandbox.test`}`
 
   console.log('\n-- teams -------------------------------------------------------')
 

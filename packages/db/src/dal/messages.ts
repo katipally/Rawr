@@ -262,6 +262,35 @@ export const recordMailboxFailure = async (
 const STOPPED_BY_DISCONNECT =
   'The mailbox this enrollment was sending from was disconnected. Nothing can go out from an enrollment with no sender, so it is stopped rather than left in the queue. Enroll the contact again from a connected mailbox.'
 
+/** Stops what sends from a mailbox and removes it. Returns how many enrollments it
+ *  stopped. */
+export const dropMailbox = async (tx: Tx, ctx: AccountContext, mailboxId: string): Promise<number> => {
+  // Before the mailbox goes: every live enrollment sending from it. The
+  // foreign key would only null the column, and an enrollment with no mailbox
+  // is one the scheduler picks up every minute and can never send. Same
+  // transaction, so there is no window in which one exists.
+  const [stopped] = await tx.execute<{ count: number }>(sql`
+    with ended as (
+      update sequence_enrollment
+         set state = 'failed', stop_reason = ${STOPPED_BY_DISCONNECT},
+             next_run_at = null, finished_at = now(), lease_until = null
+       where mailbox_id = ${mailboxId}::uuid
+         and state in ('active', 'waiting_task', 'paused')
+      returning id
+    ), noted as (
+      insert into sequence_event (account_id, enrollment_id, kind, detail)
+      select ${ctx.accountId}::uuid, id, 'stopped',
+             ${JSON.stringify({ state: 'failed', reason: STOPPED_BY_DISCONNECT })}::jsonb
+        from ended
+    )
+    select count(*)::int as count from ended`)
+
+  // The messages already read stay. They are the history the feature exists for,
+  // and disconnecting is "stop reading new mail", not "erase what you have read".
+  await tx.delete(mailbox).where(eq(mailbox.id, mailboxId))
+  return Number(stopped?.count ?? 0)
+}
+
 export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string): Promise<void> =>
   mutate(ctx, 'mailbox', async (tx) => {
     const [found] = await tx
@@ -273,30 +302,7 @@ export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string):
     if (!isAdmin(ctx) && found.userId !== ctx.actorId) {
       throw new Error('That is somebody else’s mailbox. Only they, or an admin, can disconnect it.')
     }
-
-    // Before the mailbox goes: every live enrollment sending from it. The
-    // foreign key would only null the column, and an enrollment with no mailbox
-    // is one the scheduler picks up every minute and can never send. Same
-    // transaction, so there is no window in which one exists.
-    const [stopped] = await tx.execute<{ count: number }>(sql`
-      with ended as (
-        update sequence_enrollment
-           set state = 'failed', stop_reason = ${STOPPED_BY_DISCONNECT},
-               next_run_at = null, finished_at = now(), lease_until = null
-         where mailbox_id = ${mailboxId}::uuid
-           and state in ('active', 'waiting_task', 'paused')
-        returning id
-      ), noted as (
-        insert into sequence_event (account_id, enrollment_id, kind, detail)
-        select ${ctx.accountId}::uuid, id, 'stopped',
-               ${JSON.stringify({ state: 'failed', reason: STOPPED_BY_DISCONNECT })}::jsonb
-          from ended
-      )
-      select count(*)::int as count from ended`)
-
-    // The messages already read stay. They are the history the feature exists for,
-    // and disconnecting is "stop reading new mail", not "erase what you have read".
-    await tx.delete(mailbox).where(eq(mailbox.id, mailboxId))
+    const stopped = await dropMailbox(tx, ctx, mailboxId)
 
     return {
       result: undefined,
@@ -305,7 +311,7 @@ export const disconnectMailbox = async (ctx: AccountContext, mailboxId: string):
         entityId: mailboxId,
         action: 'disconnect',
         before: { email: found.email },
-        after: { messagesKept: true, enrollmentsStopped: Number(stopped?.count ?? 0) },
+        after: { messagesKept: true, enrollmentsStopped: stopped },
       },
     }
   })

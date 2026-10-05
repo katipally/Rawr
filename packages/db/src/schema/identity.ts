@@ -90,6 +90,10 @@ export const membership = pgTable(
     invitedBy: uuid('invited_by').references(() => userAccount.id, { onDelete: 'set null' }),
     deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
     deactivatedBy: uuid('deactivated_by').references(() => userAccount.id, { onDelete: 'set null' }),
+    /** Sessions issued in this account before this are dead. Moved when this seat
+     *  is ended, so the person's sessions in any other account carry on, and a
+     *  seat that is restored does not revive the cookies it held before. */
+    sessionsValidAfter: timestamp('sessions_valid_after', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('membership_account_user_key').on(t.accountId, t.userId)],

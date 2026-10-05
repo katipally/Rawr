@@ -12,6 +12,7 @@ import {
   type HubScopes,
 } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
+import { dropMailbox } from './messages.ts'
 import { provisionAccount } from './provision.ts'
 import { isKnownTimezone } from './slots.ts'
 
@@ -284,9 +285,18 @@ const superAdminCount = async (tx: Tx): Promise<number> => {
 
 /** Ends somebody's access. The row stays, so the audit trail still names them, and
  *  their membership stops answering because `memberships_for_user` only returns
- *  active ones. Their sessions are cut on the same call rather than left to
- *  expire. */
-export const deactivateMember = async (ctx: AccountContext, userId: string): Promise<void> =>
+ *  active ones. Their sessions in this account are cut on the same call rather
+ *  than left to expire, and their sessions in any other account are not.
+ *
+ *  What they owned does not go with them: their records and open tasks pass to
+ *  `reassignTo`, or to nobody (a record nobody owns is visible at every scope), and
+ *  their mailboxes are disconnected, which stops what sends from them. The mail
+ *  already read stays. */
+export const deactivateMember = async (
+  ctx: AccountContext,
+  userId: string,
+  reassignTo: string | null,
+): Promise<{ records: number; tasks: number; mailboxes: number }> =>
   mutate(ctx, 'membership', async (tx) => {
     assertSuperAdmin(ctx, "end somebody's access")
     if (userId === ctx.actorId) throw new Error('You cannot deactivate yourself. Ask another super admin.')
@@ -299,14 +309,41 @@ export const deactivateMember = async (ctx: AccountContext, userId: string): Pro
     if (current.isSuperAdmin && (await superAdminCount(tx)) <= 1) {
       throw new Error('This is the only super admin. Make somebody else one first.')
     }
+    if (reassignTo !== null) {
+      const [heir] = await tx
+        .select({ id: membership.id })
+        .from(membership)
+        .where(and(eq(membership.userId, reassignTo), eq(membership.state, 'active')))
+      if (!heir || reassignTo === userId) throw new Error('Their work has to go to somebody who is active in this account.')
+    }
+    const now = new Date()
     await tx
       .update(membership)
-      .set({ state: 'deactivated', deactivatedAt: new Date(), deactivatedBy: ctx.actorId })
+      .set({ state: 'deactivated', deactivatedAt: now, deactivatedBy: ctx.actorId, sessionsValidAfter: now })
       .where(eq(membership.userId, userId))
-    await tx.execute(sql`select rawr.sign_out_everywhere(${userId})`)
+
+    const to = reassignTo
+    const counts = await tx.execute<{ records: number; tasks: number }>(sql`
+      with c as (update contact set owner_id = ${to}::uuid, updated_at = now() where owner_id = ${userId}::uuid returning 1),
+           k as (update company set owner_id = ${to}::uuid, updated_at = now() where owner_id = ${userId}::uuid returning 1),
+           d as (update deal set owner_id = ${to}::uuid, updated_at = now() where owner_id = ${userId}::uuid returning 1),
+           r as (update custom_record set owner_id = ${to}::uuid, updated_at = now() where owner_id = ${userId}::uuid returning 1),
+           t as (update task set assignee_id = ${to}::uuid, updated_at = now() where assignee_id = ${userId}::uuid and status = 'open' returning 1)
+      select (select count(*) from c) + (select count(*) from k) + (select count(*) from d) + (select count(*) from r) as records,
+             (select count(*) from t) as tasks`)
+    const mailboxIds = await tx.execute<{ id: string }>(sql`select id from mailbox where user_id = ${userId}::uuid`)
+    for (const { id } of mailboxIds) await dropMailbox(tx, ctx, id)
+
+    const moved = { records: Number(counts[0]?.records ?? 0), tasks: Number(counts[0]?.tasks ?? 0), mailboxes: mailboxIds.length }
     return {
-      result: undefined,
-      audit: { entity: 'membership', entityId: userId, action: 'deactivate', before: { state: current.state } },
+      result: moved,
+      audit: {
+        entity: 'membership',
+        entityId: userId,
+        action: 'deactivate',
+        before: { state: current.state },
+        after: { reassignedTo: reassignTo, ...moved },
+      },
     }
   })
 

@@ -88,8 +88,8 @@ export const accountRouter = router({
       .mutation(({ ctx, input }) => call(() => setMemberGrants(ctx.account, input))),
 
     deactivate: superAdminProcedure
-      .input(z.object({ userId: z.string().uuid() }))
-      .mutation(({ ctx, input }) => call(() => deactivateMember(ctx.account, input.userId))),
+      .input(z.object({ userId: z.string().uuid(), reassignTo: z.string().uuid().nullable() }))
+      .mutation(({ ctx, input }) => call(() => deactivateMember(ctx.account, input.userId, input.reassignTo))),
 
     reactivate: superAdminProcedure
       .input(z.object({ userId: z.string().uuid() }))

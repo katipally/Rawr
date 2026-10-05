@@ -303,6 +303,9 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
   const [ending, setEnding] = useState<{ userId: string; name: string; kind: 'deactivate' | 'remove' } | null>(null)
+  /** Who inherits the records and open tasks of the person being ended. Empty leaves
+   *  them with nobody, which every scope can still reach. */
+  const [handTo, setHandTo] = useState(selfId)
   const [busy, setBusy] = useState(false)
   /** What a member looks like after a change this browser has made but the server
    *  has not sent back yet. router.refresh takes a round trip, and a permission
@@ -651,7 +654,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                   void run(() => api.account.members.remove.mutate({ userId: target.userId }), 'Removed.')
                   return
                 }
-                void run(() => api.account.members.deactivate.mutate({ userId: target.userId }), 'Access ended.', {
+                void run(() => api.account.members.deactivate.mutate({ userId: target.userId, reassignTo: handTo || null }), 'Access ended.', {
                   userId: target.userId,
                   patch: { state: 'deactivated' },
                 })
@@ -670,10 +673,25 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
             they held.
           </p>
         ) : (
-          <p>
-            They are signed out and cannot get back in. Their records, notes and emails stay where
-            they are, and restoring access puts back exactly what they held.
-          </p>
+          <div className="flex flex-col gap-4">
+            <p>
+              They are signed out of this account and cannot get back in. Their notes and emails
+              stay where they are, their mailbox is disconnected, and restoring access puts back
+              exactly what they held.
+            </p>
+            <Field id="hand-to" label="Hand their records and open tasks to">
+              <Select id="hand-to" value={handTo} onChange={(e) => setHandTo(e.target.value)}>
+                <option value="">Nobody</option>
+                {rows
+                  .filter((row) => row.state === 'active' && row.userId !== ending?.userId)
+                  .map((row) => (
+                    <option key={row.userId} value={row.userId}>
+                      {row.name}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+          </div>
         )}
       </Modal>
 
