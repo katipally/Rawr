@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
-import { env, googleCalendarConfigured } from '~/lib/env.ts'
+import { env, googleCalendarConfigured, hostedDomainRequired } from '~/lib/env.ts'
 import { calendarsPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_CALENDAR_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { CALENDAR_SCOPES } from '~/server/calendar.ts'
@@ -34,7 +34,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const state = generateState()
   const codeVerifier = generateCodeVerifier()
   const url = googleClient(GOOGLE_CALENDAR_CALLBACK_PATH).createAuthorizationURL(state, codeVerifier, CALENDAR_SCOPES)
-  url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
+  if (hostedDomainRequired) url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
   url.searchParams.set('access_type', 'offline')
   url.searchParams.set('prompt', 'consent')
   url.searchParams.set('include_granted_scopes', 'true')

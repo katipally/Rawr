@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
-import { devGmailEnabled, env, googleConfigured } from '~/lib/env.ts'
+import { devGmailEnabled, env, googleConfigured, hostedDomainRequired } from '~/lib/env.ts'
 import { mailboxesPath, safePath } from '~/lib/links.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, generateCodeVerifier, generateState, googleClient } from '~/server/auth/google.ts'
 import { GMAIL_READ_SCOPES, GMAIL_SEND_SCOPES } from '~/server/gmail.ts'
@@ -39,7 +39,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     codeVerifier,
     wantsSending ? GMAIL_SEND_SCOPES : GMAIL_READ_SCOPES,
   )
-  url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
+  if (hostedDomainRequired) url.searchParams.set('hd', env.GOOGLE_HOSTED_DOMAIN)
   // Offline with an explicit prompt: Google returns a refresh token on the first
   // consent only, and a back-fill runs far longer than an access token lives.
   url.searchParams.set('access_type', 'offline')
