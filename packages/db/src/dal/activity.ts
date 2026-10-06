@@ -300,6 +300,10 @@ export const readTimeline = async (
   input: {
     entity: EntityRef
     types?: ActivityType[]
+    /** HubSpot's "Activity assigned to": only what these people wrote. The
+     *  index walk is unchanged and the actor is checked per joined row, so a
+     *  rare author costs at most a scan of this record's links. */
+    actorIds?: string[]
     limit?: number
     cursor?: TimelineCursor | null
   },
@@ -331,6 +335,7 @@ export const readTimeline = async (
           input.types && input.types.length > 0
             ? inArray(activityLink.type, input.types)
             : undefined,
+          input.actorIds && input.actorIds.length > 0 ? inArray(activity.actorId, input.actorIds) : undefined,
           input.cursor
             ? or(
                 lt(activityLink.occurredAt, input.cursor.occurredAt),

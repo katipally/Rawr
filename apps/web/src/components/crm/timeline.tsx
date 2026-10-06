@@ -1,8 +1,8 @@
 'use client'
 
-import { Alert, Button, DropdownMenu, EmptyState, TextArea, buttonClass, cn, useToast } from '@rawr/ui'
+import { Alert, Button, DropdownMenu, EmptyState, TextArea, cn, useToast } from '@rawr/ui'
 import type { EmailPayload, EmailStats } from '@rawr/db'
-import { ChevronDown, ChevronRight, Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Search, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
@@ -49,6 +49,8 @@ export type TimelineProps = {
   /** Who is looking. Their own hand-logged entries can be corrected or removed; an
    *  admin can do that to anyone's. Nothing the system wrote can be touched. */
   viewer: { userId: string; isAdmin: boolean }
+  /** The team, for "Activity assigned to". */
+  people: { id: string; label: string }[]
 }
 
 /** What a person can put on the timeline by hand, and the prompt each one needs.
@@ -107,6 +109,26 @@ const EmailStatsLine = ({ stats }: { stats: EmailStats }) => (
   </p>
 )
 
+/** HubSpot's filter row: a filter in use is a grey filled chip with its own clear,
+ *  one that is not is a plain bold button. */
+const chipClass = (applied: boolean) =>
+  cn(
+    'inline-flex h-pill max-w-full items-center gap-1 rounded-pill font-semibold transition-colors duration-150 ease-out',
+    applied ? 'bg-fill-hover pl-3' : 'px-2 hover:bg-fill-hover',
+  )
+
+const ClearChip = ({ label, onClear }: { label: string; onClear: () => void }) => (
+  <button
+    type="button"
+    aria-label={label}
+    title={label}
+    onClick={onClear}
+    className="mr-1 grid size-6 shrink-0 place-items-center rounded-pill hover:bg-line"
+  >
+    <X aria-hidden="true" className="size-3.5" />
+  </button>
+)
+
 const sameSet = (a: string[], b: string[]): boolean => a.length === b.length && a.every((type) => b.includes(type))
 
 /** A tracked row on the timeline addresses the row behind it, so "viewed Data
@@ -129,6 +151,7 @@ export const Timeline = ({
   groups,
   canWrite,
   viewer,
+  people,
 }: TimelineProps) => {
   const queryClient = useQueryClient()
   const fmt = useFormat()
@@ -149,6 +172,7 @@ export const Timeline = ({
   const [removing, setRemoving] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [needle, setNeedle] = useState('')
+  const [authors, setAuthors] = useState<string[]>([])
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
@@ -178,13 +202,14 @@ export const Timeline = ({
     setHydrated(true)
   }, [object, urlTypes, uiReady])
 
-  const load = async (types: string[], from: typeof cursor, append: boolean) => {
+  const load = async (types: string[], from: typeof cursor, append: boolean, actorIds = authors) => {
     setLoading(true)
     setError(null)
     try {
       const page = await queryClient.fetchQuery({ ...trpc.crm.timeline.list.queryOptions({
         entity: { entityType: object, entityId: recordId },
         types,
+        actorIds,
         limit: 50,
         cursor: from ? { occurredAt: new Date(from.occurredAt), id: from.id } : null,
       }), staleTime: 0 })
@@ -213,7 +238,7 @@ export const Timeline = ({
     }
   }
 
-  const choose = (next: string[]) => {
+  const choose = (next: string[], actorIds = authors) => {
     setSelected(next)
     setTimelineKinds(object, next)
     // Put the choice in the URL so the filtered timeline can be linked to.
@@ -221,9 +246,14 @@ export const Timeline = ({
     if (next.length === 0) search.delete('type')
     else search.set('type', next.join(','))
     window.history.replaceState(null, '', `?${search.toString()}`)
-    void load(next, null, false)
+    void load(next, null, false, actorIds)
   }
   const toggle = (type: string) => choose(selected.includes(type) ? selected.filter((t) => t !== type) : [...selected, type])
+  const chooseAuthors = (next: string[]) => {
+    setAuthors(next)
+    void load(selected, null, false, next)
+  }
+  const filtered = selected.length > 0 || authors.length > 0
 
   const query = needle.trim().toLowerCase()
   const shown = query
@@ -319,42 +349,76 @@ export const Timeline = ({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <DropdownMenu
-          label="Filter the timeline by type"
-          align="start"
-          groups={groups.map((group) => ({
-            key: group.label,
-            label: group.label,
-            items: group.types
-              .filter((type) => (counts[type] ?? 0) > 0)
-              .map((type) => ({
-                key: type,
-                label: TYPE_LABELS[type] ?? type,
-                hint: counts[type],
-                checked: selected.includes(type),
-                onSelect: () => toggle(type),
-              })),
-          }))}
-          trigger={(props) => (
-            <button
-              {...props}
-              type="button"
-              className={buttonClass('secondary', selected.length > 0 ? 'bg-fill-hover' : undefined)}
-            >
-              Activity ({fmt.number(shownCount)}/{fmt.number(total)})
-              <ChevronDown aria-hidden="true" className="size-3.5" />
-            </button>
-          )}
-        />
-        {selected.length > 0 ? (
-          <Button
-            variant="tertiary"
+        <span className={chipClass(selected.length > 0)}>
+          <DropdownMenu
+            label="Filter the timeline by type"
+            align="start"
+            groups={groups.map((group) => ({
+              key: group.label,
+              label: group.label,
+              items: group.types
+                .filter((type) => (counts[type] ?? 0) > 0)
+                .map((type) => ({
+                  key: type,
+                  label: TYPE_LABELS[type] ?? type,
+                  hint: counts[type],
+                  checked: selected.includes(type),
+                  onSelect: () => toggle(type),
+                })),
+            }))}
+            trigger={(props) => (
+              <button {...props} type="button" className="inline-flex min-w-0 items-center gap-1 py-1">
+                Activity ({fmt.number(shownCount)}/{fmt.number(total)})
+                <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+              </button>
+            )}
+          />
+          {selected.length > 0 ? <ClearChip label="Clear the activity filter" onClear={() => choose([])} /> : null}
+        </span>
+        <span className={chipClass(authors.length > 0)}>
+          <DropdownMenu
+            label="Filter the timeline by who it is assigned to"
+            align="start"
+            groups={[
+              {
+                key: 'people',
+                items: people.map((person) => ({
+                  key: person.id,
+                  label: person.label,
+                  checked: authors.includes(person.id),
+                  onSelect: () =>
+                    chooseAuthors(authors.includes(person.id) ? authors.filter((id) => id !== person.id) : [...authors, person.id]),
+                })),
+              },
+            ]}
+            trigger={(props) => (
+              <button {...props} type="button" className="inline-flex min-w-0 items-center gap-1 py-1">
+                <span className="truncate">
+                  {authors.length === 1
+                    ? (people.find((person) => person.id === authors[0])?.label ?? 'Activity assigned to')
+                    : authors.length > 1
+                      ? `Activity assigned to (${fmt.number(authors.length)})`
+                      : 'Activity assigned to'}
+                </span>
+                <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+              </button>
+            )}
+          />
+          {authors.length > 0 ? <ClearChip label="Clear the assigned to filter" onClear={() => chooseAuthors([])} /> : null}
+        </span>
+        {filtered ? (
+          <button
+            type="button"
+            className={chipClass(false)}
             // An empty choice is forgotten rather than stored, or the next
             // record of this kind opens filtered again.
-            onClick={() => choose([])}
+            onClick={() => {
+              setAuthors([])
+              choose([], [])
+            }}
           >
             Clear all
-          </Button>
+          </button>
         ) : null}
       </div>
 
@@ -366,12 +430,12 @@ export const Timeline = ({
 
       {shown.length === 0 && hydrated ? (
         <EmptyState
-          title={query ? 'Nothing matches that search' : selected.length > 0 ? 'Nothing of that type yet' : 'Nothing has happened here yet'}
+          title={query ? 'Nothing matches that search' : filtered ? 'Nothing matches those filters yet' : 'Nothing has happened here yet'}
           description={
             query
               ? 'Only what is loaded is searched. Load older entries to search further back.'
-              : selected.length > 0
-                ? 'Clear the filter above to see everything on this record.'
+              : filtered
+                ? 'Clear the filters above to see everything on this record.'
                 : 'Notes, emails, meetings and property changes all land here as they happen.'
           }
         />

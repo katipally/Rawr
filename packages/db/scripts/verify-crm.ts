@@ -381,6 +381,20 @@ try {
     return subject
   })
 
+  await check('the timeline narrows to the people who wrote it', async () => {
+    const [deal] = await db.select({ id: s.deal.id, name: s.deal.name }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const entity = { entityType: 'deal', entityId: deal!.id } as const
+    await updateRecord(sales, 'deal', deal!.id, { name: `Author probe ${crypto.randomUUID()}` })
+    await updateRecord(sales, 'deal', deal!.id, { name: deal!.name })
+    const author = (await readTimeline(sales, { entity, limit: 50 })).rows.find((row) => row.actorId)?.actorId
+    expect(author !== undefined, 'nothing on the deal has an author')
+    const mine = await readTimeline(sales, { entity, actorIds: [author!], limit: 50 })
+    const nobody = await readTimeline(sales, { entity, actorIds: [crypto.randomUUID()], limit: 5 })
+    expect(mine.rows.length > 0 && mine.rows.every((row) => row.actorId === author), 'the author filter dropped or kept the wrong rows')
+    expect(nobody.rows.length === 0, `a stranger matched ${nobody.rows.length} rows`)
+    return `${mine.rows.length} by the author, none by a stranger`
+  })
+
   console.log('\n-- pipeline and stage agree ------------------------------------------')
 
   const pipelines = await db

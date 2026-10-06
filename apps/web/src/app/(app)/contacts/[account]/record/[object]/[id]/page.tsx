@@ -485,6 +485,7 @@ const RecordPage = async ({
         groups={ACTIVITY_GROUPS}
         canWrite={canWrite}
         viewer={{ userId: session.userId, isAdmin: sessionIsAdmin(session) }}
+        people={lookups.users}
       />
     )
   }

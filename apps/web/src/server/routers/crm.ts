@@ -637,6 +637,7 @@ export const crmRouter = router({
         z.object({
           entity: entityRef,
           types: z.array(z.string().max(32)).max(24).optional(),
+          actorIds: z.array(z.uuid()).max(100).optional(),
           limit: z.number().int().min(1).max(200).optional(),
           cursor: z.object({ occurredAt: z.coerce.date(), id: z.uuid() }).nullish(),
         }),
@@ -646,6 +647,7 @@ export const crmRouter = router({
           readTimeline(ctx.account, {
             entity: input.entity,
             types: (input.types ?? []).filter(isActivityType),
+            actorIds: input.actorIds ?? [],
             limit: input.limit ?? 50,
             cursor: input.cursor ?? null,
           }),
