@@ -1,5 +1,5 @@
 import { canWrite as roleCanWrite, isUuid, readThread } from '@rawr/db'
-import { Badge, Card } from '@rawr/ui'
+import { Card } from '@rawr/ui'
 import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
@@ -58,22 +58,25 @@ const ThreadPage = async ({
     <InboxFrame account={account} session={session} filters={filters} selected={threadId}>
       <ThreadRead threadId={threadId} />
 
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Link href={inboxPath(account)} aria-label="Back to the inbox" className="grid size-8 place-items-center rounded-pill text-body no-underline hover:bg-fill md:hidden">
+      <div className="flex min-h-15 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href={inboxPath(account)} aria-label="Back to the inbox" className="grid size-8 shrink-0 place-items-center rounded-pill text-body no-underline hover:bg-fill md:hidden">
             <ChevronLeft aria-hidden="true" className="size-4" />
           </Link>
-          <h1 className="min-w-0 text-lg font-medium">{found.thread.subject ?? '(no subject)'}</h1>
-          <Badge>
-            {found.thread.messageCount} message{found.thread.messageCount === 1 ? '' : 's'}
-          </Badge>
+          <div className="flex min-w-0 flex-col">
+            <h1 className="min-w-0 text-base font-medium">{found.thread.subject ?? '(no subject)'}</h1>
+            <p className="min-w-0 truncate text-secondary">
+              {found.thread.messageCount} message{found.thread.messageCount === 1 ? '' : 's'}
+              {newest?.fromAddr ? ` · last from ${newest.fromAddr}` : ''}
+            </p>
+          </div>
         </div>
         {replyTo ? (
           <ReplyButton account={account} threadId={threadId} to={replyTo} subject={found.thread.subject} />
         ) : null}
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,16rem)]">
+      <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto bg-fill-thread p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,var(--spacing-inbox-aside))]">
         <div className="flex min-w-0 flex-col gap-2">
           {found.messages.map((message) => (
             <MessageView key={message.id} message={message} />

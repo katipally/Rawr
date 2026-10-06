@@ -74,7 +74,7 @@ export const InboxFrame = async ({
   const same = (a: InboxFilters, b: InboxFilters) =>
     a.scope === b.scope && a.mailboxId === b.mailboxId && a.unreplied === b.unreplied && a.unread === b.unread
   const current = views.find((view) => same(view.filters, filters))?.key ?? null
-  const link = 'flex items-center justify-between gap-2 rounded-hs px-3 py-2 text-body no-underline hover:bg-fill'
+  const link = 'flex min-h-8 items-center justify-between gap-2 py-1 pr-6 pl-2 text-body font-normal no-underline hover:bg-fill'
 
   const hasMailbox = mailboxes.some((box) => box.userId === session.userId && box.state !== 'revoked')
 
@@ -94,9 +94,9 @@ export const InboxFrame = async ({
         </Alert>
       )}
       <div className="flex min-h-0 flex-1">
-      <aside className="hidden w-[14.75rem] shrink-0 flex-col border-r border-line bg-surface md:flex">
+      <aside className="hidden w-inbox-nav shrink-0 flex-col border-r border-line bg-surface md:flex">
         <div className="flex flex-col gap-3 px-4 pt-4 pb-2">
-          <h1 className="text-lg font-semibold">Inbox</h1>
+          <h1 className="text-base font-semibold">Inbox</h1>
           <form action={inboxPath(account)} className="relative">
             {filters.scope === 'mine' ? <input type="hidden" name="scope" value="mine" /> : null}
             {filters.unreplied ? <input type="hidden" name="unreplied" value="1" /> : null}
@@ -120,10 +120,10 @@ export const InboxFrame = async ({
                 <Link
                   href={inboxPath(account, toParams({ ...view.filters, q: filters.q }))}
                   aria-current={current === view.key ? 'page' : undefined}
-                  className={cn(link, current === view.key && 'bg-canvas font-semibold')}
+                  className={cn(link, current === view.key && 'bg-fill font-semibold')}
                 >
                   <span className="truncate">{view.label}</span>
-                  <span className="shrink-0 text-small tabular-nums">{fmt.number(view.count)}</span>
+                  <span className="shrink-0 font-semibold tabular-nums">{fmt.number(view.count)}</span>
                 </Link>
               </li>
             ))}
@@ -137,7 +137,7 @@ export const InboxFrame = async ({
                     <Link
                       href={inboxPath(account, toParams({ ...filters, mailboxId: filters.mailboxId === box.id ? null : box.id }))}
                       aria-current={filters.mailboxId === box.id ? 'page' : undefined}
-                      className={cn(link, filters.mailboxId === box.id && 'bg-canvas font-semibold')}
+                      className={cn(link, filters.mailboxId === box.id && 'bg-fill font-semibold')}
                     >
                       <span className="truncate">{box.email}</span>
                       {box.userId === session.userId ? <span className="shrink-0 text-small text-secondary">Yours</span> : null}
@@ -148,7 +148,7 @@ export const InboxFrame = async ({
             </>
           ) : null}
         </nav>
-        <Link href={mailboxesPath()} className="flex items-center gap-2 border-t border-line px-4 py-3 text-body no-underline hover:bg-fill">
+        <Link href={mailboxesPath()} className="flex items-center gap-2 border-t border-line px-4 py-3 text-body font-light no-underline hover:bg-fill">
           <Settings aria-hidden="true" className="size-4" />
           Inbox Settings
         </Link>

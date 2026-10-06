@@ -70,13 +70,13 @@ export const InboxList = ({
   return (
     <div
       className={cn(
-        'flex w-full shrink-0 flex-col border-r border-line bg-surface md:w-[19.75rem]',
+        'flex w-full shrink-0 flex-col border-r border-line bg-surface md:w-[min(var(--spacing-inbox-list),40%)]',
         // On a phone the list and the conversation take turns: the list until a
         // thread is opened, then the conversation.
         selected && 'hidden md:flex',
       )}
     >
-      <p className="flex h-12 shrink-0 items-center justify-between border-b border-line px-4 text-small">
+      <p className="flex h-10 shrink-0 items-center justify-between border-b border-line px-4 text-small">
         <span className="text-secondary">{filters.q ? `Matching “${filters.q}”` : 'Newest first'}</span>
         <span className="font-semibold">{fmt.number(threads.length)}{cursor ? '+' : ''}</span>
       </p>
@@ -96,20 +96,20 @@ export const InboxList = ({
                   href={threadPath(account, thread.id)}
                   aria-current={open ? 'page' : undefined}
                   className={cn(
-                    'flex gap-3 border-b border-line border-l-[3px] px-4 py-3 no-underline hover:bg-fill',
+                    'flex gap-3 border-b border-line border-l-4 py-3 pr-3 pl-2 font-normal text-body no-underline transition-colors duration-150 ease-out hover:bg-fill',
                     open ? 'border-l-body bg-canvas' : 'border-l-transparent',
                   )}
                 >
                   <Avatar name={whoOf(thread)} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-baseline justify-between gap-2">
-                      <span className={cn('truncate text-body', thread.unread ? 'font-semibold' : 'font-medium')}>{whoOf(thread)}</span>
-                      <time className="shrink-0 text-small text-secondary tabular-nums" dateTime={thread.lastAt ?? undefined}>
+                      <span className={cn('truncate text-base', thread.unread ? 'font-bold' : 'font-normal')}>{whoOf(thread)}</span>
+                      <time className="shrink-0 text-small font-light text-secondary tabular-nums" dateTime={thread.lastAt ?? undefined}>
                         {thread.lastAt ? fmt.date(thread.lastAt) : ''}
                       </time>
                     </span>
-                    <span className={cn('truncate text-body', thread.unread && 'font-semibold')}>{thread.subject ?? '(no subject)'}</span>
-                    <span className="truncate text-small text-secondary">{thread.snippet ?? ''}</span>
+                    <span className={cn('truncate text-[0.9375rem]', thread.unread ? 'font-semibold' : 'font-normal')}>{thread.subject ?? '(no subject)'}</span>
+                    <span className="truncate font-normal">{thread.snippet ?? ''}</span>
                     {thread.lastDirection === 'inbound' ? (
                       <span className="mt-1">
                         <Badge tone="warn">Waiting on us</Badge>

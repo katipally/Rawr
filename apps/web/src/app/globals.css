@@ -15,6 +15,7 @@
   --color-fill: var(--rawr-fill);
   --color-fill-hover: var(--rawr-fill-hover);
   --color-fill-header-hover: var(--rawr-fill-header-hover);
+  --color-fill-thread: var(--rawr-fill-thread);
   --color-disabled: var(--rawr-disabled);
 
   --color-body: var(--rawr-text);
@@ -89,6 +90,9 @@
   --spacing-record-right: var(--rawr-record-right-width);
   --spacing-composer-width: var(--rawr-composer-width);
   --spacing-composer-height: var(--rawr-composer-height);
+  --spacing-inbox-nav: var(--rawr-inbox-nav-width);
+  --spacing-inbox-list: var(--rawr-inbox-list-width);
+  --spacing-inbox-aside: var(--rawr-inbox-aside-width);
   /* A literal, because a container query cannot read a custom property. Below it
      a page card beside a docked panel would be narrower than the panel, so the
      panel covers the card instead. */

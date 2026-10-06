@@ -14,6 +14,8 @@
   --rawr-fill-hover: #e6e6e6;
   /* A table header under the pointer, a shade lighter than a hovered row. */
   --rawr-fill-header-hover: #ebebeb;
+  /* Behind the messages of an open inbox conversation. */
+  --rawr-fill-thread: #fafafa;
   --rawr-disabled: #f5f5f5;
 
   --rawr-text: #333333;
@@ -98,6 +100,10 @@
   /* The record composer HubSpot floats over the page. */
   --rawr-composer-width: 36.25rem;
   --rawr-composer-height: 27.25rem;
+  /* HubSpot's inbox: the views, the thread list and the contact column. */
+  --rawr-inbox-nav-width: 14.625rem;
+  --rawr-inbox-list-width: 23.4375rem;
+  --rawr-inbox-aside-width: 20rem;
 
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;

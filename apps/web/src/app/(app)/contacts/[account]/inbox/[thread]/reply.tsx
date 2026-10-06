@@ -23,8 +23,7 @@ export const ReplyButton = ({
 
   return (
     <>
-      <Button variant="primary" onClick={() => setOpen(true)}>
-        <Reply aria-hidden="true" className="size-4" />
+      <Button variant="secondary" className="shrink-0" icon={<Reply aria-hidden="true" className="size-3.5" />} onClick={() => setOpen(true)}>
         Reply
       </Button>
       {open ? (
