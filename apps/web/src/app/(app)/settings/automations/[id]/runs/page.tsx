@@ -1,5 +1,7 @@
 import { listAutomationRuns, readAutomation, RUN_PAGE } from '@rawr/db'
-import { Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
+import { EmptyState, PageHeader } from '@rawr/ui'
+import { ChevronLeft } from 'lucide-react'
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { automationsPath } from '~/lib/links.ts'
 import { RunLog } from './run-log.tsx'
@@ -48,11 +50,13 @@ const AutomationRunsPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      <Breadcrumb items={[{ label: 'Automations', href: automationsPath() }, { label: rule.name }]} />
+      <Link href={automationsPath()} className="inline-flex items-center gap-1 self-start font-semibold">
+        <ChevronLeft aria-hidden="true" className="size-4" />
+        Back to Automations
+      </Link>
       <PageHeader
-        as="h2"
         title={rule.name}
-        lead="Every time this rule fired, and what it did."
+        lead="History: every time this rule fired, and what it did."
         why={
           <>
             <p>

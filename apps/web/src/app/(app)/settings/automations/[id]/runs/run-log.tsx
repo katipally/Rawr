@@ -1,8 +1,10 @@
 'use client'
 
 import { STATE_TONE } from '../../run-state.ts'
-import { Badge, EmptyState, FilterRow } from '@rawr/ui'
+import { Badge, DataTable, EmptyState, type Column } from '@rawr/ui'
 import Link from 'next/link'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { FilterChip } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -22,7 +24,6 @@ export type RunLogEntry = {
 }
 
 const FILTERS: { key: string; label: string }[] = [
-  { key: '', label: 'All' },
   { key: 'waiting', label: 'Waiting' },
   { key: 'done', label: 'Done' },
   { key: 'skipped', label: 'Skipped' },
@@ -45,18 +46,54 @@ export const RunLog = ({
   const fmt = useFormat()
   const { page, pager } = usePagedRows(runs, 'runs')
 
+  const columns: Column<RunLogEntry>[] = [
+    {
+      key: 'record',
+      header: 'Record',
+      width: 280,
+      render: (run) => (
+        <Link href={recordPath(accountSlug, run.entityType, run.entityId)} title={run.entityName ?? undefined} className="block truncate font-semibold">
+          {run.entityName ?? `This ${run.entityType}`}
+        </Link>
+      ),
+    },
+    { key: 'state', header: 'Status', width: 120, render: (run) => <Badge tone={STATE_TONE[run.state]}>{run.state}</Badge> },
+    {
+      key: 'detail',
+      header: 'What it did',
+      width: 460,
+      render: (run) => (
+        <span className="flex min-w-0 flex-col gap-0.5 py-1 font-light">
+          {run.trail.map((entry, index) => (
+            <span key={`${run.id}-${index}`} className="flex gap-2 break-words">
+              <span className="tabular-nums">{index + 1}.</span>
+              <span className="min-w-0">{entry}</span>
+            </span>
+          ))}
+          {run.detail ? <span className="break-words text-secondary">{run.detail}</span> : null}
+          {run.trail.length === 0 && !run.detail ? EMPTY_VALUE : null}
+        </span>
+      ),
+    },
+    {
+      key: 'at',
+      header: 'Date',
+      width: 220,
+      // A waiting run's useful time is when it wakes, not when it started:
+      // "fired an hour ago" says nothing about a rule that has two more days to sit.
+      render: (run) => <span className="font-light">{run.resumeAt ? `Continues ${fmt.dateTime(run.resumeAt)}` : fmt.dateTime(run.at)}</span>,
+    },
+  ]
+
   return (
-    <div className="flex flex-col gap-3">
-      <FilterRow
-        label="Which runs"
-        lead="Showing"
-        items={FILTERS.map((entry) => ({
-          key: entry.key || 'all',
-          label: entry.label,
-          href: entry.key ? `?state=${entry.key}` : '?',
-          current: (state ?? '') === entry.key,
-        }))}
-      />
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <FilterChip
+          label="Status"
+          clear="?"
+          options={FILTERS.map((entry) => ({ key: entry.key, label: entry.label, href: `?state=${entry.key}`, on: state === entry.key }))}
+        />
+      </div>
 
       {runs.length === 0 ? (
         <EmptyState
@@ -68,42 +105,7 @@ export const RunLog = ({
           }
         />
       ) : (
-        <ol className="flex flex-col rounded-panel border border-line bg-surface">
-          {page.map((run) => (
-            <li key={run.id} className="flex flex-col gap-1 border-b border-divider px-3 py-2 last:border-0">
-              <div className="flex flex-wrap items-baseline gap-x-2">
-                <Badge tone={STATE_TONE[run.state]}>{run.state}</Badge>
-                <Link
-                  href={recordPath(accountSlug, run.entityType, run.entityId)}
-                  className="min-w-0 truncate font-medium"
-                >
-                  {run.entityName ?? `This ${run.entityType}`}
-                </Link>
-                {/* A waiting run's useful time is when it wakes, not when it
-                    started: "fired an hour ago" says nothing about a rule that
-                    has two more days to sit. */}
-                <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
-                  {run.resumeAt
-                    ? `continues ${fmt.dateTime(run.resumeAt)}`
-                    : fmt.dateTime(run.at)}
-                </span>
-              </div>
-
-              {run.trail.length > 0 ? (
-                <ol className="flex flex-col gap-0.5 text-small text-secondary">
-                  {run.trail.map((entry, index) => (
-                    <li key={`${run.id}-${index}`} className="flex gap-2">
-                      <span className="tabular-nums">{index + 1}.</span>
-                      <span className="min-w-0 break-words">{entry}</span>
-                    </li>
-                  ))}
-                </ol>
-              ) : null}
-
-              {run.detail ? <p className="text-small break-words text-secondary">{run.detail}</p> : null}
-            </li>
-          ))}
-        </ol>
+        <DataTable columns={columns} rows={page} rowKey={(run) => run.id} caption="Runs" storageKey="settings.automation-runs" />
       )}
 
       {pager}
