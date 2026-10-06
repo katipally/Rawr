@@ -46,20 +46,23 @@ export const InboxList = ({
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
-  const [threads, setThreads] = useState(initial)
-  const [cursor, setCursor] = useState<Cursor>(initialCursor)
+  // Only the pages fetched here are held; the first page stays the server's, so
+  // a refresh after a thread is marked read reaches the list.
+  const [older, setOlder] = useState<{ threads: Thread[]; cursor: Cursor } | null>(null)
   const [busy, setBusy] = useState(false)
+  const cursor = older ? older.cursor : initialCursor
+  const firstIds = new Set(initial.map((thread) => thread.id))
+  const threads = older ? [...initial, ...older.threads.filter((thread) => !firstIds.has(thread.id))] : initial
 
   const more = async () => {
     if (!cursor) return
     setBusy(true)
     try {
       const page = await queryClient.fetchQuery({ ...trpc.mail.inbox.queryOptions({ ...filters, cursor, limit: 25 }), staleTime: 0 })
-      setThreads((current) => [
-        ...current,
-        ...page.threads.map((thread) => ({ ...thread, lastAt: thread.lastAt?.toISOString() ?? null })),
-      ])
-      setCursor(page.cursor)
+      setOlder((current) => ({
+        threads: [...(current?.threads ?? []), ...page.threads.map((thread) => ({ ...thread, lastAt: thread.lastAt?.toISOString() ?? null }))],
+        cursor: page.cursor,
+      }))
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
@@ -90,6 +93,7 @@ export const InboxList = ({
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {threads.map((thread) => {
             const open = thread.id === selected
+            const unread = thread.unread && !open
             return (
               <li key={thread.id}>
                 <Link
@@ -103,12 +107,12 @@ export const InboxList = ({
                   <Avatar name={whoOf(thread)} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex items-baseline justify-between gap-2">
-                      <span className={cn('truncate text-base', thread.unread ? 'font-bold' : 'font-normal')}>{whoOf(thread)}</span>
+                      <span className={cn('truncate text-base', unread ? 'font-bold' : 'font-normal')}>{whoOf(thread)}</span>
                       <time className="shrink-0 text-small font-light text-secondary tabular-nums" dateTime={thread.lastAt ?? undefined}>
                         {thread.lastAt ? fmt.date(thread.lastAt) : ''}
                       </time>
                     </span>
-                    <span className={cn('truncate text-[0.9375rem]', thread.unread ? 'font-semibold' : 'font-normal')}>{thread.subject ?? '(no subject)'}</span>
+                    <span className={cn('truncate text-[0.9375rem]', unread ? 'font-semibold' : 'font-normal')}>{thread.subject ?? '(no subject)'}</span>
                     <span className="truncate font-normal">{thread.snippet ?? ''}</span>
                     {thread.lastDirection === 'inbound' ? (
                       <span className="mt-1">
