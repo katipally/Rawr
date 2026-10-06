@@ -1,10 +1,11 @@
 'use client'
 
-import { Alert, Avatar, IconButton, Spinner, useMounted, usePresence, useToast } from '@rawr/ui'
-import { CalendarDays, Copy, Mail, Phone, SquareCheck, StickyNote, X } from 'lucide-react'
+import { Alert, Avatar, IconButton, Spinner, useMounted, usePresence } from '@rawr/ui'
+import { CalendarDays, Mail, Phone, SquareCheck, StickyNote, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { CopyButton } from '~/components/copy-button.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { PREVIEW_DOCK } from '~/lib/docks.ts'
 import { inSentence } from '~/lib/label-case.ts'
@@ -48,7 +49,6 @@ const PREVIEW_EXIT_MS = 280
 export const RecordPreview = ({ account, object, objectLabel, id, fields, canWrite, from, onClose }: RecordPreviewProps) => {
   const queryClient = useQueryClient()
   const fmt = useFormat()
-  const toast = useToast()
   const mounted = useMounted()
   const panel = useRef<HTMLElement>(null)
   const [loaded, setLoaded] = useState<{ id: string; data: Loaded | null } | null>(null)
@@ -103,15 +103,6 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
     { label: 'Meeting', icon: CalendarDays, params: { interaction: 'meeting' } },
   ]
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(email)
-      toast('success', 'Email copied.')
-    } catch {
-      toast('error', 'The browser would not let the email be copied.')
-    }
-  }
-
   return createPortal(
     // The wrapper's width is what animates, so the page card beside it gives up
     // the room in step. On a shell too narrow to share, it covers the card.
@@ -157,7 +148,7 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
                         <a href={`mailto:${email}`} className="min-w-0 truncate hover:underline" title={email}>
                           {email}
                         </a>
-                        <IconButton label="Copy email" icon={<Copy aria-hidden="true" className="size-3.5" />} onClick={() => void copy()} className="size-6 shrink-0" />
+                        <CopyButton value={email} what="Email" />
                       </span>
                     ) : null}
                   </div>
