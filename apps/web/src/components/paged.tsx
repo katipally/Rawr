@@ -57,6 +57,7 @@ export const usePagedRows = <Row,>(
           noun={noun}
           onPrevious={() => go(Math.max(0, offset - perPage), perPage)}
           onNext={() => go(offset + perPage, perPage)}
+          onPage={(number) => go((number - 1) * perPage, perPage)}
           onPerPage={(size) => go(0, size)}
         />
       ) : null,
