@@ -1,8 +1,11 @@
 'use client'
 
-import { Badge, Button, Card, Combobox, EmptyState, NOTHING_MATCHED, Spinner, useToast } from '@rawr/ui'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Badge, Button, DataTable, EmptyState, NOTHING_MATCHED, Spinner, cn, useToast, type Column } from '@rawr/ui'
+import Link from 'next/link'
 import { Fragment, useState } from 'react'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { FilterChip, ghostFilter } from '~/components/filter-chip.tsx'
+import { auditPath } from '~/lib/links.ts'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { useQueryClient } from '@tanstack/react-query'
@@ -53,17 +56,26 @@ const pastTense = (verb: string): string =>
         ? `${verb}led`
         : `${verb}ed`)
 
-/** A sentence rather than a row of columns: "who did what to which thing" reads
- *  faster than four cells the eye has to reassemble.
- *
- *  Only the first word of an action is the verb, so `save_steps` is "saved steps
- *  on", and the article follows the thing rather than always being "a", which
- *  turned every integration into "a integration". */
-const sentence = (row: Pick<Row, 'actorName' | 'action' | 'entity'>): string => {
-  const [verb = '', ...rest] = row.action.split('_')
-  const thing = row.entity.replaceAll('_', ' ')
-  const did = rest.length > 0 ? `${pastTense(verb)} ${rest.join(' ')} on` : pastTense(verb)
-  return `${row.actorName ?? 'Somebody'} ${did} ${/^[aeiou]/i.test(thing) ? 'an' : 'a'} ${thing}`
+/** What was done, in the Action column. Only the first word of an action is the
+ *  verb, so `save_steps` is "Saved steps". */
+const actionOf = (action: string): string => {
+  const [verb = '', ...rest] = action.split('_')
+  const did = [pastTense(verb), ...rest].join(' ')
+  return did.charAt(0).toUpperCase() + did.slice(1)
+}
+
+const categoryOf = (entity: string): string => {
+  const words = entity.replaceAll('_', ' ')
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
+
+/** A filtered history is an address, so it can be sent to whoever has to answer for it. */
+const hrefFor = (entity: string | null, actorId: string | null): string => {
+  const query = new URLSearchParams()
+  if (entity) query.set('entity', entity)
+  if (actorId) query.set('actor', actorId)
+  const search = query.toString()
+  return search ? `${auditPath()}?${search}` : auditPath()
 }
 
 export const AuditTable = ({
@@ -71,8 +83,8 @@ export const AuditTable = ({
   cursor: initialCursor,
   entities,
   people,
-  entity: initialEntity,
-  actorId: initialActorId,
+  entity,
+  actorId,
 }: {
   initial: Row[]
   cursor: Cursor
@@ -84,39 +96,17 @@ export const AuditTable = ({
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const toast = useToast()
-  const router = useRouter()
-  const pathname = usePathname()
-  const params = useSearchParams()
   const [rows, setRows] = useState(initial)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
-  const [entity, setEntity] = useState<string | null>(initialEntity)
-  const [actorId, setActorId] = useState<string | null>(initialActorId)
   const [busy, setBusy] = useState(false)
 
-  /** The filter is the address, so a history somebody is reading can be sent to
-   *  the person who has to answer for it. Replaced rather than pushed: narrowing
-   *  a filter twice should not need Back pressed twice to leave. */
-  const go = (key: 'entity' | 'actor', value: string | null) => {
-    const query = new URLSearchParams(params)
-    if (value === null) query.delete(key)
-    else query.set(key, value)
-    const search = query.toString()
-    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false })
-  }
-
-  const load = async (next: { entity?: string | null; actorId?: string | null; more?: boolean }) => {
+  const loadOlder = async () => {
     setBusy(true)
     try {
-      const page = await queryClient.fetchQuery({ ...trpc.admin.audit.list.queryOptions({
-        entity: next.entity === undefined ? entity : next.entity,
-        actorId: next.actorId === undefined ? actorId : next.actorId,
-        cursor: next.more ? cursor : null,
-        limit: 50,
-      }), staleTime: 0 })
+      const page = await queryClient.fetchQuery({ ...trpc.admin.audit.list.queryOptions({ entity, actorId, cursor, limit: 50 }), staleTime: 0 })
       // superjson revives the timestamps as Dates; the server component hands
       // them over as strings. One shape here, so the renderer never has to ask.
-      const fetched = page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))
-      setRows((current) => (next.more ? [...current, ...fetched] : fetched))
+      setRows((current) => [...current, ...page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))])
       setCursor(page.cursor)
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -125,57 +115,65 @@ export const AuditTable = ({
     }
   }
 
+  const columns: Column<Row>[] = [
+    {
+      key: 'at',
+      header: 'Occurred',
+      width: 200,
+      render: (row) => (
+        <time dateTime={row.at} className="whitespace-nowrap">
+          {fmt.dateTime(row.at)}
+        </time>
+      ),
+    },
+    {
+      key: 'actor',
+      header: 'Modified by',
+      width: 240,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <span title={row.actorName ?? undefined} className="min-w-0 truncate">{row.actorName ?? 'Somebody'}</span>
+          {row.actorKind === 'user' ? null : <Badge tone={KIND_TONE[row.actorKind] ?? 'neutral'} className="shrink-0">{row.actorKind}</Badge>}
+        </span>
+      ),
+    },
+    { key: 'category', header: 'Category', width: 200, render: (row) => <span className="block truncate">{categoryOf(row.entity)}</span> },
+    { key: 'action', header: 'Action', width: 220, render: (row) => <span className="block truncate">{actionOf(row.action)}</span> },
+    { key: 'details', header: 'Details', width: 360, render: (row) => <Diff before={row.before} after={row.after} /> },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
-        <Combobox
-          label="Kind of thing"
-          value={entity}
-          onChange={(value) => {
-            setEntity(value)
-            go('entity', value)
-            void load({ entity: value })
-          }}
-          options={entities.map((each) => ({ value: each, label: each.replaceAll('_', ' ') }))}
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-1">
+        <FilterChip
+          label="Category"
+          clear={hrefFor(null, actorId)}
+          options={entities.map((each) => ({ key: each, label: categoryOf(each), href: hrefFor(each, actorId), on: each === entity }))}
         />
-        <Combobox
-          label="Who"
-          value={actorId}
-          onChange={(value) => {
-            setActorId(value)
-            go('actor', value)
-            void load({ actorId: value })
-          }}
-          options={people.map((person) => ({ value: person.userId, label: person.name }))}
+        <FilterChip
+          label="Modified by"
+          clear={hrefFor(entity, null)}
+          options={people.map((person) => ({ key: person.userId, label: person.name, href: hrefFor(entity, person.userId), on: person.userId === actorId }))}
         />
+        {entity || actorId ? (
+          <>
+            <span aria-hidden="true" className="mx-1.5 h-5 w-px bg-line" />
+            <Link href={auditPath()} className={cn(ghostFilter, 'no-underline')}>
+              Reset filters
+            </Link>
+          </>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
         <EmptyState {...NOTHING_MATCHED} />
       ) : (
-        <Card flush>
-          <ul className="divide-y divide-divider">
-            {rows.map((row) => (
-              <li key={row.id} className="px-4 py-2">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <time dateTime={row.at} className="w-44 shrink-0 text-small text-secondary">
-                    {fmt.dateTime(row.at)}
-                  </time>
-                  <span className="min-w-0 flex-1">{sentence(row)}</span>
-                  {row.actorKind === 'user' ? null : (
-                    <Badge tone={KIND_TONE[row.actorKind] ?? 'neutral'}>{row.actorKind}</Badge>
-                  )}
-                </div>
-                <Diff before={row.before} after={row.after} />
-              </li>
-            ))}
-          </ul>
-        </Card>
+        <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption="Audit log" storageKey="settings.audit" />
       )}
 
       <div className="flex items-center gap-2">
         {cursor ? (
-          <Button busy={busy} onClick={() => void load({ more: true })}>
+          <Button busy={busy} onClick={() => void loadOlder()}>
             Show older
           </Button>
         ) : rows.length > 0 ? (
@@ -183,13 +181,12 @@ export const AuditTable = ({
         ) : null}
         {busy && !cursor ? <Spinner label="Loading history" /> : null}
       </div>
-
-          </div>
+    </div>
   )
 }
 
 const show = (value: unknown): string => {
-  if (value === null || value === undefined || value === '') return '—'
+  if (value === null || value === undefined || value === '') return EMPTY_VALUE
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
@@ -198,7 +195,7 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 /** What actually changed, field by field.
  *
- *  The sentence says a deal was updated; this says the stage went from
+ *  The Action column says a deal was updated; this says the stage went from
  *  Qualified to Closed won, which is the thing anybody reading a history came
  *  for. Only the keys that differ, because a record with forty fields and one
  *  edit should read as one line. Both sides are already stored on the row. */
@@ -211,11 +208,11 @@ const Diff = ({ before, after }: { before: unknown; after: unknown }) => {
   if (keys.length === 0) return null
 
   return (
-    <details className="mt-1">
+    <details className="py-2">
       <summary className="cursor-pointer text-small text-secondary">
         {keys.length === 1 ? '1 field changed' : `${keys.length} fields changed`}
       </summary>
-      <dl className="mt-1 grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
+      <dl className="mt-1 grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
         {keys.map((key) => (
           <Fragment key={key}>
             <dt className="truncate text-secondary">{key.replaceAll('_', ' ')}</dt>

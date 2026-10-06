@@ -38,8 +38,7 @@ const AuditPage = async ({
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
-        title="Audit log"
+        title="Audit Logs"
         lead={`Every change made in ${session.accountName}, newest first.`}
         why={
           <p>
@@ -50,6 +49,7 @@ const AuditPage = async ({
       />
 
       <AuditTable
+        key={`${askedEntity ?? ''}|${actor ?? ''}`}
         initial={page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))}
         cursor={page.cursor}
         entities={entities}
