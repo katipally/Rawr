@@ -6,13 +6,13 @@ import { KpiStrip } from '~/components/crm/kpi-strip.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
-import { decodeCursor, decodeFilters, decodeSort, duplicatesPath, encodeCursor, exportCsvPath, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { decodeFilters, decodeSort, duplicatesPath, exportCsvPath, exportPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 25
 /** The largest page the table offers. Above this a person is looking for the
  *  export, not a longer screen. */
 const MAX_PAGE_SIZE = 100
@@ -23,6 +23,8 @@ const readLimit = (raw: string | undefined): number => {
   return Math.min(Math.max(Math.trunc(asked), 1), MAX_PAGE_SIZE)
 }
 
+const readPage = (raw: string | undefined): number => Math.max(1, Math.trunc(Number(raw)) || 1)
+
 /** Shaped like an object key. The registry decides whether it is one. */
 const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
 
@@ -31,11 +33,10 @@ type Search = {
   q?: string
   filters?: string
   sort?: string
-  cursor?: string
+  page?: string
   error?: string
   cols?: string
   limit?: string
-  skip?: string
   /** The + in the top bar and "Add view" on the tab bar link here rather than
    *  carrying their own dialogs. */
   new?: string
@@ -112,7 +113,7 @@ const ListPage = async ({
         sorts,
         search: search.q ?? '',
         limit: readLimit(search.limit),
-        cursor: decodeCursor(search.cursor),
+        offset: (readPage(search.page) - 1) * readLimit(search.limit),
         count: true,
       })
       return { ...crm, views: list, resolved: view, page, queryError: null }
@@ -126,6 +127,12 @@ const ListPage = async ({
   // view actually lives at, rather than a 404.
   if (!resolved.matched && resolved.view.slug !== viewSlug) {
     redirect(objectView(account, objectParam, resolved.view.slug, 'list', search as ListParams))
+  }
+  // A page past the end, from a bookmark taken before rows were deleted or a
+  // filter narrowed, lands on the last page that still has rows.
+  if (page && page.rows.length === 0 && (page.total ?? 0) > 0 && readPage(search.page) > 1) {
+    const last = Math.ceil(page.total! / readLimit(search.limit))
+    redirect(objectView(account, objectParam, resolved.view.slug, 'list', { ...(search as ListParams), page: String(last) }))
   }
 
   // Normalised, not cast: the toolbar reads group.conditions, and a hand-edited
@@ -152,10 +159,9 @@ const ListPage = async ({
     ...(search.q ? { q: search.q } : {}),
     ...(search.filters ? { filters: search.filters } : {}),
     ...(search.sort ? { sort: search.sort } : {}),
-    ...(search.cursor ? { cursor: search.cursor } : {}),
+    ...(search.page ? { page: search.page } : {}),
     ...(search.cols ? { cols: search.cols } : {}),
     ...(search.limit ? { limit: search.limit } : {}),
-    ...(search.skip ? { skip: search.skip } : {}),
   }
 
   const exportHref = exportCsvPath(account, {
@@ -213,7 +219,6 @@ const ListPage = async ({
         }))}
         current={resolved.view.slug}
         currentKind="list"
-        kinds={kindsFor(object)}
         params={listParams}
         canWrite={canWrite}
       />
@@ -227,6 +232,7 @@ const ListPage = async ({
         viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
         viewLabel={resolved.view.name}
         kind="list"
+        kinds={kindsFor(object)}
         params={listParams}
         filters={filters as never}
         columns={columns}
@@ -267,7 +273,7 @@ const ListPage = async ({
             labels: row.labels,
           }))}
           params={listParams}
-          nextCursor={encodeCursor(page!.nextCursor)}
+          sorts={sorts}
           totalHint={page!.total}
           objectLabel={object.nameSingular}
           objectPlural={object.namePlural}

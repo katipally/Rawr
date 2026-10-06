@@ -1,9 +1,9 @@
 'use client'
 
-import { DataTable, EmptyState, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
-import { Download } from 'lucide-react'
+import { Avatar, DataTable, DropdownMenu, EmptyState, IconButton, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, EllipsisVertical, PanelRight } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { FieldType } from '@rawr/db'
@@ -34,9 +34,10 @@ export type RecordTableProps = {
   view: string
   columns: TableColumn[]
   rows: TableRow[]
-  /** Base query for the next-page link, so paging keeps the filters and the sort. */
+  /** Base query for the page links, so paging keeps the filters and the sort. */
   params: ListParams
-  nextCursor: string | undefined
+  /** What the rows are sorted by, so the header of that column says so. */
+  sorts: { key: string; direction: 'asc' | 'desc' }[]
   totalHint: number | null
   objectLabel: string
   objectPlural: string
@@ -54,7 +55,13 @@ const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
 
 /** Matches the list page's own default, so the per-page control opens showing
  *  what the page actually asked for. */
-const DEFAULT_PAGE_SIZE = 50
+const DEFAULT_PAGE_SIZE = 25
+
+/** HubSpot shows a person and a company as one Name cell with a picture, where
+ *  Rawr stores a contact's name as two fields. When the table opens on one of
+ *  them the other is folded into it rather than taking a column of its own. */
+const NAME_PARTS = ['first_name', 'last_name']
+const WITH_AVATAR = new Set(['contact', 'company'])
 
 export const RecordTable = ({
   account,
@@ -63,7 +70,7 @@ export const RecordTable = ({
   columns,
   rows,
   params,
-  nextCursor,
+  sorts,
   totalHint,
   objectLabel,
   objectPlural,
@@ -73,7 +80,6 @@ export const RecordTable = ({
   canWrite,
 }: RecordTableProps) => {
   const fmt = useFormat()
-  const router = useRouter()
   const origin = useOrigin()
   const preview = useSearchParams().get('preview')
   const { navigate } = useNavigation()
@@ -85,11 +91,75 @@ export const RecordTable = ({
   const onPage = new Set(rows.map((row) => row.id))
   const live = [...selected].filter((id) => onPage.has(id))
 
-  const tableColumns: Column<TableRow>[] = columns.map((column, index) => ({
+  const goTo = (next: ListParams) => navigate(objectView(account, object, view, 'list', { ...params, ...next, page: undefined }))
+  const keys = columns.map((column) => column.key)
+  const namedPerson = object === 'contact' && NAME_PARTS.includes(keys[0] ?? '')
+  const shown = namedPerson ? columns.filter((column, index) => index === 0 || !NAME_PARTS.includes(column.key)) : columns
+
+  const headerAside = (column: TableColumn, index: number) => {
+    const sorted = sorts[0]?.key === column.key ? sorts[0].direction : null
+    const SortIcon = sorted === 'asc' ? ArrowUp : sorted === 'desc' ? ArrowDown : ArrowUpDown
+    // The Name column stands for both halves of a person's name, so it goes as one.
+    const owned = index === 0 && namedPerson ? NAME_PARTS : [column.key]
+    const rest = keys.filter((key) => !owned.includes(key))
+    return (
+      <>
+        <button
+          type="button"
+          aria-label={sorted === 'desc' ? `Sort ${column.label} ascending` : `Sort ${column.label} descending`}
+          onClick={() => goTo({ sort: sorted === 'desc' ? column.key : `-${column.key}` })}
+          className={cn(
+            'grid size-6 shrink-0 place-items-center rounded-pill text-body hover:bg-fill-hover',
+            sorted ? null : 'opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100',
+          )}
+        >
+          <SortIcon aria-hidden="true" className="size-3.5" />
+        </button>
+        <DropdownMenu
+          label={`${column.label} column`}
+          groups={[
+            {
+              key: 'sort',
+              items: [
+                { key: 'asc', label: 'Sort ascending', checked: sorted === 'asc', onSelect: () => goTo({ sort: column.key }) },
+                { key: 'desc', label: 'Sort descending', checked: sorted === 'desc', onSelect: () => goTo({ sort: `-${column.key}` }) },
+              ],
+            },
+            {
+              key: 'columns',
+              items: [
+                { key: 'add', label: 'Add column', onSelect: () => replaceParams({ columns: 'edit' }) },
+                {
+                  key: 'remove',
+                  label: 'Remove column',
+                  // A table needs one column to be a table at all.
+                  disabled: rest.length === 0,
+                  onSelect: () => goTo({ cols: rest.join(',') }),
+                },
+              ],
+            },
+          ]}
+          trigger={(props) => (
+            <button
+              {...props}
+              type="button"
+              aria-label={`${column.label} column actions`}
+              className="ml-auto grid size-6 shrink-0 place-items-center rounded-pill text-body opacity-0 hover:bg-fill-hover group-hover/header:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100 [@media(hover:none)]:opacity-100"
+            >
+              <EllipsisVertical aria-hidden="true" className="size-4" />
+            </button>
+          )}
+        />
+      </>
+    )
+  }
+
+  const tableColumns: Column<TableRow>[] = shown.map((column, index) => ({
     key: column.key,
-    header: column.label,
+    header: index === 0 && namedPerson ? 'Name' : column.label,
     align: column.numeric ? 'right' : 'left',
     width: index === 0 ? 240 : column.width,
+    headerAside: headerAside(column, index),
     render: (row) => {
       const value = row.values[column.key]
       const overdue = OVERDUE_FIELDS.has(column.key) && fmt.isPast(value)
@@ -99,32 +169,31 @@ export const RecordTable = ({
         // value, falling back to the record's display name when that field is
         // empty, so a contact with no first name is still openable and still
         // named rather than rendering an empty link.
-        const own = row.labels[column.key] || (value === null || value === undefined ? '' : String(value))
+        const own = namedPerson ? '' : row.labels[column.key] || (value === null || value === undefined ? '' : String(value))
         const text = own.trim() || row.displayName
         return (
-          <span className="relative flex items-center">
+          <span className="flex items-center gap-2">
+            {WITH_AVATAR.has(object) ? <Avatar name={text} size="sm" /> : null}
             <Link
               href={recordPath(account, object, row.id, { from: origin })}
-              className="block min-w-0 flex-1 truncate font-medium"
+              className="block min-w-0 truncate font-semibold hover:text-accent hover:underline"
               title={text}
               onClick={(event) => event.stopPropagation()}
             >
               {text}
             </Link>
-            {/* Over the end of the name rather than beside it, so showing it does not
-                cut the name short. Shown with the row hovered or the button focused,
-                and always on a device with no hover to show it with. */}
-            <button
-              type="button"
-              aria-label={`Preview ${text}`}
+            {/* Shown with the row hovered or the button focused, and always on a
+                device with no hover to show it with. No width until then, so a
+                hidden button does not cut the name short. */}
+            <IconButton
+              label="Preview"
+              icon={<PanelRight aria-hidden="true" className="size-3.5" />}
               onClick={(event) => {
                 event.stopPropagation()
                 replaceParams({ preview: row.id })
               }}
-              className="absolute top-1/2 right-0 -translate-y-1/2 rounded-hs border border-line-strong bg-surface px-2 py-0.5 text-small opacity-0 hover:bg-fill focus-visible:opacity-100 [@media(hover:none)]:opacity-100 [tr:hover_&]:opacity-100"
-            >
-              Preview
-            </button>
+              className="h-6 w-0 border-0 border-line-strong bg-surface text-body opacity-0 focus-visible:w-6 focus-visible:border focus-visible:opacity-100 [@media(hover:none)]:w-6 [@media(hover:none)]:border [@media(hover:none)]:opacity-100 [tr:hover_&]:w-6 [tr:hover_&]:border [tr:hover_&]:opacity-100"
+            />
           </span>
         )
       }
@@ -170,16 +239,12 @@ export const RecordTable = ({
     },
   }))
 
-  // Keyset pages have no numbers, so how far in we are is carried in the URL and
-  // grows by the size of each page we walk past. A hand-edited value only makes
-  // the label wrong, never the rows.
-  const offset = Math.max(0, Number(params.skip ?? 0) || 0)
+  const current = Math.max(1, Math.trunc(Number(params.page)) || 1)
   const perPage = Math.max(1, Number(params.limit ?? 0) || DEFAULT_PAGE_SIZE)
+  const offset = (current - 1) * perPage
+  const toPage = (page: number) =>
+    navigate(objectView(account, object, view, 'list', { ...params, page: page > 1 ? String(page) : undefined }))
 
-  const pageHref = (next: ListParams): string => objectView(account, object, view, 'list', next)
-
-  // Previous is the browser's own history, because a keyset cursor points
-  // forward only and there is no address to jump back to.
   const pager = (
     <Pagination
       format={fmt.number}
@@ -187,22 +252,14 @@ export const RecordTable = ({
       count={rows.length}
       offset={offset}
       total={totalHint ?? undefined}
-      hasMore={Boolean(nextCursor)}
       perPage={perPage}
       noun={`${objectLabel.toLowerCase()} records`}
-      onPrevious={() => {
-        if (offset === 0) return
-        router.back()
-      }}
-      onNext={() => {
-        if (!nextCursor) return
-        navigate(pageHref({ ...params, cursor: nextCursor, skip: String(offset + rows.length) }))
-      }}
-      onPerPage={(size) =>
-        // A new page size restarts the walk: a cursor from a 25-row page means
-        // nothing to a 100-row one, and neither does the offset it came with.
-        navigate(pageHref({ ...params, limit: String(size), cursor: undefined, skip: undefined }))
-      }
+      onPrevious={() => toPage(current - 1)}
+      onNext={() => toPage(current + 1)}
+      onPage={toPage}
+      // A new page size starts again from the first page: page four of 25 rows
+      // and page four of 100 are different rows.
+      onPerPage={(size) => goTo({ limit: String(size) })}
     />
   )
   const bulking = canBulk && live.length > 0
@@ -217,7 +274,6 @@ export const RecordTable = ({
         columns={tableColumns}
         rows={rows}
         rowKey={(row) => row.id}
-        onRowClick={(row) => router.push(recordPath(account, object, row.id, { from: origin }))}
         caption={`${object} records in the ${view} view`}
         {...(canBulk
           ? { selection: { selected, onChange: setSelected, noun: objectLabel.toLowerCase() } }
@@ -272,7 +328,7 @@ export const RecordTable = ({
         // do with the whole list on the right. The export is a plain link so the
         // browser downloads it and it survives a closed tab.
         <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
-          <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
+          <span className="inline-flex h-pill items-center rounded-pill bg-canvas px-4 text-small font-semibold">
             {fmt.number(totalHint ?? rows.length)}{' '}
             {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
           </span>
@@ -280,7 +336,7 @@ export const RecordTable = ({
           <a
             href={exportHref}
             download
-            className={buttonClass('secondary', 'no-underline')}
+            className={buttonClass('secondary', 'h-pill min-h-0 text-small text-[color:var(--rawr-text)] no-underline')}
           >
             <Download aria-hidden="true" className="size-3.5" />
             Export

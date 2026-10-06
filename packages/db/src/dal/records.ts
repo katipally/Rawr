@@ -184,6 +184,12 @@ export type ListInput = {
   search?: string
   limit?: number
   cursor?: Cursor | null
+  /** Rows to step over before the page starts, for a numbered pager. Ignored
+   *  when a cursor is given. Postgres walks every skipped row, so a page costs
+   *  O(offset + limit) where a cursor page costs O(limit): fine for a person
+   *  clicking page numbers, wrong for a loop over every page, which is what the
+   *  cursor is for. */
+  offset?: number
   /** Ask for the matching-row count alongside the page. Off by default: the
    *  board reads one query per stage and an export reads every page, and
    *  neither has anywhere to show it. */
@@ -268,7 +274,8 @@ export const listRecords = async (
           from ${tableFor(object)}
          where ${sql.join(pageWhere, sql` and `)}
          order by ${plan.orderBy}
-         limit ${limit + 1}`)
+         limit ${limit + 1}
+         offset ${input.cursor ? 0 : Math.max(0, Math.trunc(input.offset ?? 0) || 0)}`)
       return { rows, labels: await resolveLabels(tx, columns, rows.slice(0, limit)) }
     }),
   ])

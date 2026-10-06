@@ -58,13 +58,13 @@ test('a chosen column set and page size survive the round trip', () => {
   const url = objectView('datasaur', 'contact', 'all', 'list', {
     cols: 'first_name,email',
     limit: '100',
-    skip: '100',
+    page: '3',
     q: 'acme',
   })
   const query = new URL(url, 'https://rawr.test').searchParams
   assert.equal(query.get('cols'), 'first_name,email')
   assert.equal(query.get('limit'), '100')
-  assert.equal(query.get('skip'), '100')
+  assert.equal(query.get('page'), '3')
   assert.equal(query.get('q'), 'acme')
 })
 

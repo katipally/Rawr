@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { pageRange } from './pagination.ts'
+import { pageNumbers, pageRange } from './pagination.ts'
 
 const format = (value: number) => new Intl.NumberFormat('de-DE').format(value)
 
@@ -52,4 +52,25 @@ test('a single row reads as a range of one', () => {
 
 test('counts are written by the caller, and plain digits when it gives no writer', () => {
   assert.equal(pageRange({ count: 50, offset: 0, total: 1204 }).label, 'Showing 1-50 of 1204')
+})
+
+test('a short list numbers every page', () => {
+  assert.deepEqual(pageNumbers(1, 1), [1])
+  assert.deepEqual(pageNumbers(2, 5), [1, 2, 3, 4, 5])
+})
+
+test('a long list keeps the ends and the pages around the current one', () => {
+  assert.deepEqual(pageNumbers(1, 3540), [1, 2, 3, 'gap', 3540])
+  assert.deepEqual(pageNumbers(50, 3540), [1, 'gap', 48, 49, 50, 51, 52, 'gap', 3540])
+  assert.deepEqual(pageNumbers(3540, 3540), [1, 'gap', 3538, 3539, 3540])
+})
+
+test('a gap never stands in for a single page', () => {
+  assert.deepEqual(pageNumbers(4, 9), [1, 2, 3, 4, 5, 6, 'gap', 9])
+  assert.deepEqual(pageNumbers(6, 9), [1, 'gap', 4, 5, 6, 7, 8, 9])
+})
+
+test('no pages, or a current page out of range, still answers', () => {
+  assert.deepEqual(pageNumbers(1, 0), [])
+  assert.deepEqual(pageNumbers(99, 3), [1, 2, 3])
 })

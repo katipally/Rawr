@@ -122,7 +122,6 @@ const BoardPage = async ({
         }))}
         current={resolved.view.slug}
         currentKind="board"
-        kinds={kindsFor(object)}
         params={listParams}
         canWrite={canWrite}
       />
@@ -156,6 +155,7 @@ const BoardPage = async ({
         viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
         viewLabel={resolved.view.name}
         kind="board"
+        kinds={kindsFor(object)}
         params={listParams}
         filters={filters as never}
         columns={resolved.view.columns}

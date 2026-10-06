@@ -135,7 +135,6 @@ const CalendarPage = async ({
         }))}
         current={resolved.view.slug}
         currentKind="calendar"
-        kinds={kindsFor(object)}
         params={listParams}
         canWrite={canWrite}
       />
@@ -156,6 +155,7 @@ const CalendarPage = async ({
         viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
         viewLabel={resolved.view.name}
         kind="calendar"
+        kinds={kindsFor(object)}
         params={listParams}
         filters={filters as never}
         columns={resolved.view.columns}

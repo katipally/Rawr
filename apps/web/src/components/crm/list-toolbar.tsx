@@ -1,11 +1,16 @@
 'use client'
 
-import { Badge, Button, Checkbox, DropdownMenu, IconButton, Modal, TextInput, cn, useToast } from '@rawr/ui'
-import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, ChevronDown, Settings, SlidersHorizontal, Search, X } from 'lucide-react'
+import { Badge, Button, Checkbox, IconButton, Modal, Popover, TextInput, cn, useToast } from '@rawr/ui'
+import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, CalendarDays, ChevronDown, ChevronUp, Columns3, Settings, SlidersHorizontal, Search, Table2, X } from 'lucide-react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUi, useUiReady } from '~/lib/store/ui.ts'
+import { typingInto } from '~/lib/typing-into.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'
 import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 
@@ -18,6 +23,10 @@ export type ListToolbarProps = {
   /** The version of that view as this page read it. */
   viewVersion: string | null
   kind: ViewKind
+  /** Which shapes this object can be looked at in, decided by the page: a board
+   *  needs a stage, a calendar needs a date field, and only the registry knows
+   *  whether this object has either. */
+  kinds: ViewKind[]
   params: ListParams
   filters: Group[]
   columns: string[]
@@ -40,7 +49,10 @@ export type ListToolbarProps = {
 }
 
 const pill =
-  'inline-flex h-control items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 text-small font-light text-body hover:bg-fill'
+  'inline-flex h-pill items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 py-2 text-small font-light transition-all duration-150 ease-out hover:bg-fill'
+
+const KIND_LABEL: Record<ViewKind, string> = { list: 'Table view', board: 'Board view', calendar: 'Calendar view' }
+const KIND_ICON: Record<ViewKind, typeof Table2> = { list: Table2, board: Columns3, calendar: CalendarDays }
 
 export const ListToolbar = ({
   account,
@@ -50,6 +62,7 @@ export const ListToolbar = ({
   viewId,
   viewVersion,
   kind,
+  kinds,
   params,
   filters,
   columns,
@@ -66,7 +79,13 @@ export const ListToolbar = ({
   const { navigate } = useNavigation()
   const toast = useToast()
   const [search, setSearch] = useState(params.q ?? '')
+  const searchInput = useRef<HTMLInputElement>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const sortButton = useRef<HTMLButtonElement>(null)
+  const [showSort, setShowSort] = useState(false)
+  const headerCollapsed = useUi((state) => state.panelOpen.kpis) === false
+  const setPanelOpen = useUi((state) => state.setPanelOpen)
+  const headerOpen = !useUiReady() || !headerCollapsed
   // The + in the top bar links here with ?new=1, and "Add view" on the tab bar
   // with ?view=new, rather than either carrying its own copy of a dialog: there
   // is one create form per object and it always knows the object's real fields.
@@ -96,13 +115,33 @@ export const ListToolbar = ({
 
   const [showColumns, setShowColumns] = useState(false)
   const [draftColumns, setDraftColumns] = useState(columns)
+  // A column header's "Add column" asks for this dialog through the address,
+  // since the table and the toolbar are siblings with nothing else in common.
+  const columnsAsked = useSearchParams().get('columns') === 'edit'
+  useEffect(() => {
+    if (!columnsAsked) return
+    replaceParams({ columns: null })
+    setDraftColumns(columns)
+    setShowColumns(true)
+  }, [columnsAsked, columns])
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return
+      if (typingInto(event.target)) return
+      event.preventDefault()
+      searchInput.current?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const [viewName, setViewName] = useState('')
   const [shared, setShared] = useState(true)
   const [saving, setSaving] = useState(false)
 
   const goTo = (next: ListParams) => {
     const merged: ListParams = { ...params, ...next }
-    delete merged.cursor
+    delete merged.page
     navigate(objectView(account, object, view, kind, merged))
   }
 
@@ -154,6 +193,12 @@ export const ListToolbar = ({
   const labelOf = (key: string): string =>
     allColumns.find((field) => field.key === key)?.label ?? key
 
+  const sortKey = sorts[0]?.key ?? ''
+  const sortDirection = sorts[0]?.direction ?? 'desc'
+  // What the table shows, plus whatever the view sorts by when that is not one
+  // of them, so the select never claims a sort that is not the real one.
+  const sortable = sortKey && !columns.includes(sortKey) ? [sortKey, ...columns] : columns
+
   const openColumns = () => {
     setDraftColumns(columns)
     setShowColumns(true)
@@ -174,13 +219,14 @@ export const ListToolbar = ({
           with four buttons and overlapping them. */}
       <div className="flex flex-wrap items-center gap-2">
         <form
-          className="relative w-full min-w-0 sm:w-56"
+          className="relative w-full min-w-0 sm:w-[13.375rem]"
           onSubmit={(event) => {
             event.preventDefault()
             goTo({ q: search })
           }}
         >
           <TextInput
+            ref={searchInput}
             type="search"
             value={search}
             aria-label={`Search ${objectLabel.toLowerCase()}`}
@@ -219,40 +265,80 @@ export const ListToolbar = ({
         </button>
 
         {kind === 'list' ? (
-        <DropdownMenu
-          label="Sort by"
-          align="start"
-          groups={[
-            {
-              key: 'sort',
-              items: columns.map((key) => {
-                const active = sorts[0]?.key === key
-                // Choosing the sorted column flips it; choosing another starts
-                // descending, which is what a person wants from a date or an amount.
-                const direction = active && sorts[0]?.direction === 'desc' ? 'asc' : 'desc'
-                return {
-                  key,
-                  label: labelOf(key),
-                  checked: active,
-                  hint: active ? (sorts[0]?.direction === 'desc' ? 'Descending' : 'Ascending') : undefined,
-                  onSelect: () => goTo({ sort: direction === 'desc' ? `-${key}` : key }),
-                }
-              }),
-            },
-          ]}
-          trigger={(props) => (
-            <button {...props} type="button" className={cn(pill, sorts.length > 0 && params.sort && 'bg-fill-hover')}>
+          <>
+            <button
+              ref={sortButton}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={showSort}
+              onClick={() => setShowSort((open) => !open)}
+              className={cn(pill, (showSort || params.sort) && 'bg-fill-hover')}
+            >
               <ArrowUpDown aria-hidden="true" className="size-3.5" />
               Sort by
-              {sorts[0] ? <span className="text-secondary">{labelOf(sorts[0].key)}</span> : null}
-              <ChevronDown aria-hidden="true" className="size-3" />
             </button>
-          )}
-        />
+            <Popover open={showSort} onClose={() => setShowSort(false)} anchorRef={sortButton} align="start" label="Sort by">
+              <div className="flex w-[24.8125rem] max-w-[calc(100vw-2rem)] flex-col gap-3 p-4">
+                <span className="text-small font-semibold">Sort by</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    aria-label="Property to sort by"
+                    value={sortKey}
+                    onChange={(event) => goTo({ sort: sortDirection === 'desc' ? `-${event.target.value}` : event.target.value })}
+                    className="h-control min-w-0 flex-1 rounded-hs border border-line-strong bg-surface pl-3 text-body"
+                  >
+                    {sortKey ? null : <option value="">Choose a property</option>}
+                    {sortable.map((key) => (
+                      <option key={key} value={key}>
+                        {labelOf(key)}
+                      </option>
+                    ))}
+                  </select>
+                  <fieldset className="flex h-control shrink-0 items-center rounded-pill border border-line p-0.5">
+                    <legend className="sr-only">Sort direction</legend>
+                    {(['desc', 'asc'] as const).map((direction) => (
+                      <button
+                        key={direction}
+                        type="button"
+                        aria-pressed={sortDirection === direction}
+                        disabled={!sortKey}
+                        onClick={() => goTo({ sort: direction === 'desc' ? `-${sortKey}` : sortKey })}
+                        className="h-full rounded-pill border border-transparent px-3 text-small transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:text-muted aria-pressed:border-line-strong aria-pressed:bg-surface aria-pressed:shadow-panel"
+                      >
+                        {direction === 'desc' ? 'Most recent' : 'Oldest'}
+                      </button>
+                    ))}
+                  </fieldset>
+                </div>
+              </div>
+            </Popover>
+          </>
         ) : null}
 
         <span className="ml-auto flex items-center gap-1">
           {trailing}
+          {kinds.length > 1 ? (
+            <span className="flex h-control items-center rounded-pill border border-line p-0.5">
+              {kinds.map((option) => {
+                const Icon = KIND_ICON[option]
+                return (
+                  <Link
+                    key={option}
+                    href={objectView(account, object, view, option, { ...params, page: undefined })}
+                    aria-current={kind === option ? 'true' : undefined}
+                    aria-label={KIND_LABEL[option]}
+                    title={KIND_LABEL[option]}
+                    className={cn(
+                      'grid h-full aspect-square place-items-center rounded-pill border text-body no-underline transition-all duration-150 ease-out',
+                      kind === option ? 'border-line-strong bg-surface shadow-panel' : 'border-transparent hover:bg-fill',
+                    )}
+                  >
+                    <Icon aria-hidden="true" className="size-4" />
+                  </Link>
+                )
+              })}
+            </span>
+          ) : null}
           {canWrite ? (
             <IconButton
               label={kind === 'list' ? 'Save these filters and columns as a view' : 'Save these filters as a view'}
@@ -268,6 +354,15 @@ export const ListToolbar = ({
               className="border border-line-strong text-body"
               aria-haspopup="dialog"
               onClick={openColumns}
+            />
+          ) : null}
+          {kind === 'list' ? (
+            <IconButton
+              label={headerOpen ? 'Collapse header' : 'Expand header'}
+              icon={headerOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              className="border border-line-strong text-body"
+              aria-expanded={headerOpen}
+              onClick={() => setPanelOpen('kpis', !headerOpen)}
             />
           ) : null}
         </span>

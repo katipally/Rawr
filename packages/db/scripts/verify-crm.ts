@@ -1354,6 +1354,15 @@ try {
     return `page of ${page.rows.length} out of ${page.total}`
   })
 
+  await check('B8. a numbered page starts where the pages before it stopped', async () => {
+    const both = await listRecords(admin, { object: 'contact', limit: 4, count: true })
+    const second = await listRecords(admin, { object: 'contact', limit: 2, offset: 2, count: true })
+    expect(second.total === both.total, `the total moved with the offset: ${both.total} then ${second.total}`)
+    const expected = both.rows.slice(2).map((row) => row.id).join()
+    expect(second.rows.map((row) => row.id).join() === expected, 'page two is not rows three and four')
+    return `rows 3-${2 + second.rows.length} of ${second.total}`
+  })
+
   await check('the probe tenant renders correctly with exactly one row', async () => {
     const page = await listRecords(probeCtx, { object: 'company', limit: 50 })
     expect(page.rows.length === 1, `saw ${page.rows.length} companies`)

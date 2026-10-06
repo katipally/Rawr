@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge, Button, DropdownMenu, Modal, RenamePrompt, cn, useToast } from '@rawr/ui'
-import { CalendarDays, ChevronDown, Columns3, MoreHorizontal, Pin, Plus, Table2 } from 'lucide-react'
+import { CalendarDays, ChevronDown, Columns3, GripVertical, MoreHorizontal, Pin, Plus, Table2, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -9,8 +9,6 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
-const KIND_LABEL: Record<ViewKind, string> = { list: 'Table', board: 'Board', calendar: 'Calendar' }
-const KIND_ICON: Record<ViewKind, typeof Table2> = { list: Table2, board: Columns3, calendar: CalendarDays }
 const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
 
 export type ViewTab = {
@@ -30,20 +28,16 @@ export type ViewTabsProps = {
   views: ViewTab[]
   current: string
   currentKind: ViewKind
-  /** Which shapes this object can be looked at in, decided by the page: a board
-   *  needs a stage, a calendar needs a date field, and only the registry knows
-   *  whether this object has either. */
-  kinds: ViewKind[]
   /** Carried onto every tab so switching views keeps the search a person typed. */
   params: ListParams
   canWrite: boolean
 }
 
-/** Switching tabs starts the list again, so the page cursor is dropped rather
+/** Switching tabs starts the list again, so the page number is dropped rather
  *  than carried onto a different result set. */
-const withoutCursor = (params: ListParams): ListParams => {
+const withoutPage = (params: ListParams): ListParams => {
   const next = { ...params }
-  delete next.cursor
+  delete next.page
   return next
 }
 
@@ -58,7 +52,6 @@ export const ViewTabs = ({
   views,
   current,
   currentKind,
-  kinds,
   params,
   canWrite,
 }: ViewTabsProps) => {
@@ -68,9 +61,10 @@ export const ViewTabs = ({
   const [renaming, setRenaming] = useState<ViewTab | null>(null)
   const [deleting, setDeleting] = useState<ViewTab | null>(null)
   const [busy, setBusy] = useState(false)
+  const [dragging, setDragging] = useState<string | null>(null)
 
   const href = (view: { slug: string }, kind: ViewKind = currentKind): string =>
-    objectView(account, object, view.slug, kind, withoutCursor(params))
+    objectView(account, object, view.slug, kind, withoutPage(params))
 
   // The open tab always shows, even when it is not pinned, so a link into an
   // unpinned view does not land on a bar that has no tab for where you are.
@@ -97,9 +91,14 @@ export const ViewTabs = ({
    *  and one a keyboard can reach. */
   const moveBy = (view: ViewTab, by: number) => {
     const order = tabs.map((tab) => tab.id).filter((id): id is string => !!id)
+    moveTo(view, order.indexOf(view.id ?? '') + by)
+  }
+
+  /** The grip's drop: the dragged tab takes the place of the one it lands on. */
+  const moveTo = (view: ViewTab, to: number) => {
+    const order = tabs.map((tab) => tab.id).filter((id): id is string => !!id)
     const at = order.indexOf(view.id ?? '')
-    const to = at + by
-    if (at < 0 || to < 0 || to >= order.length) return
+    if (at < 0 || to < 0 || to >= order.length || to === at) return
     const next = [...order]
     const [moved] = next.splice(at, 1)
     if (moved) next.splice(to, 0, moved)
@@ -155,31 +154,73 @@ export const ViewTabs = ({
     ]
   }
 
+  /** Closing a tab unpins it; the view itself stays one menu away. The open tab
+   *  always shows, so closing it also moves to the tab beside it. */
+  const close = (view: ViewTab) =>
+    void run('Closed. The view is still under All views.', async () => {
+      await api.crm.views.pin.mutate({ id: view.id!, pinned: false })
+      const next = tabs.find((tab) => tab.slug !== view.slug)
+      navigate(href({ slug: next?.slug ?? 'all' }))
+    })
+
+  /** Shown while the pointer is over the tab or focus is inside it, and always on
+   *  a device with no hover to show it with. */
+  const onHover = 'hidden group-hover/tab:grid group-focus-within/tab:grid aria-expanded:grid [@media(hover:none)]:grid'
+
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-line pb-1">
       {tabs.map((view) => {
         const active = view.slug === current
         const Icon = TAB_ICON[view.kind]
+        const movable = Boolean(view.id && canWrite && view.pinned)
         return (
+          // A drop target for the grip. Dragging is the pointer shortcut; Move left
+          // and Move right in the tab's menu are the way a keyboard does the same.
+          // biome-ignore lint/a11y/noStaticElementInteractions: see above
           <span
             key={view.slug}
+            draggable={movable}
+            onDragStart={(event) => {
+              setDragging(view.slug)
+              event.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragEnd={() => setDragging(null)}
+            onDragOver={(event) => {
+              if (dragging && movable) event.preventDefault()
+            }}
+            onDrop={(event) => {
+              event.preventDefault()
+              const moved = tabs.find((tab) => tab.slug === dragging)
+              setDragging(null)
+              if (moved && movable) moveTo(moved, tabs.filter((tab) => tab.id).indexOf(view))
+            }}
             className={cn(
-              'flex min-h-control items-center rounded-hs',
-              active ? 'bg-fill-hover text-body' : 'text-secondary hover:bg-fill hover:text-body',
+              'group/tab flex h-pill items-center rounded-hs transition-all duration-150 ease-out',
+              active ? 'bg-fill-hover text-body' : 'bg-surface text-secondary hover:bg-fill-hover hover:text-body',
+              dragging === view.slug && 'opacity-60',
             )}
           >
             <Link
               href={href(view)}
               aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex max-w-56 items-center gap-2 truncate py-1 pl-3 font-normal text-current no-underline',
-                view.id && canWrite ? 'pr-1' : 'pr-3',
-              )}
+              className="flex min-w-0 max-w-56 items-center gap-2 px-3 py-px font-normal text-current no-underline"
             >
-              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              <Icon aria-hidden="true" className={cn('size-4 shrink-0', movable && 'group-hover/tab:hidden')} />
+              {movable ? <GripVertical aria-hidden="true" className="hidden size-4 shrink-0 cursor-grab group-hover/tab:block" /> : null}
               <span className="truncate">{view.name}</span>
               {view.isShared ? null : <span className="text-small text-secondary">(mine)</span>}
             </Link>
+            {active && movable ? (
+              <button
+                type="button"
+                disabled={busy}
+                aria-label={`Close the ${view.name} tab`}
+                onClick={() => close(view)}
+                className={cn('-ml-2 mr-1 size-6 shrink-0 place-items-center rounded-pill hover:bg-fill disabled:cursor-not-allowed', onHover)}
+              >
+                <X aria-hidden="true" className="size-3.5" />
+              </button>
+            ) : null}
             {view.id && canWrite ? (
               <DropdownMenu
                 label={`Actions for ${view.name}`}
@@ -189,7 +230,7 @@ export const ViewTabs = ({
                     {...props}
                     type="button"
                     disabled={busy}
-                    className="mr-1 rounded-pill p-1 text-secondary hover:bg-fill-hover hover:text-body disabled:cursor-not-allowed"
+                    className={cn('-ml-2 mr-1 size-6 shrink-0 place-items-center rounded-pill text-secondary hover:bg-fill hover:text-body disabled:cursor-not-allowed', onHover)}
                   >
                     <MoreHorizontal aria-hidden="true" className="size-4" />
                     <span className="sr-only">Actions for {view.name}</span>
@@ -242,29 +283,6 @@ export const ViewTabs = ({
         </Link>
       ) : null}
 
-      {kinds.length > 1 ? (
-        <span className="ml-auto flex h-control items-center gap-0.5 rounded-pill border border-line px-0.5">
-          {kinds.map((kind) => {
-            const Icon = KIND_ICON[kind]
-            return (
-              <Link
-                key={kind}
-                href={href({ slug: current }, kind)}
-                aria-current={currentKind === kind ? 'true' : undefined}
-                aria-label={KIND_LABEL[kind]}
-                title={KIND_LABEL[kind]}
-                className={cn(
-                  'grid size-7 place-items-center rounded-pill text-body no-underline',
-                  currentKind === kind ? 'border border-line-strong bg-surface' : 'hover:bg-fill',
-                )}
-              >
-                <Icon aria-hidden="true" className="size-4" />
-              </Link>
-            )
-          })}
-        </span>
-      ) : null}
-
       <Modal
         open={deleting !== null}
         size="sm"
@@ -286,7 +304,7 @@ export const ViewTabs = ({
                   setDeleting(null)
                   // The records are still there; only the arrangement went. Land
                   // on the tab every link falls back to rather than on a dead one.
-                  navigate(objectView(account, object, 'all', currentKind, withoutCursor(params)))
+                  navigate(objectView(account, object, 'all', currentKind, withoutPage(params)))
                 })
               }}
             >

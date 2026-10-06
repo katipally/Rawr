@@ -11,6 +11,10 @@ export type Column<Row> = {
   /** Starting width in pixels. Resizing is per-column and never collapses to zero. */
   width?: number
   align?: 'left' | 'right'
+  /** Controls drawn after the header label: a sort mark, a column menu. A
+   *  header that has them lights up under the pointer, which says it does
+   *  something. */
+  headerAside?: ReactNode
   render: (row: Row) => ReactNode
 }
 
@@ -225,13 +229,21 @@ export const DataTable = <Row,>({
                   key={column.key}
                   scope="col"
                   className={cn(
-                    'relative sticky top-0 z-10 h-row border-b border-line px-6 align-middle',
+                    'group/header relative sticky top-0 z-10 h-row border-b border-line px-6 align-middle',
                     'truncate bg-surface font-normal text-secondary',
                     column.align === 'right' && 'text-right',
+                    column.headerAside !== undefined && 'pr-2 transition-colors duration-150 ease-out hover:bg-fill-header-hover focus-within:bg-fill-header-hover',
                   )}
                   title={column.header}
                 >
-                  {column.header}
+                  {column.headerAside === undefined ? (
+                    column.header
+                  ) : (
+                    <span className={cn('flex min-w-0 items-center gap-1', column.align === 'right' && 'justify-end')}>
+                      <span className="min-w-0 truncate">{column.header}</span>
+                      {column.headerAside}
+                    </span>
+                  )}
                   {/* Focusable and driven by the arrow keys, because a pointer is
                       not the only way somebody arrives at this table. */}
                   {/* biome-ignore lint/a11y/useSemanticElements: there is no HTML
@@ -273,8 +285,8 @@ export const DataTable = <Row,>({
                 key={rowKey(row)}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 className={cn(
-                  'border-b border-line',
-                  onRowClick && 'cursor-pointer hover:bg-fill',
+                  'border-b border-line transition-colors duration-150 ease-out hover:bg-fill-hover',
+                  onRowClick && 'cursor-pointer',
                   selection?.selected.has(rowKey(row)) && 'bg-accent-subtle',
                 )}
               >

@@ -43,3 +43,23 @@ export const pageRange = (input: {
           : `Showing ${number(from)}-${number(to)} of ${number(total)}`,
   }
 }
+
+/** The page buttons a numbered pager shows: the first and last page, the two on
+ *  either side of the current one, and 'gap' where a run is skipped. A gap never
+ *  hides a single page, since the page itself takes no more room than the dots.
+ *  At most nine entries whatever `last` is. Pages count from one. */
+export const pageNumbers = (current: number, last: number): (number | 'gap')[] => {
+  if (last < 1) return []
+  const at = Math.min(Math.max(1, current), last)
+  const from = Math.max(1, at - 2)
+  const to = Math.min(last, at + 2)
+  const pages: (number | 'gap')[] = []
+  if (from > 1) pages.push(1)
+  if (from === 3) pages.push(2)
+  else if (from > 3) pages.push('gap')
+  for (let page = from; page <= to; page += 1) pages.push(page)
+  if (to === last - 2) pages.push(last - 1)
+  else if (to < last - 2) pages.push('gap')
+  if (to < last) pages.push(last)
+  return pages
+}

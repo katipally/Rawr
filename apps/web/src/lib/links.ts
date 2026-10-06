@@ -65,7 +65,8 @@ export type ListParams = {
   /** JSON filter groups, for a filter set that has not been saved as a view. */
   filters?: string | undefined
   sort?: string | undefined
-  cursor?: string | undefined
+  /** Which page of the table, counting from one. */
+  page?: string | undefined
   pipeline?: string | undefined
   /** Board only: which field's values become the columns. */
   group?: string | undefined
@@ -79,9 +80,6 @@ export type ListParams = {
   cols?: string | undefined
   /** Rows per page. In the URL so a link to page two shows the same page two. */
   limit?: string | undefined
-  /** How many rows the pages before this one held. Carried so the pager can say
-   *  "Showing 51-100" on a keyset list, which has no page numbers to count from. */
-  skip?: string | undefined
   /** The record whose preview panel is open over the list. */
   preview?: string | undefined
 }
