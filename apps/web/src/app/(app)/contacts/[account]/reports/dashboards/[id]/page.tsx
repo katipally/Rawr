@@ -1,4 +1,4 @@
-import { listReportDashboards, readReportDashboard } from '@rawr/db'
+import { isUuid, listReportDashboards, readReportDashboard } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
@@ -29,7 +29,8 @@ const DashboardScreen = async ({
   const { account, id } = await params
   const range = reportRange(session, await searchParams)
   const ctx = contextFrom(session)
-  const [found, all] = await Promise.all([readReportDashboard(ctx, id), listReportDashboards(ctx)])
+  // A HubSpot dashboard link carries HubSpot's numeric id, which names nothing here.
+  const [found, all] = await Promise.all([isUuid(id) ? readReportDashboard(ctx, id) : null, listReportDashboards(ctx)])
 
   if (!found) {
     return (
