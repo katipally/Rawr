@@ -1,7 +1,7 @@
-import { PageHeader } from '@rawr/ui'
 import { listAssignable, listTeams } from '@rawr/db'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TeamList } from './team-list.tsx'
+import { UsersTeamsHeader } from '../members/users-teams-header.tsx'
 
 /** Named groups inside this account. A form or a booking page that round-robins
  *  within a team hands European inbound to the people who work it, rather than to
@@ -15,17 +15,7 @@ const TeamsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        as="h2"
-        title="Teams"
-        lead={`Groups inside ${session.accountName}.`}
-        why={
-          <p>
-            A form set to round-robin within a team rotates through its members rather than through
-            everybody.
-          </p>
-        }
-      />
+      <UsersTeamsHeader current="teams" />
 
       <TeamList teams={teams} people={people} canWrite={sessionIsAdmin(session)} hub="account" />
     </div>
