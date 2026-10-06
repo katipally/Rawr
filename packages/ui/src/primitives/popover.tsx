@@ -58,8 +58,9 @@ export const Popover = ({
     const trigger = anchorRef.current
     const layer = panel.current
     if (!trigger || !layer) return
-    const size = layer.getBoundingClientRect()
-    setBox(anchor(trigger.getBoundingClientRect(), { top: 0, left: 0, width: size.width, height: size.height }, { side, align }))
+    // offsetWidth rather than the bounding box: the pop-in starts at scale(.95),
+    // and a panel measured mid-animation is clamped 5% short of the edge it hits.
+    setBox(anchor(trigger.getBoundingClientRect(), { top: 0, left: 0, width: layer.offsetWidth, height: layer.offsetHeight }, { side, align }))
   }, [anchorRef, side, align])
 
   // Layout effect: measure and place before the browser paints, or the panel is
