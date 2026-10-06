@@ -102,8 +102,10 @@
   --rawr-duration-slow: 300ms;
   --rawr-easing: cubic-bezier(0.4, 0, 0.2, 1);
   /* HubSpot's declared transitions: a docked filter panel grows in 125ms, the
-     record preview docks in 280ms, the bulk bar settles in 200ms. */
+     record preview docks in 280ms, the bulk bar settles in 200ms, a board card
+     shades under the pointer in 50ms. */
   --rawr-duration-dock: 125ms;
+  --rawr-duration-card: 50ms;
   --rawr-duration-preview: 280ms;
   --rawr-ease-dock: cubic-bezier(0.8, 0, 1, 1);
   --rawr-ease-preview: cubic-bezier(0.32, 0.72, 0, 1);

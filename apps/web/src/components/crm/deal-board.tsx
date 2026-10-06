@@ -1,16 +1,19 @@
 'use client'
 
-import { Avatar, Badge, DropdownMenu, EmptyState, cn, useToast } from '@rawr/ui'
-import { CalendarPlus, ChevronDown, CircleCheck, Mail, MoreHorizontal, StickyNote } from 'lucide-react'
+import { Avatar, Badge, DropdownMenu, EmptyState, IconButton, Tooltip, cn, useToast } from '@rawr/ui'
+import { CalendarPlus, ChevronDown, CircleCheck, History, Mail, MoreHorizontal, PanelRight, StickyNote } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { EMPTY_VALUE, shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import type { Group } from './filter-builder.tsx'
+import { RecordPreview } from './record-preview.tsx'
+import type { TableColumn } from './record-table.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { TaskForm } from './task-form.tsx'
 import { useFormat } from '~/components/zone.tsx'
@@ -65,6 +68,9 @@ export type BoardColumn = {
  *  read as a deal id. */
 const DRAG_TYPE = 'application/x-rawr-deal'
 
+/** HubSpot's 24px round icon buttons in a card's corner. */
+const cardIcon = 'size-6 text-secondary transition-colors duration-150 hover:bg-fill-hover hover:text-body'
+
 /** What the board on screen was read with, so "Show more" asks for the next page
  *  of the same deals rather than of an unfiltered board. */
 export type BoardQuery = {
@@ -82,6 +88,8 @@ export type DealBoardProps = {
    *  by deal type moves the deal's type rather than its stage. */
   groupByKey: string
   canWrite: boolean
+  /** The properties the preview panel opens on. */
+  previewFields: TableColumn[]
 }
 
 export type PipelineOption = { id: string; label: string; href: string }
@@ -110,7 +118,8 @@ export const PipelinePicker = ({ pipelines, currentId }: { pipelines: PipelineOp
   />
 )
 
-export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: DealBoardProps) => {
+export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previewFields }: DealBoardProps) => {
+  const preview = useSearchParams().get('preview')
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
@@ -263,7 +272,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
       {/* Stretch, not start: a column that sizes to its own cards leaves an empty
           stage as a header-high drop target, which is the one stage somebody most
           often drags into. Equal heights also stop the board reading as ragged. */}
-      <div className="flex min-h-0 min-w-max flex-1 items-stretch gap-3">
+      <div className="flex min-h-0 min-w-max flex-1 items-stretch gap-2">
         {columns.map((column) => (
           // A drop target. Dragging is the pointer shortcut, not the only way: the
           // same stage change is on the record page and in bulk edit, both
@@ -289,15 +298,15 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
             className={cn(
               // One comfortable reading width, whatever the column count. Growing
               // to fill made a three-column board stretch each card to 470px.
-              'flex w-[min(17.5rem,85vw)] shrink-0 flex-col rounded-panel bg-canvas',
+              'flex w-[min(17.5rem,85vw)] shrink-0 flex-col rounded-panel bg-canvas transition-colors duration-150 motion-reduce:transition-none',
               over === column.key && 'bg-accent-subtle',
             )}
           >
-            <header className="flex items-baseline gap-1 px-2 pt-4 pb-3 text-small font-semibold">
+            <header className="flex items-baseline gap-1.5 px-4 py-3 text-small font-semibold">
               <span className="min-w-0 truncate" title={column.name}>
                 {column.name}
               </span>
-              <span className="shrink-0 tabular-nums">{column.count}</span>
+              <span className="shrink-0 text-secondary tabular-nums">{fmt.number(column.count)}</span>
             </header>
 
             {/* The card list scrolls, the board does not. Height follows the
@@ -327,7 +336,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                       }}
                       aria-busy={moving === card.id || undefined}
                       className={cn(
-                        'group rounded-panel border border-line bg-surface p-3 text-small shadow-panel',
+                        'group rounded-panel border border-line bg-surface px-3 py-2 text-small shadow-panel transition-[background-color,opacity] duration-(--rawr-duration-card) ease-in-out hover:bg-fill motion-reduce:transition-none',
                         canWrite && 'cursor-grab active:cursor-grabbing',
                         moving === card.id && 'opacity-60',
                         dragging === card.id && 'opacity-40',
@@ -337,7 +346,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                         <Link
                           href={recordPath(account, 'deal', card.id, { from: origin })}
                           title={card.displayName}
-                          className="line-clamp-2 min-w-0 flex-1 break-words text-body"
+                          className="line-clamp-2 min-w-0 flex-1 break-words text-sm font-semibold text-link no-underline hover:text-accent hover:underline"
                         >
                           {card.displayName}
                         </Link>
@@ -360,11 +369,11 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           />
                         ) : null}
                       </div>
-                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? EMPTY_VALUE : fmt.money(card.amount, card.currency)}</p>
+                      <p className="mt-1 tabular-nums">Amount: {card.amount === null ? EMPTY_VALUE : fmt.money(card.amount, card.currency)}</p>
                       <p className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
                         Close date:
                         {card.closeDate === null ? (
-                          <span>--</span>
+                          <span>{EMPTY_VALUE}</span>
                         ) : fmt.isPast(card.closeDate) ? (
                           <Badge tone="error">{fmt.date(card.closeDate)}</Badge>
                         ) : (
@@ -379,24 +388,53 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                         <ScoreRing score={card.score} />
                         <span className="text-secondary">Deal score</span>
                       </p>
-                      {card.companyName ? (
-                        <p className="mt-2 flex items-center gap-1.5 truncate border-t border-line pt-2 text-body" title={card.companyName}>
-                          <Avatar name={card.companyName} size="sm" />
-                          <span className="truncate">{card.companyName}</span>
-                        </p>
-                      ) : null}
-                      {card.contactCount > 0 ? (
-                        // Three faces and a count. Forty contacts is a number, not
-                        // forty avatars wrapping down the card.
-                        <p className="mt-2 flex flex-wrap items-center gap-1" title={card.contacts.join(', ')}>
-                          {card.contacts.slice(0, AVATARS_SHOWN).map((name) => (
-                            <Avatar key={name} name={name} size="sm" />
-                          ))}
-                          {card.contactCount > AVATARS_SHOWN ? (
-                            <span className="text-secondary tabular-nums">+{card.contactCount - AVATARS_SHOWN}</span>
+                      {card.companyName || card.contactCount > 0 ? (
+                        <div className="mt-2 flex flex-col gap-2 border-t border-divider pt-2">
+                          {card.companyName ? (
+                            <p className="flex items-center gap-1.5 truncate text-body" title={card.companyName}>
+                              <Avatar name={card.companyName} size="sm" />
+                              <span className="truncate">{card.companyName}</span>
+                            </p>
                           ) : null}
-                        </p>
+                          {card.contactCount > 0 ? (
+                            // Three faces and a count. Forty contacts is a number, not
+                            // forty avatars wrapping down the card.
+                            <p className="flex flex-wrap items-center gap-1" title={card.contacts.join(', ')}>
+                              {card.contacts.slice(0, AVATARS_SHOWN).map((name) => (
+                                <Avatar key={name} name={name} size="sm" />
+                              ))}
+                              {card.contactCount > AVATARS_SHOWN ? (
+                                <span className="text-secondary tabular-nums">+{card.contactCount - AVATARS_SHOWN}</span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                        </div>
                       ) : null}
+                      {/* HubSpot's activity pills under a divider: how long since
+                          anything happened, and how long it has sat in this
+                          column. Both derived from the timeline, and both the
+                          first thing anybody looks for on a board: a deal is
+                          rarely in trouble because of its amount. */}
+                      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-divider pt-2 text-secondary tabular-nums">
+                        <span title="Last activity" className="inline-flex h-5.5 max-w-full items-center gap-1 rounded-pill border border-line px-2">
+                          <History aria-hidden="true" className="size-3 shrink-0" />
+                          <span className="truncate">
+                            {card.daysSinceActivity === null
+                              ? 'Nothing logged yet'
+                              : card.daysSinceActivity === 0
+                                ? 'Active today'
+                                : `${card.daysSinceActivity}d quiet`}
+                          </span>
+                        </span>
+                        <span
+                          className={cn(
+                            'inline-flex h-5.5 items-center rounded-pill border border-line px-2',
+                            card.daysInStage >= STALE_DAYS && 'border-warning bg-warning-subtle text-body',
+                          )}
+                        >
+                          {card.daysInStage === 0 ? 'Moved here today' : `${card.daysInStage}d in stage`}
+                        </span>
+                      </div>
                       {canWrite ? (
                         // The next open task, or an offer to make one. Either way
                         // it opens the same task form the record page uses, filed
@@ -405,7 +443,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           type="button"
                           onClick={() => setScheduling(card)}
                           className={cn(
-                            'mt-2 flex w-full items-center gap-1.5 rounded-pill border border-line-strong px-2 py-1 text-left hover:bg-fill',
+                            'mt-2 flex w-full items-center gap-1.5 rounded-pill border border-line-strong px-2 py-1 text-left hover:bg-fill-hover',
                             fmt.isPast(card.nextTask?.dueDate) && 'border-error text-error',
                           )}
                         >
@@ -425,79 +463,62 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           {card.nextStep}
                         </p>
                       ) : null}
-                      {/* How long it has sat here, and how long since anything
-                          happened. Both derived from the timeline, and both the
-                          first thing anybody looks for on a board: a deal is
-                          rarely in trouble because of its amount. */}
-                      <p className="mt-1 flex flex-wrap gap-x-2 text-small text-secondary tabular-nums">
-                        <span className={cn(card.daysInStage >= STALE_DAYS && 'text-warning')}>
-                          {card.daysInStage === 0 ? 'Moved here today' : `${card.daysInStage}d in stage`}
-                        </span>
-                        <span>
-                          {card.daysSinceActivity === null
-                            ? 'Nothing logged yet'
-                            : card.daysSinceActivity === 0
-                              ? 'Active today'
-                              : `${card.daysSinceActivity}d quiet`}
-                        </span>
-                      </p>
-                      {canWrite ? (
-                        // The record page's quick actions, on the card. Each is a
-                        // link into the address that opens the panel already on
-                        // that page, so there is still one composer and one note
-                        // editor. Shown on hover and whenever one holds focus, so
-                        // the keyboard reaches what the pointer does.
-                        <div className="mt-2 flex gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                          {[
-                            {
-                              key: 'note',
-                              label: 'Add a note',
-                              icon: StickyNote,
-                              href: recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin }),
-                            },
-                            {
-                              key: 'task',
-                              label: 'Create a task',
-                              icon: CircleCheck,
-                              href: recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new', from: origin }),
-                            },
-                            {
-                              key: 'email',
+                      {/* HubSpot's four icons in the card's corner. Preview docks
+                          the record beside the board; the rest are the record
+                          page's quick actions, so there is still one composer,
+                          one note editor and one task form. */}
+                      <div className="mt-1.5 flex justify-end gap-0.5">
+                        <IconButton
+                          label="Preview"
+                          side="top"
+                          icon={<PanelRight aria-hidden="true" className="size-3.5" />}
+                          onClick={() => replaceParams({ preview: card.id })}
+                          className={cardIcon}
+                        />
+                        {canWrite ? (
+                          <>
+                            {card.emailContactId ? (
+                              <Tooltip label="Create an email" side="top">
+                                <Link
+                                  href={recordPath(account, 'contact', card.emailContactId, { tab: 'activities', compose: '1', from: origin })}
+                                  aria-label="Create an email"
+                                  className={cn('inline-flex shrink-0 items-center justify-center rounded-pill', cardIcon)}
+                                >
+                                  <Mail aria-hidden="true" className="size-3.5" />
+                                </Link>
+                              </Tooltip>
+                            ) : (
                               // A deal has no address of its own, so the composer
                               // opens on the first contact linked to it that has
                               // one. With none, the button says why rather than
                               // going nowhere.
-                              label: card.emailContactId ? 'Email a contact on this deal' : 'No contact on this deal has an email address',
-                              icon: Mail,
-                              href: card.emailContactId
-                                ? recordPath(account, 'contact', card.emailContactId, { tab: 'activities', compose: '1', from: origin })
-                                : null,
-                            },
-                          ].map((action) =>
-                            action.href ? (
+                              <IconButton
+                                label="No contact on this deal has an email address"
+                                side="top"
+                                icon={<Mail aria-hidden="true" className="size-3.5" />}
+                                disabled
+                                className={cardIcon}
+                              />
+                            )}
+                            <Tooltip label="Create a note" side="top">
                               <Link
-                                key={action.key}
-                                href={action.href}
-                                title={action.label}
-                                className="grid size-7 place-items-center rounded-pill border border-line-strong text-body hover:bg-fill"
+                                href={recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin })}
+                                aria-label="Create a note"
+                                className={cn('inline-flex shrink-0 items-center justify-center rounded-pill', cardIcon)}
                               >
-                                <action.icon aria-hidden="true" className="size-3.5" />
-                                <span className="sr-only">{action.label}</span>
+                                <StickyNote aria-hidden="true" className="size-3.5" />
                               </Link>
-                            ) : (
-                              <span
-                                key={action.key}
-                                title={action.label}
-                                aria-disabled="true"
-                                className="grid size-7 place-items-center rounded-pill border border-line text-secondary opacity-60"
-                              >
-                                <action.icon aria-hidden="true" className="size-3.5" />
-                                <span className="sr-only">{action.label}</span>
-                              </span>
-                            ),
-                          )}
-                        </div>
-                      ) : null}
+                            </Tooltip>
+                            <IconButton
+                              label="Create a task"
+                              side="top"
+                              icon={<CircleCheck aria-hidden="true" className="size-3.5" />}
+                              onClick={() => setScheduling(card)}
+                              className={cardIcon}
+                            />
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                   </li>
                 ))
@@ -522,7 +543,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
 
             {/* The money sits at the foot of the column, under the cards it adds
                 up, rather than in the header where it reads as a title. */}
-            <footer className="mt-auto border-t border-line px-2 py-1 text-small">
+            <footer className="mt-auto border-t border-line px-4 py-2 text-small font-light">
               {column.totals.length === 0 ? (
                 <p>
                   <span className="font-semibold">{fmt.money(0)}</span> | Total amount
@@ -553,6 +574,17 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
     {/* The record page's own task form, on the board, filed against the card it
         was opened from. One form, so a task scheduled here carries the type, the
         priority, the queue and the reminder a task scheduled anywhere else does. */}
+    <RecordPreview
+      account={account}
+      object="deal"
+      objectLabel="Deal"
+      id={preview}
+      fields={previewFields}
+      canWrite={canWrite}
+      from={origin}
+      onClose={() => replaceParams({ preview: null })}
+    />
+
     {scheduling && lookups ? (
       <TaskForm
         modal={{

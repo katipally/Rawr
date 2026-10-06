@@ -7,8 +7,9 @@ import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeFilters, exportCsvPath, importsPath, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
-import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
+import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { SECTIONS } from '~/lib/record-layout.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
 
@@ -203,6 +204,8 @@ const BoardPage = async ({
             query={{ ...query, filters: query.filters as never }}
             groupByKey={board.groupByKey}
             canWrite={canWrite}
+            // The first card of the record page, so the preview opens on what that page does.
+            previewFields={toTableColumns(object, SECTIONS.deal[0]?.fieldKeys ?? [])}
           />
         ) : null}
       </FiltersDock>
