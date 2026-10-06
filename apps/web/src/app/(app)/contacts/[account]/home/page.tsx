@@ -14,11 +14,9 @@ import {
   withAccountReads,
 } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
-import { ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { activityActor, activityLabel } from '~/components/crm/value.tsx'
+import { activityActor, activityLabel, EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { todayIn } from '~/lib/format.ts'
 import {
   accountHome,
@@ -38,6 +36,7 @@ import {
 } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly, viewerContext } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
+import { HomeCards } from './home-cards.tsx'
 
 /** The Monday screen. D10 replaced the spreadsheet ritual with a shared view; this
  *  is that view, opened first. Every number on it is a link to the list that
@@ -129,30 +128,6 @@ const Setup = ({ items }: { items: { done: boolean; label: string; href: string 
     </details>
   )
 }
-
-/** The "see everything" link in a card's corner. Small and quiet, but a control
- *  rather than a sentence: it is the same shape in all six cards, which is what
- *  makes it findable without being read. */
-const SeeAll = ({ href, children }: { href: string; children: React.ReactNode }) => (
-  <LinkButton
-    href={href}
-    variant="tertiary"
-    className="shrink-0 gap-1 px-2 py-1"
-    icon={<ChevronRight aria-hidden="true" className="size-3.5 order-1" />}
-  >
-    {children}
-  </LinkButton>
-)
-
-const Panel = ({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) => (
-  <section className="flex min-w-0 flex-col rounded-panel border border-line bg-surface shadow-panel">
-    <header className="flex items-center justify-between gap-2 px-6 pt-6 pb-4">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {action}
-    </header>
-    <div className="min-w-0 px-6 pb-6">{children}</div>
-  </section>
-)
 
 const HomePage = async ({
   params,
@@ -263,7 +238,7 @@ const HomePage = async ({
           {fmt.at(now, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, {session.accountName}
         </p>
       </div>
-      <div className="flex flex-col gap-4 px-2 pb-2 sm:px-4 sm:pb-4">
+      <div className="flex flex-col gap-2.5 px-2 pb-2 sm:px-4 sm:pb-4">
 
       {error ? (
         <Alert>
@@ -299,207 +274,263 @@ const HomePage = async ({
 
       {checklist.length > 0 ? <Setup items={checklist} /> : null}
 
-      {/* A container query, not a viewport one: this grid lives inside the shell's
-          content pane, and whether two columns fit is a question about that pane,
-          not about the window a narrow rail may be sharing. */}
-      <div className="grid gap-4 @3xl:grid-cols-2">
-        {sales ? <Panel
-          title="Pipeline by stage"
-          action={<SeeAll href={objectView(account, 'deal', 'all', 'board')}>Open the board</SeeAll>}
-        >
-          {board.stages.length === 0 ? (
-            <EmptyState title="No pipeline yet" description="Add stages under Settings, Pipelines, and deals will land here." />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[28rem] text-body">
-                <thead>
-                  <tr className="text-left text-small text-secondary">
-                    <th className="py-1 pr-3 font-medium">Stage</th>
-                    <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Deals</th>
-                    <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Total</th>
-                    <th className="whitespace-nowrap py-1 text-right font-medium">Weighted</th>
-                  </tr>
-                </thead>
-                {pipelines.map(([pipelineId, pipelineName]) => (
-                  <tbody key={pipelineId}>
-                    {pipelines.length > 1 ? (
-                      <tr>
-                        <th colSpan={4} className="pt-2 pb-1 text-left text-small font-medium uppercase text-secondary">
-                          {pipelineName}
-                        </th>
-                      </tr>
-                    ) : null}
-                    {board.stages
-                      .filter((s) => s.pipelineId === pipelineId)
-                      .map((stage) => (
-                        <tr key={stage.stageId} className="border-t border-divider">
-                          <td className="w-full max-w-0 truncate py-1.5 pr-3">
-                            {/* The board has no stage address, so the row opens the list
-                                filtered to exactly the deals it counted. */}
-                            <Link
-                              href={objectView(account, 'deal', 'all', 'list', {
-                                filters: encodeFilters([
-                                  { conjunction: 'and', conditions: [{ field: 'stage_id', operator: 'is', value: stage.stageId }] },
-                                ]),
-                              })}
-                            >
-                              {stage.stageName}
-                            </Link>
-                            {stage.probability !== null ? <span className="ml-1 text-small text-secondary">{stage.probability}%</span> : null}
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
-                          <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
-                            {stage.totals.length ? stage.totals.map((m) => fmt.money(m.total, m.currency)).join(' · ') : fmt.money(0)}
-                          </td>
-                          <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
-                            {stage.totals.length ? stage.totals.map((m) => fmt.money(m.weighted, m.currency)).join(' · ') : fmt.money(0)}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                ))}
-              </table>
-            </div>
-          )}
-        </Panel> : null}
-
-        {sales ? <Panel
-          title="Next step overdue"
-          action={<SeeAll href={objectView(account, 'deal', 'overdue-next-step', 'board')}>All overdue</SeeAll>}
-        >
-          {overdue.length === 0 ? (
-            <p className="text-secondary">Nothing is overdue. Every open deal has a next step in the future, or none set.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-divider">
-              {overdue.slice(0, 8).map((deal) => (
-                <li key={deal.id} className="flex flex-col gap-0.5 py-2">
-                  <div className="flex min-w-0 items-baseline justify-between gap-2">
-                    <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
-                      {deal.name ?? 'Unnamed deal'}
-                    </Link>
-                    <span className="shrink-0 text-small text-error">{fmt.date(deal.nextStepDate)}</span>
-                  </div>
-                  <p className="truncate text-small text-secondary">
-                    {deal.nextStep ?? 'No next step written'}
-                    {deal.ownerName ? ` · ${deal.ownerName}` : ''}
-                    {deal.stageName ? ` · ${deal.stageName}` : ''}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel> : null}
-
-        {sales ? <Panel title="Closing this month" action={<SeeAll href={objectView(account, 'deal', 'all', 'list', { sort: 'close_date' })}>All deals</SeeAll>}>
-          {board.closingThisMonth.length === 0 ? (
-            <p className="text-secondary">No open deal has a close date this month.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-divider">
-              {board.closingThisMonth.map((deal) => (
-                <li key={deal.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
-                  <div className="min-w-0">
-                    <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="block truncate font-medium">
-                      {deal.name ?? 'Unnamed deal'}
-                    </Link>
-                    <p className="truncate text-small text-secondary">
-                      {deal.stageName ?? 'No stage'}
-                      {deal.ownerName ? ` · ${deal.ownerName}` : ''}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="tabular-nums">{deal.amount === null ? '—' : fmt.money(deal.amount, deal.currency)}</p>
-                    <p className="text-small text-secondary">{fmt.date(deal.closeDate)}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel> : null}
-
-        {sales ? <Panel title="Meetings in the next 7 days" action={<SeeAll href={bookedPath(account)}>All booked</SeeAll>}>
-          {board.upcoming.length === 0 ? (
-            <p className="text-secondary">Nothing booked for the coming week.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-divider">
-              {board.upcoming.map((b) => (
-                <li key={b.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
-                  <div className="min-w-0">
-                    {b.contactId ? (
-                      <Link href={recordPath(account, 'contact', b.contactId, { from: accountHome(account) })} className="block truncate font-medium">
-                        {b.attendeeName}
-                      </Link>
+      <HomeCards
+        cards={[
+          ...(sales
+            ? [
+              {
+                key: 'pipeline',
+                title: 'Pipeline by stage',
+                href: objectView(account, 'deal', 'all', 'board'),
+                hrefLabel: 'Open the board',
+                body: (
+                  <>
+                    {board.stages.length === 0 ? (
+                      <EmptyState title="No pipeline yet" description="Add stages under Settings, Pipelines, and deals will land here." />
                     ) : (
-                      <p className="truncate font-medium">{b.attendeeName}</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[28rem] text-body">
+                          <thead>
+                            <tr className="text-left text-small text-secondary">
+                              <th className="py-1 pr-3 font-medium">Stage</th>
+                              <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Deals</th>
+                              <th className="whitespace-nowrap py-1 pr-3 text-right font-medium">Total</th>
+                              <th className="whitespace-nowrap py-1 text-right font-medium">Weighted</th>
+                            </tr>
+                          </thead>
+                          {pipelines.map(([pipelineId, pipelineName]) => (
+                            <tbody key={pipelineId}>
+                              {pipelines.length > 1 ? (
+                                <tr>
+                                  <th colSpan={4} className="pt-2 pb-1 text-left text-small font-medium uppercase text-secondary">
+                                    {pipelineName}
+                                  </th>
+                                </tr>
+                              ) : null}
+                              {board.stages
+                                .filter((s) => s.pipelineId === pipelineId)
+                                .map((stage) => (
+                                  <tr key={stage.stageId} className="border-t border-divider">
+                                    <td className="w-full max-w-0 truncate py-1.5 pr-3">
+                                      {/* The board has no stage address, so the row opens the list
+                                          filtered to exactly the deals it counted. */}
+                                      <Link
+                                        href={objectView(account, 'deal', 'all', 'list', {
+                                          filters: encodeFilters([
+                                            { conjunction: 'and', conditions: [{ field: 'stage_id', operator: 'is', value: stage.stageId }] },
+                                          ]),
+                                        })}
+                                      >
+                                        {stage.stageName}
+                                      </Link>
+                                      {stage.probability !== null ? <span className="ml-1 text-small text-secondary">{stage.probability}%</span> : null}
+                                    </td>
+                                    <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{stage.count}</td>
+                                    <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">
+                                      {stage.totals.length ? stage.totals.map((m) => fmt.money(m.total, m.currency)).join(' · ') : fmt.money(0)}
+                                    </td>
+                                    <td className="whitespace-nowrap py-1.5 text-right tabular-nums">
+                                      {stage.totals.length ? stage.totals.map((m) => fmt.money(m.weighted, m.currency)).join(' · ') : fmt.money(0)}
+                                    </td>
+                                  </tr>
+                                ))}
+                            </tbody>
+                          ))}
+                        </table>
+                      </div>
                     )}
-                    <p className="truncate text-small text-secondary">
-                      {b.pageName}
-                      {b.hostName ? ` · with ${b.hostName}` : ''}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-small text-secondary">{fmt.dateTime(b.startsAt)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel> : null}
-
-        {people ? <Panel title="My tasks" action={<SeeAll href={tasksPath(account, { mine: '1' })}>All mine</SeeAll>}>
-          {myTasks.length === 0 ? (
-            <p className="text-secondary">No open tasks are assigned to you.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-divider">
-              {myTasks.slice(0, 8).map((t) => (
-                <li key={t.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{t.title}</p>
-                    {t.entityType && t.entityId ? (
-                      <Link href={recordPath(account, t.entityType, t.entityId, { from: accountHome(account) })} className="block truncate text-small">
-                        {t.entityName ?? t.entityType}
-                      </Link>
-                    ) : null}
-                  </div>
-                  {t.dueDate ? (
-                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.timezone) ? 'text-error' : 'text-secondary'}`}>
-                      {fmt.date(t.dueDate)}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel> : null}
-
-        <Panel title="Recent activity" action={<SeeAll href={objectView(account, 'contact', 'all', 'list', { sort: '-updated_at' })}>Recently changed</SeeAll>}>
-          {recent.length === 0 ? (
-            <p className="text-secondary">Nothing has happened yet. Notes, calls, stage moves and form fills land here as the team works.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-divider">
-              {recent.map((entry) => (
-                <li key={entry.id} className="flex flex-col gap-0.5 py-2">
-                  <div className="flex min-w-0 items-baseline justify-between gap-2">
-                    <p className="min-w-0 truncate">
-                      <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">{activityLabel(entry)}</span>{' '}
-                      <span className="font-medium">{activityActor(entry.type, { ...entry, recordName: entry.entityName })}</span>{' '}
-                      {entry.subject ?? ''}
-                    </p>
-                    <time dateTime={entry.occurredAt.toISOString()} className="shrink-0 text-small text-secondary">
-                      {fmt.dateTime(entry.occurredAt)}
-                    </time>
-                  </div>
-                  <p className="truncate text-small text-secondary">
-                    {entry.entityDeleted ? (
-                      <span className="italic">{entry.entityName}</span>
+                  </>
+                ),
+              },
+              ]
+            : []),
+          ...(sales
+            ? [
+              {
+                key: 'overdue',
+                title: 'Next step overdue',
+                href: objectView(account, 'deal', 'overdue-next-step', 'board'),
+                hrefLabel: 'All overdue',
+                body: (
+                  <>
+                    {overdue.length === 0 ? (
+                      <p className="py-6 text-center">Nothing is overdue. Every open deal has a next step in the future, or none set.</p>
                     ) : (
-                      <Link href={recordPath(account, entry.entityType, entry.entityId, { from: accountHome(account) })}>{entry.entityName}</Link>
+                      <ul className="flex flex-col divide-y divide-divider">
+                        {overdue.slice(0, 8).map((deal) => (
+                          <li key={deal.id} className="flex flex-col gap-0.5 py-2">
+                            <div className="flex min-w-0 items-baseline justify-between gap-2">
+                              <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
+                                {deal.name ?? 'Unnamed deal'}
+                              </Link>
+                              <span className="shrink-0 text-small text-error">{fmt.date(deal.nextStepDate)}</span>
+                            </div>
+                            <p className="truncate text-small text-secondary">
+                              {deal.nextStep ?? 'No next step written'}
+                              {deal.ownerName ? ` · ${deal.ownerName}` : ''}
+                              {deal.stageName ? ` · ${deal.stageName}` : ''}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
                     )}
-                    {entry.body ? ` · ${entry.body}` : ''}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
-      </div>
+                  </>
+                ),
+              },
+              ]
+            : []),
+          ...(sales
+            ? [
+              {
+                key: 'closing',
+                title: 'Closing this month',
+                href: objectView(account, 'deal', 'all', 'list', { sort: 'close_date' }),
+                hrefLabel: 'All deals',
+                body: (
+                  <>
+                    {board.closingThisMonth.length === 0 ? (
+                      <p className="py-6 text-center">No open deal has a close date this month.</p>
+                    ) : (
+                      <ul className="flex flex-col divide-y divide-divider">
+                        {board.closingThisMonth.map((deal) => (
+                          <li key={deal.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
+                            <div className="min-w-0">
+                              <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="block truncate font-medium">
+                                {deal.name ?? 'Unnamed deal'}
+                              </Link>
+                              <p className="truncate text-small text-secondary">
+                                {deal.stageName ?? 'No stage'}
+                                {deal.ownerName ? ` · ${deal.ownerName}` : ''}
+                              </p>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <p className="tabular-nums">{deal.amount === null ? EMPTY_VALUE : fmt.money(deal.amount, deal.currency)}</p>
+                              <p className="text-small text-secondary">{fmt.date(deal.closeDate)}</p>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ),
+              },
+              ]
+            : []),
+          ...(sales
+            ? [
+              {
+                key: 'meetings',
+                title: 'Meetings in the next 7 days',
+                href: bookedPath(account),
+                hrefLabel: 'All booked',
+                body: (
+                  <>
+                    {board.upcoming.length === 0 ? (
+                      <p className="py-6 text-center">Nothing booked for the coming week.</p>
+                    ) : (
+                      <ul className="flex flex-col divide-y divide-divider">
+                        {board.upcoming.map((b) => (
+                          <li key={b.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
+                            <div className="min-w-0">
+                              {b.contactId ? (
+                                <Link href={recordPath(account, 'contact', b.contactId, { from: accountHome(account) })} className="block truncate font-medium">
+                                  {b.attendeeName}
+                                </Link>
+                              ) : (
+                                <p className="truncate font-medium">{b.attendeeName}</p>
+                              )}
+                              <p className="truncate text-small text-secondary">
+                                {b.pageName}
+                                {b.hostName ? ` · with ${b.hostName}` : ''}
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-small text-secondary">{fmt.dateTime(b.startsAt)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ),
+              },
+              ]
+            : []),
+          ...(people
+            ? [
+              {
+                key: 'tasks',
+                title: 'My tasks',
+                href: tasksPath(account, { mine: '1' }),
+                hrefLabel: 'All mine',
+                body: (
+                  <>
+                    {myTasks.length === 0 ? (
+                      <p className="py-6 text-center">No open tasks are assigned to you.</p>
+                    ) : (
+                      <ul className="flex flex-col divide-y divide-divider">
+                        {myTasks.slice(0, 8).map((t) => (
+                          <li key={t.id} className="flex min-w-0 items-baseline justify-between gap-2 py-2">
+                            <div className="min-w-0">
+                              <p className="truncate font-medium">{t.title}</p>
+                              {t.entityType && t.entityId ? (
+                                <Link href={recordPath(account, t.entityType, t.entityId, { from: accountHome(account) })} className="block truncate text-small">
+                                  {t.entityName ?? t.entityType}
+                                </Link>
+                              ) : null}
+                            </div>
+                            {t.dueDate ? (
+                              <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.timezone) ? 'text-error' : 'text-secondary'}`}>
+                                {fmt.date(t.dueDate)}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ),
+              },
+              ]
+            : []),
+          {
+                key: 'activity',
+                title: 'Recent activity',
+                href: objectView(account, 'contact', 'all', 'list', { sort: '-updated_at' }),
+                hrefLabel: 'Recently changed',
+                body: (
+                  <>
+                    {recent.length === 0 ? (
+                      <p className="py-6 text-center">Nothing has happened yet. Notes, calls, stage moves and form fills land here as the team works.</p>
+                    ) : (
+                      <ul className="flex flex-col divide-y divide-divider">
+                        {recent.map((entry) => (
+                          <li key={entry.id} className="flex flex-col gap-0.5 py-2">
+                            <div className="flex min-w-0 items-baseline justify-between gap-2">
+                              <p className="min-w-0 truncate">
+                                <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">{activityLabel(entry)}</span>{' '}
+                                <span className="font-medium">{activityActor(entry.type, { ...entry, recordName: entry.entityName })}</span>{' '}
+                                {entry.subject ?? ''}
+                              </p>
+                              <time dateTime={entry.occurredAt.toISOString()} className="shrink-0 text-small text-secondary">
+                                {fmt.dateTime(entry.occurredAt)}
+                              </time>
+                            </div>
+                            <p className="truncate text-small text-secondary">
+                              {entry.entityDeleted ? (
+                                <span className="italic">{entry.entityName}</span>
+                              ) : (
+                                <Link href={recordPath(account, entry.entityType, entry.entityId, { from: accountHome(account) })}>{entry.entityName}</Link>
+                              )}
+                              {entry.body ? ` · ${entry.body}` : ''}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ),
+              },
+        ]}
+      />
       </div>
     </div>
   )

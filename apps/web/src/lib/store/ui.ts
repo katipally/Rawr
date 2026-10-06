@@ -16,7 +16,7 @@ import { api, getQueryClient, trpc } from '~/lib/rpc.ts'
  *  Everything below except `railExpanded` used to live only in this browser's
  *  localStorage: it did not follow a person to another machine, and it leaked
  *  between accounts on a shared browser. `usePreferencesSync` (bottom of this
- *  file) hydrates the four fields below from the server on mount and pushes
+ *  file) hydrates the synced fields below from the server on mount and pushes
  *  changes back, debounced. `railExpanded` alone stays local as well, purely so
  *  the very first paint has the right rail width before the server answers. */
 
@@ -42,6 +42,7 @@ const SYNCED_KEYS = {
   timelineKinds: 'timelineKinds',
   panelOpen: 'panelOpen',
   quickFilters: 'quickFilters',
+  homeCards: 'homeCards',
 } as const
 type SyncedField = keyof typeof SYNCED_KEYS
 
@@ -60,6 +61,8 @@ type UiState = {
   /** Which properties a list's quick filter row offers, by object key. An object
    *  with no entry shows its defaults. */
   quickFilters: Record<string, string[]>
+  /** The order of the cards on Home, by card key. Empty is the default order. */
+  homeCards: string[]
   /** Whether `usePreferencesSync` has finished its one round trip for this
    *  session (or given up after one), so the server-backed fields above hold
    *  this account's real values rather than the empty defaults every field
@@ -73,6 +76,7 @@ type UiState = {
   setTimelineKinds: (object: string, kinds: string[]) => void
   setPanelOpen: (key: string, open: boolean) => void
   setQuickFilters: (object: string, keys: string[] | null) => void
+  setHomeCards: (keys: string[]) => void
 }
 
 export const useUi = create<UiState>()(
@@ -84,6 +88,7 @@ export const useUi = create<UiState>()(
       timelineKinds: {},
       panelOpen: {},
       quickFilters: {},
+      homeCards: [],
       serverSynced: false,
 
       setRailExpanded: (railExpanded) => set({ railExpanded }),
@@ -106,6 +111,7 @@ export const useUi = create<UiState>()(
           const { [object]: _dropped, ...rest } = state.quickFilters
           return { quickFilters: keys ? { ...rest, [object]: keys } : rest }
         }),
+      setHomeCards: (homeCards) => set({ homeCards }),
     }),
     {
       name: 'rawr.ui',
@@ -186,6 +192,9 @@ const isBookmarkArray = (value: unknown): value is Bookmark[] =>
 
 const isRecentArray = (value: unknown): value is RecentItem[] =>
   Array.isArray(value) && value.every((row) => row && typeof row === 'object' && typeof (row as RecentItem).href === 'string')
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((row) => typeof row === 'string')
 
 const isStringArrayRecord = (value: unknown): value is Record<string, string[]> =>
   typeof value === 'object' &&
@@ -284,6 +293,7 @@ export const usePreferencesSync = (): void => {
           timelineKinds: isStringArrayRecord(server.timelineKinds) ? server.timelineKinds : local.timelineKinds,
           panelOpen: isBooleanRecord(server.panelOpen) ? server.panelOpen : local.panelOpen,
           quickFilters: isStringArrayRecord(server.quickFilters) ? server.quickFilters : local.quickFilters,
+          homeCards: isStringArray(server.homeCards) ? server.homeCards : local.homeCards,
           serverSynced: true,
         })
         startWriteBack()
