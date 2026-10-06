@@ -18,7 +18,7 @@ const SettingsLayout = async ({ children }: { children: ReactNode }) => {
         backHref={session ? accountHome(session.accountSlug) : '/'}
       />
     </div>
-    <div className="min-w-0 p-6 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
+    <div className="min-w-0 px-4 py-5 sm:px-8 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain">
       {children}
     </div>
   </div>
