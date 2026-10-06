@@ -1,6 +1,6 @@
 'use client'
 
-import { Avatar, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { Avatar, Badge, Button, ConfirmDialog, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { ChevronDown, Copy, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -102,6 +102,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const inviting = isSuperAdmin && invitingParam !== null
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
+  const [revoking, setRevoking] = useState<InvitationRow | null>(null)
   const [ending, setEnding] = useState<{ userId: string; name: string; kind: 'deactivate' | 'remove' } | null>(null)
   /** Who inherits the records and open tasks of the person being ended. Empty leaves
    *  them with nobody, which every scope can still reach. */
@@ -277,7 +278,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
                     key: 'revoke',
                     label: 'Revoke',
                     destructive: true,
-                    onSelect: () => run(() => api.account.members.revoke.mutate({ invitationId: row.id }), 'Invitation revoked.'),
+                    onSelect: () => setRevoking(row),
                   },
                 ] }]}
               />
@@ -438,6 +439,22 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
           </div>
         ) : null}
       </Modal>
+
+      <ConfirmDialog
+        open={revoking !== null}
+        title={`Revoke the invitation to ${revoking?.email ?? ''}?`}
+        confirm="Revoke"
+        busy={busy}
+        onCancel={() => setRevoking(null)}
+        onConfirm={() =>
+          revoking &&
+          void run(() => api.account.members.revoke.mutate({ invitationId: revoking.id }), 'Invitation revoked.').then(() =>
+            setRevoking(null),
+          )
+        }
+      >
+        <p className="break-words">The link sent to {revoking?.email} stops working. Invite them again to send a new one.</p>
+      </ConfirmDialog>
 
       {/* Both actions here take somebody's access away, so both are confirmed like
           every other destructive action in Rawr. Removing is the one that cannot be
