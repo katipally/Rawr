@@ -27,7 +27,6 @@ const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?:
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
         title="Mailboxes"
         lead="Gmail threads on the contacts, companies and deals they are about."
         why={

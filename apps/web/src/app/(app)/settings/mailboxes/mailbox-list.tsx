@@ -1,10 +1,10 @@
 'use client'
 
-import { Alert, Badge, Button, Checkbox, ConfirmDialog, Field, IconButton, Select, Switch, TextInput, cn, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, DataTable, Field, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
-import { ACTION_ICONS } from '~/components/icons.ts'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -267,9 +267,36 @@ export const MailboxList = ({
     }
   }
 
+  const blockColumns: Column<BlocklistRow>[] = [
+    {
+      key: 'pattern',
+      header: 'Address or domain',
+      width: 420,
+      render: (entry) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span title={entry.pattern} className="min-w-0 flex-1 truncate font-semibold">{entry.pattern}</span>
+          <RowActions>
+            <button type="button" className={rowPill} disabled={busy} onClick={() => setUnblocking(entry)}>
+              Stop excluding
+            </button>
+          </RowActions>
+        </span>
+      ),
+    },
+    {
+      key: 'scope',
+      header: 'Applies to',
+      width: 200,
+      render: (entry) => (
+        <span className="font-light">{entry.userId === null ? 'Everybody' : entry.userId === currentUserId ? 'Just my mailbox' : 'Somebody else'}</span>
+      ),
+    },
+  ]
+
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
+        <h2 className="text-xl font-medium">Connected emails</h2>
         {mine ? null : (
           <div className="flex flex-wrap gap-2">
             {googleReady ? (
@@ -461,7 +488,7 @@ export const MailboxList = ({
 
       <section className="flex flex-col gap-2">
         <div className="max-w-2xl">
-          <h3 className="text-base font-semibold">Never read these</h3>
+          <h2 className="text-xl font-medium">Never read these</h2>
           <p className="text-secondary">
             An address or a domain. Applied before anything is stored, so a match is never in the
             database at all. Threads where everybody is at {internalDomain} are already excluded
@@ -502,28 +529,13 @@ export const MailboxList = ({
         {blocklist.length === 0 ? (
           <p className="text-secondary">Nothing excluded by hand yet.</p>
         ) : (
-          <ul className="flex flex-col rounded-panel border border-line bg-surface">
-            {blocklist.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-divider px-3 py-1.5 last:border-0"
-              >
-                <span className="min-w-0 break-words">
-                  {entry.pattern}
-                  <span className="ml-2 text-small text-secondary">
-                    {entry.userId === null ? 'everybody' : entry.userId === currentUserId ? 'mine' : 'somebody else'}
-                  </span>
-                </span>
-                <IconButton
-                  label={`Stop excluding ${entry.pattern}`}
-                  tone="destructive"
-                  icon={<ACTION_ICONS.delete size={16} />}
-                  disabled={busy}
-                  onClick={() => setUnblocking(entry)}
-                />
-              </li>
-            ))}
-          </ul>
+          <DataTable
+            columns={blockColumns}
+            rows={blocklist}
+            rowKey={(entry) => entry.id}
+            caption="Excluded senders"
+            storageKey="settings.mail-blocklist"
+          />
         )}
       </section>
 
