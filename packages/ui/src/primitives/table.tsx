@@ -188,7 +188,7 @@ export const DataTable = <Row,>({
           setAtEnd(scrollLeft + clientWidth >= scrollWidth - 1)
         }}
         className={cn(
-          'w-full overflow-auto border-t border-line bg-surface',
+          'relative w-full overflow-auto border-t border-line bg-surface',
           fill && 'min-h-0 flex-1',
         )}
       >
