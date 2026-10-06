@@ -1,13 +1,17 @@
 import { Skeleton } from '@rawr/ui'
 
-/** The export form and what it will write. */
+/** The title, then the export card centred under it with its fields. */
 const Loading = () => (
-  <div className="flex max-w-2xl flex-col gap-3">
-    <Skeleton className="h-7 w-56" />
-    <Skeleton className="h-4 w-3/4" />
-    {Array.from({ length: 2 }, (_, index) => (
-      <Skeleton key={index} className="h-24 w-full" />
-    ))}
+  <div className="flex flex-col gap-3">
+    <Skeleton className="h-7 w-40" />
+    <Skeleton className="h-4 w-80 max-w-full" />
+    <div className="mx-auto flex w-full max-w-[40rem] min-w-0 flex-col gap-5 rounded-panel border border-line p-6">
+      <Skeleton className="h-6 w-48" />
+      {Array.from({ length: 4 }, (_, index) => (
+        <Skeleton key={index} className="h-12 w-full" />
+      ))}
+      <Skeleton className="h-9 w-24" />
+    </div>
   </div>
 )
 
