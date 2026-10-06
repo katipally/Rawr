@@ -1,7 +1,7 @@
-import { PageHeader } from '@rawr/ui'
 import { ROLE_TEMPLATES, listInvitations, listMembers } from '@rawr/db'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { MemberList } from './member-list.tsx'
+import { UsersTeamsHeader } from './users-teams-header.tsx'
 
 /** Who is in the account and what each of them holds. Hubs, at view or edit, the
  *  way HubSpot's permission grid grants them, with super admin above the grid.
@@ -20,10 +20,8 @@ const MembersPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        as="h2"
-        title="Members"
-        lead={`Everyone in ${session.accountName}.`}
+      <UsersTeamsHeader
+        current="users"
         why={
           <p>
             Anyone with a verified {session.hostedDomain} Google account joins the first time they

@@ -1,27 +1,18 @@
 'use client'
 
-import { Avatar, Badge, Button, Card, Checkbox, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, useToast } from '@rawr/ui'
-import { Copy, MoreHorizontal } from 'lucide-react'
+import { Avatar, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, Copy, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { usePagedRows } from '~/components/paged.tsx'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { invitePath } from '~/lib/links.ts'
-import {
-  CRITICAL_ACTIONS,
-  CRITICAL_HINT,
-  CRITICAL_LABEL,
-  HUBS,
-  HUBS_WITHOUT_SCREENS,
-  HUBS_WITH_RECORDS,
-  HUB_HINT,
-  SCOPES,
-  SCOPE_LABEL,
-  type CriticalAction,
-  type Hub,
-  type Scope,
-} from '~/lib/hubs.ts'
+import { CRITICAL_ACTIONS, CRITICAL_LABEL, HUBS, HUBS_WITH_RECORDS, SCOPE_LABEL, type CriticalAction, type Hub, type Scope } from '~/lib/hubs.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { AccessEditor, EMPTY_GRANTS, levelOf, scopeOf, type Grants, type RoleTemplate } from './access-editor.tsx'
 
 type HubScopes = Partial<Record<Hub, Scope>>
 
@@ -55,10 +46,6 @@ export type InvitationRow = {
   createdAt: string
 }
 
-/** The suggested sets, handed down from the data access layer so the client keeps
- *  no second copy of them. */
-export type RoleTemplate = { key: string; label: string; description: string; grants: Grants }
-
 type Props = {
   rows: MemberListRow[]
   invitations: InvitationRow[]
@@ -67,18 +54,12 @@ type Props = {
   isSuperAdmin: boolean
 }
 
-type Grants = {
-  isSuperAdmin: boolean
-  viewHubs: Hub[]
-  editHubs: Hub[]
-  viewScopes: HubScopes
-  editScopes: HubScopes
-  criticalGrants: CriticalAction[]
-}
-type Level = 'none' | 'view' | 'edit'
-type Tab = 'active' | 'pending' | 'deactivated'
-
-const EMPTY: Grants = { isSuperAdmin: false, viewHubs: [], editHubs: [], viewScopes: {}, editScopes: {}, criticalGrants: [] }
+type View = 'active' | 'pending' | 'deactivated'
+const VIEWS: { key: View; label: string }[] = [
+  { key: 'active', label: 'Active Users' },
+  { key: 'pending', label: 'Pending Invites' },
+  { key: 'deactivated', label: 'Deactivated Users' },
+]
 
 const grantsOf = (row: MemberListRow | InvitationRow): Grants => ({
   isSuperAdmin: row.isSuperAdmin,
@@ -89,216 +70,36 @@ const grantsOf = (row: MemberListRow | InvitationRow): Grants => ({
   criticalGrants: row.criticalGrants,
 })
 
-const levelOf = (grants: Grants, hub: Hub): Level =>
-  grants.editHubs.includes(hub) ? 'edit' : grants.viewHubs.includes(hub) ? 'view' : 'none'
-
-/** A hub that reaches everything is absent from the map rather than stored as
- *  'everything', which is the shape the server keeps and the policy reads. */
-const withScope = (map: HubScopes, hub: Hub, scope: Scope): HubScopes => {
-  const next = { ...map }
-  if (scope === 'everything') delete next[hub]
-  else next[hub] = scope
-  return next
-}
-
-const scopeOf = (grants: Grants, hub: Hub): Scope => grants.viewScopes[hub] ?? 'everything'
-
-const withLevel = (grants: Grants, hub: Hub, level: Level): Grants => ({
-  ...grants,
-  viewHubs: level === 'view' ? [...new Set([...grants.viewHubs, hub])] : grants.viewHubs.filter((h) => h !== hub),
-  editHubs: level === 'edit' ? [...new Set([...grants.editHubs, hub])] : grants.editHubs.filter((h) => h !== hub),
-  // Dropping a hub drops its scope with it, so granting it again starts open
-  // rather than silently narrowed by a decision somebody made months ago.
-  viewScopes: level === 'none' ? withScope(grants.viewScopes, hub, 'everything') : grants.viewScopes,
-  editScopes: level === 'edit' ? grants.editScopes : withScope(grants.editScopes, hub, 'everything'),
-})
-
-/** One control, both maps. Reading and writing are narrowed together because a
- *  seat that may only edit its own records has no reason to read everybody's,
- *  and HubSpot's own grid moves them together too. */
-const withRecordScope = (grants: Grants, hub: Hub, scope: Scope): Grants => ({
-  ...grants,
-  viewScopes: withScope(grants.viewScopes, hub, scope),
-  editScopes: grants.editHubs.includes(hub) ? withScope(grants.editScopes, hub, scope) : grants.editScopes,
-})
-
-/** What the row shows at a glance, in HubSpot's own shorthand: the hubs someone
- *  holds, not a count of them. */
+/** What the Access column shows, in HubSpot's own shorthand: the hubs someone
+ *  holds joined by bars, how far each reaches only where it is narrowed. */
 const summarise = (grants: Grants): string => {
   if (grants.isSuperAdmin) return 'Super Admin'
   const held = HUBS.filter((hub) => levelOf(grants, hub) !== 'none')
   if (held.length === 0 && grants.criticalGrants.length === 0) return 'No access'
   const parts = held.map((hub) => {
-    const level = levelOf(grants, hub) === 'edit' ? hub : `${hub} (view)`
-    const scope = scopeOf(grants, hub)
-    return scope === 'everything' ? level : `${level} · ${SCOPE_LABEL[scope].toLowerCase()}`
+    const notes = [
+      ...(levelOf(grants, hub) === 'view' ? ['view'] : []),
+      ...(HUBS_WITH_RECORDS.has(hub) && scopeOf(grants, hub) !== 'everything' ? [SCOPE_LABEL[scopeOf(grants, hub)].toLowerCase()] : []),
+    ]
+    const name = hub[0]!.toUpperCase() + hub.slice(1)
+    return notes.length > 0 ? `${name} (${notes.join(', ')})` : name
   })
   const critical = CRITICAL_ACTIONS.filter((action) => grants.criticalGrants.includes(action))
-  if (critical.length > 0) parts.push(critical.map((action) => CRITICAL_LABEL[action].toLowerCase()).join(', '))
-  return parts.join(' · ')
+  if (critical.length > 0) parts.push(critical.map((action) => CRITICAL_LABEL[action]).join(', '))
+  return parts.join(' | ')
 }
-
-const withCritical = (grants: Grants, action: CriticalAction, on: boolean): Grants => ({
-  ...grants,
-  criticalGrants: on
-    ? CRITICAL_ACTIONS.filter((key) => key === action || grants.criticalGrants.includes(key))
-    : grants.criticalGrants.filter((key) => key !== action),
-})
-
-/** The grid itself: one row per hub, three exclusive levels. Super admin sits
- *  above it and greys it out, because holding everything is not six choices. */
-const GrantGrid = ({
-  value,
-  onChange,
-  templates,
-  copyFrom,
-}: {
-  value: Grants
-  onChange: (next: Grants) => void
-  templates: RoleTemplate[]
-  copyFrom: MemberListRow[]
-}) => (
-  <div className="flex flex-col gap-3">
-    {/* HubSpot's "Choose how to set access": start from a suggested set or from
-        somebody who already has the right one, then adjust. Neither commits
-        anything, so a wrong pick is a second click rather than a mistake. */}
-    <fieldset className="flex flex-wrap items-center gap-2 border-0 p-0">
-      <legend className="sr-only">start from an existing set of permissions</legend>
-      <span className="text-small text-secondary">Start from</span>
-      {templates.map((template) => (
-        <Button key={template.key} type="button" variant="secondary" title={template.description} onClick={() => onChange(template.grants)}>
-          {template.label}
-        </Button>
-      ))}
-      {copyFrom.length > 0 ? (
-        <Select
-          aria-label="Copy permissions from another member"
-          value=""
-          onChange={(e) => {
-            const source = copyFrom.find((row) => row.userId === e.target.value)
-            if (source) onChange(grantsOf(source))
-          }}
-        >
-          <option value="">Copy from another member</option>
-          {copyFrom.map((row) => (
-            <option key={row.userId} value={row.userId}>
-              {row.name}
-            </option>
-          ))}
-        </Select>
-      ) : null}
-    </fieldset>
-    <Checkbox
-      label="Super Admin"
-      hint="Every hub, plus seating people and ending their access."
-      checked={value.isSuperAdmin}
-      onChange={(e) => onChange({ ...value, isSuperAdmin: e.target.checked })}
-    />
-    <div className="flex flex-col gap-1 rounded-hs border border-line">
-      <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-line px-3 py-2 text-small text-secondary">
-        <span>Hub</span>
-        <span>None · View · Edit</span>
-      </div>
-      {HUBS.map((hub) => {
-        const level = levelOf(value, hub)
-        return (
-          <div key={hub} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
-            <div>
-              <p className="text-body">
-                <span className="capitalize">{hub}</span>
-                {HUBS_WITHOUT_SCREENS.has(hub) ? <span className="ml-2 text-small text-secondary">no screens yet</span> : null}
-              </p>
-              <p className="text-small text-secondary">{HUB_HINT[hub]}</p>
-            </div>
-            <fieldset className="flex gap-1 border-0 p-0">
-              <legend className="sr-only">{hub} access</legend>
-              {(['none', 'view', 'edit'] as const).map((option) => (
-                <Button
-                  key={option}
-                  type="button"
-                  variant={level === option ? 'primary' : 'secondary'}
-                  disabled={value.isSuperAdmin}
-                  onClick={() => onChange(withLevel(value, hub, option))}
-                >
-                  {option === 'none' ? 'None' : option === 'view' ? 'View' : 'Edit'}
-                </Button>
-              ))}
-            </fieldset>
-            {level !== 'none' && HUBS_WITH_RECORDS.has(hub) && !value.isSuperAdmin ? (
-              <fieldset className="col-span-2 flex flex-wrap items-center gap-1 border-0 p-0 pl-0 pt-1">
-                <legend className="sr-only">how much of {hub} this seat reaches</legend>
-                <span className="pr-1 text-small text-secondary">Reaches</span>
-                {SCOPES.map((option) => (
-                  <Button
-                    key={option}
-                    type="button"
-                    variant={scopeOf(value, hub) === option ? 'primary' : 'secondary'}
-                    onClick={() => onChange(withRecordScope(value, hub, option))}
-                  >
-                    {SCOPE_LABEL[option]}
-                  </Button>
-                ))}
-                <span className="text-small text-secondary">
-                  {scopeOf(value, hub) === 'everything'
-                    ? 'every record in the account'
-                    : scopeOf(value, hub) === 'team'
-                      ? 'records owned by anybody on their teams, and unassigned ones'
-                      : 'only records they own, and unassigned ones'}
-                </span>
-              </fieldset>
-            ) : null}
-          </div>
-        )
-      })}
-    </div>
-    {/* HubSpot's Critical column, as its own group for the same reason it is one
-        there: each of these is irreversible or reaches the whole database, and
-        none of them falls out of holding a hub. */}
-    <div className="flex flex-col gap-1 rounded-hs border border-line">
-      <div className="grid grid-cols-[1fr_auto] gap-2 border-b border-line px-3 py-2 text-small text-secondary">
-        <span>Critical</span>
-        <span>Off · On</span>
-      </div>
-      {CRITICAL_ACTIONS.map((action) => {
-        const on = value.isSuperAdmin || value.criticalGrants.includes(action)
-        return (
-          <div key={action} className="grid grid-cols-[1fr_auto] items-center gap-2 px-3 py-2">
-            <div>
-              <p className="text-body">{CRITICAL_LABEL[action]}</p>
-              <p className="text-small text-secondary">{CRITICAL_HINT[action]}</p>
-            </div>
-            <fieldset className="flex gap-1 border-0 p-0">
-              <legend className="sr-only">may {CRITICAL_LABEL[action].toLowerCase()}</legend>
-              {([false, true] as const).map((option) => (
-                <Button
-                  key={String(option)}
-                  type="button"
-                  variant={on === option ? 'primary' : 'secondary'}
-                  disabled={value.isSuperAdmin}
-                  onClick={() => onChange(withCritical(value, action, option))}
-                >
-                  {option ? 'On' : 'Off'}
-                </Button>
-              ))}
-            </fieldset>
-          </div>
-        )
-      })}
-    </div>
-  </div>
-)
 
 export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin }: Props) => {
   const fmt = useFormat()
   const toast = useToast()
   const router = useRouter()
-  const [tab, setTab] = useState<Tab>('active')
+  const [viewParam] = useUrlParam('view')
+  const view: View = viewParam === 'pending' || viewParam === 'deactivated' ? viewParam : 'active'
+  const [needle, setNeedle] = useState('')
   const [editingId, setEditingId] = useUrlParam('member')
-  /** What has been changed in the grid and not saved; the member's own grants until then. */
-  const [grantDraft, setGrantDraft] = useState<Grants | null>(null)
+  const [invitingParam, setInviting] = useUrlParam('invite')
   const editingRow = isSuperAdmin ? rows.find((row) => row.userId === editingId) : undefined
-  const editing = editingRow ? { userId: editingRow.userId, name: editingRow.name, grants: grantDraft ?? grantsOf(editingRow) } : null
-  const [inviting, setInviting] = useState<{ email: string; grants: Grants } | null>(null)
+  const inviting = isSuperAdmin && invitingParam !== null
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
   const [ending, setEnding] = useState<{ userId: string; name: string; kind: 'deactivate' | 'remove' } | null>(null)
@@ -334,242 +135,254 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   }
 
   const members = rows.map((row) => (pending[row.userId] ? { ...row, ...pending[row.userId] } : row))
-  const shown = members.filter((row) =>
-    tab === 'active' ? row.state === 'active' : tab === 'deactivated' ? row.state === 'deactivated' : false,
-  )
+  const counts: Record<View, number> = {
+    active: members.filter((row) => row.state === 'active').length,
+    pending: invitations.length,
+    deactivated: members.filter((row) => row.state === 'deactivated').length,
+  }
+  const wanted = needle.trim().toLowerCase()
+  const found = (text: string) => text.toLowerCase().includes(wanted)
+  const shown = members.filter((row) => row.state === view && (wanted === '' || found(row.name) || found(row.email)))
+  const shownInvites = invitations.filter((row) => wanted === '' || found(row.email))
+  const { page, pager } = usePagedRows<MemberListRow>(shown, 'users')
+  const invitePage = usePagedRows<InvitationRow>(shownInvites, 'invites')
+
+  const save = async (userId: string, grants: Grants) => {
+    setBusy(true)
+    setPending((current) => ({ ...current, [userId]: { ...current[userId], ...grants } }))
+    try {
+      await api.account.members.setGrants.mutate({ userId, ...grants })
+      toast('success', 'Permissions saved.')
+      router.refresh()
+      setEditingId(null)
+    } catch (error) {
+      setPending((current) => {
+        const next = { ...current }
+        delete next[userId]
+        return next
+      })
+      toast('error', errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const invite = async (email: string, grants: Grants) => {
+    setBusy(true)
+    try {
+      const { token } = await api.account.members.invite.mutate({ email, ...grants })
+      toast('success', 'Invitation ready.')
+      router.refresh()
+      setInviting(null)
+      setLink(`${window.location.origin}${invitePath(token)}`)
+    } catch (error) {
+      toast('error', errorMessage(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const memberActions = (row: MemberListRow) =>
+    isSuperAdmin && row.userId !== selfId ? (
+      <DropdownMenu
+        label={`Actions for ${row.name}`}
+        align="start"
+        trigger={(props) => (
+          <button {...props} type="button" className={rowPill}>
+            Actions
+            <ChevronDown aria-hidden="true" className="size-3" />
+          </button>
+        )}
+        groups={[{ key: 'member', items: [
+          { key: 'edit', label: 'Edit permissions', onSelect: () => setEditingId(row.userId) },
+          { key: 'copy', label: 'Copy permissions from...', onSelect: () => setCopying({ toUserId: row.userId, name: row.name, fromUserId: '' }) },
+          row.state === 'deactivated'
+            ? {
+                key: 'reactivate',
+                label: 'Restore access',
+                onSelect: () =>
+                  run(
+                    () => api.account.members.reactivate.mutate({ userId: row.userId }),
+                    'Access restored.',
+                    { userId: row.userId, patch: { state: 'active' } },
+                  ),
+              }
+            : { key: 'deactivate', label: 'End access', onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'deactivate' }) },
+          { key: 'remove', label: 'Remove from account', destructive: true, onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'remove' }) },
+        ] }]}
+      />
+    ) : null
+
+  const memberColumns: Column<MemberListRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 380,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <Avatar name={row.name} />
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            {isSuperAdmin && row.userId !== selfId ? (
+              <button type="button" title={row.name} onClick={() => setEditingId(row.userId)} className="min-w-0 truncate text-left font-semibold text-link hover:underline">
+                {row.name}
+              </button>
+            ) : (
+              <span title={row.name} className="min-w-0 truncate font-semibold">
+                {row.name}
+              </span>
+            )}
+            {row.userId === selfId ? <span className="shrink-0 text-secondary">(you)</span> : null}
+            {row.isSuperAdmin ? <Badge tone="accent" className="shrink-0">Super Admin</Badge> : null}
+            {!row.linked ? <Badge tone="neutral" className="shrink-0">Never signed in</Badge> : null}
+          </span>
+          <RowActions>{memberActions(row)}</RowActions>
+        </span>
+      ),
+    },
+    { key: 'email', header: 'Email', width: 260, render: (row) => <span title={row.email} className="block truncate">{row.email}</span> },
+    { key: 'access', header: 'Access', width: 380, render: (row) => <span title={summarise(row)} className="block truncate">{summarise(row)}</span> },
+    { key: 'joined', header: 'Joined', width: 160, render: (row) => <span className="whitespace-nowrap">{fmt.date(row.joinedAt)}</span> },
+  ]
+
+  const inviteColumns: Column<InvitationRow>[] = [
+    {
+      key: 'email',
+      header: 'Email',
+      width: 340,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span title={row.email} className="min-w-0 flex-1 truncate font-semibold">{row.email}</span>
+          {isSuperAdmin ? (
+            <RowActions>
+              <DropdownMenu
+                label={`Actions for the invitation to ${row.email}`}
+                align="start"
+                trigger={(props) => (
+                  <button {...props} type="button" className={rowPill}>
+                    Actions
+                    <ChevronDown aria-hidden="true" className="size-3" />
+                  </button>
+                )}
+                groups={[{ key: 'invite', items: [
+                  {
+                    key: 'resend',
+                    label: 'Resend',
+                    onSelect: () =>
+                      run(async () => {
+                        const { token } = await api.account.members.resend.mutate({ invitationId: row.id })
+                        setLink(`${window.location.origin}${invitePath(token)}`)
+                      }, 'A new link is ready.'),
+                  },
+                  {
+                    key: 'revoke',
+                    label: 'Revoke',
+                    destructive: true,
+                    onSelect: () => run(() => api.account.members.revoke.mutate({ invitationId: row.id }), 'Invitation revoked.'),
+                  },
+                ] }]}
+              />
+            </RowActions>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'access', header: 'Access', width: 340, render: (row) => <span title={summarise(row)} className="block truncate">{summarise(row)}</span> },
+    { key: 'by', header: 'Invited by', width: 200, render: (row) => <span className="block truncate">{row.invitedByName ?? EMPTY_VALUE}</span> },
+    { key: 'expires', header: 'Expires', width: 160, render: (row) => <span className="whitespace-nowrap">{fmt.date(row.expiresAt)}</span> },
+  ]
 
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="flex gap-1">
-          {(['active', 'pending', 'deactivated'] as const).map((key) => (
-            <Button
-              key={key}
-              variant={tab === key ? 'primary' : 'secondary'}
-              onClick={() => setTab(key)}
-            >
-              {key === 'active'
-                ? `Active (${members.filter((r) => r.state === 'active').length})`
-                : key === 'pending'
-                  ? `Pending (${invitations.length})`
-                  : `Deactivated (${members.filter((r) => r.state === 'deactivated').length})`}
-            </Button>
-          ))}
-        </div>
-        {isSuperAdmin ? (
-          <Button onClick={() => setInviting({ email: '', grants: EMPTY })}>Create member</Button>
-        ) : null}
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0">Create users, choose what each of them can reach, and end their access.</p>
+        {isSuperAdmin ? <Button onClick={() => setInviting('1')}>Create user</Button> : null}
       </div>
 
-      {tab === 'pending' ? (
-        invitations.length === 0 ? (
-          <EmptyState title="No open invitations" description="Everybody invited has taken their seat." />
+      <div role="tablist" aria-label="Users by state" className="flex min-w-0 overflow-x-auto">
+        {VIEWS.map((entry) => (
+          <button
+            key={entry.key}
+            type="button"
+            role="tab"
+            aria-selected={view === entry.key}
+            onClick={() => replaceParams({ view: entry.key === 'active' ? null : entry.key, skip: null })}
+            className={cn(
+              'flex h-pill min-w-0 flex-1 basis-0 items-center gap-2 border border-line px-3 text-left whitespace-nowrap transition-colors duration-150 ease-out sm:max-w-[16.25rem] [&+&]:-ml-px',
+              view === entry.key ? 'bg-surface' : 'bg-fill hover:bg-fill-hover',
+            )}
+          >
+            <span className="grid h-[1.125rem] min-w-[1.125rem] shrink-0 place-items-center rounded-pill bg-body px-1 text-small text-inverse tabular-nums">
+              {fmt.number(counts[entry.key])}
+            </span>
+            <span className="min-w-0 truncate">{entry.label}</span>
+          </button>
+        ))}
+      </div>
+
+      <label className="relative w-full min-w-0 sm:w-80">
+        <span className="sr-only">Search name or email address</span>
+        <input
+          type="search"
+          value={needle}
+          placeholder={view === 'pending' ? 'Search email address' : 'Search name or email address'}
+          onChange={(event) => setNeedle(event.target.value)}
+          className="h-control w-full rounded-pill border border-line-strong bg-surface py-1 pr-9 pl-4 text-base font-light placeholder:text-muted"
+        />
+        <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
+      </label>
+
+      {view === 'pending' ? (
+        shownInvites.length === 0 ? (
+          <EmptyState
+            title={wanted ? 'No invitation matches' : 'No open invitations'}
+            description={wanted ? 'Nobody invited has that email address.' : 'Everybody invited has taken their seat.'}
+          />
         ) : (
-          <ul>
-            {invitations.map((row) => (
-              <li key={row.id} className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-0">
-                <div>
-                  <p className="text-body">{row.email}</p>
-                  <p className="text-small text-secondary">
-                    {summarise(row)} · invited by {row.invitedByName ?? 'somebody'} · expires{' '}
-                    {fmt.date(row.expiresAt)}
-                  </p>
-                </div>
-                {isSuperAdmin ? (
-                  <DropdownMenu
-                    label="Invitation actions"
-                    trigger={(props) => <IconButton {...props} label="Invitation actions" icon={<MoreHorizontal size={16} />} />}
-                    groups={[{ key: 'invite', items: [
-                      {
-                        key: 'resend',
-                        label: 'Resend',
-                        onSelect: () =>
-                          run(async () => {
-                            const { token } = await api.account.members.resend.mutate({ invitationId: row.id })
-                            setLink(`${window.location.origin}${invitePath(token)}`)
-                          }, 'A new link is ready.'),
-                      },
-                      {
-                        key: 'revoke',
-                        label: 'Revoke',
-                        onSelect: () =>
-                          run(() => api.account.members.revoke.mutate({ invitationId: row.id }), 'Invitation revoked.'),
-                      },
-                    ] }]}
-                  />
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <>
+            <DataTable columns={inviteColumns} rows={invitePage.page} rowKey={(row) => row.id} caption="Pending invites" storageKey="settings.invites" />
+            {invitePage.pager}
+          </>
         )
       ) : shown.length === 0 ? (
         <EmptyState
-          title={tab === 'active' ? 'Nobody here yet' : 'Nobody deactivated'}
-          description={tab === 'active' ? 'Invite somebody to seat them.' : 'Everybody who has been here still has access.'}
+          title={wanted ? 'Nobody matches' : view === 'active' ? 'Nobody here yet' : 'Nobody deactivated'}
+          description={
+            wanted
+              ? 'No user here has that name or email address.'
+              : view === 'active'
+                ? 'Create a user to seat them.'
+                : 'Everybody who has been here still has access.'
+          }
         />
       ) : (
-        <ul>
-          {shown.map((row) => (
-            <li key={row.userId} className="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-0">
-              <div className="flex items-center gap-3">
-                <Avatar name={row.name} />
-                <div>
-                  <p className="text-body">
-                    {row.name}
-                    {row.userId === selfId ? <span className="text-secondary"> (you)</span> : null}
-                    {row.isSuperAdmin ? (
-                      <Badge tone="accent" className="ml-2">
-                        Super Admin
-                      </Badge>
-                    ) : null}
-                    {!row.linked ? (
-                      <Badge tone="neutral" className="ml-2">
-                        Never signed in
-                      </Badge>
-                    ) : null}
-                  </p>
-                  <p className="text-small text-secondary">
-                    {row.email} · {summarise(row)}
-                  </p>
-                </div>
-              </div>
-              {isSuperAdmin && row.userId !== selfId ? (
-                <DropdownMenu
-                  label={`Actions for ${row.name}`}
-                  trigger={(props) => <IconButton {...props} label={`Actions for ${row.name}`} icon={<MoreHorizontal size={16} />} />}
-                  groups={[{ key: 'member', items: [
-                    {
-                      key: 'edit',
-                      label: 'Edit permissions',
-                      onSelect: () => {
-                        setGrantDraft(null)
-                        setEditingId(row.userId)
-                      },
-                    },
-                    row.state === 'deactivated'
-                      ? {
-                          key: 'reactivate',
-                          label: 'Restore access',
-                          onSelect: () =>
-                            run(
-                              () => api.account.members.reactivate.mutate({ userId: row.userId }),
-                              'Access restored.',
-                              { userId: row.userId, patch: { state: 'active' } },
-                            ),
-                        }
-                      : {
-                          key: 'deactivate',
-                          label: 'End access',
-                          onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'deactivate' }),
-                        },
-                    {
-                      key: 'copy',
-                      label: 'Copy permissions from...',
-                      onSelect: () => setCopying({ toUserId: row.userId, name: row.name, fromUserId: '' }),
-                    },
-                    {
-                      key: 'remove',
-                      label: 'Remove from account',
-                      onSelect: () => setEnding({ userId: row.userId, name: row.name, kind: 'remove' }),
-                    },
-                  ] }]}
-                />
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <>
+          <DataTable columns={memberColumns} rows={page} rowKey={(row) => row.userId} caption={VIEWS.find((entry) => entry.key === view)!.label} storageKey="settings.users" />
+          {pager}
+        </>
       )}
 
-      <Modal
-        open={editing !== null}
-        onClose={() => setEditingId(null)}
-        title={`Permissions for ${editing?.name ?? ''}`}
-        footer={
-          editing ? (
-            <>
-              <Button variant="secondary" onClick={() => setEditingId(null)}>
-                Cancel
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() =>
-                  run(
-                    async () => {
-                      await api.account.members.setGrants.mutate({ userId: editing.userId, ...editing.grants })
-                      setEditingId(null)
-                    },
-                    'Permissions saved.',
-                    { userId: editing.userId, patch: editing.grants },
-                  )
-                }
-              >
-                Save
-              </Button>
-            </>
-          ) : null
-        }
-      >
-        {editing ? (
-          <div className="flex flex-col gap-4">
-            <GrantGrid
-              value={editing.grants}
-              onChange={setGrantDraft}
-              templates={templates}
-              copyFrom={[]}
-            />
-          </div>
-        ) : null}
-      </Modal>
-
-      <Modal
-        open={inviting !== null}
-        onClose={() => setInviting(null)}
-        title="Create member"
-        dirty={inviting !== null && inviting.email !== ''}
-        onSubmit={() => {
-          if (!inviting) return
-          void run(async () => {
-            const { token } = await api.account.members.invite.mutate({
-              email: inviting.email.trim(),
-              ...inviting.grants,
-            })
-            setInviting(null)
-            setLink(`${window.location.origin}${invitePath(token)}`)
-          }, 'Invitation ready.')
-        }}
-        footer={
-          inviting ? (
-            <>
-              <Button variant="secondary" onClick={() => setInviting(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={busy || inviting.email.trim() === ''}>
-                Send invitation
-              </Button>
-            </>
-          ) : null
-        }
-      >
-        {inviting ? (
-          <div className="flex flex-col gap-4">
-            <Field id="invite-email" label="Email address">
-              <TextInput
-                id="invite-email"
-                type="email"
-                value={inviting.email}
-                onChange={(e) => setInviting({ ...inviting, email: e.target.value })}
-                placeholder="someone@example.com"
-              />
-            </Field>
-            <GrantGrid
-              value={inviting.grants}
-              onChange={(grants) => setInviting({ ...inviting, grants })}
-              templates={templates}
-              copyFrom={rows}
-            />
-          </div>
-        ) : null}
-      </Modal>
+      {editingRow ? (
+        <AccessEditor
+          key={editingRow.userId}
+          name={editingRow.name}
+          initial={grantsOf(editingRow)}
+          templates={templates}
+          copyFrom={members.filter((row) => row.userId !== editingRow.userId).map((row) => ({ userId: row.userId, name: row.name, grants: grantsOf(row) }))}
+          busy={busy}
+          onSave={(grants) => void save(editingRow.userId, grants)}
+          onClose={() => setEditingId(null)}
+        />
+      ) : inviting ? (
+        <AccessEditor
+          name={null}
+          initial={EMPTY_GRANTS}
+          templates={templates}
+          copyFrom={members.map((row) => ({ userId: row.userId, name: row.name, grants: grantsOf(row) }))}
+          busy={busy}
+          onSave={(grants, email) => void invite(email, grants)}
+          onClose={() => setInviting(null)}
+        />
+      ) : null}
 
       <Modal
         open={copying !== null}
@@ -714,6 +527,6 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
           </div>
         </div>
       </Modal>
-    </Card>
+    </div>
   )
 }
