@@ -46,6 +46,15 @@
   --rawr-info: #0091ae;
   --rawr-info-subtle: #e5f5f8;
 
+  /* The dots and tags on HubSpot's segment, form and email lists: live, active,
+     published and sent share one green; scheduled is amber; a draft or a static
+     list is the muted grey. */
+  --rawr-status-live: #00823a;
+  --rawr-status-live-subtle: #daefe1;
+  --rawr-status-pending: #f7c03e;
+  --rawr-tag-object: #016de1;
+  --rawr-tag-object-subtle: #e1f2fb;
+
   --rawr-scrim: rgb(51 51 51 / 0.4);
 
   /* The chrome: rail, top bar and flyout share one charcoal, the item pill is a

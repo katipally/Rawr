@@ -1,19 +1,20 @@
 'use client'
 
-import { Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, NOTHING_MATCHED, PageHeader, Select, TextInput, useToast, type Column } from '@rawr/ui'
-import { MoreVertical, Search } from 'lucide-react'
+import { Button, DataTable, DropdownMenu, EmptyState, Modal, NOTHING_MATCHED, PageHeader, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ObjectKey } from '@rawr/db'
 import { usePagedRows } from '~/components/paged.tsx'
-import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
-import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
-import { useOrigin } from '~/lib/use-origin.ts'
+import { RowActions, StatusDot, rowPill } from '~/components/row-actions.tsx'
+import type { FilterField, Group } from '~/components/crm/filter-builder.tsx'
+import { objectView, segmentsPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { useQueryClient } from '@tanstack/react-query'
+import { OBJECT_LABEL, SegmentBuilder } from './segment-builder.tsx'
 
 export type SegmentRow = {
   id: string
@@ -37,39 +38,35 @@ export type SegmentListProps = {
   hub: string
 }
 
-const OBJECT_LABEL: Record<ObjectKey, string> = {
-  contact: 'Contacts',
-  company: 'Companies',
-  deal: 'Deals',
-}
+/** HubSpot's ghost filter on its segment list: 14px semibold, no border until
+ *  the pointer is over it. */
+const ghost =
+  'inline-flex min-h-[2.4375rem] items-center gap-1 rounded-hs px-3 font-semibold text-body transition-all duration-150 ease-out hover:bg-fill'
+
+const KIND_LABEL = { all: 'All types', active: 'Active', static: 'Static' } as const
 
 export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: SegmentListProps) => {
   const queryClient = useQueryClient()
   const fmt = useFormat()
-  const origin = useOrigin()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
 
+  // ?segment=new or ?segment=<id> opens the builder, and the older
+  // ?action=create-list opens it on a static list, so links into either still land.
   const [segmentParam, setSegmentParam] = useUrlParam('segment')
-  const editing: SegmentRow | 'new' | null = segmentParam === 'new' ? 'new' : (rows.find((row) => row.id === segmentParam) ?? null)
-  const setEditing = (next: SegmentRow | 'new' | null) => setSegmentParam(next === null ? null : next === 'new' ? 'new' : next.id)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [object, setObject] = useState<ObjectKey>('contact')
-  const [filters, setFilters] = useState<Group[]>([{ conjunction: 'and', conditions: [] }])
-  const [preview, setPreview] = useState<{ count: number; sample: { id: string; displayName: string }[] } | null>(null)
-  const [showBuilder, setShowBuilder] = useState(false)
+  const [action, setAction] = useUrlParam('action')
+  const editing = rows.find((row) => row.id === segmentParam && !row.isStatic) ?? null
+  const building = segmentParam === 'new' || editing !== null || action === 'create-list'
+  const closeBuilder = () => {
+    setSegmentParam(null)
+    if (action === 'create-list') setAction(null)
+  }
 
   const [needle, setNeedle] = useState('')
   const [kind, setKind] = useState<'all' | 'active' | 'static'>('all')
   const [objectFilter, setObjectFilter] = useState<'all' | ObjectKey>('all')
-  const [action, setAction] = useUrlParam('action')
-  const creatingList = action === 'create-list'
-  const setCreatingList = (open: boolean) => setAction(open ? 'create-list' : null)
-  const [viewing, setViewing] = useState<SegmentRow | null>(null)
   const [removing, setRemoving] = useState<SegmentRow | null>(null)
-  const [members, setMembers] = useState<{ id: string; displayName: string; enteredAt: Date }[] | null>(null)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -84,54 +81,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
       return false
     } finally {
       setBusy(false)
-    }
-  }
-
-  // Seeded from the address rather than the click, so a reloaded or pasted
-  // ?segment= opens with the segment's own values.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different segment reseeds the form, not a refreshed copy of the same one
-  useEffect(() => {
-    if (editing === null) return
-    const seed = editing === 'new' ? null : editing
-    setName(seed?.name ?? '')
-    setDescription(seed?.description ?? '')
-    setObject(seed?.objectKey ?? 'contact')
-    setFilters(seed && seed.filters.length > 0 ? seed.filters : [{ conjunction: 'and', conditions: [] }])
-    setPreview(null)
-  }, [segmentParam])
-
-  const runPreview = async (next: Group[]) => {
-    setFilters(next)
-    setPreview(null)
-    try {
-      setPreview(await queryClient.fetchQuery({ ...trpc.segments.preview.queryOptions({ object, filters: next as never }), staleTime: 0 }))
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-    }
-  }
-
-  const save = async () => {
-    const ok = await run(
-      () =>
-        api.segments.save.mutate({
-          id: editing === 'new' || editing === null ? null : editing.id,
-          object,
-          name,
-          description: description || null,
-          filters: filters as never,
-        }),
-      'Segment saved. Recompute it to fill in who is in it.',
-    )
-    if (ok) setEditing(null)
-  }
-
-  const openMembers = async (row: SegmentRow) => {
-    setViewing(row)
-    setMembers(null)
-    try {
-      setMembers(await queryClient.fetchQuery({ ...trpc.segments.members.queryOptions({ id: row.id }), staleTime: 0 }))
-    } catch (cause) {
-      toast('error', errorMessage(cause))
     }
   }
 
@@ -158,19 +107,57 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     {
       key: 'name',
       header: 'Name',
-      width: 320,
+      width: 360,
       render: (row) => (
-        <span className="flex min-w-0 flex-col py-1">
-          {row.isStatic ? (
-            <Link href={segmentsPath(account, row.id)} className="truncate font-semibold text-link hover:underline">
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span className="flex min-w-0 flex-col">
+            <Link href={segmentsPath(account, row.id)} title={row.name} className="truncate font-semibold text-link hover:underline">
               {row.name}
             </Link>
-          ) : (
-            <button type="button" onClick={() => void openMembers(row)} className="truncate text-left font-semibold text-link hover:underline">
-              {row.name}
-            </button>
-          )}
-          {row.description ? <span className="truncate text-small text-secondary">{row.description}</span> : null}
+            {row.description ? <span className="truncate text-small text-secondary">{row.description}</span> : null}
+          </span>
+          <RowActions>
+            {canWrite && !row.isStatic ? (
+              <button type="button" className={rowPill} onClick={() => setSegmentParam(row.id)}>
+                Edit
+              </button>
+            ) : null}
+            <Link href={segmentsPath(account, row.id)} className={rowPill}>
+              Details
+            </Link>
+            <DropdownMenu
+              label={`More for ${row.name}`}
+              align="start"
+              groups={[
+                {
+                  key: 'read',
+                  // A static list holds no conditions, so filtering a record list
+                  // by them would show every record rather than its own.
+                  items: row.isStatic
+                    ? []
+                    : [
+                        {
+                          key: 'list',
+                          label: 'Open matching records',
+                          href: objectView(account, row.objectKey, 'all', 'list', { filters: JSON.stringify(row.filters) }),
+                        },
+                      ],
+                },
+                ...(canWrite
+                  ? [
+                      ...(row.isStatic ? [] : [{ key: 'write', items: [{ key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) }] }]),
+                      { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
+                    ]
+                  : []),
+              ].filter((group) => group.items.length > 0)}
+              trigger={(props) => (
+                <button {...props} type="button" className={rowPill}>
+                  More
+                  <ChevronDown aria-hidden="true" className="size-3" />
+                </button>
+              )}
+            />
+          </RowActions>
         </span>
       ),
     },
@@ -183,9 +170,9 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         row.lastEvaluatedAt === null && !row.isStatic ? (
           <span className="text-secondary" title="Never recomputed, so the count is unknown rather than zero">--</span>
         ) : (
-          <button type="button" onClick={() => void openMembers(row)} className="font-semibold text-link hover:underline">
+          <Link href={segmentsPath(account, row.id)} className="font-semibold text-link hover:underline">
             {fmt.number(row.memberCount)}
-          </button>
+          </Link>
         ),
     },
     {
@@ -194,15 +181,11 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
       width: 110,
       render: (row) =>
         row.isStatic ? (
-          <span className="inline-flex items-center gap-2" title="A snapshot of an imported file. It is never recomputed.">
-            <span aria-hidden="true" className="size-2 rounded-pill bg-line-strong" />
-            Static
+          <span title="A snapshot kept by hand. It is never recomputed.">
+            <StatusDot tone="off">Static</StatusDot>
           </span>
         ) : (
-          <span className="inline-flex items-center gap-2">
-            <span aria-hidden="true" className="size-2 rounded-pill bg-success" />
-            Active
-          </span>
+          <StatusDot tone="live">Active</StatusDot>
         ),
     },
     { key: 'object', header: 'Object', width: 120, render: (row) => OBJECT_LABEL[row.objectKey] },
@@ -225,63 +208,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         ) : (
           fmt.dateTime(row.lastEvaluatedAt)
         ),
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 64,
-      render: (row) => (
-        <DropdownMenu
-          label={`Actions for ${row.name}`}
-          groups={[
-            {
-              key: 'read',
-              // Two destinations, never the same one twice: who is in it, and the
-              // records themselves. A static list holds no conditions, so filtering
-              // a record list by them would show every record rather than its own.
-              items: row.isStatic
-                ? [{ key: 'members', label: 'Open the members page', href: segmentsPath(account, row.id) }]
-                : [
-                    { key: 'members', label: 'View members here', onSelect: () => void openMembers(row) },
-                    {
-                      key: 'list',
-                      label: 'Open matching records',
-                      href: objectView(account, row.objectKey, 'all', 'list', { filters: JSON.stringify(row.filters) }),
-                    },
-                  ],
-            },
-            ...(canWrite
-              ? [
-                  ...(row.isStatic
-                    ? []
-                    : [
-                        {
-                          key: 'write',
-                          items: [
-                            { key: 'recompute', label: 'Recompute', onSelect: () => recompute(row) },
-                            { key: 'edit', label: 'Edit', onSelect: () => setEditing(row) },
-                          ],
-                        },
-                      ]),
-                  {
-                    key: 'danger',
-                    items: [
-                      { key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) },
-                    ],
-                  },
-                ]
-              : []),
-          ]}
-          trigger={(props) => (
-            <IconButton
-              {...props}
-              side="left"
-              label={`Actions for ${row.name}`}
-              icon={<MoreVertical className="size-4" />}
-            />
-          )}
-        />
-      ),
     },
   ]
 
@@ -316,17 +242,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
                   Recompute all
                 </Button>
               ) : null}
-              <Button
-                onClick={() => {
-                  setName('')
-                  setDescription('')
-                  setObject('contact')
-                  setCreatingList(true)
-                }}
-              >
-                Create list
-              </Button>
-              <Button variant="primary" onClick={() => setEditing('new')}>
+              <Button variant="primary" onClick={() => setSegmentParam('new')}>
                 Create segment
               </Button>
             </span>
@@ -341,7 +257,54 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         </p>
       )}
 
-      <div className="flex flex-wrap items-end gap-2">
+      <div className="flex flex-wrap items-center gap-1">
+        <DropdownMenu
+          label="Segment type"
+          align="start"
+          groups={[
+            {
+              key: 'kind',
+              items: (Object.keys(KIND_LABEL) as (keyof typeof KIND_LABEL)[]).map((key) => ({
+                key,
+                label: KIND_LABEL[key],
+                checked: kind === key,
+                onSelect: () => setKind(key),
+              })),
+            },
+          ]}
+          trigger={(props) => (
+            <button {...props} type="button" className={ghost}>
+              {KIND_LABEL[kind]}
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            </button>
+          )}
+        />
+        <DropdownMenu
+          label="Records"
+          align="start"
+          groups={[
+            {
+              key: 'object',
+              items: [
+                { key: 'all', label: 'All objects', checked: objectFilter === 'all', onSelect: () => setObjectFilter('all') },
+                ...(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => ({
+                  key,
+                  label: OBJECT_LABEL[key],
+                  checked: objectFilter === key,
+                  onSelect: () => setObjectFilter(key),
+                })),
+              ],
+            },
+          ]}
+          trigger={(props) => (
+            <button {...props} type="button" className={ghost}>
+              {objectFilter === 'all' ? 'All objects' : OBJECT_LABEL[objectFilter]}
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            </button>
+          )}
+        />
+      </div>
+
       <label className="relative w-full min-w-0 sm:w-64">
         <span className="sr-only">Search segments</span>
         <input
@@ -353,31 +316,6 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         />
         <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
       </label>
-
-        <label className="flex min-w-fit flex-col gap-1">
-          <span className="text-small text-secondary">Type</span>
-          <Select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
-            <option value="all">Active and static</option>
-            <option value="active">Active</option>
-            <option value="static">Static</option>
-          </Select>
-        </label>
-
-        <label className="flex min-w-fit flex-col gap-1">
-          <span className="text-small text-secondary">Records</span>
-          <Select
-            value={objectFilter}
-            onChange={(event) => setObjectFilter(event.target.value as 'all' | ObjectKey)}
-          >
-            <option value="all">Every object</option>
-            {(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => (
-              <option key={key} value={key}>
-                {OBJECT_LABEL[key]}
-              </option>
-            ))}
-          </Select>
-        </label>
-      </div>
 
       <DataTable
         columns={columns}
@@ -394,7 +332,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             <EmptyState
               title="No segments yet"
               description="A saved query that remembers who is in it."
-              {...(canWrite ? { action: <Button variant="primary" onClick={() => setEditing('new')}>Create segment</Button> } : {})}
+              {...(canWrite ? { action: <Button variant="primary" onClick={() => setSegmentParam('new')}>Create segment</Button> } : {})}
             />
           )}
           </div>
@@ -409,213 +347,14 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         </span>
       </div>
 
-      {/* --------------------------------------------------------- editor */}
-      <Modal
-        open={editing !== null}
-        size="lg"
-        title={editing === 'new' ? 'Create segment' : `Edit ${editing === null ? '' : editing.name}`}
-        onClose={() => setEditing(null)}
-        dirty={editing === 'new' && (name !== '' || description !== '' || conditionCount(filters) > 0)}
-        onSubmit={() => void save()}
-        footer={
-          <>
-            <Button variant="tertiary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim() || conditionCount(filters) === 0}>
-              Save segment
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <Field id="segment-name" label="Name">
-            <TextInput
-              id="segment-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Enterprise trials"
-              autoFocus
-            />
-          </Field>
-
-          <Field id="segment-description" label="Description" hint="Optional. Why this list exists.">
-            <TextInput
-              id="segment-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </Field>
-
-          <Field id="segment-object" label="Records">
-            <Select
-              id="segment-object"
-              value={object}
-              disabled={editing !== 'new'}
-              onChange={(event) => {
-                setObject(event.target.value as ObjectKey)
-                setFilters([{ conjunction: 'and', conditions: [] }])
-                setPreview(null)
-              }}
-            >
-              {(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => (
-                <option key={key} value={key}>
-                  {OBJECT_LABEL[key]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {editing !== 'new' ? (
-            <p className="text-small text-secondary">
-              The object is fixed after creation: changing it would leave the stored membership
-              pointing at records of a different kind.
-            </p>
-          ) : null}
-
-          <div className="flex flex-col gap-2">
-            <p className="flex flex-wrap items-baseline gap-2">
-              <span className="font-medium">Conditions</span>
-              <span className="text-small text-secondary">
-                {conditionCount(filters)} set. A segment with none would hold every record, so at
-                least one is required.
-              </span>
-            </p>
-            {showBuilder ? (
-              <FilterBuilder
-                fields={fieldsByObject[object] ?? []}
-                relativeDates
-                value={filters}
-                onApply={(next) => {
-                  setShowBuilder(false)
-                  void runPreview(next)
-                }}
-                onClose={() => setShowBuilder(false)}
-              />
-            ) : (
-              <div>
-                <Button onClick={() => setShowBuilder(true)}>
-                  {conditionCount(filters) === 0 ? 'Add conditions' : 'Change conditions'}
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {preview ? (
-            <div className="rounded-hs border border-line bg-fill px-3 py-2">
-              <p className="font-medium">
-                {fmt.number(preview.count)} record{preview.count === 1 ? '' : 's'} match right now
-              </p>
-              {preview.sample.length > 0 ? (
-                <p className="text-small text-secondary">
-                  {preview.sample.map((entry) => entry.displayName).join(', ')}
-                  {preview.count > preview.sample.length ? ' and more' : ''}
-                </p>
-              ) : (
-                <p className="text-small text-secondary">
-                  Nothing matches yet. That is allowed: a segment can be built before the records
-                  that belong in it exist.
-                </p>
-              )}
-            </div>
-          ) : null}
-        </div>
-      </Modal>
-
-      {/* ----------------------------------------------------- static list */}
-      <Modal
-        open={creatingList}
-        title="Create list"
-        onClose={() => setCreatingList(false)}
-        dirty={name !== '' || description !== ''}
-        onSubmit={() =>
-          void run(
-            () =>
-              api.segments.createList.mutate({
-                object,
-                name,
-                description: description || null,
-              }),
-            'List created. Add records to it from the bulk bar.',
-          ).then((ok) => {
-            if (ok) setCreatingList(false)
-          })
-        }
-        footer={
-          <>
-            <Button variant="tertiary" onClick={() => setCreatingList(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
-              Create list
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-secondary">
-            A static list holds whoever you put in it and nothing takes them out again but you.
-            Fill it from the bulk bar on any list of records, or from an imported file.
-          </p>
-          <Field id="list-name" label="Name">
-            <TextInput
-              id="list-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Autumn webinar invitees"
-              autoFocus
-            />
-          </Field>
-          <Field id="list-description" label="Description" hint="Optional. Why this list exists.">
-            <TextInput
-              id="list-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </Field>
-          <Field id="list-object" label="Records">
-            <Select id="list-object" value={object} onChange={(event) => setObject(event.target.value as ObjectKey)}>
-              {(Object.keys(OBJECT_LABEL) as ObjectKey[]).map((key) => (
-                <option key={key} value={key}>
-                  {OBJECT_LABEL[key]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-      </Modal>
-
-      {/* -------------------------------------------------------- members */}
-      <Modal
-        open={viewing !== null}
-        size="lg" title={`Who is in ${viewing?.name ?? ''}`}
-        onClose={() => setViewing(null)}
-      >
-        {members === null ? (
-          <p className="text-secondary">Reading the membership…</p>
-        ) : members.length === 0 ? (
-          <p className="text-secondary">
-            Nobody is in it right now. If it has never been recomputed, that is why: the query has
-            not been run against the records yet.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {members.map((member) => (
-              <li key={member.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                <Link
-                  href={recordPath(account, viewing?.objectKey ?? 'contact', member.id, { from: origin })}
-                  title={member.displayName}
-                  className="min-w-0 truncate"
-                >
-                  {member.displayName}
-                </Link>
-                <span className="text-small text-secondary">
-                  joined {fmt.dateTime(member.enteredAt.toISOString())}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Modal>
+      <SegmentBuilder
+        open={canWrite && building}
+        segment={editing}
+        startStatic={action === 'create-list'}
+        fieldsByObject={fieldsByObject}
+        onClose={closeBuilder}
+        onSaved={(id) => router.push(segmentsPath(account, id))}
+      />
 
       {/* --------------------------------------------------------- delete */}
       <Modal

@@ -43,6 +43,11 @@
   --color-warning-subtle: var(--rawr-warning-subtle);
   --color-info: var(--rawr-info);
   --color-info-subtle: var(--rawr-info-subtle);
+  --color-status-live: var(--rawr-status-live);
+  --color-status-live-subtle: var(--rawr-status-live-subtle);
+  --color-status-pending: var(--rawr-status-pending);
+  --color-tag-object: var(--rawr-tag-object);
+  --color-tag-object-subtle: var(--rawr-tag-object-subtle);
 
   --color-scrim: var(--rawr-scrim);
 

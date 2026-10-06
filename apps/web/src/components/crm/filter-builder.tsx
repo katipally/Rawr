@@ -1,6 +1,6 @@
 'use client'
 
-import { DATE_RANGES, isDateRange } from '@rawr/db/registry'
+import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
 import { Button, Select, TextInput, cn } from '@rawr/ui'
 import { useState } from 'react'
 import type { Operator } from '@rawr/db'
@@ -68,6 +68,18 @@ const isComplete = (condition: Condition): boolean => {
   if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '')
   if (MULTI.has(condition.operator)) return values.length > 0 && values.every((entry) => entry !== '')
   return values.length > 0 && values[0] !== ''
+}
+
+/** One condition as a sentence, "Lifecycle stage is any of Lead, MQL", for a
+ *  page that shows a segment's rule without opening the builder. */
+export const describeCondition = (fields: FilterField[], condition: Condition): string => {
+  const label = fields.find((field) => field.key === condition.field)?.label ?? condition.field
+  const operator = OPERATOR_LABELS[condition.operator] ?? condition.operator
+  if (NULLARY.has(condition.operator)) return `${label} ${operator}`
+  if (isDateRange(condition.value)) return `${label} is ${dateRangeLabel(condition.value).toLowerCase()}`
+  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : entry))
+  const value = condition.operator === RANGE ? values.join(' and ') : values.join(', ')
+  return `${label} ${operator} ${value}`
 }
 
 const inputTypeFor = (type: string): string => {
