@@ -178,6 +178,35 @@ export const RecordTable = ({
 
   const pageHref = (next: ListParams): string => objectView(account, object, view, 'list', next)
 
+  // Previous is the browser's own history, because a keyset cursor points
+  // forward only and there is no address to jump back to.
+  const pager = (
+    <Pagination
+      format={fmt.number}
+      className="shrink-0 py-0"
+      count={rows.length}
+      offset={offset}
+      total={totalHint ?? undefined}
+      hasMore={Boolean(nextCursor)}
+      perPage={perPage}
+      noun={`${objectLabel.toLowerCase()} records`}
+      onPrevious={() => {
+        if (offset === 0) return
+        router.back()
+      }}
+      onNext={() => {
+        if (!nextCursor) return
+        navigate(pageHref({ ...params, cursor: nextCursor, skip: String(offset + rows.length) }))
+      }}
+      onPerPage={(size) =>
+        // A new page size restarts the walk: a cursor from a 25-row page means
+        // nothing to a 100-row one, and neither does the offset it came with.
+        navigate(pageHref({ ...params, limit: String(size), cursor: undefined, skip: undefined }))
+      }
+    />
+  )
+  const bulking = canBulk && live.length > 0
+
   return (
     // The rows keep room to be read when the chrome above them is tall: past this
     // the page scrolls instead of the table shrinking to a header.
@@ -217,70 +246,47 @@ export const RecordTable = ({
         onClose={() => replaceParams({ preview: null })}
       />
 
-      {/* Below the list, not above it. The bar appears the moment a row is ticked,
-          and above the table it pushed every row down by its own height, so the
-          next click landed on the row after the intended one. Here the table box
-          gives up the height instead, from its bottom edge, and no row moves. */}
-      {canBulk && live.length > 0 ? (
-        <div className="shrink-0">
-          <BulkBar
-            object={object}
-            objectLabel={objectLabel}
-            objectPlural={objectPlural}
-            ids={live}
-            versions={Object.fromEntries(rows.map((row) => [row.id, row.version]))}
-            fields={bulkFields}
-            onDone={() => setSelected(new Set())}
-            onClear={() => setSelected(new Set())}
-          />
+      {bulking ? (
+        <>
+          {/* Below the list, not above it. The bar appears the moment a row is
+              ticked, and above the table it pushed every row down by its own
+              height, so the next click landed on the row after the intended one.
+              Here it takes the footer's place, so the table keeps the height it
+              had and no row moves. */}
+          <div className="shrink-0">
+            <BulkBar
+              object={object}
+              objectLabel={objectLabel}
+              objectPlural={objectPlural}
+              ids={live}
+              versions={Object.fromEntries(rows.map((row) => [row.id, row.version]))}
+              fields={bulkFields}
+              onDone={() => setSelected(new Set())}
+              onClear={() => setSelected(new Set())}
+            />
+          </div>
+          {pager}
+        </>
+      ) : (
+        // HubSpot's footer: the total on the left, the pages in the middle, what to
+        // do with the whole list on the right. The export is a plain link so the
+        // browser downloads it and it survives a closed tab.
+        <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
+          <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
+            {fmt.number(totalHint ?? rows.length)}{' '}
+            {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
+          </span>
+          {pager}
+          <a
+            href={exportHref}
+            download
+            className={buttonClass('secondary', 'no-underline')}
+          >
+            <Download aria-hidden="true" className="size-3.5" />
+            Export
+          </a>
         </div>
-      ) : null}
-
-      {/* Previous is the browser's own history, because a keyset cursor points
-          forward only and there is no address to jump back to. */}
-      <Pagination
-        format={fmt.number}
-        className="shrink-0"
-        count={rows.length}
-        offset={offset}
-        total={totalHint ?? undefined}
-        hasMore={Boolean(nextCursor)}
-        perPage={perPage}
-        noun={`${objectLabel.toLowerCase()} records`}
-        onPrevious={() => {
-          if (offset === 0) return
-          router.back()
-        }}
-        onNext={() => {
-          if (!nextCursor) return
-          navigate(
-            pageHref({ ...params, cursor: nextCursor, skip: String(offset + rows.length) }),
-          )
-        }}
-        onPerPage={(size) =>
-          // A new page size restarts the walk: a cursor from a 25-row page means
-          // nothing to a 100-row one, and neither does the offset it came with.
-          navigate(pageHref({ ...params, limit: String(size), cursor: undefined, skip: undefined }))
-        }
-      />
-
-      {/* HubSpot's footer: the total on the left, what to do with the whole list
-          on the right. The export is a plain link so the browser downloads it and
-          it survives a closed tab. */}
-      <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
-        <span className="inline-flex h-8 items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-          {fmt.number(totalHint ?? rows.length)}{' '}
-          {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
-        </span>
-        <a
-          href={exportHref}
-          download
-          className={buttonClass('secondary', 'no-underline')}
-        >
-          <Download aria-hidden="true" className="size-3.5" />
-          Export
-        </a>
-      </div>
+      )}
     </div>
   )
 }

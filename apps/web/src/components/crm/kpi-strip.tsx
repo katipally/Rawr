@@ -107,9 +107,9 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
                   cursor: undefined,
                   skip: undefined,
                 })}
-                className={`flex h-full flex-col justify-between gap-0.5 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
+                className={`flex h-full items-baseline justify-between gap-2 rounded-panel border border-line bg-surface px-3 py-2 text-body no-underline hover:bg-fill${tiles ? '' : ' pointer-events-none invisible'}`}
               >
-                <span className="text-small text-secondary">{tile.label}</span>
+                <span className="min-w-0 truncate text-small text-secondary">{tile.label}</span>
                 <span className="text-base font-semibold tabular-nums">{fmt.number(tile.count)}</span>
               </Link>
               {tiles ? null : <Skeleton className="absolute inset-0 h-full rounded-panel" />}
