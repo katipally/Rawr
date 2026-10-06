@@ -1,9 +1,8 @@
 'use client'
 
-import { Alert, Button, Card, ConfirmDialog, cn, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
-import { ChevronDown, ChevronRight } from 'lucide-react'
-import { LinkButton } from '~/components/link-button.tsx'
-import { RangePicker } from '~/components/reports/range-picker.tsx'
+import { Alert, Button, ConfirmDialog, cn, DropdownMenu, EmptyState, useToast } from '@rawr/ui'
+import { ChevronDown } from 'lucide-react'
+import { RangePicker, useRangeLabel } from '~/components/reports/range-picker.tsx'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -11,13 +10,7 @@ import { dashboardPath, reportsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { CardPicker, type CardChoice } from '../card-picker.tsx'
 import { DashboardSwitcher, type SwitchChoice } from './dashboard-switcher.tsx'
-import { useFormat } from '~/components/zone.tsx'
-
-type CardData =
-  | { kind: 'metric'; value: string; hint: string }
-  | { kind: 'table'; columns: string[]; rows: (string | number)[][] }
-
-export type RenderedCard = { key: string; label: string; report: string; data: CardData }
+import { ReportCard, type RenderedCard } from './report-card.tsx'
 
 export type DashboardViewProps = {
   account: string
@@ -43,14 +36,53 @@ export const DashboardView = ({
   all,
   canEdit,
 }: DashboardViewProps) => {
-  const fmt = useFormat()
   const router = useRouter()
+  const range = useRangeLabel(from, to)
   const toast = useToast()
   // null is closed. Add content and Dashboard details both edit this dashboard;
   // Create dashboard starts a new one.
   const [editing, setEditing] = useState<'content' | 'details' | 'new' | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [dragging, setDragging] = useState<string | null>(null)
+  // The order just dropped, drawn until the refresh that follows the save brings
+  // the same order back from the server.
+  const [placed, setPlaced] = useState<string[] | null>(null)
+  const [drawn, setDrawn] = useState(rendered)
+  if (drawn !== rendered) {
+    setDrawn(rendered)
+    setPlaced(null)
+  }
+  const byKey = new Map(rendered.map((card) => [card.key, card]))
+  const cards = placed ? placed.flatMap((key) => byKey.get(key) ?? []) : rendered
+
+  /** A layout change saves at once, as HubSpot's does. A retired key stays at the
+   *  end, so the warning about it is not quietly lost. */
+  const relayout = async (keys: string[]) => {
+    setPlaced(keys)
+    try {
+      const kept = new Set(keys)
+      await api.reporting.dashboards.save.mutate({
+        id: dashboard.id,
+        name: dashboard.name,
+        isShared: dashboard.isShared,
+        cards: [...keys, ...dashboard.cards.filter((key) => !byKey.has(key) && !kept.has(key))],
+      })
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+      setPlaced(null)
+    }
+  }
+
+  /** The dragged card takes the place of the one it is dropped on. O(cards). */
+  const drop = (onto: string) => {
+    const keys = cards.map((card) => card.key)
+    if (!dragging || dragging === onto) return
+    const without = keys.filter((key) => key !== dragging)
+    without.splice(keys.indexOf(onto), 0, dragging)
+    void relayout(without)
+  }
 
   const save = async (input: { name: string; cards: string[]; isShared: boolean }) => {
     setBusy(true)
@@ -131,80 +163,53 @@ export const DashboardView = ({
           {retired === 1
             ? 'One card on this dashboard no longer exists and is not drawn.'
             : `${retired} cards on this dashboard no longer exist and are not drawn.`}{' '}
-          Change the cards to tidy it up.
+          Open Add content to tidy it up.
         </Alert>
       ) : null}
 
-      {rendered.length === 0 ? (
+      {cards.length === 0 ? (
         <EmptyState title="Nothing to draw" description="Every card on this dashboard has been retired." />
       ) : (
-        <div className="grid min-w-0 gap-3 @2xl:grid-cols-2 @5xl:grid-cols-3">
-          {rendered.map((card) => (
-            <Card
+        <div className="grid min-w-0 gap-2.5 @2xl:grid-cols-2 @5xl:grid-cols-3">
+          {cards.map((card) => (
+            <ReportCard
               key={card.key}
-              title={card.label}
-              action={
-                <LinkButton
-                  href={reportsPath(account, { tab: card.report, from, to })}
-                  variant="tertiary"
-                  className="shrink-0 gap-1 px-2 py-1"
-                  icon={<ChevronRight aria-hidden="true" className="order-1 size-3.5" />}
-                >
-                  Full report
-                </LinkButton>
+              card={card}
+              href={reportsPath(account, { tab: card.report, from, to })}
+              range={range}
+              dragging={dragging === card.key}
+              grip={
+                canEdit
+                  ? {
+                      onDragStart: (event) => {
+                        setDragging(card.key)
+                        event.dataTransfer.effectAllowed = 'move'
+                      },
+                      onDragEnd: () => setDragging(null),
+                    }
+                  : null
               }
-            >
-              {card.data.kind === 'metric' ? (
-                <div className="flex flex-col gap-1">
-                  <span className="text-lg font-medium tabular-nums">{card.data.value}</span>
-                  <span className="text-small text-secondary">{card.data.hint}</span>
-                </div>
-              ) : card.data.rows.length === 0 ? (
-                <p className="text-secondary">Nothing in this range.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left">
-                    <thead>
-                      <tr className="border-b border-divider text-small text-secondary">
-                        {card.data.columns.map((column, index) => (
-                          <th
-                            key={column}
-                            className={index === 0 ? 'py-1 pr-2 font-medium' : 'py-1 pr-2 text-right font-medium'}
-                          >
-                            {column}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* The first cell is a name, and names repeat: two sequences
-                          may share one. A report table is positional, so the row
-                          number is what identifies a row. */}
-                      {card.data.rows.map((row, rowIndex) => (
-                        <tr key={rowIndex} className="border-b border-divider last:border-0">
-                          {row.map((cell, index) => (
-                            <td
-                              key={card.data.kind === 'table' ? card.data.columns[index] : index}
-                              className={
-                                index === 0
-                                  ? 'py-1 pr-2 break-words'
-                                  : 'py-1 pr-2 text-right tabular-nums'
-                              }
-                            >
-                              {typeof cell === 'number' ? fmt.number(cell) : cell}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
+              target={
+                dragging
+                  ? {
+                      onDragOver: (event) => event.preventDefault(),
+                      onDrop: (event) => {
+                        event.preventDefault()
+                        drop(card.key)
+                        setDragging(null)
+                      },
+                    }
+                  : null
+              }
+              onRemove={
+                canEdit && cards.length > 1
+                  ? () => void relayout(cards.map((each) => each.key).filter((key) => key !== card.key))
+                  : null
+              }
+            />
           ))}
         </div>
       )}
-
       </div>
 
       <CardPicker
