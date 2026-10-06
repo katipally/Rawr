@@ -1,5 +1,6 @@
 'use client'
 
+import { DATE_RANGES, isDateRange } from '@rawr/db/registry'
 import { Button, Select, TextInput, cn } from '@rawr/ui'
 import { useState } from 'react'
 import type { Operator } from '@rawr/db'
@@ -62,6 +63,7 @@ const emptyValueFor = (operator: string): unknown =>
  *  check would have waved a half-finished range through. */
 const isComplete = (condition: Condition): boolean => {
   if (NULLARY.has(condition.operator)) return true
+  if (condition.operator === RANGE && isDateRange(condition.value)) return true
   const values = asList(condition.value)
   if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '')
   if (MULTI.has(condition.operator)) return values.length > 0 && values.every((entry) => entry !== '')
@@ -82,6 +84,9 @@ export type FilterBuilderProps = {
   /** Omitted where the builder is part of a form rather than a popover: there is
    *  nothing to close, and a Close button that does nothing is worse than none. */
   onClose?: () => void
+  /** Offers HubSpot's rolling ranges on a date "is between". Only where the
+   *  filter compiles to SQL, which is what resolves them on the day it runs. */
+  relativeDates?: boolean
   className?: string
 }
 
@@ -91,10 +96,12 @@ export type FilterBuilderProps = {
 const ValueControl = ({
   field,
   condition,
+  relativeDates,
   onChange,
 }: {
   field: FilterField | undefined
   condition: Condition
+  relativeDates: boolean
   onChange: (value: unknown) => void
 }) => {
   const values = asList(condition.value)
@@ -102,8 +109,27 @@ const ValueControl = ({
 
   if (condition.operator === RANGE) {
     const [from = '', to = ''] = values
+    const rolling = isDateRange(condition.value) ? condition.value : ''
+    const span =
+      relativeDates && (field?.type === 'date' || field?.type === 'datetime') ? (
+        <Select
+          aria-label="Range"
+          value={rolling}
+          onChange={(event) => onChange(event.target.value || ['', ''])}
+          className="w-auto min-w-40 flex-1"
+        >
+          <option value="">Custom dates</option>
+          {DATE_RANGES.map((range) => (
+            <option key={range.token} value={range.token}>
+              {range.label}
+            </option>
+          ))}
+        </Select>
+      ) : null
+    if (rolling) return span
     return (
-      <div className="flex w-auto min-w-40 flex-1 items-center gap-2">
+      <div className="flex w-auto min-w-40 flex-1 flex-wrap items-center gap-2">
+        {span}
         <TextInput
           aria-label="From"
           type={inputType}
@@ -190,7 +216,7 @@ const ValueControl = ({
 
 /** AND/OR groups, one level deep. A5 draws the line there on purpose: a tree of
  *  arbitrary depth is a query builder nobody can read on screen. */
-export const FilterBuilder = ({ fields, value, onApply, onClose, className }: FilterBuilderProps) => {
+export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates = false, className }: FilterBuilderProps) => {
   const [groups, setGroups] = useState<Group[]>(
     value.length > 0 ? value : [{ conjunction: 'and', conditions: [] }],
   )
@@ -320,7 +346,7 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, className }: Fi
                   ))}
                 </Select>
 
-                {takesValue ? <ValueControl field={field} condition={condition} onChange={(value) => patchCondition(groupIndex, conditionIndex, { value })} /> : null}
+                {takesValue ? <ValueControl field={field} condition={condition} relativeDates={relativeDates} onChange={(value) => patchCondition(groupIndex, conditionIndex, { value })} /> : null}
 
                 <Button
                   variant="tertiary"

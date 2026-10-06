@@ -481,6 +481,7 @@ const StepList = ({
                 <FilterBuilder
                   key={`${ctx.object}-${path}-${index}-guard`}
                   fields={ctx.filterFields}
+                  relativeDates
                   value={step.conditions}
                   onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
                 />
@@ -496,6 +497,7 @@ const StepList = ({
                 <FilterBuilder
                   key={`${ctx.object}-${path}-${index}-branch`}
                   fields={ctx.filterFields}
+                  relativeDates
                   value={step.conditions}
                   onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
                 />
@@ -877,6 +879,7 @@ export const AutomationList = ({
             <FilterBuilder
               key={object}
               fields={filterFieldsByObject[object] ?? []}
+              relativeDates
               value={conditions}
               onApply={setConditions}
             />

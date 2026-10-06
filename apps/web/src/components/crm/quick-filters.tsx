@@ -1,10 +1,10 @@
 'use client'
 
+import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
 import { Button, Checkbox, IconButton, Popover, TextInput, cn } from '@rawr/ui'
 import { ChevronDown, ListFilter, Pencil, Plus, X } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
-import { useFormat, useZone } from '~/components/zone.tsx'
-import { dayKey } from '~/lib/format.ts'
+import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Choice } from './field-input.tsx'
 import type { Condition, FilterField, Group } from './filter-builder.tsx'
@@ -13,13 +13,6 @@ import type { Condition, FilterField, Group } from './filter-builder.tsx'
  *  Each object shows the ones it has. */
 const DEFAULT_KEYS = ['owner_id', 'created_at', 'last_contacted_at', 'lead_status', 'close_date']
 const TEMPORAL = new Set(['date', 'datetime'])
-const DAY_MS = 86_400_000
-const RANGES = [
-  { label: 'Today', days: 0 },
-  { label: 'Last 7 days', days: 7 },
-  { label: 'Last 30 days', days: 30 },
-  { label: 'Last 90 days', days: 90 },
-]
 /** Past this many options a list gets a search box. */
 const SEARCH_FROM = 8
 
@@ -195,7 +188,7 @@ const Chip = ({
     if (!condition) return null
     if (condition.operator === 'in') return values.length > 1 ? `${nameOf(values[0]!)} +${values.length - 1}` : nameOf(values[0] ?? '')
     if (condition.operator === 'on_or_after') return values[0] === '@today' ? 'Today' : `Since ${fmt.date(values[0])}`
-    if (condition.operator === 'between') return `${fmt.date(values[0])} to ${fmt.date(values[1])}`
+    if (condition.operator === 'between') return isDateRange(condition.value) ? dateRangeLabel(condition.value) : `${fmt.date(values[0])} to ${fmt.date(values[1])}`
     if (condition.operator === 'contains') return `“${values[0]}”`
     return 'Filtered'
   })()
@@ -291,22 +284,21 @@ const DateEditor = ({
   condition: Condition | undefined
   onApply: (condition: Condition | null) => void
 }) => {
-  const zone = useZone()
-  const current = valuesOf(condition)
-  const [range, setRange] = useState(condition?.operator === 'between' ? current : ['', ''])
-  const since = (days: number) => (days === 0 ? '@today' : dayKey(new Date(Date.now() - days * DAY_MS), zone))
+  const rolling = condition?.operator === 'between' && isDateRange(condition.value) ? condition.value : null
+  const [range, setRange] = useState(condition?.operator === 'between' && !rolling ? valuesOf(condition) : ['', ''])
   return (
     <>
-      <div className="flex flex-col">
-        {RANGES.map((option) => {
-          const value = since(option.days)
-          const on = condition?.operator === 'on_or_after' && current[0] === value
+      {/* Stored as the range's name, not its dates, so a saved view keeps meaning
+          the last 30 days rather than the 30 days before it was saved. */}
+      <div className="flex max-h-72 flex-col overflow-y-auto">
+        {DATE_RANGES.map((option) => {
+          const on = rolling === option.token || (option.token === '@today' && condition?.operator === 'on_or_after' && condition.value === '@today')
           return (
             <button
-              key={option.label}
+              key={option.token}
               type="button"
               aria-pressed={on}
-              onClick={() => onApply({ field: field.key, operator: 'on_or_after', value })}
+              onClick={() => onApply({ field: field.key, operator: 'between', value: option.token })}
               className="rounded-hs px-3 py-2 text-left hover:bg-fill aria-pressed:font-semibold"
             >
               {option.label}

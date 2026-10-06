@@ -165,6 +165,21 @@ test('@today is the day in the account zone, not in UTC', () => {
   assert.equal(scopeFor(null, 'Pacific/Auckland', at).today, '2026-09-03')
 })
 
+test('a rolling date range resolves on the day the query runs, in the account zone', () => {
+  const at = new Date('2026-10-01T03:00:00Z')
+  const pacific = scopeFor(null, 'America/Los_Angeles', at)
+  const { text, params } = built(
+    compileFilters(contact, [{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'between', value: '@last_month' }] }], pacific),
+  )
+  // Still September 30th in Los Angeles, so last month is August, between that
+  // zone's midnights.
+  assert.ok(text.includes('at time zone'), text)
+  assert.deepEqual(params, ['2026-08-01', 'America/Los_Angeles', '2026-08-31', 'America/Los_Angeles'])
+  // A fixed range saved before the tokens existed is still two bound days.
+  const fixed = built(compile([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'between', value: ['2026-01-01', '2026-01-31'] }] }]))
+  assert.deepEqual(fixed.params, ['2026-01-01', '2026-01-31'])
+})
+
 test('an empty group and an empty filter set compile to nothing at all', () => {
   assert.equal(compile([]), undefined)
   assert.equal(compile([{ conjunction: 'and', conditions: [] }]), undefined)

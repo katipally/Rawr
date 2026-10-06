@@ -430,6 +430,7 @@ export const ListToolbar = ({
                     key={encodeFilters(filters)}
                     fields={filterFields}
                     value={filters}
+                    relativeDates
                     onApply={applyFilters}
                     className="rounded-none border-0 p-0 shadow-none"
                   />

@@ -5,6 +5,7 @@ import {
   TYPE_META,
   type Operator,
 } from '../registry/types.ts'
+import { isDateRange, resolveDateRange } from '../registry/date-ranges.ts'
 import type { AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { dayKey } from './slots.ts'
@@ -27,13 +28,14 @@ export type Cursor = { value: string | number | null; id: string }
 
 /** Values the caller may not know at save time. A saved view stores the token and
  *  it resolves per request, so "My contacts" means the person reading it. */
-export type QueryScope = { userId: string | null; today: string }
+export type QueryScope = { userId: string | null; today: string; zone: string }
 
 /** `@today` is the day it is in the account's zone, not in UTC: a view of what is
  *  due today must not move to tomorrow at 4 PM Pacific. */
 export const scopeFor = (userId: string | null, zone = 'UTC', now = new Date()): QueryScope => ({
   userId,
   today: dayKey(now, zone),
+  zone,
 })
 
 const resolveToken = (value: unknown, scope: QueryScope): unknown => {
@@ -82,6 +84,15 @@ const compileCondition = (
         : sql`(${custom} ? ${key} and ${custom} ->> ${key} is not null)`
     }
     return operator === 'is_empty' ? sql`${expr} is null` : sql`${expr} is not null`
+  }
+
+  if (operator === 'between' && isDateRange(condition.value)) {
+    const [first, last] = resolveDateRange(condition.value, scope.today)
+    if (field.type !== 'datetime') return sql`${expr} between ${first}::date and ${last}::date`
+    // A moment is in the range when it falls on one of its days on the account's
+    // clock, so both ends are that zone's midnights. Half open, so the last
+    // day keeps its final second; a bare expression either side keeps it indexable.
+    return sql`(${expr} >= (${first}::date)::timestamp at time zone ${scope.zone} and ${expr} < (${last}::date + 1)::timestamp at time zone ${scope.zone})`
   }
 
   const raw = resolveToken(condition.value, scope)

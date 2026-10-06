@@ -682,6 +682,38 @@ try {
     return `${page.rows.length} rows, ${page.nextCursor ? 'paged cleanly' : 'single page'}`
   })
 
+  await check('a rolling date range resolves when the list runs, not when it was saved', async () => {
+    const word = `rolling${Date.now().toString(36)}`
+    const fresh = await createRecord(sales, 'contact', { first_name: 'Rolling', last_name: 'Today', email: `today.${word}@verify.test` })
+    const older = await createRecord(sales, 'contact', { first_name: 'Rolling', last_name: 'Older', email: `older.${word}@verify.test` })
+    try {
+      await db.update(s.contact).set({ createdAt: sql`now() - interval '3 days'` }).where(eq(s.contact.id, older.id))
+      const within = async (value: unknown) => {
+        const page = await listRecords(sales, {
+          object: 'contact',
+          columns: ['email'],
+          filters: [
+            { conjunction: 'and', conditions: [{ field: 'created_at', operator: 'between', value }] },
+            { conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: word }] },
+          ],
+          sorts: [],
+          limit: 10,
+        })
+        return new Set(page.rows.map((row) => row.id))
+      }
+      const today = await within('@today')
+      const lastWeek = await within('@last_7_days')
+      expect(today.has(fresh.id) && !today.has(older.id), 'today did not hold just the contact made today')
+      // Last 7 days is the seven before today, as HubSpot counts it.
+      expect(lastWeek.has(older.id) && !lastWeek.has(fresh.id), 'last 7 days did not hold just the older contact')
+      const fixed = await within(['2000-01-01', '2000-01-31'])
+      expect(fixed.size === 0, 'a fixed range from 2000 matched this run')
+      return 'today and last 7 days split the two, a fixed range still binds its dates'
+    } finally {
+      await db.delete(s.contact).where(sql`${s.contact.id} in (${fresh.id}, ${older.id})`)
+    }
+  })
+
   await check('a custom jsonb field filters and sorts through the registry', async () => {
     const key = `verify_flag_${Date.now().toString(36)}`
     const field = await createField(admin, { objectKey: 'deal', key, label: 'Verify flag', type: 'boolean' })

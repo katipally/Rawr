@@ -483,6 +483,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
             {showBuilder ? (
               <FilterBuilder
                 fields={fieldsByObject[object] ?? []}
+                relativeDates
                 value={filters}
                 onApply={(next) => {
                   setShowBuilder(false)

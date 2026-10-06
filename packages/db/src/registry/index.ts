@@ -3,5 +3,6 @@
  *  field type, an operator, a conditional rule or an import mapping imports this
  *  instead of the package root. */
 export * from './conditional.ts'
+export * from './date-ranges.ts'
 export * from './mapping.ts'
 export * from './types.ts'
