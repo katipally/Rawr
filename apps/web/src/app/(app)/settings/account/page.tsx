@@ -36,6 +36,7 @@ const AccountPage = async () => {
         avatarUrl: session.avatarUrl,
       }}
       accounts={mine.map((m) => ({ slug: m.accountSlug, name: m.accountName, joinedAt: m.joinedAt.toISOString() }))}
+      isSuperAdmin={session.isSuperAdmin}
       admins={members.filter((m) => m.isSuperAdmin && m.userId !== session.userId).map((m) => ({ name: m.name, email: m.email }))}
       timezone={schedule.timezone}
       weekly={schedule.weekly}

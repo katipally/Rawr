@@ -20,6 +20,7 @@ type Service = {
 export type AccountPanelProps = {
   me: { email: string; displayName: string; avatarUrl: string | null }
   accounts: { slug: string; name: string; joinedAt: string }[]
+  isSuperAdmin: boolean
   admins: { name: string; email: string }[]
   timezone: string
   weekly: unknown
@@ -90,7 +91,7 @@ const ServiceRow = ({
   )
 }
 
-export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
+export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -180,7 +181,11 @@ export const AccountPanel = ({ me, accounts, admins, timezone: initialTimezone, 
             </li>
           ))}
         </ul>
-        {admins.length > 0 ? (
+        {isSuperAdmin ? (
+          <p className="text-small text-secondary">
+            You are a super admin, so you have full access here and set what everybody else may do under Settings, Members &amp; Teams.
+          </p>
+        ) : admins.length > 0 ? (
           <p className="text-small text-secondary">
             What you may do is set by a super admin under Settings, Members &amp; Teams.{' '}
             {admins.length > 0 ? (
