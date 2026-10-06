@@ -97,7 +97,6 @@ const AutomationsPage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
         title="Automations"
         lead="When this happens, do that."
         why={
@@ -114,7 +113,7 @@ const AutomationsPage = async () => {
             </p>
             <p>
               A rule can wait. A step that waits parks the record and the worker picks it up when
-              the time comes, and a step that checks looks at the record again as it is then — so
+              the time comes, and a step that checks looks at the record again as it is then, so
               &ldquo;wait three days, and if they still have not replied, make a task&rdquo; is
               three steps in a row. A run still waiting shows in the log before the finished ones.
             </p>

@@ -1,13 +1,17 @@
 'use client'
 
 import { STATE_TONE } from './run-state.ts'
-import { Alert, Badge, Button, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, useToast } from '@rawr/ui'
+import { Alert, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { automationRunsPath } from '~/lib/links.ts'
 import { inSentence } from '~/lib/label-case.ts'
@@ -573,7 +577,16 @@ export const AutomationList = ({
   const editing: AutomationRowView | 'new' | null = automationParam === 'new' ? 'new' : (rows.find((row) => row.id === automationParam) ?? null)
   const setEditing = (next: AutomationRowView | 'new' | null) => setAutomationParam(next === null ? null : next === 'new' ? 'new' : next.id)
   const [removing, setRemoving] = useState<AutomationRowView | null>(null)
-  const { page, pager } = usePagedRows(rows, 'automations')
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useUrlParam('status')
+  const needle = query.trim().toLowerCase()
+  const shown = rows.filter(
+    (row) =>
+      (!needle || row.name.toLowerCase().includes(needle)) &&
+      (status !== 'on' || (switched[row.id] ?? row.isActive)) &&
+      (status !== 'off' || !(switched[row.id] ?? row.isActive)),
+  )
+  const { page, pager } = usePagedRows(shown, 'automations')
   const [busy, setBusy] = useState(false)
   /** Whether a rule is on, as this browser has just set it. router.refresh takes a
    *  round trip, and a switch that snaps back for that long reads as a failure.
@@ -652,105 +665,153 @@ export const AutomationList = ({
       editing === 'new' ? 'Saved. Turn it on when you are ready.' : 'Saved.',
     )
 
+  const toggle = (row: AutomationRowView, next: boolean) => {
+    setSwitched((current) => ({ ...current, [row.id]: next }))
+    void run(
+      () => api.admin.automations.setActive.mutate({ id: row.id, isActive: next }),
+      next ? 'Running from now on.' : 'Stopped.',
+      () =>
+        setSwitched((current) => {
+          const rest = { ...current }
+          delete rest[row.id]
+          return rest
+        }),
+    )
+  }
+
+  const columns: Column<AutomationRowView>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 420,
+      render: (row) => {
+        const when = `When ${TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a ${inSentence(labelOf(row.objectKey))}: ${row.steps.map(summarise).join(', then ')}`
+        return (
+          <span className="flex min-w-0 items-center gap-2 py-1">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <button type="button" title={row.name} onClick={() => setEditing(row)} className="truncate text-left font-semibold text-link hover:underline">
+                {row.name}
+              </button>
+              <span title={when} className="truncate text-small font-light text-secondary">{when}</span>
+            </span>
+            <RowActions>
+              <button type="button" className={rowPill} onClick={() => setEditing(row)}>
+                Edit
+              </button>
+              <DropdownMenu
+                label={`More for ${row.name}`}
+                align="start"
+                trigger={(props) => (
+                  <button {...props} type="button" className={rowPill}>
+                    More
+                    <ChevronDown aria-hidden="true" className="size-3" />
+                  </button>
+                )}
+                groups={[
+                  { key: 'rule', items: [{ key: 'history', label: 'View history', href: automationRunsPath(row.id) }] },
+                  { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
+                ]}
+              />
+            </RowActions>
+          </span>
+        )
+      },
+    },
+    { key: 'object', header: 'Object', width: 160, render: (row) => <span className="block truncate font-light">{labelOf(row.objectKey)}</span> },
+    {
+      key: 'runs',
+      header: 'Runs',
+      width: 120,
+      align: 'right',
+      render: (row) => (
+        <Link href={automationRunsPath(row.id)} className="tabular-nums">
+          {fmt.number(row.runCount)}
+        </Link>
+      ),
+    },
+    { key: 'last', header: 'Last run', width: 200, render: (row) => <span className="font-light">{row.lastRunAt ? fmt.dateTime(row.lastRunAt) : EMPTY_VALUE}</span> },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 120,
+      render: (row) => (
+        <Switch checked={isOn(row)} label={isOn(row) ? 'On' : 'Off'} disabled={busy} onChange={(event) => toggle(row, event.target.checked)} />
+      ),
+    },
+  ]
+
+  const runColumns: Column<RunView>[] = [
+    { key: 'state', header: 'Status', width: 120, render: (entry) => <Badge tone={STATE_TONE[entry.state]}>{entry.state}</Badge> },
+    { key: 'name', header: 'Automation', width: 260, render: (entry) => <span title={entry.automationName} className="block truncate font-semibold">{entry.automationName}</span> },
+    { key: 'detail', header: 'Detail', width: 420, render: (entry) => <span title={entry.detail ?? undefined} className="block truncate font-light">{entry.detail || EMPTY_VALUE}</span> },
+    {
+      key: 'at',
+      header: 'When',
+      width: 220,
+      // A waiting run's useful time is when it wakes, not when it started:
+      // "fired an hour ago" says nothing about a rule that has two more days to sit.
+      render: (entry) => <span className="font-light">{entry.resumeAt ? `Continues ${fmt.dateTime(entry.resumeAt)}` : fmt.dateTime(entry.at)}</span>,
+    },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
-      <div>
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="flex min-w-0 flex-wrap items-center gap-2">
+          <label className="relative w-full min-w-0 sm:w-[18rem]">
+            <span className="sr-only">Search automations</span>
+            <input
+              type="search"
+              value={query}
+              placeholder="Search automations"
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-[2.5rem] w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 font-light placeholder:text-muted"
+            />
+            <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+          </label>
+          <DropdownMenu
+            label="Filter by status"
+            align="start"
+            trigger={(props) => (
+              <button {...props} type="button" className={cn(ghostFilter, 'text-body', status && 'bg-fill-hover')}>
+                {status === 'on' ? 'Status: On' : status === 'off' ? 'Status: Off' : 'Status'}
+                <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+              </button>
+            )}
+            groups={[
+              {
+                key: 'status',
+                items: [
+                  { key: 'all', label: 'All', checked: !status, onSelect: () => setStatus(null) },
+                  { key: 'on', label: 'On', checked: status === 'on', onSelect: () => setStatus('on') },
+                  { key: 'off', label: 'Off', checked: status === 'off', onSelect: () => setStatus('off') },
+                ],
+              },
+            ]}
+          />
+        </span>
         <Button variant="primary" onClick={() => setEditing('new')}>
           Create automation
         </Button>
       </div>
 
-      {rows.length === 0 ? (
+      {shown.length === 0 ? (
         <EmptyState
-          title="Nothing runs on its own yet"
-          description="A rule watches for something that happens and does one thing about it."
+          title={rows.length === 0 ? 'Nothing runs on its own yet' : 'No automation matches'}
+          description={rows.length === 0 ? 'A rule watches for something that happens and does one thing about it.' : 'Try another name, or clear the status filter.'}
         />
       ) : (
-        <ul className="flex flex-col rounded-panel border border-line bg-surface">
-          {page.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">{row.name}</span>
-                  {isOn(row) ? <Badge tone="ok">On</Badge> : <Badge tone="neutral">Off</Badge>}
-                </p>
-                <p className="text-small text-secondary">
-                  When {TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a{' '}
-                  {inSentence(labelOf(row.objectKey))}:{' '}
-                  {row.steps.map(summarise).join(', then ')}
-                </p>
-                <p className="text-small text-secondary tabular-nums">
-                  {row.runCount === 0
-                    ? 'Has not fired yet'
-                    : `Fired ${fmt.number(row.runCount)} time${row.runCount === 1 ? '' : 's'}, last ${fmt.dateTime(row.lastRunAt ?? row.createdAt)}`}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-2">
-                <Switch
-                  checked={isOn(row)}
-                  label={isOn(row) ? 'On' : 'Off'}
-                  onChange={(event) => {
-                    const next = event.target.checked
-                    setSwitched((current) => ({ ...current, [row.id]: next }))
-                    void run(
-                      () => api.admin.automations.setActive.mutate({ id: row.id, isActive: next }),
-                      next ? 'Running from now on.' : 'Stopped.',
-                      () =>
-                        setSwitched((current) => {
-                          const rest = { ...current }
-                          delete rest[row.id]
-                          return rest
-                        }),
-                    )
-                  }}
-                />
-                <Link href={automationRunsPath(row.id)} className="text-small">
-                  Runs
-                </Link>
-                <IconButton
-                  label={`Edit ${row.name}`}
-                  icon={<ACTION_ICONS.edit size={16} />}
-                  onClick={() => setEditing(row)}
-                />
-                <IconButton
-                  label={`Delete ${row.name}`}
-                  tone="destructive"
-                  icon={<ACTION_ICONS.delete size={16} />}
-                  onClick={() => setRemoving(row)}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <DataTable columns={columns} rows={page} rowKey={(row) => row.id} caption="Automations" storageKey="settings.automations" />
       )}
 
       {pager}
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-base font-semibold">What they did</h3>
+        <h2 className="text-xl font-medium">Recent activity</h2>
         {runs.length === 0 ? (
           <p className="text-secondary">Nothing has fired yet.</p>
         ) : (
-          <ul className="flex flex-col rounded-panel border border-line bg-surface">
-            {runs.slice(0, 50).map((entry) => (
-              <li key={entry.id} className="flex flex-wrap items-baseline gap-x-2 border-b border-divider px-3 py-1.5 last:border-0">
-                <Badge tone={STATE_TONE[entry.state]}>{entry.state}</Badge>
-                <span className="font-medium">{entry.automationName}</span>
-                <span className="min-w-0 truncate text-secondary">{entry.detail}</span>
-                {/* A waiting run's useful time is when it wakes, not when it
-                    started: "fired an hour ago" says nothing about a rule that
-                    has two more days to sit. */}
-                <span className="ml-auto shrink-0 text-small text-secondary tabular-nums">
-                  {entry.resumeAt
-                    ? `continues ${fmt.dateTime(entry.resumeAt)}`
-                    : fmt.dateTime(entry.at)}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <DataTable columns={runColumns} rows={runs.slice(0, 50)} rowKey={(entry) => entry.id} caption="Recent automation runs" storageKey="settings.automation-activity" />
         )}
       </section>
 
