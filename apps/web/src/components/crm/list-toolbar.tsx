@@ -52,7 +52,7 @@ export type ListToolbarProps = {
 }
 
 const pill =
-  'inline-flex h-pill items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 py-2 text-small font-light transition-all duration-150 ease-out hover:bg-fill'
+  'inline-flex h-pill items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 py-2 text-small font-light text-body transition-all duration-150 ease-out hover:bg-fill'
 
 /** Matches --rawr-duration-dock, which the panel's width transition runs for. */
 const DOCK_EXIT_MS = 125

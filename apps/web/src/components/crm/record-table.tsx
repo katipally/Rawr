@@ -319,7 +319,7 @@ export const RecordTable = ({
         <a
           href={exportHref}
           download
-          className={buttonClass('secondary', 'h-pill min-h-0 text-small text-[color:var(--rawr-text)] no-underline')}
+          className={buttonClass('secondary', 'h-pill min-h-0 no-underline')}
         >
           <Download aria-hidden="true" className="size-3.5" />
           Export
