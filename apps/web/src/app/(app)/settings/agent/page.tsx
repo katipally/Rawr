@@ -41,7 +41,7 @@ const AgentAccessPage = async () => {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Agent access"
+        title="Agent Access"
         lead="Any MCP client connects by signing in, or with a token created here."
         why={
           <p>

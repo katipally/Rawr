@@ -1,6 +1,6 @@
 import { listGrants, listMailboxes, listMcpTokens, listMembers, readSchedule } from '@rawr/db'
 import { devCalendarEnabled, devGmailEnabled, googleCalendarConfigured, googleConfigured } from '~/lib/env.ts'
-import { agentAccessPath, availabilityPath, calendarsPath, mailboxesPath } from '~/lib/links.ts'
+import { accountPath, agentAccessPath, availabilityPath, calendarsPath, mailboxesPath } from '~/lib/links.ts'
 import { plainError } from '~/lib/provider-errors.ts'
 import { contextFrom, memberships, readSession } from '~/server/session.ts'
 import { AccountPanel } from './account-panel.tsx'
@@ -59,7 +59,7 @@ const AccountPage = async () => {
             ? `${grant.provider === 'dev' ? 'Development calendar' : grant.calendarId}.`
             : null,
         canConnect: googleCalendarConfigured || devCalendarEnabled,
-        href: googleCalendarConfigured ? `/api/auth/google/calendar?return=${encodeURIComponent('/settings/account')}` : calendarsPath(account),
+        href: googleCalendarConfigured ? `/api/auth/google/calendar?return=${encodeURIComponent(`${accountPath()}?tab=email`)}` : calendarsPath(account),
         managePath: calendarsPath(account),
       }}
       tokens={tokens.filter((t) => t.userId === session.userId && !t.revokedAt).length}

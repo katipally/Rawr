@@ -1,11 +1,13 @@
 'use client'
 
-import { Button, Field, PageHeader, Select, cn, useToast } from '@rawr/ui'
+import { Button, Field, PageHeader, Select, Tabs, cn, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
+import { accountPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
 
 type Service = {
@@ -42,12 +44,20 @@ const zones = (): string[] => {
   return []
 }
 
+/** HubSpot's preference section: a 20/500 heading over its fields, no card. */
 const Panel = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="rounded-panel border border-line bg-surface shadow-panel">
-    <h3 className="px-6 pt-6 pb-4 text-base font-semibold">{title}</h3>
-    <div className="flex flex-col gap-3 px-6 pb-6">{children}</div>
+  <section className="flex flex-col gap-3">
+    <h3 className="text-xl font-medium">{title}</h3>
+    <div className="flex flex-col gap-3">{children}</div>
   </section>
 )
+
+type Tab = 'profile' | 'email' | 'security'
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'profile', label: 'Profile' },
+  { key: 'email', label: 'Email & Calendar' },
+  { key: 'security', label: 'Security' },
+]
 
 const ServiceRow = ({
   name,
@@ -95,6 +105,8 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
+  const [tabParam] = useUrlParam('tab')
+  const tab: Tab = TABS.find((entry) => entry.key === tabParam)?.key ?? 'profile'
   const [timezone, setTimezone] = useState(initialTimezone)
   const [savingZone, setSavingZone] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -143,14 +155,23 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
   }
 
   return (
-    <div className="flex max-w-3xl flex-col gap-4">
-      <PageHeader
-        as="h2"
-        title="Your account"
-        lead="What Rawr knows about you, and the things only you control."
-        why={<p>Your name and picture come from Google each time you sign in.</p>}
+    <div className="flex min-w-0 flex-col gap-4">
+      <PageHeader title="General" why={<p>Your name and picture come from Google each time you sign in.</p>} />
+      <Tabs
+        label="Your preferences"
+        items={TABS.map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          href: entry.key === 'profile' ? accountPath() : `${accountPath()}?tab=${entry.key}`,
+          current: entry.key === tab,
+        }))}
+        onSelect={(key) => replaceParams({ tab: key === 'profile' ? null : key })}
       />
+      <p className="border-b border-line pb-4">These preferences only apply to you.</p>
 
+      <div className="flex max-w-3xl flex-col gap-8">
+      {tab === 'profile' ? (
+      <>
       <Panel title="Who you are">
         <div className="flex items-center gap-3">
           {me.avatarUrl ? (
@@ -174,7 +195,7 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
               <div className="min-w-0">
                 <p className="font-medium">{w.name}</p>
                 <p className="text-small text-secondary">
-                  What you may do here is under Settings, Members &amp; Teams.
+                  What you may do here is under Settings, Users &amp; Teams.
                 </p>
               </div>
               <p className="shrink-0 text-small text-secondary">Joined {fmt.date(w.joinedAt)}</p>
@@ -183,11 +204,11 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
         </ul>
         {isSuperAdmin ? (
           <p className="text-small text-secondary">
-            You are a super admin, so you have full access here and set what everybody else may do under Settings, Members &amp; Teams.
+            You are a super admin, so you have full access here and set what everybody else may do under Settings, Users &amp; Teams.
           </p>
         ) : admins.length > 0 ? (
           <p className="text-small text-secondary">
-            What you may do is set by a super admin under Settings, Members &amp; Teams.{' '}
+            What you may do is set by a super admin under Settings, Users &amp; Teams.{' '}
             {admins.length > 0 ? (
               <>
                 Ask{' '}
@@ -232,7 +253,8 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
           </div>
         </Field>
       </Panel>
-
+      </>
+      ) : tab === 'email' ? (
       <Panel title="Connected Google services">
         <ServiceRow
           name="Gmail"
@@ -247,7 +269,7 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
           needs="Needs a Google Cloud project with Calendar enabled, and a key to encrypt the grant with."
         />
       </Panel>
-
+      ) : (
       <Panel title="Assistants and sessions">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p>
@@ -276,6 +298,8 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
           )}
         </div>
       </Panel>
+      )}
+      </div>
     </div>
   )
 }
