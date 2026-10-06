@@ -1,11 +1,12 @@
 'use client'
 
-import { Alert, Button, EmptyState, Field, IconButton, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, DataTable, DropdownMenu, EmptyState, Field, Modal, RenamePrompt, TextInput, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import Link from 'next/link'
-import { ACTION_ICONS } from '~/components/icons.ts'
 import { usePagedRows } from '~/components/paged.tsx'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { objectView, propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -42,7 +43,12 @@ export const ObjectList = ({
    *  trip is long enough that a new object looked like it had not been created. */
   const [created, setCreated] = useState<ObjectView[]>([])
   const all = [...rows, ...created.filter((object) => !rows.some((row) => row.id === object.id))]
-  const { page, pager } = usePagedRows(all, 'objects')
+  const [query, setQuery] = useState('')
+  const needle = query.trim().toLowerCase()
+  const shown = needle
+    ? all.filter((row) => row.namePlural.toLowerCase().includes(needle) || row.nameSingular.toLowerCase().includes(needle) || row.key.includes(needle))
+    : all
+  const { page, pager } = usePagedRows(shown, 'objects')
 
   const run = async (what: () => Promise<unknown>, said: string) => {
     setBusy(true)
@@ -59,61 +65,90 @@ export const ObjectList = ({
     }
   }
 
+  const columns: Column<ObjectView>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 360,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <Link href={objectView(account, row.key, 'all')} title={row.namePlural} className="min-w-0 flex-1 truncate font-semibold">
+            {row.namePlural}
+          </Link>
+          {canWrite ? (
+            <RowActions>
+              <DropdownMenu
+                label={`Actions for ${row.namePlural}`}
+                align="start"
+                trigger={(props) => (
+                  <button {...props} type="button" className={rowPill}>
+                    Actions
+                    <ChevronDown aria-hidden="true" className="size-3" />
+                  </button>
+                )}
+                groups={[
+                  {
+                    key: 'object',
+                    items: [
+                      { key: 'properties', label: 'Manage properties', href: propertiesPath(row.key) },
+                      { key: 'rename', label: 'Rename', onSelect: () => setRenaming(row) },
+                    ],
+                  },
+                  { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
+                ]}
+              />
+            </RowActions>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'key', header: 'Internal name', width: 220, render: (row) => <code title={row.key} className="block truncate text-secondary">{row.key}</code> },
+    { key: 'records', header: 'Records', width: 140, align: 'right', render: (row) => <span className="font-light tabular-nums">{fmt.number(row.recordCount)}</span> },
+    {
+      key: 'fields',
+      header: 'Properties',
+      width: 140,
+      align: 'right',
+      render: (row) => (
+        <Link href={propertiesPath(row.key)} className="tabular-nums">
+          {fmt.number(row.fieldCount)}
+        </Link>
+      ),
+    },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
-      {canWrite ? (
-        <div>
-          <Button variant="primary" onClick={() => { setSingular(''); setPlural(''); setCreating(true) }}>
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="relative w-full min-w-0 sm:w-[16rem]">
+          <span className="sr-only">Search objects</span>
+          <input
+            type="search"
+            value={query}
+            placeholder="Search objects"
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-[2.5rem] w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 font-light placeholder:text-muted"
+          />
+          <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+        </label>
+        {canWrite ? (
+          <Button onClick={() => { setSingular(''); setPlural(''); setCreating(true) }}>
             Create object
           </Button>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
-      {all.length === 0 ? (
+      {shown.length === 0 ? (
         <EmptyState
-          title="No objects of your own yet"
-          description="Contacts, companies and deals are built in. An object you create sits beside them with its own fields, its own list and its own records — a project, a vendor, a piece of equipment."
+          title={all.length === 0 ? 'No objects of your own yet' : 'No object matches'}
+          description={
+            all.length === 0
+              ? 'Contacts, companies and deals are built in. An object you create sits beside them with its own fields, its own list and its own records: a project, a vendor, a piece of equipment.'
+              : 'Try another name.'
+          }
         />
       ) : (
-        <ul className="flex flex-col rounded-panel border border-line bg-surface">
-          {page.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-baseline gap-x-2">
-                  <Link href={objectView(account, row.key, 'all')} className="font-medium">
-                    {row.namePlural}
-                  </Link>
-                  <code className="text-small text-secondary">{row.key}</code>
-                </p>
-                <p className="text-small text-secondary tabular-nums">
-                  {fmt.number(row.recordCount)} record{row.recordCount === 1 ? '' : 's'} ·{' '}
-                  <Link href={propertiesPath(row.key)}>
-                    {row.fieldCount} field{row.fieldCount === 1 ? '' : 's'}
-                  </Link>
-                </p>
-              </div>
-
-              {canWrite ? (
-                <span className="flex shrink-0 items-center gap-0.5">
-                  <IconButton
-                    label={`Rename ${row.namePlural}`}
-                    icon={<ACTION_ICONS.rename size={16} />}
-                    onClick={() => setRenaming(row)}
-                  />
-                  <IconButton
-                    label={`Delete ${row.namePlural}`}
-                    tone="destructive"
-                    icon={<ACTION_ICONS.delete size={16} />}
-                    onClick={() => setRemoving(row)}
-                  />
-                </span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+        <DataTable columns={columns} rows={page} rowKey={(row) => row.id} caption="Custom objects" storageKey="settings.objects" />
       )}
 
       {pager}

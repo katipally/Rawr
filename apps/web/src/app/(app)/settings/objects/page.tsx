@@ -14,7 +14,6 @@ const ObjectsPage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
         title="Objects"
         lead="Contacts, companies and deals, and anything else you keep records of."
         why={
@@ -22,7 +21,7 @@ const ObjectsPage = async () => {
             <p>
               An object you create sits beside the built-in three with its own fields, its own list
               and its own records. Its values live in one shared table rather than a table of its
-              own, which is why it needs no migration and no deploy — and why a very large one
+              own, which is why it needs no migration and no deploy, and why a very large one
               sorts a little more slowly than contacts do.
             </p>
             <p>
