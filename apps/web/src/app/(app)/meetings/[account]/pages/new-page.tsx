@@ -1,22 +1,25 @@
 'use client'
 
 import type { BookingKind } from '@rawr/db'
-import { Button, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, TextInput, cn, useToast } from '@rawr/ui'
+import { Shuffle, User, Users } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { useState } from 'react'
+import { useState, type ComponentType } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { bookingPagesPath } from '~/lib/links.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 
-/** Creating a page asks for the two things that cannot be defaulted: what it is
- *  called and, for an admin, whether it is shared. Everything else opens in the
- *  editor with the production configuration already in it, so a new page is
- *  bookable before anybody changes a setting. */
+/** HubSpot's "Choose a scheduling page type": three cards, then the editor.
+ *  Between the two this asks for the one thing that cannot be defaulted, the
+ *  name the public link is made from. Everything else opens in the editor with
+ *  the production configuration already in it, so a new page is bookable before
+ *  anybody changes a setting. */
 
-const KIND_HINTS: Record<BookingKind, string> = {
-  round_robin: 'Spreads meetings across a team. Embedded on the website.',
-  collective: 'Everybody listed has to be free, and all of them are on the invitation.',
-  one_on_one: 'Yours alone, for an email signature. Only you can see and change it.',
-}
+const TYPES: { kind: BookingKind; title: string; hint: string; Icon: ComponentType<{ className?: string }> }[] = [
+  { kind: 'one_on_one', title: 'One-on-one', hint: 'Contacts book a meeting with you alone. Only you can see and change it.', Icon: User },
+  { kind: 'collective', title: 'Group', hint: 'Contacts book a meeting with several people on your team, all free at once.', Icon: Users },
+  { kind: 'round_robin', title: 'Round robin', hint: 'Meetings are shared out across your team, to whoever is furthest behind.', Icon: Shuffle },
+]
 
 const DEFAULTS = {
   durationMinutes: 30,
@@ -60,12 +63,20 @@ export const NewPageButton = ({
   const show = useToast()
   const [open, setOpen] = useState(startOpen)
   const [name, setName] = useState('')
-  const [kind, setKind] = useState<BookingKind>(canCreateShared ? 'round_robin' : 'one_on_one')
+  const [kind, setKind] = useState<BookingKind | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const close = () => {
+    setOpen(false)
+    setKind(null)
+    setName('')
+    replaceParams({ new: null })
+  }
 
   const slug = slugify(name)
 
   const create = async () => {
+    if (!kind) return
     if (!slug) {
       show('error', 'A page needs a name with at least one letter or number in it.')
       return
@@ -99,25 +110,58 @@ export const NewPageButton = ({
 
       <Modal
         open={open}
-        onClose={() => setOpen(false)}
-        title="Create scheduling page"
+        onClose={close}
+        size="lg"
+        title={kind === null ? 'Choose a scheduling page type' : `New ${TYPES.find((type) => type.kind === kind)?.title} page`}
         dirty={name !== ''}
-        onSubmit={() => void create()}
-        footer={
-          <>
-            <Button type="button" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit" busy={saving} disabled={name.trim() === ''}>
-              {saving ? 'Creating…' : 'Create'}
-            </Button>
-          </>
-        }
+        {...(kind === null
+          ? {}
+          : {
+              onSubmit: () => void create(),
+              footer: (
+                <>
+                  <Button type="button" onClick={() => setKind(null)}>
+                    Choose another type
+                  </Button>
+                  <Button variant="primary" type="submit" busy={saving} disabled={name.trim() === ''}>
+                    {saving ? 'Creating…' : 'Create'}
+                  </Button>
+                </>
+              ),
+            })}
       >
-        <div className="flex flex-col gap-3">
+        {kind === null ? (
+          <div className="flex min-w-0 flex-col gap-3">
+            <ul className="grid min-w-0 gap-3 sm:grid-cols-3">
+              {TYPES.map(({ kind: option, title, hint, Icon }) => {
+                const locked = option !== 'one_on_one' && !canCreateShared
+                return (
+                  <li key={option} className="min-w-0">
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={() => setKind(option)}
+                      className={cn(
+                        'flex h-full w-full min-w-0 flex-col items-center gap-3 rounded-hs border border-line-strong bg-surface p-5 text-center transition-all duration-150 ease-out',
+                        'hover:bg-fill active:bg-fill disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-surface',
+                      )}
+                    >
+                      <span aria-hidden="true" className="grid size-16 place-items-center rounded-pill bg-accent-subtle text-link">
+                        <Icon className="size-7" />
+                      </span>
+                      <span className="text-base font-semibold">{title}</span>
+                      <span>{hint}</span>
+                      {locked ? <span className="text-small text-secondary">Shared pages are an admin's to set up.</span> : null}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : (
           <Field
             id="new-booking-name"
-            label="Name"
+            label="Internal name"
             required
             hint={slug ? `Will be booked at /b/${account}/${slug}` : 'Used for the public link'}
           >
@@ -126,33 +170,10 @@ export const NewPageButton = ({
               value={name}
               autoFocus
               onChange={(event) => setName(event.target.value)}
-              placeholder="Sales team round robin"
+              placeholder={kind === 'one_on_one' ? 'Meet with me' : 'Sales team round robin'}
             />
           </Field>
-
-          {canCreateShared ? (
-            <Field
-              id="new-booking-kind"
-              label="Kind"
-              hint={KIND_HINTS[kind]}
-            >
-              <Select
-                id="new-booking-kind"
-                value={kind}
-                onChange={(event) => setKind(event.target.value as typeof kind)}
-              >
-                <option value="round_robin">Shared round robin</option>
-                <option value="collective">Shared collective</option>
-                <option value="one_on_one">My personal link</option>
-              </Select>
-            </Field>
-          ) : (
-            <p className="text-xs text-secondary">
-              This will be your own personal link. Creating a shared round robin page is an admin
-              task.
-            </p>
-          )}
-        </div>
+        )}
       </Modal>
     </>
   )
