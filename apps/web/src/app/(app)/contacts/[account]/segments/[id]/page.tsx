@@ -1,18 +1,17 @@
-import { readSegment, readSegmentMembers } from '@rawr/db'
+import { getRegistry, readSegment, readSegmentMembers } from '@rawr/db'
 import { notFound, redirect } from 'next/navigation'
+import { toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { ListMembers } from './list-members.tsx'
 
-/** One list, and who is in it.
- *
- *  A static list is the only kind whose membership is a thing a person edits, so
- *  it is the only kind with a page of its own. An active list opens as a filtered
- *  view instead, because its membership is its conditions and editing it here
- *  would be editing a number rather than the rule behind it. */
+/** One segment, and who is in it. Every kind has this page, as in HubSpot; only
+ *  a static list's members are edited here, because an active one's membership
+ *  is its conditions and editing it would be editing a number rather than the
+ *  rule behind it. */
 /** One screenful, defined here rather than in the client module beside it: a
  *  value exported across the 'use client' boundary arrives as a module reference
  *  and reached the query as NaN. */
-const PAGE_SIZE = 50
+const PAGE_SIZE = 25
 
 const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: string }> }) => {
   const session = await readSession()
@@ -20,22 +19,17 @@ const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: 
 
   const { account, id } = await params
   const ctx = contextFrom(session)
-  const list = await readSegment(ctx, id)
+  const [list, registry] = await Promise.all([readSegment(ctx, id), getRegistry(ctx)])
   if (!list) notFound()
 
   const members = await readSegmentMembers(ctx, id, PAGE_SIZE)
+  const object = registry.byKey.get(list.objectKey)
 
   return (
     <ListMembers
       account={account}
-      list={{
-        id: list.id,
-        name: list.name,
-        description: list.description,
-        objectKey: list.objectKey,
-        isStatic: list.isStatic,
-        memberCount: list.memberCount,
-      }}
+      list={{ ...list, lastEvaluatedAt: list.lastEvaluatedAt?.toISOString() ?? null }}
+      fields={object ? toFilterFields(object) : []}
       initial={members.map((member) => ({ ...member, enteredAt: member.enteredAt.toISOString() }))}
       pageSize={PAGE_SIZE}
       canWrite={sessionCanEdit(session, 'marketing')}
