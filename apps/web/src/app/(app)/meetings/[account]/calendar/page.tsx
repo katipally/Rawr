@@ -12,7 +12,7 @@ import {
   tasksPath,
 } from '~/lib/links.ts'
 import { googleCalendarConfigured } from '~/lib/env.ts'
-import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin, viewerContext } from '~/server/session.ts'
 
 /** The month, for one person.
  *
@@ -39,15 +39,16 @@ const CalendarScreen = async ({
   if (!session) redirect('/sign-in')
 
   const ctx = contextFrom(session)
-  // The reader's own today decides the default month, not the server's.
-  const today = todayIn(session.accountTimezone)
+  // The reader's own today decides the default month, not the server's, and the
+  // meetings land on the days they are on the reader's clock.
+  const today = todayIn(session.timezone)
   const month = MONTH.test(query.month ?? '') ? `${query.month}-01` : `${today.slice(0, 7)}-01`
   // Everybody's is only an admin's to ask for: a rep's calendar is theirs.
   const everyone = query.who === 'all' && sessionIsAdmin(session)
   const who = everyone ? null : query.who && sessionIsAdmin(session) ? query.who : session.userId
 
   const [agenda, members, grants] = await Promise.all([
-    readAgenda(ctx, { month, userId: who }),
+    readAgenda(viewerContext(session), { month, userId: who }),
     sessionIsAdmin(session) ? listMembers(ctx) : Promise.resolve([]),
     listGrants(ctx),
   ])

@@ -138,6 +138,11 @@ export const contextFrom = (session: Session): AccountContext => ({
   timezone: session.accountTimezone,
 })
 
+/** The context for a screen that is one person's, where "today" and the day a
+ *  meeting falls on are the ones on that person's wall. Reports and shared views
+ *  keep `contextFrom`, which buckets in the account's zone for everybody. */
+export const viewerContext = (session: Session): AccountContext => ({ ...contextFrom(session), timezone: session.timezone })
+
 /** The same question the data access layer asks, for screens deciding what to
  *  render. Never the only gate: every write is checked again in the layer. */
 export const sessionCanEdit = (session: Session, hub: Hub): boolean =>

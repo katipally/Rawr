@@ -36,7 +36,7 @@ import {
   submissionsPath,
   tasksPath,
 } from '~/lib/links.ts'
-import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly, viewerContext } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
 
 /** The Monday screen. D10 replaced the spreadsheet ritual with a shared view; this
@@ -176,9 +176,9 @@ const HomePage = async ({
 
   const [board, overdue, myTasks, recent, members, setup] = await withAccountReads(ctx, () =>
     Promise.all([
-      readDashboard(ctx),
+      readDashboard(viewerContext(session)),
       sales ? overdueNextSteps(ctx) : [],
-      people ? listTasks(ctx, { status: 'open', assigneeId: session.userId }) : [],
+      people ? listTasks(viewerContext(session), { status: 'open', assigneeId: session.userId }) : [],
       recentActivity(ctx, 12),
       listMembers(ctx),
       // What an admin still has to switch on. Read only for them: nobody else can
@@ -459,7 +459,7 @@ const HomePage = async ({
                     ) : null}
                   </div>
                   {t.dueDate ? (
-                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.accountTimezone) ? 'text-error' : 'text-secondary'}`}>
+                    <span className={`shrink-0 text-small ${t.dueDate < todayIn(session.timezone) ? 'text-error' : 'text-secondary'}`}>
                       {fmt.date(t.dueDate)}
                     </span>
                   ) : null}

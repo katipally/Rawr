@@ -8,7 +8,7 @@ import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-labels.ts
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
 import { objectView, recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, viewerContext } from '~/server/session.ts'
 import { QueueSidebar } from './queue-sidebar.tsx'
 import { getFormat } from '~/server/format.ts'
 
@@ -69,7 +69,7 @@ const TasksPage = async ({
     tasksPath(account, { ...kept, ...next })
 
   const [tasks, queues, overdue, lookups, registry] = await Promise.all([
-    listTasks(ctx, {
+    listTasks(viewerContext(session), {
       ...(mine && ctx.actorId ? { assigneeId: ctx.actorId } : {}),
       ...(view.key === 'overdue' ? { overdueOnly: true } : {}),
       ...(view.key === 'today' || view.key === 'upcoming' ? { due: view.key } : {}),
