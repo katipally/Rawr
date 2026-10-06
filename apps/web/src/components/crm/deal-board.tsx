@@ -269,8 +269,10 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
 
   return (
     <>
-    {/* The board scrolls inside its own box; the page never scrolls sideways. */}
-    <div className="flex min-h-0 w-full flex-1 overflow-x-auto pb-2">
+    {/* The board scrolls inside its own box; the page never scrolls sideways.
+        Relative so the cards' sr-only labels are placed, and clipped, in here
+        rather than widening the page card. */}
+    <div className="relative flex min-h-0 w-full flex-1 overflow-x-auto pb-2">
       {/* Stretch, not start: a column that sizes to its own cards leaves an empty
           stage as a header-high drop target, which is the one stage somebody most
           often drags into. Equal heights also stop the board reading as ragged. */}
