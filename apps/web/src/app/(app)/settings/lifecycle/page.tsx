@@ -2,12 +2,10 @@ import { PageHeader } from '@rawr/ui'
 import { listLifecycleStages } from '@rawr/db'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { StageList } from './stage-list.tsx'
-import { getFormat } from '~/server/format.ts'
 
 /** A2: the lifecycle list is ordered, editable and reorderable, and a change on a
  *  record writes its own timeline event. The list itself lives here. */
 const LifecyclePage = async () => {
-  const fmt = await getFormat()
   const session = await readSession()
   if (!session) return null
 
@@ -16,8 +14,7 @@ const LifecyclePage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
-        title="Lifecycle stages"
+        title="Lifecycle Stages"
         lead="The ordered list a contact or a company moves along."
         why={
           <p>
@@ -29,15 +26,7 @@ const LifecyclePage = async () => {
       />
 
       <StageList
-        rows={stages.map((stage) => ({
-          id: stage.id,
-          name: stage.name,
-          detail:
-            stage.usedBy === 0
-              ? 'On no records'
-              : `On ${fmt.number(stage.usedBy)} record${stage.usedBy === 1 ? '' : 's'}`,
-          usedBy: stage.usedBy,
-        }))}
+        rows={stages.map((stage) => ({ id: stage.id, name: stage.name, usedBy: stage.usedBy }))}
         canWrite={sessionIsAdmin(session)}
       />
     </div>

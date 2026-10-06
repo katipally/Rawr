@@ -75,7 +75,7 @@ export const settingsGroups = (): SettingsGroup[] => [
       { href: objectsPath(), label: 'Objects', keywords: ['data model', 'schema', 'custom objects'] },
       { href: propertiesPath(), label: 'Properties', keywords: ['fields', 'columns', 'attributes'] },
       { href: pipelinesPath(), label: 'Pipelines', keywords: ['stages', 'deal stages'] },
-      { href: lifecyclePath(), label: 'Lifecycle', keywords: ['stages', 'lead', 'customer'] },
+      { href: lifecyclePath(), label: 'Lifecycle Stages', keywords: ['stages', 'lead', 'customer'] },
       { href: subscriptionsPath(), label: 'Subscriptions', keywords: ['billing', 'unsubscribe', 'consent', 'opt out'] },
     ],
   },
