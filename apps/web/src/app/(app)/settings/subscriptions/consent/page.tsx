@@ -1,8 +1,7 @@
 import { CONSENT_FILTERS, CONSENT_PAGE, listConsentRecords, type ConsentFilter } from '@rawr/db'
-import { Breadcrumb, PageHeader } from '@rawr/ui'
-import { subscriptionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { ConsentTable } from './consent-table.tsx'
+import { SubscriptionsHeader } from '../subscriptions-header.tsx'
 
 /** Every cookie choice a visitor made, newest first.
  *
@@ -31,11 +30,8 @@ const ConsentRecordsPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      <Breadcrumb items={[{ label: 'Subscriptions', href: subscriptionsPath() }, { label: 'Consent records' }]} />
-      <PageHeader
-        as="h2"
-        title="Consent records"
-        lead="What each visitor agreed to, and when."
+      <SubscriptionsHeader
+        current="consent"
         why={
           <p>
             A choice is appended, never updated. Overwriting the row would destroy the only

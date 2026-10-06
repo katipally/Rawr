@@ -1,9 +1,7 @@
-import { PageHeader } from '@rawr/ui'
 import { listSubscriptionTypes } from '@rawr/db'
-import { LinkButton } from '~/components/link-button.tsx'
-import { consentRecordsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { SubscriptionTypes } from './subscription-types.tsx'
+import { SubscriptionsHeader } from './subscriptions-header.tsx'
 
 /** A2 and D15. The types themselves; the per-contact state lives on the record.
  *  F6 pushes an opt-out outward to Brevo and never the reverse for one that
@@ -16,11 +14,8 @@ const SubscriptionsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        as="h2"
-        title="Subscription types"
-        lead="What somebody can opt in or out of."
-        action={<LinkButton href={consentRecordsPath()}>Consent records</LinkButton>}
+      <SubscriptionsHeader
+        current="types"
         why={
           <p>
             Every contact holds one of three states per type, and the third, never specified, is

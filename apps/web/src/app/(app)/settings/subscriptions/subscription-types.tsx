@@ -1,10 +1,12 @@
 'use client'
 
-import { Alert, Button, Field, IconButton, Modal, RenamePrompt, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, DataTable, DropdownMenu, EmptyState, Field, Modal, RenamePrompt, TextInput, useToast, type Column } from '@rawr/ui'
+import { ChevronDown } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { SubscriptionTypeRow } from '@rawr/db'
-import { ACTION_ICONS } from '~/components/icons.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { RowActions, StatusDot, rowPill } from '~/components/row-actions.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -25,6 +27,7 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
   const [doubleOptIn, setDoubleOptIn] = useState(false)
   const [removing, setRemoving] = useState<SubscriptionTypeRow | null>(null)
   const [renaming, setRenaming] = useState<SubscriptionTypeRow | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const run = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true)
@@ -41,147 +44,148 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
     }
   }
 
+  const toggleConfirm = (row: SubscriptionTypeRow) =>
+    void run(
+      () => api.admin.subscriptionTypes.update.mutate({ id: row.id, doubleOptIn: !row.doubleOptIn }),
+      row.doubleOptIn ? 'A tick on a form now subscribes straight away.' : 'Opt-ins on this type now have to be confirmed.',
+    )
+
+  const columns: Column<SubscriptionTypeRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 320,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span title={row.name} className="truncate font-semibold">{row.name}</span>
+            {row.isInternal ? <span className="truncate text-small font-light text-secondary">Internal, never offered on a public form</span> : null}
+          </span>
+          {canWrite ? (
+            <RowActions>
+              <DropdownMenu
+                label={`Actions for ${row.name}`}
+                align="start"
+                trigger={(props) => (
+                  <button {...props} type="button" className={rowPill}>
+                    Actions
+                    <ChevronDown aria-hidden="true" className="size-3" />
+                  </button>
+                )}
+                groups={[
+                  {
+                    key: 'type',
+                    items: [
+                      { key: 'rename', label: 'Rename', disabled: busy, onSelect: () => setRenaming(row) },
+                      { key: 'confirm', label: row.doubleOptIn ? 'Turn off confirmed opt-in' : 'Turn on confirmed opt-in', disabled: busy, onSelect: () => toggleConfirm(row) },
+                    ],
+                  },
+                  { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
+                ]}
+              />
+            </RowActions>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'description', header: 'Description', width: 360, render: (row) => <span title={row.description ?? undefined} className="block truncate font-light">{row.description || EMPTY_VALUE}</span> },
+    {
+      key: 'subscribed',
+      header: 'Subscribed',
+      width: 140,
+      align: 'right',
+      render: (row) => (
+        <span title={row.awaitingConfirmation > 0 ? `${fmt.number(row.awaitingConfirmation)} waiting to confirm` : undefined} className="font-light tabular-nums">
+          {fmt.number(row.subscribed)}
+        </span>
+      ),
+    },
+    { key: 'unsubscribed', header: 'Opted out', width: 140, align: 'right', render: (row) => <span className="font-light tabular-nums">{fmt.number(row.unsubscribed)}</span> },
+    { key: 'confirm', header: 'Confirmed opt-in', width: 160, render: (row) => <StatusDot tone={row.doubleOptIn ? 'live' : 'off'}>{row.doubleOptIn ? 'On' : 'Off'}</StatusDot> },
+  ]
+
   return (
-    <div className="flex flex-col gap-4">
-      {canWrite ? (
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void run(
-              () =>
-                api.admin.subscriptionTypes.create.mutate({
-                  name,
-                  description: description || null,
-                  isInternal,
-                  doubleOptIn,
-                }),
-              'Subscription type created.',
-            ).then((ok) => {
-              if (ok) {
-                setName('')
-                setDescription('')
-                setIsInternal(false)
-                setDoubleOptIn(false)
-              }
-            })
-          }}
-        >
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="min-w-0">
+          What somebody can opt in or out of. Everybody not subscribed or opted out has not specified.
+        </p>
+        {canWrite ? (
+          <Button onClick={() => setCreating(true)}>Create subscription type</Button>
+        ) : (
+          <p className="text-secondary">You need {hub} access to change this. Marketing and admins manage subscription types.</p>
+        )}
+      </div>
+
+      {rows.length === 0 ? (
+        <EmptyState
+          title="No subscription types yet"
+          description="Without one there is nothing for a contact to opt out of, and a form's consent checkbox has nothing to record against."
+        />
+      ) : (
+        <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption="Subscription types" storageKey="settings.subscription-types" />
+      )}
+
+      <Modal
+        open={creating}
+        title="Create subscription type"
+        onClose={() => setCreating(false)}
+        dirty={name !== '' || description !== ''}
+        onSubmit={() =>
+          void run(
+            () =>
+              api.admin.subscriptionTypes.create.mutate({
+                name,
+                description: description || null,
+                isInternal,
+                doubleOptIn,
+              }),
+            'Subscription type created.',
+          ).then((ok) => {
+            if (!ok) return
+            setName('')
+            setDescription('')
+            setIsInternal(false)
+            setDoubleOptIn(false)
+            setCreating(false)
+          })
+        }
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setCreating(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
+              Create
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
           <Field id="sub-name" label="Name">
-            <TextInput
-              id="sub-name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Product newsletter"
-            />
+            <TextInput id="sub-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="Product newsletter" />
           </Field>
           <Field id="sub-description" label="Description" hint="Shown to staff, not to the contact.">
-            <TextInput
-              id="sub-description"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
+            <TextInput id="sub-description" value={description} onChange={(event) => setDescription(event.target.value)} />
           </Field>
-          <label className="flex items-center gap-2 pb-1.5">
-            <input type="checkbox" checked={isInternal} onChange={(event) => setIsInternal(event.target.checked)} />
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1" checked={isInternal} onChange={(event) => setIsInternal(event.target.checked)} />
             <span>
               Internal
               <span className="block text-small text-secondary">Never offered on a public form.</span>
             </span>
           </label>
-          <label className="flex items-center gap-2 pb-1.5">
-            <input
-              type="checkbox"
-              checked={doubleOptIn}
-              onChange={(event) => setDoubleOptIn(event.target.checked)}
-            />
+          <label className="flex items-start gap-2">
+            <input type="checkbox" className="mt-1" checked={doubleOptIn} onChange={(event) => setDoubleOptIn(event.target.checked)} />
             <span>
               Confirmed opt-in
               <span className="block text-small text-secondary">
-                A form tick only asks. Nothing is sent until the link in the confirmation mail is
-                clicked.
+                A form tick only asks. Nothing is sent until the link in the confirmation mail is clicked.
               </span>
             </span>
           </label>
-          <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
-            Create
-          </Button>
-        </form>
-      ) : (
-        <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          You need {hub} access to change this. Marketing and admins manage
-          subscription types.
-        </p>
-      )}
-
-      <ul className="flex flex-col rounded-panel border border-line bg-surface">
-        {rows.length === 0 ? (
-          <li className="px-3 py-3 text-secondary">
-            No subscription types yet. Without one there is nothing for a contact to opt out of,
-            and a form's consent checkbox has nothing to record against.
-          </li>
-        ) : (
-          rows.map((row) => (
-            <li
-              key={row.id}
-              className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">{row.name}</span>
-                  {row.isInternal ? (
-                    <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">Internal</span>
-                  ) : null}
-                </p>
-                {row.description ? <p className="text-small text-secondary">{row.description}</p> : null}
-                <p className="text-small text-secondary tabular-nums">
-                  {fmt.number(row.subscribed)} subscribed · {fmt.number(row.unsubscribed)} opted out ·
-                  everybody else has not specified
-                  {row.awaitingConfirmation > 0
-                    ? ` · ${fmt.number(row.awaitingConfirmation)} waiting to confirm`
-                    : ''}
-                </p>
-                <label className="mt-1 flex flex-wrap items-center gap-2 text-small">
-                  <input
-                    type="checkbox"
-                    checked={row.doubleOptIn}
-                    disabled={!canWrite || busy}
-                    onChange={(event) =>
-                      void run(
-                        () =>
-                          api.admin.subscriptionTypes.update.mutate({
-                            id: row.id,
-                            doubleOptIn: event.target.checked,
-                          }),
-                        event.target.checked
-                          ? 'Opt-ins on this type now have to be confirmed.'
-                          : 'A tick on a form now subscribes straight away.',
-                      )
-                    }
-                  />
-                  Confirmed opt-in
-                </label>
-              </div>
-              {canWrite ? (
-                <span className="flex shrink-0 items-center gap-0.5">
-                  <IconButton
-                    label={`Rename ${row.name}`}
-                    icon={<ACTION_ICONS.rename size={16} />}
-                    disabled={busy}
-                    onClick={() => setRenaming(row)}
-                  />
-                  <IconButton
-                    label={`Delete ${row.name}`}
-                    tone="destructive"
-                    icon={<ACTION_ICONS.delete size={16} />}
-                    onClick={() => setRemoving(row)}
-                  />
-                </span>
-              ) : null}
-            </li>
-          ))
-        )}
-      </ul>
+        </div>
+      </Modal>
 
       <Modal
         open={removing !== null}

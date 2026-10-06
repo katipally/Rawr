@@ -1,10 +1,13 @@
 'use client'
 
-import { Badge, Card, EmptyState, Field, Pagination, Select, TextInput } from '@rawr/ui'
+import { DataTable, EmptyState, Pagination, type Column } from '@rawr/ui'
+import { Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import type { ConsentFilter } from '@rawr/db'
+import { FilterChip } from '~/components/filter-chip.tsx'
+import { StatusDot } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { consentRecordsPath, recordPath } from '~/lib/links.ts'
 
@@ -75,37 +78,59 @@ export const ConsentTable = ({
     return () => window.clearTimeout(timer)
   }, [draft, search, category, router])
 
-  const filters = (
-    <div className="grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
-      <Field id="consent-search" label="Visitor or contact">
-        <TextInput
-          id="consent-search"
-          type="search"
-          placeholder="Visitor id, name or email"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-      </Field>
-      <Field id="consent-category" label="What they chose">
-        <Select
-          id="consent-category"
-          value={category ?? ''}
-          onChange={(event) => go({ cat: (event.target.value || null) as ConsentFilter | null })}
-        >
-          <option value="">Any choice</option>
-          {FILTERS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </Field>
-    </div>
-  )
+  const yesNo = (on: boolean) => <StatusDot tone={on ? 'live' : 'off'}>{on ? 'Agreed' : 'Refused'}</StatusDot>
+
+  const columns: Column<ConsentRow>[] = [
+    {
+      key: 'visitor',
+      header: 'Visitor',
+      width: 320,
+      render: (row) => (
+        <span className="flex min-w-0 flex-col py-1">
+          {/* The id is all there is until something says otherwise: a consent
+              record names nobody, which is the point of it. */}
+          {row.contact ? (
+            <Link href={recordPath(account, 'contact', row.contact.id)} title={row.contact.name} className="truncate font-semibold">
+              {row.contact.name}
+            </Link>
+          ) : null}
+          <span title={row.visitorId} className="truncate font-mono text-small">{row.visitorId}</span>
+          {row.userAgent ? <span title={row.userAgent} className="truncate text-small font-light text-secondary">{row.userAgent}</span> : null}
+        </span>
+      ),
+    },
+    { key: 'necessary', header: 'Necessary', width: 130, render: () => yesNo(true) },
+    { key: 'analytics', header: 'Analytics', width: 130, render: (row) => yesNo(row.categories.analytics) },
+    { key: 'advertisement', header: 'Advertising', width: 130, render: (row) => yesNo(row.categories.advertisement) },
+    { key: 'policy', header: 'Policy', width: 120, render: (row) => <span title={row.policyVersion} className="block truncate font-light">{row.policyVersion}</span> },
+    { key: 'at', header: 'Recorded', width: 200, render: (row) => <span className="font-light">{fmt.dateTime(row.at)}</span> },
+  ]
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      {filters}
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="relative w-full min-w-0 sm:w-[18rem]">
+          <span className="sr-only">Search visitor or contact</span>
+          <input
+            type="search"
+            placeholder="Visitor id, name or email"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="h-[2.5rem] w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 font-light placeholder:text-muted"
+          />
+          <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+        </label>
+        <FilterChip
+          label="Choice"
+          clear={consentRecordsPath(search ? { q: search } : {})}
+          options={FILTERS.map((option) => ({
+            key: option.value,
+            label: option.label,
+            href: consentRecordsPath({ ...(search ? { q: search } : {}), cat: option.value }),
+            on: category === option.value,
+          }))}
+        />
+      </div>
 
       {rows.length === 0 ? (
         <EmptyState
@@ -125,45 +150,7 @@ export const ConsentTable = ({
           }
         />
       ) : (
-        <Card flush>
-          <ul className="divide-y divide-divider">
-            {rows.map((row) => (
-              <li key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
-                <span className="flex min-w-0 flex-1 basis-56 flex-col">
-                  {/* The id is all there is until something says otherwise: a
-                      consent record names nobody, which is the point of it. */}
-                  {row.contact ? (
-                    <Link href={recordPath(account, 'contact', row.contact.id)} className="truncate font-medium">
-                      {row.contact.name}
-                    </Link>
-                  ) : null}
-                  <span className="truncate font-mono text-small">{row.visitorId}</span>
-                  {row.userAgent ? (
-                    <span className="truncate text-small text-secondary">{row.userAgent}</span>
-                  ) : null}
-                </span>
-
-                <span className="flex shrink-0 flex-wrap gap-1">
-                  <Badge tone="neutral">necessary</Badge>
-                  <Badge tone={row.categories.analytics ? 'ok' : 'neutral'}>
-                    analytics {row.categories.analytics ? 'yes' : 'no'}
-                  </Badge>
-                  <Badge tone={row.categories.advertisement ? 'ok' : 'neutral'}>
-                    advertising {row.categories.advertisement ? 'yes' : 'no'}
-                  </Badge>
-                </span>
-
-                <span className="w-32 shrink-0 truncate text-small text-secondary">
-                  policy {row.policyVersion}
-                </span>
-
-                <span className="w-44 shrink-0 text-small text-secondary">
-                  {fmt.dateTime(row.at)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+        <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption="Consent records" storageKey="settings.consent" />
       )}
 
       {offset > 0 || hasMore ? (
