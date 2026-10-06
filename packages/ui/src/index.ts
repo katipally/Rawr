@@ -17,7 +17,7 @@ export { ConfirmDialog, type ConfirmDialogProps } from './primitives/confirm-dia
 export { Modal, type ModalProps } from './primitives/modal.tsx'
 export { Pagination, type PaginationProps } from './primitives/pagination.tsx'
 export { pageRange, type PageRange } from './primitives/pagination.ts'
-export { useMounted } from './primitives/overlay.ts'
+export { POP_EXIT_MS, SLIDE_EXIT_MS, useMounted, usePresence } from './primitives/overlay.ts'
 export { Popover, type PopoverProps } from './primitives/popover.tsx'
 export { anchor, type Align, type Box, type Placement, type Side } from './primitives/position.ts'
 export { RenamePrompt, type RenamePromptProps } from './primitives/rename-prompt.tsx'

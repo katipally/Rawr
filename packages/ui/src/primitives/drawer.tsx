@@ -3,7 +3,7 @@
 import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
-import { useOverlay } from './overlay.ts'
+import { SLIDE_EXIT_MS, useOverlay, usePresence } from './overlay.ts'
 
 export type DrawerProps = {
   open: boolean
@@ -30,15 +30,17 @@ export type DrawerProps = {
 export const Drawer = ({ open, onClose, title, action, children, className }: DrawerProps) => {
   const dialog = useRef<HTMLElement>(null)
   const shown = useOverlay(open, onClose, dialog)
+  const { present, closing } = usePresence(shown, SLIDE_EXIT_MS)
 
   // Portalled for the reason the modal is: a fixed panel inside the shell's
   // content card, which is a size container, would run the height of the card
   // rather than the window.
-  if (!shown) return null
+  if (!present) return null
 
   return createPortal(
     <aside
       ref={dialog}
+      inert={closing}
       role="dialog"
       aria-label={title}
       tabIndex={-1}
@@ -47,7 +49,8 @@ export const Drawer = ({ open, onClose, title, action, children, className }: Dr
         // text-body is not decoration: this is usually opened from a control in
         // the charcoal top bar, and without it every unstyled word inside
         // inherits that bar's near-white ink and renders white on white.
-        'fixed inset-y-0 right-0 z-overlay flex w-full flex-col border-l border-line bg-surface-raised text-body shadow-overlay outline-none sm:max-w-[min(26rem,92vw)]',
+        'fixed inset-y-0 right-0 z-overlay flex w-full flex-col border-l border-line bg-surface-raised text-body shadow-overlay outline-none motion-reduce:animate-none sm:max-w-[min(26rem,92vw)]',
+        closing ? 'animate-slide-out' : 'animate-slide-in',
         className,
       )}
     >

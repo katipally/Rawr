@@ -86,7 +86,27 @@
   --z-index-flyout: var(--rawr-z-flyout);
   --z-index-overlay: var(--rawr-z-overlay);
   --z-index-toast: var(--rawr-z-toast);
+
+  --ease-dock: var(--rawr-ease-dock);
+  --ease-preview: var(--rawr-ease-preview);
+  --ease-bulk: var(--rawr-ease-bulk);
+  --animate-pop-in: rawr-pop-in var(--rawr-duration-base) ease both;
+  --animate-pop-out: rawr-pop-out var(--rawr-duration-base) ease both;
+  --animate-fade-in: rawr-fade-in var(--rawr-duration-base) ease both;
+  --animate-fade-out: rawr-fade-out var(--rawr-duration-base) ease both;
+  --animate-slide-in: rawr-slide-in var(--rawr-duration-fast) ease-out both;
+  --animate-slide-out: rawr-slide-out var(--rawr-duration-fast) ease-in both;
+  --animate-drop-in: rawr-drop-in var(--rawr-duration-base) var(--rawr-ease-bulk) both;
 }
+
+/* One-sided keyframes: each runs from, or to, the element's own resting style. */
+@keyframes rawr-pop-in { from { opacity: 0; transform: scale(0.95); } }
+@keyframes rawr-pop-out { to { opacity: 0; transform: scale(0.95); } }
+@keyframes rawr-fade-in { from { opacity: 0; } }
+@keyframes rawr-fade-out { to { opacity: 0; } }
+@keyframes rawr-slide-in { from { transform: translateX(100%); } }
+@keyframes rawr-slide-out { to { transform: translateX(100%); } }
+@keyframes rawr-drop-in { from { opacity: 0; transform: translateY(-6px); } }
 
 @layer base {
   html {

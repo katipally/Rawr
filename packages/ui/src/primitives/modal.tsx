@@ -4,7 +4,7 @@ import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
 import { DiscardConfirm, useDismiss } from './discard-guard.tsx'
-import { useOverlay } from './overlay.ts'
+import { POP_EXIT_MS, useOverlay, usePresence } from './overlay.ts'
 
 export type ModalSize = 'sm' | 'md' | 'lg'
 
@@ -55,18 +55,23 @@ export const Modal = ({
   const dialog = useRef<HTMLDivElement>(null)
   const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose)
   const shown = useOverlay(open, dismiss, dialog)
+  const { present, closing } = usePresence(shown, POP_EXIT_MS)
   const Shell = onSubmit ? 'form' : 'div'
 
   // Portalled to the body because `position: fixed` is measured against the
   // nearest ancestor that establishes a containing block, and the app shell's
   // content card is one: it carries `container-type: inline-size`. Rendered in
   // place, the scrim covered the card rather than the window.
-  if (!shown) return null
+  if (!present) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-overlay flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div inert={closing} className="fixed inset-0 z-overlay flex items-end justify-center p-0 sm:items-center sm:p-4">
       {/* The scrim is a token: black at 30% over a dark canvas is invisible. */}
-      <div aria-hidden="true" onClick={dismiss} className="absolute inset-0 bg-scrim" />
+      <div
+        aria-hidden="true"
+        onClick={dismiss}
+        className={cn('absolute inset-0 bg-scrim motion-reduce:animate-none', closing ? 'animate-fade-out' : 'animate-fade-in')}
+      />
       <div
         ref={dialog}
         role="dialog"
@@ -76,7 +81,8 @@ export const Modal = ({
         className={cn(
           // A phone gets a sheet off the bottom edge, capped so the page behind
           // it stays visible and the dialog reads as a layer, not a new screen.
-          'relative flex max-h-[85dvh] w-full flex-col rounded-panel border border-line bg-surface-raised shadow-overlay outline-none',
+          'relative flex max-h-[85dvh] w-full flex-col rounded-panel border border-line bg-surface-raised shadow-overlay outline-none motion-reduce:animate-none',
+          closing ? 'animate-pop-out' : 'animate-pop-in',
           SIZES[size],
         )}
       >

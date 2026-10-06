@@ -104,7 +104,7 @@ export const Tooltip = ({ label, side = 'bottom', children }: TooltipProps) => {
             id={id}
             role="tooltip"
             style={box ? { top: box.top, left: box.left } : { top: -9999, left: -9999 }}
-            className="pointer-events-none fixed z-overlay max-w-64 rounded-hs bg-nav px-2 py-1 text-small text-nav-text shadow-overlay"
+            className="pointer-events-none fixed z-overlay max-w-64 animate-pop-in rounded-hs bg-nav px-2 py-1 text-small text-nav-text shadow-overlay motion-reduce:animate-none"
           >
             {label}
           </div>,

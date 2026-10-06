@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),' +
@@ -19,6 +19,27 @@ export const useMounted = (): boolean =>
     () => true,
     () => false,
   )
+
+/** How long each layer takes to leave, matching --rawr-duration-base and
+ *  --rawr-duration-fast, which the exit keyframes run for. */
+export const POP_EXIT_MS = 200
+export const SLIDE_EXIT_MS = 150
+
+/** Keeps a layer drawn for `exitMs` after it closes so it can animate out, and
+ *  drops it at once for anybody whose system asks for reduced motion. `closing`
+ *  is the stretch in between, when the layer is on screen but already shut. */
+export const usePresence = (open: boolean, exitMs: number): { present: boolean; closing: boolean } => {
+  const [present, setPresent] = useState(open)
+  if (open && !present) setPresent(true)
+  const closing = present && !open
+  useEffect(() => {
+    if (!closing) return
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const timer = setTimeout(() => setPresent(false), reduced ? 0 : exitMs)
+    return () => clearTimeout(timer)
+  }, [closing, exitMs])
+  return { present, closing }
+}
 
 /** Everything a dialog owes the person using it: Escape closes, the page behind
  *  stops scrolling, Tab cannot walk out into it, and focus returns to whatever

@@ -2,8 +2,9 @@
 
 import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { cn } from '../cn.ts'
 import { DiscardConfirm, useDismiss } from './discard-guard.tsx'
-import { useOverlay } from './overlay.ts'
+import { SLIDE_EXIT_MS, useOverlay, usePresence } from './overlay.ts'
 
 export type SidePanelProps = {
   open: boolean
@@ -30,17 +31,22 @@ export const SidePanel = ({
   const dialog = useRef<HTMLElement>(null)
   const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose)
   const shown = useOverlay(open, dismiss, dialog)
+  const { present, closing } = usePresence(shown, SLIDE_EXIT_MS)
   const Shell = onSubmit ? 'form' : 'div'
 
   // Portalled to the body for the same reason the modal is: `position: fixed` is
   // measured against the app shell's content card, which establishes a containing
   // block with `container-type: inline-size`, so in place the scrim covered the
   // card rather than the window.
-  if (!shown) return null
+  if (!present) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-overlay flex justify-end">
-      <div aria-hidden="true" onClick={dismiss} className="flex-1 bg-scrim" />
+    <div inert={closing} className="fixed inset-0 z-overlay flex justify-end">
+      <div
+        aria-hidden="true"
+        onClick={dismiss}
+        className={cn('flex-1 bg-scrim motion-reduce:animate-none', closing ? 'animate-fade-out' : 'animate-fade-in')}
+      />
       <aside
         ref={dialog}
         role="dialog"
@@ -48,7 +54,10 @@ export const SidePanel = ({
         aria-label={title}
         tabIndex={-1}
         // Full width on a phone, a panel on a desktop, never a fixed pixel width.
-        className="relative flex h-full w-full flex-col border-l border-line bg-surface-raised shadow-overlay outline-none sm:max-w-[min(32rem,90vw)]"
+        className={cn(
+          'relative flex h-full w-full flex-col border-l border-line bg-surface-raised shadow-overlay outline-none motion-reduce:animate-none sm:max-w-[min(32rem,90vw)]',
+          closing ? 'animate-slide-out' : 'animate-slide-in',
+        )}
       >
         <header inert={asking} className="flex shrink-0 items-center justify-between gap-3 border-b border-divider px-4 py-3">
           <h2 className="truncate font-medium">{title}</h2>

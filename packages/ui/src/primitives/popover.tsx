@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { cn } from '../cn.ts'
-import { useMounted } from './overlay.ts'
-import { anchor, type Align, type Side } from './position.ts'
+import { POP_EXIT_MS, useMounted, usePresence } from './overlay.ts'
+import { anchor, type Align, type Placement, type Side } from './position.ts'
 
 export type PopoverProps = {
   open: boolean
@@ -24,6 +24,14 @@ export type PopoverProps = {
   children: ReactNode
 }
 
+const EDGE: Record<Side, string> = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }
+const ALONG: Record<Align, string> = { start: 'left', center: 'center', end: 'right' }
+const ALONG_SIDE: Record<Align, string> = { start: 'top', center: 'center', end: 'bottom' }
+
+/** Grows out of the corner nearest its trigger, whichever side it flipped to. */
+const originOf = (side: Side, align: Align): string =>
+  side === 'top' || side === 'bottom' ? `${ALONG[align]} ${EDGE[side]}` : `${EDGE[side]} ${ALONG_SIDE[align]}`
+
 /** A panel anchored to a control: Escape and an outside click close it, focus
  *  moves into it, and it repositions on scroll and resize rather than drifting
  *  away from its trigger. Not modal: the page behind keeps working. */
@@ -39,11 +47,12 @@ export const Popover = ({
   children,
 }: PopoverProps) => {
   const panel = useRef<HTMLDivElement>(null)
-  const [box, setBox] = useState<{ top: number; left: number } | null>(null)
+  const [box, setBox] = useState<Placement | null>(null)
   const close = useRef(onClose)
   close.current = onClose
   const mounted = useMounted()
   const shown = open && mounted
+  const { present, closing } = usePresence(shown, POP_EXIT_MS)
 
   const reposition = useCallback(() => {
     const trigger = anchorRef.current
@@ -57,8 +66,8 @@ export const Popover = ({
   // visible at 0,0 for a frame and jumps.
   useLayoutEffect(() => {
     if (shown) reposition()
-    else setBox(null)
-  }, [shown, reposition])
+    else if (!present) setBox(null)
+  }, [shown, present, reposition])
 
   // The panel's own height changes while it is open: a combobox list of twenty
   // rows becomes one as the query narrows, and a filter panel grows a section.
@@ -100,7 +109,7 @@ export const Popover = ({
   // Portalled to the body: the coordinates come from getBoundingClientRect, which
   // is relative to the viewport, and a fixed element inside the shell's content
   // card is placed against the card instead.
-  if (!shown) return null
+  if (!present) return null
 
   return createPortal(
     <div
@@ -108,9 +117,11 @@ export const Popover = ({
       role="dialog"
       aria-label={label}
       tabIndex={-1}
-      style={box ? { top: box.top, left: box.left } : { top: -9999, left: -9999 }}
+      inert={closing}
+      style={box ? { top: box.top, left: box.left, transformOrigin: originOf(box.side, align) } : { top: -9999, left: -9999 }}
       className={cn(
-        'fixed z-overlay max-h-[min(80vh,32rem)] overflow-y-auto rounded-panel border border-line bg-surface-raised shadow-overlay outline-none',
+        'fixed z-overlay max-h-[min(80vh,32rem)] overflow-y-auto rounded-panel border border-line bg-surface-raised shadow-overlay outline-none motion-reduce:animate-none',
+        closing ? 'animate-pop-out' : 'animate-pop-in',
         className,
       )}
     >
