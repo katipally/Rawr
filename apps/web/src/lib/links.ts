@@ -47,11 +47,12 @@ const HUBSPOT_OBJECT_PATH = /^(\/contacts\/[^/?#]+\/(?:objects|record)\/)(0-[123
  *  `all`, none of which name a view here, so every one opens the tasks list. */
 const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/?#]+(?:\/list)?)?\/?$/
 
-/** HubSpot's marketing addresses, each as the screen here that holds the same
- *  thing. HubSpot puts the portal where this app puts the account, so the slug
- *  carries over. Segments sit under /contacts there as here; forms, a form's
- *  submissions, marketing email, sequences and templates have top-level paths
- *  of their own. */
+/** HubSpot's marketing and meetings addresses, each as the screen here that
+ *  holds the same thing. HubSpot puts the portal where this app puts the account,
+ *  so the slug carries over. Segments sit under /contacts there as here; forms, a
+ *  form's submissions, marketing email, sequences and templates have top-level
+ *  paths of their own. A scheduling page is a /meetings link there, booked
+ *  meetings are the 0-47 object, and the calendar connection is a preference. */
 const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string][] = [
   [/^\/contacts\/([^/?#]+)\/objectLists\/create\/?$/, (account) => `/${CRM_ROOT}/${account}/segments?segment=new`],
   [/^\/contacts\/([^/?#]+)\/objectLists(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/segments`],
@@ -69,12 +70,16 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/templates\/([^/?#]+)\/?$/, (account) => `/${CRM_ROOT}/${account}/templates`],
   [/^\/templates\/([^/?#]+)\/new\/?$/, (account) => `/${CRM_ROOT}/${account}/templates?template=new`],
   [/^\/templates\/([^/?#]+)\/edit\/([^/?#]+)\/?$/, (account, id) => `/${CRM_ROOT}/${account}/templates?template=${id}`],
+  [/^\/meetings\/([^/?#]+)\/link\/new\/?$/, (account) => `/${MEETINGS_ROOT}/${account}/pages?new=1`],
+  [/^\/meetings\/([^/?#]+)\/link\/([^/?#]+)\/?$/, (account, id) => `/${MEETINGS_ROOT}/${account}/pages/${id}`],
+  [/^\/contacts\/([^/?#]+)\/objects\/0-47(?:\/views\/[^/?#]+(?:\/list)?)?\/?$/, (account) => `/${MEETINGS_ROOT}/${account}/booked`],
+  [/^\/settings\/([^/?#]+)\/user-preferences\/calendar\/?$/, (account) => `/${MEETINGS_ROOT}/${account}/calendars`],
 ]
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
  *  same address with the readable key, a 0-27 tasks link as the tasks list, a
- *  segment, form, marketing email, sequence or template link as the screen that
- *  holds it, or null
+ *  segment, form, marketing email, sequence, template or meetings link as the
+ *  screen that holds it, or null
  *  when the path is none of those. Read by src/proxy.ts, which redirects to the
  *  answer. */
 export const fromHubspotPath = (path: string): string | null => {

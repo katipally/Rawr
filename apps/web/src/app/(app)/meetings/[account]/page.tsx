@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
-import { calendarPath } from '~/lib/links.ts'
+import { bookingPagesPath } from '~/lib/links.ts'
 
-const MeetingsAccountRoot = async ({ params }: { params: Promise<{ account: string }> }) => redirect(calendarPath((await params).account))
+/** HubSpot's /meetings/<portal> is the scheduling pages list, so the same
+ *  address here opens Meeting links. */
+const MeetingsAccountRoot = async ({ params }: { params: Promise<{ account: string }> }) => redirect(bookingPagesPath((await params).account))
 
 export default MeetingsAccountRoot
