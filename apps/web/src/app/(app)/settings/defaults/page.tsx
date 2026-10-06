@@ -18,11 +18,7 @@ const DefaultsPage = async () => {
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader
-        as="h2"
-        title="Account defaults"
-        lead={`Settings that apply to everyone in ${account.name}.`}
-      />
+      <PageHeader title="Account Defaults" />
       <DefaultsPanel account={account} canWrite={session.isSuperAdmin} zones={zones} currencies={currencies} />
     </div>
   )

@@ -14,12 +14,15 @@ export type TabItem = {
 export type TabsProps = {
   label: string
   items: TabItem[]
+  /** Switches the tab in place instead of following its link, for a form whose
+   *  unsaved values span tabs. The link stays, so a new tab still opens it. */
+  onSelect?: (key: string) => void
   className?: string
 }
 
 /** Address-driven tabs: each one is a link, so a tab is shareable, survives a
  *  reload and works with the back button. Nothing here holds state. */
-export const Tabs = ({ label, items, className }: TabsProps) => (
+export const Tabs = ({ label, items, onSelect, className }: TabsProps) => (
   <nav
     aria-label={label}
     className={cn('scroll-fade-x flex min-w-0 overflow-x-auto rounded-t-hs border-b border-line', className)}
@@ -29,6 +32,15 @@ export const Tabs = ({ label, items, className }: TabsProps) => (
         key={item.key}
         href={item.href}
         aria-current={item.current ? 'page' : undefined}
+        onClick={
+          onSelect
+            ? (event) => {
+                if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+                event.preventDefault()
+                onSelect(item.key)
+              }
+            : undefined
+        }
         className={cn(
           // min-h, as on Button: a tab label at 200% text size must wrap, not clip.
           'flex min-h-12 shrink-0 items-center gap-1.5 border-r border-line px-7 py-2 text-body no-underline last:border-r-0',
