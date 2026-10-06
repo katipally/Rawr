@@ -1,5 +1,5 @@
 import { canDo, getRegistry, listDeletedRecords } from '@rawr/db'
-import { EmptyState, PageHeader, Tabs } from '@rawr/ui'
+import { Breadcrumb, EmptyState, PageHeader, Tabs } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { RestoreList } from './restore-list.tsx'
 import { restorePath } from '~/lib/links.ts'
@@ -40,6 +40,8 @@ const RestorePage = async ({
 
   return (
     <div className="flex flex-col gap-4">
+      <Breadcrumb items={[{ label: 'Data Management' }, { label: 'Restore records' }]} />
+
       <PageHeader
         title="Restore records"
         lead="Records somebody deleted, newest first, and the way to put them back."
