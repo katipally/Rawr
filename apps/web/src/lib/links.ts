@@ -43,11 +43,17 @@ export const accountInPath = (path: string | null | undefined): string | null =>
 
 const HUBSPOT_OBJECT_IDS: Record<string, string> = { '0-1': 'contact', '0-2': 'company', '0-3': 'deal' }
 const HUBSPOT_OBJECT_PATH = /^(\/contacts\/[^/?#]+\/(?:objects|record)\/)(0-[123])(?=[/?#]|$)/
+/** HubSpot's tasks index is the 0-27 object's, and its views are numbered or
+ *  `all`, none of which name a view here, so every one opens the tasks list. */
+const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/?#]+(?:\/list)?)?\/?$/
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
- *  same address with the readable key, or null when the path holds no HubSpot
- *  object id. Read by src/proxy.ts, which redirects to the answer. */
+ *  same address with the readable key, a 0-27 tasks link as the tasks list, or
+ *  null when the path holds no HubSpot object id. Read by src/proxy.ts, which
+ *  redirects to the answer. */
 export const fromHubspotPath = (path: string): string | null => {
+  const tasks = HUBSPOT_TASKS_PATH.exec(path)
+  if (tasks) return `${tasks[1]}tasks`
   const found = HUBSPOT_OBJECT_PATH.exec(path)
   if (!found) return null
   return `${found[1]}${HUBSPOT_OBJECT_IDS[found[2]!]}${path.slice(found[0].length)}`

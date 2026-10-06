@@ -151,6 +151,13 @@ test('a HubSpot object id opens the same screen under its readable key', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-3'), '/contacts/datasaur/objects/deal')
 })
 
+test('a HubSpot tasks link opens the tasks list, whichever view it named', () => {
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-27/views/all/list'), '/contacts/datasaur/tasks')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-27/views/81234/list'), '/contacts/datasaur/tasks')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-27'), '/contacts/datasaur/tasks')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-270'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)
