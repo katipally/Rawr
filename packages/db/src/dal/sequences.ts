@@ -90,6 +90,8 @@ export type SequenceRow = {
 }
 
 export type SequenceStats = {
+  /** Everybody ever enrolled, whatever became of them: HubSpot's Enrolled. */
+  enrolled: number
   active: number
   finished: number
   replied: number
@@ -101,6 +103,7 @@ export type SequenceStats = {
 }
 
 const emptyStats = (): SequenceStats => ({
+  enrolled: 0,
   active: 0,
   finished: 0,
   replied: 0,
@@ -113,6 +116,7 @@ const emptyStats = (): SequenceStats => ({
 
 const statsSql = sql`
   json_build_object(
+    'enrolled',     (select count(*) from sequence_enrollment e where e.sequence_id = s.id),
     'active',       (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state in ('active','waiting_task','paused')),
     'finished',     (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'finished'),
     'replied',      (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'replied'),

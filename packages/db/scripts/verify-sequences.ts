@@ -527,6 +527,12 @@ try {
   check(listed?.stats.replied === 1, 'and so are replies', String(listed?.stats.replied))
   check(listed?.stats.bounced === 1, 'and bounces', String(listed?.stats.bounced))
   check(listed?.stats.unsubscribed === 2, 'and opt-outs', String(listed?.stats.unsubscribed))
+  const everyone = await listEnrollments(sales, { sequenceId: created.id })
+  check(
+    listed?.stats.enrolled === everyone.length,
+    'enrolled counts everybody who was ever in it, stopped or not',
+    `${listed?.stats.enrolled} of ${everyone.length}`,
+  )
 
   console.log('')
   console.log('-- what can never send --------------------------------------------')

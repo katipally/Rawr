@@ -1,6 +1,6 @@
 import { Skeleton, SkeletonRows } from '@rawr/ui'
 
-/** A filter row, then one card per sequence. */
+/** The state tabs, the search, then the table. */
 const Loading = () => (
   <div className="flex flex-col gap-3">
     <Skeleton className="h-7 w-56" />
@@ -9,6 +9,7 @@ const Loading = () => (
       <Skeleton className="h-8 w-24" />
       <Skeleton className="h-8 w-24" />
     </div>
+    <Skeleton className="h-8 w-60" />
     <SkeletonRows rows={6} />
   </div>
 )
