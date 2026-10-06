@@ -1,25 +1,18 @@
 'use client'
 
-import { Badge, Button, Field, Modal, TextArea, TextInput, buttonClass, type BadgeTone, useToast } from '@rawr/ui'
-import Link from 'next/link'
+import { Button, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { useZone, useFormat } from '~/components/zone.tsx'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
+import { useZone } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
-/** One booked meeting.
- *
- *  Times are rendered in the reader's own zone with the zone name shown, because
- *  a meeting time with no zone on it is the thing people get wrong. That zone is
- *  the one on the session rather than the one the browser reports: the server
- *  renders this row first, and two clocks for one node is what React throws the
- *  server's markup away over. */
-
-const STATES: Record<string, BadgeTone> = {
-  confirmed: 'ok',
-  cancelled: 'error',
-  rescheduled: 'neutral',
-}
+/** What can be done to one booked meeting, as the pills after its attendee on
+ *  the hovered row: join it, move it, or cancel it, each move and cancel asking
+ *  in a dialog first. The zone named in the move dialog is the one on the
+ *  session rather than the one the browser reports, because the server renders
+ *  the row first and two clocks for one node is what React throws the server's
+ *  markup away over. */
 
 export type BookedRowData = {
   id: string
@@ -33,16 +26,7 @@ export type BookedRowData = {
   conferenceUrl: string | null
 }
 
-export const BookedRow = ({
-  booking,
-  contactHref,
-  editable,
-}: {
-  booking: BookedRowData
-  contactHref: string | null
-  editable: boolean
-}) => {
-  const fmt = useFormat()
+export const BookedActions = ({ booking, editable }: { booking: BookedRowData; editable: boolean }) => {
   const show = useToast()
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -104,64 +88,35 @@ export const BookedRow = ({
     }
   }
 
+  // A cancelled meeting keeps its conference url, because the provider row is
+  // what gets torn down and that can fail. Offering it as a link invited
+  // somebody to join a meeting nobody is coming to. And nothing is moved or
+  // cancelled once it has happened: the calendar event is in the past and the
+  // attendee has either turned up or not.
+  const joinable = booking.state === 'confirmed' && booking.conferenceUrl !== null
+  const changeable = booking.state === 'confirmed' && editable && end.getTime() > Date.now()
+
   return (
-    <li className="flex flex-col gap-1 rounded-panel border border-line bg-surface p-3">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <span className="font-medium">
-          {fmt.dateTime(booking.startsAt)}
-          {' – '}
-          {fmt.time(end)}
-        </span>
-        <span className="text-xs text-secondary">{zone}</span>
-        <Badge tone={STATES[booking.state] ?? 'neutral'} dot>
-          {booking.state}
-        </Badge>
-      </div>
-
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-        {contactHref ? (
-          <Link href={contactHref} className="font-semibold text-link">
-            {booking.attendeeName}
-          </Link>
-        ) : (
-          <span className="font-medium">{booking.attendeeName}</span>
-        )}
-        <span className="text-secondary">{booking.attendeeEmail}</span>
-        <span className="text-secondary">
-          {booking.pageName} · {booking.hostName}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        {/* A cancelled meeting keeps its conference url, because the provider
-            row is what gets torn down and that can fail. Offering it as a link
-            invited somebody to join a meeting nobody is coming to. */}
-        {booking.state !== 'confirmed' ? null : booking.conferenceUrl ? (
-          <a
-            href={booking.conferenceUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={buttonClass('secondary', 'no-underline')}
-          >
-            Join link
-          </a>
-        ) : (
-          <span className="text-xs text-secondary">No conference link on this one.</span>
-        )}
-
-        {/* Nothing to cancel once it has happened: the calendar event is in the
-            past and the attendee has either turned up or not. */}
-        {booking.state === 'confirmed' && editable && end.getTime() > Date.now() ? (
-          <span className="ml-auto flex flex-wrap items-center gap-2">
-            <Button type="button" onClick={() => setAsking('reschedule')}>
-              Reschedule
-            </Button>
-            <Button type="button" variant="destructive" onClick={() => setAsking('cancel')}>
-              Cancel
-            </Button>
-          </span>
-        ) : null}
-      </div>
+    <>
+      {joinable || changeable ? (
+        <RowActions>
+          {joinable ? (
+            <a href={booking.conferenceUrl ?? undefined} target="_blank" rel="noreferrer" className={rowPill}>
+              Join
+            </a>
+          ) : null}
+          {changeable ? (
+            <>
+              <button type="button" className={rowPill} onClick={() => setAsking('reschedule')}>
+                Reschedule
+              </button>
+              <button type="button" className={rowPill} onClick={() => setAsking('cancel')}>
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </RowActions>
+      ) : null}
 
       <Modal
         open={asking === 'cancel'}
@@ -229,6 +184,6 @@ export const BookedRow = ({
           </Field>
         </div>
       </Modal>
-    </li>
+    </>
   )
 }

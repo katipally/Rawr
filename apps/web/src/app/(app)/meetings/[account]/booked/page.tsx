@@ -55,7 +55,7 @@ const BookedScreen = async ({
   const filtered = filters.page !== null || filters.host !== null || filters.state !== null
 
   return (
-    <div className="w-full max-w-6xl">
+    <div className="w-full min-w-0">
       <PageHeader
         className="mb-4"
         title="Booked meetings"
@@ -74,24 +74,6 @@ const BookedScreen = async ({
           current: when === option,
         }))}
       />
-
-      {result.rows.length === 0 ? (
-        filtered ? (
-          <EmptyState
-            title="Nothing matches those filters"
-            description="Widen the meeting link, the host or the state below to see more."
-          />
-        ) : (
-          <EmptyState
-            title={when === 'upcoming' ? 'Nothing booked yet' : 'No past meetings'}
-            description={
-              when === 'upcoming'
-                ? 'A meeting booked through a page shows up here, and on the contact’s timeline.'
-                : 'Meetings move here once they have happened.'
-            }
-          />
-        )
-      ) : null}
 
       {/* Keyed on the filters: the list holds the pages it has fetched, and a
           new filter is a new list rather than more of the old one. */}
@@ -123,6 +105,23 @@ const BookedScreen = async ({
           ),
         )}
         editable={sessionCanEdit(session, 'sales')}
+        empty={
+          filtered ? (
+            <EmptyState
+              title="Nothing matches those filters"
+              description="Widen the meeting link, the host or the status above to see more."
+            />
+          ) : (
+            <EmptyState
+              title={when === 'upcoming' ? 'Nothing booked yet' : 'No past meetings'}
+              description={
+                when === 'upcoming'
+                  ? 'A meeting booked through a page shows up here, and on the contact’s timeline.'
+                  : 'Meetings move here once they have happened.'
+              }
+            />
+          )
+        }
       />
     </div>
   )
