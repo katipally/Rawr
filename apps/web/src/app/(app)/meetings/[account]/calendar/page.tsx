@@ -60,7 +60,7 @@ const CalendarScreen = async ({
       : (members.find((member) => member.userId === who)?.name ?? 'You')
 
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-4">
+    <div className="flex w-full flex-col gap-4">
       <PageHeader
         title="Calendar"
         lead={`${whose === 'You' ? 'Meetings booked with you and tasks due from you' : `${whose}’s meetings and tasks`}.`}
