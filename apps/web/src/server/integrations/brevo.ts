@@ -333,6 +333,7 @@ export type BrevoCampaign = {
   subject: string | null
   status: string
   sentAt: string | null
+  listIds: number[]
   /** Null until Brevo has something to report, which is not the same as zero. */
   stats: {
     sent: number
@@ -387,6 +388,7 @@ export const listBrevoCampaigns = async (ctx: AccountContext): Promise<BrevoCamp
       subject?: string
       status: string
       sentDate?: string
+      recipients?: { lists?: number[] }
       statistics?: { globalStats?: BrevoStats }
     }[]
   }>({
@@ -400,6 +402,7 @@ export const listBrevoCampaigns = async (ctx: AccountContext): Promise<BrevoCamp
     subject: row.subject ?? null,
     status: row.status,
     sentAt: row.sentDate ?? null,
+    listIds: row.recipients?.lists ?? [],
     stats: statsOf(row.statistics?.globalStats),
   }))
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import type { Format } from '~/lib/format.ts'
-import { Alert, Button, DataTable, EmptyState, Field, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { Alert, Button, ConfirmDialog, DataTable, EmptyState, Field, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
@@ -20,6 +20,7 @@ type Campaign = {
   subject: string | null
   status: string
   sentAt: string | null
+  listIds: number[]
   stats: {
     sent: number
     delivered: number
@@ -91,6 +92,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
   const [composing, setComposing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [handoff, setHandoff] = useState<Handoff | null>(null)
+  const [sending, setSending] = useState<Campaign | null>(null)
 
   const [segmentId, setSegmentId] = useState(segments[0]?.id ?? '')
   const [listId, setListId] = useState(defaultListId)
@@ -168,6 +170,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
     try {
       await api.integrations.sendCampaign.mutate({ campaignId: campaign.id })
       toast('success', `${campaign.name} is going out.`)
+      setSending(null)
       await load()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -196,7 +199,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
           </span>
           {campaign.status === 'draft' ? (
             <RowActions>
-              <button type="button" className={rowPill} disabled={busy} onClick={() => void send(campaign)}>
+              <button type="button" className={rowPill} disabled={busy} onClick={() => setSending(campaign)}>
                 Send now
               </button>
             </RowActions>
@@ -298,6 +301,23 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
           {pager}
         </div>
       )}
+
+      <ConfirmDialog
+        open={sending !== null}
+        title={`Send ${sending?.name ?? 'this campaign'} now?`}
+        confirm="Send now"
+        busy={busy}
+        onCancel={() => setSending(null)}
+        onConfirm={() => sending && void send(sending)}
+      >
+        <p className="break-words">
+          {sending?.name} goes to everybody on{' '}
+          {sending && sending.listIds.length > 0
+            ? `Brevo ${sending.listIds.length === 1 ? 'list' : 'lists'} ${sending.listIds.join(', ')}`
+            : 'its Brevo recipient lists'}{' '}
+          straight away. A sent campaign cannot be called back.
+        </p>
+      </ConfirmDialog>
 
       <Modal
         open={composing}
