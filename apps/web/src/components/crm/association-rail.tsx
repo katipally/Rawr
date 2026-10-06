@@ -1,7 +1,7 @@
 'use client'
 
-import { Badge, Button, Card, ConfirmDialog, IconButton, Select, TextInput, useToast } from '@rawr/ui'
-import { ArrowDownUp, ExternalLink, Plus, Search } from 'lucide-react'
+import { Badge, Button, Card, ConfirmDialog, DropdownMenu, IconButton, Select, TextInput, useToast } from '@rawr/ui'
+import { ArrowDownUp, ChevronDown, ExternalLink, Link2, Plus, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -15,6 +15,7 @@ import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { CopyButton } from '~/components/copy-button.tsx'
 
 export type Associated = {
   id: string
@@ -23,7 +24,16 @@ export type Associated = {
   detail: string | null
   isPrimary: boolean
   canUnlink: boolean
+  /** A contact's address, shown under the name with a copy button. */
+  email: string | null
   label: string | null
+}
+
+/** HubSpot's one sentence on an empty card, by what the card would hold. */
+const EMPTY_SENTENCE: Record<string, string> = {
+  contact: 'See the people associated with this record.',
+  company: 'See the businesses or organizations associated with this record.',
+  deal: 'Track the revenue opportunities associated with this record.',
 }
 
 /** One card: everything of one object that is linked to this record. Named by the
@@ -149,28 +159,38 @@ export const AssociationRail = ({
               : {})}
             action={
               canWrite && canLink ? (
-                <>
-                  {createFields[card.objectKey] ? (
-                    <IconButton
-                      label={`New ${inSentence(card.nameSingular)}`}
-                      icon={<Plus aria-hidden="true" className="size-3.5" />}
-                      className="size-6"
-                      onClick={() => setCreating(card)}
-                    />
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-expanded={adding === card.objectKey}
-                    onClick={() => {
-                      setChoice(null)
-                      setAdding(adding === card.objectKey ? null : card.objectKey)
-                    }}
-                    className="inline-flex h-6 items-center gap-1 rounded-pill px-2 text-small font-semibold hover:bg-fill"
-                  >
-                    <Plus aria-hidden="true" className="size-3" />
-                    Add
-                  </button>
-                </>
+                <DropdownMenu
+                  label={`Add ${plural}`}
+                  groups={[
+                    {
+                      key: 'add',
+                      items: [
+                        {
+                          key: 'existing',
+                          label: `Add existing ${inSentence(card.nameSingular)}`,
+                          onSelect: () => {
+                            setChoice(null)
+                            setAdding(card.objectKey)
+                          },
+                        },
+                        ...(createFields[card.objectKey]
+                          ? [{ key: 'new', label: `Create new ${inSentence(card.nameSingular)}`, onSelect: () => setCreating(card) }]
+                          : []),
+                      ],
+                    },
+                  ]}
+                  trigger={(props) => (
+                    <button
+                      {...props}
+                      type="button"
+                      className="inline-flex h-[1.4375rem] items-center gap-1 rounded-pill px-2 text-small font-semibold transition-colors duration-150 ease-out hover:bg-fill-hover"
+                    >
+                      <Plus aria-hidden="true" className="size-3" />
+                      Add
+                      <ChevronDown aria-hidden="true" className="size-3" />
+                    </button>
+                  )}
+                />
               ) : null
             }
           >
@@ -211,7 +231,7 @@ export const AssociationRail = ({
             ) : null}
 
             {adding === card.objectKey && canLink ? (
-              <div className="flex flex-col gap-2 px-6 pb-4">
+              <div className="flex animate-drop-in flex-col gap-2 px-6 pb-4 motion-reduce:animate-none">
                 <RecordPicker
                   object={card.objectKey}
                   label={`Pick a ${inSentence(card.nameSingular)} to link`}
@@ -269,18 +289,14 @@ export const AssociationRail = ({
             ) : null}
 
             {rows.length === 0 ? (
-              <p className="px-6 pb-6 text-center text-secondary">
-                {card.records.length === 0 ? (
-                  <>
-                    Nothing linked yet.{' '}
-                    {canWrite && canLink
-                      ? 'Use Add to connect one.'
-                      : 'A link appears here when one is made.'}
-                  </>
-                ) : (
-                  <>Nothing here matches “{needle}”.</>
-                )}
-              </p>
+              card.records.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 px-6 pb-6 text-center">
+                  <Link2 aria-hidden="true" strokeWidth={1} className="h-[4.125rem] w-[4.5rem] text-muted" />
+                  <p>{EMPTY_SENTENCE[card.objectKey] ?? `See the ${plural} associated with this record.`}</p>
+                </div>
+              ) : (
+                <p className="px-6 pb-6 text-center text-secondary">Nothing here matches “{needle}”.</p>
+              )
             ) : (
               <ul className="flex flex-col gap-3 px-6 pb-4">
                 {rows.map((row) => (
@@ -299,7 +315,18 @@ export const AssociationRail = ({
                         </Link>
                         {row.isPrimary ? <Badge tone="ok">Primary</Badge> : null}
                       </span>
-                      {row.detail ? (
+                      {row.email ? (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className="truncate" title={row.email}>Email: {row.email}</span>
+                          <CopyButton value={row.email} what="Email" />
+                        </span>
+                      ) : null}
+                      {row.detail && row.objectKey === 'company' ? (
+                        <span className="flex min-w-0 items-center gap-1">
+                          <span className="truncate" title={row.detail}>Company domain name: {row.detail}</span>
+                          <CopyButton value={row.detail} what="Domain" />
+                        </span>
+                      ) : row.detail ? (
                         <span className="block truncate text-secondary" title={row.detail}>
                           {row.detail}
                         </span>
@@ -326,7 +353,7 @@ export const AssociationRail = ({
                   href={objectView(account, card.objectKey, 'all', 'list', {
                     filters: filterFor(object, recordId, card.objectKey),
                   })}
-                  className="inline-flex items-center gap-1"
+                  className="inline-flex items-center gap-1 font-bold"
                 >
                   {filterFor(object, recordId, card.objectKey)
                     ? `View all associated ${card.namePlural}`
