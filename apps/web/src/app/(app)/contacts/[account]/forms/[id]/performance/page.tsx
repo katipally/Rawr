@@ -1,10 +1,10 @@
 import { formPerformance, getForm } from '@rawr/db'
-import { Breadcrumb, Card, Tabs } from '@rawr/ui'
+import { Card } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
-import { formPerformancePath, formsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { reportRange } from '../../../reports/range.ts'
+import { FormHeader } from '../form-header.tsx'
 import { PerformanceCharts } from './charts.tsx'
 import { getFormat } from '~/server/format.ts'
 
@@ -43,25 +43,12 @@ const PerformancePage = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <header className="flex min-w-0 flex-col gap-2">
-        <Breadcrumb items={[{ label: 'Forms', href: formsPath(account) }, { label: form.name }]} />
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <h1 className="min-w-0 break-words text-lg font-medium">{form.name}</h1>
-          <RangePicker from={range.fromDay} to={range.toDay} />
-        </div>
-        <Tabs
-          label="Form"
-          items={[
-            { key: 'edit', label: 'Edit', href: formsPath(account, id) },
-            {
-              key: 'performance',
-              label: 'Performance',
-              href: formPerformancePath(account, id),
-              current: true,
-            },
-          ]}
-        />
-      </header>
+      <FormHeader
+        account={account}
+        form={form}
+        current="performance"
+        aside={<RangePicker from={range.fromDay} to={range.toDay} />}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Tile

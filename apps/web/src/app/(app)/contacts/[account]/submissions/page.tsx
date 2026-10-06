@@ -1,9 +1,10 @@
-import { listSubmissions } from '@rawr/db'
+import { getForm, listSubmissions } from '@rawr/db'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { EmptyState, PageHeader, Tabs } from '@rawr/ui'
 import { submissionsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsReadOnly } from '~/server/session.ts'
+import { FormHeader } from '../forms/[id]/form-header.tsx'
 import { ReviewList } from './review-list.tsx'
 
 /** The review queue. Nothing the spam engine catches is dropped, so this is where
@@ -49,13 +50,17 @@ const SubmissionsPage = async ({
       : undefined
 
   const PAGE = 50
+  const ctx = contextFrom(session)
   // One more than a page, so "is there another page" is known without a count.
-  const found = await listSubmissions(contextFrom(session), {
-    state,
-    limit: PAGE + 1,
-    ...(formId ? { formId } : {}),
-    ...(cursor ? { cursor } : {}),
-  })
+  const [found, form] = await Promise.all([
+    listSubmissions(ctx, {
+      state,
+      limit: PAGE + 1,
+      ...(formId ? { formId } : {}),
+      ...(cursor ? { cursor } : {}),
+    }),
+    formId ? getForm(ctx, formId) : null,
+  ])
   const rows = found.slice(0, PAGE)
   const last = rows.at(-1)
   const olderHref =
@@ -71,27 +76,35 @@ const SubmissionsPage = async ({
 
   return (
     <div className="w-full max-w-6xl">
-      <PageHeader
-        className="mb-3"
-        title="Submissions"
-        lead={
-          rows.length === 1
-            ? '1 submission'
-            : `${rows.length}${olderHref ? '+' : ''} submissions`
-        }
-        why="Nothing the spam engine catches is dropped. A false positive is recovered here rather than lost invisibly, and the state sits in the URL so a held queue is a link somebody can send."
-      />
+      {form ? (
+        <div className="mb-4">
+          <FormHeader account={account} form={form} current={state} />
+        </div>
+      ) : (
+        <>
+          <PageHeader
+            className="mb-3"
+            title="Submissions"
+            lead={
+              rows.length === 1
+                ? '1 submission'
+                : `${rows.length}${olderHref ? '+' : ''} submissions`
+            }
+            why="Nothing the spam engine catches is dropped. A false positive is recovered here rather than lost invisibly, and the state sits in the URL so a held queue is a link somebody can send."
+          />
 
-      <Tabs
-        className="mb-4"
-        label="Submission state"
-        items={STATES.map((option) => ({
-          key: option.key,
-          label: option.label,
-          href: submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) }),
-          current: option.key === state,
-        }))}
-      />
+          <Tabs
+            className="mb-4"
+            label="Submission state"
+            items={STATES.map((option) => ({
+              key: option.key,
+              label: option.label,
+              href: submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) }),
+              current: option.key === state,
+            }))}
+          />
+        </>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState
