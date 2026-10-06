@@ -55,6 +55,19 @@
   --rawr-tag-object: #016de1;
   --rawr-tag-object-subtle: #e1f2fb;
 
+  /* HubSpot's report palette, read from its reporting-fill-chart-default-light
+     tokens; a first series is orange and a second aqua, as its charts draw them.
+     Gridlines are its dashed #33333399, the category axis its solid control grey,
+     and a chart tooltip's header the near-black of every HubSpot tooltip. */
+  --rawr-chart-orange: #ffa581;
+  --rawr-chart-aqua: #48d1cf;
+  --rawr-chart-purple: #c4b4f7;
+  --rawr-chart-yellow: #fbe0a5;
+  --rawr-chart-pink: #ff9fcc;
+  --rawr-chart-grid: rgb(51 51 51 / 0.6);
+  --rawr-chart-axis: #8a8a8a;
+  --rawr-tooltip: #141414;
+
   --rawr-scrim: rgb(51 51 51 / 0.4);
 
   /* The chrome: rail, top bar and flyout share one charcoal, the item pill is a

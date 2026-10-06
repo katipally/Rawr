@@ -34,7 +34,7 @@ export const AxisLabels = ({ labels }: { labels: string[] }) => {
         <span
           key={column}
           className={cn(
-            'min-w-0 flex-1 whitespace-nowrap px-0.5 text-small text-secondary',
+            'min-w-0 flex-1 whitespace-nowrap px-0.5 pt-1 text-[0.6875rem] font-light text-body',
             // The first and last labels are anchored inwards so they stay inside
             // the card instead of half over its edge.
             column === 0 ? 'text-left' : column === labels.length - 1 ? 'text-right' : 'text-center',

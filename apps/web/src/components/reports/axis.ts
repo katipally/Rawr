@@ -37,3 +37,15 @@ export const visibleTicks = (count: number, stride: number): Set<number> => {
   kept.add(last)
   return kept
 }
+
+/** The lines of a value axis: 0 up to the first round number at or over `max`,
+ *  about `count` steps of 1, 2 or 5 times a power of ten. Never a step under 1,
+ *  because every value charted here is a count or a whole amount. O(count). */
+export const valueTicks = (max: number, count = 5): number[] => {
+  if (max <= 0) return [0, 1]
+  const raw = max / count
+  const power = 10 ** Math.floor(Math.log10(raw))
+  const step = Math.max(1, ([1, 2, 5, 10].find((times) => times * power >= raw) ?? 10) * power)
+  const top = Math.ceil(max / step) * step
+  return Array.from({ length: Math.round(top / step) + 1 }, (_, index) => index * step)
+}

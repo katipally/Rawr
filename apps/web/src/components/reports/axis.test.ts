@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { tickStride, visibleTicks } from './axis.ts'
+import { tickStride, valueTicks, visibleTicks } from './axis.ts'
 
 /** The date a reader is looking for is either legible or it is not there; a date
  *  rendered as one letter and an ellipsis is neither. */
@@ -45,4 +45,13 @@ test('one column and no columns are both drawable', () => {
 
 test('an unmeasured row thins as if it were a phone rather than not at all', () => {
   assert.equal(tickStride(30, 5, 0), tickStride(30, 5, 320))
+})
+
+test('a value axis climbs in round steps to just over the tallest bar', () => {
+  assert.deepEqual(valueTicks(5), [0, 1, 2, 3, 4, 5])
+  assert.deepEqual(valueTicks(7), [0, 2, 4, 6, 8])
+  assert.deepEqual(valueTicks(100), [0, 20, 40, 60, 80, 100])
+  assert.deepEqual(valueTicks(1), [0, 1])
+  assert.deepEqual(valueTicks(0), [0, 1])
+  assert.equal(valueTicks(1_234_567).at(-1), 1_500_000)
 })

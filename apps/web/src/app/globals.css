@@ -49,6 +49,10 @@
   --color-tag-object: var(--rawr-tag-object);
   --color-tag-object-subtle: var(--rawr-tag-object-subtle);
 
+  --color-chart-grid: var(--rawr-chart-grid);
+  --color-chart-axis: var(--rawr-chart-axis);
+  --color-tooltip: var(--rawr-tooltip);
+
   --color-scrim: var(--rawr-scrim);
 
   --color-nav: var(--rawr-nav);
@@ -121,6 +125,7 @@
   --animate-drop-in: rawr-drop-in var(--rawr-duration-base) var(--rawr-ease-bulk) both;
   --animate-rise-in: rawr-rise-in var(--rawr-duration-slow) ease-out both;
   --animate-rise-out: rawr-rise-out var(--rawr-duration-slow) ease-in both;
+  --animate-grow-up: rawr-grow-up var(--rawr-duration-slow) ease-out both;
 }
 
 /* One-sided keyframes: each runs from, or to, the element's own resting style. */
@@ -133,6 +138,7 @@
 @keyframes rawr-drop-in { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes rawr-rise-in { from { transform: translateY(100%); } }
 @keyframes rawr-rise-out { to { transform: translateY(100%); } }
+@keyframes rawr-grow-up { from { transform: scaleY(0); } }
 
 @layer base {
   html {

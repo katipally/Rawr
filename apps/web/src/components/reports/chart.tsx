@@ -1,5 +1,6 @@
 import { cn } from '@rawr/ui'
-import { AxisLabels } from './axis-labels.tsx'
+import { valueTicks } from './axis.ts'
+import { BarPlot } from './bar-plot.tsx'
 
 /** B7's charts. SVG drawn from the design tokens, no charting library.
  *
@@ -12,19 +13,15 @@ import { AxisLabels } from './axis-labels.tsx'
 export type Series = { label: string; values: number[]; tone: Tone }
 export type Tone = 'accent' | 'success' | 'warning' | 'error' | 'muted'
 
+/** Rawr's tones as HubSpot's chart palette: the first series a chart draws is
+ *  orange and the second aqua, as HubSpot's are, and the rest follow its order. */
 const STROKE: Record<Tone, string> = {
-  accent: 'var(--color-accent)',
-  success: 'var(--color-success)',
-  warning: 'var(--color-warning)',
-  error: 'var(--color-error)',
-  muted: 'var(--color-secondary)',
+  accent: 'var(--rawr-chart-orange)',
+  success: 'var(--rawr-chart-aqua)',
+  muted: 'var(--rawr-chart-purple)',
+  warning: 'var(--rawr-chart-yellow)',
+  error: 'var(--rawr-chart-pink)',
 }
-
-/** The largest value across every series, rounded up so the tallest bar does not
- *  touch the top edge. Zero everywhere gives 1, so an empty chart draws a flat
- *  baseline rather than dividing by nothing. */
-const ceiling = (series: Series[]): number =>
-  Math.max(1, ...series.flatMap((entry) => entry.values))
 
 export type ChartProps = {
   title: string
@@ -41,7 +38,7 @@ export type ChartProps = {
 const Legend = ({ series }: { series: Series[] }) => (
   <ul className="flex flex-wrap gap-x-4 gap-y-1">
     {series.map((entry) => (
-      <li key={entry.label} className="flex items-center gap-1.5 text-small text-secondary">
+      <li key={entry.label} className="flex items-center gap-1.5 text-small font-normal">
         <span
           aria-hidden="true"
           className="size-2.5 shrink-0 rounded-full"
@@ -99,76 +96,38 @@ const Table = ({
   </div>
 )
 
-/** Grouped bars over time or over categories.
- *
- *  The bars are an SVG stretched to the container, because bars should fill the
- *  width they are given. The labels are HTML underneath it rather than text inside
- *  it: a stretched SVG scales its text with it, which turns a three-column chart
- *  into distorted letterforms. How many of them are drawn is measured in the
- *  browser; see AxisLabels. */
+/** Grouped bars over time or over categories, on a value axis that climbs in
+ *  round steps. How many category labels are drawn is measured in the browser;
+ *  see AxisLabels. */
 export const BarChart = ({ title, labels, series, format, className }: ChartProps) => {
-  const top = ceiling(series)
-  const columns = labels.length
-  const height = 180
-  // A unit grid: one unit per column, so the widths do not depend on the pixel
-  // size the container happens to give it.
-  const width = Math.max(1, columns) * 100
-  const groupWidth = 100
-  // A wide gap when there are few columns: two bars stretched across a whole card
-  // read as a block of colour rather than as a comparison.
-  const gap = columns <= 3 ? 55 : columns <= 6 ? 35 : 12
-  const barWidth = (groupWidth - gap) / Math.max(1, series.length)
+  const ticks = valueTicks(Math.max(0, ...series.flatMap((entry) => entry.values)))
 
   return (
     <figure className={cn('flex min-w-0 flex-col gap-2', className)}>
       <figcaption className="font-medium">{title}</figcaption>
       <Legend series={series} />
 
-      {columns === 0 ? (
+      {labels.length === 0 ? (
         <p className="py-6 text-center text-secondary">Nothing in this range.</p>
       ) : (
         <>
-          <div className="min-w-0">
-            <svg
-              role="img"
-              aria-label={`${title}. The same numbers are in the table below.`}
-              viewBox={`0 0 ${width} ${height}`}
-              className="h-48 w-full"
-              preserveAspectRatio="none"
-            >
-              <line
-                x1={0}
-                y1={height}
-                x2={width}
-                y2={height}
-                stroke="var(--color-divider)"
-                strokeWidth={1}
-                vectorEffect="non-scaling-stroke"
-              />
-              {labels.map((label, column) => (
-                <g key={column}>
-                  {series.map((entry, index) => {
-                    const value = entry.values[column] ?? 0
-                    const barHeight = Math.max(value === 0 ? 0 : 2, (value / top) * (height - 4))
-                    return (
-                      <rect
-                        key={entry.label}
-                        x={column * groupWidth + gap / 2 + index * barWidth}
-                        y={height - barHeight}
-                        width={Math.max(1, barWidth - 2)}
-                        height={barHeight}
-                        fill={STROKE[entry.tone]}
-                      >
-                        <title>{`${label} · ${entry.label}: ${format(value)}`}</title>
-                      </rect>
-                    )
-                  })}
-                </g>
-              ))}
-            </svg>
-
-            <AxisLabels labels={labels} />
-          </div>
+          <BarPlot
+            title={title}
+            labels={labels}
+            series={series.map((entry) => ({
+              label: entry.label,
+              color: STROKE[entry.tone],
+              values: entry.values,
+              written: labels.map((_, column) => format(entry.values[column] ?? 0)),
+            }))}
+            ticks={ticks}
+            tickLabels={ticks.map(format)}
+            totals={
+              series.length > 1
+                ? labels.map((_, column) => format(series.reduce((total, entry) => total + (entry.values[column] ?? 0), 0)))
+                : null
+            }
+          />
 
           <Table labels={labels} series={series} format={format} caption={title} />
         </>
@@ -220,7 +179,7 @@ export const Funnel = ({
               <div className="h-2 w-full rounded-full bg-fill">
                 <div
                   className="h-2 rounded-full"
-                  style={{ width: `${(step.value / top) * 100}%`, background: 'var(--color-accent)' }}
+                  style={{ width: `${(step.value / top) * 100}%`, background: STROKE.accent }}
                 />
               </div>
             </li>
