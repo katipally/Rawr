@@ -1,72 +1,82 @@
 'use client'
 
-import { Button } from '@rawr/ui'
-import { useState } from 'react'
+import { Button, Modal, cn, useToast } from '@rawr/ui'
+import { rowPill } from '~/components/row-actions.tsx'
 
 /** The line marketing pastes into Webflow, and the hosted address for an email
- *  signature. Shown rather than hidden behind a modal, because copying one of
- *  these is the most common thing anyone does on this screen.
- *
- *  The script embed and the hosted page are the same route, so if the script is
- *  blocked the link still works. F2 §7. */
+ *  signature. The script embed and the hosted page are the same route, so if the
+ *  script is blocked the link still works. F2 §7. */
 
-export const BookingLinkSnippet = ({
+export const hostedBookingUrl = (baseUrl: string, account: string, slug: string): string =>
+  `${baseUrl}/b/${account}/${slug}`
+
+/** Copies a page's public address or its code and says so. A refused clipboard
+ *  is said too, since the text is on screen to select by hand. */
+export const useCopy = () => {
+  const toast = useToast()
+  return async (value: string, what: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast('success', `${what} copied.`)
+    } catch {
+      toast('error', 'The browser refused clipboard access. Select the text instead.')
+    }
+  }
+}
+
+/** HubSpot's Embed Widget dialog: the page's name and address, the code in a
+ *  box, Copy code joined to Copy link, and Close. */
+export const EmbedDialog = ({
   baseUrl,
   account,
-  slug,
-  open,
+  page,
+  onClose,
 }: {
   baseUrl: string
   account: string
-  slug: string
-  /** Expanded from the start, for a dialog that exists only to show it. */
-  open?: boolean
+  page: { name: string; slug: string } | null
+  onClose: () => void
 }) => {
-  const [copied, setCopied] = useState<string | null>(null)
-
-  const hosted = `${baseUrl}/b/${account}/${slug}`
-  const snippet = `<div data-rawr-booking="${account}/${slug}"></div>\n<script src="${baseUrl}/booking.js" defer></script>\n<noscript><a href="${hosted}">Book a meeting</a></noscript>`
-
-  const copy = async (label: string, value: string) => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(label)
-      setTimeout(() => setCopied(null), 2000)
-    } catch {
-      // Clipboard access is refused in some contexts. The text is on screen and
-      // selectable, so there is still a way to get it.
-      setCopied('failed')
-    }
-  }
+  const copy = useCopy()
+  const hosted = page ? hostedBookingUrl(baseUrl, account, page.slug) : ''
+  const snippet = page
+    ? `<div data-rawr-booking="${account}/${page.slug}"></div>\n<script src="${baseUrl}/booking.js" defer></script>\n<noscript><a href="${hosted}">Book a meeting</a></noscript>`
+    : ''
 
   return (
-    <details open={open} className="mt-1 text-xs">
-      <summary className="cursor-pointer text-secondary">Link and embed code</summary>
-
-      <div className="mt-2 flex flex-col gap-2">
-        <p className="break-all font-mono text-[11px]">{hosted}</p>
-        <pre className="overflow-x-auto rounded-hs bg-fill p-2 font-mono text-[11px] leading-relaxed">
-          {snippet}
-        </pre>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={() => void copy('hosted', hosted)}>
-            Copy link
-          </Button>
-          <Button type="button" onClick={() => void copy('snippet', snippet)}>
-            Copy embed
-          </Button>
-          <a href={hosted} target="_blank" rel="noreferrer" className="font-semibold text-link">
-            Open
-          </a>
-          {copied === 'failed' ? (
-            <span className="text-error">
-              The browser refused clipboard access. Select the text above instead.
-            </span>
-          ) : copied ? (
-            <span className="text-success">Copied.</span>
-          ) : null}
+    <Modal
+      open={page !== null}
+      title="Embed Widget"
+      onClose={onClose}
+      footer={
+        <Button variant="primary" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      {page ? (
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="min-w-0">
+            <p className="text-base font-semibold">{page.name}</p>
+            <p className="break-all">{hosted}</p>
+          </div>
+          <div className="flex min-w-0 flex-col gap-1">
+            <h3 className="font-semibold">Embed code</h3>
+            <p className="text-small">Puts the booking widget on your website, sized to the column it sits in.</p>
+            <pre className="max-h-40 overflow-auto rounded-hs border border-line-strong bg-fill p-3 font-mono text-small break-all whitespace-pre-wrap">
+              {snippet}
+            </pre>
+          </div>
+          <div className="flex">
+            <button type="button" className={cn(rowPill, 'rounded-r-none')} onClick={() => void copy(snippet, 'Embed code')}>
+              Copy code
+            </button>
+            <button type="button" className={cn(rowPill, '-ml-px rounded-l-none')} onClick={() => void copy(hosted, 'Link')}>
+              Copy link
+            </button>
+          </div>
         </div>
-      </div>
-    </details>
+      ) : null}
+    </Modal>
   )
 }

@@ -1626,6 +1626,12 @@ try {
     afterViews.views === beforeViews.views + 2,
     `${afterViews.views} views`,
   )
+  const listedViews = (await listBookingPages(datasaur)).find((row) => row.id === remindedId)?.views
+  check(
+    'the pages list counts the same views, once each, beside its hosts and bookings',
+    listedViews === afterViews.views,
+    `${listedViews} listed, ${afterViews.views} on the page`,
+  )
 
   // A personal link and a shared page are the same row with a different owner, so
   // the type is editable and the host list follows the owner.

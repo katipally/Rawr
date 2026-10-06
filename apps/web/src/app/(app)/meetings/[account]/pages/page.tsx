@@ -1,7 +1,8 @@
-import { listBookingPages } from '@rawr/db'
-import { EmptyState, PageHeader } from '@rawr/ui'
+import { listBookingPages, listGrants } from '@rawr/db'
+import { Alert, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { LinkButton } from '~/components/link-button.tsx'
 import { googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
 import { calendarsPath } from '~/lib/links.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
@@ -17,18 +18,19 @@ const BookingPagesScreen = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ new?: string }>
+  searchParams: Promise<{ new?: string; q?: string; owner?: string; type?: string }>
 }) => {
   const { account } = await params
-  const { new: creating } = await searchParams
+  const { new: creating, q, owner, type } = await searchParams
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const ctx = contextFrom(session)
-  const [pages, zoom] = await Promise.all([listBookingPages(ctx), zoomReady(ctx)])
+  const [pages, zoom, grants] = await Promise.all([listBookingPages(ctx), zoomReady(ctx), listGrants(ctx)])
   const shared = pages.filter((page) => page.kind !== 'one_on_one')
   const mine = pages.filter((page) => page.kind === 'one_on_one')
   const unhealthy = pages.reduce((total, page) => total + page.unhealthyHosts, 0)
+  const connected = grants.some((grant) => grant.userId === session.userId && grant.state === 'connected')
 
   return (
     <div className="flex flex-col gap-4">
@@ -65,6 +67,13 @@ const BookingPagesScreen = async ({
 
       <MeetingsTabs account={account} current="pages" />
 
+      {connected ? null : (
+        <Alert tone="warning" action={<LinkButton href={calendarsPath(account)}>Connect calendar</LinkButton>}>
+          <strong className="font-semibold">Your calendar is not connected.</strong> Connect it so the pages you host
+          can offer times.
+        </Alert>
+      )}
+
       {pages.length === 0 ? (
         <EmptyState
           title="No meeting links yet"
@@ -76,6 +85,7 @@ const BookingPagesScreen = async ({
           baseUrl={publicBaseUrl}
           rows={pages}
           viewer={{ id: session.userId, isAdmin: sessionIsAdmin(session) }}
+          query={{ q: q ?? '', owner: owner ?? null, type: type ?? null }}
         />
       )}
     </div>

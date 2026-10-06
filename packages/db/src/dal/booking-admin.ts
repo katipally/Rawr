@@ -51,6 +51,10 @@ export type BookingPageSummary = {
   isActive: boolean
   hostCount: number
   upcoming: number
+  /** Every visit the page has had, and every meeting it took that was not later
+   *  moved: HubSpot's Views, Meetings booked and, from the two, conversion. */
+  views: number
+  booked: number
   /** Hosts on the page with no usable calendar. A number an admin can see at a
    *  glance beats a page that quietly offers nothing. */
   unhealthyHosts: number
@@ -76,6 +80,8 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       is_active: boolean
       host_count: string
       upcoming: string
+      views: string
+      booked: string
       unhealthy: string
       hosts_with_hours: string
     }>(sql`
@@ -83,6 +89,10 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
              p.duration_minutes, p.location, p.is_active,
              count(distinct h.user_id) filter (where h.is_active) as host_count,
              count(distinct b.id) filter (where b.state = 'confirmed' and b.starts_at >= now()) as upcoming,
+             -- A subquery, not a join: joined, every view day would multiply the
+             -- host and booking rows the other counts are taken over.
+             (select coalesce(sum(v.views), 0) from booking_page_view v where v.booking_page_id = p.id) as views,
+             count(distinct b.id) filter (where b.state <> 'rescheduled') as booked,
              count(distinct h.user_id) filter (
                where h.is_active and (g.state is null or g.state <> 'connected')
              ) as unhealthy,
@@ -114,6 +124,8 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       isActive: row.is_active,
       hostCount: Number(row.host_count),
       upcoming: Number(row.upcoming),
+      views: Number(row.views),
+      booked: Number(row.booked),
       unhealthyHosts: Number(row.unhealthy),
       hostsWithHours: Number(row.hosts_with_hours),
     }))

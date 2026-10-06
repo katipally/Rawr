@@ -15,7 +15,7 @@ import {
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { availabilityPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { BookingLinkSnippet } from '../snippet.tsx'
+import { EmbedDialog } from '../snippet.tsx'
 import { QuestionList, type MappingTarget } from './questions.tsx'
 import { TemplatePreview } from './template-preview.tsx'
 
@@ -88,6 +88,7 @@ export const PageEditor = ({
     page.reminders.map((row) => ({ key: row.id, amount: row.amount, unit: row.unit })),
   )
   const [saving, setSaving] = useState(false)
+  const [embedding, setEmbedding] = useState(false)
 
   const set = <K extends keyof BookingPageConfig>(key: K, value: BookingPageConfig[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -784,7 +785,10 @@ export const PageEditor = ({
         </div>
 
         <div className="mt-3">
-          <BookingLinkSnippet baseUrl={baseUrl} account={accountSlug} slug={form.slug} />
+          <Button type="button" onClick={() => setEmbedding(true)}>
+            Link and embed
+          </Button>
+          <EmbedDialog baseUrl={baseUrl} account={accountSlug} page={embedding ? { name: page.name, slug: page.slug } : null} onClose={() => setEmbedding(false)} />
         </div>
       </section>
 
