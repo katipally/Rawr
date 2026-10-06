@@ -5,6 +5,7 @@ import { Spinner } from '@rawr/ui'
 import { useState } from 'react'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { MessageView } from './message-view.tsx'
+import { EMPTY_VALUE } from './value.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -33,7 +34,7 @@ export const MailPanel = ({ contactName, threads, engagement }: MailPanelProps) 
     {engagement.lastContactedAt || engagement.lastRepliedAt ? (
       <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-b border-divider px-6 py-2 text-small">
         <dt className="text-secondary">Last contacted</dt>
-        <dd className="tabular-nums">{engagement.lastContactedAt ? fmt.date(engagement.lastContactedAt) : '—'}</dd>
+        <dd className="tabular-nums">{engagement.lastContactedAt ? fmt.date(engagement.lastContactedAt) : EMPTY_VALUE}</dd>
         <dt className="text-secondary">Last reply</dt>
         <dd className="tabular-nums">{engagement.lastRepliedAt ? fmt.date(engagement.lastRepliedAt) : 'Never'}</dd>
         <dt className="text-secondary">Sent · received</dt>

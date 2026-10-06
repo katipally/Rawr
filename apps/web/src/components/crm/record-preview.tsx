@@ -11,7 +11,7 @@ import { inSentence } from '~/lib/label-case.ts'
 import { recordPath } from '~/lib/links.ts'
 import { trpc } from '~/lib/rpc.ts'
 import type { TableColumn } from './record-table.tsx'
-import { Value } from './value.tsx'
+import { EMPTY_VALUE, Value } from './value.tsx'
 import { useQueryClient } from '@tanstack/react-query'
 
 type Loaded = {
@@ -193,7 +193,7 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
                           value={data.record.values[field.key]}
                           label={data.record.labels[field.key]}
                           currency={data.record.values.currency}
-                          placeholder="—"
+                          placeholder={EMPTY_VALUE}
                         />
                       </dd>
                     </div>

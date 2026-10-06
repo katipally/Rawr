@@ -48,7 +48,7 @@ import { AttachmentsPanel } from '~/components/crm/attachments-panel.tsx'
 import { TasksPanel } from '~/components/crm/tasks-panel.tsx'
 import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
-import { Value } from '~/components/crm/value.tsx'
+import { EMPTY_VALUE, Value } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
 import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
 import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
@@ -575,7 +575,7 @@ const RecordPage = async ({
                         value={record.values[field.key]}
                         label={record.labels[field.key]}
                         currency={record.values.currency}
-                        placeholder="—"
+                        placeholder={EMPTY_VALUE}
                         oneLine
                       />
                     </dd>

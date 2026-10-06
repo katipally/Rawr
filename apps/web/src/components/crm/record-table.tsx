@@ -12,7 +12,7 @@ import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
 import type { EditableField } from './field-input.tsx'
-import { Value } from './value.tsx'
+import { EMPTY_VALUE, Value } from './value.tsx'
 import { RecordPreview } from './record-preview.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { useFormat } from '~/components/zone.tsx'
@@ -221,7 +221,7 @@ export const RecordTable = ({
             value={value}
             label={row.labels[column.key]}
             currency={row.values.currency}
-            placeholder="—"
+            placeholder={EMPTY_VALUE}
             oneLine
           />
         </span>

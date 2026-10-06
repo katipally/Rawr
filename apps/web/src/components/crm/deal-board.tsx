@@ -5,7 +5,7 @@ import { CalendarPlus, ChevronDown, CircleCheck, Mail, MoreHorizontal, StickyNot
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { shortName } from '~/components/crm/value.tsx'
+import { EMPTY_VALUE, shortName } from '~/components/crm/value.tsx'
 import { useNavigation } from '~/components/navigation.tsx'
 import { recordPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
@@ -360,7 +360,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite }: Dea
                           />
                         ) : null}
                       </div>
-                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? '—' : fmt.money(card.amount, card.currency)}</p>
+                      <p className="mt-2 tabular-nums">Amount: {card.amount === null ? EMPTY_VALUE : fmt.money(card.amount, card.currency)}</p>
                       <p className="flex flex-wrap items-baseline gap-x-1 tabular-nums">
                         Close date:
                         {card.closeDate === null ? (

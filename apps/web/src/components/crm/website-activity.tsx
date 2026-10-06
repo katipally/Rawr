@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { recordPath } from '~/lib/links.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { EMPTY_VALUE } from './value.tsx'
 
 export type WebsiteActivityProps = {
   account: string
@@ -104,7 +105,7 @@ export const WebsiteActivity = ({
             </div>
             <div className="min-w-0">
               <dt className="text-small text-secondary uppercase">Most recent visit</dt>
-              <dd className="break-words">{lastSeenAt ? fmt.dateTime(lastSeenAt) : '—'}</dd>
+              <dd className="break-words">{lastSeenAt ? fmt.dateTime(lastSeenAt) : EMPTY_VALUE}</dd>
             </div>
           </dl>
 

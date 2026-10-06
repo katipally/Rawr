@@ -20,6 +20,10 @@ import type { Format } from '~/lib/format.ts'
  *  five hundred characters is a real row, and putting it whole into an aria-label
  *  gives a screen reader a paragraph to read before it says what the button does.
  *  The visible text is clamped by CSS; this is for the places CSS cannot reach. */
+/** What a record shows for a property with no value: HubSpot's `--`, in a table
+ *  cell, a preview and a property list alike. */
+export const EMPTY_VALUE = '--'
+
 export const shortName = (value: string, max = 40): string =>
   value.length <= max ? value : `${value.slice(0, max - 1).trimEnd()}…`
 

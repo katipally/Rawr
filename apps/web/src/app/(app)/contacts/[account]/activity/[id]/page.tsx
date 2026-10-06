@@ -3,7 +3,7 @@ import { Breadcrumb, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { Value } from '~/components/crm/value.tsx'
+import { EMPTY_VALUE, Value } from '~/components/crm/value.tsx'
 import { objectView, pageViewPath, recordPath, reportsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
@@ -86,7 +86,7 @@ const PageViewScreen = async ({
                   {/* A property is whatever the site sent, so a nested object is
                       as likely as a string. Same renderer as a json field on a
                       record, rather than a second answer to the same question. */}
-                  <Value format={fmt} type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder="—" />
+                  <Value format={fmt} type={typeof value === 'object' && value !== null ? 'json' : 'text'} value={value} placeholder={EMPTY_VALUE} />
                 </Row>
               ))}
             </dl>

@@ -9,7 +9,7 @@ import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
-import { Value } from './value.tsx'
+import { EMPTY_VALUE, Value } from './value.tsx'
 import { useFormat } from '~/components/zone.tsx'
 
 export type PropertySection = {
@@ -227,7 +227,7 @@ export const PropertyPanel = ({
                             type={field.type}
                             value={local[field.key]}
                             label={labels[field.key]}
-                            placeholder="—"
+                            placeholder={EMPTY_VALUE}
                           />
                         </div>
                         {editable ? (
@@ -261,7 +261,7 @@ export const PropertyPanel = ({
                           value={local[field.key]}
                           label={labels[field.key]}
                           currency={local.currency}
-                          placeholder="—"
+                          placeholder={EMPTY_VALUE}
                         />
                         {editable ? (
                           <span
