@@ -48,6 +48,11 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
   const router = useRouter()
   const queryClient = useQueryClient()
   const toast = useToast()
+  // What is missing from the records changed, so the tiles above the list are asked again.
+  const refresh = () => {
+    void queryClient.invalidateQueries(trpc.crm.kpis.queryFilter())
+    router.refresh()
+  }
   const [fieldKey, setFieldKey] = useState('')
   const [value, setValue] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
@@ -98,6 +103,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
             )
           }
           onDone()
+          void queryClient.invalidateQueries(trpc.crm.kpis.queryFilter())
           router.refresh()
         })
         .catch(() => {})
@@ -106,7 +112,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
       live = false
       clearInterval(timer)
     }
-  }, [progress, onDone, router, toast])
+  }, [progress, onDone, router, queryClient, toast])
 
   /** Puts a bulk edit back. Not a transaction and not pretending to be one: a
    *  record somebody else changed in between is reported by name rather than
@@ -131,7 +137,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
         restored += result.updated
       }
       toast('success', `Put back on ${restored} ${nounFor(restored)}.`)
-      router.refresh()
+      refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     }
@@ -143,7 +149,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     try {
       const result = await api.crm.records.restore.mutate({ object, ids: restoring })
       toast('success', `Put back ${result.restored} ${nounFor(result.restored)}.`)
-      router.refresh()
+      refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     }
@@ -175,7 +181,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
         setValue(null)
         onDone()
       }
-      router.refresh()
+      refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {

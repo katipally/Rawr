@@ -1,10 +1,12 @@
 'use client'
 
+import { Skeleton } from '@rawr/ui'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
-import { useEffect, useId, useState } from 'react'
+import { useId } from 'react'
 import { encodeFilters, objectView, type ListParams } from '~/lib/links.ts'
-import { api } from '~/lib/rpc.ts'
+import { trpc } from '~/lib/rpc.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Group } from './filter-builder.tsx'
 import { useFormat } from '~/components/zone.tsx'
@@ -41,10 +43,13 @@ export type KpiStripProps = {
  *  Its own round trip rather than part of the page, because four counts over
  *  eighty-eight thousand contacts is one table scan and the rows should not wait
  *  for it. Nothing is rendered until it answers, and nothing is rendered if it
- *  fails: a broken count is not worth an error above somebody's list. */
+ *  fails: a broken count is not worth an error above somebody's list.
+ *
+ *  Read through the shared cache, so a bulk action that changes what is missing
+ *  invalidates `trpc.crm.kpis` and the tiles refetch instead of keeping the old
+ *  counts. */
 export const KpiStrip = ({ account, object, view, params, filters, hasRecords }: KpiStripProps) => {
   const fmt = useFormat()
-  const [tiles, setTiles] = useState<Kpi[] | null>(null)
   // Collapsed is a statement about this person's screen, not about the list, so it
   // follows them to every list rather than riding in an address they might paste.
   // Open until their preferences arrive, so the first paint matches the server's.
@@ -52,26 +57,11 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
   const collapsed = useUi((state) => state.panelOpen.kpis) === false
   const setPanelOpen = useUi((state) => state.setPanelOpen)
   const expanded = !useUiReady() || !collapsed
-  // Filters arrive as a fresh array every render, so the effect keys off what is
-  // in them rather than their identity, and reads them back from that same key.
-  const filterKey = JSON.stringify(filters)
-  const search = params.q ?? ''
-
-  useEffect(() => {
-    if (!hasRecords) return
-    let live = true
-    api.crm.kpis
-      .query({ object, filters: JSON.parse(filterKey), search })
-      .then((rows) => {
-        if (live) setTiles(rows as Kpi[])
-      })
-      .catch(() => {
-        if (live) setTiles([])
-      })
-    return () => {
-      live = false
-    }
-  }, [object, hasRecords, filterKey, search])
+  const { data, isError } = useQuery({
+    ...trpc.crm.kpis.queryOptions({ object, filters, search: params.q ?? '' }),
+    enabled: hasRecords,
+  })
+  const tiles = (data as Kpi[] | undefined) ?? (isError ? [] : null)
 
   // Nothing to say is not worth a row. An object with no records has four
   // zeroes, and so does one whose data is complete.
@@ -105,7 +95,7 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
       {expanded ? (
         <ul id={stripId} aria-busy={tiles ? undefined : true} className="flex flex-wrap gap-2">
           {shells.map((tile) => (
-            <li key={tile.key} className="min-w-0 flex-1 basis-[min(12rem,100%)]">
+            <li key={tile.key} className="relative min-w-0 flex-1 basis-[min(12rem,100%)]">
               <Link
                 aria-hidden={tiles ? undefined : true}
                 tabIndex={tiles ? undefined : -1}
@@ -122,6 +112,7 @@ export const KpiStrip = ({ account, object, view, params, filters, hasRecords }:
                 <span className="text-small text-secondary">{tile.label}</span>
                 <span className="text-base font-semibold tabular-nums">{fmt.number(tile.count)}</span>
               </Link>
+              {tiles ? null : <Skeleton className="absolute inset-0 h-full rounded-panel" />}
             </li>
           ))}
         </ul>
