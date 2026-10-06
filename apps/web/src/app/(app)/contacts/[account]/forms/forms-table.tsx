@@ -306,8 +306,9 @@ export const FormsTable = ({
               const target = moving
               if (!target) return
               const folderId = event.target.value || null
-              setMoving(null)
-              void run(() => api.forms.moveToFolder.mutate({ formId: target.id, folderId }))
+              // Closed after the refresh starts: dropping ?move first lets that
+              // address change land last and shows the list as it was.
+              void run(() => api.forms.moveToFolder.mutate({ formId: target.id, folderId })).then(() => setMoving(null))
             }}
           >
             <option value="">No folder</option>
