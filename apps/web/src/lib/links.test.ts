@@ -199,6 +199,17 @@ test('a HubSpot scheduling page, booked meetings or calendar link opens the scre
   assert.equal(fromHubspotPath('/settings/mailboxes'), null)
 })
 
+test('a HubSpot dashboard or reports link opens the screen that holds it', () => {
+  assert.equal(fromHubspotPath('/reports-dashboard/datasaur/view/13647808'), '/contacts/datasaur/reports/dashboards/13647808')
+  assert.equal(fromHubspotPath('/reports-dashboard/datasaur/view'), '/contacts/datasaur/reports/dashboards')
+  assert.equal(fromHubspotPath('/reports-dashboard/datasaur'), '/contacts/datasaur/reports/dashboards')
+  assert.equal(fromHubspotPath('/reports-list/datasaur/dashboards/views/-4'), '/contacts/datasaur/reports/dashboards')
+  assert.equal(fromHubspotPath('/reports-list/datasaur'), '/contacts/datasaur/reports/list')
+  assert.equal(fromHubspotPath('/reports-list/datasaur/views/-1'), '/contacts/datasaur/reports/list')
+  assert.equal(fromHubspotPath('/reports-list/datasaur/340431119'), '/contacts/datasaur/reports/list')
+  assert.equal(fromHubspotPath('/contacts/datasaur/reports/dashboards'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)
