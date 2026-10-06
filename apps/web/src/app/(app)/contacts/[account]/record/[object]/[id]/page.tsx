@@ -40,7 +40,7 @@ import { PropertyPanel, type PropertySection } from '~/components/crm/property-p
 import { RecordActions } from '~/components/crm/record-actions.tsx'
 import { RecordOverview, type Touch } from '~/components/crm/record-overview.tsx'
 import { RecordComposer } from '~/components/crm/record-composer.tsx'
-import { RecordQuickActions } from '~/components/crm/record-quick-actions.tsx'
+import { AddActivityMenu, RecordQuickActions } from '~/components/crm/record-quick-actions.tsx'
 import { MailPanel } from '~/components/crm/mail-panel.tsx'
 import { SegmentsPanel } from '~/components/crm/segments-panel.tsx'
 import { SequencesPanel } from '~/components/crm/sequences-panel.tsx'
@@ -85,6 +85,10 @@ const COLUMN = 'flex min-w-0 flex-col gap-4 @4xl:min-h-0 @4xl:overflow-y-auto'
 
 /** Shaped like an object key. The registry decides whether it is one. */
 const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
+
+/** What HubSpot's "Last activity date" counts: something a person did with the
+ *  record, not a property changing under it. */
+const ENGAGEMENTS = ['note', 'call', 'email', 'meeting', 'task'] as const
 
 const RecordPage = async ({
   params,
@@ -403,11 +407,42 @@ const RecordPage = async ({
   }
 
   const OverviewSection = async () => {
-    const threads = await threadsPromise
+    const [threads, recent, lastEngaged] = await Promise.all([
+      threadsPromise,
+      readTimeline(ctx, { entity, limit: 3 }),
+      readTimeline(ctx, { entity, types: [...ENGAGEMENTS], limit: 1 }),
+    ])
+    const lastActivity = lastEngaged.rows[0]?.occurredAt
+    const highlights = ['created_at', objectParam === 'deal' ? 'stage_id' : 'lifecycle_stage_id'].flatMap((key) => {
+      const field = object.byKey.get(key)
+      return field
+        ? [{
+            label: field.label,
+            value: (
+              <Value format={fmt} type={field.type} value={record.values[key]} label={record.labels[key]} placeholder={EMPTY_VALUE} oneLine />
+            ),
+          }]
+        : []
+    })
     return (
       <RecordOverview
         account={account}
         object={objectParam}
+        recordId={id}
+        recordName={record.displayName}
+        highlights={[...highlights, { label: 'Last activity date', value: lastActivity ? fmt.date(lastActivity.toISOString()) : EMPTY_VALUE }]}
+        recent={recent.rows.map((row) => ({
+          id: row.id,
+          type: row.type,
+          subject: row.subject,
+          body: row.body,
+          occurredAt: row.occurredAt.toISOString(),
+          actorName: row.actorName,
+          actorKind: row.actorKind,
+          payload: row.payload,
+        }))}
+        addActivities={<AddActivityMenu email={emailAction} canWrite={canWrite} />}
+        associations={rail.groups}
         threads={threads.map((thread) => ({
           threadId: thread.id,
           subject: thread.subject,
@@ -633,7 +668,7 @@ const RecordPage = async ({
         <div className={COLUMN}>
           {/* Pinned, so switching between Overview and the timeline never means
               scrolling back up the column to find the tabs. */}
-          <nav aria-label="Record sections" className="sticky top-0 z-10 flex shrink-0 overflow-hidden rounded-t-hs border-b border-line bg-canvas">
+          <nav aria-label="Record sections" className="sticky top-0 z-10 flex shrink-0 overflow-hidden rounded-t-hs border border-line bg-canvas">
             {[
               { key: 'overview', label: 'Overview', href: recordPath(account, objectParam, id, { from: origin ?? undefined }) },
               { key: 'activities', label: `Activities (${fmt.number(timelineTotal)})`, href: recordPath(account, objectParam, id, { tab: 'activities', from: origin ?? undefined }) },
@@ -643,7 +678,7 @@ const RecordPage = async ({
                 href={item.href}
                 aria-current={activeTab === item.key ? 'page' : undefined}
                 className={cn(
-                  'flex h-12 flex-1 items-center justify-center border-r border-line px-7 text-body no-underline last:border-r-0',
+                  'flex h-12 flex-1 items-center justify-center border-r border-line px-7 text-body no-underline transition-colors duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] last:border-r-0',
                   activeTab === item.key ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
                 )}
               >

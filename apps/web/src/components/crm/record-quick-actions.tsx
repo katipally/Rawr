@@ -1,6 +1,7 @@
 'use client'
 
-import { CalendarCheck, CircleCheck, Mail, Phone, StickyNote } from 'lucide-react'
+import { DropdownMenu, buttonClass } from '@rawr/ui'
+import { CalendarCheck, ChevronDown, CircleCheck, Mail, Phone, StickyNote } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
 import { replaceParams } from '~/lib/url-params.ts'
 
@@ -21,12 +22,9 @@ export type RecordQuickActionsProps = {
  *  None of them own a form. Each asks for the panel already on this page through
  *  the address, so there is one composer, one task form and one compose dialog,
  *  and "log a call on this deal" is a link somebody can be sent. */
-export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps) => {
+const useActivityActions = (email: RecordQuickActionsProps['email']) => {
   const { navigate } = useNavigation()
-
-  if (!canWrite) return null
-
-  const actions = [
+  return [
     { label: 'Note', icon: StickyNote, onClick: () => replaceParams({ log: 'note', task: null }) },
     {
       label: 'Email',
@@ -41,6 +39,12 @@ export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps)
     { label: 'Task', icon: CircleCheck, onClick: () => replaceParams({ task: 'new', log: null }) },
     { label: 'Meeting', icon: CalendarCheck, onClick: () => replaceParams({ log: 'meeting', task: null }) },
   ]
+}
+
+export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps) => {
+  const actions = useActivityActions(email)
+
+  if (!canWrite) return null
 
   return (
     <div className="flex flex-wrap items-start justify-between gap-1">
@@ -60,5 +64,37 @@ export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps)
         </button>
       ))}
     </div>
+  )
+}
+
+/** The Overview's "Add activities" menu: the same five, from the Recent
+ *  activities card. */
+export const AddActivityMenu = ({ email, canWrite }: RecordQuickActionsProps) => {
+  const actions = useActivityActions(email)
+
+  if (!canWrite) return null
+
+  return (
+    <DropdownMenu
+      label="Add activities"
+      groups={[
+        {
+          key: 'add',
+          items: actions.map(({ label, icon: Icon, onClick, disabled }) => ({
+            key: label,
+            label,
+            icon: <Icon aria-hidden="true" className="size-4" />,
+            onSelect: onClick,
+            disabled: disabled === true,
+          })),
+        },
+      ]}
+      trigger={(props) => (
+        <button {...props} type="button" className={buttonClass('tertiary', 'font-semibold')}>
+          Add activities
+          <ChevronDown aria-hidden="true" className="size-3.5" />
+        </button>
+      )}
+    />
   )
 }

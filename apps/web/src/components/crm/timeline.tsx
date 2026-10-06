@@ -274,7 +274,7 @@ export const Timeline = ({
 
   return (
     <div className="flex flex-col gap-3">
-      <nav aria-label="Activity type" className="flex flex-wrap border-b border-line">
+      <nav aria-label="Activity type" className="flex overflow-x-auto border-b border-line">
         {SUBTABS.map((tab) => {
           const active = sameSet(tab.types, selected)
           return (
@@ -284,8 +284,8 @@ export const Timeline = ({
               aria-current={active ? 'true' : undefined}
               onClick={() => choose(tab.types)}
               className={cn(
-                '-mb-px border-b-[3px] px-3 py-2 font-normal',
-                active ? 'border-body text-body' : 'border-transparent text-secondary hover:text-body',
+                'relative h-12 shrink-0 p-3 whitespace-nowrap text-body transition-colors duration-150 ease-out hover:bg-fill',
+                active ? 'font-medium after:absolute after:inset-x-3 after:bottom-0 after:h-[5px] after:rounded-[24px] after:bg-body' : 'font-normal',
               )}
             >
               {tab.label}
