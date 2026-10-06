@@ -265,13 +265,12 @@ export const TasksTable = ({
       </div>
       {creating ? (
         <TaskForm
-          modal={{ title: 'Create task', onClose: closeCreate }}
+          panel={{ title: 'Create Task', onClose: closeCreate, onAnother: () => router.refresh() }}
           account={account}
           assignees={assignees}
           queues={queues}
           defaultQueueId={queueId}
           onSaved={closeCreate}
-          className="flex flex-wrap items-end gap-2"
         />
       ) : null}
       <Modal
@@ -305,7 +304,7 @@ export const TasksTable = ({
       {editing ? (
         <TaskForm
           key={editing.id}
-          modal={{ title: 'Edit task', onClose: () => setEditing(null) }}
+          panel={{ title: 'Edit Task', onClose: () => setEditing(null) }}
           account={account}
           assignees={assignees}
           queues={queues}
@@ -314,7 +313,6 @@ export const TasksTable = ({
             setEditing(null)
             router.refresh()
           }}
-          className="flex flex-wrap items-end gap-2"
         />
       ) : null}
     </div>

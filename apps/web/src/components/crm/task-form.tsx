@@ -1,8 +1,8 @@
 'use client'
 
-import { Button, Modal, Select, TextArea, TextInput, useToast, type ModalProps } from '@rawr/ui'
+import { Button, Field, Modal, Select, SidePanel, TextArea, TextInput, useToast, type ModalProps } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useDraft } from '~/lib/drafts.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
@@ -72,6 +72,10 @@ export type TaskFormProps = {
   /** Present to show the form in a dialog with its actions pinned under it,
    *  rather than inline where the caller put it. */
   modal?: { title: string; size?: ModalProps['size'] | undefined; onClose: () => void } | undefined
+  /** Present to show the form in HubSpot's create panel down the right of the
+   *  window, every field stacked under its label. `onAnother` is called after
+   *  Create and add another, which keeps the panel open on an emptied form. */
+  panel?: { title: string; onClose: () => void; onAnother?: (() => void) | undefined } | undefined
 }
 
 /** One form behind the record's composer, the tasks index dialog, the edit dialog
@@ -87,8 +91,10 @@ export const TaskForm = ({
   onSaved,
   className,
   modal,
+  panel,
 }: TaskFormProps) => {
   const toast = useToast()
+  const id = useId()
   const titleField = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState(task?.title ?? '')
   const [body, setBody] = useState(task?.body ?? '')
@@ -98,7 +104,7 @@ export const TaskForm = ({
   const [remindAt, setRemindAt] = useState(task?.remindAt ? localValue(new Date(task.remindAt)) : '')
   const [queueId, setQueueId] = useState(task?.queueId ?? defaultQueueId ?? '')
   const [assigneeId, setAssigneeId] = useState(task?.assigneeId ?? '')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<false | 'save' | 'another'>(false)
   const [more, setMore] = useState(
     Boolean(task?.remindAt || task?.queueId || task?.assigneeId || task?.body),
   )
@@ -125,8 +131,8 @@ export const TaskForm = ({
     if (autoFocus) titleField.current?.focus()
   }, [autoFocus])
 
-  const save = async () => {
-    setBusy(true)
+  const save = async (another = false) => {
+    setBusy(another ? 'another' : 'save')
     try {
       const fields = {
         title,
@@ -150,13 +156,69 @@ export const TaskForm = ({
         toast('success', 'Task created.')
       }
       forget()
-      onSaved()
+      if (another) {
+        panel?.onAnother?.()
+        titleField.current?.focus()
+      } else onSaved()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
       setBusy(false)
     }
   }
+
+  const typeOptions = (Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((key) => (
+    <option key={key} value={key}>
+      {TASK_TYPE_LABELS[key]}
+    </option>
+  ))
+  const priorityOptions = (Object.keys(TASK_PRIORITY_LABELS) as TaskPriority[]).map((key) => (
+    <option key={key} value={key}>
+      {TASK_PRIORITY_LABELS[key]}
+    </option>
+  ))
+  const queueOptions = (
+    <>
+      <option value="">No queue</option>
+      {queues.map((queue) => (
+        <option key={queue.id} value={queue.id}>
+          {queue.name}
+        </option>
+      ))}
+    </>
+  )
+  const assigneeOptions = (
+    <>
+      <option value="">Me</option>
+      {assignees.map((person) => (
+        <option key={person.id} value={person.id}>
+          {person.label}
+        </option>
+      ))}
+    </>
+  )
+  /** The preset fills the instant; the instant is what is stored, and stays
+   *  editable, so "a day before" and "next Tuesday at four" are the same
+   *  control rather than two. */
+  const reminder = (className: string, fieldId?: string) => (
+    <Select
+      id={fieldId}
+      value={REMINDER_PRESETS.find((preset) => preset.daysBefore !== null && dueDate && remindFrom(dueDate, preset.daysBefore) === remindAt)?.key ?? (remindAt ? 'custom' : 'none')}
+      onChange={(event) => {
+        const preset = REMINDER_PRESETS.find((option) => option.key === event.target.value)
+        if (!preset) return
+        setRemindAt(preset.daysBefore === null || !dueDate ? '' : remindFrom(dueDate, preset.daysBefore))
+      }}
+      className={className}
+    >
+      {REMINDER_PRESETS.map((preset) => (
+        <option key={preset.key} value={preset.key} disabled={preset.daysBefore !== null && !dueDate}>
+          {preset.label}
+        </option>
+      ))}
+      {remindAt ? <option value="custom">Custom</option> : null}
+    </Select>
+  )
 
   const controls = (
     <>
@@ -174,11 +236,7 @@ export const TaskForm = ({
         onChange={(event) => setType(event.target.value as TaskType)}
         className="w-auto min-w-24"
       >
-        {(Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((key) => (
-          <option key={key} value={key}>
-            {TASK_TYPE_LABELS[key]}
-          </option>
-        ))}
+        {typeOptions}
       </Select>
       <Select
         aria-label="Priority"
@@ -186,11 +244,7 @@ export const TaskForm = ({
         onChange={(event) => setPriority(event.target.value as TaskPriority)}
         className="w-auto min-w-24"
       >
-        {(Object.keys(TASK_PRIORITY_LABELS) as TaskPriority[]).map((key) => (
-          <option key={key} value={key}>
-            {TASK_PRIORITY_LABELS[key]}
-          </option>
-        ))}
+        {priorityOptions}
       </Select>
       {/* A native date field shows nothing but a format, so it says what it is.
           The selects beside it read as their own value and need no label. */}
@@ -221,28 +275,12 @@ export const TaskForm = ({
           being edited already uses one of them. */}
       {more ? (
         <div className="flex w-full flex-wrap items-end gap-2">
-          {/* The preset fills the instant; the instant is what is stored, and stays
-              editable, so "a day before" and "next Tuesday at four" are the same
-              control rather than two. */}
-          <label className="flex flex-col gap-0.5">
-            <span className="text-small text-secondary">Reminder</span>
-            <Select
-              value={REMINDER_PRESETS.find((preset) => preset.daysBefore !== null && dueDate && remindFrom(dueDate, preset.daysBefore) === remindAt)?.key ?? (remindAt ? 'custom' : 'none')}
-              onChange={(event) => {
-                const preset = REMINDER_PRESETS.find((option) => option.key === event.target.value)
-                if (!preset) return
-                setRemindAt(preset.daysBefore === null || !dueDate ? '' : remindFrom(dueDate, preset.daysBefore))
-              }}
-              className="w-auto min-w-36"
-            >
-              {REMINDER_PRESETS.map((preset) => (
-                <option key={preset.key} value={preset.key} disabled={preset.daysBefore !== null && !dueDate}>
-                  {preset.label}
-                </option>
-              ))}
-              {remindAt ? <option value="custom">Custom</option> : null}
-            </Select>
-          </label>
+          <div className="flex flex-col gap-0.5">
+            <label htmlFor={`${id}-reminder`} className="text-small text-secondary">
+              Reminder
+            </label>
+            {reminder('w-auto min-w-36', `${id}-reminder`)}
+          </div>
           <label className="flex flex-col gap-0.5">
             <span className="text-small text-secondary">Remind me at</span>
             <TextInput
@@ -259,12 +297,7 @@ export const TaskForm = ({
               onChange={(event) => setQueueId(event.target.value)}
               className="w-auto min-w-32"
             >
-              <option value="">No queue</option>
-              {queues.map((queue) => (
-                <option key={queue.id} value={queue.id}>
-                  {queue.name}
-                </option>
-              ))}
+              {queueOptions}
             </Select>
           </label>
           <label className="flex flex-col gap-0.5">
@@ -274,12 +307,7 @@ export const TaskForm = ({
               onChange={(event) => setAssigneeId(event.target.value)}
               className="w-auto min-w-32"
             >
-              <option value="">Me</option>
-              {assignees.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.label}
-                </option>
-              ))}
+              {assigneeOptions}
             </Select>
           </label>
           {/* Full width under the row: automations and sequences already write a
@@ -298,6 +326,72 @@ export const TaskForm = ({
   )
   const label = task ? 'Save task' : 'Add task'
 
+  if (panel) {
+    const field = (key: string) => `${id}-${key}`
+    return (
+      <SidePanel
+        open
+        title={panel.title}
+        onClose={panel.onClose}
+        onSubmit={() => void save()}
+        dirty={task ? title !== task.title || body !== (task.body ?? '') : Boolean(title || body || dueDate)}
+        footer={
+          <>
+            <Button type="submit" variant="primary" busy={busy === 'save'} disabled={title.trim() === '' || busy !== false}>
+              {task ? 'Save' : 'Create'}
+            </Button>
+            {task ? null : (
+              <Button variant="secondary" busy={busy === 'another'} disabled={title.trim() === '' || busy !== false} onClick={() => void save(true)}>
+                Create and add another
+              </Button>
+            )}
+            <Button variant="secondary" onClick={panel.onClose}>
+              Cancel
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <Field id={field('title')} label="Task title" required>
+            <TextInput id={field('title')} ref={titleField} value={title} data-autofocus onChange={(event) => setTitle(event.target.value)} />
+          </Field>
+          <Field id={field('due')} label="Due date">
+            <TextInput id={field('due')} type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
+          </Field>
+          <Field id={field('type')} label="Task type" required>
+            <Select id={field('type')} value={type} onChange={(event) => setType(event.target.value as TaskType)}>
+              {typeOptions}
+            </Select>
+          </Field>
+          <Field id={field('assignee')} label="Assigned to">
+            <Select id={field('assignee')} value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
+              {assigneeOptions}
+            </Select>
+          </Field>
+          <Field id={field('priority')} label="Priority">
+            <Select id={field('priority')} value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
+              {priorityOptions}
+            </Select>
+          </Field>
+          <Field id={field('queue')} label="Queue">
+            <Select id={field('queue')} value={queueId} onChange={(event) => setQueueId(event.target.value)}>
+              {queueOptions}
+            </Select>
+          </Field>
+          <Field id={field('reminder')} label="Reminder" {...(dueDate ? {} : { hint: 'Set a due date to pick a reminder relative to it.' })}>
+            {reminder('w-full', field('reminder'))}
+          </Field>
+          <Field id={field('remind-at')} label="Remind me at">
+            <TextInput id={field('remind-at')} type="datetime-local" value={remindAt} onChange={(event) => setRemindAt(event.target.value)} />
+          </Field>
+          <Field id={field('notes')} label="Task notes">
+            <TextArea id={field('notes')} value={body} rows={4} onChange={(event) => setBody(event.target.value)} />
+          </Field>
+        </div>
+      </SidePanel>
+    )
+  }
+
   if (modal) {
     return (
       <Modal
@@ -311,7 +405,7 @@ export const TaskForm = ({
             <Button variant="tertiary" onClick={modal.onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
+            <Button type="submit" variant="primary" busy={busy !== false} disabled={title.trim() === ''}>
               {label}
             </Button>
           </>
@@ -334,7 +428,7 @@ export const TaskForm = ({
       }}
     >
       {controls}
-      <Button type="submit" variant="primary" busy={busy} disabled={title.trim() === ''}>
+      <Button type="submit" variant="primary" busy={busy !== false} disabled={title.trim() === ''}>
         {label}
       </Button>
       {options}
