@@ -15,6 +15,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import type { Format } from '~/lib/format.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 
 /** B11. The catalogue a dashboard is assembled from.
  *
@@ -54,7 +55,7 @@ const sum = <T,>(rows: T[], pick: (row: T) => number): number =>
   rows.reduce((total, row) => total + pick(row), 0)
 
 const percent = (part: number, whole: number): string =>
-  whole === 0 ? '—' : `${Math.round((part / whole) * 100)}%`
+  whole === 0 ? EMPTY_VALUE : `${Math.round((part / whole) * 100)}%`
 
 /** Longest table a card shows. A card is a glance; the report behind it is the
  *  place to read all forty rows, and every card links there. */
@@ -223,7 +224,7 @@ const CARDS: CardDef[] = [
       columns: ['Mailbox', 'Median hours', 'Replies'],
       rows: (email?.replyLag ?? [])
         .slice(0, TOP)
-        .map((row) => [row.mailbox, row.medianHours === null ? '—' : row.medianHours, row.replies]),
+        .map((row) => [row.mailbox, row.medianHours === null ? EMPTY_VALUE : row.medianHours, row.replies]),
     }),
   },
 

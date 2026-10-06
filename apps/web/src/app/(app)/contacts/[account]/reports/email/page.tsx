@@ -7,9 +7,10 @@ import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 import { MessageTable } from './message-table.tsx'
 import { getFormat } from '~/server/format.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 
 const hours = (value: number | null): string => {
-  if (value === null) return '—'
+  if (value === null) return EMPTY_VALUE
   if (value < 1) return `${Math.round(value * 60)} min`
   if (value < 48) return `${value.toFixed(1)} h`
   return `${(value / 24).toFixed(1)} days`

@@ -6,6 +6,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 import { getFormat } from '~/server/format.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 
 const FormsReport = async ({
   params,
@@ -66,14 +67,14 @@ const FormsReport = async ({
                     <tr key={row.id} className="border-b border-divider last:border-0">
                       <th scope="row" className="py-1 pr-3 text-left font-normal">{row.form}</th>
                       <td className="py-1 pr-3 text-right tabular-nums">
-                        {row.views === 0 ? '—' : fmt.number(row.views)}
+                        {row.views === 0 ? EMPTY_VALUE : fmt.number(row.views)}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.submissions}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">
-                        {row.views === 0 ? '—' : fmt.percent(row.submissions / row.views, 1)}
+                        {row.views === 0 ? EMPTY_VALUE : fmt.percent(row.submissions / row.views, 1)}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">
-                        {row.appearsOn === 0 ? '—' : row.appearsOn}
+                        {row.appearsOn === 0 ? EMPTY_VALUE : row.appearsOn}
                       </td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.held}</td>
                       <td className="py-1 pr-3 text-right tabular-nums">{row.contacts}</td>

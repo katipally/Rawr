@@ -14,6 +14,7 @@ import { contextFrom, readSession } from '~/server/session.ts'
 import { ReportsHeader } from './header.tsx'
 import { reportRange } from './range.ts'
 import { getFormat } from '~/server/format.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 
 /** The headline from each of the six, with a link into the one somebody wants.
  *
@@ -22,7 +23,7 @@ import { getFormat } from '~/server/format.ts'
  *  that each answer one question. They run together rather than in turn. */
 
 const percent = (part: number, whole: number): string =>
-  whole === 0 ? '—' : `${Math.round((part / whole) * 100)}%`
+  whole === 0 ? EMPTY_VALUE : `${Math.round((part / whole) * 100)}%`
 
 const Tile = ({
   href,
@@ -120,7 +121,7 @@ const ReportsOverview = async ({
           <Tile
             href={link('attribution')}
             label="Biggest first touch"
-            value={topFirst?.channel ?? '—'}
+            value={topFirst?.channel ?? EMPTY_VALUE}
             hint={topFirst ? `${topFirst.contacts} contacts, ${fmt.amounts(topFirst.wonAmounts)} won` : 'Nothing attributed in this range'}
           />
         </div>
