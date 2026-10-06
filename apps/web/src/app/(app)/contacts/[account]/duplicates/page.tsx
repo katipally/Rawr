@@ -1,9 +1,10 @@
-import { canWrite, findDuplicates, findJunkCompanies } from '@rawr/db'
+import { canWrite, findDuplicates, findJunkCompanies, getRegistry, objectOrThrow } from '@rawr/db'
 import { EmptyState, PageHeader, Tabs } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { DuplicateList } from './duplicate-list.tsx'
 import { JunkCompanies } from './junk-companies.tsx'
 import { duplicatesPath } from '~/lib/links.ts'
+import { isReadOnly } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** B11. The queue the merge dialog never had.
@@ -38,6 +39,9 @@ const DuplicatesPage = async ({
 
   const LIMIT = 50
   const pairs = await findDuplicates(contextFrom(session), object, { limit: LIMIT })
+  const fields = objectOrThrow(await getRegistry(contextFrom(session)), object)
+    .fields.filter((field) => !isReadOnly(field))
+    .map((field) => ({ key: field.key, label: field.label, type: field.type }))
   const junk =
     object === 'company' ? await findJunkCompanies(contextFrom(session), { limit: LIMIT }) : { rows: [], total: 0 }
 
@@ -85,6 +89,7 @@ const DuplicatesPage = async ({
         account={account}
         object={object}
         limit={LIMIT}
+        fields={fields}
         pairs={pairs.map((pair) => ({
           ...pair,
           keep: { ...pair.keep, createdAt: pair.keep.createdAt.toISOString() },

@@ -160,7 +160,7 @@ export const toEditableFields = (
     })
 }
 
-const isReadOnly = (field: RegistryField): boolean =>
+export const isReadOnly = (field: RegistryField): boolean =>
   field.isSystem || TYPE_META[field.type].readOnly === true
 
 export type CrmContext = {
