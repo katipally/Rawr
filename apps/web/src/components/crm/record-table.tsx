@@ -278,6 +278,20 @@ export const RecordTable = ({
         {...(canBulk
           ? { selection: { selected, onChange: setSelected, noun: objectLabel.toLowerCase() } }
           : {})}
+        headerBar={
+          bulking ? (
+            <BulkBar
+              object={object}
+              objectLabel={objectLabel}
+              objectPlural={objectPlural}
+              ids={live}
+              versions={Object.fromEntries(rows.map((row) => [row.id, row.version]))}
+              fields={bulkFields}
+              onDone={() => setSelected(new Set())}
+              onClear={() => setSelected(new Set())}
+            />
+          ) : null
+        }
         empty={
           <EmptyState
             title="Nothing matches this view"
@@ -303,47 +317,24 @@ export const RecordTable = ({
         onClose={() => replaceParams({ preview: null })}
       />
 
-      {bulking ? (
-        <>
-          {/* Below the list, not above it. The bar appears the moment a row is
-              ticked, and above the table it pushed every row down by its own
-              height, so the next click landed on the row after the intended one.
-              Here it takes the footer's place, so the table keeps the height it
-              had and no row moves. */}
-          <div className="shrink-0">
-            <BulkBar
-              object={object}
-              objectLabel={objectLabel}
-              objectPlural={objectPlural}
-              ids={live}
-              versions={Object.fromEntries(rows.map((row) => [row.id, row.version]))}
-              fields={bulkFields}
-              onDone={() => setSelected(new Set())}
-              onClear={() => setSelected(new Set())}
-            />
-          </div>
-          {pager}
-        </>
-      ) : (
-        // HubSpot's footer: the total on the left, the pages in the middle, what to
-        // do with the whole list on the right. The export is a plain link so the
-        // browser downloads it and it survives a closed tab.
-        <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
-          <span className="inline-flex h-pill items-center rounded-pill bg-canvas px-4 text-small font-semibold">
-            {fmt.number(totalHint ?? rows.length)}{' '}
-            {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
-          </span>
-          {pager}
-          <a
-            href={exportHref}
-            download
-            className={buttonClass('secondary', 'h-pill min-h-0 text-small text-[color:var(--rawr-text)] no-underline')}
-          >
-            <Download aria-hidden="true" className="size-3.5" />
-            Export
-          </a>
-        </div>
-      )}
+      {/* HubSpot's footer: the total on the left, the pages in the middle, what to
+          do with the whole list on the right. The export is a plain link so the
+          browser downloads it and it survives a closed tab. */}
+      <div className="-mx-3 flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-line px-3 pt-2 sm:-mx-6 sm:px-6">
+        <span className="inline-flex h-pill items-center rounded-pill bg-canvas px-4 text-small font-semibold">
+          {fmt.number(totalHint ?? rows.length)}{' '}
+          {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
+        </span>
+        {pager}
+        <a
+          href={exportHref}
+          download
+          className={buttonClass('secondary', 'h-pill min-h-0 text-small text-[color:var(--rawr-text)] no-underline')}
+        >
+          <Download aria-hidden="true" className="size-3.5" />
+          Export
+        </a>
+      </div>
     </div>
   )
 }

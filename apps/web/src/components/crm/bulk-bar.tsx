@@ -1,7 +1,8 @@
 'use client'
 
 import { useQueryClient } from '@tanstack/react-query'
-import { Button, Combobox, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Combobox, DropdownMenu, IconButton, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { ChevronDown, Link2, Pencil, Send, Trash2, UserRound, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
@@ -25,11 +26,17 @@ export type BulkBarProps = {
 
 /** Which dialog is open. Each action asks for exactly the one thing it needs and
  *  nothing else, so none of them is a form. */
-type Pending = 'delete' | 'assign' | 'associate' | 'merge' | 'list' | null
+type Pending = 'delete' | 'assign' | 'associate' | 'merge' | 'list' | 'edit' | null
 
 type Progress = { id: string; processed: number; total: number }
 
 const POLL_MS = 2000
+
+/** HubSpot's selection actions: ghost, 14/600, a pixel inside the 40px row. The
+ *  label folds away on a narrow table and stays the button's name. */
+const action =
+  'inline-flex h-[calc(var(--spacing-row)-2px)] shrink-0 items-center gap-1.5 rounded-pill px-2.5 text-body font-semibold transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent'
+const label = 'sr-only @3xl:not-sr-only'
 
 /** One field, one value, applied to everything ticked. A5.
  *
@@ -179,6 +186,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
       if (result.failed.length === 0) {
         setFieldKey('')
         setValue(null)
+        setPending(null)
         onDone()
       }
       refresh()
@@ -270,102 +278,177 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
   const canMerge = ids.length === 2 && isBuiltIn
 
   return (
-    <div className="flex flex-col gap-2 rounded-panel border border-line-interactive bg-accent-subtle p-3">
-      <div className="flex flex-wrap items-end gap-2">
-        <p className="font-medium">
-          {ids.length} {noun} selected
-        </p>
+    // The table lays this over its header row, so it is exactly that row's
+    // height and the rows under it never move.
+    <div
+      role="toolbar"
+      aria-label={`Actions for ${ids.length} selected ${noun}`}
+      className="@container relative flex h-full min-w-0 animate-drop-in items-center gap-0.5 rounded-hs border border-line bg-surface pl-4 motion-reduce:animate-none"
+    >
+      <span className="mr-3 min-w-0 shrink truncate font-semibold">
+        {fmt.number(ids.length)} {noun} selected
+      </span>
 
-        {/* A sequence sends to a person, so this is a contact-only action. */}
-        {object === 'contact' ? (
-          <Button variant="primary" onClick={() => setShowEnroll(true)}>
-            Add to a sequence
-          </Button>
-        ) : null}
-
-        <Button onClick={() => void openAssign()}>Assign owner</Button>
-        <Button
-          onClick={() => {
-            setPending('associate')
-            setTarget(null)
-            setLinkLabel('')
-          }}
-        >
-          Associate with
-        </Button>
-        {isBuiltIn ? <Button onClick={() => void openList()}>Add to list</Button> : null}
-        <Button
-          disabled={!canMerge}
-          title={canMerge ? undefined : 'Merging takes exactly two records of the same kind.'}
-          onClick={() => void openMerge()}
-        >
-          Merge
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={() => {
-            setTypedCount('')
-            setPending('delete')
-          }}
-        >
-          Delete
-        </Button>
-
-        <label className="flex min-w-0 flex-col gap-1">
-          <span className="text-small text-secondary">Change</span>
-          <Select
-            value={fieldKey}
-            onChange={(event) => {
-              setFieldKey(event.target.value)
-              setValue(null)
-              setFailed([])
-            }}
-          >
-            <option value="">Pick a field</option>
-            {fields.map((candidate) => (
-              <option key={candidate.key} value={candidate.key}>
-                {candidate.label}
-              </option>
-            ))}
-          </Select>
-        </label>
-
-        {field ? (
-          <label className="flex min-w-0 flex-col gap-1">
-            <span className="text-small text-secondary">To</span>
-            <FieldInput id="bulk-value" field={field} value={value} onChange={setValue} />
-          </label>
-        ) : null}
-
-        <Button variant="primary" busy={busy} disabled={!field} onClick={() => void apply()}>
-          Apply to {ids.length}
-        </Button>
-        <Button variant="tertiary" onClick={onClear}>
-          Clear selection
-        </Button>
-      </div>
+      <button type="button" className={action} aria-label="Assign owner" onClick={() => void openAssign()}>
+        <UserRound aria-hidden="true" className="size-4" />
+        <span className={label}>Assign</span>
+      </button>
+      <button
+        type="button"
+        className={action}
+        aria-label="Edit a property"
+        onClick={() => {
+          setFieldKey('')
+          setValue(null)
+          setFailed([])
+          setPending('edit')
+        }}
+      >
+        <Pencil aria-hidden="true" className="size-4" />
+        <span className={label}>Edit</span>
+      </button>
+      <button
+        type="button"
+        className={action}
+        aria-label="Delete"
+        onClick={() => {
+          setTypedCount('')
+          setPending('delete')
+        }}
+      >
+        <Trash2 aria-hidden="true" className="size-4" />
+        <span className={label}>Delete</span>
+      </button>
+      <button
+        type="button"
+        className={action}
+        aria-label="Associate with"
+        onClick={() => {
+          setPending('associate')
+          setTarget(null)
+          setLinkLabel('')
+        }}
+      >
+        <Link2 aria-hidden="true" className="size-4" />
+        <span className={label}>Associate</span>
+      </button>
+      {/* A sequence sends to a person, so this is a contact-only action. */}
+      {object === 'contact' ? (
+        <button type="button" className={action} aria-label="Enroll in sequence" onClick={() => setShowEnroll(true)}>
+          <Send aria-hidden="true" className="size-4" />
+          <span className={label}>Enroll in sequence</span>
+        </button>
+      ) : null}
+      <DropdownMenu
+        label="More bulk actions"
+        align="start"
+        groups={[
+          {
+            key: 'more',
+            items: [
+              ...(isBuiltIn ? [{ key: 'list', label: 'Add to list', onSelect: () => void openList() }] : []),
+              {
+                key: 'merge',
+                label: 'Merge',
+                hint: canMerge ? undefined : 'Exactly two',
+                disabled: !canMerge,
+                onSelect: () => void openMerge(),
+              },
+            ],
+          },
+        ]}
+        trigger={(props) => (
+          <button {...props} type="button" className={action}>
+            More
+            <ChevronDown aria-hidden="true" className="size-4" />
+          </button>
+        )}
+      />
 
       {progress ? (
-        <p role="status" className="text-small text-secondary">
+        <p role="status" className="ml-2 min-w-0 truncate text-small text-secondary" title="This keeps running if you leave the page.">
           {fmt.number(progress.processed)} of {fmt.number(progress.total)} done. This
           keeps running if you leave the page.
         </p>
       ) : null}
 
-      {failed.length > 0 ? (
-        <div role="alert" className="flex flex-col gap-1">
-          <p className="text-error">
-            {failed.length} of {ids.length} could not be changed. Everything else was saved.
-          </p>
-          <ul className="flex flex-col gap-0.5">
-            {failed.map((row) => (
-              <li key={row.id} className="text-small text-secondary">
-                <span className="font-medium">{row.displayName}</span> {row.reason}
-              </li>
-            ))}
-          </ul>
+      <IconButton
+        label="Clear selection"
+        icon={<X aria-hidden="true" className="size-4" />}
+        onClick={onClear}
+        className="mr-1 ml-auto shrink-0 text-body"
+      />
+
+      {/* Refusals outlive the dialog that caused them, so they hang under the
+          bar until read rather than vanishing with it. */}
+      {failed.length > 0 && pending === null ? (
+        <div
+          role="alert"
+          className="absolute top-full left-0 z-20 mt-1 flex max-h-64 w-[min(32rem,100%)] flex-col gap-1 overflow-y-auto rounded-panel border border-line bg-surface p-3 shadow-overlay"
+        >
+          <div className="flex items-start gap-2">
+            <p className="min-w-0 flex-1 text-error">
+              {failed.length} of {ids.length} could not be changed. Everything else was saved.
+            </p>
+            <IconButton label="Dismiss" icon={<X aria-hidden="true" className="size-4" />} onClick={() => setFailed([])} className="size-6 shrink-0" />
+          </div>
+          <FailedList failed={failed} />
         </div>
       ) : null}
+
+      <Modal
+        open={pending === 'edit'}
+        title={`Edit ${ids.length} ${noun}`}
+        onClose={() => setPending(null)}
+        onSubmit={() => void apply()}
+        footer={
+          <>
+            <Button variant="tertiary" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" busy={busy} disabled={!field}>
+              Apply to {ids.length}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <label className="flex min-w-0 flex-col gap-1">
+            <span className="text-small text-secondary">Property to change</span>
+            <Select
+              value={fieldKey}
+              onChange={(event) => {
+                setFieldKey(event.target.value)
+                setValue(null)
+                setFailed([])
+              }}
+            >
+              <option value="">Pick a field</option>
+              {fields.map((candidate) => (
+                <option key={candidate.key} value={candidate.key}>
+                  {candidate.label}
+                </option>
+              ))}
+            </Select>
+          </label>
+
+          {field ? (
+            <label className="flex min-w-0 flex-col gap-1">
+              <span className="text-small text-secondary">New value</span>
+              <FieldInput id="bulk-value" field={field} value={value} onChange={setValue} />
+            </label>
+          ) : null}
+
+          {failed.length > 0 ? (
+            <div role="alert" className="flex flex-col gap-1">
+              <p className="text-error">
+                {failed.length} of {ids.length} could not be changed. Everything else was saved.
+              </p>
+              <FailedList failed={failed} />
+            </div>
+          ) : null}
+        </div>
+      </Modal>
 
       {showEnroll ? (
         <EnrollDialog
@@ -594,3 +677,13 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     </div>
   )
 }
+
+const FailedList = ({ failed }: { failed: { id: string; displayName: string; reason: string }[] }) => (
+  <ul className="flex flex-col gap-0.5">
+    {failed.map((row) => (
+      <li key={row.id} className="text-small text-secondary">
+        <span className="font-medium">{row.displayName}</span> {row.reason}
+      </li>
+    ))}
+  </ul>
+)

@@ -43,6 +43,9 @@ export type DataTableProps<Row> = {
    *  to be a flex column with min-h-0; without that the box collapses, so it is
    *  opt-in rather than the default. */
   fill?: boolean
+  /** Laid over the header row, after the select column, while it is set: what a
+   *  selection's actions replace the column titles with. */
+  headerBar?: ReactNode
 }
 
 const SELECT_WIDTH = 45
@@ -68,6 +71,7 @@ export const DataTable = <Row,>({
   selection,
   storageKey,
   fill = false,
+  headerBar,
 }: DataTableProps<Row>) => {
   const [widths, setWidths] = useState<Record<string, number>>({})
   /** The scroll box's content width. 0 until measured, and re-measured on every
@@ -151,6 +155,8 @@ export const DataTable = <Row,>({
   const allTicked =
     selection !== undefined && rows.length > 0 && rows.every((row) => selection.selected.has(rowKey(row)))
 
+  const someTicked = !allTicked && selection !== undefined && rows.some((row) => selection.selected.has(rowKey(row)))
+
   const toggleAll = () => {
     if (!selection) return
     const next = new Set(selection.selected)
@@ -219,6 +225,7 @@ export const DataTable = <Row,>({
                   <Checkbox
                     hideLabel
                     checked={allTicked}
+                    indeterminate={someTicked}
                     onChange={toggleAll}
                     label={`Select every ${selection.noun} on this page`}
                   />
@@ -320,6 +327,11 @@ export const DataTable = <Row,>({
           </tbody>
         </table>
       </div>
+      {headerBar ? (
+        <div className="absolute top-0 right-0 z-20 h-row" style={{ left: select }}>
+          {headerBar}
+        </div>
+      ) : null}
       {/* macOS hides overlay scrollbars until something scrolls, so a clipped
           actions column looks like the end of the table. This edge is the
           affordance; it goes as soon as the last column is in view. */}
