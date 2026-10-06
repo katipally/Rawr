@@ -1,12 +1,15 @@
 'use client'
 
-import { Button, Field, IconButton, Modal, RenamePrompt, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, DataTable, DropdownMenu, EmptyState, Field, Modal, RenamePrompt, Select, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, ChevronLeft, Search } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { PipelineRow, StageRow } from '@rawr/db'
-import { ACTION_ICONS } from '~/components/icons.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
+import { StageTable, type StageDraft } from '../stage-table.tsx'
 
 export type PipelineEditorProps = {
   pipelines: PipelineRow[]
@@ -14,17 +17,35 @@ export type PipelineEditorProps = {
   hub: string
 }
 
+type Extra = { probability: number | null; isClosedWon: boolean; isClosedLost: boolean }
+
+const PROBABILITIES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+/** HubSpot's one probability control: a percentage, or Won or Lost, which close
+ *  the deal at 100% and 0%. */
+const probabilityValue = (stage: Extra) =>
+  stage.isClosedWon ? 'won' : stage.isClosedLost ? 'lost' : stage.probability === null ? '' : String(stage.probability)
+
+const fromProbability = (value: string): Extra =>
+  value === 'won'
+    ? { probability: 100, isClosedWon: true, isClosedLost: false }
+    : value === 'lost'
+      ? { probability: 0, isClosedWon: false, isClosedLost: true }
+      : { probability: value === '' ? null : Number(value), isClosedWon: false, isClosedLost: false }
+
+const searchBox =
+  'h-[2.5rem] w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 font-light placeholder:text-muted'
+
 export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps) => {
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [pipelineId, setPipelineId] = useUrlParam('pipeline')
+  const open = pipelines.find((pipeline) => pipeline.id === pipelineId) ?? null
+  const [query, setQuery] = useState('')
 
-  const [newPipeline, setNewPipeline] = useState('')
-  const [addingTo, setAddingTo] = useState<string | null>(null)
-  const [stageName, setStageName] = useState('')
-  const [stageProbability, setStageProbability] = useState('')
-  const [editing, setEditing] = useState<StageRow | null>(null)
+  const [creating, setCreating] = useState(false)
   const [removing, setRemoving] = useState<{ stage: StageRow; pipeline: PipelineRow } | null>(null)
   const [renaming, setRenaming] = useState<PipelineRow | null>(null)
   const [deleting, setDeleting] = useState<PipelineRow | null>(null)
@@ -45,200 +66,175 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
     }
   }
 
-  const moveStage = (pipeline: PipelineRow, index: number, by: number) => {
-    const next = [...pipeline.stages]
-    const target = index + by
-    if (target < 0 || target >= next.length) return
-    const [moved] = next.splice(index, 1)
-    if (moved) next.splice(target, 0, moved)
-    void run(
-      () =>
-        api.admin.pipelines.reorderStages.mutate({
-          pipelineId: pipeline.id,
-          orderedIds: next.map((stage) => stage.id),
-        }),
-      'Order saved.',
-    )
-  }
+  /** New stages first, so the order written at the end can name them; then the
+   *  edited ones; then the order, once, when it changed or something was added.
+   *  One request per changed stage, so O(changed) round trips. */
+  const saveStages = (pipeline: PipelineRow, draft: StageDraft<Extra>[], saved: StageRow[]) =>
+    run(async () => {
+      const ids: string[] = []
+      for (const row of draft) {
+        const values = { name: row.name.trim(), probability: row.probability, isClosedWon: row.isClosedWon, isClosedLost: row.isClosedLost }
+        if (!row.id) {
+          ids.push((await api.admin.pipelines.createStage.mutate({ pipelineId: pipeline.id, ...values })).id)
+          continue
+        }
+        ids.push(row.id)
+        const before = saved.find((stage) => stage.id === row.id)
+        if (
+          before &&
+          (before.name !== values.name || before.probability !== values.probability || before.isClosedWon !== values.isClosedWon || before.isClosedLost !== values.isClosedLost)
+        ) {
+          await api.admin.pipelines.updateStage.mutate({ id: row.id, ...values })
+        }
+      }
+      if (ids.some((id, index) => id !== saved[index]?.id) || ids.length !== saved.length) {
+        await api.admin.pipelines.reorderStages.mutate({ pipelineId: pipeline.id, orderedIds: ids })
+      }
+    }, 'Pipeline saved.')
 
-  if (!canWrite) {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          You need {hub} access to change this. Pipelines decide what every deal
-          in the account means, so only an admin edits them.
-        </p>
-        {pipelines.map((pipeline) => (
-          <ReadOnlyPipeline key={pipeline.id} pipeline={pipeline} />
-        ))}
-      </div>
-    )
-  }
+  const needle = query.trim().toLowerCase()
+  const shown = needle ? pipelines.filter((pipeline) => pipeline.name.toLowerCase().includes(needle)) : pipelines
+
+  const columns: Column<PipelineRow>[] = [
+    {
+      key: 'name',
+      header: 'Pipeline',
+      width: 360,
+      render: (pipeline) => (
+        <button type="button" title={pipeline.name} onClick={() => setPipelineId(pipeline.id)} className="block max-w-full truncate text-left font-semibold text-link hover:underline">
+          {pipeline.name}
+        </button>
+      ),
+    },
+    { key: 'stages', header: 'Number of stages', width: 180, align: 'right', render: (pipeline) => <span className="font-light tabular-nums">{fmt.number(pipeline.stages.length)}</span> },
+    { key: 'deals', header: 'Deals', width: 160, align: 'right', render: (pipeline) => <span className="font-light tabular-nums">{fmt.number(pipeline.dealCount)}</span> },
+  ]
 
   return (
-    <div className="flex flex-col gap-4">
-      <form
-        className="flex flex-wrap items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void run(() => api.admin.pipelines.create.mutate({ name: newPipeline }), 'Pipeline created.').then(
-            (ok) => ok && setNewPipeline(''),
-          )
-        }}
-      >
-        <Field id="new-pipeline" label="New pipeline">
-          <TextInput
-            id="new-pipeline"
-            value={newPipeline}
-            onChange={(event) => setNewPipeline(event.target.value)}
-            placeholder="Enterprise"
-          />
-        </Field>
-        <Button type="submit" variant="primary" busy={busy} disabled={!newPipeline.trim()}>
-          Create pipeline
-        </Button>
-      </form>
+    <div className="flex min-w-0 flex-col gap-4">
+      {!canWrite ? (
+        <p className="text-secondary">You need {hub} access to change this. Pipelines decide what every deal in the account means, so only an admin edits them.</p>
+      ) : null}
 
-      {pipelines.map((pipeline) => (
-        <section key={pipeline.id} className="rounded-panel border border-line bg-surface shadow-panel">
-          <header className="flex flex-wrap items-center justify-between gap-2 px-6 pt-6 pb-4">
-            <h3 className="flex flex-wrap items-baseline gap-2">
-              <span className="text-base font-semibold">{pipeline.name}</span>
-              <span className="text-small text-secondary">
-                {pipeline.stages.length} stage{pipeline.stages.length === 1 ? '' : 's'} ·{' '}
-                {fmt.number(pipeline.dealCount)} deal{pipeline.dealCount === 1 ? '' : 's'}
+      {open ? (
+        <>
+          <button type="button" onClick={() => setPipelineId(null)} className="inline-flex items-center gap-1 self-start font-semibold text-link hover:underline">
+            <ChevronLeft aria-hidden="true" className="size-4" />
+            Back to Pipelines
+          </button>
+          <h2 className="text-xl font-medium break-words">Manage {open.name}</h2>
+          <section className="flex min-w-0 flex-col gap-4 rounded-panel border border-line px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Select aria-label="Pipeline" value={open.id} onChange={(event) => setPipelineId(event.target.value)} className="w-64 max-w-full">
+                {pipelines.map((pipeline) => (
+                  <option key={pipeline.id} value={pipeline.id}>
+                    {pipeline.name}
+                  </option>
+                ))}
+              </Select>
+              {canWrite ? (
+                <DropdownMenu
+                  label={`Actions for ${open.name}`}
+                  trigger={(props) => (
+                    <Button {...props}>
+                      Actions <ChevronDown aria-hidden="true" className="inline size-3 align-middle" />
+                    </Button>
+                  )}
+                  groups={[
+                    {
+                      key: 'pipeline',
+                      items: [
+                        { key: 'rename', label: 'Rename pipeline', onSelect: () => setRenaming(open) },
+                        { key: 'delete', label: 'Delete pipeline', destructive: true, onSelect: () => setDeleting(open) },
+                      ],
+                    },
+                  ]}
+                />
+              ) : null}
+            </div>
+            <p className="text-small text-secondary">
+              {fmt.number(open.dealCount)} deal{open.dealCount === 1 ? '' : 's'} in this pipeline. Drag a stage by its grip to reorder it; weighted totals use each stage's probability.
+            </p>
+            <StageTable<Extra>
+              key={JSON.stringify(open.stages)}
+              caption={`${open.name} stages`}
+              stages={open.stages.map((stage) => ({ id: stage.id, name: stage.name, usedBy: stage.dealCount, probability: stage.probability, isClosedWon: stage.isClosedWon, isClosedLost: stage.isClosedLost }))}
+              blank={{ probability: null, isClosedWon: false, isClosedLost: false }}
+              usedHeader="Used in"
+              canWrite={canWrite}
+              busy={busy}
+              columns={[
+                {
+                  header: 'Probability',
+                  render: (stage, set, editable) => {
+                    const value = probabilityValue(stage)
+                    const label = (option: string) =>
+                      option === 'won' ? 'Won (100%)' : option === 'lost' ? 'Lost (0%)' : option === '' ? EMPTY_VALUE : `${option}%`
+                    if (!editable) return <span className="tabular-nums">{label(value)}</span>
+                    const options = ['', ...PROBABILITIES.map(String), 'won', 'lost']
+                    return (
+                      <Select aria-label={`Probability of ${stage.name || 'the new stage'}`} value={value} onChange={(event) => set(fromProbability(event.target.value))} className="h-control min-h-0 w-36">
+                        {(options.includes(value) ? options : [...options, value]).map((option) => (
+                          <option key={option} value={option}>
+                            {label(option)}
+                          </option>
+                        ))}
+                      </Select>
+                    )
+                  },
+                },
+              ]}
+              onSave={(draft, saved) =>
+                saveStages(open, draft, open.stages.filter((stage) => saved.some((row) => row.id === stage.id)))
+              }
+              onDelete={(stage) => {
+                const row = open.stages.find((candidate) => candidate.id === stage.id)
+                if (!row) return
+                setRemoving({ stage: row, pipeline: open })
+                setDestination('')
+              }}
+            />
+          </section>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="relative w-full min-w-0 sm:w-[16rem]">
+              <span className="sr-only">Search pipelines</span>
+              <input type="search" value={query} placeholder="Search pipelines" onChange={(event) => setQuery(event.target.value)} className={searchBox} />
+              <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+            </label>
+            <span className="flex flex-wrap items-center gap-3">
+              <span className="text-secondary tabular-nums">
+                {fmt.number(pipelines.length)} deal pipeline{pipelines.length === 1 ? '' : 's'}
               </span>
-            </h3>
-            <span className="flex flex-wrap gap-2">
-              <Button
-                variant="tertiary"
-                busy={busy}
-                onClick={() => setRenaming(pipeline)}
-              >
-                Rename
-              </Button>
-              <Button variant="destructive" busy={busy} onClick={() => setDeleting(pipeline)}>
-                Delete
-              </Button>
+              {canWrite ? <Button onClick={() => setCreating(true)}>Create pipeline</Button> : null}
             </span>
-          </header>
-
-          <ul className="flex flex-col">
-            {pipeline.stages.length === 0 ? (
-              <li className="px-3 py-3 text-secondary">
-                No stages yet. A pipeline with no stages cannot lay out a board, so add the first
-                one below.
-              </li>
-            ) : (
-              pipeline.stages.map((stage, index) => (
-                <li
-                  key={stage.id}
-                  className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-                >
-                  <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
-                    <span className="font-medium">{stage.name}</span>
-                    <span className="text-small text-secondary tabular-nums">
-                      {stage.probability === null ? 'no probability' : `${stage.probability}%`}
-                    </span>
-                    {stage.isClosedWon ? <span className="text-small text-success">Closed won</span> : null}
-                    {stage.isClosedLost ? <span className="text-small text-error">Closed lost</span> : null}
-                    <span className="text-small text-secondary tabular-nums">
-                      {fmt.number(stage.dealCount)} deal{stage.dealCount === 1 ? '' : 's'}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-0.5">
-                    <IconButton
-                      label={`Move ${stage.name} up`}
-                      icon={<ACTION_ICONS.moveUp size={16} />}
-                      disabled={busy || index === 0}
-                      onClick={() => moveStage(pipeline, index, -1)}
-                    />
-                    <IconButton
-                      label={`Move ${stage.name} down`}
-                      icon={<ACTION_ICONS.moveDown size={16} />}
-                      disabled={busy || index === pipeline.stages.length - 1}
-                      onClick={() => moveStage(pipeline, index, 1)}
-                    />
-                    <IconButton
-                      label={`Edit ${stage.name}`}
-                      icon={<ACTION_ICONS.edit size={16} />}
-                      onClick={() => setEditing(stage)}
-                    />
-                    <IconButton
-                      label={`Delete ${stage.name}`}
-                      tone="destructive"
-                      icon={<ACTION_ICONS.delete size={16} />}
-                      onClick={() => {
-                        setRemoving({ stage, pipeline })
-                        setDestination('')
-                      }}
-                    />
-                  </span>
-                </li>
-              ))
-            )}
-          </ul>
-
-          <div className="border-t border-divider px-3 py-2">
-            {addingTo === pipeline.id ? (
-              <form
-                className="flex flex-wrap items-end gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  void run(
-                    () =>
-                      api.admin.pipelines.createStage.mutate({
-                        pipelineId: pipeline.id,
-                        name: stageName,
-                        probability: stageProbability === '' ? null : Number(stageProbability),
-                      }),
-                    'Stage added.',
-                  ).then((ok) => {
-                    if (ok) {
-                      setStageName('')
-                      setStageProbability('')
-                      setAddingTo(null)
-                    }
-                  })
-                }}
-              >
-                <Field id={`stage-name-${pipeline.id}`} label="Stage name">
-                  <TextInput
-                    id={`stage-name-${pipeline.id}`}
-                    value={stageName}
-                    onChange={(event) => setStageName(event.target.value)}
-                    autoFocus
-                  />
-                </Field>
-                <Field id={`stage-prob-${pipeline.id}`} label="Probability" hint="0 to 100. Blank means none.">
-                  <TextInput
-                    id={`stage-prob-${pipeline.id}`}
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={stageProbability}
-                    onChange={(event) => setStageProbability(event.target.value)}
-                  />
-                </Field>
-                <Button type="submit" variant="primary" busy={busy} disabled={!stageName.trim()}>
-                  Add stage
-                </Button>
-                <Button variant="tertiary" type="button" onClick={() => setAddingTo(null)}>
-                  Cancel
-                </Button>
-              </form>
-            ) : (
-              <Button onClick={() => setAddingTo(pipeline.id)}>Add a stage</Button>
-            )}
           </div>
-        </section>
-      ))}
+          {shown.length === 0 ? (
+            <EmptyState
+              title={pipelines.length === 0 ? 'No pipelines yet' : 'No pipeline matches'}
+              description={pipelines.length === 0 ? 'A pipeline is the stages a deal moves through. Create one to lay out a board.' : 'Try another name.'}
+            />
+          ) : (
+            <DataTable columns={columns} rows={shown} rowKey={(pipeline) => pipeline.id} caption="Deal pipelines" storageKey="settings.pipelines" />
+          )}
+        </>
+      )}
 
-      {editing ? <StageForm stage={editing} busy={busy} onClose={() => setEditing(null)} onSave={async (values) => {
-        const ok = await run(() => api.admin.pipelines.updateStage.mutate({ id: editing.id, ...values }), 'Stage saved.')
-        if (ok) setEditing(null)
-      }} /> : null}
-
+      <RenamePrompt
+        value={creating ? '' : null}
+        title="Create pipeline"
+        label="Pipeline name"
+        busy={busy}
+        onCancel={() => setCreating(false)}
+        onRename={(name) => {
+          void run(async () => {
+            const created = await api.admin.pipelines.create.mutate({ name })
+            setPipelineId(created.id)
+          }, 'Pipeline created.').then((ok) => ok && setCreating(false))
+        }}
+      />
       <Modal
         open={removing !== null}
         size="sm"
@@ -322,7 +318,11 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                   void run(
                     () => api.admin.pipelines.remove.mutate({ id: deleting.id }),
                     'Pipeline deleted.',
-                  ).then((ok) => ok && setDeleting(null))
+                  ).then((ok) => {
+                    if (!ok) return
+                    setDeleting(null)
+                    setPipelineId(null)
+                  })
                 }
               >
                 Delete pipeline
@@ -336,7 +336,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
             <p>
               The pipeline and its {deleting.stages.length} stage
               {deleting.stages.length === 1 ? '' : 's'} go. A pipeline with deals in it is refused,
-              so nothing is lost either way — but a board somebody had open stops existing.
+              so nothing is lost either way, but a board somebody had open stops existing.
             </p>
           </div>
         ) : null}
@@ -358,110 +358,4 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
       />
     </div>
   )
-}
-
-const StageForm = ({
-  stage,
-  busy,
-  onClose,
-  onSave,
-}: {
-  stage: StageRow
-  busy: boolean
-  onClose: () => void
-  onSave: (values: { name: string; probability: number | null; isClosedWon: boolean; isClosedLost: boolean }) => void
-}) => {
-  const [name, setName] = useState(stage.name)
-  const [probability, setProbability] = useState(stage.probability === null ? '' : String(stage.probability))
-  const [won, setWon] = useState(stage.isClosedWon)
-  const [lost, setLost] = useState(stage.isClosedLost)
-
-  const probabilityNow = probability === '' ? null : Number(probability)
-  const dirty =
-    name !== stage.name || probabilityNow !== stage.probability || won !== stage.isClosedWon || lost !== stage.isClosedLost
-
-  return (
-    <Modal
-      open
-      title={`Edit ${stage.name}`}
-      onClose={onClose}
-      dirty={dirty}
-      onSubmit={() => onSave({ name, probability: probabilityNow, isClosedWon: won, isClosedLost: lost })}
-      footer={
-        <>
-          <Button variant="tertiary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
-            Save stage
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        <Field id="edit-stage-name" label="Name">
-          <TextInput id="edit-stage-name" value={name} onChange={(event) => setName(event.target.value)} autoFocus />
-        </Field>
-        <Field
-          id="edit-stage-prob"
-          label="Probability"
-          hint="Weighted totals use this. Changing it recomputes them on the next board read."
-        >
-          <TextInput
-            id="edit-stage-prob"
-            type="number"
-            min={0}
-            max={100}
-            value={probability}
-            onChange={(event) => setProbability(event.target.value)}
-          />
-        </Field>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={won}
-            onChange={(event) => {
-              setWon(event.target.checked)
-              if (event.target.checked) setLost(false)
-            }}
-          />
-          Closed won
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={lost}
-            onChange={(event) => {
-              setLost(event.target.checked)
-              if (event.target.checked) setWon(false)
-            }}
-          />
-          Closed lost
-        </label>
-      </div>
-    </Modal>
-  )
-}
-
-const ReadOnlyPipeline = ({ pipeline }: { pipeline: PipelineRow }) => {
-  const fmt = useFormat()
-  return (
-  <section className="rounded-panel border border-line bg-surface shadow-panel">
-    <header className="px-6 pt-6 pb-4 text-base font-semibold">{pipeline.name}</header>
-    <ul className="flex flex-col">
-      {pipeline.stages.map((stage) => (
-        <li
-          key={stage.id}
-          className="flex flex-wrap items-baseline gap-x-3 border-b border-divider px-3 py-1.5 last:border-0"
-        >
-          <span>{stage.name}</span>
-          <span className="text-small text-secondary tabular-nums">
-            {stage.probability === null ? 'no probability' : `${stage.probability}%`} ·{' '}
-            {fmt.number(stage.dealCount)} deal{stage.dealCount === 1 ? '' : 's'}
-          </span>
-        </li>
-      ))}
-    </ul>
-  </section>
-)
 }

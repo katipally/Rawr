@@ -16,7 +16,6 @@ const PipelinesPage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
         title="Pipelines"
         lead="The stages a deal moves through, and the probability each one carries."
         why={
