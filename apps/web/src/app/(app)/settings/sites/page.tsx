@@ -29,18 +29,16 @@ const SitesPage = async () => {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeader
-          title="Tracked sites"
-          lead="Each host that sends page views carries a site key."
-          why={
-            <p>
-              Nothing is collected without one, and nothing is collected from anyone who has not
-              accepted analytics cookies.
-            </p>
-          }
-        />
-      </div>
+      <PageHeader
+        title="Tracked Sites"
+        lead="Each host that sends page views carries a site key."
+        why={
+          <p>
+            Nothing is collected without one, and nothing is collected from anyone who has not
+            accepted analytics cookies.
+          </p>
+        }
+      />
 
       <SiteList
         baseUrl={publicBaseUrl}
@@ -52,7 +50,7 @@ const SitesPage = async () => {
 
       <section className="flex flex-col gap-2">
         <div>
-          <h2 className="text-base font-semibold">What the collector refused</h2>
+          <h2 className="text-xl font-medium">What the collector refused</h2>
           <p className="text-secondary">
             Aggregated per day, so a loop firing the same rejected event ten thousand times is one
             row rather than ten thousand.
