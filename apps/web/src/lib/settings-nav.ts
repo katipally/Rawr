@@ -65,7 +65,7 @@ export const settingsGroups = (): SettingsGroup[] => [
       { href: appsPath(), label: 'Connected Apps', parent: 'Integrations', keywords: ['integrations', 'apps', 'connect', 'apollo', 'brevo', 'slack', 'webhooks', 'google calendar', 'calendar connections'] },
       { href: mailboxesPath(), label: 'Mailboxes', parent: 'Integrations', keywords: ['gmail', 'email', 'inbox', 'connect'] },
       { href: sitesPath(), label: 'Tracked Sites', parent: 'Tracking & Analytics', keywords: ['analytics', 'tracking', 'website', 'pixel'] },
-      { href: trackingPath(), label: 'Tracking Domain', parent: 'Tracking & Analytics', keywords: ['cname', 'links', 'open tracking'] },
+      { href: trackingPath(), label: 'Tracking', parent: 'Tracking & Analytics', keywords: ['tracking domain', 'cname', 'links', 'open tracking', 'events', 'campaigns', 'utm'] },
       { href: auditPath(), label: 'Audit Logs', keywords: ['audit', 'log', 'who changed', 'history'] },
     ],
   },

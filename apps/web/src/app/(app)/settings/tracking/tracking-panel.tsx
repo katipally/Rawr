@@ -1,8 +1,9 @@
 'use client'
 
-import { Button, Card, Field, Switch, TextInput, useToast } from '@rawr/ui'
+import { Field, Switch, TextInput, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
+import { SaveBar } from '~/components/save-bar.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 export const TrackingPanel = ({
@@ -21,7 +22,7 @@ export const TrackingPanel = ({
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Who may be measured">
+      <Section title="Who may be measured">
         <div className="flex flex-col gap-3">
           <Switch
             label="Ask before tracking"
@@ -51,10 +52,25 @@ export const TrackingPanel = ({
             one they gave to hear from you.
           </p>
         </div>
-      </Card>
+      </Section>
 
-      <Card title="Where the links point">
-        <div className="flex flex-col gap-3">
+      <Section title="Where the links point">
+        <form
+          id="tracking-domain-form"
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setBusy(true)
+            void api.sequences.tracking.set
+              .mutate({ domain: value.trim() || null })
+              .then(() => {
+                toast('success', 'Saved. New sends use it; anything already out keeps the old links.')
+                router.refresh()
+              })
+              .catch((cause) => toast('error', errorMessage(cause)))
+              .finally(() => setBusy(false))
+          }}
+        >
           <Field
             label="Hostname"
             id="tracking-domain"
@@ -67,30 +83,11 @@ export const TrackingPanel = ({
               onChange={(event) => setValue(event.target.value)}
             />
           </Field>
-          <div>
-            <Button
-              variant="primary"
-              busy={busy}
-              disabled={value.trim() === (domain ?? '')}
-              onClick={() => {
-                setBusy(true)
-                void api.sequences.tracking.set
-                  .mutate({ domain: value.trim() || null })
-                  .then(() => {
-                    toast('success', 'Saved. New sends use it; anything already out keeps the old links.')
-                    router.refresh()
-                  })
-                  .catch((cause) => toast('error', errorMessage(cause)))
-                  .finally(() => setBusy(false))
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-      </Card>
+        </form>
+        <SaveBar form="tracking-domain-form" changes={value.trim() === (domain ?? '') ? 0 : 1} busy={busy} onCancel={() => setValue(domain ?? '')} />
+      </Section>
 
-      <Card title="What to set up">
+      <Section title="What to set up">
         <ol className="flex list-decimal flex-col gap-2 pl-5 text-secondary">
           <li>
             Add a CNAME for <code className="text-body">{value.trim() || 'links.yourdomain.com'}</code> pointing at
@@ -102,7 +99,16 @@ export const TrackingPanel = ({
             sender is one of the strongest spam signals there is.
           </li>
         </ol>
-      </Card>
+      </Section>
     </div>
   )
 }
+
+/** HubSpot's settings section: a 20/500 heading over its fields, the sections
+ *  split by a rule rather than boxed. */
+const Section = ({ title, children }: { title: string; children: ReactNode }) => (
+  <section className="flex max-w-[50rem] flex-col gap-3 border-b border-line pb-6 last:border-b-0">
+    <h2 className="text-xl font-medium">{title}</h2>
+    {children}
+  </section>
+)

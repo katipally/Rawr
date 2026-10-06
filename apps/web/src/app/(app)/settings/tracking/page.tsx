@@ -30,8 +30,7 @@ const TrackingPage = async () => {
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        as="h2"
-        title="Tracking domain"
+        title="Tracking"
         lead="Where the links in sequence mail are served from."
         why={
           <p>
