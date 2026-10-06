@@ -1,7 +1,7 @@
 import { listReportDashboards } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { cardCatalogue } from '~/server/dashboard-cards.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { ReportsHeader } from '../header.tsx'
 import { reportRange } from '../range.ts'
 import { DashboardList } from './dashboard-list.tsx'
@@ -42,6 +42,7 @@ const DashboardsScreen = async ({
           cards: row.cards,
           updatedAt: row.updatedAt.toISOString(),
           mine: row.ownerId === session.userId,
+          canEdit: row.ownerId === null || row.ownerId === session.userId || sessionIsAdmin(session),
         }))}
       />
     </div>

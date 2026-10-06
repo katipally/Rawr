@@ -348,7 +348,7 @@ export const sequencesPath = (account: string): string => `/${CRM_ROOT}/${accoun
  *  pipeline report with the ones that held no deals in the range left in. */
 export const reportsPath = (
   account: string,
-  params: { tab?: string; from?: string; to?: string; pipelines?: 'all' } = {},
+  params: { tab?: string; from?: string; to?: string; pipelines?: 'all'; q?: string | undefined } = {},
 ): string => {
   const { tab, ...rest } = params
   return `/${CRM_ROOT}/${account}/reports${tab ? `/${tab}` : ''}${query(rest)}`
