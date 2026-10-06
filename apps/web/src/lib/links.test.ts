@@ -158,6 +158,23 @@ test('a HubSpot tasks link opens the tasks list, whichever view it named', () =>
   assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-270'), null)
 })
 
+test('a HubSpot segment, form or marketing email link opens the screen that holds it', () => {
+  assert.equal(fromHubspotPath('/contacts/datasaur/objectLists/views/all'), '/contacts/datasaur/segments')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objectLists'), '/contacts/datasaur/segments')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objectLists/1561/filters'), '/contacts/datasaur/segments/1561')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objectLists/1561'), '/contacts/datasaur/segments/1561')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objectLists/create'), '/contacts/datasaur/segments?segment=new')
+  assert.equal(fromHubspotPath('/forms/datasaur'), '/contacts/datasaur/forms')
+  assert.equal(fromHubspotPath('/forms/datasaur/views/all_forms'), '/contacts/datasaur/forms')
+  assert.equal(fromHubspotPath('/forms/datasaur/editor/af8f/edit/form'), '/contacts/datasaur/forms/af8f')
+  assert.equal(fromHubspotPath('/forms/datasaur/new-editor/af8f'), '/contacts/datasaur/forms/af8f')
+  assert.equal(fromHubspotPath('/submissions/datasaur/form/af8f/performance'), '/contacts/datasaur/forms/af8f/performance')
+  assert.equal(fromHubspotPath('/submissions/datasaur/form/af8f/submissions'), '/contacts/datasaur/submissions?form=af8f&state=clean')
+  assert.equal(fromHubspotPath('/submissions/datasaur/form/af8f/spam'), '/contacts/datasaur/submissions?form=af8f&state=confirmed_spam')
+  assert.equal(fromHubspotPath('/email/datasaur/manage/state/all'), '/contacts/datasaur/newsletter')
+  assert.equal(fromHubspotPath('/contacts/datasaur/segments/abc'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)

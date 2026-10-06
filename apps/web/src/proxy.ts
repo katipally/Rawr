@@ -19,7 +19,15 @@ const ACCOUNT_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
   const readable = fromHubspotPath(request.nextUrl.pathname)
-  if (readable) return NextResponse.redirect(new URL(`${readable}${request.nextUrl.search}`, request.nextUrl.origin))
+  if (readable) {
+    // The answer can carry its own query (a segment builder, a form's submissions),
+    // so the link's query is merged in rather than appended after it.
+    const target = new URL(readable, request.nextUrl.origin)
+    for (const [key, value] of request.nextUrl.searchParams) {
+      if (!target.searchParams.has(key)) target.searchParams.append(key, value)
+    }
+    return NextResponse.redirect(target)
+  }
 
   const match = ACCOUNT_PATH.exec(request.nextUrl.pathname)
   if (!match) return NextResponse.next()
@@ -46,5 +54,6 @@ export const proxy = (request: NextRequest): NextResponse => {
 }
 
 export const config = {
-  matcher: ['/contacts/:path*', '/meetings/:path*'],
+  // /forms, /submissions and /email exist only as HubSpot links to redirect.
+  matcher: ['/contacts/:path*', '/meetings/:path*', '/forms/:path*', '/submissions/:path*', '/email/:path*'],
 }

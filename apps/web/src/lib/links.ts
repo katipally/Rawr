@@ -47,13 +47,34 @@ const HUBSPOT_OBJECT_PATH = /^(\/contacts\/[^/?#]+\/(?:objects|record)\/)(0-[123
  *  `all`, none of which name a view here, so every one opens the tasks list. */
 const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/?#]+(?:\/list)?)?\/?$/
 
+/** HubSpot's marketing addresses, each as the screen here that holds the same
+ *  thing. HubSpot puts the portal where this app puts the account, so the slug
+ *  carries over. Segments sit under /contacts there as here; forms, a form's
+ *  submissions and marketing email have top-level paths of their own. */
+const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string][] = [
+  [/^\/contacts\/([^/?#]+)\/objectLists\/create\/?$/, (account) => `/${CRM_ROOT}/${account}/segments?segment=new`],
+  [/^\/contacts\/([^/?#]+)\/objectLists(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/segments`],
+  [/^\/contacts\/([^/?#]+)\/objectLists\/([^/?#]+)(?:\/[^/?#]+)?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/segments/${id}`],
+  [/^\/forms\/([^/?#]+)(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/forms`],
+  [/^\/forms\/([^/?#]+)\/(?:new-)?editor\/([^/?#]+)(?:\/[^?#]*)?$/, (account, id) => `/${CRM_ROOT}/${account}/forms/${id}`],
+  [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)(?:\/performance)?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/forms/${id}/performance`],
+  [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/submissions\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=clean`],
+  [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/spam\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=confirmed_spam`],
+  [/^\/email\/([^/?#]+)\/manage(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/newsletter`],
+]
+
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
- *  same address with the readable key, a 0-27 tasks link as the tasks list, or
- *  null when the path holds no HubSpot object id. Read by src/proxy.ts, which
- *  redirects to the answer. */
+ *  same address with the readable key, a 0-27 tasks link as the tasks list, a
+ *  segment, form or marketing email link as the screen that holds it, or null
+ *  when the path is none of those. Read by src/proxy.ts, which redirects to the
+ *  answer. */
 export const fromHubspotPath = (path: string): string | null => {
   const tasks = HUBSPOT_TASKS_PATH.exec(path)
   if (tasks) return `${tasks[1]}tasks`
+  for (const [pattern, to] of HUBSPOT_MARKETING_PATHS) {
+    const match = pattern.exec(path)
+    if (match) return to(match[1]!, match[2] ?? '')
+  }
   const found = HUBSPOT_OBJECT_PATH.exec(path)
   if (!found) return null
   return `${found[1]}${HUBSPOT_OBJECT_IDS[found[2]!]}${path.slice(found[0].length)}`
