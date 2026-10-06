@@ -258,7 +258,7 @@ export const updateTask = async (ctx: AccountContext, input: TaskEdit): Promise<
 
 export type TaskQueueRow = { id: string; name: string; openCount: number }
 
-/** Bounded because the sidebar renders every one of them. A hundred named lists
+/** Bounded because the Task queues page renders every one of them. A hundred named lists
  *  is already past the point where anybody finds theirs by reading. */
 const MAX_QUEUES = 200
 
