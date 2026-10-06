@@ -70,7 +70,7 @@ const DashboardScreen = async ({
           ownerName: found.ownerName,
         }}
         rendered={cards}
-        all={all.map((row) => ({ id: row.id, name: row.name }))}
+        all={all.map((row) => ({ id: row.id, name: row.name, mine: row.ownerId === session.userId }))}
         canEdit={found.ownerId === null || found.ownerId === session.userId || sessionIsAdmin(session)}
       />
     </div>

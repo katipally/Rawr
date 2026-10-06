@@ -88,7 +88,7 @@ const BOOKMARKS: NavSection = { key: 'bookmarks', label: 'Bookmarks', icon: 'boo
 const CLOSE_DELAY_MS = 160
 /** HubSpot opens the flyout 42px above the icon that owns it. */
 const FLYOUT_LIFT_PX = 42
-const CANVAS_ROUTES = ['/record/', '/home', '/reports/dashboards/', '/settings', '/inbox']
+const CANVAS_ROUTES = ['/record/', '/home', '/settings', '/inbox']
 
 const CREATE_ICONS: Record<string, typeof Contact> = {
   contact: Contact,
@@ -149,8 +149,8 @@ const Shell = ({
   const closeTimer = useRef<number | null>(null)
   const railRef = useRef<HTMLElement>(null)
 
-  /** HubSpot frames every screen as one white card except a record, a dashboard
-   *  and Home, which are cards straight on the canvas. */
+  /** HubSpot frames every screen as one white card except a record and Home,
+   *  which are cards straight on the canvas. */
   const onCanvas = CANVAS_ROUTES.some((route) => here.includes(route))
 
   // Neither the sheet nor a flyout survives a navigation, or the new page loads
