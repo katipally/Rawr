@@ -6,29 +6,23 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
+import { SaveBar } from '~/components/save-bar.tsx'
 import { todayIn } from '~/lib/format.ts'
 import { useZone } from '~/components/zone.tsx'
 import { bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { DAY_GROUPS, daysChanged, toWeekly, toWindows, type DayGroup, type Ranges, type Window } from './windows.ts'
 
-/** Weekly hours plus one-off overrides.
+/** Weekly hours as HubSpot's availability window rows, plus one-off overrides.
  *
  *  Times here are wall-clock rules in the named timezone, not instants, which is
  *  what keeps nine in the morning at nine through a daylight-saving change. The
  *  timezone is chosen from the browser's own list rather than a curated one, so
  *  nobody is missing from it. */
 
-const DAYS: { key: string; label: string; short: string }[] = [
-  { key: '1', label: 'Monday', short: 'Mon' },
-  { key: '2', label: 'Tuesday', short: 'Tue' },
-  { key: '3', label: 'Wednesday', short: 'Wed' },
-  { key: '4', label: 'Thursday', short: 'Thu' },
-  { key: '5', label: 'Friday', short: 'Fri' },
-  { key: '6', label: 'Saturday', short: 'Sat' },
-  { key: '7', label: 'Sunday', short: 'Sun' },
-]
+const FORM_ID = 'weekly-hours'
 
-type Ranges = Record<string, [string, string][]>
+const newKey = () => crypto.randomUUID()
 
 /** Node and the browser ship different ICU data, so this list differs between the
  *  two sides of a render. Read on the client only, after mount. */
@@ -59,9 +53,17 @@ export const ScheduleEditor = ({
   const show = useToast()
   const router = useRouter()
   const zone = useZone()
-  const [timezone, setTimezone] = useState(schedule.timezone)
-  const [weekly, setWeekly] = useState<Ranges>(schedule.weekly as Ranges)
+  /** The last hours the server confirmed, read back through the rows so a map
+   *  stored in another order does not count as a change. */
+  const [saved, setSaved] = useState(() => ({
+    timezone: schedule.timezone,
+    weekly: toWeekly(toWindows(schedule.weekly as Ranges, newKey)),
+  }))
+  const [timezone, setTimezone] = useState(saved.timezone)
+  const [rows, setRows] = useState<Window[]>(() => toWindows(saved.weekly, newKey))
   const [saving, setSaving] = useState(false)
+  const weekly = useMemo(() => toWeekly(rows), [rows])
+  const changes = Number(timezone !== saved.timezone) + daysChanged(weekly, saved.weekly)
 
   const [overrideDay, setOverrideDay] = useState(() => todayIn(zone))
   const [overrideKind, setOverrideKind] = useState<'off' | 'hours'>('off')
@@ -88,26 +90,8 @@ export const ScheduleEditor = ({
     return Math.round((minutes / 60) * 10) / 10
   }, [weekly])
 
-  const setRange = (day: string, index: number, which: 0 | 1, value: string) =>
-    setWeekly((current) => {
-      const ranges = [...(current[day] ?? [])]
-      const range = ranges[index]
-      if (!range) return current
-      ranges[index] = which === 0 ? [value, range[1]] : [range[0], value]
-      return { ...current, [day]: ranges }
-    })
-
-  const addRange = (day: string) =>
-    setWeekly((current) => ({
-      ...current,
-      [day]: [...(current[day] ?? []), ['09:00', '17:00'] as [string, string]],
-    }))
-
-  const removeRange = (day: string, index: number) =>
-    setWeekly((current) => ({
-      ...current,
-      [day]: (current[day] ?? []).filter((_, at) => at !== index),
-    }))
+  const setRow = (key: string, change: Partial<Window>) =>
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))
 
   const save = async () => {
     setSaving(true)
@@ -115,13 +99,12 @@ export const ScheduleEditor = ({
       await api.booking.saveSchedule.mutate({
         ...(isSelf ? {} : { userId: schedule.userId }),
         timezone,
-        // Empty days are dropped rather than stored as an empty list: a day with no
-        // windows and a day that is not in the object mean the same thing.
-        weekly: Object.fromEntries(
-          Object.entries(weekly).filter(([, ranges]) => ranges.length > 0),
-        ) as Ranges,
+        // A day with no rows is left out of the map rather than stored as an
+        // empty list: the two mean the same thing.
+        weekly,
       })
       show('success', 'Saved. New times are offered from the next page load.')
+      setSaved({ timezone, weekly })
       router.refresh()
     } catch (cause) {
       show('error', errorMessage(cause))
@@ -157,101 +140,109 @@ export const ScheduleEditor = ({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <div className="mb-3 flex flex-wrap items-end gap-3">
-          <Field
+    <div className="flex flex-col gap-4 pb-28">
+      <form
+        id={FORM_ID}
+        className="flex max-w-[35rem] min-w-0 flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (editable && !saving) void save()
+        }}
+      >
+        <Field
+          id="schedule-timezone"
+          label="Your time zone"
+          required
+          hint="Hours are kept in this zone, so nine in the morning stays nine when the clocks change."
+        >
+          <Select
             id="schedule-timezone"
-            label="Timezone"
-            required
-            hint="Hours are kept in this zone, so nine in the morning stays nine when the clocks change."
+            value={timezone}
+            disabled={!editable}
+            onChange={(event) => setTimezone(event.target.value)}
           >
-            <Select
-              id="schedule-timezone"
-              value={timezone}
-              disabled={!editable}
-              onChange={(event) => setTimezone(event.target.value)}
+            {/* The stored value first, so it is never dropped from the list on an
+                engine that cannot enumerate zones. */}
+            <option value={timezone}>{timezone}</option>
+            {zoneList
+              .filter((zone) => zone !== timezone)
+              .map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+          </Select>
+        </Field>
+
+        <div className="flex min-w-0 flex-col gap-2">
+          <h2 className="font-semibold">Availability window</h2>
+          {rows.length === 0 ? <p className="text-secondary">Not working any day, so nothing is offered.</p> : null}
+          <ul className="flex min-w-0 flex-col gap-2">
+            {rows.map((row) => {
+              const label = DAY_GROUPS.find((group) => group.value === row.days)?.label ?? ''
+              return (
+                <li key={row.key} className="flex min-w-0 flex-wrap items-center gap-2">
+                  <Select
+                    aria-label="Days"
+                    value={row.days}
+                    disabled={!editable}
+                    className="w-36"
+                    onChange={(event) => setRow(row.key, { days: event.target.value as DayGroup })}
+                  >
+                    {DAY_GROUPS.map((group) => (
+                      <option key={group.value} value={group.value}>
+                        {group.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <span>from</span>
+                  <TextInput
+                    type="time"
+                    aria-label={`${label} start`}
+                    value={row.from}
+                    disabled={!editable}
+                    className="w-auto"
+                    onChange={(event) => setRow(row.key, { from: event.target.value })}
+                  />
+                  <span>to</span>
+                  <TextInput
+                    type="time"
+                    aria-label={`${label} end`}
+                    value={row.to}
+                    disabled={!editable}
+                    className="w-auto"
+                    onChange={(event) => setRow(row.key, { to: event.target.value })}
+                  />
+                  <IconButton
+                    label={`Remove ${label} ${row.from} to ${row.to}`}
+                    tone="destructive"
+                    icon={<ACTION_ICONS.delete size={16} />}
+                    disabled={!editable}
+                    onClick={() => setRows((current) => current.filter((each) => each.key !== row.key))}
+                  />
+                </li>
+              )
+            })}
+          </ul>
+          {editable ? (
+            <Button
+              type="button"
+              variant="tertiary"
+              className="self-start px-0 font-semibold"
+              onClick={() => setRows((current) => [...current, { key: newKey(), days: 'weekdays', from: '09:00', to: '17:00' }])}
             >
-              {/* The stored value first, so it is never dropped from the list on an
-                  engine that cannot enumerate zones. */}
-              <option value={timezone}>{timezone}</option>
-              {zoneList
-                .filter((zone) => zone !== timezone)
-                .map((zone) => (
-                  <option key={zone} value={zone}>
-                    {zone}
-                  </option>
-                ))}
-            </Select>
-          </Field>
-          <p className="text-sm text-secondary">
+              + Add hours
+            </Button>
+          ) : null}
+          <p className="text-small text-secondary">
             {totalHours === 0 ? 'No hours set, so nothing is offered.' : `${totalHours} hours a week`}
           </p>
-          <Button
-            variant="primary"
-            type="button"
-            className="ml-auto"
-            busy={saving}
-            disabled={!editable}
-            onClick={() => void save()}
-          >
-            {saving ? 'Saving…' : 'Save hours'}
-          </Button>
         </div>
-
-        <ul className="flex flex-col gap-2">
-          {DAYS.map((day) => {
-            const ranges = weekly[day.key] ?? []
-            return (
-              <li key={day.key} className="flex flex-wrap items-center gap-2 border-t border-divider pt-2">
-                <span className="w-20 shrink-0 font-medium">{day.short}</span>
-                {ranges.length === 0 ? (
-                  <span className="text-secondary">Not working</span>
-                ) : (
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    {ranges.map((range, index) => (
-                      <span key={index} className="flex items-center gap-1">
-                        <TextInput
-                          type="time"
-                          aria-label={`${day.label} start`}
-                          value={range[0]}
-                          disabled={!editable}
-                          className="w-auto"
-                          onChange={(event) => setRange(day.key, index, 0, event.target.value)}
-                        />
-                        <span className="text-secondary">to</span>
-                        <TextInput
-                          type="time"
-                          aria-label={`${day.label} end`}
-                          value={range[1]}
-                          disabled={!editable}
-                          className="w-auto"
-                          onChange={(event) => setRange(day.key, index, 1, event.target.value)}
-                        />
-                        <Button
-                          type="button"
-                          disabled={!editable}
-                          onClick={() => removeRange(day.key, index)}
-                        >
-                          ✕
-                        </Button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <Button
-                  type="button"
-                  className="ml-auto"
-                  disabled={!editable}
-                  onClick={() => addRange(day.key)}
-                >
-                  Add hours
-                </Button>
-              </li>
-            )
-          })}
-        </ul>
-      </section>
+        <SaveBar form={FORM_ID} changes={editable ? changes : 0} busy={saving} onCancel={() => {
+          setTimezone(saved.timezone)
+          setRows(toWindows(saved.weekly, newKey))
+        }} />
+      </form>
 
       <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
         <h2 className="mb-1 font-medium">One-off days</h2>
