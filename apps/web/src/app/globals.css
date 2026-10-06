@@ -72,6 +72,7 @@
   --radius-pill: var(--rawr-radius-pill);
   --shadow-panel: var(--rawr-shadow-panel);
   --shadow-overlay: var(--rawr-shadow-overlay);
+  --shadow-side: var(--rawr-shadow-side);
   --spacing-row: var(--rawr-row-height);
   --spacing-topbar: var(--rawr-topbar-height);
   --spacing-rail: var(--rawr-rail-width);
@@ -82,6 +83,7 @@
   --spacing-search: var(--rawr-search-width);
   --spacing-preview: var(--rawr-preview-width);
   --spacing-filters: var(--rawr-filters-width);
+  --spacing-side-panel: var(--rawr-side-panel-width);
   --spacing-dock-gap: var(--rawr-dock-gap);
   /* A literal, because a container query cannot read a custom property. Below it
      a page card beside a docked panel would be narrower than the panel, so the

@@ -58,6 +58,7 @@
 
   --rawr-shadow-panel: 0 1px 8px 0 rgb(20 20 20 / 0.08);
   --rawr-shadow-overlay: 0 24px 48px 0 rgb(20 20 20 / 0.08);
+  --rawr-shadow-side: 0 16px 32px 0 rgb(20 20 20 / 0.08);
 
   --rawr-font-sans: 'Lexend Deca', Helvetica, Arial, sans-serif;
   --rawr-text-body: 0.875rem;
@@ -89,6 +90,7 @@
      separates a docked card from the page card. */
   --rawr-preview-width: 26.25rem;
   --rawr-filters-width: 30.25rem;
+  --rawr-side-panel-width: 37.5rem;
   --rawr-dock-gap: 0.5rem;
 
   --rawr-z-rail: 30;

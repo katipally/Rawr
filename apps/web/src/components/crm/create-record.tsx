@@ -190,8 +190,8 @@ export const CreateRecordPanel = ({
       dirty={dirty}
       footer={
         <>
-          <Button variant="tertiary" onClick={close}>
-            Cancel
+          <Button type="submit" variant="primary" busy={saving === 'create'} disabled={needs !== null || saving !== null}>
+            Create
           </Button>
           <Button
             variant="secondary"
@@ -201,8 +201,8 @@ export const CreateRecordPanel = ({
           >
             Create and add another
           </Button>
-          <Button type="submit" variant="primary" busy={saving === 'create'} disabled={needs !== null || saving !== null}>
-            Create
+          <Button variant="secondary" onClick={close}>
+            Cancel
           </Button>
         </>
       }

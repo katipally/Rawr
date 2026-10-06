@@ -36,31 +36,32 @@ export const SidePanel = ({
 
   // Portalled to the body for the same reason the modal is: `position: fixed` is
   // measured against the app shell's content card, which establishes a containing
-  // block with `container-type: inline-size`, so in place the scrim covered the
-  // card rather than the window.
+  // block with `container-type: inline-size`, so in place the panel ran the
+  // height of the card rather than the window.
   if (!present) return null
 
+  // HubSpot's create panel: the full height of the window over the top bar, no
+  // scrim, so the page behind stays readable. On the way out the content goes
+  // first and the empty panel slides away.
   return createPortal(
-    <div inert={closing} className="fixed inset-0 z-overlay flex justify-end">
-      <div
-        aria-hidden="true"
-        onClick={dismiss}
-        className={cn('flex-1 bg-scrim motion-reduce:animate-none', closing ? 'animate-fade-out' : 'animate-fade-in')}
-      />
-      <aside
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        tabIndex={-1}
-        // Full width on a phone, a panel on a desktop, never a fixed pixel width.
-        className={cn(
-          'relative flex h-full w-full flex-col border-l border-line bg-surface-raised shadow-overlay outline-none motion-reduce:animate-none sm:max-w-[min(32rem,90vw)]',
-          closing ? 'animate-slide-out' : 'animate-slide-in',
-        )}
-      >
-        <header inert={asking} className="flex shrink-0 items-center justify-between gap-3 border-b border-divider px-4 py-3">
-          <h2 className="truncate font-medium">{title}</h2>
+    <aside
+      ref={dialog}
+      inert={closing}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      className={cn(
+        'fixed inset-y-0 right-0 z-overlay flex w-[min(var(--spacing-side-panel),100vw)] flex-col border-l border-line bg-surface-raised text-body shadow-side outline-none motion-reduce:animate-none',
+        closing ? 'animate-slide-out' : 'animate-slide-in',
+      )}
+    >
+      <div className={cn('flex min-h-0 flex-1 flex-col', closing && 'invisible')}>
+        <header
+          inert={asking}
+          className="flex min-h-17 shrink-0 items-center justify-between gap-3 border-b border-line py-3 pr-6 pl-[clamp(1rem,5vw,2.5rem)]"
+        >
+          <h2 className="truncate text-xl font-medium">{title}</h2>
           <button
             type="button"
             onClick={dismiss}
@@ -81,16 +82,16 @@ export const SidePanel = ({
           }
           className="flex min-h-0 flex-1 flex-col"
         >
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-[clamp(1rem,5vw,2.5rem)] py-6">{children}</div>
           {footer ? (
-            <footer className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-divider p-4">
+            <footer className="flex shrink-0 flex-wrap gap-2 border-t border-line bg-surface-raised px-[clamp(1rem,5vw,2.5rem)] py-4">
               {footer}
             </footer>
           ) : null}
         </Shell>
         {asking ? <DiscardConfirm onKeep={keep} onDiscard={discard} /> : null}
-      </aside>
-    </div>,
+      </div>
+    </aside>,
     document.body,
   )
 }

@@ -455,7 +455,6 @@ export const SequenceEditor = ({
         title={`${sequence.name} settings`}
         footer={
           <>
-            <Button onClick={() => setSettingsOpen(false)}>Close</Button>
             <Button
               variant="primary"
               busy={busy}
@@ -468,6 +467,7 @@ export const SequenceEditor = ({
             >
               Save
             </Button>
+            <Button onClick={() => setSettingsOpen(false)}>Close</Button>
           </>
         }
       >
