@@ -119,6 +119,8 @@
   --animate-slide-in: rawr-slide-in var(--rawr-duration-fast) ease-out both;
   --animate-slide-out: rawr-slide-out var(--rawr-duration-fast) ease-in both;
   --animate-drop-in: rawr-drop-in var(--rawr-duration-base) var(--rawr-ease-bulk) both;
+  --animate-rise-in: rawr-rise-in var(--rawr-duration-slow) ease-out both;
+  --animate-rise-out: rawr-rise-out var(--rawr-duration-slow) ease-in both;
 }
 
 /* One-sided keyframes: each runs from, or to, the element's own resting style. */
@@ -129,6 +131,8 @@
 @keyframes rawr-slide-in { from { transform: translateX(100%); } }
 @keyframes rawr-slide-out { to { transform: translateX(100%); } }
 @keyframes rawr-drop-in { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes rawr-rise-in { from { transform: translateY(100%); } }
+@keyframes rawr-rise-out { to { transform: translateY(100%); } }
 
 @layer base {
   html {

@@ -1,24 +1,23 @@
 import { bookingPageStats, getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
-import { Alert, Breadcrumb, EmptyState, PageHeader } from '@rawr/ui'
+import { Alert, EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
-import { availabilityPath, bookedPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
+import { bookingPagesPath } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { zoomReady } from '~/server/zoom.ts'
 import { PageEditor } from './editor.tsx'
-import { getFormat } from '~/server/format.ts'
 
-/** One booking page, everything about it on one screen: what it offers, who hosts
- *  it, what it asks, and what lands on the calendar. */
+/** One booking page, everything about it on one screen under HubSpot's three
+ *  tabs: what it is and what lands on the calendar, when it can be booked and
+ *  what it asks, and what the attendee is sent. */
 
 const BookingPageEditorScreen = async ({
   params,
 }: {
   params: Promise<{ account: string; id: string }>
 }) => {
-  const fmt = await getFormat()
   const { account, id } = await params
   const session = await readSession()
   if (!session) redirect('/sign-in')
@@ -78,40 +77,9 @@ const BookingPageEditorScreen = async ({
     sessionIsAdmin(session) || (page.kind === 'one_on_one' && mine && !sessionIsReadOnly(session))
 
   return (
-    <div className="w-full max-w-5xl">
-      <Breadcrumb items={[{ label: 'Meeting links', href: bookingPagesPath(account) }, { label: page.name }]} />
-      <PageHeader
-        className="mt-1 mb-4"
-        title={page.name}
-        action={
-          <>
-            <LinkButton href={bookedPath(account, { page: page.bookingPageId })}>Booked meetings</LinkButton>
-            <LinkButton href={availabilityPath(account)}>My hours</LinkButton>
-            <LinkButton href={calendarsPath(account)}>Calendars</LinkButton>
-          </>
-        }
-      />
-
-      <dl className="mb-4 grid gap-2 sm:grid-cols-3">
-        {[
-          { label: `Views, last ${stats.sinceDays} days`, value: fmt.number(stats.views) },
-          { label: 'Meetings booked', value: fmt.number(stats.booked) },
-          {
-            label: 'Booked per view',
-            // Zero per cent and "nobody has opened the link yet" are different
-            // answers, and only one of them is a reason to change the page.
-            value: stats.conversion === null ? 'no views yet' : `${stats.conversion}%`,
-          },
-        ].map((tile) => (
-          <div key={tile.label} className="min-w-0 rounded-panel border border-line bg-surface p-3">
-            <dt className="text-xs text-secondary">{tile.label}</dt>
-            <dd className="truncate text-lg font-medium tabular-nums">{tile.value}</dd>
-          </div>
-        ))}
-      </dl>
-
+    <div className="flex w-full min-w-0 flex-col gap-4">
       {!editable ? (
-        <Alert tone="warning" className="mb-4">
+        <Alert tone="warning" className="mx-auto w-full max-w-[80rem]">
           You need sales access to change this page. A shared round robin is an
           admin&apos;s to configure.
         </Alert>
@@ -126,6 +94,7 @@ const BookingPageEditorScreen = async ({
         members={lookups.users}
         targets={targets}
         working={{ zoom, google_meet: googleCalendarConfigured }}
+        stats={stats}
         editable={editable}
         canPublishShared={sessionIsAdmin(session)}
       />

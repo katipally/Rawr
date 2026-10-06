@@ -1,9 +1,25 @@
 'use client'
 
-import type { BookingPageConfig, FormField, PageHostRow, ReminderUnit } from '@rawr/db'
-import { Badge, Button, Field, IconButton, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import type { BookingPageConfig, BookingPageStats, FormField, PageHostRow, ReminderUnit } from '@rawr/db'
+import {
+  Badge,
+  Button,
+  DiscardConfirm,
+  DropdownMenu,
+  Field,
+  IconButton,
+  Select,
+  Switch,
+  TextArea,
+  TextInput,
+  buttonClass,
+  cn,
+  useToast,
+} from '@rawr/ui'
+import { ChevronDown, ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   BOOKING_MAIL_TOKENS,
   DEFAULT_CONFIRMATION_BODY,
@@ -13,20 +29,39 @@ import {
   REMINDER_UNITS,
 } from '~/lib/booking-tokens.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
-import { availabilityPath } from '~/lib/links.ts'
+import { SaveBar } from '~/components/save-bar.tsx'
+import { useFormat } from '~/components/zone.tsx'
+import { availabilityPath, bookedPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { EmbedDialog } from '../snippet.tsx'
+import { useUrlParam } from '~/lib/url-params.ts'
+import { KINDS } from '../pages-table.tsx'
+import { EmbedDialog, hostedBookingUrl, useCopy } from '../snippet.tsx'
 import { QuestionList, type MappingTarget } from './questions.tsx'
 import { TemplatePreview } from './template-preview.tsx'
 
-/** Everything about a page, editable in one form with one save. Nothing here is a
- *  wizard: a person changing the buffer should not have to walk four steps to do it.
+/** HubSpot's scheduling page editor: back to meetings, the name, Actions and
+ *  the public page, then Overview, Scheduling and Automation as tabs over one
+ *  form with one save. Nothing here is a wizard: a person changing the buffer
+ *  should not have to walk four steps to do it. Which tab is open lives in the
+ *  address, so a reload or a pasted link lands on it.
  *
  *  The client checks nothing that matters. Every rule is enforced again in the data
  *  access layer, so a refusal arrives as a sentence rather than the save silently
  *  doing something else. */
 
 type Member = { id: string; label: string }
+type HostDraft = { userId: string; weight: number; isRequired: boolean }
+type ReminderDraft = { key: string; amount: number; unit: ReminderUnit }
+type Draft = { form: BookingPageConfig; questions: FormField[]; hosts: HostDraft[]; reminders: ReminderDraft[] }
+
+const FORM_ID = 'booking-page-editor'
+
+const TABS = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'scheduling', label: 'Scheduling' },
+  { key: 'automation', label: 'Automation' },
+] as const
+type Tab = (typeof TABS)[number]['key']
 
 const LOCATIONS: { value: BookingPageConfig['location']; label: string; hint: string }[] = [
   { value: 'zoom', label: 'Zoom', hint: 'A Zoom meeting is created under the assigned host.' },
@@ -50,6 +85,75 @@ const numeric = (value: string, fallback: number): number => {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback
 }
 
+const draftOf = (page: BookingPageConfig, hosts: PageHostRow[]): Draft => ({
+  form: page,
+  questions: page.questions,
+  hosts: hosts
+    .filter((host) => host.isActive)
+    .map((host) => ({ userId: host.userId, weight: host.weight, isRequired: host.isRequired })),
+  // Keyed on the stored id rather than on the pair a person is editing: keying
+  // on "1 day" makes the row remount the moment the 1 becomes a 2, and the
+  // field loses focus mid-keystroke.
+  reminders: page.reminders.map((row) => ({ key: row.id, amount: row.amount, unit: row.unit })),
+})
+
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/** How many settings differ from what was saved: each field of the page, and
+ *  the questions, hosts and reminders as one each. O(fields) per render. */
+const countChanges = (draft: Draft, saved: Draft): number => {
+  const keys = Object.keys(draft.form) as (keyof BookingPageConfig)[]
+  const fields = keys.filter(
+    (key) => key !== 'questions' && key !== 'reminders' && !same(draft.form[key], saved.form[key]),
+  ).length
+  const timings = (rows: ReminderDraft[]) => rows.map(({ amount, unit }) => [amount, unit])
+  return (
+    fields +
+    Number(!same(draft.questions, saved.questions)) +
+    Number(!same(draft.hosts, saved.hosts)) +
+    Number(!same(timings(draft.reminders), timings(saved.reminders)))
+  )
+}
+
+const Heading = ({ children }: { children: ReactNode }) => <h2 className="text-xl font-medium">{children}</h2>
+
+/** A switch beside its title and line, in a 16-radius card, as HubSpot's
+ *  Automation tab draws Confirmation email and Pre-meeting reminder. */
+const SwitchCard = ({
+  title,
+  line,
+  checked,
+  disabled,
+  onChange,
+  children,
+}: {
+  title: string
+  line: string
+  checked: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+  children: ReactNode
+}) => (
+  <section className="flex min-w-0 flex-col gap-4 rounded-panel border border-line bg-surface p-5">
+    <div className="flex min-w-0 items-start justify-between gap-4">
+      <div className="min-w-0">
+        <h3 className="text-base font-semibold">{title}</h3>
+        <p>{line}</p>
+      </div>
+      <Switch label={title} hideLabel checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
+    </div>
+    {checked ? <div className="flex min-w-0 flex-col gap-3">{children}</div> : null}
+  </section>
+)
+
+type NumberKey =
+  | 'durationMinutes'
+  | 'granularityMinutes'
+  | 'bufferBeforeMinutes'
+  | 'bufferAfterMinutes'
+  | 'minNoticeMinutes'
+  | 'maxHorizonDays'
+
 export const PageEditor = ({
   account,
   accountSlug,
@@ -59,6 +163,7 @@ export const PageEditor = ({
   members,
   targets,
   working,
+  stats,
   editable,
   canPublishShared,
 }: {
@@ -70,28 +175,42 @@ export const PageEditor = ({
   members: Member[]
   targets: MappingTarget[]
   working: WorkingLocations
+  stats: BookingPageStats
   editable: boolean
   canPublishShared: boolean
 }) => {
   const show = useToast()
-  const [form, setForm] = useState(page)
-  const [questions, setQuestions] = useState<FormField[]>(page.questions)
-  const [hostRows, setHostRows] = useState(
-    hosts
-      .filter((host) => host.isActive)
-      .map((host) => ({ userId: host.userId, weight: host.weight, isRequired: host.isRequired })),
-  )
-  const [reminders, setReminders] = useState(
-    // Keyed on a client-minted id rather than on the pair a person is editing:
-    // keying on "1 day" makes the row remount the moment the 1 becomes a 2, and
-    // the field loses focus mid-keystroke.
-    page.reminders.map((row) => ({ key: row.id, amount: row.amount, unit: row.unit })),
-  )
+  const fmt = useFormat()
+  const router = useRouter()
+  const copy = useCopy()
+  const [tabParam, setTabParam] = useUrlParam('tab')
+  const [subParam, setSubParam] = useUrlParam('sub')
+  const tab: Tab = TABS.find((each) => each.key === tabParam)?.key ?? 'overview'
+  const sub = subParam === 'form' ? 'form' : 'schedule'
+
+  /** The last state the server confirmed. Everything on this screen is local
+   *  until Save, so Cancel and the change count are both measured against it. */
+  const [saved, setSaved] = useState(() => draftOf(page, hosts))
+  const [form, setForm] = useState(saved.form)
+  const [questions, setQuestions] = useState(saved.questions)
+  const [hostRows, setHostRows] = useState(saved.hosts)
+  const [reminders, setReminders] = useState(saved.reminders)
   const [saving, setSaving] = useState(false)
   const [embedding, setEmbedding] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+
+  const draft: Draft = { form, questions, hosts: hostRows, reminders }
+  const changes = countChanges(draft, saved)
 
   const set = <K extends keyof BookingPageConfig>(key: K, value: BookingPageConfig[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
+
+  const reset = () => {
+    setForm(saved.form)
+    setQuestions(saved.questions)
+    setHostRows(saved.hosts)
+    setReminders(saved.reminders)
+  }
 
   const hostsById = useMemo(() => new Map(hosts.map((host) => [host.userId, host])), [hosts])
   const collective = form.kind === 'collective'
@@ -100,12 +219,12 @@ export const PageEditor = ({
     .map((row) => hostsById.get(row.userId))
     .filter((host) => host && host.grantState !== 'connected')
 
-  const available = members.filter(
-    (member) => !hostRows.some((row) => row.userId === member.id),
-  )
+  const available = members.filter((member) => !hostRows.some((row) => row.userId === member.id))
 
   const duplicateReminder =
     new Set(reminders.map((row) => `${row.unit}:${row.amount}`)).size !== reminders.length
+
+  const hosted = hostedBookingUrl(baseUrl, accountSlug, saved.form.slug)
 
   const save = async () => {
     // Refused rather than quietly deduplicated: the person asked for two, and a
@@ -146,6 +265,8 @@ export const PageEditor = ({
         ...(form.kind === 'one_on_one' ? {} : { hosts: hostRows }),
       })
       show('success', 'Saved.')
+      setSaved(draft)
+      router.refresh()
     } catch (cause) {
       show('error', errorMessage(cause))
     } finally {
@@ -153,267 +274,101 @@ export const PageEditor = ({
     }
   }
 
-  return (
-    <form
-      className="flex flex-col gap-4"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (editable && !saving) void save()
-      }}
-    >
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-3">
-          <h2 className="font-medium">This link</h2>
-          <Select
-            id="page-kind"
-            aria-label="What kind of link this is"
-            value={form.kind}
-            className="w-44"
-            disabled={!editable || !canPublishShared}
-            onChange={(event) => {
-              const kind = event.target.value as BookingPageConfig['kind']
-              setForm((current) => ({
-                ...current,
-                kind,
-                // A personal link has exactly one host and that host is its owner,
-                // so the two move together rather than leaving a page owned by one
-                // person and hosted by another.
-                ownerId: kind === 'one_on_one' ? (current.ownerId ?? hostRows[0]?.userId ?? null) : null,
-              }))
-            }}
-          >
-            <option value="one_on_one">Personal link</option>
-            <option value="round_robin">Shared round robin</option>
-            <option value="collective">Shared collective</option>
-          </Select>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={form.isActive}
-              disabled={!editable || (form.kind !== 'one_on_one' && !canPublishShared)}
-              onChange={(event) => set('isActive', event.target.checked)}
-            />
-            Taking bookings
-          </label>
-          {form.isActive && hostRows.length === 0 ? (
-            <span className="text-sm text-error">
-              A page with no hosts cannot be published. Add a host below.
-            </span>
-          ) : null}
-          <Button
-            variant="primary"
-            type="submit"
-            className="ml-auto"
-            busy={saving}
-            disabled={!editable}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
+  const leave = () => router.push(bookingPagesPath(account))
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field id="page-name" label="Name" required>
-            <TextInput
-              id="page-name"
-              value={form.name}
-              disabled={!editable}
-              onChange={(event) => set('name', event.target.value)}
-            />
-          </Field>
+  const numberField = (id: string, label: string, hint: string, key: NumberKey, bounds: { min: number; max: number; fallback: number }) => (
+    <Field id={id} label={label} hint={hint}>
+      <TextInput
+        id={id}
+        type="number"
+        min={bounds.min}
+        max={bounds.max}
+        value={form[key]}
+        disabled={!editable}
+        onChange={(event) => set(key, numeric(event.target.value, bounds.fallback))}
+      />
+    </Field>
+  )
 
-          <Field
-            id="page-slug"
-            label="Public link"
-            required
-            hint={`${baseUrl}/b/${accountSlug}/${form.slug}`}
-          >
-            <TextInput
-              id="page-slug"
-              value={form.slug}
-              disabled={!editable}
-              onChange={(event) => set('slug', event.target.value)}
-            />
-          </Field>
+  const overview = (
+    <div className="flex min-w-0 flex-col gap-4">
+      <Heading>Overview</Heading>
+      <Field id="page-kind" label="Meeting type">
+        <Select
+          id="page-kind"
+          value={form.kind}
+          disabled={!editable || !canPublishShared}
+          onChange={(event) => {
+            const kind = event.target.value as BookingPageConfig['kind']
+            setForm((current) => ({
+              ...current,
+              kind,
+              // A personal link has exactly one host and that host is its owner,
+              // so the two move together rather than leaving a page owned by one
+              // person and hosted by another.
+              ownerId: kind === 'one_on_one' ? (current.ownerId ?? hostRows[0]?.userId ?? null) : null,
+            }))
+          }}
+        >
+          {(Object.keys(KINDS) as BookingPageConfig['kind'][]).map((kind) => (
+            <option key={kind} value={kind}>
+              {KINDS[kind]}
+            </option>
+          ))}
+        </Select>
+      </Field>
 
-          <Field id="page-duration" label="Length" hint="Minutes the meeting runs for">
-            <TextInput
-              id="page-duration"
-              type="number"
-              min={5}
-              max={1440}
-              value={form.durationMinutes}
-              disabled={!editable}
-              onChange={(event) => set('durationMinutes', numeric(event.target.value, 30))}
-            />
-          </Field>
-
-          <Field
-            id="page-granularity"
-            label="Offer times every"
-            hint="Minutes between offered start times, measured from the host's own midnight"
-          >
-            <TextInput
-              id="page-granularity"
-              type="number"
-              min={5}
-              max={1440}
-              value={form.granularityMinutes}
-              disabled={!editable}
-              onChange={(event) => set('granularityMinutes', numeric(event.target.value, 30))}
-            />
-          </Field>
-
-          <Field id="page-buffer-before" label="Clear time before" hint="Minutes kept free ahead of a meeting">
-            <TextInput
-              id="page-buffer-before"
-              type="number"
-              min={0}
-              max={480}
-              value={form.bufferBeforeMinutes}
-              disabled={!editable}
-              onChange={(event) => set('bufferBeforeMinutes', numeric(event.target.value, 0))}
-            />
-          </Field>
-
-          <Field id="page-buffer-after" label="Clear time after" hint="Minutes kept free after a meeting">
-            <TextInput
-              id="page-buffer-after"
-              type="number"
-              min={0}
-              max={480}
-              value={form.bufferAfterMinutes}
-              disabled={!editable}
-              onChange={(event) => set('bufferAfterMinutes', numeric(event.target.value, 0))}
-            />
-          </Field>
-
-          <Field
-            id="page-notice"
-            label="Shortest notice"
-            hint="Minutes from now before the first offered slot. 240 is four hours."
-          >
-            <TextInput
-              id="page-notice"
-              type="number"
-              min={0}
-              max={43200}
-              value={form.minNoticeMinutes}
-              disabled={!editable}
-              onChange={(event) => set('minNoticeMinutes', numeric(event.target.value, 240))}
-            />
-          </Field>
-
-          <Field id="page-horizon" label="Book up to" hint="Days ahead">
-            <TextInput
-              id="page-horizon"
-              type="number"
-              min={1}
-              max={365}
-              value={form.maxHorizonDays}
-              disabled={!editable}
-              onChange={(event) => set('maxHorizonDays', numeric(event.target.value, 60))}
-            />
-          </Field>
-
-          <Field
-            id="page-location"
-            label="Where"
-            hint={
-              working[form.location as keyof WorkingLocations] === false
-                ? DARK
-                : (LOCATIONS.find((option) => option.value === form.location)?.hint ?? '')
-            }
-          >
-            <Select
-              id="page-location"
-              value={form.location}
-              disabled={!editable}
-              onChange={(event) =>
-                set('location', event.target.value as BookingPageConfig['location'])
-              }
-            >
-              {LOCATIONS.map((option) => {
-                const dark = working[option.value as keyof WorkingLocations] === false
-                return (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                    {dark ? ' — not set up' : ''}
-                  </option>
-                )
-              })}
-            </Select>
-          </Field>
-
-          {form.location === 'phone' || form.location === 'custom' ? (
-            <Field
-              id="page-location-detail"
-              label={form.location === 'phone' ? 'Number to call' : 'Joining instructions'}
-              required
-            >
-              <TextInput
-                id="page-location-detail"
-                value={form.locationDetail ?? ''}
-                disabled={!editable}
-                onChange={(event) => set('locationDetail', event.target.value)}
-              />
-            </Field>
-          ) : null}
-        </div>
-      </section>
+      <Field id="page-name" label="Internal name" required>
+        <TextInput id="page-name" value={form.name} disabled={!editable} onChange={(event) => set('name', event.target.value)} />
+      </Field>
 
       {form.kind === 'one_on_one' ? (
-        <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-          <h2 className="mb-1 font-medium">Whose link this is</h2>
-          <p className="mb-3 text-xs text-secondary">
-            A personal link has one host, and that host is its owner. Only they and an admin can
-            see or change it.
-          </p>
-          <Field id="page-owner" label="Owner">
-            <Select
-              id="page-owner"
-              value={form.ownerId ?? ''}
-              disabled={!editable || !canPublishShared}
-              onChange={(event) => set('ownerId', event.target.value || null)}
-            >
-              <option value="">Whoever saves this</option>
-              {members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </section>
-      ) : null}
-
-      {form.kind !== 'one_on_one' ? (
-        <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-          <h2 className="mb-3 font-medium">Hosts</h2>
-
-          <p className="mb-3 text-xs text-secondary">
+        <Field
+          id="page-owner"
+          label="Organizer"
+          hint="A personal link has one host, and that host is its owner. Only they and an admin can see or change it."
+        >
+          <Select
+            id="page-owner"
+            value={form.ownerId ?? ''}
+            disabled={!editable || !canPublishShared}
+            onChange={(event) => set('ownerId', event.target.value || null)}
+          >
+            <option value="">Whoever saves this</option>
+            {members.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-2">
+          <h3 className="font-semibold">Team members</h3>
+          <p className="text-small">
             {collective
               ? 'Every required host has to be free, and all of them are on the invitation. Adding one makes this page harder to book, not easier.'
               : 'A meeting goes to whoever is furthest behind their share, among the hosts actually free for that time. Weight 2 takes twice as many meetings as weight 1.'}
           </p>
 
           {hostRows.length === 0 ? (
-            <p className="text-sm text-secondary">Nobody hosts this page yet.</p>
+            <p className="text-secondary">Nobody hosts this page yet.</p>
           ) : (
-            <ul className="mb-3 flex flex-col gap-2">
+            <ul className="flex flex-col gap-2">
               {hostRows.map((row) => {
                 const host = hostsById.get(row.userId)
                 const label =
                   host?.name ?? members.find((member) => member.id === row.userId)?.label ?? row.userId
                 const share = totalWeight > 0 ? Math.round((row.weight / totalWeight) * 100) : 0
                 return (
-                  <li key={row.userId} className="flex flex-wrap items-center gap-2 text-sm">
+                  <li key={row.userId} className="flex flex-wrap items-center gap-2">
                     <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                     {host && host.grantState !== 'connected' ? (
                       <Badge tone="error" dot>
                         {host.grantState === 'unconfigured' ? 'no calendar' : host.grantState}
                       </Badge>
                     ) : (
-                      <span className="text-xs text-secondary">{host?.timezone ?? 'no hours set'}</span>
+                      <span className="text-small text-secondary">{host?.timezone ?? 'no hours set'}</span>
                     )}
 
                     {collective ? (
@@ -448,7 +403,7 @@ export const PageEditor = ({
                         >
                           <span className="block h-full bg-cta" style={{ width: `${share}%` }} />
                         </span>
-                        <label className="flex items-center gap-1 text-xs">
+                        <label className="flex items-center gap-1 text-small">
                           Weight
                           <TextInput
                             type="number"
@@ -476,11 +431,7 @@ export const PageEditor = ({
                       tone="destructive"
                       icon={<ACTION_ICONS.delete size={16} />}
                       disabled={!editable}
-                      onClick={() =>
-                        setHostRows((current) =>
-                          current.filter((existing) => existing.userId !== row.userId),
-                        )
-                      }
+                      onClick={() => setHostRows((current) => current.filter((existing) => existing.userId !== row.userId))}
                     />
                   </li>
                 )
@@ -491,6 +442,7 @@ export const PageEditor = ({
           {editable && available.length > 0 ? (
             <Select
               id="page-add-host"
+              aria-label="Add a host"
               value=""
               onChange={(event) => {
                 const userId = event.target.value
@@ -508,305 +460,439 @@ export const PageEditor = ({
           ) : null}
 
           {collective && hostRows.length > 0 && !hostRows.some((row) => row.isRequired) ? (
-            <p className="mt-3 text-sm text-error">
-              A collective page needs at least one required host, or there is nothing to intersect
-              and it offers no times at all.
+            <p className="text-error">
+              A group page needs at least one required host, or there is nothing to intersect and it
+              offers no times at all.
             </p>
           ) : null}
 
           {unhealthy.length > 0 ? (
-            <p className="mt-3 text-sm text-error">
+            <p className="text-error">
               {unhealthy.length === 1
                 ? 'One host has no working calendar, so no times are offered for them. A host with no calendar is treated as unavailable, never as free.'
                 : `${unhealthy.length} hosts have no working calendar, so no times are offered for them.`}
             </p>
           ) : null}
-        </section>
+        </div>
+      )}
+
+      <Field
+        id="page-title-tpl"
+        label="Event title"
+        required
+        hint="A variable that resolves to nothing is left out, and a title never ends with a dangling separator."
+      >
+        <TextInput id="page-title-tpl" value={form.titleTpl} disabled={!editable} onChange={(event) => set('titleTpl', event.target.value)} />
+      </Field>
+
+      <Field
+        id="page-location"
+        label="Location"
+        hint={
+          working[form.location as keyof WorkingLocations] === false
+            ? DARK
+            : (LOCATIONS.find((option) => option.value === form.location)?.hint ?? '')
+        }
+      >
+        <Select
+          id="page-location"
+          value={form.location}
+          disabled={!editable}
+          onChange={(event) => set('location', event.target.value as BookingPageConfig['location'])}
+        >
+          {LOCATIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+              {working[option.value as keyof WorkingLocations] === false ? ' (not set up)' : ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
+
+      {form.location === 'phone' || form.location === 'custom' ? (
+        <Field
+          id="page-location-detail"
+          label={form.location === 'phone' ? 'Number to call' : 'Joining instructions'}
+          required
+        >
+          <TextInput
+            id="page-location-detail"
+            value={form.locationDetail ?? ''}
+            disabled={!editable}
+            onChange={(event) => set('locationDetail', event.target.value)}
+          />
+        </Field>
       ) : null}
 
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <h2 className="mb-1 font-medium">What lands on the calendar</h2>
-        <p className="mb-3 text-xs text-secondary">
-          A variable that resolves to nothing is left out, and a title never ends with a dangling
-          separator.
-        </p>
+      <Field id="page-description-tpl" label="Description">
+        <TextArea
+          id="page-description-tpl"
+          rows={4}
+          value={form.descriptionTpl}
+          disabled={!editable}
+          onChange={(event) => set('descriptionTpl', event.target.value)}
+        />
+      </Field>
 
-        <div className="grid gap-3">
-          <Field id="page-title-tpl" label="Event title" required>
-            <TextInput
-              id="page-title-tpl"
-              value={form.titleTpl}
-              disabled={!editable}
-              onChange={(event) => set('titleTpl', event.target.value)}
-            />
-          </Field>
+      <Field
+        id="page-company-fallback"
+        label="When the company is unknown, call it"
+        required
+        hint="Used in place of the company name so a title is never left half-finished"
+      >
+        <TextInput
+          id="page-company-fallback"
+          value={form.companyFallback}
+          disabled={!editable}
+          onChange={(event) => set('companyFallback', event.target.value)}
+        />
+      </Field>
+    </div>
+  )
 
-          <Field id="page-description-tpl" label="Event description">
-            <TextArea
-              id="page-description-tpl"
-              rows={4}
-              value={form.descriptionTpl}
-              disabled={!editable}
-              onChange={(event) => set('descriptionTpl', event.target.value)}
-            />
-          </Field>
+  const scheduling = (
+    <div className="flex min-w-0 flex-col gap-4">
+      <Heading>Scheduling</Heading>
+      <Field id="page-slug" label="Scheduling page link" required hint={hostedBookingUrl(baseUrl, accountSlug, form.slug)}>
+        <TextInput id="page-slug" value={form.slug} disabled={!editable} onChange={(event) => set('slug', event.target.value)} />
+      </Field>
 
-          <Field
-            id="page-company-fallback"
-            label="When the company is unknown, call it"
-            required
-            hint="Used in place of the company name so a title is never left half-finished"
-          >
-            <TextInput
-              id="page-company-fallback"
-              value={form.companyFallback}
-              disabled={!editable}
-              onChange={(event) => set('companyFallback', event.target.value)}
-            />
-          </Field>
+      <div className="flex min-w-0 items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h3 className="font-semibold">Taking bookings</h3>
+          <p>While this is off the page offers no times and its link says so.</p>
+          {form.isActive && hostRows.length === 0 ? (
+            <p className="text-error">A page with no hosts cannot be published. Add a host on Overview.</p>
+          ) : null}
         </div>
-
-        <TemplatePreview
-          titleTpl={form.titleTpl}
-          descriptionTpl={form.descriptionTpl}
-          companyFallback={form.companyFallback}
-          pageName={form.name}
-          durationMinutes={form.durationMinutes}
+        <Switch
+          label="Taking bookings"
+          hideLabel
+          checked={form.isActive}
+          disabled={!editable || (form.kind !== 'one_on_one' && !canPublishShared)}
+          onChange={(event) => set('isActive', event.target.checked)}
         />
-      </section>
+      </div>
 
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <h2 className="mb-1 font-medium">Questions</h2>
-        <p className="mb-3 text-xs text-secondary">
-          Name and work email are always asked. Anything here is asked as well, and an answer mapped
-          to a field lands on the contact or the company.
-        </p>
-        <QuestionList
-          questions={questions}
-          onChange={setQuestions}
-          editable={editable}
-          targets={targets}
-        />
-      </section>
+      <div role="tablist" aria-label="Scheduling" className="flex min-w-0 border-b border-line">
+        {(['schedule', 'form'] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={sub === key}
+            onClick={() => setSubParam(key === 'schedule' ? null : key)}
+            className={cn(
+              'flex min-h-12 items-center px-7 text-body transition-colors duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] first:rounded-tl-hs last:rounded-tr-hs',
+              sub === key ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
+            )}
+          >
+            {key === 'schedule' ? 'Schedule' : 'Form'}
+          </button>
+        ))}
+      </div>
 
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <h2 className="mb-1 font-medium">What the attendee is sent</h2>
-        <p className="mb-3 text-xs text-secondary">
-          Sent from the host&apos;s own connected mailbox, never a colleague&apos;s. With none that
-          can send, nothing goes out and the host is told. The calendar invitation is separate and
-          always goes.
-        </p>
-
-        <label className="mb-3 flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.confirmationEnabled}
-            disabled={!editable}
-            onChange={(event) => set('confirmationEnabled', event.target.checked)}
-          />
-          Send a confirmation email as soon as the meeting is booked
-        </label>
-
-        {form.confirmationEnabled ? (
-          <div className="mb-4 grid gap-3">
-            <Field id="page-confirmation-subject" label="Confirmation subject">
-              <TextInput
-                id="page-confirmation-subject"
-                value={form.confirmationSubject ?? ''}
-                placeholder={DEFAULT_CONFIRMATION_SUBJECT}
+      {sub === 'schedule' ? (
+        <div className="flex min-w-0 flex-col gap-4">
+          {numberField('page-duration', 'Duration', 'Minutes the meeting runs for', 'durationMinutes', { min: 5, max: 1440, fallback: 30 })}
+          <div className="min-w-0">
+            <h3 className="font-semibold">Availability</h3>
+            <p>
+              Times come from each host&apos;s own working hours, set once for every page they host, under{' '}
+              <Link href={availabilityPath(account)}>My hours</Link>.
+            </p>
+          </div>
+          <details className="group min-w-0 border-t border-line pt-4">
+            <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-semibold">
+              <ChevronDown aria-hidden="true" className="size-4 -rotate-90 transition-transform duration-150 group-open:rotate-0" />
+              Additional settings
+            </summary>
+            <div className="mt-4 flex min-w-0 flex-col gap-4">
+              {numberField('page-horizon', 'When a meeting can be scheduled', 'Days ahead a visitor can book', 'maxHorizonDays', { min: 1, max: 365, fallback: 60 })}
+              {numberField('page-notice', 'Minimum notice time', 'Minutes from now before the first offered slot. 240 is four hours.', 'minNoticeMinutes', { min: 0, max: 43200, fallback: 240 })}
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                {numberField('page-buffer-before', 'Buffer time before', 'Minutes kept free ahead of a meeting', 'bufferBeforeMinutes', { min: 0, max: 480, fallback: 0 })}
+                {numberField('page-buffer-after', 'Buffer time after', 'Minutes kept free after a meeting', 'bufferAfterMinutes', { min: 0, max: 480, fallback: 0 })}
+              </div>
+              {numberField('page-granularity', 'Start time increment', "Minutes between offered start times, measured from the host's own midnight", 'granularityMinutes', { min: 5, max: 1440, fallback: 30 })}
+            </div>
+          </details>
+        </div>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="min-w-0">
+            <h3 className="font-semibold">Questions</h3>
+            <p className="text-small">
+              Name and work email are always asked. Anything here is asked as well, and an answer mapped
+              to a field lands on the contact or the company.
+            </p>
+          </div>
+          <QuestionList questions={questions} onChange={setQuestions} editable={editable} targets={targets} />
+          <div className="flex min-w-0 flex-col gap-4 border-t border-line pt-4">
+            <h3 className="text-base font-semibold">After booking</h3>
+            <Field id="page-confirmation" label="Confirmation message" hint="Shown on the page once the meeting is booked">
+              <TextArea
+                id="page-confirmation"
+                rows={2}
+                value={form.confirmationCopy ?? ''}
                 disabled={!editable}
-                onChange={(event) => set('confirmationSubject', event.target.value)}
+                onChange={(event) => set('confirmationCopy', event.target.value)}
               />
             </Field>
-            <Field
-              id="page-confirmation-body"
-              label="Confirmation email"
-              hint="Left empty, the wording below the fields is used."
-            >
-              <TextArea
-                id="page-confirmation-body"
-                rows={8}
-                value={form.confirmationBody ?? ''}
-                placeholder={DEFAULT_CONFIRMATION_BODY}
+            <Field id="page-redirect" label="Or send them to" hint="A full URL. Left empty, the confirmation is shown in place.">
+              <TextInput
+                id="page-redirect"
+                value={form.redirectUrl ?? ''}
                 disabled={!editable}
-                onChange={(event) => set('confirmationBody', event.target.value)}
+                onChange={(event) => set('redirectUrl', event.target.value)}
               />
             </Field>
           </div>
-        ) : null}
+        </div>
+      )}
+    </div>
+  )
 
-        <h3 className="mb-1 font-medium">Reminders before the meeting</h3>
-        <p className="mb-2 text-xs text-secondary">
-          Each one is sent once per meeting. A reminder added after somebody booked still reaches
-          them, as long as the meeting has not started.
+  const automation = (
+    <div className="flex min-w-0 flex-col gap-4">
+      <Heading>Automation</Heading>
+      <p className="text-small">
+        Sent from the host&apos;s own connected mailbox, never a colleague&apos;s. With none that can send,
+        nothing goes out and the host is told. The calendar invitation is separate and always goes.
+      </p>
+
+      <SwitchCard
+        title="Confirmation email"
+        line="Send a confirmation email to attendees as soon as they book."
+        checked={form.confirmationEnabled}
+        disabled={!editable}
+        onChange={(checked) => set('confirmationEnabled', checked)}
+      >
+        <Field id="page-confirmation-subject" label="Subject">
+          <TextInput
+            id="page-confirmation-subject"
+            value={form.confirmationSubject ?? ''}
+            placeholder={DEFAULT_CONFIRMATION_SUBJECT}
+            disabled={!editable}
+            onChange={(event) => set('confirmationSubject', event.target.value)}
+          />
+        </Field>
+        <Field id="page-confirmation-body" label="Email" hint="Left empty, the wording below the fields is used.">
+          <TextArea
+            id="page-confirmation-body"
+            rows={8}
+            value={form.confirmationBody ?? ''}
+            placeholder={DEFAULT_CONFIRMATION_BODY}
+            disabled={!editable}
+            onChange={(event) => set('confirmationBody', event.target.value)}
+          />
+        </Field>
+      </SwitchCard>
+
+      <SwitchCard
+        title="Pre-meeting reminder"
+        line="Send an email reminder to attendees before a meeting starts."
+        checked={reminders.length > 0}
+        disabled={!editable}
+        onChange={(checked) => setReminders(checked ? [{ key: crypto.randomUUID(), amount: 1, unit: 'day' }] : [])}
+      >
+        <p className="text-small">
+          Each one is sent once per meeting. A reminder added after somebody booked still reaches them, as
+          long as the meeting has not started.
         </p>
-
-        {reminders.length === 0 ? (
-          <p className="mb-2 text-sm text-secondary">No reminders. Nothing is sent before the call.</p>
-        ) : (
-          <ul className="mb-2 flex flex-col gap-2">
-            {reminders.map((row) => (
-              <li key={row.key} className="flex flex-wrap items-center gap-2 text-sm">
-                <TextInput
-                  type="number"
-                  min={1}
-                  max={365}
-                  aria-label="How many"
-                  className="w-20"
-                  value={row.amount}
-                  disabled={!editable}
-                  onChange={(event) =>
-                    setReminders((current) =>
-                      current.map((each) =>
-                        each.key === row.key
-                          ? { ...each, amount: numeric(event.target.value, 1) }
-                          : each,
-                      ),
-                    )
-                  }
-                />
-                <Select
-                  aria-label="Unit"
-                  className="w-36"
-                  value={row.unit}
-                  disabled={!editable}
-                  onChange={(event) =>
-                    setReminders((current) =>
-                      current.map((each) =>
-                        each.key === row.key
-                          ? { ...each, unit: event.target.value as ReminderUnit }
-                          : each,
-                      ),
-                    )
-                  }
-                >
-                  {REMINDER_UNITS.map((unit) => (
-                    <option key={unit} value={unit}>
-                      {unit}
-                      {row.amount === 1 ? '' : 's'} before
-                    </option>
-                  ))}
-                </Select>
-                <IconButton
-                  label={`Remove the ${row.amount} ${row.unit} reminder`}
-                  tone="destructive"
-                  icon={<ACTION_ICONS.delete size={16} />}
-                  disabled={!editable}
-                  onClick={() =>
-                    setReminders((current) => current.filter((each) => each.key !== row.key))
-                  }
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-
+        <ul className="flex flex-col gap-2">
+          {reminders.map((row) => (
+            <li key={row.key} className="flex flex-wrap items-center gap-2">
+              <TextInput
+                type="number"
+                min={1}
+                max={365}
+                aria-label="How many"
+                className="w-20"
+                value={row.amount}
+                disabled={!editable}
+                onChange={(event) =>
+                  setReminders((current) =>
+                    current.map((each) => (each.key === row.key ? { ...each, amount: numeric(event.target.value, 1) } : each)),
+                  )
+                }
+              />
+              <Select
+                aria-label="Unit"
+                className="w-36"
+                value={row.unit}
+                disabled={!editable}
+                onChange={(event) =>
+                  setReminders((current) =>
+                    current.map((each) => (each.key === row.key ? { ...each, unit: event.target.value as ReminderUnit } : each)),
+                  )
+                }
+              >
+                {REMINDER_UNITS.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                    {row.amount === 1 ? '' : 's'} before
+                  </option>
+                ))}
+              </Select>
+              <IconButton
+                label={`Remove the ${row.amount} ${row.unit} reminder`}
+                tone="destructive"
+                icon={<ACTION_ICONS.delete size={16} />}
+                disabled={!editable}
+                onClick={() => setReminders((current) => current.filter((each) => each.key !== row.key))}
+              />
+            </li>
+          ))}
+        </ul>
         {editable ? (
           <Button
             type="button"
-            onClick={() =>
-              setReminders((current) => [
-                ...current,
-                { key: crypto.randomUUID(), amount: 1, unit: 'day' as ReminderUnit },
-              ])
-            }
+            className="self-start"
+            onClick={() => setReminders((current) => [...current, { key: crypto.randomUUID(), amount: 1, unit: 'day' }])}
           >
             + Add reminder
           </Button>
         ) : null}
+        {duplicateReminder ? <p className="text-error">{DUPLICATE_REMINDER}</p> : null}
+        <Field id="page-reminder-subject" label="Subject">
+          <TextInput
+            id="page-reminder-subject"
+            value={form.reminderSubject ?? ''}
+            placeholder={DEFAULT_REMINDER_SUBJECT}
+            disabled={!editable}
+            onChange={(event) => set('reminderSubject', event.target.value)}
+          />
+        </Field>
+        <Field id="page-reminder-body" label="Email" hint="Left empty, the wording below the fields is used.">
+          <TextArea
+            id="page-reminder-body"
+            rows={8}
+            value={form.reminderBody ?? ''}
+            placeholder={DEFAULT_REMINDER_BODY}
+            disabled={!editable}
+            onChange={(event) => set('reminderBody', event.target.value)}
+          />
+        </Field>
+      </SwitchCard>
 
-        {duplicateReminder ? (
-          <p className="mt-2 text-sm text-error">{DUPLICATE_REMINDER}</p>
-        ) : null}
+      <p className="text-small text-secondary">
+        Anything that resolves to nothing is left out rather than printed. Available:{' '}
+        {BOOKING_MAIL_TOKENS.map((token) => `{{ ${token} }}`).join(' · ')}
+      </p>
+    </div>
+  )
 
-        {reminders.length > 0 ? (
-          <div className="mt-3 grid gap-3">
-            <Field id="page-reminder-subject" label="Reminder subject">
-              <TextInput
-                id="page-reminder-subject"
-                value={form.reminderSubject ?? ''}
-                placeholder={DEFAULT_REMINDER_SUBJECT}
-                disabled={!editable}
-                onChange={(event) => set('reminderSubject', event.target.value)}
-              />
-            </Field>
-            <Field
-              id="page-reminder-body"
-              label="Reminder email"
-              hint="Left empty, the wording below the fields is used."
+  return (
+    <form
+      id={FORM_ID}
+      className="mx-auto flex w-full max-w-[80rem] min-w-0 flex-col gap-6 pb-28"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (editable && !saving) void save()
+      }}
+    >
+      <header className="flex min-w-0 flex-col gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <div className="flex min-w-0 flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => (changes > 0 ? setLeaving(true) : leave())}
+              className="inline-flex items-center gap-0.5 self-start text-small font-semibold text-body hover:underline"
             >
-              <TextArea
-                id="page-reminder-body"
-                rows={8}
-                value={form.reminderBody ?? ''}
-                placeholder={DEFAULT_REMINDER_BODY}
-                disabled={!editable}
-                onChange={(event) => set('reminderBody', event.target.value)}
-              />
-            </Field>
+              <ChevronLeft aria-hidden="true" className="size-3.5" />
+              Back to meetings
+            </button>
+            <h1 className="flex min-w-0 flex-wrap items-center gap-2 text-xl font-medium">
+              <span className="min-w-0 break-words">{saved.form.name}</span>
+              <Badge tone="neutral">{KINDS[saved.form.kind]}</Badge>
+              {saved.form.isActive ? null : <Badge tone="neutral">Off</Badge>}
+            </h1>
+            <p className="text-small text-secondary">
+              Last {stats.sinceDays} days: {fmt.number(stats.views)} {stats.views === 1 ? 'view' : 'views'},{' '}
+              {fmt.number(stats.booked)} booked
+              {/* Nought per cent and "nobody has opened it yet" are different answers. */}
+              {stats.conversion === null ? '' : `, ${stats.conversion}% of views`}
+            </p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <DropdownMenu
+              label="Actions"
+              align="end"
+              groups={[
+                {
+                  key: 'share',
+                  items: [
+                    { key: 'copy', label: 'Copy link', onSelect: () => void copy(hosted, 'Link') },
+                    { key: 'embed', label: 'Embed', onSelect: () => setEmbedding(true) },
+                  ],
+                },
+                {
+                  key: 'go',
+                  items: [
+                    { key: 'booked', label: 'Booked meetings', href: bookedPath(account, { page: page.bookingPageId }) },
+                    { key: 'hours', label: 'My hours', href: availabilityPath(account) },
+                    { key: 'calendars', label: 'Calendar connections', href: calendarsPath(account) },
+                  ],
+                },
+              ]}
+              trigger={(props) => (
+                <button {...props} type="button" className={buttonClass('secondary', 'gap-1')}>
+                  Actions
+                  <ChevronDown aria-hidden="true" className="size-3.5" />
+                </button>
+              )}
+            />
+            <a href={hosted} target="_blank" rel="noreferrer" className={buttonClass('primary', 'no-underline')}>
+              Open page
+              <ExternalLink aria-hidden="true" className="size-3.5" />
+            </a>
+          </div>
+        </div>
+        <div role="tablist" aria-label="Scheduling page" className="scroll-fade-x flex min-w-0 overflow-x-auto border-b border-line">
+          {TABS.map((each) => (
+            <button
+              key={each.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === each.key}
+              onClick={() => setTabParam(each.key === 'overview' ? null : each.key)}
+              className={cn(
+                'relative flex h-12 shrink-0 items-center rounded-hs px-7 whitespace-nowrap text-body transition-colors duration-150 ease-out hover:bg-fill',
+                tab === each.key
+                  ? 'font-medium after:absolute after:inset-x-3 after:bottom-0 after:h-1 after:rounded-[24px] after:bg-body'
+                  : 'font-normal',
+              )}
+            >
+              {each.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="grid min-w-0 gap-10 lg:grid-cols-[minmax(0,35rem)_minmax(0,1fr)]">
+        <div className="min-w-0">{tab === 'overview' ? overview : tab === 'scheduling' ? scheduling : automation}</div>
+        {tab === 'overview' ? (
+          <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+            <TemplatePreview
+              titleTpl={form.titleTpl}
+              descriptionTpl={form.descriptionTpl}
+              companyFallback={form.companyFallback}
+              pageName={form.name}
+              durationMinutes={form.durationMinutes}
+            />
+          </aside>
         ) : null}
-
-        <p className="mt-3 text-xs text-secondary">
-          Anything that resolves to nothing is left out rather than printed. Available:{' '}
-          {BOOKING_MAIL_TOKENS.map((token) => `{{ ${token} }}`).join(' · ')}
-        </p>
-      </section>
-
-      <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">
-        <h2 className="mb-1 font-medium">After booking</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            id="page-confirmation"
-            label="Confirmation message"
-            hint="Shown on the page once the meeting is booked"
-          >
-            <TextArea
-              id="page-confirmation"
-              rows={2}
-              value={form.confirmationCopy ?? ''}
-              disabled={!editable}
-              onChange={(event) => set('confirmationCopy', event.target.value)}
-            />
-          </Field>
-
-          <Field
-            id="page-redirect"
-            label="Or send them to"
-            hint="A full URL. Left empty, the confirmation is shown in place."
-          >
-            <TextInput
-              id="page-redirect"
-              value={form.redirectUrl ?? ''}
-              disabled={!editable}
-              onChange={(event) => set('redirectUrl', event.target.value)}
-            />
-          </Field>
-        </div>
-
-        <div className="mt-3">
-          <Button type="button" onClick={() => setEmbedding(true)}>
-            Link and embed
-          </Button>
-          <EmbedDialog baseUrl={baseUrl} account={accountSlug} page={embedding ? { name: page.name, slug: page.slug } : null} onClose={() => setEmbedding(false)} />
-        </div>
-      </section>
-
-      <div className="flex justify-end">
-        <Button
-          variant="primary"
-          type="submit"
-          busy={saving}
-          disabled={!editable}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
       </div>
 
-      <p className="text-xs text-secondary">
-        Working hours are per person, not per page. Set yours under{' '}
-        <Link href={availabilityPath(account)}>My hours</Link>.
-      </p>
+      <SaveBar form={FORM_ID} changes={editable ? changes : 0} busy={saving} onCancel={reset} />
+      <EmbedDialog
+        baseUrl={baseUrl}
+        account={accountSlug}
+        page={embedding ? { name: saved.form.name, slug: saved.form.slug } : null}
+        onClose={() => setEmbedding(false)}
+      />
+      {leaving ? <DiscardConfirm onKeep={() => setLeaving(false)} onDiscard={leave} /> : null}
     </form>
   )
 }
