@@ -221,7 +221,7 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
         </div>
       </header>
 
-      <div className="-mx-3 -mb-3 grid flex-1 content-start items-start gap-4 border-t border-line bg-canvas p-4 sm:-mx-6 sm:-mb-6 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
+      <div className="-mx-3 -mb-3 grid flex-1 content-start items-start gap-4 border-t border-line bg-canvas p-4 sm:-mx-6 sm:-mb-6 @4xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
         <section aria-labelledby="segment-filters" className="flex min-w-0 flex-col gap-4 rounded-panel border border-line bg-surface p-6">
           <div className="flex items-center gap-2">
             <h2 id="segment-filters" className="text-xl font-medium">
