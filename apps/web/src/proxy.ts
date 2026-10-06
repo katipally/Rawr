@@ -57,7 +57,9 @@ export const config = {
   // /forms, /submissions, /email, /sequences, /templates, /reports-dashboard,
   // /reports-list, /import, /data-integration-home, /duplicates,
   // /connected-apps, /integrations-settings, /marketplace, /ecosystem, /user-home,
-  // /account-and-billing, /service-keys and /private-apps exist only as HubSpot
+  // /account-and-billing, /service-keys, /private-apps, /property-settings,
+  // /object-type-settings, /data-model-overview, /pipelines-settings and
+  // /workflows exist only as HubSpot
   // links to redirect; /settings is matched for HubSpot's settings links.
   matcher: [
     '/contacts/:path*',
@@ -81,5 +83,10 @@ export const config = {
     '/account-and-billing/:path*',
     '/service-keys/:path*',
     '/private-apps/:path*',
+    '/property-settings/:path*',
+    '/object-type-settings/:path*',
+    '/data-model-overview/:path*',
+    '/pipelines-settings/:path*',
+    '/workflows/:path*',
   ],
 }

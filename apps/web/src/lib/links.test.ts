@@ -250,6 +250,28 @@ test('a HubSpot users, teams, defaults, preferences, audit log or service key li
   assert.equal(fromHubspotPath('/settings/tracking/events'), null)
 })
 
+test('a HubSpot property, object, pipeline, subscription, privacy, tracking or workflow link opens its settings page', () => {
+  assert.equal(fromHubspotPath('/property-settings/datasaur/properties'), '/settings/properties')
+  assert.equal(fromHubspotPath('/property-settings/datasaur/properties/groups'), '/settings/properties?tab=groups')
+  assert.equal(fromHubspotPath('/property-settings/datasaur/properties/archived'), '/settings/properties?tab=archived')
+  assert.equal(fromHubspotPath('/property-settings/datasaur/properties/conditional'), '/settings/properties')
+  assert.equal(fromHubspotPath('/object-type-settings/datasaur/object/0-3'), '/settings/objects')
+  assert.equal(fromHubspotPath('/data-model-overview/datasaur'), '/settings/objects')
+  assert.equal(fromHubspotPath('/pipelines-settings/datasaur/object/0-1/contacts-lifecycle-pipeline'), '/settings/lifecycle')
+  assert.equal(fromHubspotPath('/pipelines-settings/datasaur/object/0-3'), '/settings/pipelines')
+  assert.equal(fromHubspotPath('/pipelines-settings/datasaur/object/0-3/default'), '/settings/pipelines')
+  assert.equal(fromHubspotPath('/pipelines-settings/datasaur/object/0-10'), '/settings/pipelines')
+  assert.equal(fromHubspotPath('/settings/datasaur/marketing/email/types'), '/settings/subscriptions')
+  assert.equal(fromHubspotPath('/settings/datasaur/marketing/email/subscriptions'), '/settings/subscriptions')
+  assert.equal(fromHubspotPath('/settings/datasaur/data-privacy'), '/settings/subscriptions/consent')
+  assert.equal(fromHubspotPath('/settings/datasaur/analytics-and-tracking/tracking'), '/settings/tracking')
+  assert.equal(fromHubspotPath('/settings/datasaur/analytics-and-tracking/tracking-urls'), '/settings/tracking/campaigns')
+  assert.equal(fromHubspotPath('/workflows/datasaur'), '/settings/automations')
+  assert.equal(fromHubspotPath('/workflows/datasaur/platform/flow/1234/edit'), '/settings/automations')
+  assert.equal(fromHubspotPath('/settings/subscriptions/consent'), null)
+  assert.equal(fromHubspotPath('/settings/properties'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)

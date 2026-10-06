@@ -6,6 +6,10 @@ import { toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { PropertyList } from './property-list.tsx'
 
+/** HubSpot names the object by its type id, `?type=0-1`, on a link copied out of
+ *  its property settings. */
+const HUBSPOT_TYPES: Record<string, string> = { '0-1': 'contact', '0-2': 'company', '0-3': 'deal' }
+
 /** D4's premise, made reachable: marketing adds a property without a deploy.
  *
  *  Every field created here is stored in <object>.custom as jsonb and appears
@@ -14,12 +18,13 @@ import { PropertyList } from './property-list.tsx'
 const PropertiesPage = async ({
   searchParams,
 }: {
-  searchParams: Promise<{ object?: string }>
+  searchParams: Promise<{ object?: string; type?: string }>
 }) => {
   const session = await readSession()
   if (!session) return null
 
-  const { object } = await searchParams
+  const { object: named, type } = await searchParams
+  const object = named ?? (type ? HUBSPOT_TYPES[type] : undefined)
   const ctx = contextFrom(session)
 
   // From the registry rather than a list here, so an object an admin invented
