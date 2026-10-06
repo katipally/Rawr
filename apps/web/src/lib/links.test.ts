@@ -175,6 +175,20 @@ test('a HubSpot segment, form or marketing email link opens the screen that hold
   assert.equal(fromHubspotPath('/contacts/datasaur/segments/abc'), null)
 })
 
+test('a HubSpot sequence or template link opens the screen that holds it', () => {
+  assert.equal(fromHubspotPath('/sequences/datasaur'), '/contacts/datasaur/sequences')
+  assert.equal(fromHubspotPath('/sequences/datasaur/manage'), '/contacts/datasaur/sequences')
+  assert.equal(fromHubspotPath('/sequences/datasaur/sequence/91'), '/contacts/datasaur/sequences/91')
+  assert.equal(fromHubspotPath('/sequences/datasaur/sequence/91/edit'), '/contacts/datasaur/sequences/91')
+  assert.equal(fromHubspotPath('/sequences/datasaur/sequence/91/performance'), '/contacts/datasaur/sequences/91')
+  assert.equal(fromHubspotPath('/sequences/datasaur/sequence/91/settings'), '/contacts/datasaur/sequences/91?settings=open')
+  assert.equal(fromHubspotPath('/sequences/datasaur/sequence/91/enrollments'), '/contacts/datasaur/sequences/91/enrollments')
+  assert.equal(fromHubspotPath('/templates/datasaur'), '/contacts/datasaur/templates')
+  assert.equal(fromHubspotPath('/templates/datasaur/new'), '/contacts/datasaur/templates?template=new')
+  assert.equal(fromHubspotPath('/templates/datasaur/edit/50694446'), '/contacts/datasaur/templates?template=50694446')
+  assert.equal(fromHubspotPath('/contacts/datasaur/sequences/91'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)

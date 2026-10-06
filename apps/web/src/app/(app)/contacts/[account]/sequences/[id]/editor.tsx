@@ -26,6 +26,7 @@ import { enrollmentsPath, sequenceSendsPath, sequencesPath } from '~/lib/links.t
 import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useUrlParam } from '~/lib/url-params.ts'
 
 type Draft = SequenceStep & { key: string }
 
@@ -86,7 +87,10 @@ export const SequenceEditor = ({
   const router = useRouter()
   const toast = useToast()
   const [steps, setSteps] = useState<Draft[]>(initial.map((step) => ({ ...step, key: newKey() })))
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // In the address so a HubSpot settings link, a reload or a pasted link opens it.
+  const [settingsParam, setSettingsParam] = useUrlParam('settings')
+  const settingsOpen = settingsParam === 'open'
+  const setSettingsOpen = (open: boolean) => setSettingsParam(open ? 'open' : null)
   const [settings, setSettings] = useState(sequence.settings)
   const [sender, setSender] = useState(sequence.sender)
   const [campaigns, setCampaigns] = useState<{ id: number; name: string; status: string }[] | null>(null)

@@ -50,7 +50,8 @@ const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/
 /** HubSpot's marketing addresses, each as the screen here that holds the same
  *  thing. HubSpot puts the portal where this app puts the account, so the slug
  *  carries over. Segments sit under /contacts there as here; forms, a form's
- *  submissions and marketing email have top-level paths of their own. */
+ *  submissions, marketing email, sequences and templates have top-level paths
+ *  of their own. */
 const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string][] = [
   [/^\/contacts\/([^/?#]+)\/objectLists\/create\/?$/, (account) => `/${CRM_ROOT}/${account}/segments?segment=new`],
   [/^\/contacts\/([^/?#]+)\/objectLists(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/segments`],
@@ -61,11 +62,19 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/submissions\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=clean`],
   [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/spam\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=confirmed_spam`],
   [/^\/email\/([^/?#]+)\/manage(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/newsletter`],
+  [/^\/sequences\/([^/?#]+)(?:\/manage(?:\/[^?#]*)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/sequences`],
+  [/^\/sequences\/([^/?#]+)\/sequence\/([^/?#]+)\/enrollments?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/sequences/${id}/enrollments`],
+  [/^\/sequences\/([^/?#]+)\/sequence\/([^/?#]+)\/settings\/?$/, (account, id) => `/${CRM_ROOT}/${account}/sequences/${id}?settings=open`],
+  [/^\/sequences\/([^/?#]+)\/sequence\/([^/?#]+)(?:\/(?:edit|steps|performance))?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/sequences/${id}`],
+  [/^\/templates\/([^/?#]+)\/?$/, (account) => `/${CRM_ROOT}/${account}/templates`],
+  [/^\/templates\/([^/?#]+)\/new\/?$/, (account) => `/${CRM_ROOT}/${account}/templates?template=new`],
+  [/^\/templates\/([^/?#]+)\/edit\/([^/?#]+)\/?$/, (account, id) => `/${CRM_ROOT}/${account}/templates?template=${id}`],
 ]
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
  *  same address with the readable key, a 0-27 tasks link as the tasks list, a
- *  segment, form or marketing email link as the screen that holds it, or null
+ *  segment, form, marketing email, sequence or template link as the screen that
+ *  holds it, or null
  *  when the path is none of those. Read by src/proxy.ts, which redirects to the
  *  answer. */
 export const fromHubspotPath = (path: string): string | null => {
