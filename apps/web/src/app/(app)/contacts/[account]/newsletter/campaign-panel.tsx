@@ -1,11 +1,15 @@
 'use client'
 
 import type { Format } from '~/lib/format.ts'
-import { Alert, Button, EmptyState, Field, Modal, Select, TextInput, useToast } from '@rawr/ui'
+import { Alert, Button, DataTable, EmptyState, Field, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { usePagedRows } from '~/components/paged.tsx'
+import { RowActions, StatusDot, rowPill, type StatusTone } from '~/components/row-actions.tsx'
+import { useUrlParam } from '~/lib/url-params.ts'
 import { useQueryClient } from '@tanstack/react-query'
 
 type Template = { id: number; name: string; subject: string | null; isActive: boolean }
@@ -46,7 +50,23 @@ const BREVO_APP = 'https://app.brevo.com/'
 type Handoff = { name: string; listId: string; scheduled: boolean }
 
 const rate = (fmt: Format, part: number, whole: number): string =>
-  whole === 0 ? '—' : fmt.percent(part / whole, 1)
+  whole === 0 ? EMPTY_VALUE : fmt.percent(part / whole, 1)
+
+/** Brevo's campaign statuses in HubSpot's four views and status dots: sent is
+ *  green, anything queued or going out is amber, a draft is grey. */
+const VIEWS = [
+  { key: 'all', label: 'All emails' },
+  { key: 'draft', label: 'Drafts' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'sent', label: 'Sent' },
+  { key: 'archived', label: 'Archived' },
+] as const
+type View = (typeof VIEWS)[number]['key']
+
+const viewOf = (status: string): Exclude<View, 'all'> =>
+  status === 'sent' ? 'sent' : status === 'draft' ? 'draft' : status === 'archive' ? 'archived' : 'scheduled'
+
+const TONE: Record<Exclude<View, 'all'>, StatusTone> = { sent: 'live', scheduled: 'pending', draft: 'off', archived: 'archived' }
 
 /** B12. Aim a Brevo campaign from here, and read what it did.
  *
@@ -80,6 +100,10 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
   const [senderEmail, setSenderEmail] = useState('')
   const [templateId, setTemplateId] = useState('')
   const [scheduledAt, setScheduledAt] = useState('')
+  const [viewParam, setView] = useUrlParam('status')
+  const view: View = VIEWS.some((entry) => entry.key === viewParam) ? (viewParam as View) : 'all'
+  const shown = (campaigns ?? []).filter((campaign) => view === 'all' || viewOf(campaign.status) === view)
+  const { page, pager } = usePagedRows(shown, 'campaigns')
 
   /** The first thing still missing, named, so a primary button that will not
    *  press says why instead of looking broken. */
@@ -152,6 +176,42 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
     }
   }
 
+  // A campaign Brevo has nothing to say about yet reads as --, not as zero:
+  // "nobody opened it" and "it has not gone out" are different facts.
+  const stat = (campaign: Campaign, value: (stats: NonNullable<Campaign['stats']>) => string) =>
+    campaign.stats ? value(campaign.stats) : EMPTY_VALUE
+
+  const columns: Column<Campaign>[] = [
+    {
+      key: 'name',
+      header: 'Email name',
+      width: 380,
+      render: (campaign) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span className="flex min-w-0 flex-col">
+            <span className="flex min-w-0 font-semibold" title={campaign.status}>
+              <StatusDot tone={TONE[viewOf(campaign.status)]}>{campaign.name}</StatusDot>
+            </span>
+            {campaign.subject ? <span className="truncate pl-[1.125rem] text-small text-secondary">{campaign.subject}</span> : null}
+          </span>
+          {campaign.status === 'draft' ? (
+            <RowActions>
+              <button type="button" className={rowPill} disabled={busy} onClick={() => void send(campaign)}>
+                Send now
+              </button>
+            </RowActions>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'delivered', header: 'Delivered', width: 120, align: 'right', render: (campaign) => stat(campaign, (stats) => fmt.number(stats.delivered)) },
+    { key: 'opens', header: 'Open rate', width: 120, align: 'right', render: (campaign) => stat(campaign, (stats) => rate(fmt, stats.uniqueOpens, stats.delivered)) },
+    { key: 'clicks', header: 'Click rate', width: 120, align: 'right', render: (campaign) => stat(campaign, (stats) => rate(fmt, stats.uniqueClicks, stats.delivered)) },
+    { key: 'bounces', header: 'Bounced', width: 110, align: 'right', render: (campaign) => stat(campaign, (stats) => fmt.number(stats.bounces)) },
+    { key: 'unsubscribes', header: 'Opted out', width: 110, align: 'right', render: (campaign) => stat(campaign, (stats) => fmt.number(stats.unsubscribes)) },
+    { key: 'sent', header: 'Sent', width: 180, render: (campaign) => (campaign.sentAt ? fmt.dateTime(campaign.sentAt) : EMPTY_VALUE) },
+  ]
+
   if (!canWrite) {
     return (
       <p className="text-secondary">
@@ -205,59 +265,37 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
       ) : campaigns.length === 0 ? (
         <EmptyState title="Brevo has no campaigns yet" />
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-2xl border-collapse text-left">
-            <thead>
-              <tr className="border-b border-divider text-small text-secondary">
-                <th className="py-1.5 pr-3 font-medium">Campaign</th>
-                <th className="py-1.5 pr-3 font-medium">Status</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Delivered</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Opened</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Clicked</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Bounced</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Opted out</th>
-                <th className="py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {campaigns.map((campaign) => (
-                <tr key={campaign.id} className="border-b border-divider last:border-0">
-                  <td className="py-1.5 pr-3">
-                    <span className="font-medium">{campaign.name}</span>
-                    {campaign.subject ? (
-                      <span className="block text-small text-secondary">{campaign.subject}</span>
-                    ) : null}
-                  </td>
-                  <td className="py-1.5 pr-3 text-secondary">{campaign.status}</td>
-                  {/* A campaign Brevo has nothing to say about yet reads as a dash,
-                      not as zero: "nobody opened it" and "it has not gone out" are
-                      different facts. */}
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? fmt.number(campaign.stats.delivered) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? rate(fmt, campaign.stats.uniqueOpens, campaign.stats.delivered) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? rate(fmt, campaign.stats.uniqueClicks, campaign.stats.delivered) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? fmt.number(campaign.stats.bounces) : '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-right tabular-nums">
-                    {campaign.stats ? fmt.number(campaign.stats.unsubscribes) : '—'}
-                  </td>
-                  <td className="py-1.5 text-right">
-                    {campaign.status === 'draft' ? (
-                      <Button variant="tertiary" busy={busy} onClick={() => void send(campaign)}>
-                        Send now
-                      </Button>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex min-w-0 flex-col gap-3">
+          <div role="tablist" aria-label="Campaign status" className="scroll-fade-x flex min-w-0 overflow-x-auto rounded-t-hs border-b border-line">
+            {VIEWS.map((entry) => {
+              const count = entry.key === 'all' ? campaigns.length : campaigns.filter((campaign) => viewOf(campaign.status) === entry.key).length
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === entry.key}
+                  onClick={() => setView(entry.key === 'all' ? null : entry.key)}
+                  className={cn(
+                    'flex min-h-10 shrink-0 items-center gap-2 border-r border-line px-4 text-body last:border-r-0',
+                    view === entry.key ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
+                  )}
+                >
+                  {entry.key === 'all' ? entry.label : <StatusDot tone={TONE[entry.key]}>{entry.label}</StatusDot>}
+                  <span className="text-small text-secondary">{fmt.number(count)}</span>
+                </button>
+              )
+            })}
+          </div>
+          <DataTable
+            columns={columns}
+            rows={page}
+            rowKey={(campaign) => String(campaign.id)}
+            caption="Brevo campaigns"
+            storageKey="newsletter.campaigns"
+            empty={<EmptyState title="No campaigns here" description="None of Brevo's campaigns are in this state." />}
+          />
+          {pager}
         </div>
       )}
 
