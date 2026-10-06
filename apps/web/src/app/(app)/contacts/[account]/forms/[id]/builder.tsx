@@ -17,7 +17,7 @@ import { ChevronDown, ChevronLeft, ListPlus, Paintbrush, Settings2, Workflow } f
 import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Alert, Button, DiscardConfirm, DropdownMenu, Field, Modal, Select, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
+import { Alert, Button, DiscardConfirm, DropdownMenu, Field, Modal, Select, Skeleton, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
@@ -70,6 +70,38 @@ const PANELS: { key: string; label: string; icon: ReactNode }[] = [
   { key: 'settings', label: 'Basics', icon: <Settings2 aria-hidden="true" className="size-4" /> },
 ]
 
+
+/** The editor's frame, drawn until the editor can portal itself over the
+ *  window, so a cold start never opens on a blank page: the dark bar, the panel
+ *  rail, the open panel and the form preview. */
+const EditorSkeleton = () => (
+  <div role="status" aria-label="Opening the form editor" className="fixed inset-0 z-overlay flex flex-col bg-canvas">
+    <div className="grid min-h-14 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 bg-nav px-2">
+      <Skeleton className="h-8 w-28 opacity-30" />
+      <Skeleton className="mx-auto h-6 w-[min(16rem,100%)] opacity-30" />
+      <Skeleton className="h-8 w-24 opacity-30" />
+    </div>
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+      <div className="flex shrink-0 gap-1 border-b border-line bg-surface p-1.5 md:flex-col md:border-r md:border-b-0">
+        {Array.from({ length: 4 }, (_, index) => (
+          <Skeleton key={index} className="size-10" />
+        ))}
+      </div>
+      <div className="flex max-h-[50dvh] min-h-0 w-full shrink-0 flex-col gap-3 overflow-hidden border-b border-line bg-surface p-4 md:max-h-none md:w-[min(32rem,45vw)] md:border-r md:border-b-0">
+        <Skeleton className="h-6 w-40" />
+        {Array.from({ length: 5 }, (_, index) => (
+          <Skeleton key={index} className="h-12" />
+        ))}
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden p-4 sm:p-6">
+        <div className="mx-auto flex w-full max-w-[50rem] flex-col gap-4">
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-64" />
+        </div>
+      </div>
+    </div>
+  </div>
+)
 
 export const FormBuilder = ({
   account,
@@ -252,7 +284,7 @@ export const FormBuilder = ({
   const panel = PANELS.some((entry) => entry.key === panelParam) || panelParam === 'none' ? panelParam : 'questions'
   const leave = () => router.push(form.id ? formPerformancePath(account, form.id) : formsPath(account))
 
-  if (!mounted) return null
+  if (!mounted) return <EditorSkeleton />
 
   // The whole window, over the app's own bar and rail, as HubSpot's editor is.
   // Portalled because the shell's content card is a size container, which a
