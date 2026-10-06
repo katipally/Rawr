@@ -91,7 +91,7 @@ const ReportsOverview = async ({
             href={link('pipeline')}
             label="Deals created"
             value={String(created)}
-            hint={`${won} won, ${fmt.amounts(pipeline.wonAmounts)}`}
+            hint={`${won} closed won in this range, ${fmt.amounts(pipeline.wonAmounts)}`}
           />
           <Tile
             href={link('forms')}

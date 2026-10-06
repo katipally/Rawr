@@ -71,7 +71,7 @@ const CARDS: CardDef[] = [
       return {
         kind: 'metric',
         value: fmt.number(sum(weeks, (week) => week.created)),
-        hint: `${fmt.number(sum(weeks, (week) => week.won))} won, ${fmt.number(sum(weeks, (week) => week.lost))} lost`,
+        hint: `${fmt.number(sum(weeks, (week) => week.won))} closed won, ${fmt.number(sum(weeks, (week) => week.lost))} closed lost in this range`,
       }
     },
   },
