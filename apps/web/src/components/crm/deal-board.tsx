@@ -316,7 +316,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
             {/* The card list scrolls, the board does not. Height follows the
                 viewport rather than a fixed pixel count so a short laptop screen
                 and a tall monitor both show whole cards. */}
-            <ol className="flex min-h-0 max-h-[min(65svh,50rem)] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2 @[60rem]:max-h-none">
+            <ol className="relative flex min-h-0 max-h-[min(65svh,50rem)] flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2 @[60rem]:max-h-none">
               {shownCards(column).length === 0 ? (
                 <li className="px-1 py-2 text-secondary">
                   Nothing {groupByKey === 'stage_id' ? 'in this stage' : 'here'} yet.
