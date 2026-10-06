@@ -2,14 +2,12 @@
 
 import type { SequenceRow, SequenceStep, StepKind, VariantResult } from '@rawr/db'
 import {
-  Badge,
-  Breadcrumb,
   Button,
   Card,
   Checkbox,
   Combobox,
+  DropdownMenu,
   Field,
-  IconButton,
   Select,
   SidePanel,
   Switch,
@@ -18,15 +16,15 @@ import {
   cn,
   useToast,
 } from '@rawr/ui'
-import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
-import Link from 'next/link'
+import { ChevronDown, GripVertical, ListTodo, Mail, MessageSquare, Phone, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { enrollmentsPath, sequenceSendsPath, sequencesPath } from '~/lib/links.ts'
+import { type ReactNode, useEffect, useState } from 'react'
 import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
+import { rowPill } from '~/components/row-actions.tsx'
+import { SequenceHeader } from './sequence-header.tsx'
 
 type Draft = SequenceStep & { key: string }
 
@@ -38,6 +36,15 @@ const KIND_LABEL: Record<StepKind, string> = {
   linkedin: 'Message on LinkedIn',
   task: 'Do something else',
 }
+
+const KIND_ICON: Record<StepKind, ReactNode> = {
+  email: <Mail aria-hidden="true" className="size-4" />,
+  call: <Phone aria-hidden="true" className="size-4" />,
+  linkedin: <MessageSquare aria-hidden="true" className="size-4" />,
+  task: <ListTodo aria-hidden="true" className="size-4" />,
+}
+
+const STEP_KINDS: StepKind[] = ['email', 'call', 'linkedin', 'task']
 
 const DAYS = [
   { value: 1, label: 'Mon' },
@@ -95,6 +102,7 @@ export const SequenceEditor = ({
   const [sender, setSender] = useState(sequence.sender)
   const [campaigns, setCampaigns] = useState<{ id: number; name: string; status: string }[] | null>(null)
   const [busy, setBusy] = useState(false)
+  const [dragging, setDragging] = useState<number | null>(null)
 
   // Fetched when the panel opens on a Woodpecker sequence, not on every render of
   // a Gmail one: the list is a call to Woodpecker and most sequences never need it.
@@ -145,17 +153,17 @@ export const SequenceEditor = ({
       return next
     })
 
-  const addStep = (kind: StepKind) =>
+  const addStep = (kind: StepKind, at: number) =>
     setSteps((current) => [
-      ...current,
+      ...current.slice(0, at),
       {
         key: newKey(),
         id: '',
-        position: current.length,
+        position: at,
         kind,
         // A first step goes as soon as the window allows; a later one waits two
         // days, which is the gap most people want and nobody wants to type.
-        delayDays: current.length === 0 ? 0 : 2,
+        delayDays: at === 0 ? 0 : 2,
         delayHours: 0,
         subject: kind === 'email' ? '' : null,
         subjectB: null,
@@ -164,6 +172,7 @@ export const SequenceEditor = ({
         taskTitle: kind === 'email' ? null : KIND_LABEL[kind],
         taskBody: null,
       },
+      ...current.slice(at),
     ])
 
   const saveSteps = () =>
@@ -189,27 +198,12 @@ export const SequenceEditor = ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <Breadcrumb items={[{ label: 'Sequences', href: sequencesPath(account) }, { label: sequence.name }]} />
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="flex flex-wrap items-center gap-2 text-lg font-medium">
-            {sequence.name}
-            <Badge tone={sequence.state === 'active' ? 'ok' : sequence.state === 'paused' ? 'warn' : 'neutral'} dot>
-              {sequence.state}
-            </Badge>
-          </h1>
-          {sequence.description ? <p className="text-secondary">{sequence.description}</p> : null}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Link href={enrollmentsPath(account, sequence.id)} className="font-medium">
-            {sequence.stats.active} in flight
-          </Link>
-          <Link href={sequenceSendsPath(account, sequence.id)} className="font-medium">
-            What it sent
-          </Link>
-          {canWrite ? (
+      <SequenceHeader
+        account={account}
+        sequence={sequence}
+        current="steps"
+        actions={
+          canWrite ? (
             <>
               <Button onClick={() => setSettingsOpen(true)}>Settings</Button>
               {sequence.state === 'active' ? (
@@ -239,24 +233,25 @@ export const SequenceEditor = ({
                 </Button>
               )}
             </>
-          ) : null}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-y-4 rounded-panel border border-line p-4 sm:grid-cols-3 xl:grid-cols-6">
         {[
+          { label: 'In flight', value: sequence.stats.active },
           { label: 'Sent', value: sequence.stats.sent },
           { label: 'Opened', value: sequence.stats.opened },
           { label: 'Clicked', value: sequence.stats.clicked },
           { label: 'Replied', value: sequence.stats.replied },
           { label: 'Bounced', value: sequence.stats.bounced },
         ].map((tile) => (
-          <Card key={tile.label}>
-            <p className="text-small text-secondary">{tile.label}</p>
-            <p className="text-lg tabular-nums">{tile.value}</p>
-          </Card>
+          <div key={tile.label} className="flex min-w-0 flex-col items-center gap-1 text-center">
+            <dt className="text-small font-semibold uppercase">{tile.label}</dt>
+            <dd className="text-xl font-medium tabular-nums">{tile.value}</dd>
+          </div>
         ))}
-      </div>
+      </dl>
 
       {sender === 'woodpecker' ? (
         <Card title="Woodpecker owns the steps">
@@ -269,64 +264,102 @@ export const SequenceEditor = ({
         </Card>
       ) : null}
 
-      <div className={cn('flex flex-col gap-3', sender === 'woodpecker' && 'hidden')}>
+      <div className={cn('mx-auto flex w-full max-w-3xl min-w-0 flex-col', sender === 'woodpecker' && 'hidden')}>
         {steps.map((step, index) => (
-          <Card
-            key={step.key}
-            title={`${index + 1}. ${KIND_LABEL[step.kind]}`}
-            action={
-              canWrite ? (
-                <>
-                  <IconButton
-                    label="Move up"
-                    icon={<ArrowUp className="size-4" />}
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
+          <div key={step.key} className="flex min-w-0 flex-col">
+            <Connector canWrite={canWrite} onAdd={(kind) => addStep(kind, index)}>
+              <span className="text-secondary">{index === 0 ? 'Wait before the first one' : 'Wait'}</span>
+              <TextInput
+                aria-label={`Days before step ${index + 1}`}
+                inputMode="numeric"
+                className="w-14"
+                disabled={!canWrite}
+                value={String(step.delayDays)}
+                onChange={(event) => patch(step.key, { delayDays: Number(event.target.value.replaceAll(/\D/g, '') || 0) })}
+              />
+              <span className="text-secondary">days</span>
+              <TextInput
+                aria-label={`Hours before step ${index + 1}`}
+                inputMode="numeric"
+                className="w-14"
+                disabled={!canWrite}
+                value={String(step.delayHours)}
+                onChange={(event) =>
+                  patch(step.key, { delayHours: Math.min(23, Number(event.target.value.replaceAll(/\D/g, '') || 0)) })
+                }
+              />
+              <span className="text-secondary">hours</span>
+            </Connector>
+            {/* A drop target for the grip. Dragging is the pointer shortcut; Move up
+                and Move down in the step's Actions are the way a keyboard does it. */}
+            <section
+              aria-label={`Step ${index + 1}`}
+              onDragOver={(event) => {
+                if (dragging !== null) event.preventDefault()
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                if (dragging !== null) move(dragging, index - dragging)
+                setDragging(null)
+              }}
+              className={cn(
+                'min-w-0 overflow-hidden rounded-panel border border-line bg-surface shadow-panel',
+                dragging === index && 'opacity-60',
+              )}
+            >
+              <div className="flex min-w-0 items-center gap-2 border-b border-line bg-fill px-3 py-2">
+                {canWrite ? (
+                  // biome-ignore lint/a11y/noStaticElementInteractions: the grip is the pointer's shortcut; Actions is the keyboard's
+                  <span
+                    draggable
+                    onDragStart={(event) => {
+                      setDragging(index)
+                      event.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragEnd={() => setDragging(null)}
+                    title="Drag to move"
+                    className="flex shrink-0 cursor-grab text-secondary"
+                  >
+                    <GripVertical aria-hidden="true" className="size-4" />
+                  </span>
+                ) : null}
+                <span className="flex shrink-0">{KIND_ICON[step.kind]}</span>
+                <h2 className="min-w-0 flex-1 truncate font-semibold">
+                  {index + 1}. {KIND_LABEL[step.kind]}
+                </h2>
+                {canWrite ? (
+                  <DropdownMenu
+                    label={`Actions for step ${index + 1}`}
+                    groups={[
+                      {
+                        key: 'move',
+                        items: [
+                          { key: 'up', label: 'Move up', disabled: index === 0, onSelect: () => move(index, -1) },
+                          { key: 'down', label: 'Move down', disabled: index === steps.length - 1, onSelect: () => move(index, 1) },
+                        ],
+                      },
+                      {
+                        key: 'remove',
+                        items: [
+                          {
+                            key: 'delete',
+                            label: 'Delete',
+                            destructive: true,
+                            onSelect: () => setSteps((current) => current.filter((row) => row.key !== step.key)),
+                          },
+                        ],
+                      },
+                    ]}
+                    trigger={(props) => (
+                      <button {...props} type="button" className={rowPill}>
+                        Actions
+                        <ChevronDown aria-hidden="true" className="size-3" />
+                      </button>
+                    )}
                   />
-                  <IconButton
-                    label="Move down"
-                    icon={<ArrowDown className="size-4" />}
-                    disabled={index === steps.length - 1}
-                    onClick={() => move(index, 1)}
-                  />
-                  <IconButton
-                    label="Remove this step"
-                    tone="destructive"
-                    icon={<Trash2 className="size-4" />}
-                    onClick={() => setSteps((current) => current.filter((row) => row.key !== step.key))}
-                  />
-                </>
-              ) : null
-            }
-          >
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-wrap items-end gap-3">
-                <Field label="Wait" id={`${step.key}-days`} hint={index === 0 ? 'Before the first one goes out.' : 'After the step above.'}>
-                  <div className="flex items-center gap-2">
-                    <TextInput
-                      id={`${step.key}-days`}
-                      inputMode="numeric"
-                      className="w-16"
-                      disabled={!canWrite}
-                      value={String(step.delayDays)}
-                      onChange={(event) => patch(step.key, { delayDays: Number(event.target.value.replaceAll(/\D/g, '') || 0) })}
-                    />
-                    <span className="text-secondary">days</span>
-                    <TextInput
-                      aria-label="Hours"
-                      inputMode="numeric"
-                      className="w-16"
-                      disabled={!canWrite}
-                      value={String(step.delayHours)}
-                      onChange={(event) =>
-                        patch(step.key, { delayHours: Math.min(23, Number(event.target.value.replaceAll(/\D/g, '') || 0)) })
-                      }
-                    />
-                    <span className="text-secondary">hours</span>
-                  </div>
-                </Field>
+                ) : null}
               </div>
-
+              <div className="flex min-w-0 flex-col gap-3 p-4">
               {step.kind === 'email' ? (
                 <>
                   {canWrite ? (
@@ -430,8 +463,9 @@ export const SequenceEditor = ({
                   </p>
                 </>
               )}
-            </div>
-          </Card>
+              </div>
+            </section>
+          </div>
         ))}
 
         {steps.length === 0 ? (
@@ -440,12 +474,10 @@ export const SequenceEditor = ({
           </Card>
         ) : null}
 
+        <Connector canWrite={canWrite} onAdd={(kind) => addStep(kind, steps.length)} />
+
         {canWrite ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => addStep('email')}>Add an email</Button>
-            <Button onClick={() => addStep('call')}>Add a call</Button>
-            <Button onClick={() => addStep('linkedin')}>Add a LinkedIn step</Button>
-            <Button onClick={() => addStep('task')}>Add something else</Button>
+          <div className="sticky bottom-0 flex justify-end border-t border-line bg-surface py-3">
             <Button variant="primary" busy={busy} onClick={() => void saveSteps()}>
               Save steps
             </Button>
@@ -653,6 +685,50 @@ export const SequenceEditor = ({
     </div>
   )
 }
+
+/** The line between two steps: the wait before the step under it, and the
+ *  round + that puts a new step in at that point. */
+const Connector = ({
+  canWrite,
+  onAdd,
+  children,
+}: {
+  canWrite: boolean
+  onAdd: (kind: StepKind) => void
+  children?: ReactNode
+}) => (
+  <div className="flex min-w-0 flex-col items-center">
+    <span aria-hidden="true" className="h-4 w-px bg-line-strong" />
+    {canWrite ? (
+      <DropdownMenu
+        label="Choose step"
+        groups={[
+          {
+            key: 'kinds',
+            items: STEP_KINDS.map((kind) => ({ key: kind, label: KIND_LABEL[kind], onSelect: () => onAdd(kind) })),
+          },
+        ]}
+        trigger={(props) => (
+          <button
+            {...props}
+            type="button"
+            aria-label="Add a step here"
+            className="flex size-6 items-center justify-center rounded-pill border border-line-strong bg-surface transition-all duration-150 ease-out hover:bg-fill"
+          >
+            <Plus aria-hidden="true" className="size-3.5" />
+          </button>
+        )}
+      />
+    ) : null}
+    {children ? (
+      <>
+        <span aria-hidden="true" className="h-2 w-px bg-line-strong" />
+        <div className="flex min-w-0 flex-wrap items-center justify-center gap-2 text-small">{children}</div>
+      </>
+    ) : null}
+    <span aria-hidden="true" className="h-4 w-px bg-line-strong" />
+  </div>
+)
 
 /** Dropping a saved email into a step.
  *
