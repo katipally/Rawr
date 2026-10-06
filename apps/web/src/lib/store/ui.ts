@@ -41,6 +41,7 @@ const SYNCED_KEYS = {
   recent: 'recent',
   timelineKinds: 'timelineKinds',
   panelOpen: 'panelOpen',
+  quickFilters: 'quickFilters',
 } as const
 type SyncedField = keyof typeof SYNCED_KEYS
 
@@ -56,6 +57,9 @@ type UiState = {
    *  `assoc:deal` on a record page's association rail). A panel with no entry
    *  defaults open, the way it always has. */
   panelOpen: Record<string, boolean>
+  /** Which properties a list's quick filter row offers, by object key. An object
+   *  with no entry shows its defaults. */
+  quickFilters: Record<string, string[]>
   /** Whether `usePreferencesSync` has finished its one round trip for this
    *  session (or given up after one), so the server-backed fields above hold
    *  this account's real values rather than the empty defaults every field
@@ -68,6 +72,7 @@ type UiState = {
   remember: (item: RecentItem) => void
   setTimelineKinds: (object: string, kinds: string[]) => void
   setPanelOpen: (key: string, open: boolean) => void
+  setQuickFilters: (object: string, keys: string[] | null) => void
 }
 
 export const useUi = create<UiState>()(
@@ -78,6 +83,7 @@ export const useUi = create<UiState>()(
       recent: [],
       timelineKinds: {},
       panelOpen: {},
+      quickFilters: {},
       serverSynced: false,
 
       setRailExpanded: (railExpanded) => set({ railExpanded }),
@@ -95,6 +101,11 @@ export const useUi = create<UiState>()(
       setTimelineKinds: (object, kinds) =>
         set((state) => ({ timelineKinds: { ...state.timelineKinds, [object]: kinds } })),
       setPanelOpen: (key, open) => set((state) => ({ panelOpen: { ...state.panelOpen, [key]: open } })),
+      setQuickFilters: (object, keys) =>
+        set((state) => {
+          const { [object]: _dropped, ...rest } = state.quickFilters
+          return { quickFilters: keys ? { ...rest, [object]: keys } : rest }
+        }),
     }),
     {
       name: 'rawr.ui',
@@ -272,6 +283,7 @@ export const usePreferencesSync = (): void => {
           recent: isRecentArray(server.recent) ? server.recent : local.recent,
           timelineKinds: isStringArrayRecord(server.timelineKinds) ? server.timelineKinds : local.timelineKinds,
           panelOpen: isBooleanRecord(server.panelOpen) ? server.panelOpen : local.panelOpen,
+          quickFilters: isStringArrayRecord(server.quickFilters) ? server.quickFilters : local.quickFilters,
           serverSynced: true,
         })
         startWriteBack()

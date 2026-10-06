@@ -2,6 +2,7 @@ import { calendarFields, isObjectKey, listViews, parseFilters, readBoard, resolv
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
+import { FiltersDock } from '~/components/crm/filters-dock.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
@@ -146,63 +147,65 @@ const BoardPage = async ({
         />
       ) : null}
 
-      <ListToolbar
-        account={account}
-        object="deal"
-        objectLabel={object.nameSingular}
-        view={resolved.view.slug}
-        viewId={resolved.view.id}
-        viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
-        viewLabel={resolved.view.name}
-        kind="board"
-        kinds={kindsFor(object)}
-        params={listParams}
-        filters={filters as never}
-        columns={resolved.view.columns}
-        sorts={resolved.view.sorts}
-        filterFields={toFilterFields(object)}
-        createFields={toEditableFields(object, lookups)}
-        canWrite={canWrite}
-        openCreate={search.new === '1'}
-        openView={search.view === 'new'}
-        allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
-        trailing={
-          byStage && lookups.pipelines.length > 1 ? (
-            <PipelinePicker
-              // Keyed because this element is created here and rendered inside the
-              // toolbar's own children array on the client, which is a list as far
-              // as React is concerned.
-              key="pipeline"
-              currentId={pipelineId ?? ''}
-              pipelines={lookups.pipelines.map((pipeline) => ({
-                id: pipeline.id,
-                label: pipeline.label,
-                href: objectView(account, 'deal', resolved.view.slug, 'board', { ...listParams, pipeline: pipeline.id }),
-              }))}
-            />
-          ) : null
-        }
-      />
-
-      {board && board.unassigned > 0 ? (
-        <Alert tone="warning">
-          {fmt.number(board.unassigned)} deal{board.unassigned === 1 ? '' : 's'}{' '}
-          {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
-          {byStage
-            ? 'Switch pipelines above to find them.'
-            : `Filter on ${board.groupByLabel} being empty to see them.`}
-        </Alert>
-      ) : null}
-
-      {board ? (
-        <DealBoard
+      <FiltersDock>
+        <ListToolbar
           account={account}
-          columns={board.columns}
-          query={{ ...query, filters: query.filters as never }}
-          groupByKey={board.groupByKey}
+          object="deal"
+          objectLabel={object.nameSingular}
+          view={resolved.view.slug}
+          viewId={resolved.view.id}
+          viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
+          viewLabel={resolved.view.name}
+          kind="board"
+          kinds={kindsFor(object)}
+          params={listParams}
+          filters={filters as never}
+          columns={resolved.view.columns}
+          sorts={resolved.view.sorts}
+          filterFields={toFilterFields(object)}
+          createFields={toEditableFields(object, lookups)}
           canWrite={canWrite}
+          openCreate={search.new === '1'}
+          openView={search.view === 'new'}
+          allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
+          trailing={
+            byStage && lookups.pipelines.length > 1 ? (
+              <PipelinePicker
+                // Keyed because this element is created here and rendered inside the
+                // toolbar's own children array on the client, which is a list as far
+                // as React is concerned.
+                key="pipeline"
+                currentId={pipelineId ?? ''}
+                pipelines={lookups.pipelines.map((pipeline) => ({
+                  id: pipeline.id,
+                  label: pipeline.label,
+                  href: objectView(account, 'deal', resolved.view.slug, 'board', { ...listParams, pipeline: pipeline.id }),
+                }))}
+              />
+            ) : null
+          }
         />
-      ) : null}
+
+        {board && board.unassigned > 0 ? (
+          <Alert tone="warning">
+            {fmt.number(board.unassigned)} deal{board.unassigned === 1 ? '' : 's'}{' '}
+            {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
+            {byStage
+              ? 'Switch pipelines above to find them.'
+              : `Filter on ${board.groupByLabel} being empty to see them.`}
+          </Alert>
+        ) : null}
+
+        {board ? (
+          <DealBoard
+            account={account}
+            columns={board.columns}
+            query={{ ...query, filters: query.filters as never }}
+            groupByKey={board.groupByKey}
+            canWrite={canWrite}
+          />
+        ) : null}
+      </FiltersDock>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { notFound, redirect } from 'next/navigation'
 import { CalendarGrid } from '~/components/crm/calendar-grid.tsx'
 import { todayIn } from '~/lib/format.ts'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
+import { FiltersDock } from '~/components/crm/filters-dock.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeFilters, exportPath, importsPath, objectView, recordPath, type ListParams, type ViewKind } from '~/lib/links.ts'
@@ -146,69 +147,71 @@ const CalendarPage = async ({
         </Alert>
       ) : null}
 
-      <ListToolbar
-        account={account}
-        object={objectParam}
-        objectLabel={object.nameSingular}
-        view={resolved.view.slug}
-        viewId={resolved.view.id}
-        viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
-        viewLabel={resolved.view.name}
-        kind="calendar"
-        kinds={kindsFor(object)}
-        params={listParams}
-        filters={filters as never}
-        columns={resolved.view.columns}
-        sorts={resolved.view.sorts}
-        filterFields={toFilterFields(object)}
-        createFields={toEditableFields(object, lookups)}
-        canWrite={canWrite}
-        openCreate={search.new === '1'}
-        openView={search.view === 'new'}
-        allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
-      />
-
-      {placeable.length > 1 ? (
-        <FilterRow
-          label="Place on"
-          lead="Place on"
-          items={placeable.map((field) => ({
-            key: field.key,
-            label: field.label,
-            href: objectView(account, objectParam, resolved.view.slug, 'calendar', {
-              ...listParams,
-              group: field.key,
-              month,
-            }),
-            current: field.key === calendar?.fieldKey,
-          }))}
+      <FiltersDock>
+        <ListToolbar
+          account={account}
+          object={objectParam}
+          objectLabel={object.nameSingular}
+          view={resolved.view.slug}
+          viewId={resolved.view.id}
+          viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
+          viewLabel={resolved.view.name}
+          kind="calendar"
+          kinds={kindsFor(object)}
+          params={listParams}
+          filters={filters as never}
+          columns={resolved.view.columns}
+          sorts={resolved.view.sorts}
+          filterFields={toFilterFields(object)}
+          createFields={toEditableFields(object, lookups)}
+          canWrite={canWrite}
+          openCreate={search.new === '1'}
+          openView={search.view === 'new'}
+          allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
         />
-      ) : null}
 
-      {calendar ? (
-        <CalendarGrid
-          month={calendar.month}
-          today={today}
-          entries={calendar.entries.map((entry) => ({
-            ...entry,
-            href: recordPath(account, objectParam, entry.id, {
-              from: objectView(account, objectParam, resolved.view.slug, 'calendar', {
+        {placeable.length > 1 ? (
+          <FilterRow
+            label="Place on"
+            lead="Place on"
+            items={placeable.map((field) => ({
+              key: field.key,
+              label: field.label,
+              href: objectView(account, objectParam, resolved.view.slug, 'calendar', {
                 ...listParams,
-                group: calendar.fieldKey,
+                group: field.key,
                 month,
               }),
-            }),
-          }))}
-          truncated={calendar.truncated}
-          fieldLabel={calendar.fieldLabel}
-          monthHref={(month) =>
-            objectView(account, objectParam, resolved.view.slug, 'calendar', {
-              ...listParams,
-              month,
-            } as ListParams)
-          }
-        />
-      ) : null}
+              current: field.key === calendar?.fieldKey,
+            }))}
+          />
+        ) : null}
+
+        {calendar ? (
+          <CalendarGrid
+            month={calendar.month}
+            today={today}
+            entries={calendar.entries.map((entry) => ({
+              ...entry,
+              href: recordPath(account, objectParam, entry.id, {
+                from: objectView(account, objectParam, resolved.view.slug, 'calendar', {
+                  ...listParams,
+                  group: calendar.fieldKey,
+                  month,
+                }),
+              }),
+            }))}
+            truncated={calendar.truncated}
+            fieldLabel={calendar.fieldLabel}
+            monthHref={(month) =>
+              objectView(account, objectParam, resolved.view.slug, 'calendar', {
+                ...listParams,
+                month,
+              } as ListParams)
+            }
+          />
+        ) : null}
+      </FiltersDock>
     </div>
   )
 }

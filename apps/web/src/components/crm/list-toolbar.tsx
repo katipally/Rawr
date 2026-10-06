@@ -1,11 +1,13 @@
 'use client'
 
-import { Badge, Button, Checkbox, IconButton, Modal, Popover, TextInput, cn, useToast } from '@rawr/ui'
+import { Badge, Button, Checkbox, IconButton, Modal, Popover, TextInput, cn, useMounted, usePresence, useToast } from '@rawr/ui'
 import { ArrowDown, ArrowUp, ArrowUpDown, BookmarkPlus, CalendarDays, ChevronDown, ChevronUp, Columns3, Settings, SlidersHorizontal, Search, Table2, X } from 'lucide-react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { FILTERS_DOCK } from '~/lib/docks.ts'
 import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
@@ -13,6 +15,7 @@ import { typingInto } from '~/lib/typing-into.ts'
 import { replaceParams } from '~/lib/url-params.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'
 import { CreateRecordPanel, type CreateField } from './create-record.tsx'
+import { QuickFilters } from './quick-filters.tsx'
 
 export type ListToolbarProps = {
   account: string
@@ -51,6 +54,9 @@ export type ListToolbarProps = {
 const pill =
   'inline-flex h-pill items-center gap-1.5 rounded-pill border border-line-strong bg-surface px-4 py-2 text-small font-light transition-all duration-150 ease-out hover:bg-fill'
 
+/** Matches --rawr-duration-dock, which the panel's width transition runs for. */
+const DOCK_EXIT_MS = 125
+
 const KIND_LABEL: Record<ViewKind, string> = { list: 'Table view', board: 'Board view', calendar: 'Calendar view' }
 const KIND_ICON: Record<ViewKind, typeof Table2> = { list: Table2, board: Columns3, calendar: CalendarDays }
 
@@ -81,6 +87,10 @@ export const ListToolbar = ({
   const [search, setSearch] = useState(params.q ?? '')
   const searchInput = useRef<HTMLInputElement>(null)
   const [showFilters, setShowFilters] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const mounted = useMounted()
+  const advanced = usePresence(showAdvanced && mounted, DOCK_EXIT_MS)
+  const filtersDock = mounted ? document.getElementById(FILTERS_DOCK) : null
   const sortButton = useRef<HTMLButtonElement>(null)
   const [showSort, setShowSort] = useState(false)
   const headerCollapsed = useUi((state) => state.panelOpen.kpis) === false
@@ -135,6 +145,14 @@ export const ListToolbar = ({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+  useEffect(() => {
+    if (!showAdvanced) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && !document.querySelector('[aria-modal="true"]')) setShowAdvanced(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [showAdvanced])
   const [viewName, setViewName] = useState('')
   const [shared, setShared] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -146,6 +164,8 @@ export const ListToolbar = ({
   }
 
   const activeConditions = filters.reduce((sum, group) => sum + group.conditions.length, 0)
+  const choices = Object.fromEntries(createFields.flatMap((field) => (field.choices ? [[field.key, field.choices]] : [])))
+  const applyFilters = (groups: Group[]) => goTo({ filters: encodeFilters(groups) })
 
   /** One write behind both buttons. `into` null creates a new view under the
    *  typed name; `into` an id overwrites that view's arrangement and keeps its
@@ -369,16 +389,56 @@ export const ListToolbar = ({
       </div>
 
       {showFilters ? (
-        <FilterBuilder
+        <QuickFilters
+          object={object}
           fields={filterFields}
-          value={filters}
-          onClose={() => setShowFilters(false)}
-          onApply={(groups) => {
-            setShowFilters(false)
-            goTo({ filters: encodeFilters(groups) })
-          }}
+          choices={choices}
+          filters={filters}
+          onChange={applyFilters}
+          onAdvanced={() => setShowAdvanced(true)}
         />
       ) : null}
+
+      {/* Docked beside the list rather than over it, and growing out of nothing,
+          so the table reflows instead of being covered. A list too narrow to
+          share lays it over the right edge instead. */}
+      {advanced.present && filtersDock
+        ? createPortal(
+            <div
+              data-closing={advanced.closing || undefined}
+              className="w-[min(calc(var(--spacing-filters)+1rem),100cqw)] shrink-0 overflow-hidden transition-[width] duration-(--rawr-duration-dock) ease-dock starting:w-0 data-closing:w-0 motion-reduce:transition-none @max-dock:absolute @max-dock:inset-y-0 @max-dock:right-0 @max-dock:z-flyout"
+            >
+              <section
+                aria-label="All filters"
+                inert={advanced.closing}
+                className="ml-4 flex h-full w-[min(var(--spacing-filters),calc(100cqw-1rem))] flex-col border-l border-line bg-surface @max-dock:shadow-overlay"
+              >
+                <header className="flex shrink-0 items-center gap-2 border-b border-line p-4">
+                  <h2 className="min-w-0 flex-1 truncate text-lg font-normal">All filters</h2>
+                  <IconButton
+                    label="Close filters"
+                    icon={<X aria-hidden="true" className="size-4" />}
+                    onClick={() => setShowAdvanced(false)}
+                    className="text-body"
+                  />
+                </header>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                  <h3 className="mb-3 text-base font-semibold">Advanced filters</h3>
+                  {/* Keyed by what is applied, so a quick filter changed while the
+                      panel is open shows here rather than being overwritten. */}
+                  <FilterBuilder
+                    key={encodeFilters(filters)}
+                    fields={filterFields}
+                    value={filters}
+                    onApply={applyFilters}
+                    className="rounded-none border-0 p-0 shadow-none"
+                  />
+                </div>
+              </section>
+            </div>,
+            filtersDock,
+          )
+        : null}
 
       <Modal
         open={showSave}

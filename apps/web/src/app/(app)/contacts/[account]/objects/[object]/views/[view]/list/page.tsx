@@ -3,6 +3,7 @@ import { Alert, EmptyState } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
 import { KpiStrip } from '~/components/crm/kpi-strip.tsx'
+import { FiltersDock } from '~/components/crm/filters-dock.tsx'
 import { ListToolbar } from '~/components/crm/list-toolbar.tsx'
 import { RecordTable } from '~/components/crm/record-table.tsx'
 import { ViewTabs } from '~/components/crm/view-tabs.tsx'
@@ -223,66 +224,68 @@ const ListPage = async ({
         canWrite={canWrite}
       />
 
-      <ListToolbar
-        account={account}
-        object={objectParam}
-        objectLabel={object.nameSingular}
-        view={resolved.view.slug}
-        viewId={resolved.view.id}
-        viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
-        viewLabel={resolved.view.name}
-        kind="list"
-        kinds={kindsFor(object)}
-        params={listParams}
-        filters={filters as never}
-        columns={columns}
-        sorts={sorts}
-        filterFields={toFilterFields(object)}
-        createFields={toEditableFields(object, lookups)}
-        canWrite={canWrite}
-        openCreate={search.new === '1'}
-        openView={search.view === 'new'}
-        allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
-      />
-
-      <KpiStrip
-        account={account}
-        object={objectParam}
-        view={resolved.view.slug}
-        params={listParams}
-        filters={filters as never}
-        hasRecords={(page?.total ?? page?.rows.length ?? 0) > 0}
-      />
-
-      {queryError ? (
-        <EmptyState
-          title="This view could not be read"
-          description={queryError}
+      <FiltersDock>
+        <ListToolbar
+          account={account}
+          object={objectParam}
+          objectLabel={object.nameSingular}
+          view={resolved.view.slug}
+          viewId={resolved.view.id}
+          viewVersion={resolved.view.updatedAt?.toISOString() ?? null}
+          viewLabel={resolved.view.name}
+          kind="list"
+          kinds={kindsFor(object)}
+          params={listParams}
+          filters={filters as never}
+          columns={columns}
+          sorts={sorts}
+          filterFields={toFilterFields(object)}
+          createFields={toEditableFields(object, lookups)}
+          canWrite={canWrite}
+          openCreate={search.new === '1'}
+          openView={search.view === 'new'}
+          allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
         />
-      ) : (
-        <RecordTable
+
+        <KpiStrip
           account={account}
           object={objectParam}
           view={resolved.view.slug}
-          columns={toTableColumns(object, columns)}
-          rows={page!.rows.map((row) => ({
-            id: row.id,
-            displayName: row.displayName,
-            version: row.version,
-            values: row.values,
-            labels: row.labels,
-          }))}
           params={listParams}
-          sorts={sorts}
-          totalHint={page!.total}
-          objectLabel={object.nameSingular}
-          objectPlural={object.namePlural}
-          bulkFields={bulkFields}
-          exportHref={exportHref}
-          previewFields={toTableColumns(object, previewKeys)}
-          canWrite={canWrite}
+          filters={filters as never}
+          hasRecords={(page?.total ?? page?.rows.length ?? 0) > 0}
         />
-      )}
+
+        {queryError ? (
+          <EmptyState
+            title="This view could not be read"
+            description={queryError}
+          />
+        ) : (
+          <RecordTable
+            account={account}
+            object={objectParam}
+            view={resolved.view.slug}
+            columns={toTableColumns(object, columns)}
+            rows={page!.rows.map((row) => ({
+              id: row.id,
+              displayName: row.displayName,
+              version: row.version,
+              values: row.values,
+              labels: row.labels,
+            }))}
+            params={listParams}
+            sorts={sorts}
+            totalHint={page!.total}
+            objectLabel={object.nameSingular}
+            objectPlural={object.namePlural}
+            bulkFields={bulkFields}
+            exportHref={exportHref}
+            previewFields={toTableColumns(object, previewKeys)}
+            canWrite={canWrite}
+          />
+        )}
+      </FiltersDock>
     </div>
   )
 }

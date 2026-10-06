@@ -82,6 +82,7 @@ export type FilterBuilderProps = {
   /** Omitted where the builder is part of a form rather than a popover: there is
    *  nothing to close, and a Close button that does nothing is worse than none. */
   onClose?: () => void
+  className?: string
 }
 
 /** The right-hand side of one condition. Three shapes rather than one, because
@@ -189,7 +190,7 @@ const ValueControl = ({
 
 /** AND/OR groups, one level deep. A5 draws the line there on purpose: a tree of
  *  arbitrary depth is a query builder nobody can read on screen. */
-export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilderProps) => {
+export const FilterBuilder = ({ fields, value, onApply, onClose, className }: FilterBuilderProps) => {
   const [groups, setGroups] = useState<Group[]>(
     value.length > 0 ? value : [{ conjunction: 'and', conditions: [] }],
   )
@@ -258,7 +259,7 @@ export const FilterBuilder = ({ fields, value, onApply, onClose }: FilterBuilder
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-3 shadow-panel">
+    <div className={cn('flex flex-col gap-3 rounded-panel border border-line bg-surface p-3 shadow-panel', className)}>
       {groups.map((group, groupIndex) => (
         <div key={groupIndex} className="flex flex-col gap-2 rounded-hs border border-divider p-2">
           {group.conditions.map((condition, conditionIndex) => {
