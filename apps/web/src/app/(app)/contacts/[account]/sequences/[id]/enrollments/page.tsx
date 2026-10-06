@@ -41,8 +41,7 @@ const EnrollmentsPage = async ({
   return (
     <EnrollmentTable
       account={account}
-      sequenceId={id}
-      sequenceName={found.sequence.name}
+      sequence={found.sequence}
       state={chosen}
       rows={rows.map((row) => ({
         ...row,
