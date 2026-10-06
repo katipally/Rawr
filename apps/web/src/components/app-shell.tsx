@@ -25,6 +25,7 @@ import { SECTION_ICONS, type IconKey } from './icons.ts'
 import { NavigationProgress, NavigationProvider, useNavigation } from './navigation.tsx'
 import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
+import { PREVIEW_DOCK } from '~/lib/docks.ts'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
 import { useUi, useUiReady, usePreferencesSync } from '~/lib/store/ui.ts'
 import { TaskTray } from './task-tray.tsx'
@@ -630,13 +631,18 @@ const Shell = ({
               content stays within it. One scroller, so a page that wants to fill
               the window (a list with a sticky header and a pager at the foot) can
               ask for h-full and get a real height back. */}
-          <div
-            className={cn(
-              '@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto',
-              !onCanvas && 'rounded-panel bg-surface p-3 shadow-panel sm:p-6 sm:pt-5',
-            )}
-          >
-            {children}
+          {/* A record preview docks to the right of the card and the card gives
+              up the width, rather than the preview covering it. */}
+          <div className="@container/shell relative flex min-h-0 flex-1">
+            <div
+              className={cn(
+                '@container flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto',
+                !onCanvas && 'rounded-panel bg-surface p-3 shadow-panel sm:p-6 sm:pt-5',
+              )}
+            >
+              {children}
+            </div>
+            <div id={PREVIEW_DOCK} className="contents" />
           </div>
           {pendingHref ? (
             // The old screen stays put but steps back, and the spinner says the

@@ -80,6 +80,13 @@
   --spacing-control: var(--rawr-control-height);
   --spacing-pill: var(--rawr-pill-height);
   --spacing-search: var(--rawr-search-width);
+  --spacing-preview: var(--rawr-preview-width);
+  --spacing-filters: var(--rawr-filters-width);
+  --spacing-dock-gap: var(--rawr-dock-gap);
+  /* A literal, because a container query cannot read a custom property. Below it
+     a page card beside a docked panel would be narrower than the panel, so the
+     panel covers the card instead. */
+  --container-dock: 56rem;
 
   --z-index-rail: var(--rawr-z-rail);
   --z-index-topbar: var(--rawr-z-topbar);

@@ -295,6 +295,7 @@ export const RecordTable = ({
       <RecordPreview
         account={account}
         object={object}
+        objectLabel={objectLabel}
         id={preview}
         fields={previewFields}
         canWrite={canWrite}

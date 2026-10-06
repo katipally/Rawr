@@ -85,6 +85,11 @@
   --rawr-rail-item-height: 3.25rem;
   --rawr-flyout-width: 13.25rem;
   --rawr-search-width: 26.0625rem;
+  /* Panels that dock beside the list rather than over it, and the gap that
+     separates a docked card from the page card. */
+  --rawr-preview-width: 26.25rem;
+  --rawr-filters-width: 30.25rem;
+  --rawr-dock-gap: 0.5rem;
 
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;
