@@ -162,7 +162,7 @@ export const InboxFrame = async ({
         selected={selected}
       />
 
-      <section className="flex min-w-0 flex-1 flex-col bg-canvas">{children}</section>
+      <section className="@container flex min-w-0 flex-1 flex-col bg-canvas">{children}</section>
       </div>
     </div>
   )

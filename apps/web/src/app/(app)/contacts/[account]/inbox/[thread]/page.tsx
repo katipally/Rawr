@@ -76,7 +76,7 @@ const ThreadPage = async ({
         ) : null}
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto bg-fill-thread p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,var(--spacing-inbox-aside))]">
+      <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto bg-fill-thread p-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,var(--spacing-inbox-aside))]">
         <div className="flex min-w-0 flex-col gap-2">
           {found.messages.map((message) => (
             <MessageView key={message.id} message={message} />
