@@ -8,6 +8,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FilterBuilder, describeCondition, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import type { SegmentRow } from './segment-list.tsx'
 
@@ -33,12 +34,6 @@ const EMPTY: Group[] = [{ conjunction: 'and', conditions: [] }]
 
 const conditionCount = (groups: Group[]) => groups.reduce((sum, group) => sum + group.conditions.length, 0)
 
-/** The dark bar's two pill shapes: outlined on the charcoal, and the white one
- *  that moves forward. */
-const darkPill =
-  'inline-flex min-h-[2.4375rem] shrink-0 items-center gap-1 rounded-pill border border-nav-line bg-nav px-6 font-semibold text-nav-text transition-all duration-150 ease-out hover:bg-nav-hover disabled:cursor-not-allowed disabled:opacity-60'
-const lightPill =
-  'inline-flex min-h-[2.4375rem] shrink-0 items-center gap-1 rounded-pill border border-cta bg-surface px-6 font-semibold text-body transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:opacity-60'
 
 const Tile = ({
   name,

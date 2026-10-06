@@ -13,11 +13,13 @@ import {
   type FormThemeToken,
 } from '@rawr/db/forms'
 import type { FormDetail } from '@rawr/db'
-import { Code2, Inbox, TrendingUp } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ListPlus, Paintbrush, Settings2, Workflow } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { LinkButton } from '~/components/link-button.tsx'
-import { useEffect, useState } from 'react'
-import { Alert, Breadcrumb, Button, Field, Modal, Select, TextArea, TextInput, useToast } from '@rawr/ui'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { Alert, Button, DiscardConfirm, DropdownMenu, Field, Modal, Select, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
+import { useUrlParam } from '~/lib/url-params.ts'
+import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
@@ -58,6 +60,16 @@ const TYPE_LABELS: Record<FormFieldType, string> = {
   heading: 'Heading',
   hidden: 'Hidden value',
 }
+
+/** HubSpot's editor rail: one panel open at a time beside the form, named in the
+ *  address so a reload or a shared link opens the same one. */
+const PANELS: { key: string; label: string; icon: ReactNode }[] = [
+  { key: 'questions', label: 'Questions', icon: <ListPlus aria-hidden="true" className="size-4" /> },
+  { key: 'look', label: 'Look', icon: <Paintbrush aria-hidden="true" className="size-4" /> },
+  { key: 'after', label: 'After submit', icon: <Workflow aria-hidden="true" className="size-4" /> },
+  { key: 'settings', label: 'Basics', icon: <Settings2 aria-hidden="true" className="size-4" /> },
+]
+
 
 export const FormBuilder = ({
   account,
@@ -110,6 +122,9 @@ export const FormBuilder = ({
   const [confirmText, setConfirmText] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [stages, setStages] = useState<{ name: string }[]>([])
+  const mounted = useMounted()
+  const [leaving, setLeaving] = useState(false)
+  const [panelParam, setPanelParam] = useUrlParam('panel')
 
   useEffect(() => {
     // A seat that cannot read the list gets an empty one, and the Select still
@@ -234,72 +249,95 @@ export const FormBuilder = ({
       : stageNames
   const askingConsent = fields.some((field) => field.type === 'consent')
 
-  return (
-    <div className="w-full max-w-7xl">
-      <header className="mb-4 flex flex-col gap-2">
-        <Breadcrumb
-          items={[
-            { label: 'Forms', href: formsPath(account) },
-            { label: form.id ? form.name : 'New form' },
-          ]}
-        />
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-lg font-medium">{form.id ? form.name : 'New form'}</h1>
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            {form.id ? (
-              <LinkButton
-                href={formPerformancePath(account, form.id)}
-                icon={<TrendingUp aria-hidden="true" className="size-4" />}
-              >
-                Performance
-              </LinkButton>
-            ) : null}
-            {form.id ? (
-              <LinkButton
-                href={submissionsPath(account, { form: form.id, state: 'clean' })}
-                icon={<Inbox aria-hidden="true" className="size-4" />}
-              >
-                Submissions
-              </LinkButton>
-            ) : null}
-            {form.id ? (
-              <Button
-                type="button"
-                icon={<Code2 aria-hidden="true" className="size-4" />}
-                onClick={() => setShowEmbed(true)}
-              >
-                Embed code
-              </Button>
-            ) : null}
-            {!canEdit ? (
-              <span className="text-xs text-secondary">Your role can view this but not change it.</span>
-            ) : (
-              <>
-                {blockers.length > 0 ? (
-                  <span className="text-xs text-secondary">
-                    {blockers.length === 1 ? blockers[0] : `${blockers.length} things to fix first`}
-                  </span>
-                ) : dirty ? (
-                  <span className="text-xs text-secondary">Unsaved changes</span>
-                ) : null}
-                {form.id ? (
-                  <Button type="button" variant="destructive" onClick={() => setShowDelete(true)}>
-                    Delete
-                  </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="primary"
-                  busy={saving}
-                  disabled={!dirty || blockers.length > 0}
-                  onClick={() => void save()}
-                >
-                  {saving ? 'Saving…' : 'Save form'}
-                </Button>
-              </>
+  const panel = PANELS.some((entry) => entry.key === panelParam) || panelParam === 'none' ? panelParam : 'questions'
+  const leave = () => router.push(form.id ? formPerformancePath(account, form.id) : formsPath(account))
+
+  if (!mounted) return null
+
+  // The whole window, over the app's own bar and rail, as HubSpot's editor is.
+  // Portalled because the shell's content card is a size container, which a
+  // fixed box would otherwise be measured against.
+  return createPortal(
+    <div className="fixed inset-0 z-overlay flex flex-col bg-canvas text-body">
+      <header
+        inert={leaving}
+        className="grid min-h-14 shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 bg-nav px-2 text-nav-text"
+      >
+        <span className="flex items-center gap-1">
+          <button type="button" onClick={() => (dirty ? setLeaving(true) : leave())} className={darkPill}>
+            <ChevronLeft aria-hidden="true" className="size-4" />
+            Back
+          </button>
+          <DropdownMenu
+            label="File"
+            align="start"
+            groups={[
+              {
+                key: 'go',
+                items: form.id
+                  ? [
+                      { key: 'performance', label: 'Performance', href: formPerformancePath(account, form.id) },
+                      { key: 'submissions', label: 'Submissions', href: submissionsPath(account, { form: form.id, state: 'clean' }) },
+                      { key: 'embed', label: 'Embed code', onSelect: () => setShowEmbed(true) },
+                    ]
+                  : [],
+              },
+              {
+                key: 'danger',
+                items: canEdit && form.id ? [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setShowDelete(true) }] : [],
+              },
+            ].filter((group) => group.items.length > 0)}
+            trigger={(props) => (
+              <button {...props} type="button" disabled={!form.id} className="inline-flex min-h-10 items-center gap-1 rounded-hs px-2 font-semibold text-nav-text hover:bg-nav-hover disabled:opacity-60">
+                File
+                <ChevronDown aria-hidden="true" className="size-3.5" />
+              </button>
             )}
-          </div>
-        </div>
+          />
+        </span>
+        {canEdit ? (
+          <label className="mx-auto flex max-w-full min-w-0">
+            <span className="sr-only">Form name</span>
+            <input
+              value={name}
+              placeholder="New form"
+              size={Math.max(8, Math.min(name.length, 60))}
+              onChange={(event) => {
+                setName(event.target.value)
+                if (slugFollowsName) setSlug(toFormSlug(event.target.value))
+              }}
+              className="min-w-0 truncate rounded-hs bg-transparent px-1 text-center text-xl text-nav-text outline-none placeholder:text-nav-muted focus-visible:ring-2 focus-visible:ring-nav-line"
+            />
+          </label>
+        ) : (
+          <h1 className="truncate text-center text-xl font-normal">{form.id ? form.name : 'New form'}</h1>
+        )}
+        <span className="flex min-w-0 items-center justify-end gap-3">
+          {!canEdit ? (
+            <span className="hidden truncate text-small text-nav-muted sm:inline">Your role can view this but not change it.</span>
+          ) : (
+            <>
+              <span className="hidden truncate text-small text-nav-muted sm:inline">
+                {blockers.length > 0
+                  ? blockers.length === 1
+                    ? blockers[0]
+                    : `${blockers.length} things to fix first`
+                  : dirty
+                    ? 'Unsaved changes'
+                    : null}
+              </span>
+              <button
+                type="button"
+                className={lightPill}
+                aria-busy={saving || undefined}
+                disabled={saving || !dirty || blockers.length > 0}
+                onClick={() => void save()}
+              >
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          )}
+        </span>
       </header>
 
       <Modal open={showEmbed} title={`Embed \u201c${form.name}\u201d`} onClose={() => setShowEmbed(false)}>
@@ -342,21 +380,31 @@ export const FormBuilder = ({
         </div>
       </Modal>
 
-      {canEdit && blockers.length > 1 ? (
-        <div className="mb-4 rounded-panel border border-line bg-fill p-3 text-sm">
-          <p className="mb-1 font-medium">Before this can be saved</p>
-          <ul className="ml-4 list-disc text-secondary">
-            {blockers.map((blocker) => (
-              <li key={blocker}>{blocker}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-
-      {/* Editor and preview sit side by side only when there is room for both.
-          Below that the preview follows the editor rather than being hidden. */}
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
-        <div className="flex min-w-0 flex-col gap-4">
+      <div inert={leaving} className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <nav
+          aria-label="Editor panels"
+          className="flex shrink-0 gap-1 border-b border-line bg-surface p-1.5 md:flex-col md:border-r md:border-b-0"
+        >
+          {PANELS.map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              title={entry.label}
+              aria-label={entry.label}
+              aria-pressed={panel === entry.key}
+              onClick={() => setPanelParam(panel === entry.key ? 'none' : entry.key)}
+              className={cn(
+                'grid size-10 place-items-center rounded-hs transition-colors duration-150 ease-out hover:bg-fill',
+                panel === entry.key && 'bg-canvas',
+              )}
+            >
+              {entry.icon}
+            </button>
+          ))}
+        </nav>
+        {panel === 'none' ? null : (
+          <div className="flex max-h-[50dvh] min-h-0 w-full shrink-0 flex-col gap-4 overflow-y-auto border-b border-line bg-surface p-4 md:max-h-none md:w-[min(32rem,45vw)] md:border-r md:border-b-0">
+          {panel === 'settings' ? (
           <section className="rounded-panel border border-line bg-surface p-3">
             <h2 className="mb-3 font-medium">Basics</h2>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -403,13 +451,17 @@ export const FormBuilder = ({
               </p>
             ) : null}
           </section>
+          ) : null}
 
-          <ThemePanel
-            theme={settings.theme}
-            canEdit={canEdit}
-            onChange={(theme) => setSettings({ ...settings, theme })}
-          />
+          {panel === 'look' ? (
+            <ThemePanel
+              theme={settings.theme}
+              canEdit={canEdit}
+              onChange={(theme) => setSettings({ ...settings, theme })}
+            />
+          ) : null}
 
+          {panel === 'questions' ? (
           <section className="rounded-panel border border-line bg-surface p-3">
             <div className="mb-3 flex flex-wrap items-baseline gap-x-3">
               <h2 className="font-medium">Questions</h2>
@@ -593,7 +645,9 @@ export const FormBuilder = ({
               ))}
             </ol>
           </section>
+          ) : null}
 
+          {panel === 'after' ? (
           <section className="rounded-panel border border-line bg-surface p-3">
             <h2 className="mb-3 font-medium">After submit</h2>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -788,11 +842,31 @@ export const FormBuilder = ({
               Post accepted leads to Slack
             </label>
           </section>
-        </div>
+          ) : null}
+          </div>
+        )}
 
-        <FormPreview fields={fields} settings={settings} />
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="mx-auto flex w-full max-w-[50rem] flex-col gap-4">
+            {canEdit && blockers.length > 1 ? (
+              <div className="mb-4 rounded-panel border border-line bg-fill p-3 text-sm">
+                <p className="mb-1 font-medium">Before this can be saved</p>
+                <ul className="ml-4 list-disc text-secondary">
+                  {blockers.map((blocker) => (
+                    <li key={blocker}>{blocker}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            <div className="rounded-panel border border-line bg-surface p-4 shadow-panel">
+              <FormPreview fields={fields} settings={settings} />
+            </div>
+          </div>
+        </main>
       </div>
-    </div>
+      {leaving ? <DiscardConfirm onKeep={() => setLeaving(false)} onDiscard={leave} /> : null}
+    </div>,
+    document.body,
   )
 }
 
