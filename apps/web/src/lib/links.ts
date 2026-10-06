@@ -4,7 +4,8 @@
  *  The shape mirrors HubSpot's so muscle memory carries over: the account sits
  *  where HubSpot puts the portal id, and the /objects/.../views/:slug/list and
  *  /record/:object/:id segments are theirs. The one deliberate difference is
- *  readable object keys instead of HubSpot's 0-1 and 0-3 codes.
+ *  readable object keys instead of HubSpot's 0-1 and 0-3 codes, which still
+ *  open: fromHubspotPath below turns one into the other.
  *
  *    /contacts/datasaur/objects/contact/views/all/list
  *    /contacts/datasaur/objects/deal/views/all/board?pipeline=<id>
@@ -38,6 +39,18 @@ export const accountInPath = (path: string | null | undefined): string | null =>
     // account, and guessing at it is worse than saying there was none.
     return null
   }
+}
+
+const HUBSPOT_OBJECT_IDS: Record<string, string> = { '0-1': 'contact', '0-2': 'company', '0-3': 'deal' }
+const HUBSPOT_OBJECT_PATH = /^(\/contacts\/[^/?#]+\/(?:objects|record)\/)(0-[123])(?=[/?#]|$)/
+
+/** A link copied out of HubSpot, with 0-1 where this app says contact, as the
+ *  same address with the readable key, or null when the path holds no HubSpot
+ *  object id. Read by src/proxy.ts, which redirects to the answer. */
+export const fromHubspotPath = (path: string): string | null => {
+  const found = HUBSPOT_OBJECT_PATH.exec(path)
+  if (!found) return null
+  return `${found[1]}${HUBSPOT_OBJECT_IDS[found[2]!]}${path.slice(found[0].length)}`
 }
 
 /** The URL segment for a view. The stored kind is 'table', the segment is

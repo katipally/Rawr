@@ -1,5 +1,6 @@
 import { decodeJwt } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
+import { fromHubspotPath } from '~/lib/links.ts'
 
 /** A CRM or meetings link carries its account in the path, so opening someone else's link
  *  while signed in to a different account has to offer the switch rather than
@@ -17,6 +18,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 const ACCOUNT_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
 export const proxy = (request: NextRequest): NextResponse => {
+  const readable = fromHubspotPath(request.nextUrl.pathname)
+  if (readable) return NextResponse.redirect(new URL(`${readable}${request.nextUrl.search}`, request.nextUrl.origin))
+
   const match = ACCOUNT_PATH.exec(request.nextUrl.pathname)
   if (!match) return NextResponse.next()
 

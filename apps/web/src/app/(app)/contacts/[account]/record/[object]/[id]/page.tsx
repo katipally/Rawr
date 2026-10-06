@@ -109,7 +109,8 @@ const RecordPage = async ({
   const { type, tab, compose, from } = await searchParams
   // Overview is the landing tab, the way HubSpot opens on a summary rather than
   // on a wall of history. An unknown value falls back rather than 404ing.
-  const activeTab = tab === 'activities' ? 'activities' : 'overview'
+  // `activity` is HubSpot's word for the same tab.
+  const activeTab = tab === 'activities' || tab === 'activity' ? 'activities' : 'overview'
 
   const ctx = contextFrom(session)
   // A timeline entry, an association, a task and a file all name an object key,

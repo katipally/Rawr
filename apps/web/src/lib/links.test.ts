@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, objectView, recordPath, accountInPath, safeFrom, safePath } from './links.ts'
+import { exportCsvPath, exportPath, fromHubspotPath, objectView, recordPath, accountInPath, safeFrom, safePath } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -143,4 +143,16 @@ test('anything the browser would read as another host falls back', () => {
 
 test('a path is handed back in the parser\'s form, so dot segments are resolved', () => {
   assert.equal(safePath('/contacts/../settings?x=1'), '/settings?x=1')
+})
+
+test('a HubSpot object id opens the same screen under its readable key', () => {
+  assert.equal(fromHubspotPath('/contacts/datasaur/record/0-1/abc'), '/contacts/datasaur/record/contact/abc')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-2/views/all/list'), '/contacts/datasaur/objects/company/views/all/list')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-3'), '/contacts/datasaur/objects/deal')
+})
+
+test('a path with no HubSpot object id is left alone', () => {
+  assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
+  assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)
+  assert.equal(fromHubspotPath('/contacts/0-1/home'), null)
 })
