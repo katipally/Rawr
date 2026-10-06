@@ -89,12 +89,13 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/contacts\/([^/?#]+)\/objects\/(0-[123])\/restore\/?$/, (account, id) => restorePath(account, HUBSPOT_OBJECT_IDS[id])],
   [/^\/(?:connected-apps|integrations-settings)\/[^/?#]+(?:\/[^?#]*)?$/, () => appsPath()],
   [/^\/(?:marketplace|ecosystem)\/[^/?#]+(?:\/[^?#]*)?$/, () => availableAppsPath()],
+  [/^\/user-home\/([^/?#]+)(?:\/[^?#]*)?$/, (account) => accountHome(account)],
 ]
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
  *  same address with the readable key, a 0-27 tasks link as the tasks list, a
  *  segment, form, marketing email, sequence, template, meetings, dashboard,
- *  reports, import, duplicates, restore or connected apps link as the screen
+ *  reports, import, duplicates, restore, connected apps or home link as the screen
  *  that holds it, or null
  *  when the path is none of those. Read by src/proxy.ts, which redirects to the
  *  answer. */

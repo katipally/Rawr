@@ -210,6 +210,12 @@ test('a HubSpot dashboard or reports link opens the screen that holds it', () =>
   assert.equal(fromHubspotPath('/contacts/datasaur/reports/dashboards'), null)
 })
 
+test('a HubSpot home link opens home', () => {
+  assert.equal(fromHubspotPath('/user-home/datasaur'), '/contacts/datasaur/home')
+  assert.equal(fromHubspotPath('/user-home/datasaur/'), '/contacts/datasaur/home')
+  assert.equal(fromHubspotPath('/user-home'), null)
+})
+
 test('a HubSpot import, duplicates, restore or connected apps link opens the screen that holds it', () => {
   assert.equal(fromHubspotPath('/import/datasaur'), '/contacts/datasaur/import')
   assert.equal(fromHubspotPath('/data-integration-home/datasaur/post/73801025'), '/contacts/datasaur/import')
