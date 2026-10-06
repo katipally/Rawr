@@ -156,7 +156,7 @@ const HomePage = async ({
       // What an admin still has to switch on. Read only for them: nobody else can
       // act on it, and six extra queries for a viewer would buy nothing.
       isAdmin
-        ? Promise.all([listIntegrations(ctx), listGrants(ctx), marketing ? listForms(ctx) : [], listImportRuns(ctx), listSites(ctx), listPipelines(ctx)])
+        ? Promise.all([listIntegrations(ctx), listGrants(ctx), marketing ? listForms(ctx) : [], listImportRuns(ctx, { states: ['done'], limit: 1 }), listSites(ctx), listPipelines(ctx)])
         : null,
     ]),
   )
@@ -169,7 +169,7 @@ const HomePage = async ({
         return [
           { done: members.length > 1, label: 'Add the team and set their access', href: membersPath() },
           { done: pipelines.length > 0, label: 'Check the deal pipelines and stage probabilities', href: pipelinesPath() },
-          { done: imports.some((run) => run.state === 'done'), label: 'Import contacts, companies and deals', href: importsPath(account) },
+          { done: imports.total > 0, label: 'Import contacts, companies and deals', href: importsPath(account) },
           { done: connected('slack'), label: 'Connect Slack so form fills reach the team', href: integrationsPath('slack') },
           { done: grants.length > 0, label: 'Connect a calendar so booking pages have a host', href: calendarsPath(account) },
           { done: forms.length > 0, label: 'Build the first form', href: formsPath(account) },

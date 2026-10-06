@@ -1,4 +1,4 @@
-import { canWrite, getRegistry, listImportRuns } from '@rawr/db'
+import { canWrite, getRegistry, IMPORT_PAGE, IMPORT_KINDS, listImportRuns } from '@rawr/db'
 import { PageHeader } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
@@ -9,14 +9,34 @@ import { ImportHistory } from './import-history.tsx'
 import { UnfinishedUploads } from './import-uploader.tsx'
 import { SHAPE_LABEL } from './shapes.ts'
 
-const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) => {
+const ImportPage = async ({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ account: string }>
+  searchParams: Promise<{ skip?: string; per?: string; q?: string }>
+}) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const { account } = await params
+  const { skip, per, q } = await searchParams
   const ctx = contextFrom(session)
-  const runs = await listImportRuns(ctx)
   const registry = await getRegistry(ctx)
+  const search = q?.trim() ?? ''
+  const needle = search.toLowerCase()
+  const perPage = Math.min(Math.max(Number(per) || IMPORT_PAGE, 1), 100)
+  const { rows: runs, total, offset } = await listImportRuns(ctx, {
+    limit: perPage,
+    offset: Number(skip) || 0,
+    search: search
+      ? {
+          text: search,
+          objectTypes: registry.objects.filter((entry) => entry.namePlural.toLowerCase().includes(needle)).map((entry) => entry.key),
+          importKinds: IMPORT_KINDS.filter((kind) => kind !== 'records' && SHAPE_LABEL[kind].label.toLowerCase().includes(needle)),
+        }
+      : null,
+  })
   const allowed = canWrite(ctx, 'contact')
   const whatOf = (run: (typeof runs)[number]): string =>
     run.importKind === 'records'
@@ -77,6 +97,10 @@ const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) 
         </div>
         <ImportHistory
           account={account}
+          total={total}
+          offset={offset}
+          perPage={perPage}
+          search={search}
           runs={runs.map((run) => ({
             id: run.id,
             filename: run.filename,

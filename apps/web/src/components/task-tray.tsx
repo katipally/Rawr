@@ -4,6 +4,7 @@ import { cn, IconButton } from '@rawr/ui'
 import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
+import type { ImportSummary } from '@rawr/db'
 import { useEffect, useState } from 'react'
 import { importsPath } from '~/lib/links.ts'
 import { trpc } from '~/lib/rpc.ts'
@@ -42,7 +43,7 @@ type Running = {
   totalRows: number
 }
 
-const ACTIVE = new Set(['parsing', 'running'])
+const ACTIVE: ImportSummary['state'][] = ['parsing', 'running']
 
 const NONE: Running[] = []
 
@@ -59,20 +60,17 @@ export const TaskTray = ({ account }: { account: string }) => {
   // is back, and hands over the same array while the numbers are the same, which
   // is what keeps the shell from re-rendering on a timer for ever.
   const { data: runs = NONE } = useQuery({
-    ...trpc.crm.imports.list.queryOptions(),
+    ...trpc.crm.imports.list.queryOptions({ states: ACTIVE }),
     staleTime: 0,
-    select: (rows): Running[] =>
-      rows
-        .filter((row) => ACTIVE.has(row.state))
-        .map((row) => ({
-          id: row.id,
-          filename: row.filename,
-          state: row.state,
-          processedRows: row.processedRows,
-          totalRows: row.totalRows,
-        })),
-    refetchInterval: (query) =>
-      query.state.data?.some((row) => ACTIVE.has(row.state)) ? POLL_ACTIVE_MS : POLL_IDLE_MS,
+    select: ({ rows }): Running[] =>
+      rows.map((row) => ({
+        id: row.id,
+        filename: row.filename,
+        state: row.state,
+        processedRows: row.processedRows,
+        totalRows: row.totalRows,
+      })),
+    refetchInterval: (query) => ((query.state.data?.total ?? 0) > 0 ? POLL_ACTIVE_MS : POLL_IDLE_MS),
   })
 
   // A run in the tray is also an upload in the store once its parts have landed.

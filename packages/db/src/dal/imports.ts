@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql, type SQL } from 'drizzle-orm'
 import { importRow, importRun } from '../schema/imports.ts'
+import { importStateEnum } from '../schema/enums.ts'
 import { userAccount } from '../schema/identity.ts'
 import { activityLink } from '../schema/records.ts'
 import {
@@ -2611,14 +2612,46 @@ export const readImportRun = async (
   } as ImportSummary
 }
 
-/** The imports list pages in the browser, so this is how far back it reaches:
- *  newest first off import_run_recent_idx, one primary-key probe per row for the
- *  name, so O(n) in the cap rather than in the account's history. */
-export const IMPORT_LIST_LIMIT = 500
+export const IMPORT_PAGE = 25
+export const IMPORT_STATES = importStateEnum.enumValues
 
-export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary[]> => {
-  const rows = await withAccount(ctx, (tx) =>
-    tx
+export type ImportRunFilter = {
+  limit?: number | undefined
+  offset?: number | undefined
+  states?: ImportSummary['state'][] | undefined
+  /** A substring of the file name, or the objects and kinds whose label matched
+   *  it: the label lives in the registry, so the caller resolves it. */
+  search?: { text: string; objectTypes: string[]; importKinds: ImportKind[] } | null | undefined
+}
+
+/** One page of the imports list, newest first, with the total for numbered pages.
+ *  An offset past the end lands on the last page.
+ *
+ *  Unfiltered, the page walks import_run_recent_idx: O(offset + limit), one
+ *  primary-key probe per row for the name. The total and any search scan the
+ *  account's runs, O(n) in its import history, which is a few per migration. */
+export const listImportRuns = async (
+  ctx: AccountContext,
+  input: ImportRunFilter = {},
+): Promise<{ rows: ImportSummary[]; total: number; offset: number }> =>
+  withAccount(ctx, async (tx) => {
+    const limit = Math.min(Math.max(input.limit ?? IMPORT_PAGE, 1), 100)
+    const needle = input.search?.text.trim().toLowerCase()
+    const where = and(
+      input.states ? inArray(importRun.state, input.states) : undefined,
+      needle
+        ? or(
+            sql`strpos(lower(${importRun.filename}), ${needle}) > 0`,
+            input.search!.objectTypes.length > 0
+              ? and(eq(importRun.importKind, 'records'), inArray(importRun.objectType, input.search!.objectTypes))
+              : undefined,
+            input.search!.importKinds.length > 0 ? inArray(importRun.importKind, input.search!.importKinds) : undefined,
+          )
+        : undefined,
+    )
+    const [{ total } = { total: 0 }] = await tx.select({ total: count() }).from(importRun).where(where)
+    const offset = Math.min(Math.max(input.offset ?? 0, 0), Math.floor(Math.max(total - 1, 0) / limit) * limit)
+    const rows = await tx
       .select({
         id: importRun.id,
         filename: importRun.filename,
@@ -2641,8 +2674,13 @@ export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary
       })
       .from(importRun)
       .leftJoin(userAccount, eq(userAccount.id, importRun.createdBy))
-      .orderBy(desc(importRun.createdAt))
-      .limit(IMPORT_LIST_LIMIT),
-  )
-  return rows.map((row) => ({ ...row, headers: [], errors: [], unmatchedOwners: [] })) as ImportSummary[]
-}
+      .where(where)
+      .orderBy(desc(importRun.createdAt), desc(importRun.id))
+      .limit(limit)
+      .offset(offset)
+    return {
+      rows: rows.map((row) => ({ ...row, headers: [], errors: [], unmatchedOwners: [] })) as ImportSummary[],
+      total,
+      offset,
+    }
+  })

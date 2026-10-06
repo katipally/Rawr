@@ -55,6 +55,7 @@ import {
   readCalendar,
   readImportRun,
   listImportRuns,
+  IMPORT_STATES,
   readSubscriptions,
   readTimeline,
   recordOptions,
@@ -858,7 +859,17 @@ export const crmRouter = router({
     .query(({ ctx, input }) => call(() => searchAll(ctx.account, input.query))),
 
   imports: router({
-    list: protectedProcedure.query(({ ctx }) => call(() => listImportRuns(ctx.account))),
+    list: protectedProcedure
+      .input(
+        z
+          .object({
+            states: z.array(z.enum(IMPORT_STATES)).optional(),
+            offset: z.number().int().min(0).optional(),
+            limit: z.number().int().min(1).max(100).optional(),
+          })
+          .optional(),
+      )
+      .query(({ ctx, input }) => call(() => listImportRuns(ctx.account, input))),
 
     read: protectedProcedure
       .input(z.object({ id: z.uuid() }))

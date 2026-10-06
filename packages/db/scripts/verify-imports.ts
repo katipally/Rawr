@@ -22,6 +22,7 @@ import {
   isNewProperty,
   proposeProperty,
   IMPORT_KINDS,
+  listImportRuns,
   previewImportRun,
   readImportRows,
   readImportRun,
@@ -1443,6 +1444,30 @@ try {
     expect(dispatched.length === 0, 'a fixture tenant\'s running import would still be dispatched')
     expect(marked.length === 2, `${marked.length} of the 2 fixture tenants are marked`)
     return 'sandbox and peer skipped, and neither is picked by its domain'
+  })
+
+  console.log('\n-- the imports list --------------------------------------------------')
+
+  await check('the imports list pages to its oldest run, newest first, and searches past the first page', async () => {
+    const stamp = `page-${Date.now()}`
+    const ids: string[] = []
+    for (let i = 0; i < 3; i += 1) ids.push(await startRun(admin, 'records', `${stamp}-${i}`, 1))
+    const all = await listImportRuns(admin, { limit: 100 })
+    const pages: { id: string }[] = []
+    for (let offset = 0; offset < all.total; offset += 2) pages.push(...(await listImportRuns(admin, { limit: 2, offset })).rows)
+    expect(pages.length === all.total, `${pages.length} rows across the pages of ${all.total}`)
+    expect(new Set(pages.map((run) => run.id)).size === all.total, 'a run appeared on two pages')
+    expect(ids.every((id) => pages.some((run) => run.id === id)), 'a new run is on no page')
+    const past = await listImportRuns(admin, { limit: 2, offset: all.total + 10 })
+    expect(past.rows.length > 0 && past.offset === Math.floor((all.total - 1) / 2) * 2, `an offset past the end landed on ${past.offset}`)
+    const found = await listImportRuns(admin, { limit: 1, search: { text: `${stamp}-0`, objectTypes: [], importKinds: [] } })
+    expect(found.total === 1 && found.rows[0]?.id === ids[0], `a search for one file found ${found.total}`)
+    const byObject = await listImportRuns(admin, { limit: 100, search: { text: 'no file is called this', objectTypes: ['contact'], importKinds: [] } })
+    expect(ids.every((id) => byObject.rows.some((run) => run.id === id)), 'a search by object missed a contact import')
+    const done = await listImportRuns(admin, { states: ['done'], limit: 100 })
+    expect(done.rows.every((run) => run.state === 'done'), 'a state filter let another state through')
+    expect((await listImportRuns(peerCtx, { search: { text: stamp, objectTypes: [], importKinds: [] } })).total === 0, 'the peer listed the runs')
+    return `${all.total} runs over ${Math.ceil(all.total / 2)} pages of 2`
   })
 
   console.log('\n-- tenancy -----------------------------------------------------------')

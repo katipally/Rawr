@@ -1,11 +1,11 @@
 'use client'
 
-import { Avatar, DataTable, EmptyState, NOTHING_MATCHED, type Column } from '@rawr/ui'
+import { Avatar, DataTable, EmptyState, NOTHING_MATCHED, Pagination, cn, type Column } from '@rawr/ui'
 import { Search } from 'lucide-react'
 import Link from 'next/link'
-import { useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useState, useTransition } from 'react'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
-import { usePagedRows } from '~/components/paged.tsx'
 import { StatusDot, type StatusTone } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { importsPath } from '~/lib/links.ts'
@@ -39,16 +39,49 @@ const STATE: Record<ImportHistoryRow['state'], { label: string; tone: StatusTone
 }
 
 /** HubSpot's file imports table: the name as a link, a dot for the state, the
- *  counts with nothing as "--", who started it and when. Searched and paged in
- *  the browser over every run the page was given. */
-export const ImportHistory = ({ account, runs }: { account: string; runs: ImportHistoryRow[] }) => {
+ *  counts with nothing as "--", who started it and when. Searched and paged at
+ *  the database, so the oldest run is as reachable as the newest; the page, its
+ *  size and the search are the address. */
+export const ImportHistory = ({
+  account,
+  runs,
+  total,
+  offset,
+  perPage,
+  search,
+}: {
+  account: string
+  runs: ImportHistoryRow[]
+  total: number
+  offset: number
+  perPage: number
+  search: string
+}) => {
   const fmt = useFormat()
-  const [needle, setNeedle] = useState('')
-  const wanted = needle.trim().toLowerCase()
-  const visible = wanted
-    ? runs.filter((run) => run.filename.toLowerCase().includes(wanted) || run.what.toLowerCase().includes(wanted))
-    : runs
-  const { page, pager } = usePagedRows(visible, 'imports')
+  const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const [pending, startTransition] = useTransition()
+  const [draft, setDraft] = useState(search)
+
+  const go = (next: { skip?: number; per?: number; q?: string }) => {
+    const query = new URLSearchParams(params)
+    const set = (key: string, value: string | null) => (value ? query.set(key, value) : query.delete(key))
+    set('skip', next.skip ? String(next.skip) : null)
+    if (next.per !== undefined) set('per', String(next.per))
+    if (next.q !== undefined) set('q', next.q || null)
+    const href = query.toString() ? `${pathname}?${query}` : pathname
+    startTransition(() => router.replace(href, { scroll: false }))
+  }
+
+  // One navigation after the typing stops rather than one per keystroke; a new
+  // search starts again from the first page.
+  useEffect(() => {
+    const needle = draft.trim()
+    if (needle === search) return
+    const timer = window.setTimeout(() => go({ q: needle }), 250)
+    return () => window.clearTimeout(timer)
+  })
 
   const count = (value: number) => (value === 0 ? EMPTY_VALUE : fmt.number(value))
 
@@ -110,7 +143,7 @@ export const ImportHistory = ({ account, runs }: { account: string; runs: Import
     },
   ]
 
-  if (runs.length === 0) {
+  if (total === 0 && !search) {
     return (
       <EmptyState
         title="Nothing has been imported yet"
@@ -125,22 +158,37 @@ export const ImportHistory = ({ account, runs }: { account: string; runs: Import
         <span className="sr-only">Search imports</span>
         <input
           type="search"
-          value={needle}
+          value={draft}
           placeholder="Search"
-          onChange={(event) => setNeedle(event.target.value)}
+          onChange={(event) => setDraft(event.target.value)}
           className="h-control w-full rounded-pill border border-line-strong bg-surface py-1 pr-9 pl-4 text-body placeholder:text-muted"
         />
         <Search aria-hidden="true" className="absolute top-1/2 right-3 size-4 -translate-y-1/2" />
       </label>
-      <DataTable
-        columns={columns}
-        rows={page}
-        rowKey={(run) => run.id}
-        caption="File imports"
-        storageKey="imports.history"
-        empty={<EmptyState {...NOTHING_MATCHED} />}
-      />
-      {pager}
+      <div aria-busy={pending} className={cn('min-w-0 transition-opacity', pending && 'opacity-60')}>
+        <DataTable
+          columns={columns}
+          rows={runs}
+          rowKey={(run) => run.id}
+          caption="File imports"
+          storageKey="imports.history"
+          empty={<EmptyState {...NOTHING_MATCHED} />}
+        />
+      </div>
+      {total > perPage ? (
+        <Pagination
+          format={fmt.number}
+          count={runs.length}
+          offset={offset}
+          total={total}
+          perPage={perPage}
+          noun="imports"
+          onPrevious={() => go({ skip: Math.max(0, offset - perPage) })}
+          onNext={() => go({ skip: offset + perPage })}
+          onPage={(number) => go({ skip: (number - 1) * perPage })}
+          onPerPage={(size) => go({ per: size })}
+        />
+      ) : null}
     </div>
   )
 }
