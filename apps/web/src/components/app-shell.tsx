@@ -224,7 +224,7 @@ const Shell = ({
                 href={item.href}
                 aria-current={isCurrent(item) ? 'page' : undefined}
                 className={cn(
-                  'flex min-h-10 items-center rounded-pill px-4 py-2 font-light text-nav-text no-underline',
+                  'flex min-h-10 items-center rounded-pill px-4 py-2 font-light text-nav-text no-underline transition-all duration-150 ease-out',
                   isCurrent(item) ? 'bg-nav-active' : 'hover:bg-nav-hover',
                 )}
               >
@@ -428,27 +428,26 @@ const Shell = ({
           </Link>
         </div>
 
-        {search ? <div className="w-full min-w-0 max-w-[34.375rem]">{search}</div> : null}
+        {search ? <div className="w-full min-w-0 max-w-search">{search}</div> : null}
 
-        {create.length > 0 ? (
-          <DropdownMenu
-            label="Create"
-            groups={[
-              {
-                key: 'create',
-                items: create.map((option) => {
-                  const Icon = CREATE_ICONS[option.key] ?? Plus
-                  return { key: option.key, label: option.label, href: option.href, icon: <Icon className="size-4" /> }
-                }),
-              },
-            ]}
-            trigger={(props) => (
-              <IconButton {...props} label="Create new" icon={<Plus className="size-4" />} className={cn('border border-nav-line', topbarIcon)} />
-            )}
-          />
-        ) : null}
-
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          {create.length > 0 ? (
+            <DropdownMenu
+              label="Create"
+              groups={[
+                {
+                  key: 'create',
+                  items: create.map((option) => {
+                    const Icon = CREATE_ICONS[option.key] ?? Plus
+                    return { key: option.key, label: option.label, href: option.href, icon: <Icon className="size-4" /> }
+                  }),
+                },
+              ]}
+              trigger={(props) => (
+                <IconButton {...props} label="Create new" icon={<Plus className="size-4" />} className={topbarIcon} />
+              )}
+            />
+          ) : null}
           {/* HubSpot's marketplace icon, minus the marketplace: what this company
               has connected, and what it could. */}
           <DropdownMenu

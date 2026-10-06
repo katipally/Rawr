@@ -14,6 +14,7 @@
   --color-surface-raised: var(--rawr-surface-raised);
   --color-fill: var(--rawr-fill);
   --color-fill-hover: var(--rawr-fill-hover);
+  --color-fill-header-hover: var(--rawr-fill-header-hover);
   --color-disabled: var(--rawr-disabled);
 
   --color-body: var(--rawr-text);
@@ -60,6 +61,8 @@
   --text-body--line-height: 1.5;
   --text-small: var(--rawr-text-small);
   --text-small--line-height: 1.45;
+  --text-kpi: var(--rawr-text-kpi);
+  --text-kpi--line-height: 1.25;
 
   --font-weight-body: var(--rawr-weight-body);
   --font-weight-label: var(--rawr-weight-label);
@@ -75,6 +78,8 @@
   --spacing-rail-item: var(--rawr-rail-item-height);
   --spacing-flyout: var(--rawr-flyout-width);
   --spacing-control: var(--rawr-control-height);
+  --spacing-pill: var(--rawr-pill-height);
+  --spacing-search: var(--rawr-search-width);
 
   --z-index-rail: var(--rawr-z-rail);
   --z-index-topbar: var(--rawr-z-topbar);

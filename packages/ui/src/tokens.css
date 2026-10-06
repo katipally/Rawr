@@ -12,6 +12,8 @@
   --rawr-surface-raised: #ffffff;
   --rawr-fill: #f5f5f5;
   --rawr-fill-hover: #e6e6e6;
+  /* A table header under the pointer, a shade lighter than a hovered row. */
+  --rawr-fill-header-hover: #ebebeb;
   --rawr-disabled: #f5f5f5;
 
   --rawr-text: #333333;
@@ -60,6 +62,8 @@
   --rawr-font-sans: 'Lexend Deca', Helvetica, Arial, sans-serif;
   --rawr-text-body: 0.875rem;
   --rawr-text-small: 0.75rem;
+  /* The big number on a KPI tile. */
+  --rawr-text-kpi: 1.75rem;
   --rawr-weight-body: 300;
   --rawr-weight-label: 500;
   --rawr-weight-link: 600;
@@ -73,11 +77,14 @@
   --rawr-radius-panel: 16px;
   --rawr-radius-pill: 999999px;
   --rawr-control-height: 2rem;
+  /* HubSpot's toolbar pills and view tabs sit a pixel under a control. */
+  --rawr-pill-height: 1.9375rem;
 
   --rawr-topbar-height: 2.75rem;
   --rawr-rail-width: 4rem;
   --rawr-rail-item-height: 3.25rem;
   --rawr-flyout-width: 13.25rem;
+  --rawr-search-width: 26.0625rem;
 
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;
