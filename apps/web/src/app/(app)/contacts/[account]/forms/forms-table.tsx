@@ -1,14 +1,17 @@
 'use client'
 
 import type { Format } from '~/lib/format.ts'
-import { Button, DataTable, EmptyState, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
+import { Button, DataTable, DropdownMenu, EmptyState, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
+import { ChevronDown } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
-import { formsPath, submissionsPath } from '~/lib/links.ts'
+import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import { RowActions, StatusDot, rowPill } from '~/components/row-actions.tsx'
 import { EmbedSnippet } from './embed-snippet.tsx'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -37,7 +40,7 @@ const UNFILED = 'none'
 /** A rate somebody has to act on, not a rate somebody has to admire. One decimal
  *  is enough to tell 2.1% from 2.8%; a second is noise from a counter. */
 const rate = (fmt: Format, part: number, whole: number): string =>
-  whole === 0 ? '—' : fmt.percent(part / whole, 1)
+  whole === 0 ? EMPTY_VALUE : fmt.percent(part / whole, 1)
 
 /** HubSpot's forms list: a table with the form's status under its name, and the
  *  numbers that matter in the columns. The embed code is one click away on each
@@ -107,16 +110,56 @@ export const FormsTable = ({
     {
       key: 'name',
       header: 'Name',
-      width: 320,
+      width: 420,
       render: (row) => (
-        <span className="flex min-w-0 flex-col py-1">
-          <Link href={formsPath(account, row.id)} className="truncate" onClick={(event) => event.stopPropagation()}>
-            {row.name}
-          </Link>
-          <span className="flex items-center gap-1.5 text-small text-secondary">
-            <span aria-hidden="true" className={`size-2 rounded-pill ${row.isActive ? 'bg-success' : 'bg-line-strong'}`} />
-            {row.isActive ? 'Published' : 'Turned off'} | Form
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span className="flex min-w-0 flex-col">
+            <Link href={formPerformancePath(account, row.id)} title={row.name} className="truncate font-semibold text-link hover:underline">
+              {row.name}
+            </Link>
+            <span className="flex min-w-0 text-small">
+              <StatusDot tone={row.isActive ? 'live' : 'off'}>{row.isActive ? 'Published' : 'Turned off'} | Form</StatusDot>
+            </span>
           </span>
+          <RowActions>
+            <Link href={formsPath(account, row.id)} className={rowPill}>
+              Edit
+            </Link>
+            {canEdit ? (
+              <button
+                type="button"
+                className={rowPill}
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    const id = await api.forms.clone.mutate({ id: row.id })
+                    router.push(formsPath(account, id))
+                  })
+                }
+              >
+                Clone
+              </button>
+            ) : null}
+            <DropdownMenu
+              label={`Actions for ${row.name}`}
+              align="start"
+              groups={[
+                {
+                  key: 'actions',
+                  items: [
+                    { key: 'embed', label: 'Embed code', onSelect: () => setEmbedding(row) },
+                    ...(canEdit ? [{ key: 'move', label: 'Move to folder', onSelect: () => setMoving(row) }] : []),
+                  ],
+                },
+              ]}
+              trigger={(props) => (
+                <button {...props} type="button" className={rowPill}>
+                  Actions
+                  <ChevronDown aria-hidden="true" className="size-3" />
+                </button>
+              )}
+            />
+          </RowActions>
         </span>
       ),
     },
@@ -125,7 +168,7 @@ export const FormsTable = ({
       header: 'Page views',
       width: 130,
       align: 'right',
-      render: (row) => (row.pageViews === 0 ? '—' : fmt.number(row.pageViews)),
+      render: (row) => (row.pageViews === 0 ? EMPTY_VALUE : fmt.number(row.pageViews)),
     },
     {
       key: 'rate',
@@ -141,14 +184,24 @@ export const FormsTable = ({
       align: 'right',
       render: (row) => fmt.number(row.spam),
     },
-    { key: 'submissions', header: 'Form submissions', width: 160, align: 'right', render: (row) => fmt.number(row.submissions) },
+    {
+      key: 'submissions',
+      header: 'Form submissions',
+      width: 160,
+      align: 'right',
+      render: (row) => (
+        <Link href={submissionsPath(account, { state: 'clean', form: row.id })} className="font-semibold text-link hover:underline">
+          {fmt.number(row.submissions)}
+        </Link>
+      ),
+    },
     {
       key: 'appears',
       header: 'Appears on',
       width: 130,
       align: 'right',
       render: (row) =>
-        row.appearsOn === 0 ? '—' : `${row.appearsOn} ${row.appearsOn === 1 ? 'page' : 'pages'}`,
+        row.appearsOn === 0 ? EMPTY_VALUE : `${row.appearsOn} ${row.appearsOn === 1 ? 'page' : 'pages'}`,
     },
     {
       key: 'held',
@@ -157,7 +210,7 @@ export const FormsTable = ({
       align: 'right',
       render: (row) =>
         row.quarantined > 0 ? (
-          <Link href={submissionsPath(account, { state: 'quarantined', form: row.id })} onClick={(event) => event.stopPropagation()}>
+          <Link href={submissionsPath(account, { state: 'quarantined', form: row.id })} className="font-semibold text-link hover:underline">
             {fmt.number(row.quarantined)}
           </Link>
         ) : (
@@ -171,33 +224,7 @@ export const FormsTable = ({
       render: (row) =>
         row.lastSubmissionAt
           ? fmt.date(row.lastSubmissionAt)
-          : '—',
-    },
-    {
-      key: 'actions',
-      header: '',
-      width: 250,
-      render: (row) => (
-        <span className="flex flex-wrap justify-end gap-1">
-          <RowAction onClick={() => setEmbedding(row)}>Embed code</RowAction>
-          {canEdit ? (
-            <>
-              <RowAction
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    const id = await api.forms.clone.mutate({ id: row.id })
-                    router.push(formsPath(account, id))
-                  })
-                }
-              >
-                Clone
-              </RowAction>
-              <RowAction onClick={() => setMoving(row)}>Move</RowAction>
-            </>
-          ) : null}
-        </span>
-      ),
+          : EMPTY_VALUE,
     },
   ]
 
@@ -251,7 +278,6 @@ export const FormsTable = ({
         rows={page}
         rowKey={(row) => row.id}
         caption="Forms in this account"
-        onRowClick={(row) => router.push(formsPath(account, row.id))}
         empty={
           folder === null ? (
             <EmptyState title="No forms yet" description="Create a form to start collecting submissions." />
@@ -386,28 +412,6 @@ const Chip = ({
     className={`inline-flex h-control max-w-full items-center truncate rounded-pill border px-3 text-small ${
       current ? 'border-line-strong bg-fill font-medium' : 'border-line text-secondary hover:bg-fill'
     }`}
-  >
-    {children}
-  </button>
-)
-
-const RowAction = ({
-  onClick,
-  disabled,
-  children,
-}: {
-  onClick: () => void
-  disabled?: boolean
-  children: React.ReactNode
-}) => (
-  <button
-    type="button"
-    disabled={disabled}
-    onClick={(event) => {
-      event.stopPropagation()
-      onClick()
-    }}
-    className="inline-flex h-control items-center rounded-pill border border-line-strong px-3 text-small font-light hover:bg-fill disabled:opacity-60"
   >
     {children}
   </button>
