@@ -58,9 +58,12 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   return (
     <ToastContext.Provider value={value}>
       {children}
+      {/* Top and centred, under the header: every page keeps its own actions
+          along the bottom and the right, and a toast there covers the very
+          button the person just used. */}
       <div
         aria-live="polite"
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-toast flex flex-col items-center gap-2 p-4 sm:items-end"
+        className="pointer-events-none fixed inset-x-0 top-topbar z-toast flex flex-col items-center gap-2 p-4"
       >
         {toasts.map((toast) => (
           <div
