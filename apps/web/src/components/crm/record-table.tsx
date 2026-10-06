@@ -178,7 +178,6 @@ export const RecordTable = ({
               href={recordPath(account, object, row.id, { from: origin })}
               className="block min-w-0 truncate font-semibold hover:text-accent hover:underline"
               title={text}
-              onClick={(event) => event.stopPropagation()}
             >
               {text}
             </Link>
@@ -209,17 +208,8 @@ export const RecordTable = ({
       // rewrite the row height of every other row on the page.
       const full = row.labels[column.key] || (typeof value === 'string' ? value : '')
       return (
-        // Not a control. The handler only stops a click on a link inside the cell
-        // from also opening the row, so there is no behaviour for a keyboard to
-        // reach.
-        // biome-ignore lint/a11y/noStaticElementInteractions lint/a11y/useKeyWithClickEvents: see above
         <span
           title={full || undefined}
-          // A mailto or tel link inside a row that is itself clickable must open
-          // the link, not the record.
-          onClick={(event) => {
-            if ((event.target as HTMLElement).closest('a')) event.stopPropagation()
-          }}
           className={cn(
             'block min-w-0 truncate',
             column.type === 'multi_select' && 'whitespace-normal',
