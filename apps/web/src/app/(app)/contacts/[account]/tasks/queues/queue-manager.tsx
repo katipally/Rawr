@@ -1,34 +1,26 @@
 'use client'
 
-import { Button, IconButton, Modal, RenamePrompt, TextInput, cn, useToast } from '@rawr/ui'
-import { Pencil, Plus } from 'lucide-react'
+import { Button, DataTable, EmptyState, IconButton, Modal, RenamePrompt, TextInput, useToast, type Column } from '@rawr/ui'
+import { Pencil, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
-import { tasksPath, type TaskView } from '~/lib/links.ts'
+import { tasksPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
 export type QueueRow = { id: string; name: string; openCount: number }
 
-export type QueueSidebarProps = {
+export type QueueManagerProps = {
   account: string
   queues: QueueRow[]
-  /** A queue id, 'none', or undefined for every task whatever list it is in. */
-  current?: string | undefined
-  /** Carried into every link so switching queue keeps the view and the search. */
-  keep: { view: TaskView; mine?: '1'; q?: string; type?: string }
   canWrite: boolean
 }
 
-const row =
-  'flex min-h-9 items-center gap-2 rounded-control px-3 text-body no-underline hover:bg-fill'
-
-/** The named lists a rep works top to bottom, and the two that are not lists:
- *  everything, and the tasks nobody filed. Scrolls on its own so a hundred
- *  queues never push the table off the screen. */
-export const QueueSidebar = ({ account, queues, current, keep, canWrite }: QueueSidebarProps) => {
+/** HubSpot's Task queues page: the named lists a rep works top to bottom, each
+ *  one a link to its tasks, with create, rename and delete beside them. */
+export const QueueManager = ({ account, queues, canWrite }: QueueManagerProps) => {
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -37,6 +29,7 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
   const [renaming, setRenaming] = useState<QueueRow | null>(null)
   const [removing, setRemoving] = useState<QueueRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
   /** Queues created here, kept until router.refresh brings them back from the
    *  server: the round trip is long enough that a new queue looked like it had
    *  not been created. */
@@ -56,41 +49,31 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
     }
   }
 
-  const href = (queue?: string) => tasksPath(account, { ...keep, ...(queue ? { queue } : {}) })
+  const needle = query.trim().toLowerCase()
+  const shown = [...queues, ...created.filter((queue) => !queues.some((row) => row.id === queue.id))].filter(
+    (queue) => queue.name.toLowerCase().includes(needle),
+  )
 
-  const shown = [...queues, ...created.filter((queue) => !queues.some((row) => row.id === queue.id))]
-
-  return (
-    <nav aria-label="Task queues" className="flex min-h-0 w-full shrink-0 flex-col gap-1 sm:w-56">
-      <div className="flex items-center justify-between gap-2 px-3">
-        <h2 className="text-small font-semibold text-secondary">Queues</h2>
-        {canWrite ? (
-          <IconButton label="Create queue" icon={<Plus size={16} />} onClick={() => setAdding(true)} />
-        ) : null}
-      </div>
-
-      <ul className="flex min-h-0 flex-col gap-0.5 overflow-y-auto">
-        <li>
-          <Link href={href()} className={cn(row, !current && 'bg-fill-hover font-medium')}>
-            All queues
-          </Link>
-        </li>
-        <li>
-          <Link href={href('none')} className={cn(row, current === 'none' && 'bg-fill-hover font-medium')}>
-            No queue
-          </Link>
-        </li>
-        {shown.map((queue) => (
-          <li key={queue.id} className="group flex items-center gap-1">
-            <Link
-              href={href(queue.id)}
-              className={cn(row, 'min-w-0 flex-1', current === queue.id && 'bg-fill-hover font-medium')}
-            >
-              <span className="min-w-0 flex-1 truncate">{queue.name}</span>
-              <span className="shrink-0 text-small text-secondary">{fmt.number(queue.openCount)}</span>
-            </Link>
-            {canWrite ? (
-              <>
+  const columns: Column<QueueRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 360,
+      render: (queue) => (
+        <Link href={tasksPath(account, { queue: queue.id })} className="block truncate">
+          {queue.name}
+        </Link>
+      ),
+    },
+    { key: 'open', header: 'Open tasks', width: 160, render: (queue) => fmt.number(queue.openCount) },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            header: '',
+            width: 96,
+            render: (queue: QueueRow) => (
+              <span className="flex items-center gap-1">
                 <IconButton label={`Rename ${queue.name}`} icon={<Pencil size={16} />} onClick={() => setRenaming(queue)} />
                 <IconButton
                   label={`Delete ${queue.name}`}
@@ -98,15 +81,54 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
                   icon={<ACTION_ICONS.delete size={16} />}
                   onClick={() => setRemoving(queue)}
                 />
-              </>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+              </span>
+            ),
+          },
+        ]
+      : []),
+  ]
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full min-w-0 sm:w-[13.375rem]">
+          <TextInput
+            type="search"
+            value={query}
+            aria-label="Search task queues"
+            placeholder="Search task queues"
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4"
+          />
+          <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2" />
+        </div>
+        {canWrite ? (
+          <Button variant="primary" className="ml-auto" onClick={() => setAdding(true)}>
+            Create task queue
+          </Button>
+        ) : null}
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={shown}
+        rowKey={(queue) => queue.id}
+        caption="Task queues"
+        storageKey="task-queues"
+        fill
+        empty={
+          <div className="flex flex-1 flex-col justify-center">
+            <EmptyState
+              title={needle ? 'No queue matches' : 'No queues yet.'}
+              {...(needle ? {} : { description: 'A queue is a named list of tasks somebody works through, like Monday calls.' })}
+            />
+          </div>
+        }
+      />
 
       <Modal
         open={adding}
-        title="Create queue"
+        title="Create task queue"
         onClose={() => setAdding(false)}
         dirty={name !== ''}
         onSubmit={() => {
@@ -176,10 +198,8 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
                   () => api.crm.tasks.queues.remove.mutate({ id: removing!.id }),
                   'Queue deleted.',
                   () => {
+                    setCreated((current) => current.filter((queue) => queue.id !== removing!.id))
                     setRemoving(null)
-                    // The address still names the queue that just went away, so
-                    // leaving it there shows an empty list for nothing.
-                    if (removing!.id === current) router.replace(href())
                   },
                 )
               }
@@ -195,6 +215,6 @@ export const QueueSidebar = ({ account, queues, current, keep, canWrite }: Queue
           but the list itself.
         </p>
       </Modal>
-    </nav>
+    </div>
   )
 }

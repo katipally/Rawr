@@ -1,15 +1,15 @@
 import { canWrite, getRegistry, isUuid, listTaskQueues, listTasks, overdueNextSteps, schema, TASK_LIST_CAP } from '@rawr/db'
-import { Alert, EmptyState, Tabs, buttonClass, cn } from '@rawr/ui'
-import { CalendarDays, Search, Table2 } from 'lucide-react'
+import { Alert, EmptyState, cn } from '@rawr/ui'
+import { CalendarDays, Table2 } from 'lucide-react'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { IndexHeader } from '~/components/crm/index-header.tsx'
-import { TASK_TYPE_LABELS, type TaskType } from '~/components/crm/task-labels.ts'
+import type { TaskType } from '~/components/crm/task-labels.ts'
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
-import { objectView, recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
+import { objectView, recordPath, taskQueuesPath, tasksPath, type TaskView } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, viewerContext } from '~/server/session.ts'
-import { QueueSidebar } from './queue-sidebar.tsx'
+import { TaskFilters } from './task-filters.tsx'
 import { getFormat } from '~/server/format.ts'
 
 /** HubSpot's task views, each one an address so it can be linked into. */
@@ -21,8 +21,6 @@ const VIEWS: { key: TaskView; label: string; empty: string }[] = [
   { key: 'done', label: 'Completed', empty: 'Nothing has been completed yet' },
 ]
 
-const pill = buttonClass('secondary', 'no-underline')
-
 /** Trevor's Monday: what is overdue, and what he told himself he would do next.
  *  Both are the same question asked of two different columns. A9. */
 const TasksPage = async ({
@@ -33,6 +31,7 @@ const TasksPage = async ({
   searchParams: Promise<{
     view?: string
     mine?: string
+    assignee?: string
     q?: string
     queue?: string
     type?: string
@@ -48,6 +47,7 @@ const TasksPage = async ({
   const ctx = contextFrom(session)
   const view = VIEWS.find((option) => option.key === search.view) ?? VIEWS[0]!
   const mine = search.mine === '1'
+  const assignee = !mine && isUuid(search.assignee ?? '') ? search.assignee : undefined
   const q = search.q?.trim() ?? ''
   // A hand-edited address must not reach a uuid comparison with something that
   // is not one.
@@ -56,21 +56,19 @@ const TasksPage = async ({
   const type = (schema.TASK_TYPES as readonly string[]).includes(search.type ?? '')
     ? (search.type as TaskType)
     : undefined
-  /** Everything but the queue, because the sidebar is what changes the queue and
-   *  its "All queues" link has to be able to drop it. */
-  const filters = {
+  const kept = {
     view: view.key,
     ...(mine ? { mine: '1' as const } : {}),
+    ...(assignee ? { assignee } : {}),
     ...(q ? { q } : {}),
     ...(type ? { type } : {}),
+    ...(queue ? { queue } : {}),
   }
-  const kept = { ...filters, ...(queue ? { queue } : {}) }
-  const at = (next: { view?: TaskView; mine?: '1'; q?: string; queue?: string; type?: string }) =>
-    tasksPath(account, { ...kept, ...next })
+  const at = (next: { view?: TaskView }) => tasksPath(account, { ...kept, ...next })
 
   const [tasks, queues, overdue, lookups, registry] = await Promise.all([
     listTasks(viewerContext(session), {
-      ...(mine && ctx.actorId ? { assigneeId: ctx.actorId } : {}),
+      ...(mine && ctx.actorId ? { assigneeId: ctx.actorId } : assignee ? { assigneeId: assignee } : {}),
       ...(view.key === 'overdue' ? { overdueOnly: true } : {}),
       ...(view.key === 'today' || view.key === 'upcoming' ? { due: view.key } : {}),
       ...(view.key === 'done' ? { status: 'done' as const } : {}),
@@ -101,67 +99,36 @@ const TasksPage = async ({
         ]}
         add={writable ? [{ label: 'Create task', href: at({}) + (at({}).includes('?') ? '&new=1' : '?new=1') }] : []}
         addLabel="Add tasks"
-        more={[]}
+        more={[{ key: 'queues', label: 'Manage queues', href: taskQueuesPath(account, at({})) }]}
       />
 
-      <Tabs
-        label="Task views"
-        items={VIEWS.map((option) => {
+      <nav aria-label="Task views" className="flex flex-wrap items-center gap-1 border-b border-line pb-1">
+        {VIEWS.map((option) => {
           const Icon = option.key === 'today' || option.key === 'upcoming' ? CalendarDays : Table2
-          return {
-            key: option.key,
-            label: (
-              <span className="flex items-center gap-2">
-                <Icon aria-hidden="true" className="size-4 shrink-0" />
-                {option.label}
-              </span>
-            ),
-            href: at({ view: option.key }),
-            current: option.key === view.key,
-          }
+          const current = option.key === view.key
+          return (
+            <Link
+              key={option.key}
+              href={at({ view: option.key })}
+              aria-current={current ? 'page' : undefined}
+              className={cn(
+                'flex h-pill items-center gap-2 rounded-hs px-3 py-px font-normal no-underline transition-all duration-150 ease-out',
+                current ? 'bg-fill-hover text-body' : 'bg-surface text-secondary hover:bg-fill-hover hover:text-body',
+              )}
+            >
+              <Icon aria-hidden="true" className="size-4 shrink-0" />
+              <span className="truncate">{option.label}</span>
+            </Link>
+          )
         })}
-      />
+      </nav>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <form className="relative w-full min-w-0 sm:w-56" action={tasksPath(account)}>
-          {view.key !== 'all' ? <input type="hidden" name="view" value={view.key} /> : null}
-          {mine ? <input type="hidden" name="mine" value="1" /> : null}
-          {queue ? <input type="hidden" name="queue" value={queue} /> : null}
-          {type ? <input type="hidden" name="type" value={type} /> : null}
-          <input
-            type="search"
-            name="q"
-            defaultValue={q}
-            aria-label="Search tasks"
-            placeholder="Search ( / )"
-            className="h-control w-full rounded-pill border border-line-strong bg-surface py-1 pr-10 pl-4 text-body placeholder:text-muted"
-          />
-          <button
-            type="submit"
-            aria-label="Search tasks"
-            className="absolute top-1/2 right-1 grid size-6 -translate-y-1/2 place-items-center rounded-pill text-body hover:bg-fill"
-          >
-            <Search aria-hidden="true" className="size-4" />
-          </button>
-        </form>
-        <Link
-          href={mine ? tasksPath(account, { ...kept, mine: undefined }) : at({ mine: '1' })}
-          aria-pressed={mine}
-          className={cn(pill, mine ? 'bg-fill-hover' : 'bg-surface hover:bg-fill')}
-        >
-          Assigned to me
-        </Link>
-        {(Object.keys(TASK_TYPE_LABELS) as TaskType[]).map((key) => (
-          <Link
-            key={key}
-            href={tasksPath(account, { ...kept, type: type === key ? undefined : key })}
-            aria-pressed={type === key}
-            className={cn(pill, type === key ? 'bg-fill-hover' : 'bg-surface hover:bg-fill')}
-          >
-            {TASK_TYPE_LABELS[key]}
-          </Link>
-        ))}
-      </div>
+      <TaskFilters
+        account={account}
+        params={kept}
+        assignees={lookups.users}
+        queues={queues}
+      />
 
       {capped ? (
         <Alert>
@@ -170,8 +137,7 @@ const TasksPage = async ({
         </Alert>
       ) : null}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
-        <QueueSidebar account={account} queues={queues} current={queue} keep={filters} canWrite={writable} />
+      <div className="flex min-h-0 flex-1 flex-col">
         <TasksTable
           account={account}
           rows={rows}
@@ -179,8 +145,8 @@ const TasksPage = async ({
           queues={queues}
           {...(queue && queue !== 'none' ? { queueId: queue } : {})}
           canWrite={writable}
-          emptyTitle={q || type ? 'No tasks match the filter' : view.empty}
-          filtered={Boolean(q || type)}
+          emptyTitle={q || type || queue || assignee ? 'No tasks match the filter' : view.empty}
+          filtered={Boolean(q || type || queue || assignee)}
           openCreate={search.new === '1'}
         />
       </div>

@@ -266,6 +266,8 @@ export const tasksPath = (
   params: {
     view?: TaskView | undefined
     mine?: '1' | undefined
+    /** A teammate's user id: their tasks rather than the reader's. */
+    assignee?: string | undefined
     q?: string | undefined
     new?: '1' | undefined
     /** A queue id, or 'none' for the tasks in no queue. */
@@ -274,6 +276,11 @@ export const tasksPath = (
   } = {},
 ): string =>
   `/${CRM_ROOT}/${account}/tasks${query(params)}`
+
+/** HubSpot's Task queues page. `back` is the tasks index it was opened from, so
+ *  Back returns to the same view and filters. */
+export const taskQueuesPath = (account: string, back?: string): string =>
+  `/${CRM_ROOT}/${account}/tasks/queues${query({ back })}`
 
 /** The shared inbox. Every filter is in the address, so a filtered view pastes
  *  into Slack and the back button works. */
