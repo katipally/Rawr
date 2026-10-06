@@ -95,6 +95,9 @@
   /* HubSpot's record page: a fixed left and right column round a flexible middle. */
   --rawr-record-left-width: 26.0625rem;
   --rawr-record-right-width: 27.0625rem;
+  /* The record composer HubSpot floats over the page. */
+  --rawr-composer-width: 36.25rem;
+  --rawr-composer-height: 27.25rem;
 
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;

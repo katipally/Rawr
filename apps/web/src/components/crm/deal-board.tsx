@@ -229,13 +229,13 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
           key: 'note',
           label: 'Add a note',
           onSelect: () =>
-            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', interaction: 'note', from: origin })),
         },
         {
           key: 'task',
           label: 'Create a task',
           onSelect: () =>
-            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', task: 'new', from: origin })),
+            navigate(recordPath(account, 'deal', card.id, { tab: 'activities', interaction: 'task', from: origin })),
         },
       ],
     },
@@ -502,7 +502,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
                             )}
                             <Tooltip label="Create a note" side="top">
                               <Link
-                                href={recordPath(account, 'deal', card.id, { tab: 'activities', log: 'note', from: origin })}
+                                href={recordPath(account, 'deal', card.id, { tab: 'activities', interaction: 'note', from: origin })}
                                 aria-label="Create a note"
                                 className={cn('inline-flex shrink-0 items-center justify-center rounded-pill', cardIcon)}
                               >

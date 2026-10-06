@@ -87,8 +87,8 @@ test('the export page and the file it hands over are different addresses', () =>
 
 test('a record quick action is a link, so it can be sent to somebody', () => {
   assert.equal(
-    recordPath('datasaur', 'deal', 'abc', { tab: 'activities', log: 'call' }),
-    '/contacts/datasaur/record/deal/abc?tab=activities&log=call',
+    recordPath('datasaur', 'deal', 'abc', { tab: 'activities', interaction: 'call' }),
+    '/contacts/datasaur/record/deal/abc?tab=activities&interaction=call',
   )
 })
 

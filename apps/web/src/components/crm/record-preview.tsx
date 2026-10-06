@@ -96,11 +96,11 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
   const open = (params: Parameters<typeof recordPath>[3]) => recordPath(account, object, current, { from, ...params })
   const email = typeof data?.record.values.email === 'string' ? data.record.values.email : ''
   const actions = [
-    { label: 'Note', icon: StickyNote, params: { log: 'note' } },
+    { label: 'Note', icon: StickyNote, params: { interaction: 'note' } },
     ...(object === 'contact' && email ? [{ label: 'Email', icon: Mail, params: { tab: 'activities', compose: '1' } }] : []),
-    { label: 'Call', icon: Phone, params: { log: 'call' } },
-    { label: 'Task', icon: SquareCheck, params: { task: 'new' } },
-    { label: 'Meeting', icon: CalendarDays, params: { log: 'meeting' } },
+    { label: 'Call', icon: Phone, params: { interaction: 'call' } },
+    { label: 'Task', icon: SquareCheck, params: { interaction: 'task' } },
+    { label: 'Meeting', icon: CalendarDays, params: { interaction: 'meeting' } },
   ]
 
   const copy = async () => {

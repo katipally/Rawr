@@ -119,6 +119,7 @@ export const recordPath = (
   params: {
     tab?: string | undefined
     type?: string | undefined
+    interaction?: string | undefined
     log?: string | undefined
     task?: string | undefined
     compose?: string | undefined

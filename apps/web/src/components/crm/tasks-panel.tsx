@@ -8,7 +8,7 @@ import { ACTION_ICONS } from '~/components/icons.ts'
 import { recordPath } from '~/lib/links.ts'
 import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { replaceParams } from '~/lib/url-params.ts'
+import { openInteraction } from './record-composer.tsx'
 import { TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -92,7 +92,7 @@ export const TasksPanel = ({
 
       {canWrite ? (
         <div className="border-b border-divider px-6 py-2">
-          <Button onClick={() => replaceParams({ task: 'new', log: null })}>Add task</Button>
+          <Button onClick={() => openInteraction('task')}>Add task</Button>
         </div>
       ) : null}
 

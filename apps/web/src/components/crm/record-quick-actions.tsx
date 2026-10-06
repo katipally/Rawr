@@ -3,7 +3,7 @@
 import { DropdownMenu, buttonClass } from '@rawr/ui'
 import { CalendarCheck, ChevronDown, CircleCheck, Mail, Phone, StickyNote } from 'lucide-react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { replaceParams } from '~/lib/url-params.ts'
+import { openInteraction } from './record-composer.tsx'
 
 export type RecordQuickActionsProps = {
   /** Where the Email button goes, and what its tooltip says. A null href
@@ -25,7 +25,7 @@ export type RecordQuickActionsProps = {
 const useActivityActions = (email: RecordQuickActionsProps['email']) => {
   const { navigate } = useNavigation()
   return [
-    { label: 'Note', icon: StickyNote, onClick: () => replaceParams({ log: 'note', task: null }) },
+    { label: 'Note', icon: StickyNote, onClick: () => openInteraction('note') },
     {
       label: 'Email',
       icon: Mail,
@@ -35,9 +35,9 @@ const useActivityActions = (email: RecordQuickActionsProps['email']) => {
       disabled: email.href === null,
       title: email.title,
     },
-    { label: 'Call', icon: Phone, onClick: () => replaceParams({ log: 'call', task: null }) },
-    { label: 'Task', icon: CircleCheck, onClick: () => replaceParams({ task: 'new', log: null }) },
-    { label: 'Meeting', icon: CalendarCheck, onClick: () => replaceParams({ log: 'meeting', task: null }) },
+    { label: 'Call', icon: Phone, onClick: () => openInteraction('call') },
+    { label: 'Task', icon: CircleCheck, onClick: () => openInteraction('task') },
+    { label: 'Meeting', icon: CalendarCheck, onClick: () => openInteraction('meeting') },
   ]
 }
 
