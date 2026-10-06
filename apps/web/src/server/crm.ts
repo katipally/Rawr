@@ -112,14 +112,18 @@ export const toTableColumns = (object: RegistryObject, keys: string[]): TableCol
     ]
   })
 
-export const toFilterFields = (object: RegistryObject): FilterField[] =>
-  object.fields.map((field) => ({
-    key: field.key,
-    label: field.label,
-    type: field.type,
-    options: field.options,
-    operators: field.operators,
-  }))
+export const toFilterFields = (object: RegistryObject, lookups?: Lookups): FilterField[] =>
+  object.fields.map((field) => {
+    const choices = lookups && choicesFor(field, lookups)
+    return {
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      options: field.options,
+      operators: field.operators,
+      ...(choices ? { choices } : {}),
+    }
+  })
 
 /** The fields a create form asks for before anything else, in the order it asks.
  *  A custom object has no fixed set, so its label field is the identity. */

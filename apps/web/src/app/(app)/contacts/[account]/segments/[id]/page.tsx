@@ -1,6 +1,6 @@
 import { getRegistry, readSegment, readSegmentMembers } from '@rawr/db'
 import { notFound, redirect } from 'next/navigation'
-import { toFilterFields } from '~/server/crm.ts'
+import { readLookups, toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { ListMembers } from './list-members.tsx'
 
@@ -19,7 +19,7 @@ const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: 
 
   const { account, id } = await params
   const ctx = contextFrom(session)
-  const [list, registry] = await Promise.all([readSegment(ctx, id), getRegistry(ctx)])
+  const [list, registry, lookups] = await Promise.all([readSegment(ctx, id), getRegistry(ctx), readLookups(ctx)])
   if (!list) notFound()
 
   const members = await readSegmentMembers(ctx, id, PAGE_SIZE)
@@ -29,7 +29,7 @@ const SegmentPage = async ({ params }: { params: Promise<{ account: string; id: 
     <ListMembers
       account={account}
       list={{ ...list, lastEvaluatedAt: list.lastEvaluatedAt?.toISOString() ?? null }}
-      fields={object ? toFilterFields(object) : []}
+      fields={object ? toFilterFields(object, lookups) : []}
       initial={members.map((member) => ({ ...member, enteredAt: member.enteredAt.toISOString() }))}
       pageSize={PAGE_SIZE}
       canWrite={sessionCanEdit(session, 'marketing')}

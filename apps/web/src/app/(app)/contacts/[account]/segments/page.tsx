@@ -1,6 +1,6 @@
 import { getRegistry, listSegments, type ObjectKey } from '@rawr/db'
 import { redirect } from 'next/navigation'
-import { toFilterFields } from '~/server/crm.ts'
+import { readLookups, toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionCanEdit } from '~/server/session.ts'
 import { SegmentList } from './segment-list.tsx'
 
@@ -12,12 +12,12 @@ const SegmentsPage = async ({ params }: { params: Promise<{ account: string }> }
 
   const { account } = await params
   const ctx = contextFrom(session)
-  const [segments, registry] = await Promise.all([listSegments(ctx), getRegistry(ctx)])
+  const [segments, registry, lookups] = await Promise.all([listSegments(ctx), getRegistry(ctx), readLookups(ctx)])
 
   const fieldsByObject = Object.fromEntries(
     (['contact', 'company', 'deal'] as ObjectKey[]).flatMap((key) => {
       const object = registry.byKey.get(key)
-      return object ? [[key, toFilterFields(object)]] : []
+      return object ? [[key, toFilterFields(object, lookups)]] : []
     }),
   )
 

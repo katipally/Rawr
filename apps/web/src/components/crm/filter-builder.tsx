@@ -11,6 +11,8 @@ export type FilterField = {
   type: string
   options: string[]
   operators: readonly Operator[]
+  /** Names for the ids a user or configuration field stores, where the caller has them. */
+  choices?: { id: string; label: string }[]
 }
 
 export type Condition = { field: string; operator: Operator; value?: unknown }
@@ -73,11 +75,13 @@ const isComplete = (condition: Condition): boolean => {
 /** One condition as a sentence, "Lifecycle stage is any of Lead, MQL", for a
  *  page that shows a segment's rule without opening the builder. */
 export const describeCondition = (fields: FilterField[], condition: Condition): string => {
-  const label = fields.find((field) => field.key === condition.field)?.label ?? condition.field
+  const field = fields.find((entry) => entry.key === condition.field)
+  const label = field?.label ?? condition.field
   const operator = OPERATOR_LABELS[condition.operator] ?? condition.operator
   if (NULLARY.has(condition.operator)) return `${label} ${operator}`
   if (isDateRange(condition.value)) return `${label} is ${dateRangeLabel(condition.value).toLowerCase()}`
-  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : entry))
+  const names = new Map(field?.choices?.map((choice) => [choice.id, choice.label]))
+  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : (names.get(entry) ?? entry)))
   const value = condition.operator === RANGE ? values.join(' and ') : values.join(', ')
   return `${label} ${operator} ${value}`
 }
