@@ -36,13 +36,14 @@ export const BOOKING_STYLES = `
   --_ok-soft: var(--rawr-embed-success-soft, #e2f4ef);
   --_hold: var(--rawr-embed-hold, #a4650b);
   --_hold-soft: var(--rawr-embed-hold-soft, #fbf0db);
-  --_radius: var(--rawr-embed-radius, 10px);
+  --_on-accent: var(--rawr-embed-accent-text, #ffffff);
+  --_radius: var(--rawr-embed-radius, 4px);
   --_gap: var(--rawr-embed-gap, 1rem);
   --_surface: var(--rawr-embed-banner-bg, #ffffff);
   --_fill: var(--rawr-embed-fill, #eef1f7);
   --_fill-hover: var(--rawr-embed-fill-hover, #e5e9f2);
   --_field-bg: var(--rawr-embed-field-bg, #ffffff);
-  --_shadow: var(--rawr-embed-shadow, 0 10px 34px rgb(18 22 34 / .12), 0 2px 6px rgb(18 22 34 / .06));
+  --_shadow: var(--rawr-embed-shadow, 0 1px 5px rgb(44 61 79 / .12));
   --_mono: var(--rawr-embed-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 
   font-family: var(--_font);
@@ -69,7 +70,7 @@ export const BOOKING_STYLES = `
 .rawr-b {
   background: var(--_surface);
   border: 1px solid var(--_border);
-  border-radius: calc(var(--_radius) + 4px);
+  border-radius: calc(var(--_radius) - 1px);
   box-shadow: var(--_shadow);
   overflow: hidden;
   display: flex;
@@ -233,7 +234,10 @@ export const BOOKING_STYLES = `
   padding-bottom: 0.55rem; margin-bottom: 0.6rem; border-bottom: 1px solid var(--_border);
   min-height: 2rem;
 }
-.rawr-b-rhead h2 { font-size: 0.88rem; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+.rawr-b-rhead h2 { font-size: 1rem; font-weight: 600; letter-spacing: -0.015em; text-wrap: balance; }
+.rawr-b-rtitle { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+.rawr-b-rtitle p { font-weight: 300; }
+.rawr-b-rtitle b { font-weight: 600; }
 .rawr-b-count { font-family: var(--_mono); font-size: 0.68rem; color: var(--_faint); white-space: nowrap; flex: none; }
 .rawr-b-back {
   display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; font-weight: 500;
@@ -263,16 +267,17 @@ export const BOOKING_STYLES = `
 .rawr-b-band:first-child { margin-top: 0; }
 .rawr-b-bandname { font-family: inherit; font-size: inherit; letter-spacing: inherit; text-transform: inherit; font-weight: inherit; color: inherit; }
 .rawr-b-slot {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
-  width: 100%; text-align: left;
-  font-family: var(--_mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; font-weight: 500;
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  width: 100%; min-height: 3.125rem; text-align: center;
+  font-family: var(--_font); font-size: 1rem; font-variant-numeric: tabular-nums; font-weight: 300;
   color: var(--_text); background: var(--_field-bg); border: 1px solid var(--_border);
-  border-radius: calc(var(--_radius) - 1px); padding: 0.62rem 0.75rem; cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.1s;
+  border-radius: var(--_radius); padding: 0.62rem 4.5rem; cursor: pointer;
+  transition: border-color 0.15s ease-out, background 0.15s ease-out, color 0.15s ease-out, transform 0.1s;
 }
-.rawr-b-slot:hover { border-color: var(--_accent); background: var(--_accent-soft); color: var(--_accent-ink); }
+.rawr-b-slot:hover { border-color: var(--_accent); background: color-mix(in srgb, var(--_accent) 5%, var(--_field-bg)); }
 .rawr-b-slot:active { transform: scale(0.985); }
 .rawr-b-slot em {
+  position: absolute; right: 0.75rem;
   font-style: normal; font-family: var(--_font); font-size: 0.72rem; font-weight: 500;
   opacity: 0; translate: 7px 0; transition: opacity 0.16s, translate 0.19s;
 }
@@ -449,6 +454,85 @@ export const BOOKING_STYLES = `
   .rawr-b-pane[data-side='right'] { padding-left: 1.25rem; }
 }
 
+/* ------------------------------------------------ HubSpot's two halves
+   The booking widget (and only it: the manage and reschedule panels share these
+   class names) puts its header and calendar on the accent with light type, and
+   the times on white beside them. Wide, the body and its split stop being boxes
+   so the header, the calendar and the times sit in one grid of two halves;
+   narrow, the accent header tops whichever step is showing. */
+.rawr-b[data-step] { border: 0; }
+.rawr-b[data-step] .rawr-b-body { padding: 0; }
+.rawr-b[data-step] .rawr-b-body > .rawr-b-note,
+.rawr-b[data-step] .rawr-b-body > .rawr-b-blank { margin: 0.75rem 1.5rem; }
+.rawr-b[data-step] .rawr-b-head,
+.rawr-b[data-step] .rawr-b-pane[data-side='left'] { background: var(--_accent); color: var(--_on-accent); }
+.rawr-b[data-step] .rawr-b-head {
+  grid-template-columns: minmax(0, 1fr); justify-items: center; text-align: center;
+  border-bottom: 0; padding: 1.75rem 1.5rem 0.75rem;
+}
+.rawr-b[data-step] .rawr-b-id { align-items: center; }
+.rawr-b[data-step] .rawr-b-org { color: inherit; opacity: 0.75; }
+.rawr-b[data-step] .rawr-b-title { font-size: 1.5rem; font-weight: 300; letter-spacing: 0; }
+.rawr-b[data-step] .rawr-b-meta { color: inherit; justify-content: center; }
+.rawr-b[data-step] .rawr-b-sep { background: currentColor; opacity: 0.5; }
+.rawr-b[data-step] .rawr-b-hosts span { background: var(--_on-accent); color: var(--_accent); box-shadow: 0 0 0 1.5px var(--_accent); }
+.rawr-b[data-step] .rawr-b-tzwrap { justify-self: center; }
+.rawr-b[data-step] .rawr-b-tz {
+  background: transparent; color: inherit;
+  border-color: color-mix(in srgb, var(--_on-accent) 40%, transparent);
+}
+.rawr-b[data-step] .rawr-b-tz:hover { background: color-mix(in srgb, var(--_on-accent) 14%, transparent); color: inherit; }
+.rawr-b[data-step] .rawr-b-tz em { color: inherit; opacity: 0.7; }
+.rawr-b[data-step] .rawr-b-tzpop { color: var(--_text); right: auto; left: 50%; margin-left: calc(min(280px, 78cqw) / -2); transform-origin: top center; }
+.rawr-b[data-step] .rawr-b-pane[data-side='left'] { padding: 0.75rem 1.5rem 1.5rem; }
+.rawr-b[data-step] .rawr-b-month { font-size: 1.375rem; font-weight: 500; }
+.rawr-b[data-step] .rawr-b-navb {
+  background: transparent; color: inherit;
+  border-color: color-mix(in srgb, var(--_on-accent) 35%, transparent);
+}
+.rawr-b[data-step] .rawr-b-navb:hover:not([aria-disabled='true']) {
+  background: color-mix(in srgb, var(--_on-accent) 14%, transparent); color: inherit;
+  border-color: color-mix(in srgb, var(--_on-accent) 60%, transparent);
+}
+.rawr-b[data-step] .rawr-b-dow { font-family: var(--_font); font-size: 0.8rem; font-weight: 600; color: inherit; }
+.rawr-b[data-step] .rawr-b-day {
+  border-radius: 50%; font-family: var(--_font); font-size: 0.875rem; font-weight: 300; color: inherit;
+}
+.rawr-b[data-step] .rawr-b-day[data-open='0'] { opacity: 0.3; }
+.rawr-b[data-step] .rawr-b-day[data-open='1'] { background: transparent; color: inherit; font-weight: 600; }
+.rawr-b[data-step] .rawr-b-day[data-open='1']:hover {
+  background: color-mix(in srgb, var(--_on-accent) 14%, transparent); color: inherit; transform: none;
+}
+.rawr-b[data-step] .rawr-b-day[aria-pressed='true'],
+.rawr-b[data-step] .rawr-b-day[aria-pressed='true']:hover { background: var(--_on-accent); color: var(--_accent); }
+.rawr-b[data-step] .rawr-b-day[data-today='1'] { border-color: color-mix(in srgb, var(--_on-accent) 60%, transparent); }
+.rawr-b[data-step] .rawr-b-dot { background: currentColor; }
+.rawr-b[data-step] .rawr-b-dot[data-empty] { background: transparent; }
+.rawr-b[data-step] .rawr-b-day[aria-pressed='true'] .rawr-b-dot { background: var(--_accent); }
+.rawr-b[data-step] .rawr-b-legend { color: inherit; opacity: 0.8; }
+.rawr-b[data-step] .rawr-b-legend i { border-color: currentColor; }
+.rawr-b[data-step] .rawr-b-pane[data-side='right'],
+.rawr-b[data-step] .rawr-b-done { padding: 1.5rem 2rem; }
+.rawr-b[data-step] .rawr-b-rhead { border-bottom: 0; }
+
+@container (min-width: 560px) {
+  .rawr-b[data-step] {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr auto;
+    background: linear-gradient(90deg, var(--_accent) 50%, var(--_surface) 50%);
+  }
+  .rawr-b[data-step] .rawr-b-body,
+  .rawr-b[data-step] .rawr-b-split { display: contents; }
+  .rawr-b[data-step] .rawr-b-head { grid-column: 1; grid-row: 1; }
+  .rawr-b[data-step] .rawr-b-body > .rawr-b-note,
+  .rawr-b[data-step] .rawr-b-body > .rawr-b-blank,
+  .rawr-b[data-step] .rawr-b-pane[data-side='left'] { grid-column: 1; }
+  .rawr-b[data-step] .rawr-b-pane[data-side='right'],
+  .rawr-b[data-step] .rawr-b-done { grid-column: 2; grid-row: 1 / span 4; border-left: 0; padding: 2rem; }
+  .rawr-b[data-step] .rawr-b-foot { grid-column: 1 / -1; }
+  .rawr-b[data-step] .rawr-b-times { max-height: 26rem; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-rawr-booking-widget] *,
   [data-rawr-booking-widget] *::before,
@@ -488,6 +572,5 @@ export const HOSTED_BOOKING_STYLES = `
   --rawr-embed-fill-hover: var(--rawr-fill-hover);
   --rawr-embed-field-bg: var(--rawr-surface);
   --rawr-embed-banner-bg: var(--rawr-surface);
-  --rawr-embed-shadow: var(--rawr-shadow-panel);
 }
 `

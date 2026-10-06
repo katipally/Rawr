@@ -332,7 +332,12 @@ export const Times = ({
           <Icon name="left" />
           Calendar
         </button>
-        <h2>{formatDayLong(day, locale)}</h2>
+        <div className="rawr-b-rtitle">
+          <h2>What time works best?</h2>
+          <p>
+            Showing times for <b>{formatDayLong(day, locale)}</b>
+          </p>
+        </div>
         {/* biome-ignore lint/a11y/useSemanticElements: two toggle buttons that
             share a name, not a set of form controls to submit. */}
         <span className="rawr-b-seg" role="group" aria-label="Time format">
