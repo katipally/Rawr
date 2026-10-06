@@ -1896,6 +1896,22 @@ try {
     return `${cards.length} cards, ${withPeople} with a contact, ${cards.filter((card) => card.nextTask).length} with a next task`
   })
 
+  await check('a board card links its company and says when the deal was made', async () => {
+    const cards = (await readBoard(sales, {})).columns.flatMap((column) => column.cards)
+    const deals = await db
+      .select({ id: s.deal.id, companyId: s.deal.companyId, createdAt: s.deal.createdAt })
+      .from(s.deal)
+      .where(eq(s.deal.accountId, datasaur.id))
+    const byId = new Map(deals.map((deal) => [deal.id, deal]))
+    for (const card of cards) {
+      const deal = byId.get(card.id)
+      expect(deal !== undefined, `card ${card.id} is not a deal of this account`)
+      expect(card.companyId === deal!.companyId || (card.companyId === null && card.companyName === null), `card ${card.id} links the wrong company`)
+      expect(card.createdAt === deal!.createdAt.toISOString(), `card ${card.id} has the wrong create date`)
+    }
+    return `${cards.length} cards, ${cards.filter((card) => card.companyId).length} with a company link`
+  })
+
   await check('each KPI tile counts exactly what its own filter selects', async () => {
     for (const object of ['contact', 'company', 'deal'] as const) {
       const tiles = await listKpis(sales, object)

@@ -26,7 +26,9 @@ export type BoardCard = {
   currency: string
   closeDate: string | null
   ownerName: string | null
+  companyId: string | null
   companyName: string | null
+  createdAt: string
   nextStep: string | null
   nextStepDate: string | null
   daysInStage: number
@@ -381,6 +383,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
                         )}
                       </p>
                       {card.ownerName ? <p className="truncate">Deal owner: {card.ownerName}</p> : null}
+                      <p className="tabular-nums">Create date: {fmt.date(card.createdAt)}</p>
                       {/* Under the amount block, where HubSpot puts its own. The
                           ring is sized in em, so it follows the card's text
                           rather than a pixel count. */}
@@ -391,9 +394,18 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
                       {card.companyName || card.contactCount > 0 ? (
                         <div className="mt-2 flex flex-col gap-2 border-t border-divider pt-2">
                           {card.companyName ? (
-                            <p className="flex items-center gap-1.5 truncate text-body" title={card.companyName}>
+                            <p className="flex items-center gap-1.5 truncate" title={card.companyName}>
                               <Avatar name={card.companyName} size="sm" />
-                              <span className="truncate">{card.companyName}</span>
+                              {card.companyId ? (
+                                <Link
+                                  href={recordPath(account, 'company', card.companyId, { from: origin })}
+                                  className="truncate text-link no-underline hover:text-accent hover:underline"
+                                >
+                                  {card.companyName}
+                                </Link>
+                              ) : (
+                                <span className="truncate">{card.companyName}</span>
+                              )}
                             </p>
                           ) : null}
                           {card.contactCount > 0 ? (

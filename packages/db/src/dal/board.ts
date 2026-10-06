@@ -12,7 +12,10 @@ export type BoardCard = {
   currency: string
   closeDate: string | null
   ownerName: string | null
+  /** The deal's primary company, which the card links to. */
+  companyId: string | null
   companyName: string | null
+  createdAt: string
   nextStep: string | null
   nextStepDate: string | null
   /** Days since this deal last moved stage, or since it was created if it never
@@ -127,7 +130,9 @@ type CardRow = {
   next_step: string | null
   next_step_date: string | null
   owner_name: string | null
+  company_id: string | null
   company_name: string | null
+  created_at: Date | string
   days_in_stage: number
   days_since_activity: number | null
   score: number | null
@@ -164,6 +169,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
              "deal"."updated_at" as updated_at,
              "deal"."score" as score,
              u."name" as owner_name,
+             c."id" as company_id,
              coalesce(c."name", c."domain") as company_name,
              row_number() over (
                partition by ${groupExpr}
@@ -176,7 +182,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
     ),
     visible as (select * from ranked where rank > ${after} and rank <= ${upTo})
     select w.id, w.group_key, w.name, w.amount, w.currency, w.close_date, w.next_step,
-           w.next_step_date, w.owner_name, w.company_name, w.score, w.updated_at,
+           w.next_step_date, w.owner_name, w.company_id, w.company_name, w.created_at, w.score, w.updated_at,
            -- Two correlated reads per visible card, over the index the timeline
            -- already has. Not a join: a deal with four hundred activities would
            -- multiply every row of the board.
@@ -233,7 +239,9 @@ const toCard = (object: RegistryObject, card: CardRow): BoardCard => ({
   currency: card.currency,
   closeDate: card.close_date,
   ownerName: card.owner_name,
+  companyId: card.company_id,
   companyName: card.company_name,
+  createdAt: new Date(card.created_at).toISOString(),
   nextStep: card.next_step,
   nextStepDate: card.next_step_date,
   daysInStage: Number(card.days_in_stage ?? 0),
