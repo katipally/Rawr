@@ -188,8 +188,8 @@ export const objectView = (
   `/${CRM_ROOT}/${account}/objects/${object}/views/${view}/${kind}${query(params)}`
 
 /** `tab` is Overview or Activities, `type` filters the timeline, and the next
- *  three are the quick-action row asking a panel that is already on the page to
- *  open: log an activity of this kind, start a task, start an email. They are in
+ *  two are the quick-action row asking a panel that is already on the page to
+ *  open: log an activity of this kind or start a task, start an email. They are in
  *  the address rather than in component state so "log a call on this deal" is a
  *  link somebody can be sent. `from` is the screen the person came from, so Back
  *  returns to it with its filters rather than to the object's default list. */
@@ -201,8 +201,6 @@ export const recordPath = (
     tab?: string | undefined
     type?: string | undefined
     interaction?: string | undefined
-    log?: string | undefined
-    task?: string | undefined
     compose?: string | undefined
     from?: string | undefined
   } = {},
