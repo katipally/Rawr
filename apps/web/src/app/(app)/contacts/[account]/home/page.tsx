@@ -48,30 +48,27 @@ type Tile = { label: string; value: string; href: string; tone?: 'error' | 'warn
 const TILE_TONES = {
   error: 'text-error',
   warning: 'text-warning',
-  default: 'text-body',
+  default: 'text-link',
 } as const
 
-/** The numbers, above everything else on the page.
- *
- *  The label sits under the figure rather than over it: the eye lands on the
- *  number first and reads what it counts second, which is the order somebody
- *  opening this at nine on a Monday actually wants. A multi-currency account
- *  puts three parts in one value, so the track is wide enough to hold them
- *  before it wraps. */
+/** The numbers, above everything else on the page, in HubSpot's single value
+ *  card: what it counts in small capitals, then the figure in large teal. A
+ *  multi-currency account puts three parts in one value, so the track is wide
+ *  enough to hold them before it wraps. */
 const Tiles = ({ tiles }: { tiles: Tile[] }) => (
-  <ul className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
+  <ul className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
     {tiles.map((tile) => (
       <li key={tile.label}>
         <Link
           href={tile.href}
-          className="flex h-full flex-col justify-between gap-1 rounded-panel border border-line bg-surface p-4 no-underline shadow-panel transition-colors hover:bg-fill"
+          className="flex h-full flex-col gap-1 rounded-panel border border-line bg-surface p-3 no-underline transition-[border-color,box-shadow] duration-150 ease-out hover:border-line-strong hover:shadow-side motion-reduce:transition-none"
         >
+          <span className="text-small font-semibold uppercase text-body">{tile.label}</span>
           <span
-            className={`text-2xl leading-tight font-medium tabular-nums ${TILE_TONES[tile.tone ?? 'default']}`}
+            className={`max-w-full break-words text-kpi leading-tight font-semibold tabular-nums ${TILE_TONES[tile.tone ?? 'default']}`}
           >
             {tile.value}
           </span>
-          <span className="text-small text-secondary">{tile.label}</span>
         </Link>
       </li>
     ))}
@@ -229,8 +226,15 @@ const HomePage = async ({
   )
   const pipelines = withDeals.length > 0 ? withDeals : allPipelines.slice(0, 1)
 
+  const now = new Date()
+  // The hour in the viewer's zone, read in a fixed locale so it parses as a number
+  // whatever digits the viewer's own locale writes.
+  const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: fmt.zone, hour: 'numeric', hourCycle: 'h23' }).format(now))
+  const firstName = session.displayName.trim().split(/\s+/)[0]
+  const greeting = `Good ${hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'}${firstName ? `, ${firstName}` : ''}`
+
   // The same window readDashboard counted in, so the tile opens the rows it counted.
-  const newContactsSince = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
+  const newContactsSince = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
   const tiles: Tile[] = [
     ...(sales
@@ -253,15 +257,11 @@ const HomePage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* HubSpot's dashboard header: a white strip across the top of the canvas. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-6 py-4">
-        <div>
-          <h1 className="text-xl font-medium">Home</h1>
-          <p className="text-secondary">
-            {session.accountName}, {fmt.date(new Date())}. Every number opens the list behind it.
-          </p>
-        </div>
-        {sales ? <LinkButton href={objectView(account, 'deal', 'all', 'board')}>Open the board</LinkButton> : null}
+      <div className="border-b border-line bg-surface px-6 py-4">
+        <h1 className="text-xl font-medium break-words">{greeting}</h1>
+        <p className="text-secondary">
+          {fmt.at(now, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, {session.accountName}
+        </p>
       </div>
       <div className="flex flex-col gap-4 px-2 pb-2 sm:px-4 sm:pb-4">
 
