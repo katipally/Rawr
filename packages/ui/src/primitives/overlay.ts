@@ -41,6 +41,11 @@ export const usePresence = (open: boolean, exitMs: number): { present: boolean; 
   return { present, closing }
 }
 
+/** Open overlays, innermost last. Every one listens on document, so only the
+ *  innermost may answer a key: a confirm over a dialog closes alone on Escape, and
+ *  the dialog under it does not pull Tab back out of the confirm. */
+const layers: object[] = []
+
 /** Everything a dialog owes the person using it: Escape closes, the page behind
  *  stops scrolling, Tab cannot walk out into it, and focus returns to whatever
  *  opened it. Shared by the modal and the side panel, which are the same contract
@@ -81,7 +86,10 @@ export const useOverlay = (
     const first = box?.querySelector<HTMLElement>(FOCUSABLE)
     ;(asked ?? field ?? first ?? box)?.focus()
 
+    const layer = {}
+    layers.push(layer)
     const onKey = (event: KeyboardEvent) => {
+      if (layers.at(-1) !== layer) return
       // An inner control that handles Escape itself (a combobox closing its list)
       // calls preventDefault; closing the dialog too would throw away the edit.
       if (event.key === 'Escape') {
@@ -111,6 +119,7 @@ export const useOverlay = (
 
     return () => {
       document.removeEventListener('keydown', onKey)
+      layers.splice(layers.indexOf(layer), 1)
       document.body.style.overflow = previous
       opener.current?.focus()
     }

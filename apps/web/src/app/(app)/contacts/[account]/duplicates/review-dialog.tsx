@@ -1,7 +1,7 @@
 'use client'
 
 import type { FieldType } from '@rawr/db/registry'
-import { Alert, Button, Modal, Spinner, cn, useToast } from '@rawr/ui'
+import { Alert, Button, ConfirmDialog, Modal, Spinner, cn, useToast } from '@rawr/ui'
 import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -54,6 +54,7 @@ export const ReviewDialog = ({
   const [primary, setPrimary] = useState<Side>('keep')
   const [picks, setPicks] = useState<Record<string, Side>>({})
   const [busy, setBusy] = useState<'merge' | 'reject' | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     let dropped = false
@@ -111,6 +112,7 @@ export const ReviewDialog = ({
       toast('error', errorMessage(cause))
     } finally {
       setBusy(null)
+      setConfirming(false)
     }
   }
 
@@ -152,7 +154,7 @@ export const ReviewDialog = ({
       onClose={onClose}
       footer={
         <div className="flex w-full flex-wrap gap-3">
-          <Button variant="primary" className={pill} busy={busy === 'merge'} disabled={!records || busy !== null} onClick={() => void merge()}>
+          <Button variant="primary" className={pill} busy={busy === 'merge'} disabled={!records || busy !== null} onClick={() => setConfirming(true)}>
             {onNext ? 'Merge and review next' : 'Merge'}
           </Button>
           <Button className={pill} busy={busy === 'reject'} disabled={busy !== null} onClick={() => void reject()}>
@@ -263,6 +265,19 @@ export const ReviewDialog = ({
           subscriptions and its tasks. The other record is then deleted. Reject keeps the pair out of this queue for
           good.
         </Alert>
+        <ConfirmDialog
+          open={confirming}
+          title={`Merge into ${pair[primary].displayName}?`}
+          confirm="Merge"
+          busy={busy === 'merge'}
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => void merge()}
+        >
+          <p className="break-words">
+            {pair[primary].displayName} is the primary record and stays. {pair[other].displayName} moves into it and
+            is deleted. This cannot be undone.
+          </p>
+        </ConfirmDialog>
       </div>
     </Modal>
   )
