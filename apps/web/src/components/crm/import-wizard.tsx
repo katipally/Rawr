@@ -2,12 +2,16 @@
 
 import { FIELD_TYPES, isNewProperty, type FieldType, type Mapping, type NewProperty } from '@rawr/db/registry'
 import { Alert, Button, buttonClass, ConfirmDialog, Select, TextInput, useToast } from '@rawr/ui'
-import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { importsPath } from '~/lib/links.ts'
 import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { useQueryClient } from '@tanstack/react-query'
+import { ImportFrame, stepPill } from './import-frame.tsx'
+import { EMPTY_VALUE } from './value.tsx'
 
 /** How often a running import is asked where it got to. Short enough that the bar
  *  moves, long enough that a 90,000-row run is not thousands of requests. */
@@ -24,6 +28,10 @@ export type ImportWizardProps = {
   account: string
   runId: string
   filename: string
+  /** The object or file kind, in the words the imports list uses. */
+  what: string
+  createdByName: string | null
+  createdAt: string
   headers: string[]
   sampleRows: Record<string, string>[]
   fields: MappableField[]
@@ -56,6 +64,9 @@ export const ImportWizard = ({
   account,
   runId,
   filename,
+  what,
+  createdByName,
+  createdAt,
   headers,
   sampleRows,
   fields,
@@ -71,7 +82,12 @@ export const ImportWizard = ({
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
   const toast = useToast()
+  /** Map or Details. In the address, so a reload of the preview lands on the
+   *  preview, which is asked for again rather than kept: the CRM may have moved. */
+  const reviewing = params.get('step') === 'details'
   const [mapping, setMapping] = useState<Mapping>(initialMapping)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -142,18 +158,34 @@ export const ImportWizard = ({
   }, {})
   const clashes = Object.entries(duplicates).filter(([, list]) => list.length > 1)
 
-  const runDryRun = async () => {
+  const runDryRun = async (): Promise<boolean> => {
     setBusy(true)
     setError(null)
     try {
       await api.crm.imports.setMapping.mutate({ id: runId, mapping })
       setPreview((await api.crm.imports.dryRun.mutate({ id: runId })) as Preview)
+      return true
     } catch (cause) {
       setError(errorMessage(cause))
+      return false
     } finally {
       setBusy(false)
     }
   }
+
+  // Shallow: the step is this component's, and a server render between Next
+  // and the preview would only redraw the mapper it is leaving.
+  const showDetails = (on: boolean) =>
+    window.history.replaceState(null, '', on ? `${pathname}?step=details` : pathname)
+
+  const reopened = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, for a reload that landed on Details
+  useEffect(() => {
+    if (reviewing && !reopened.current && (state === 'mapping' || state === 'previewing')) {
+      reopened.current = true
+      void runDryRun()
+    }
+  }, [])
 
   /** One click, then the worker. It marks the run running and returns; the chunks
    *  are taken by the job that polls for them, which is what lets the person close
@@ -163,6 +195,7 @@ export const ImportWizard = ({
     setError(null)
     try {
       await api.crm.imports.start.mutate({ id: runId })
+      showDetails(false)
       setLive((current) => ({ ...current, state: 'running' }))
     } catch (cause) {
       setError(errorMessage(cause))
@@ -182,34 +215,53 @@ export const ImportWizard = ({
     const accounted =
       live.counts.created + live.counts.updated + live.counts.skipped + live.counts.errored
     return (
-      <div className="flex flex-col gap-3">
-        <h2 className="font-medium">{filename}</h2>
-        <p className="tabular-nums">
-          {fmt.number(live.processed)} of {fmt.number(totalRows)} rows ({pct}%)
-        </p>
-        <div
-          role="progressbar"
-          aria-valuenow={pct}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          className="h-2 w-full overflow-hidden rounded-hs bg-fill"
-        >
-          <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+      <div className="flex min-w-0 flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-2">
+          <Link href={importsPath(account)} className="w-fit text-small font-semibold text-body no-underline hover:underline">
+            &lsaquo; Back to imports
+          </Link>
+          <h1 className="break-words text-xl font-medium">{filename}</h1>
+          <p className="font-semibold">{what}</p>
+          <p className="text-secondary">
+            {fmt.dateTime(createdAt)}
+            {createdByName ? `, by ${createdByName}` : ''}
+          </p>
         </div>
 
-        <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
-          {[
-            ['Created', live.counts.created],
-            ['Updated', live.counts.updated],
-            ['Skipped', live.counts.skipped],
-            ['With a problem', live.counts.errored],
-          ].map(([label, value]) => (
-            <div key={String(label)}>
-              <dt className="text-small text-secondary">{label}</dt>
-              <dd className="text-lg">{fmt.number(Number(value))}</dd>
+        <section className="flex min-w-0 flex-col gap-4 rounded-panel border border-line bg-surface p-6 shadow-panel">
+          <h2 className="text-base font-semibold">Summary</h2>
+          <dl className="grid grid-cols-2 gap-4 tabular-nums sm:grid-cols-3 lg:grid-cols-5">
+            {[
+              ['Import rows', totalRows],
+              ['New records', live.counts.created],
+              ['Updated records', live.counts.updated],
+              ['Skipped', live.counts.skipped],
+              ['Errors', live.counts.errored],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="flex min-w-0 flex-col items-center gap-1 text-center">
+                <dt className="text-small font-semibold uppercase">{label}</dt>
+                <dd className="text-kpi">{Number(value) === 0 ? EMPTY_VALUE : fmt.number(Number(value))}</dd>
+              </div>
+            ))}
+          </dl>
+          {finished ? null : (
+            <div className="flex flex-col gap-2">
+              <p className="tabular-nums">
+                {fmt.number(live.processed)} of {fmt.number(totalRows)} rows ({pct}%)
+              </p>
+              <div
+                role="progressbar"
+                aria-label="Import"
+                aria-valuenow={pct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                className="h-2 w-full overflow-hidden rounded-hs bg-fill"
+              >
+                <div className="h-full bg-accent transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+              </div>
             </div>
-          ))}
-        </dl>
+          )}
+        </section>
 
         {/* Rows in against rows out. A migration nobody can check is a migration
             nobody will trust, and four counters that happen not to add up is the
@@ -324,14 +376,151 @@ export const ImportWizard = ({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="font-medium">{filename}</h2>
-        <p className="text-secondary tabular-nums">
-          {fmt.number(totalRows)} rows, {headers.length} columns
+    <ImportFrame
+      step={reviewing ? 3 : 2}
+      wide
+      cancelHref={importsPath(account)}
+      back={
+        reviewing ? (
+          <Button className={stepPill} disabled={busy} onClick={() => showDetails(false)}>
+            Back
+          </Button>
+        ) : undefined
+      }
+      next={
+        reviewing ? (
+          <Button variant="primary" className={stepPill} busy={busy} disabled={!preview} onClick={() => void start()}>
+            Finish import
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            className={stepPill}
+            busy={busy}
+            disabled={clashes.length > 0}
+            onClick={() => void runDryRun().then((ok) => ok && showDetails(true))}
+          >
+            Next
+          </Button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-2 text-center">
+        <h2 className="text-2xl font-normal">
+          {reviewing ? 'Check what will happen' : 'Map columns in your file to properties'}
+        </h2>
+        <p className="break-words text-secondary tabular-nums">
+          {reviewing
+            ? `Nothing has been written yet. ${filename}, ${fmt.number(totalRows)} rows.`
+            : `${filename}, ${fmt.number(totalRows)} rows, ${headers.length} columns.`}
         </p>
       </div>
 
+{reviewing ? (
+        <>
+      {preview ? (
+        <section className="flex min-w-0 flex-col gap-3">
+          <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
+            {[
+              ['Will be created', preview.willCreate],
+              ['Will be updated', preview.willUpdate],
+              ['Will be skipped', preview.willSkip],
+              ['Will be refused', preview.willError],
+            ].map(([label, value]) => (
+              <div key={String(label)}>
+                <dt className="text-small text-secondary">{label}</dt>
+                <dd className="text-lg">{fmt.number(Number(value))}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {/* Properties are made once, before the first row, so this is a
+              separate promise from the row counts and worth saying on its own. */}
+          {preview.newProperties.length > 0 ? (
+            <div>
+              <p className="font-medium">
+                Creates {fmt.number(preview.newProperties.length)} propert
+                {preview.newProperties.length === 1 ? 'y' : 'ies'}
+              </p>
+              <p className="text-secondary">
+                Under the group "Imported from HubSpot", before the first row is written. A property
+                whose name is already taken is used rather than made again.
+              </p>
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {preview.newProperties.map((property) => (
+                  <li
+                    key={property.header}
+                    className="rounded-hs border border-line bg-fill px-2 py-0.5"
+                  >
+                    {property.label} <span className="text-secondary">{property.type}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {preview.newChoices.length > 0 ? (
+            <div>
+              <p className="font-medium">Adds choices the file uses</p>
+              <p className="text-secondary">
+                Before the first row is written, so the rows that use them import rather than being
+                refused.
+              </p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {preview.newChoices.map((entry) => (
+                  <li key={entry.label}>
+                    {entry.label}: <span className="text-secondary">{entry.choices.join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* What the counts are worth. Every row past the checked window is
+              counted as a create, which is what a row nobody has looked at
+              usually is; a number that says so is worth more than one that does
+              not. */}
+          <p className="text-secondary">
+            {preview.checked >= preview.total
+              ? `Every one of the ${fmt.number(preview.total)} rows was checked against the CRM.`
+              : `The first ${fmt.number(preview.checked)} of ${fmt.number(preview.total)} rows were checked against the CRM. The other ${fmt.number(preview.total - preview.checked)} are counted as new; any that already exist will be updated instead when the run reaches them.`}
+          </p>
+
+          {/* The counts say how many; these say which. A dry run whose only
+              detail is the refusals tells you nothing about the 4,000 rows it
+              is about to write. */}
+          {preview.samples.create.length > 0 ? (
+            <SampleRows title="A few that will be created" rows={preview.samples.create} />
+          ) : null}
+          {preview.samples.update.length > 0 ? (
+            <SampleRows title="A few that will be updated" rows={preview.samples.update} />
+          ) : null}
+
+          {preview.samples.error.length > 0 ? (
+            <div>
+              <p className="font-medium">Rows that will be refused</p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {preview.samples.error.map((row) => (
+                  <li key={row.row}>
+                    <span className="text-secondary tabular-nums">Row {row.row}: </span>
+                    {row.reason}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-secondary">
+                A refused row does not stop the run. The rest still import.
+              </p>
+            </div>
+          ) : null}
+        </section>
+      ) : (
+        <p role="status" className="text-center text-secondary">
+          {busy ? 'Checking the file against the CRM…' : 'The preview could not be made. Go back to the mapping and try again.'}
+        </p>
+      )}
+        </>
+      ) : (
+        <>
       {previousMapping ? (
         <div className="flex flex-wrap items-center gap-2 rounded-hs border border-line bg-fill px-3 py-2">
           <span className="min-w-0 flex-1">
@@ -443,121 +632,16 @@ export const ImportWizard = ({
         </p>
       ) : null}
 
+        </>
+      )}
+
       {error ? (
         <Alert>
           {error}
         </Alert>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Button busy={busy} disabled={clashes.length > 0} onClick={() => void runDryRun()}>
-          Preview what will happen
-        </Button>
-        {preview ? (
-          <Button variant="primary" busy={busy} onClick={() => void start()}>
-            Import {fmt.number(totalRows)} rows
-          </Button>
-        ) : null}
-      </div>
-
-      {preview ? (
-        <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-3">
-          <h3 className="font-medium">Nothing has been written yet</h3>
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
-            {[
-              ['Will be created', preview.willCreate],
-              ['Will be updated', preview.willUpdate],
-              ['Will be skipped', preview.willSkip],
-              ['Will be refused', preview.willError],
-            ].map(([label, value]) => (
-              <div key={String(label)}>
-                <dt className="text-small text-secondary">{label}</dt>
-                <dd className="text-lg">{fmt.number(Number(value))}</dd>
-              </div>
-            ))}
-          </dl>
-
-          {/* Properties are made once, before the first row, so this is a
-              separate promise from the row counts and worth saying on its own. */}
-          {preview.newProperties.length > 0 ? (
-            <div>
-              <p className="font-medium">
-                Creates {fmt.number(preview.newProperties.length)} propert
-                {preview.newProperties.length === 1 ? 'y' : 'ies'}
-              </p>
-              <p className="text-secondary">
-                Under the group "Imported from HubSpot", before the first row is written. A property
-                whose name is already taken is used rather than made again.
-              </p>
-              <ul className="mt-1 flex flex-wrap gap-1.5">
-                {preview.newProperties.map((property) => (
-                  <li
-                    key={property.header}
-                    className="rounded-hs border border-line bg-fill px-2 py-0.5"
-                  >
-                    {property.label} <span className="text-secondary">{property.type}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {preview.newChoices.length > 0 ? (
-            <div>
-              <p className="font-medium">Adds choices the file uses</p>
-              <p className="text-secondary">
-                Before the first row is written, so the rows that use them import rather than being
-                refused.
-              </p>
-              <ul className="mt-1 flex flex-col gap-1">
-                {preview.newChoices.map((entry) => (
-                  <li key={entry.label}>
-                    {entry.label}: <span className="text-secondary">{entry.choices.join(', ')}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {/* What the counts are worth. Every row past the checked window is
-              counted as a create, which is what a row nobody has looked at
-              usually is; a number that says so is worth more than one that does
-              not. */}
-          <p className="text-secondary">
-            {preview.checked >= preview.total
-              ? `Every one of the ${fmt.number(preview.total)} rows was checked against the CRM.`
-              : `The first ${fmt.number(preview.checked)} of ${fmt.number(preview.total)} rows were checked against the CRM. The other ${fmt.number(preview.total - preview.checked)} are counted as new; any that already exist will be updated instead when the run reaches them.`}
-          </p>
-
-          {/* The counts say how many; these say which. A dry run whose only
-              detail is the refusals tells you nothing about the 4,000 rows it
-              is about to write. */}
-          {preview.samples.create.length > 0 ? (
-            <SampleRows title="A few that will be created" rows={preview.samples.create} />
-          ) : null}
-          {preview.samples.update.length > 0 ? (
-            <SampleRows title="A few that will be updated" rows={preview.samples.update} />
-          ) : null}
-
-          {preview.samples.error.length > 0 ? (
-            <div>
-              <p className="font-medium">Rows that will be refused</p>
-              <ul className="mt-1 flex flex-col gap-1">
-                {preview.samples.error.map((row) => (
-                  <li key={row.row}>
-                    <span className="text-secondary tabular-nums">Row {row.row}: </span>
-                    {row.reason}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1 text-secondary">
-                A refused row does not stop the run. The rest still import.
-              </p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-    </div>
+    </ImportFrame>
   )
 }
 

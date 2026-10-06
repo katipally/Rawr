@@ -13,11 +13,12 @@ import {
 } from '@rawr/db'
 import { EmptyState } from '@rawr/ui'
 import { desc, eq, and, ne } from 'drizzle-orm'
-import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { ImportWizard } from '~/components/crm/import-wizard.tsx'
+import { ImportFrame } from '~/components/crm/import-frame.tsx'
 import { ImportArriving } from './arriving.tsx'
+import { SHAPE_LABEL } from '../shapes.ts'
 import { importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
@@ -45,10 +46,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
 
   if (run.state === 'uploading' || run.state === 'parsing') {
     return (
-      <div className="flex max-w-4xl flex-col gap-4">
-        <p>
-          <Link href={importsPath(account)}>Imports</Link>
-        </p>
+      <ImportFrame step={1} cancelHref={importsPath(account)}>
         <ImportArriving
           runId={id}
           filename={run.filename}
@@ -57,7 +55,7 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
           fileBytes={run.fileBytes}
           backHref={importsPath(account)}
         />
-      </div>
+      </ImportFrame>
     )
   }
 
@@ -75,13 +73,14 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
   // The rows live in import_row until the run finishes, which is what makes a
   // killed run resumable without a re-upload. Only the examples come here.
   const rows = await readImportRows(ctx, id, 0, SAMPLE_ROWS)
+  const registry = await getRegistry(ctx)
   // From the run, not from a row's key order: jsonb sorts its keys, and a mapper
   // that reorders a person's columns is a mapper they cannot trust.
   const headers = run.headers.length > 0 ? run.headers : Object.keys(rows[0] ?? {})
   // Every kind but `records` is mapped against a fixed shape rather than the
   // account's registry: those columns say which record something belongs to,
   // not what to write on one.
-  const object = importShapeFor(run.importKind) ?? withExternalId(objectOrThrow(await getRegistry(ctx), run.objectType))
+  const object = importShapeFor(run.importKind) ?? withExternalId(objectOrThrow(registry, run.objectType))
 
   const stored = (detail?.mapping as Mapping | undefined) ?? {}
   const mapping = Object.keys(stored).length > 0 ? stored : suggestMapping(object, headers)
@@ -103,36 +102,38 @@ const ImportRunPage = async ({ params }: { params: Promise<{ account: string; id
       )
     : []
 
-  return (
-    <div className="flex max-w-4xl flex-col gap-4">
-      <p>
-        <Link href={importsPath(account)}>Imports</Link>
-      </p>
+  const what =
+    run.importKind === 'records'
+      ? (registry.objects.find((entry) => entry.key === run.objectType)?.namePlural ?? run.objectType)
+      : SHAPE_LABEL[run.importKind].label
 
-      <ImportWizard
-        account={account}
-        runId={id}
-        filename={run.filename}
-        headers={headers}
-        sampleRows={rows}
-        fields={object.fields
-          .filter(isImportable)
-          .map((field) => ({ key: field.key, label: field.label, isRequired: field.isRequired }))}
-        initialMapping={mapping}
-        previousMapping={(previous?.mapping as Mapping | undefined) ?? null}
-        totalRows={run.totalRows}
-        state={run.state}
-        processedRows={run.processedRows}
-        counts={{
-          created: run.created,
-          updated: run.updated,
-          skipped: run.skipped,
-          errored: run.errored,
-        }}
-        errors={run.errors}
-        unmatchedOwners={run.unmatchedOwners}
-      />
-    </div>
+  return (
+    <ImportWizard
+      account={account}
+      runId={id}
+      filename={run.filename}
+      what={what}
+      createdByName={run.createdByName}
+      createdAt={run.createdAt.toISOString()}
+      headers={headers}
+      sampleRows={rows}
+      fields={object.fields
+        .filter(isImportable)
+        .map((field) => ({ key: field.key, label: field.label, isRequired: field.isRequired }))}
+      initialMapping={mapping}
+      previousMapping={(previous?.mapping as Mapping | undefined) ?? null}
+      totalRows={run.totalRows}
+      state={run.state}
+      processedRows={run.processedRows}
+      counts={{
+        created: run.created,
+        updated: run.updated,
+        skipped: run.skipped,
+        errored: run.errored,
+      }}
+      errors={run.errors}
+      unmatchedOwners={run.unmatchedOwners}
+    />
   )
 }
 

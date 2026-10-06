@@ -1,88 +1,27 @@
-import {
-  canWrite,
-  dedupeKeyOf,
-  getRegistry,
-  importShapeFor,
-  listImportRuns,
-  requiredColumnKeys,
-  type ImportKind,
-} from '@rawr/db'
-import { Badge, EmptyState, PageHeader } from '@rawr/ui'
-import Link from 'next/link'
+import { canWrite, getRegistry, listImportRuns } from '@rawr/db'
+import { PageHeader } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
-import { availableAppsPath, importsPath } from '~/lib/links.ts'
+import { stepPill } from '~/components/crm/import-frame.tsx'
+import { appsPath, availableAppsPath, importsPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
-import type { ImportKindOption } from './import-kind-field.tsx'
-import { ImportUploader } from './import-uploader.tsx'
-import { getFormat } from '~/server/format.ts'
-
-/** What each of the five shape files is for, in the picker's own words. The
- *  columns beside them are read off the shapes themselves. */
-const SHAPE_LABEL: Record<Exclude<ImportKind, 'records'>, { label: string; what: string }> = {
-  activities: {
-    label: 'Notes and logged emails',
-    what: 'Timeline entries against records that already exist. Nothing here creates a contact.',
-  },
-  properties: {
-    label: 'Property definitions',
-    what: 'The fields records go into. Import this first: a column cannot arrive before the field it fills.',
-  },
-  associations: {
-    label: 'Deal contacts and companies',
-    what: 'Who is on which deal. A record export carries a contact’s company and nothing else.',
-  },
-  lists: {
-    label: 'List memberships',
-    what: 'One row per person per list. Each list arrives as a snapshot of the people the file names.',
-  },
-  submissions: {
-    label: 'Form submissions',
-    what: 'Submission history, so the forms report is not empty and a timeline does not start at the cutover.',
-  },
-}
+import { ImportHistory } from './import-history.tsx'
+import { UnfinishedUploads } from './import-uploader.tsx'
+import { SHAPE_LABEL } from './shapes.ts'
 
 const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) => {
-  const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const { account } = await params
   const ctx = contextFrom(session)
   const runs = await listImportRuns(ctx)
-  // From the registry rather than a list of three: an object an admin invented
-  // has records, and a migration arrives as a file of them like anything else.
   const registry = await getRegistry(ctx)
-  const allowed = canWrite(contextFrom(session), 'contact')
-
-  /** Built here rather than in the picker: the shapes and the match column are
-   *  the import layer's answer, and a sentence typed into a component is one
-   *  that goes stale the first time a shape gains a column. */
-  const kindOptions: ImportKindOption[] = [
-    ...registry.objects.map((entry) => {
-      const key = dedupeKeyOf('records', entry)
-      return {
-        value: entry.key,
-        label: entry.namePlural,
-        what: `Every column is a field on a ${entry.nameSingular.toLowerCase()}. Rows are matched on ${
-          entry.byKey.get(key)?.label ?? key
-        }, so importing the same file again updates rather than creating a second copy.`,
-        columns: [],
-        required: [],
-      }
-    }),
-    ...(Object.keys(SHAPE_LABEL) as Exclude<ImportKind, 'records'>[]).map((kind) => {
-      const shape = importShapeFor(kind)
-      const labelOf = (key: string) => shape?.byKey.get(key)?.label ?? key
-      return {
-        value: kind,
-        label: SHAPE_LABEL[kind].label,
-        what: SHAPE_LABEL[kind].what,
-        columns: shape?.fields.map((entry) => entry.label) ?? [],
-        required: requiredColumnKeys(kind).map(labelOf),
-      }
-    }),
-  ]
+  const allowed = canWrite(ctx, 'contact')
+  const whatOf = (run: (typeof runs)[number]): string =>
+    run.importKind === 'records'
+      ? (registry.objects.find((entry) => entry.key === run.objectType)?.namePlural ?? run.objectType)
+      : SHAPE_LABEL[run.importKind].label
 
   return (
     <div className="flex flex-col gap-4">
@@ -104,73 +43,57 @@ const ImportPage = async ({ params }: { params: Promise<{ account: string }> }) 
         }
       />
 
+      {allowed ? <UnfinishedUploads account={account} /> : null}
+
       <div className="grid gap-4 md:grid-cols-2">
-      {allowed ? (
-        <ImportUploader account={account} kinds={kindOptions} />
-      ) : (
-        <p className="rounded-panel border border-line bg-surface p-6 text-secondary shadow-panel">
-          You need contacts access to create records, so you cannot import them either.
-        </p>
-      )}
+        <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
+          <h2 className="text-base font-semibold">Import a file</h2>
+          <p className="text-secondary">One-time import from a file, directly into the CRM.</p>
+          <div className="mt-auto">
+            {allowed ? (
+              <LinkButton href={importsPath(account, 'new')} className={stepPill}>
+                Import data
+              </LinkButton>
+            ) : (
+              <p className="text-secondary">
+                You need contacts access to create records, so you cannot import them either.
+              </p>
+            )}
+          </div>
+        </section>
         <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
           <h2 className="text-base font-semibold">Sync from apps</h2>
           <p className="text-secondary">Keep data flowing between the CRM and the tools already connected to it: mail, enrichment, calendars and the rest.</p>
           <div className="mt-auto">
-            <LinkButton href={availableAppsPath()}>Connect an app</LinkButton>
+            <LinkButton href={availableAppsPath()} className={stepPill}>Connect an app</LinkButton>
           </div>
         </section>
       </div>
 
-      <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
-        <h2 className="text-base font-semibold">Monitor your imports</h2>
-        {runs.length === 0 ? (
-          <EmptyState
-            title="Nothing has been imported yet"
-            description="An import runs on the server, so you can close this tab and come back to it."
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[56rem] border-t border-line text-left">
-              <thead>
-                <tr className="text-secondary">
-                  {['Import name', 'Object', 'State', 'Rows', 'New records', 'Updated', 'Skipped', 'Errors', 'Created'].map((label) => (
-                    <th key={label} scope="col" className="h-row border-b border-line px-6 font-normal">
-                      {label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((run) => (
-                  <tr key={run.id} className="border-b border-line hover:bg-fill">
-                    <td className="h-row px-6 py-0.5">
-                      <Link href={importsPath(account, run.id)} className="font-semibold">
-                        {run.filename}
-                      </Link>
-                    </td>
-                    <td className="px-6">{run.objectType}</td>
-                    <td className="px-6">
-                      <Badge tone={run.state === 'done' ? 'ok' : run.state === 'failed' ? 'error' : 'neutral'}>{run.state}</Badge>
-                    </td>
-                    <td className="px-6 tabular-nums">
-                      {/* A file that is still arriving has no rows yet, so this
-                          column read "0 / 0" for the length of an upload. What it
-                          has at that point is bytes, so that is what it says. */}
-                      {run.state === 'uploading'
-                        ? `${fmt.bytes(run.uploadedBytes)} / ${fmt.bytes(run.fileBytes)}`
-                        : `${fmt.number(run.processedRows)} / ${fmt.number(run.totalRows)}`}
-                    </td>
-                    <td className="px-6 tabular-nums">{fmt.number(run.created)}</td>
-                    <td className="px-6 tabular-nums">{fmt.number(run.updated)}</td>
-                    <td className="px-6 tabular-nums">{fmt.number(run.skipped)}</td>
-                    <td className="px-6 tabular-nums">{fmt.number(run.errored)}</td>
-                    <td className="px-6 whitespace-nowrap text-secondary">{fmt.dateTime(run.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <section className="flex min-w-0 flex-col gap-4 rounded-panel border border-line bg-surface p-6 shadow-panel">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-medium">Monitor your imports</h2>
+          <LinkButton href={appsPath()}>Connected apps</LinkButton>
+        </div>
+        <ImportHistory
+          account={account}
+          runs={runs.map((run) => ({
+            id: run.id,
+            filename: run.filename,
+            what: whatOf(run),
+            state: run.state,
+            uploadedBytes: run.uploadedBytes,
+            fileBytes: run.fileBytes,
+            totalRows: run.totalRows,
+            processedRows: run.processedRows,
+            created: run.created,
+            updated: run.updated,
+            skipped: run.skipped,
+            errored: run.errored,
+            createdByName: run.createdByName,
+            createdAt: run.createdAt.toISOString(),
+          }))}
+        />
       </section>
     </div>
   )

@@ -24,13 +24,14 @@ export const RowActions = ({ children, className }: { children: ReactNode; class
   </span>
 )
 
-export type StatusTone = 'live' | 'pending' | 'off' | 'archived'
+export type StatusTone = 'live' | 'pending' | 'off' | 'archived' | 'error'
 
 const DOT: Record<StatusTone, string> = {
   live: 'bg-status-live',
   pending: 'bg-status-pending',
   off: 'bg-line-strong',
   archived: 'border-2 border-line-strong',
+  error: 'bg-error',
 }
 
 /** A state as a 10px dot before its word. The word always carries it too. */

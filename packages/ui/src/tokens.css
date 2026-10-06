@@ -37,6 +37,8 @@
   --rawr-cta-hover: #003536;
   --rawr-cta-subtle: #e6f2f2;
   --rawr-brand: #ff7a59;
+  /* The import wizard's steps: the current and finished ones, and the line up to them. */
+  --rawr-step: #ff4800;
   --rawr-success: #00bda5;
   --rawr-success-subtle: #e5f8f6;
   --rawr-error: #f2545b;

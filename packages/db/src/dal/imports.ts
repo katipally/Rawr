@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, sql, type SQL } from 'drizzle-orm'
 import { importRow, importRun } from '../schema/imports.ts'
+import { userAccount } from '../schema/identity.ts'
 import { activityLink } from '../schema/records.ts'
 import {
   ACTIVITY_IMPORT,
@@ -134,6 +135,8 @@ export type ImportSummary = {
    *  unassigned rather than failing, so this is the list to act on. */
   unmatchedOwners: string[]
   lastError: string | null
+  /** Who started it, or null once that person is gone. */
+  createdByName: string | null
   createdAt: Date
   finishedAt: Date | null
 }
@@ -2590,10 +2593,12 @@ export const readImportRun = async (
         errors: importRun.errors,
         unmatchedOwners: importRun.unmatchedOwners,
         lastError: importRun.lastError,
+        createdByName: userAccount.name,
         createdAt: importRun.createdAt,
         finishedAt: importRun.finishedAt,
       })
       .from(importRun)
+      .leftJoin(userAccount, eq(userAccount.id, importRun.createdBy))
       .where(eq(importRun.id, id))
       .limit(1),
   )
@@ -2605,6 +2610,11 @@ export const readImportRun = async (
     unmatchedOwners: (row.unmatchedOwners as string[] | null) ?? [],
   } as ImportSummary
 }
+
+/** The imports list pages in the browser, so this is how far back it reaches:
+ *  newest first off import_run_recent_idx, one primary-key probe per row for the
+ *  name, so O(n) in the cap rather than in the account's history. */
+export const IMPORT_LIST_LIMIT = 500
 
 export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary[]> => {
   const rows = await withAccount(ctx, (tx) =>
@@ -2625,12 +2635,14 @@ export const listImportRuns = async (ctx: AccountContext): Promise<ImportSummary
         skipped: importRun.skippedCount,
         errored: importRun.erroredCount,
         lastError: importRun.lastError,
+        createdByName: userAccount.name,
         createdAt: importRun.createdAt,
         finishedAt: importRun.finishedAt,
       })
       .from(importRun)
+      .leftJoin(userAccount, eq(userAccount.id, importRun.createdBy))
       .orderBy(desc(importRun.createdAt))
-      .limit(50),
+      .limit(IMPORT_LIST_LIMIT),
   )
   return rows.map((row) => ({ ...row, headers: [], errors: [], unmatchedOwners: [] })) as ImportSummary[]
 }
