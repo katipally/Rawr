@@ -1,7 +1,7 @@
 'use client'
 
-import { Button, Checkbox, DataTable, EmptyState, IconButton, Modal, Select, cn, useToast, type Column } from '@rawr/ui'
-import { Pencil } from 'lucide-react'
+import { Button, DataTable, EmptyState, Field, IconButton, Modal, Select, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { Check, CircleCheck, Pencil, Trash2, UserRound, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
@@ -13,7 +13,7 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { TaskForm } from './task-form.tsx'
-import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS } from './task-labels.ts'
+import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
 import type { TaskRow } from './tasks-panel.tsx'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -33,6 +33,10 @@ export type TasksTableProps = {
   /** True when a filter, not an empty account, is why the table is empty. */
   filtered?: boolean
 }
+
+const bulkAction =
+  'inline-flex h-[calc(var(--spacing-row)-2px)] shrink-0 items-center gap-1.5 rounded-pill px-2.5 text-body font-semibold transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent'
+const bulkLabel = 'sr-only @3xl:not-sr-only'
 
 /** High is the only one worth colouring: medium is the default every task has,
  *  and a table where every row shouts says nothing. */
@@ -74,7 +78,12 @@ export const TasksTable = ({
   const setEditing = (row: TaskRow | null) => setEditId(row?.id ?? null)
   const [removing, setRemoving] = useState<TaskRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulk, setBulk] = useState<'assign' | 'edit' | 'delete' | null>(null)
   const { page, pager } = usePagedRows(rows, 'task')
+  // Read against the rows on screen, so a tick on a task a refresh took away
+  // does not count or get acted on.
+  const ticked = rows.filter((row) => selected.has(row.id))
 
   // Drop ?new=1 so a refresh, or a step back, does not reopen the dialog. Run by
   // both ways out of the dialog: cancelling it and creating a task in it.
@@ -98,41 +107,70 @@ export const TasksTable = ({
     }
   }
 
+  /** Every ticked task through the same call, side by side. Each one is its own
+   *  write with its own checks, so one that fails says so and the rest land. */
+  const runBulk = async (fn: (row: TaskRow) => Promise<unknown>, done: string) => {
+    setBusy(true)
+    const results = await Promise.allSettled(ticked.map(fn))
+    const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failed.length > 0) {
+      toast('error', `${fmt.number(failed.length)} of ${fmt.number(ticked.length)} could not be changed. ${errorMessage(failed[0]!.reason)}`)
+    } else toast('success', done)
+    setBulk(null)
+    setSelected(new Set())
+    setBusy(false)
+    router.refresh()
+  }
+
   const columns: Column<TaskRow>[] = [
-    {
-      key: 'status',
-      header: 'Status',
-      width: 88,
-      render: (row) => (
-        <Checkbox
-          label={`Mark “${row.title}” ${row.status === 'done' ? 'not done' : 'done'}`}
-          hideLabel
-          checked={row.status === 'done'}
-          disabled={!canWrite || busy}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) =>
-            void run(
-              () => api.crm.tasks.setStatus.mutate({ id: row.id, status: event.target.checked ? 'done' : 'open' }),
-              event.target.checked ? 'Marked done.' : 'Reopened.',
-            )
-          }
-        />
-      ),
-    },
     {
       key: 'title',
       header: 'Title',
-      width: 320,
-      render: (row) => (
-        <span className="flex min-w-0 flex-col py-1">
-          <span className={cn('block truncate', row.status === 'done' && 'text-secondary line-through')}>
-            {row.title}
+      width: 360,
+      render: (row) => {
+        const done = row.status === 'done'
+        return (
+          <span className="flex min-w-0 items-center gap-3">
+            {/* HubSpot's complete control: a ring left of the title that fills
+                with a tick once the task is done. */}
+            <button
+              type="button"
+              aria-pressed={done}
+              aria-label={`Mark “${row.title}” ${done ? 'not done' : 'done'}`}
+              disabled={!canWrite || busy}
+              onClick={(event) => {
+                event.stopPropagation()
+                void run(
+                  () => api.crm.tasks.setStatus.mutate({ id: row.id, status: done ? 'open' : 'done' }),
+                  done ? 'Reopened.' : 'Marked done.',
+                )
+              }}
+              className={cn(
+                'group/done grid size-5 shrink-0 place-items-center rounded-pill border transition-all duration-150 ease-out disabled:cursor-not-allowed',
+                done ? 'border-accent bg-accent text-inverse' : 'border-line-strong bg-surface text-secondary hover:border-accent hover:text-accent',
+              )}
+            >
+              <Check aria-hidden="true" className={cn('size-3', !done && 'opacity-0 group-hover/done:opacity-100')} />
+            </button>
+            <span className="flex min-w-0 flex-col py-1">
+              {canWrite ? (
+                <button
+                  type="button"
+                  onClick={() => setEditing(row)}
+                  className={cn('block truncate text-left font-semibold text-link hover:text-accent hover:underline', done && 'text-secondary line-through')}
+                >
+                  {row.title}
+                </button>
+              ) : (
+                <span className={cn('block truncate', done && 'text-secondary line-through')}>{row.title}</span>
+              )}
+              {/* One line of it. A task written by an automation carries the whole
+                  reason in its body, and a table row is not where that is read. */}
+              {row.body ? <span className="block truncate text-small text-secondary">{row.body}</span> : null}
+            </span>
           </span>
-          {/* One line of it. A task written by an automation carries the whole
-              reason in its body, and a table row is not where that is read. */}
-          {row.body ? <span className="block truncate text-small text-secondary">{row.body}</span> : null}
-        </span>
-      ),
+        )
+      },
     },
     { key: 'type', header: 'Type', width: 110, render: (row) => TASK_TYPE_LABELS[row.type] },
     {
@@ -202,7 +240,9 @@ export const TasksTable = ({
             header: '',
             width: 96,
             render: (row: TaskRow) => (
-              <span className="flex items-center gap-1">
+              // Shown with the row hovered or a button in it focused, and always on
+              // a device with no hover to show it with.
+              <span className="flex items-center gap-1 opacity-0 focus-within:opacity-100 [@media(hover:none)]:opacity-100 [tr:hover_&]:opacity-100">
                 <IconButton
                   label={`Edit “${row.title}”`}
                   icon={<Pencil size={16} />}
@@ -238,6 +278,53 @@ export const TasksTable = ({
         caption="Tasks in this account"
         storageKey="tasks"
         fill
+        {...(canWrite ? { selection: { selected, onChange: setSelected, noun: 'task' } } : {})}
+        headerBar={
+          ticked.length > 0 ? (
+            <div
+              role="toolbar"
+              aria-label={`Actions for ${ticked.length} selected tasks`}
+              className="@container flex h-full min-w-0 animate-drop-in items-center gap-0.5 rounded-hs border border-line bg-surface pl-4 motion-reduce:animate-none"
+            >
+              <span className="mr-3 min-w-0 shrink truncate font-semibold">
+                {fmt.number(ticked.length)} {ticked.length === 1 ? 'task' : 'tasks'} selected
+              </span>
+              <button
+                type="button"
+                className={bulkAction}
+                aria-label="Mark as completed"
+                disabled={busy || ticked.every((row) => row.status === 'done')}
+                onClick={() =>
+                  void runBulk(
+                    (row) => (row.status === 'done' ? Promise.resolve() : api.crm.tasks.setStatus.mutate({ id: row.id, status: 'done' })),
+                    'Marked done.',
+                  )
+                }
+              >
+                <CircleCheck aria-hidden="true" className="size-4" />
+                <span className={bulkLabel}>Mark as completed</span>
+              </button>
+              <button type="button" className={bulkAction} aria-label="Assign" disabled={busy} onClick={() => setBulk('assign')}>
+                <UserRound aria-hidden="true" className="size-4" />
+                <span className={bulkLabel}>Assign</span>
+              </button>
+              <button type="button" className={bulkAction} aria-label="Edit" disabled={busy} onClick={() => setBulk('edit')}>
+                <Pencil aria-hidden="true" className="size-4" />
+                <span className={bulkLabel}>Edit</span>
+              </button>
+              <button type="button" className={bulkAction} aria-label="Delete" disabled={busy} onClick={() => setBulk('delete')}>
+                <Trash2 aria-hidden="true" className="size-4" />
+                <span className={bulkLabel}>Delete</span>
+              </button>
+              <IconButton
+                label="Clear the selection"
+                icon={<X aria-hidden="true" className="size-4" />}
+                onClick={() => setSelected(new Set())}
+                className="mr-1 ml-auto shrink-0 text-body"
+              />
+            </div>
+          ) : null
+        }
         empty={
           <div className="flex flex-1 flex-col justify-center">
             <EmptyState
@@ -301,6 +388,48 @@ export const TasksTable = ({
           task itself does not come back.
         </p>
       </Modal>
+      {bulk === 'assign' ? (
+        <BulkAssign
+          count={ticked.length}
+          assignees={assignees}
+          busy={busy}
+          onClose={() => setBulk(null)}
+          onApply={(assigneeId) =>
+            void runBulk(
+              (row) => api.crm.tasks.update.mutate({ id: row.id, assigneeId, expectedUpdatedAt: row.updatedAt }),
+              'Assigned.',
+            )
+          }
+        />
+      ) : null}
+      {bulk === 'edit' ? (
+        <BulkEdit
+          count={ticked.length}
+          queues={queues}
+          busy={busy}
+          onClose={() => setBulk(null)}
+          onApply={(change) =>
+            void runBulk((row) => api.crm.tasks.update.mutate({ id: row.id, ...change, expectedUpdatedAt: row.updatedAt }), 'Tasks updated.')
+          }
+        />
+      ) : null}
+      <Modal
+        open={bulk === 'delete'}
+        title={`Delete ${fmt.number(ticked.length)} ${ticked.length === 1 ? 'task' : 'tasks'}?`}
+        onClose={() => setBulk(null)}
+        footer={
+          <>
+            <Button variant="tertiary" disabled={busy} onClick={() => setBulk(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" busy={busy} onClick={() => void runBulk((row) => api.crm.tasks.remove.mutate({ id: row.id }), 'Tasks deleted.')}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p>The records they hang on keep their timelines. The tasks themselves do not come back.</p>
+      </Modal>
       {editing ? (
         <TaskForm
           key={editing.id}
@@ -316,5 +445,149 @@ export const TasksTable = ({
         />
       ) : null}
     </div>
+  )
+}
+
+const BulkAssign = ({
+  count,
+  assignees,
+  busy,
+  onClose,
+  onApply,
+}: {
+  count: number
+  assignees: { id: string; label: string }[]
+  busy: boolean
+  onClose: () => void
+  onApply: (assigneeId: string) => void
+}) => {
+  const [assigneeId, setAssigneeId] = useState(assignees[0]?.id ?? '')
+  return (
+    <Modal
+      open
+      size="sm"
+      title={`Assign ${count} ${count === 1 ? 'task' : 'tasks'}`}
+      onClose={onClose}
+      onSubmit={() => onApply(assigneeId)}
+      footer={
+        <>
+          <Button variant="tertiary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={busy} disabled={!assigneeId}>
+            Assign
+          </Button>
+        </>
+      }
+    >
+      <Field id="bulk-assignee" label="Assigned to">
+        <Select id="bulk-assignee" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
+          {assignees.map((person) => (
+            <option key={person.id} value={person.id}>
+              {person.label}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </Modal>
+  )
+}
+
+type BulkChange =
+  | { dueDate: string | null }
+  | { queueId: string | null }
+  | { priority: TaskPriority }
+  | { type: TaskType }
+
+const EDITABLE = [
+  { key: 'dueDate', label: 'Due date' },
+  { key: 'queueId', label: 'Queue' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'type', label: 'Task type' },
+] as const
+
+/** One property, one value, applied to every ticked task. */
+const BulkEdit = ({
+  count,
+  queues,
+  busy,
+  onClose,
+  onApply,
+}: {
+  count: number
+  queues: { id: string; name: string }[]
+  busy: boolean
+  onClose: () => void
+  onApply: (change: BulkChange) => void
+}) => {
+  const [property, setProperty] = useState<(typeof EDITABLE)[number]['key']>('dueDate')
+  const [value, setValue] = useState('')
+  const pick = (next: typeof property) => {
+    setProperty(next)
+    setValue(next === 'priority' ? 'medium' : next === 'type' ? 'todo' : '')
+  }
+  const change = (): BulkChange =>
+    property === 'dueDate'
+      ? { dueDate: value || null }
+      : property === 'queueId'
+        ? { queueId: value || null }
+        : property === 'priority'
+          ? { priority: value as TaskPriority }
+          : { type: value as TaskType }
+
+  return (
+    <Modal
+      open
+      size="sm"
+      title={`Edit ${count} ${count === 1 ? 'task' : 'tasks'}`}
+      onClose={onClose}
+      onSubmit={() => onApply(change())}
+      footer={
+        <>
+          <Button variant="tertiary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" busy={busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <Field id="bulk-property" label="Property to update">
+          <Select id="bulk-property" value={property} onChange={(event) => pick(event.target.value as typeof property)}>
+            {EDITABLE.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field id="bulk-value" label={EDITABLE.find((option) => option.key === property)!.label}>
+          {property === 'dueDate' ? (
+            <TextInput id="bulk-value" type="date" value={value} onChange={(event) => setValue(event.target.value)} />
+          ) : (
+            <Select id="bulk-value" value={value} onChange={(event) => setValue(event.target.value)}>
+              {property === 'queueId' ? (
+                <>
+                  <option value="">No queue</option>
+                  {queues.map((queue) => (
+                    <option key={queue.id} value={queue.id}>
+                      {queue.name}
+                    </option>
+                  ))}
+                </>
+              ) : (
+                Object.entries(property === 'priority' ? TASK_PRIORITY_LABELS : TASK_TYPE_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))
+              )}
+            </Select>
+          )}
+        </Field>
+      </div>
+    </Modal>
   )
 }
