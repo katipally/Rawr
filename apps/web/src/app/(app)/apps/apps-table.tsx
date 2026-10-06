@@ -1,6 +1,7 @@
 'use client'
 
-import { Avatar, Badge, DataTable, Field, Select, TextInput, type Column } from '@rawr/ui'
+import { Avatar, Badge, DataTable, DropdownMenu, type Column } from '@rawr/ui'
+import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import type { HealthState, IntegrationKind } from '@rawr/db'
@@ -24,6 +25,17 @@ export type AppRow = {
   lastActivityAt: string | null
   people: number
 }
+
+const STATUS: { value: string; label: string }[] = [
+  { value: '', label: 'Any status' },
+  { value: 'connected', label: 'Connected' },
+  { value: 'degraded', label: 'Needs attention' },
+  { value: 'disconnected', label: 'Disconnected' },
+]
+
+/** HubSpot's ghost filter button: no border, 39 tall, grey on hover. */
+const ghost =
+  'inline-flex min-h-[2.4375rem] items-center gap-1 rounded-hs px-3 font-semibold text-body transition-all duration-150 ease-out hover:bg-fill'
 
 const Muted = ({ children }: { children: string }) => <span className="text-secondary">{children}</span>
 
@@ -116,18 +128,39 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-end gap-3">
-        <Field id="app-search" label="Search for an app">
-          <TextInput id="app-search" value={query} placeholder="Name or category" onChange={(event) => setQuery(event.target.value)} />
-        </Field>
-        <Field id="app-status" label="App status">
-          <Select id="app-status" value={state} onChange={(event) => setState(event.target.value)}>
-            <option value="">Any status</option>
-            <option value="connected">Connected</option>
-            <option value="degraded">Needs attention</option>
-            <option value="disconnected">Disconnected</option>
-          </Select>
-        </Field>
+      <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <label className="relative w-full min-w-0 sm:w-[25rem]">
+          <span className="sr-only">Search for an app</span>
+          <input
+            type="search"
+            value={query}
+            placeholder="Search for an app"
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-10 w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 text-body placeholder:text-muted"
+          />
+          <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+        </label>
+        <DropdownMenu
+          label="App status"
+          align="start"
+          groups={[
+            {
+              key: 'status',
+              items: STATUS.map((option) => ({
+                key: option.value || 'any',
+                label: option.label,
+                checked: state === option.value,
+                onSelect: () => setState(option.value),
+              })),
+            },
+          ]}
+          trigger={(props) => (
+            <button {...props} type="button" className={ghost}>
+              {state ? `App status: ${STATUS.find((option) => option.value === state)?.label}` : 'App status'}
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            </button>
+          )}
+        />
       </div>
 
       <DataTable

@@ -5,7 +5,7 @@ import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { AppLogo } from '~/components/app-logo.tsx'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
-import { appPath } from '~/lib/links.ts'
+import { appPath, availableAppsPath } from '~/lib/links.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTable } from './apps-table.tsx'
@@ -32,6 +32,7 @@ const AppsPage = async () => {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Connected apps"
+        action={<LinkButton href={availableAppsPath()}>Add more connections</LinkButton>}
         lead={`${session.accountName} · ${connected.length - attention.length} working${attention.length ? `, ${attention.length} needing attention` : ''}`}
         why={
           <p>

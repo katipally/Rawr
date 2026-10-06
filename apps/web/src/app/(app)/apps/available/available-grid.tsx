@@ -1,6 +1,7 @@
 'use client'
 
-import { Badge, EmptyState, Field, NOTHING_MATCHED, TextInput } from '@rawr/ui'
+import { EmptyState, NOTHING_MATCHED } from '@rawr/ui'
+import { Search } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import type { IntegrationKind } from '@rawr/db'
@@ -37,14 +38,17 @@ export const AvailableGrid = ({ apps }: { apps: AvailableApp[] }) => {
 
   return (
     <div className="flex flex-col gap-6">
-      <Field id="available-search" label="Search apps">
-        <TextInput
-          id="available-search"
+      <label className="relative w-full min-w-0 sm:w-[25rem]">
+        <span className="sr-only">Search apps</span>
+        <input
+          type="search"
           value={query}
-          placeholder="Name, category or what it does"
+          placeholder="Search apps"
           onChange={(event) => setQuery(event.target.value)}
+          className="h-10 w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 text-body placeholder:text-muted"
         />
-      </Field>
+        <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+      </label>
 
       {byCategory.size === 0 ? (
         <EmptyState {...NOTHING_MATCHED} />
@@ -57,16 +61,23 @@ export const AvailableGrid = ({ apps }: { apps: AvailableApp[] }) => {
                 <li key={app.kind} className="min-w-0">
                   <Link
                     href={appPath(app.kind)}
-                    className="flex h-full flex-col gap-3 rounded-panel border border-line bg-surface p-5 text-body no-underline shadow-panel transition-shadow hover:shadow-md"
+                    className="flex h-full flex-col gap-3 rounded-panel border border-line bg-surface p-5 text-body no-underline shadow-panel transition-shadow duration-150 ease-out hover:shadow-overlay"
                   >
                     <AppLogo kind={app.kind} className="size-10" />
                     <span className="flex flex-col gap-0.5">
-                      <span className="break-words font-semibold">{app.name}</span>
-                      <span className="text-small text-secondary">By Rawr · {app.appType}</span>
+                      <span className="break-words text-base font-semibold">{app.name}</span>
+                      <span className="text-small font-light text-secondary">By Rawr</span>
                     </span>
-                    <span className="flex-1 text-secondary">{app.purpose}</span>
-                    <span>
-                      <Badge>{app.category}</Badge>
+                    <span className="flex-1 font-light">{app.purpose}</span>
+                    <span className="flex flex-wrap gap-1.5">
+                      {[app.appType, app.category].map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex h-5 items-center rounded-pill border border-canvas bg-canvas px-2 text-[0.625rem] font-semibold"
+                        >
+                          {tag}
+                        </span>
+                      ))}
                     </span>
                   </Link>
                 </li>

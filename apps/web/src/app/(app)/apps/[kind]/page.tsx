@@ -1,5 +1,6 @@
 import { INTEGRATION_KINDS, listIntegrationsForAccount, listSites, PERSONAL_KINDS, type IntegrationKind } from '@rawr/db'
-import { Alert, Badge, Breadcrumb, Card, Tabs } from '@rawr/ui'
+import { Alert, Badge, Card, Tabs } from '@rawr/ui'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { notFound, redirect } from 'next/navigation'
@@ -97,24 +98,22 @@ const AppPage = async ({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* The parent is where this app is actually listed. A Brevo nobody has
-          connected is on Available apps, and saying "Connected apps" above it
-          both misnames the tab and claims a state it does not have. */}
-      <Breadcrumb
-        items={[
-          connected
-            ? { label: 'Connected apps', href: appsPath() }
-            : { label: 'Available apps', href: availableAppsPath() },
-          { label: meta.name },
-        ]}
-      />
+      {/* Back to where this app is actually listed. A Brevo nobody has
+          connected is on Available apps, and sending it to "connections" both
+          misnames the tab and claims a state it does not have. */}
+      <Link
+        href={connected ? appsPath() : availableAppsPath()}
+        className="w-fit text-small font-semibold text-body no-underline hover:underline"
+      >
+        &lsaquo; {connected ? 'Back to connections' : 'Back to available apps'}
+      </Link>
 
       <div className="flex flex-wrap items-center gap-3">
         <span className="flex size-12 shrink-0 items-center justify-center rounded-hs border border-line bg-surface">
           <AppLogo kind={row.kind} className="size-8" />
         </span>
         <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="break-words text-xl font-semibold">{meta.name}</h1>
+          <h1 className="break-words text-[1.375rem] font-medium">{meta.name}</h1>
           <p className="text-secondary">{meta.purpose}</p>
         </div>
         <Badge tone={HEALTH[row.state].tone} dot>
@@ -178,8 +177,8 @@ const AppPage = async ({
                     'Connected by',
                     row.people === 0 ? 'Nobody yet' : row.people === 1 ? '1 person' : `${fmt.number(row.people)} people`,
                   )
-                : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : '—'))}
-              {detail('Installed date', row.installedAt ? fmt.dateTime(row.installedAt.toISOString()) : '—')}
+                : detail('Installed by', row.installedByName ?? (connected ? 'Not by a person' : EMPTY_VALUE))}
+              {detail('Installed date', row.installedAt ? fmt.dateTime(row.installedAt.toISOString()) : EMPTY_VALUE)}
               {detail(
                 'App type',
                 <>
