@@ -92,6 +92,9 @@
   --rawr-filters-width: 30.25rem;
   --rawr-side-panel-width: 37.5rem;
   --rawr-dock-gap: 0.5rem;
+  /* HubSpot's record page: a fixed left and right column round a flexible middle. */
+  --rawr-record-left-width: 26.0625rem;
+  --rawr-record-right-width: 27.0625rem;
 
   --rawr-z-rail: 30;
   --rawr-z-topbar: 40;

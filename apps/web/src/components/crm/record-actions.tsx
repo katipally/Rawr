@@ -140,6 +140,7 @@ export const RecordActions = ({
     <>
       <DropdownMenu
         label="Actions"
+        className="min-w-[9.5625rem]"
         groups={[
           {
             key: 'actions',

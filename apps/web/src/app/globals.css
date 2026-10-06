@@ -85,6 +85,8 @@
   --spacing-filters: var(--rawr-filters-width);
   --spacing-side-panel: var(--rawr-side-panel-width);
   --spacing-dock-gap: var(--rawr-dock-gap);
+  --spacing-record-left: var(--rawr-record-left-width);
+  --spacing-record-right: var(--rawr-record-right-width);
   /* A literal, because a container query cannot read a custom property. Below it
      a page card beside a docked panel would be narrower than the panel, so the
      panel covers the card instead. */

@@ -43,7 +43,7 @@ export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps)
   ]
 
   return (
-    <div className="flex flex-wrap items-start gap-2">
+    <div className="flex flex-wrap items-start justify-between gap-1">
       {actions.map(({ label, icon: Icon, onClick, disabled, title }) => (
         <button
           key={label}
@@ -53,10 +53,10 @@ export const RecordQuickActions = ({ email, canWrite }: RecordQuickActionsProps)
           title={title ?? label}
           className="group flex min-w-10 flex-col items-center gap-1 px-1 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          <span className="grid size-8 place-items-center rounded-pill border border-line-strong bg-surface group-hover:bg-fill group-disabled:group-hover:bg-surface">
+          <span className="grid h-pill w-8 place-items-center rounded-pill border border-line-strong bg-surface transition-colors duration-150 ease-out group-hover:bg-fill-hover group-disabled:group-hover:bg-surface">
             <Icon aria-hidden="true" className="size-4" />
           </span>
-          <span className="text-center text-small">{label}</span>
+          <span className="text-center text-small font-body">{label}</span>
         </button>
       ))}
     </div>

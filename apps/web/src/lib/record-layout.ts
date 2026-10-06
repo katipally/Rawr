@@ -40,3 +40,9 @@ export const SECTIONS: Record<ObjectKey, PropertySection[]> = {
 /** An invented object has no hand-made layout, so what a card opens on is its
  *  first few fields, in the order the admin put them in. */
 export const CUSTOM_KEY_FIELDS = 8
+
+/** HubSpot's 417 / flex / 433 columns once the shell's card is wide enough for
+ *  three. Each side is capped at a third of the row so a narrow card shrinks the
+ *  sides with the middle instead of squeezing the timeline to nothing. */
+export const RECORD_COLUMNS =
+  '@4xl:grid-cols-[minmax(0,min(var(--spacing-record-left),32%))_minmax(0,1fr)_minmax(0,min(var(--spacing-record-right),32%))]'

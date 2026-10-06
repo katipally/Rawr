@@ -31,6 +31,7 @@ import { Avatar, EmptyState, SkeletonRows, cn } from '@rawr/ui'
 import { ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { Suspense } from 'react'
+import { CopyButton } from '~/components/copy-button.tsx'
 import { LinkButton } from '~/components/link-button.tsx'
 import { notFound, redirect } from 'next/navigation'
 import { AssociationRail } from '~/components/crm/association-rail.tsx'
@@ -51,7 +52,7 @@ import { Timeline } from '~/components/crm/timeline.tsx'
 import { EMPTY_VALUE, Value } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
 import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
-import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
+import { CUSTOM_KEY_FIELDS, RECORD_COLUMNS, SECTIONS } from '~/lib/record-layout.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
 import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
@@ -513,13 +514,13 @@ const RecordPage = async ({
     // property list does not push the association rail off the bottom of a screen
     // it would otherwise fit on. One column means one scroller again: nested
     // scrollers on a phone are a trap, not a feature.
-    <div className="grid gap-4 p-2 @4xl:h-full @4xl:min-h-0 @4xl:grid-cols-[minmax(0,25.5rem)_minmax(0,1fr)_minmax(0,26.25rem)] sm:p-4">
+    <div className={cn('grid gap-4 p-2 @4xl:h-full @4xl:min-h-0 sm:p-4', RECORD_COLUMNS)}>
       <div className={COLUMN}>
-        <div className="rounded-panel border border-line bg-surface shadow-panel">
-          <div className="flex items-center justify-between gap-2 px-4 pt-3">
+        <div className="rounded-panel border border-line bg-surface p-4 shadow-panel">
+          <div className="flex items-center justify-between gap-2">
             <Link
               href={origin ?? objectView(account, objectParam, 'all')}
-              className="flex h-10 items-center gap-1 rounded-hs text-body no-underline hover:underline"
+              className="flex min-w-0 items-center gap-1 rounded-hs no-underline hover:underline"
             >
               <ChevronLeft aria-hidden="true" className="size-4" />
               {backLabel}
@@ -537,9 +538,10 @@ const RecordPage = async ({
               canWrite={canWrite}
             />
           </div>
-          <div className="flex flex-col gap-2 px-4 pt-2 pb-6">
+          <div className="-mx-4 my-3 border-t border-line" />
+          <div className="flex flex-col gap-1">
             <div className="flex items-center gap-3">
-              <Avatar name={record.displayName} size="lg" />
+              <Avatar name={record.displayName} size="lg" className="size-[3.0625rem]" />
               <div className="min-w-0">
                 <h1 className="line-clamp-2 break-words text-[1.375rem] font-medium leading-tight" title={record.displayName}>
                   {record.displayName}
@@ -551,6 +553,7 @@ const RecordPage = async ({
               <p className="flex min-w-0 items-center gap-1">
                 <a href={`mailto:${email}`} className="min-w-0 truncate">{email}</a>
                 <ExternalLink aria-hidden="true" className="size-3 shrink-0 text-secondary" />
+                <CopyButton value={email} what="Email" />
               </p>
             ) : null}
             {website ? (
@@ -583,7 +586,7 @@ const RecordPage = async ({
                 ))}
               </dl>
             ) : null}
-            <div className="mt-2 flex justify-center">
+            <div className="mt-3">
               <RecordQuickActions
                 email={emailAction}
                 canWrite={canWrite}
