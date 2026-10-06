@@ -4,6 +4,8 @@ import { Badge, Button, Combobox, Modal, Spinner, useToast } from '@rawr/ui'
 import { useEffect, useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
+import type { SequenceStep } from '@rawr/db'
+import { STEP_KIND_LABEL } from './value.tsx'
 
 type Sequence = { id: string; name: string; state: string; stepCount: number }
 type Mailbox = { id: string; email: string; canSend: boolean; state: string }
@@ -39,6 +41,7 @@ export const EnrollDialog = ({
   const [busy, setBusy] = useState(false)
   const [outcomes, setOutcomes] = useState<Outcome[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [steps, setSteps] = useState<SequenceStep[] | null>(null)
 
   useEffect(() => {
     Promise.all([queryClient.fetchQuery({ ...trpc.sequences.list.queryOptions(), staleTime: 0 }), queryClient.fetchQuery({ ...trpc.mail.mailboxes.queryOptions(), staleTime: 0 })])
@@ -53,6 +56,26 @@ export const EnrollDialog = ({
       .catch((cause) => setError(errorMessage(cause)))
   }, [queryClient])
 
+  // HubSpot shows the chosen sequence's steps before it starts, so what is about
+  // to go out is read before it goes. A late answer for a sequence no longer
+  // chosen is dropped.
+  useEffect(() => {
+    setSteps(null)
+    if (!sequenceId) return
+    let live = true
+    queryClient
+      .fetchQuery(trpc.sequences.get.queryOptions({ id: sequenceId }))
+      .then((found) => {
+        if (live) setSteps(found?.steps ?? [])
+      })
+      .catch((cause) => {
+        if (live) setError(errorMessage(cause))
+      })
+    return () => {
+      live = false
+    }
+  }, [queryClient, sequenceId])
+
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
   const refused = outcomes?.filter((row) => !row.enrolled) ?? []
   const enrolled = outcomes?.filter((row) => row.enrolled).length ?? 0
@@ -60,7 +83,7 @@ export const EnrollDialog = ({
   return (
     <Modal
       open
-      title={`Add ${contactLabel} to a sequence`}
+      title={`Enroll ${contactLabel} in a sequence`}
       onClose={onClose}
       footer={
         sequences && mailboxes && !outcomes ? (
@@ -89,7 +112,7 @@ export const EnrollDialog = ({
                   .finally(() => setBusy(false))
               }}
             >
-              Enrol
+              Start sequence
             </Button>
           </>
         ) : null
@@ -122,6 +145,27 @@ export const EnrollDialog = ({
               disabled: row.stepCount === 0,
             }))}
           />
+          {sequenceId ? (
+            steps === null ? (
+              <Spinner label="Reading the steps" />
+            ) : (
+              <ol aria-label="Steps" className="flex max-h-64 flex-col divide-y divide-line overflow-y-auto rounded-hs border border-line">
+                {steps.map((step, index) => (
+                  <li key={step.id} className="flex min-w-0 flex-col px-3 py-2">
+                    <span className="font-semibold">
+                      {index + 1}. {STEP_KIND_LABEL[step.kind]}
+                    </span>
+                    <span className="truncate text-small text-secondary">
+                      {step.delayDays === 0 && step.delayHours === 0
+                        ? 'Straight away'
+                        : `After ${step.delayDays} day${step.delayDays === 1 ? '' : 's'}${step.delayHours > 0 ? ` ${step.delayHours} h` : ''}`}
+                      {` · ${(step.kind === 'email' ? step.subject : step.taskTitle) || 'Untitled'}`}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            )
+          ) : null}
           <Combobox
             label="Send from"
             value={mailboxId}

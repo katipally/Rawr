@@ -24,18 +24,13 @@ import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { rowPill } from '~/components/row-actions.tsx'
+import { STEP_KIND_LABEL } from '~/components/crm/value.tsx'
 import { SequenceHeader } from './sequence-header.tsx'
 
 type Draft = SequenceStep & { key: string }
 
 type Template = { id: string; name: string; subject: string; bodyText: string }
 
-const KIND_LABEL: Record<StepKind, string> = {
-  email: 'Send an email',
-  call: 'Make a call',
-  linkedin: 'Message on LinkedIn',
-  task: 'Do something else',
-}
 
 const KIND_ICON: Record<StepKind, ReactNode> = {
   email: <Mail aria-hidden="true" className="size-4" />,
@@ -169,7 +164,7 @@ export const SequenceEditor = ({
         subjectB: null,
         bodyHtml: null,
         bodyText: kind === 'email' ? '' : null,
-        taskTitle: kind === 'email' ? null : KIND_LABEL[kind],
+        taskTitle: kind === 'email' ? null : STEP_KIND_LABEL[kind],
         taskBody: null,
       },
       ...current.slice(at),
@@ -325,7 +320,7 @@ export const SequenceEditor = ({
                 ) : null}
                 <span className="flex shrink-0">{KIND_ICON[step.kind]}</span>
                 <h2 className="min-w-0 flex-1 truncate font-semibold">
-                  {index + 1}. {KIND_LABEL[step.kind]}
+                  {index + 1}. {STEP_KIND_LABEL[step.kind]}
                 </h2>
                 {canWrite ? (
                   <DropdownMenu
@@ -705,7 +700,7 @@ const Connector = ({
         groups={[
           {
             key: 'kinds',
-            items: STEP_KINDS.map((kind) => ({ key: kind, label: KIND_LABEL[kind], onSelect: () => onAdd(kind) })),
+            items: STEP_KINDS.map((kind) => ({ key: kind, label: STEP_KIND_LABEL[kind], onSelect: () => onAdd(kind) })),
           },
         ]}
         trigger={(props) => (

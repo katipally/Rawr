@@ -1,4 +1,4 @@
-import type { EnrollmentState, FieldType } from '@rawr/db'
+import type { EnrollmentState, FieldType, StepKind } from '@rawr/db'
 import type { BadgeTone } from '@rawr/ui'
 import { Markdown } from './markdown.tsx'
 import { toPlainText } from './markdown.ts'
@@ -292,6 +292,15 @@ export const ENROLLMENT_TONE: Record<EnrollmentState, BadgeTone> = {
   unsubscribed: 'warn',
   failed: 'error',
   removed: 'neutral',
+}
+
+/** What a sequence step does, on its card in the editor and in the enroll
+ *  dialog's preview of the steps. */
+export const STEP_KIND_LABEL: Record<StepKind, string> = {
+  email: 'Send an email',
+  call: 'Make a call',
+  linkedin: 'Message on LinkedIn',
+  task: 'Do something else',
 }
 
 /** The state, said the way a salesperson would. "finished" and "replied" are both
