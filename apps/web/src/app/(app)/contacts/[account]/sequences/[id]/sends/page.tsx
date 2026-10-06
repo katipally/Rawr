@@ -40,8 +40,7 @@ const SequenceSendsPage = async ({
   return (
     <SendTable
       account={account}
-      sequenceId={id}
-      sequenceName={found.sequence.name}
+      sequence={found.sequence}
       state={chosen}
       offset={offset}
       perPage={SENDS_PAGE}

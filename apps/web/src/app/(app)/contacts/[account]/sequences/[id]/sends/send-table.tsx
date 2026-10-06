@@ -1,11 +1,14 @@
 'use client'
 
-import { Badge, Breadcrumb, Card, EmptyState, Pagination } from '@rawr/ui'
+import type { SequenceState } from '@rawr/db'
+import { Badge, DataTable, EmptyState, Pagination, cn, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { useFormat } from '~/components/zone.tsx'
-import { recordPath, sequencePath, sequenceSendsPath, sequencesPath, threadPath } from '~/lib/links.ts'
+import { recordPath, sequenceSendsPath, threadPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
+import { SequenceHeader } from '../sequence-header.tsx'
 
 type SendState = 'sent' | 'failed' | 'bounced'
 
@@ -38,8 +41,7 @@ const STATE_TONE = { sent: 'ok', failed: 'error', bounced: 'error' } as const
 
 export const SendTable = ({
   account,
-  sequenceId,
-  sequenceName,
+  sequence,
   state,
   rows,
   offset,
@@ -47,8 +49,7 @@ export const SendTable = ({
   hasMore,
 }: {
   account: string
-  sequenceId: string
-  sequenceName: string
+  sequence: { id: string; name: string; state: SequenceState; description: string | null }
   state: SendState | null
   rows: SendRow[]
   offset: number
@@ -61,110 +62,136 @@ export const SendTable = ({
 
   const go = (skip: number) =>
     router.replace(
-      sequenceSendsPath(account, sequenceId, {
+      sequenceSendsPath(account, sequence.id, {
         state: state ?? undefined,
         skip: skip > 0 ? String(skip) : undefined,
       }),
       { scroll: false },
     )
 
+  const columns: Column<SendRow>[] = [
+    {
+      key: 'contact',
+      header: 'Contact',
+      width: 240,
+      render: (row) => (
+        <span className="flex min-w-0 flex-col py-1">
+          {row.contactId ? (
+            <Link
+              href={recordPath(account, 'contact', row.contactId, { from: origin })}
+              title={row.contactName}
+              className="truncate font-semibold text-link hover:underline"
+            >
+              {row.contactName}
+            </Link>
+          ) : (
+            <span className="truncate font-semibold">{row.contactName}</span>
+          )}
+          <span className="truncate text-small text-secondary">{row.contactEmail ?? 'No email'}</span>
+        </span>
+      ),
+    },
+    {
+      key: 'subject',
+      header: 'Subject',
+      width: 280,
+      render: (row) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate" title={row.stepSubject ?? undefined}>
+            {row.stepSubject ?? 'No subject'}
+          </span>
+          {row.error ? (
+            <span className="truncate text-small text-error" title={row.error}>
+              {row.error}
+            </span>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      key: 'step',
+      header: 'Step',
+      width: 110,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-1">
+          {row.stepPosition === null ? 'One-off' : `Step ${row.stepPosition + 1}`}
+          {/* Only when the step was actually testing a pair. A lone "A" on
+              every row says nothing. */}
+          {row.variant ? <Badge tone="neutral">{row.variant.toUpperCase()}</Badge> : null}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: 170,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-1">
+          <Badge tone={STATE_TONE[row.state]} dot>
+            {row.state}
+          </Badge>
+          {row.replied ? <Badge tone="ok">replied</Badge> : null}
+        </span>
+      ),
+    },
+    { key: 'opened', header: 'Opened', width: 110, align: 'right', render: (row) => fmt.number(row.openCount) },
+    { key: 'clicked', header: 'Clicked', width: 110, align: 'right', render: (row) => fmt.number(row.clickCount) },
+    { key: 'sent', header: 'Sent', width: 200, render: (row) => <span className="block truncate">{fmt.dateTime(row.sentAt)}</span> },
+    {
+      key: 'thread',
+      header: 'Thread',
+      width: 140,
+      // Null until the mailbox sync reads the sent copy back, so the row links
+      // to a conversation that exists or to nothing.
+      render: (row) =>
+        row.threadId ? (
+          <Link href={threadPath(account, row.threadId)} className="font-semibold text-link hover:underline">
+            Open the thread
+          </Link>
+        ) : (
+          EMPTY_VALUE
+        ),
+    },
+  ]
+
   return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <Breadcrumb
-        items={[
-          { label: 'Sequences', href: sequencesPath(account) },
-          { label: sequenceName, href: sequencePath(account, sequenceId) },
-          { label: 'What it sent' },
-        ]}
-      />
+    <div className="flex min-w-0 flex-col gap-4">
+      <SequenceHeader account={account} sequence={sequence} current="sends" />
 
-      <h1 className="text-lg font-medium">What {sequenceName} sent</h1>
-
-      <div className="flex flex-wrap gap-1">
+      <div role="tablist" aria-label="Send state" className="scroll-fade-x flex min-w-0 overflow-x-auto rounded-t-hs border-b border-line">
         {FILTERS.map((each) => (
           <Link
             key={each.key ?? 'all'}
-            href={sequenceSendsPath(account, sequenceId, { state: each.key ?? undefined })}
-            className={
-              state === each.key
-                ? 'rounded-hs bg-accent-subtle px-3 py-1.5 font-medium text-link no-underline'
-                : 'rounded-hs px-3 py-1.5 text-secondary no-underline hover:bg-fill'
-            }
+            role="tab"
+            aria-selected={state === each.key}
+            href={sequenceSendsPath(account, sequence.id, { state: each.key ?? undefined })}
+            className={cn(
+              'flex min-h-10 shrink-0 items-center border-r border-line px-4 text-body no-underline last:border-r-0',
+              state === each.key ? 'bg-surface font-medium' : 'bg-fill font-normal hover:bg-fill-hover',
+            )}
           >
             {each.label}
           </Link>
         ))}
       </div>
 
-      {rows.length === 0 ? (
-        <EmptyState
-          title={offset > 0 ? 'Nothing on this page' : 'Nothing sent yet'}
-          description={
-            offset > 0
-              ? 'There were fewer sends than this page needs. Go back a page.'
-              : 'A row appears here the moment a step puts a mail on the wire.'
-          }
-        />
-      ) : (
-        <Card flush>
-          <ul className="divide-y divide-divider">
-            {rows.map((row) => (
-              <li key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
-                <span className="flex min-w-0 flex-1 basis-56 flex-col">
-                  {row.contactId ? (
-                    <Link
-                      href={recordPath(account, 'contact', row.contactId, { from: origin })}
-                      className="truncate font-medium"
-                    >
-                      {row.contactName}
-                    </Link>
-                  ) : (
-                    <span className="truncate font-medium">{row.contactName}</span>
-                  )}
-                  <span className="truncate text-small text-secondary">
-                    {row.stepSubject ?? row.contactEmail ?? 'No subject'}
-                  </span>
-                  {row.error ? (
-                    <span className="truncate text-small text-error">{row.error}</span>
-                  ) : null}
-                </span>
-
-                <span className="w-20 shrink-0 text-small text-secondary tabular-nums">
-                  {row.stepPosition === null ? 'one-off' : `step ${row.stepPosition + 1}`}
-                </span>
-
-                {/* Only when the step was actually testing a pair. A lone "A" on
-                    every row says nothing and costs a column. */}
-                {row.variant ? (
-                  <Badge tone="neutral">subject {row.variant.toUpperCase()}</Badge>
-                ) : null}
-
-                <Badge tone={STATE_TONE[row.state]} dot>
-                  {row.state}
-                </Badge>
-
-                {row.replied ? <Badge tone="ok">replied</Badge> : null}
-
-                <span className="w-40 shrink-0 text-small text-secondary tabular-nums">
-                  {row.openCount} opened · {row.clickCount} clicked
-                </span>
-
-                <span className="w-44 shrink-0 text-small text-secondary">
-                  {fmt.dateTime(row.sentAt)}
-                </span>
-
-                {/* Null until the mailbox sync reads the sent copy back, so the
-                    row links to a conversation that exists or to nothing. */}
-                {row.threadId ? (
-                  <Link href={threadPath(account, row.threadId)} className="shrink-0 text-small">
-                    Open the thread
-                  </Link>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        caption={`What ${sequence.name} sent`}
+        storageKey="sequence.sends"
+        empty={
+          <EmptyState
+            title={offset > 0 ? 'Nothing on this page' : 'Nothing sent yet'}
+            description={
+              offset > 0
+                ? 'There were fewer sends than this page needs. Go back a page.'
+                : 'A row appears here the moment a step puts a mail on the wire.'
+            }
+          />
+        }
+      />
 
       {offset > 0 || hasMore ? (
         <Pagination
