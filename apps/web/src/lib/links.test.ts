@@ -232,6 +232,24 @@ test('a HubSpot import, duplicates, restore or connected apps link opens the scr
   assert.equal(fromHubspotPath('/ecosystem/datasaur/marketplace/apps'), '/apps/available')
 })
 
+test('a HubSpot users, teams, defaults, preferences, audit log or service key link opens its settings page', () => {
+  assert.equal(fromHubspotPath('/settings/datasaur/users'), '/settings/members')
+  assert.equal(fromHubspotPath('/settings/datasaur/users/active_users'), '/settings/members')
+  assert.equal(fromHubspotPath('/settings/datasaur/users/user/49756527'), '/settings/members')
+  assert.equal(fromHubspotPath('/settings/datasaur/users/teams'), '/settings/teams')
+  assert.equal(fromHubspotPath('/settings/datasaur/account-defaults/general'), '/settings/defaults')
+  assert.equal(fromHubspotPath('/settings/datasaur/account-defaults/currency'), '/settings/defaults?tab=currency')
+  assert.equal(fromHubspotPath('/settings/datasaur/user-preferences/general'), '/settings/account')
+  assert.equal(fromHubspotPath('/settings/datasaur/user-preferences/profile'), '/settings/account')
+  assert.equal(fromHubspotPath('/settings/datasaur/user-preferences/security'), '/settings/account?tab=security')
+  assert.equal(fromHubspotPath('/settings/datasaur/user-preferences/calendar'), '/meetings/datasaur/calendars')
+  assert.equal(fromHubspotPath('/account-and-billing/datasaur/audit-logs'), '/settings/audit')
+  assert.equal(fromHubspotPath('/service-keys/datasaur'), '/settings/agent')
+  assert.equal(fromHubspotPath('/private-apps/datasaur'), '/settings/agent')
+  assert.equal(fromHubspotPath('/settings/members'), null)
+  assert.equal(fromHubspotPath('/settings/tracking/events'), null)
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)

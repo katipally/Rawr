@@ -55,8 +55,9 @@ const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/
  *  meetings are the 0-47 object, and the calendar connection is a preference.
  *  HubSpot's report ids name nothing here, so a report link opens the reports
  *  list, and its import ids name no run here, so an import link opens the
- *  imports list. Connected apps and the marketplace are not scoped to an
- *  account here, so their portal is dropped. */
+ *  imports list. Connected apps, the marketplace and settings are not scoped to
+ *  an account here, so their portal is dropped; HubSpot's user ids name nobody
+ *  here, so a user link opens Users & Teams. */
 const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string][] = [
   [/^\/contacts\/([^/?#]+)\/objectLists\/create\/?$/, (account) => `/${CRM_ROOT}/${account}/segments?segment=new`],
   [/^\/contacts\/([^/?#]+)\/objectLists(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/segments`],
@@ -90,12 +91,21 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/(?:connected-apps|integrations-settings)\/[^/?#]+(?:\/[^?#]*)?$/, () => appsPath()],
   [/^\/(?:marketplace|ecosystem)\/[^/?#]+(?:\/[^?#]*)?$/, () => availableAppsPath()],
   [/^\/user-home\/([^/?#]+)(?:\/[^?#]*)?$/, (account) => accountHome(account)],
+  [/^\/settings\/[^/?#]+\/users\/teams(?:\/[^?#]*)?$/, () => teamsPath()],
+  [/^\/settings\/[^/?#]+\/users(?:\/[^?#]*)?$/, () => membersPath()],
+  [/^\/settings\/[^/?#]+\/account-defaults\/currency\/?$/, () => `${defaultsPath()}?tab=currency`],
+  [/^\/settings\/[^/?#]+\/account-defaults(?:\/[^?#]*)?$/, () => defaultsPath()],
+  [/^\/settings\/[^/?#]+\/user-preferences\/(email|security)\/?$/, (tab) => `${accountPath()}?tab=${tab}`],
+  [/^\/settings\/[^/?#]+\/user-preferences(?:\/[^?#]*)?$/, () => accountPath()],
+  [/^\/account-and-billing\/[^/?#]+\/audit-logs?(?:\/[^?#]*)?$/, () => auditPath()],
+  [/^\/(?:service-keys|private-apps)\/[^/?#]+(?:\/[^?#]*)?$/, () => agentAccessPath()],
 ]
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
  *  same address with the readable key, a 0-27 tasks link as the tasks list, a
  *  segment, form, marketing email, sequence, template, meetings, dashboard,
- *  reports, import, duplicates, restore, connected apps or home link as the screen
+ *  reports, import, duplicates, restore, connected apps, home, users, teams,
+ *  account defaults, preferences, audit log or service key link as the screen
  *  that holds it, or null
  *  when the path is none of those. Read by src/proxy.ts, which redirects to the
  *  answer. */
