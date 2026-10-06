@@ -870,10 +870,10 @@ export const PageEditor = ({
         </div>
       </header>
 
-      <div className="grid min-w-0 gap-10 lg:grid-cols-[minmax(0,35rem)_minmax(0,1fr)]">
+      <div className="grid min-w-0 gap-10 @4xl:grid-cols-[minmax(0,35rem)_minmax(0,1fr)]">
         <div className="min-w-0">{tab === 'overview' ? overview : tab === 'scheduling' ? scheduling : automation}</div>
         {tab === 'overview' ? (
-          <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+          <aside className="min-w-0 @4xl:sticky @4xl:top-4 @4xl:self-start">
             <TemplatePreview
               titleTpl={form.titleTpl}
               descriptionTpl={form.descriptionTpl}
