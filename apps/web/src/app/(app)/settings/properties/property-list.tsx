@@ -1,19 +1,26 @@
 'use client'
 
-import { Alert, Button, Field, IconButton, Modal, Select, TextArea, TextInput, cn, useToast } from '@rawr/ui'
-import { useRouter } from 'next/navigation'
+import { Alert, Button, DataTable, DropdownMenu, EmptyState, Field, Modal, Select, Tabs, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { ChevronDown, Search } from 'lucide-react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import type { AdminField, Conditional, FieldType } from '@rawr/db'
-import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
-import { ACTION_ICONS } from '~/components/icons.ts'
+import type { AdminField, FieldType } from '@rawr/db'
+import { EMPTY_VALUE } from '~/components/crm/value.tsx'
+import type { FilterField } from '~/components/crm/filter-builder.tsx'
+import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
-import { api, errorMessage, trpc } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { propertiesPath } from '~/lib/links.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { useQueryClient } from '@tanstack/react-query'
+import { NEEDS_OPTIONS, PropertyEditor, TYPE_LABEL, type PropertyDraft } from './property-editor.tsx'
 
 export type PropertyListProps = {
   object: string
+  /** Every object the account has, for the object picker over the tabs. */
+  objects: { key: string; label: string }[]
   rows: AdminField[]
   deleted: AdminField[]
   /** The denominator of the fill rate: how many records the object has now. */
@@ -28,31 +35,17 @@ export type PropertyListProps = {
   canWrite: boolean
 }
 
-/** Field types that need a list of choices, and the types a person actually reaches
- *  for. The registry knows all twenty; offering them in the order somebody thinks
- *  about them is a UI decision, so it lives here. */
-const TYPE_GROUPS: { label: string; types: FieldType[] }[] = [
-  { label: 'Text', types: ['text', 'long_text', 'rich_text', 'email', 'phone', 'url', 'linkedin', 'address'] },
-  { label: 'Numbers', types: ['number', 'currency', 'percent', 'rating'] },
-  { label: 'Choices', types: ['select', 'multi_select', 'boolean'] },
-  { label: 'Dates', types: ['date', 'datetime'] },
-  { label: 'Other', types: ['user', 'relation', 'json'] },
-]
+type Tab = 'properties' | 'groups' | 'archived'
 
-const NEEDS_OPTIONS = new Set<FieldType>(['select', 'multi_select'])
+const bulkAction =
+  'inline-flex h-[calc(var(--spacing-row)-2px)] shrink-0 items-center gap-1.5 rounded-pill px-2.5 text-body font-semibold transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent'
 
-/** A key is generated from the label once and then never changes, because renaming
- *  a label must never touch stored data. F0 §4. */
-const keyFrom = (label: string): string =>
-  label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .replace(/^([0-9])/, 'f_$1')
-    .slice(0, 59)
+const searchBox =
+  'h-[2.5rem] w-full rounded-pill border border-line-strong bg-surface py-2 pr-10 pl-4 font-light placeholder:text-muted'
 
 export const PropertyList = ({
   object,
+  objects,
   rows,
   deleted,
   recordCount,
@@ -63,56 +56,31 @@ export const PropertyList = ({
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
+  const pathname = usePathname()
+  const params = useSearchParams()
   const toast = useToast()
+  const objectLabel = objects.find((entry) => entry.key === object)?.label ?? object
 
+  const [tabParam] = useUrlParam('tab')
+  const tab: Tab = tabParam === 'groups' || (tabParam === 'archived' && canWrite) ? tabParam : 'properties'
   const [action, setAction] = useUrlParam('action')
-  const creating = action === 'create'
-  const setCreating = (open: boolean) => setAction(open ? 'create' : null)
+  const creating = canWrite && action === 'create'
   const [editId, setEditId] = useUrlParam('edit')
-  const editing = rows.find((field) => field.id === editId) ?? null
-  const setEditing = (field: AdminField | null) => setEditId(field?.id ?? null)
+  const editing = canWrite ? (rows.find((field) => field.id === editId && !field.isSystem) ?? null) : null
+  const closeEditor = () => replaceParams({ action: null, edit: null, section: null })
+  const [group, setGroup] = useUrlParam('group')
+  const [typeFilter, setTypeFilter] = useUrlParam('ftype')
+
   const [removing, setRemoving] = useState<AdminField | null>(null)
-  const [usage, setUsage] = useState<{ filled: number; usedIn: { kind: string; name: string }[] } | null>(null)
-  /** Which row has its "Used in" open, and what came back. Loaded on the click,
-   *  because asking for all three hundred and seventy-two at once is three
-   *  hundred and seventy-two queries nobody read. */
-  const [openUse, setOpenUse] = useState<string | null>(null)
-  const [uses, setUses] = useState<Record<string, { kind: string; name: string }[]>>({})
+  const [usage, setUsage] = useState<{ filled: number } | null>(null)
   const [grouping, setGrouping] = useState<{ name: string; rename: boolean } | null>(null)
   const [groupDraft, setGroupDraft] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [purging, setPurging] = useState<AdminField | null>(null)
   const [busy, setBusy] = useState(false)
-
-  const [label, setLabel] = useState('')
-  const [key, setKey] = useState('')
-  const [keyTouched, setKeyTouched] = useState(false)
-  const [type, setType] = useState<FieldType>('text')
-  const [options, setOptions] = useState('')
-  const [helpText, setHelpText] = useState('')
-  const [groupName, setGroupName] = useState('')
-  const [isRequired, setIsRequired] = useState(false)
-  const [trackChanges, setTrackChanges] = useState(false)
-  const [conditional, setConditional] = useState<Conditional | null>(null)
-
   /** A portal arrives with three hundred and seventy-two properties on contacts
-   *  alone. A flat list of that many, reordered a click at a time, is a list
-   *  nobody opens twice. */
+   *  alone, so the list is searched as it is typed into. */
   const [query, setQuery] = useState('')
-  const [group, setGroup] = useState('')
-
-  const reset = () => {
-    setLabel('')
-    setKey('')
-    setKeyTouched(false)
-    setType('text')
-    setOptions('')
-    setHelpText('')
-    setGroupName('')
-    setIsRequired(false)
-    setTrackChanges(false)
-    setConditional(null)
-  }
 
   const [renamed, setRenamed] = useState<{ from: string; to: string } | null>(null)
 
@@ -137,68 +105,37 @@ export const PropertyList = ({
     }
   }
 
-  const optionList = () =>
-    options
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-
-  const create = async () => {
-    const ok = await run(
-      () =>
-        api.admin.fields.create.mutate({
-          object,
-          key: keyTouched ? key : keyFrom(label),
-          label,
-          type,
-          ...(NEEDS_OPTIONS.has(type) ? { options: optionList() } : {}),
-          helpText: helpText || null,
-          groupName: groupName || null,
-          conditional,
-          isRequired,
-          trackChanges,
-        }),
-      'Property created. It is on the record editor now.',
-    )
-    if (ok) {
-      setCreating(false)
-      reset()
-    }
-  }
-
-  const saveEdit = async () => {
+  const save = async (draft: PropertyDraft) => {
     const field = editing
-    if (!field) return
     const ok = await run(
       () =>
-        api.admin.fields.update.mutate({
-          id: field.id,
-          label,
-          ...(NEEDS_OPTIONS.has(field.type) ? { options: optionList() } : {}),
-          helpText: helpText || null,
-          groupName: groupName || null,
-          conditional,
-          isRequired,
-          trackChanges,
-        }),
-      'Property saved.',
+        field
+          ? api.admin.fields.update.mutate({
+              id: field.id,
+              label: draft.label,
+              ...(NEEDS_OPTIONS.has(field.type) ? { options: draft.options } : {}),
+              helpText: draft.helpText,
+              groupName: draft.groupName,
+              conditional: draft.conditional,
+              isRequired: draft.isRequired,
+              trackChanges: draft.trackChanges,
+            })
+          : api.admin.fields.create.mutate({
+              object,
+              key: draft.key,
+              label: draft.label,
+              type: draft.type,
+              ...(NEEDS_OPTIONS.has(draft.type) ? { options: draft.options } : {}),
+              helpText: draft.helpText,
+              groupName: draft.groupName,
+              conditional: draft.conditional,
+              isRequired: draft.isRequired,
+              trackChanges: draft.trackChanges,
+            }),
+      field ? 'Property saved.' : 'Property created. It is on the record editor now.',
     )
-    if (ok) setEditing(null)
+    if (ok) closeEditor()
   }
-
-  // Seeded from the address rather than from the click, so a reloaded or pasted
-  // ?edit= opens with the property's values and not with an empty form.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different property reseeds the drafts, not a refreshed copy of the same one
-  useEffect(() => {
-    if (!editing) return
-    setLabel(editing.label)
-    setOptions(editing.options.join('\n'))
-    setHelpText(editing.helpText ?? '')
-    setGroupName(editing.groupName ?? '')
-    setIsRequired(editing.isRequired)
-    setTrackChanges(editing.trackChanges)
-    setConditional(editing.conditional)
-  }, [editing?.id])
 
   const openRemove = async (field: AdminField) => {
     setRemoving(field)
@@ -223,529 +160,421 @@ export const PropertyList = ({
   }
 
   /** A rename the server has been told about and has not been read back yet.
-   *  Without it the list beside the table keeps the old name until the refresh
-   *  lands, with the group just renamed selected and not in it. */
+   *  Without it the group filter keeps the old name until the refresh lands,
+   *  with the group just renamed selected and not in it. */
   const groupOf = (field: AdminField): string | null =>
     field.groupName && renamed?.from === field.groupName ? renamed.to : field.groupName
 
-  const groups = [...new Set(rows.map(groupOf).filter((name): name is string => Boolean(name)))].sort()
-  const countIn = (name: string) =>
-    rows.filter((field) => (name === 'ungrouped' ? !groupOf(field) : groupOf(field) === name)).length
-  const ungrouped = rows.filter((field) => !groupOf(field)).length
-
-  const openUses = async (field: AdminField) => {
-    if (openUse === field.id) {
-      setOpenUse(null)
-      return
-    }
-    setOpenUse(field.id)
-    if (uses[field.id]) return
-    try {
-      const found = await queryClient.fetchQuery({ ...trpc.admin.fields.usage.queryOptions({ id: field.id }), staleTime: 0 })
-      setUses((current) => ({ ...current, [field.id]: found.usedIn }))
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-    }
+  // One pass over the rows for every group's count: O(n) rather than a filter per group.
+  const counts = new Map<string, number>()
+  for (const field of rows) {
+    const name = groupOf(field) ?? ''
+    counts.set(name, (counts.get(name) ?? 0) + 1)
   }
-
-  const toggle = (id: string) =>
-    setPicked((current) => {
-      const next = new Set(current)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  const groups = [...counts.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b))
+  const types = [...new Set(rows.map((field) => field.type))].sort((a, b) => TYPE_LABEL[a].localeCompare(TYPE_LABEL[b]))
 
   const needle = query.trim().toLowerCase()
   const visible = rows.filter(
     (field) =>
-      (group === '' || (group === 'ungrouped' ? !groupOf(field) : groupOf(field) === group)) &&
+      (!group || (group === 'ungrouped' ? !groupOf(field) : groupOf(field) === group)) &&
+      (!typeFilter || field.type === typeFilter) &&
       (needle === '' ||
         field.label.toLowerCase().includes(needle) ||
         field.key.includes(needle) ||
         (field.helpText ?? '').toLowerCase().includes(needle)),
   )
   /** Reordering writes the whole ordered id list, so it can only be offered when
-   *  the whole list is on screen. Hidden rather than broken, and said out loud. */
+   *  the whole list is on screen. */
   const filtered = visible.length !== rows.length
   const { page, pager, offset } = usePagedRows(visible, 'properties')
 
-  return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-start">
-      {/* The group sidebar. Three hundred and seventy-two properties is a list
-          nobody scrolls; the group is what makes it navigable, so it is a
-          standing column rather than a dropdown to remember. It stacks above the
-          list on a narrow screen instead of squeezing both. */}
-      <nav
-        aria-label="Property groups"
-        className="flex shrink-0 flex-col gap-1 md:sticky md:top-4 md:w-56 md:max-h-[70vh] md:overflow-y-auto"
-      >
-        <GroupLink label="All properties" count={rows.length} active={group === ''} onPick={() => setGroup('')} />
-        {groups.map((name) => (
-          <div key={name} className="flex items-center gap-0.5">
-            <GroupLink label={name} count={countIn(name)} active={group === name} onPick={() => setGroup(name)} />
+  const tabHref = (key: Tab) => {
+    const next = new URLSearchParams(params)
+    for (const name of ['tab', 'skip', 'group', 'ftype']) next.delete(name)
+    if (key !== 'properties') next.set('tab', key)
+    const search = next.toString()
+    return `${pathname}${search ? `?${search}` : ''}`
+  }
+
+  const sourceOf = (field: AdminField) =>
+    !field.isCustom || field.isSystem ? 'Rawr' : field.source ? `Import: ${field.source}` : 'Custom'
+
+  const columns: Column<AdminField>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 420,
+      render: (field) => {
+        const index = offset + page.indexOf(field)
+        const notes = [
+          TYPE_LABEL[field.type],
+          field.isRequired ? 'Required' : null,
+          field.isHot ? `Indexed${field.indexState ? ` (${field.indexState})` : ''}` : null,
+          field.conditional ? 'Conditional' : null,
+          field.trackChanges ? 'On the timeline' : null,
+        ].filter(Boolean)
+        const editable = canWrite && !field.isSystem
+        return (
+          <span className="flex min-w-0 items-center gap-2 py-1">
+            <span className="flex min-w-0 flex-1 flex-col">
+              {editable ? (
+                <button type="button" title={field.label} onClick={() => setEditId(field.id)} className="truncate text-left font-semibold text-link hover:underline">
+                  {field.label}
+                </button>
+              ) : (
+                <span title={field.label} className="truncate font-semibold">{field.label}</span>
+              )}
+              <span title={notes.join(' · ')} className="truncate text-small font-light text-secondary">{notes.join(' · ')}</span>
+            </span>
             {canWrite ? (
-              <IconButton
-                label={`Rename ${name}`}
-                icon={<ACTION_ICONS.edit size={14} />}
-                onClick={() => {
-                  setGrouping({ name, rename: true })
-                  setGroupDraft(name)
-                }}
-              />
+              <RowActions>
+                <DropdownMenu
+                  label={`More for ${field.label}`}
+                  align="start"
+                  trigger={(props) => (
+                    <button {...props} type="button" className={rowPill}>
+                      More
+                      <ChevronDown aria-hidden="true" className="size-3" />
+                    </button>
+                  )}
+                  groups={[
+                    {
+                      key: 'field',
+                      items: [
+                        ...(editable ? [{ key: 'edit', label: 'Edit', onSelect: () => setEditId(field.id) }] : []),
+                        ...(editable ? [{ key: 'usage', label: 'Used in', onSelect: () => replaceParams({ edit: field.id, section: 'usage' }) }] : []),
+                        ...(filtered
+                          ? []
+                          : [
+                              { key: 'up', label: 'Move up', disabled: busy || index === 0, onSelect: () => move(index, -1) },
+                              { key: 'down', label: 'Move down', disabled: busy || index === rows.length - 1, onSelect: () => move(index, 1) },
+                            ]),
+                        // "Index it" keeps its words: it is a decision about cost and
+                        // speed, not a routine row action.
+                        ...(field.isCustom && field.storage === 'jsonb' && !field.isHot
+                          ? [
+                              {
+                                key: 'index',
+                                label: 'Index it',
+                                disabled: busy,
+                                onSelect: () =>
+                                  void run(
+                                    () => api.admin.fields.promoteToHot.mutate({ fieldId: field.id }),
+                                    'Index requested. The worker builds it within the minute.',
+                                  ),
+                              },
+                            ]
+                          : []),
+                      ],
+                    },
+                    ...(field.isCustom && field.storage === 'jsonb'
+                      ? [{ key: 'danger', items: [{ key: 'archive', label: 'Archive', destructive: true, onSelect: () => void openRemove(field) }] }]
+                      : []),
+                  ]}
+                />
+              </RowActions>
             ) : null}
-          </div>
-        ))}
-        {ungrouped > 0 ? (
-          <GroupLink
-            label="Ungrouped"
-            count={ungrouped}
-            active={group === 'ungrouped'}
-            onPick={() => setGroup('ungrouped')}
-          />
-        ) : null}
-        {canWrite ? (
-          <Button
-            variant="tertiary"
-            className="mt-1 w-full"
-            onClick={() => {
-              setGrouping({ name: '', rename: false })
-              setGroupDraft('')
-            }}
-          >
-            Create group
-          </Button>
-        ) : null}
-      </nav>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        {!canWrite ? (
-          <p className="text-secondary">You need {hub} access to change the fields.</p>
-        ) : (
-        <Button variant="primary" onClick={() => { reset(); setCreating(true) }}>
-          Create property
-        </Button>
-        )}
-
-          <datalist id="property-groups">
-          {groups.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-      <div className="flex flex-wrap items-end gap-2">
-          <Field id="property-search" label="Find">
-            <TextInput
-              id="property-search"
-              value={query}
-              placeholder="Name, key or description"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </Field>
-        </div>
-      </div>
-
-      {/* A group is made by putting properties in it, which is also how one is
-          renamed away: there is nowhere else the name is kept. */}
-      {canWrite && picked.size > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-hs border border-line bg-fill px-3 py-2">
-          <span className="min-w-0 flex-1 tabular-nums">
-            {fmt.number(picked.size)} selected
           </span>
-          <Select
-            aria-label="Move the selected properties to a group"
-            value=""
-            onChange={(event) => {
-              const name = event.target.value
-              if (!name) return
-              void run(
-                () =>
-                  api.admin.fields.moveToGroup.mutate({
-                    object,
-                    fieldIds: [...picked],
-                    groupName: name === 'ungrouped' ? null : name,
-                  }),
-                'Moved.',
-              ).then((ok) => ok && setPicked(new Set()))
-            }}
-            className="w-auto min-w-40"
+        )
+      },
+    },
+    { key: 'group', header: 'Group', width: 260, render: (field) => <span title={groupOf(field) ?? undefined} className="block truncate font-light">{groupOf(field) ?? EMPTY_VALUE}</span> },
+    { key: 'source', header: 'Created by', width: 200, render: (field) => <span title={sourceOf(field)} className="block truncate font-light">{sourceOf(field)}</span> },
+    {
+      key: 'fill',
+      header: 'Fill Rate',
+      width: 120,
+      align: 'right',
+      render: (field) => (
+        <span
+          title={field.filledAt ? `${fmt.number(field.filledCount ?? 0)} of ${fmt.number(recordCount)}, as of ${fmt.date(field.filledAt)}` : 'Not measured yet'}
+          className="font-light tabular-nums"
+        >
+          {field.filledCount === null || recordCount === 0 ? EMPTY_VALUE : fmt.percent(field.filledCount / recordCount)}
+        </span>
+      ),
+    },
+  ]
+
+  const groupRows = [...groups.map((name) => ({ name, label: name })), ...(counts.has('') ? [{ name: 'ungrouped', label: 'Ungrouped' }] : [])]
+  const groupColumns: Column<(typeof groupRows)[number]>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 520,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <button
+            type="button"
+            title={row.label}
+            onClick={() => replaceParams({ tab: null, group: row.name, ftype: null, skip: null })}
+            className="min-w-0 flex-1 truncate text-left font-light hover:underline"
           >
-            <option value="">Move to group…</option>
-            {groups.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            {row.label}
+          </button>
+          {canWrite && row.name !== 'ungrouped' ? (
+            <RowActions>
+              <button
+                type="button"
+                className={rowPill}
+                onClick={() => {
+                  setGrouping({ name: row.name, rename: true })
+                  setGroupDraft(row.name)
+                }}
+              >
+                Rename
+              </button>
+            </RowActions>
+          ) : null}
+        </span>
+      ),
+    },
+    { key: 'count', header: 'Number of properties', width: 200, align: 'right', render: (row) => <span className="font-light tabular-nums">{fmt.number(counts.get(row.name === 'ungrouped' ? '' : row.name) ?? 0)}</span> },
+  ]
+
+  const archivedColumns: Column<AdminField>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 420,
+      render: (field) => (
+        <span className="flex min-w-0 items-center gap-2 py-1">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span title={field.label} className="truncate font-semibold">{field.label}</span>
+            <code title={field.key} className="truncate text-small text-secondary">{field.key}</code>
+          </span>
+          <RowActions>
+            <button type="button" className={rowPill} disabled={busy} onClick={() => void run(() => api.admin.fields.restore.mutate({ id: field.id }), 'Restored.')}>
+              Restore
+            </button>
+            <button type="button" className={cn(rowPill, 'text-error')} onClick={() => setPurging(field)}>
+              Purge
+            </button>
+          </RowActions>
+        </span>
+      ),
+    },
+    { key: 'type', header: 'Field type', width: 220, render: (field) => <span className="block truncate font-light">{TYPE_LABEL[field.type]}</span> },
+    { key: 'group', header: 'Group', width: 260, render: (field) => <span title={field.groupName ?? undefined} className="block truncate font-light">{field.groupName ?? EMPTY_VALUE}</span> },
+  ]
+
+  const typeName = (key: string | null) => (key && key in TYPE_LABEL ? TYPE_LABEL[key as FieldType] : null)
+  const groupName = group === 'ungrouped' ? 'Ungrouped' : group
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-line px-4 py-4 sm:px-5">
+        <label className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+          <span className="text-base font-semibold">Select an object:</span>
+          <Select
+            value={object}
+            onChange={(event) => router.push(propertiesPath(event.target.value))}
+            className="w-64 max-w-full"
+          >
+            {objects.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label} properties
               </option>
             ))}
-            <option value="ungrouped">Ungrouped</option>
           </Select>
-          <Button variant="tertiary" onClick={() => setPicked(new Set())}>
-            Clear
-          </Button>
-        </div>
-      ) : null}
+        </label>
+      </div>
 
-      <p className="text-secondary tabular-nums">
-        {filtered
-          ? `${fmt.number(visible.length)} of ${fmt.number(rows.length)} properties`
-          : `${fmt.number(rows.length)} propert${rows.length === 1 ? 'y' : 'ies'}`}
-        {filtered ? '. Clear the filter to reorder.' : ''}
-      </p>
+      <Tabs
+        label="Property views"
+        onSelect={(key) => replaceParams({ tab: key === 'properties' ? null : key, skip: null })}
+        items={[
+          { key: 'properties', label: `Properties (${fmt.number(rows.length)})`, href: tabHref('properties'), current: tab === 'properties' },
+          { key: 'groups', label: 'Groups', href: tabHref('groups'), current: tab === 'groups' },
+          ...(canWrite ? [{ key: 'archived', label: `Archived (${fmt.number(deleted.length)})`, href: tabHref('archived'), current: tab === 'archived' }] : []),
+        ]}
+      />
 
-      <ul className="flex flex-col rounded-panel border border-line bg-surface">
-        {page.map((field, index) => (
-          <li
-            key={field.id}
-            className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-divider px-3 py-2 last:border-0"
-          >
-            {canWrite ? (
-              <input
-                type="checkbox"
-                aria-label={`Select ${field.label}`}
-                checked={picked.has(field.id)}
-                onChange={() => toggle(field.id)}
-                className="mt-1 shrink-0"
-              />
-            ) : null}
-            <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-medium">{field.label}</span>
-                <code className="text-small text-secondary">{field.key}</code>
-                <span className="text-small text-secondary">{field.type}</span>
-                {field.isRequired ? <Badge tone="warn">Required</Badge> : null}
-                {field.isSystem ? <Badge tone="muted">Rawr keeps this</Badge> : null}
-                {!field.isCustom && !field.isSystem ? <Badge tone="muted">Core</Badge> : null}
-                {field.isHot ? <Badge tone="ok">Indexed{field.indexState ? ` · ${field.indexState}` : ''}</Badge> : null}
-                {field.trackChanges ? <Badge tone="muted">On the timeline</Badge> : null}
-                {groupOf(field) ? <Badge tone="muted">{groupOf(field)}</Badge> : null}
-                {field.source ? <Badge tone="muted">from {field.source}</Badge> : null}
-                {field.conditional ? <Badge tone="muted">Conditional</Badge> : null}
-              </p>
-
-              {/* The fill rate. A property nothing holds a value for is the one
-                  worth deleting, and a percentage is the only form of that
-                  number that survives an account growing. */}
-              <p className="text-small text-secondary tabular-nums">
-                {field.filledCount === null
-                  ? 'Fill rate not measured yet'
-                  : recordCount === 0
-                    ? 'No records yet'
-                    : `${fmt.percent(field.filledCount / recordCount)} filled · ${fmt.number(field.filledCount)} of ${fmt.number(recordCount)}`}
-                {field.filledAt ? ` · as of ${fmt.date(field.filledAt)}` : ''}
-              </p>
-
-              {openUse === field.id ? (
-                <p className="text-small text-secondary">
-                  {uses[field.id] === undefined
-                    ? 'Looking…'
-                    : uses[field.id]!.length === 0
-                      ? 'Nothing uses this property.'
-                      : `Used in: ${uses[field.id]!.map((use) => `${use.name} (${use.kind})`).join(', ')}`}
-                </p>
-              ) : null}
-              {field.helpText ? <p className="text-small text-secondary">{field.helpText}</p> : null}
-              {field.options.length > 0 ? (
-                <p className="text-small text-secondary">
-                  {field.options.length} choice{field.options.length === 1 ? '' : 's'}:{' '}
-                  {field.options.slice(0, 6).join(', ')}
-                  {field.options.length > 6 ? ` and ${field.options.length - 6} more` : ''}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-0.5">
-              {!canWrite ? null : (
-                <>
-              {filtered ? null : (
-                <>
-                  <IconButton
-                    label={`Move ${field.label} up`}
-                    icon={<ACTION_ICONS.moveUp size={16} />}
-                    disabled={busy || offset + index === 0}
-                    onClick={() => move(offset + index, -1)}
-                  />
-                  <IconButton
-                    label={`Move ${field.label} down`}
-                    icon={<ACTION_ICONS.moveDown size={16} />}
-                    disabled={busy || offset + index === rows.length - 1}
-                    onClick={() => move(offset + index, 1)}
-                  />
-                </>
+      {tab === 'properties' ? (
+        <>
+          <div className="flex flex-wrap items-center gap-1">
+            <DropdownMenu
+              label="Filter by group"
+              align="start"
+              trigger={(props) => (
+                <button {...props} type="button" className={cn(ghostFilter, 'text-body', group && 'bg-fill-hover')}>
+                  <span className="max-w-64 truncate">{groupName ?? 'All groups'}</span>
+                  <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+                </button>
               )}
-              {field.isSystem ? null : (
-                <IconButton
-                  label={`Edit ${field.label}`}
-                  icon={<ACTION_ICONS.edit size={16} />}
-                  onClick={() => setEditing(field)}
-                />
+              groups={[
+                {
+                  key: 'groups',
+                  items: [
+                    { key: '', label: 'All groups', checked: !group, onSelect: () => replaceParams({ group: null, skip: null }) },
+                    ...groups.map((name) => ({ key: name, label: name, checked: group === name, onSelect: () => replaceParams({ group: name, skip: null }) })),
+                    ...(counts.has('') ? [{ key: 'ungrouped', label: 'Ungrouped', checked: group === 'ungrouped', onSelect: () => replaceParams({ group: 'ungrouped', skip: null }) }] : []),
+                  ],
+                },
+              ]}
+            />
+            <DropdownMenu
+              label="Filter by field type"
+              align="start"
+              trigger={(props) => (
+                <button {...props} type="button" className={cn(ghostFilter, 'text-body', typeFilter && 'bg-fill-hover')}>
+                  <span className="max-w-64 truncate">{typeName(typeFilter) ?? 'All field types'}</span>
+                  <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+                </button>
               )}
-              <Button
-                variant="tertiary"
-                aria-expanded={openUse === field.id}
-                onClick={() => void openUses(field)}
-              >
-                Used in
+              groups={[
+                {
+                  key: 'types',
+                  items: [
+                    { key: '', label: 'All field types', checked: !typeFilter, onSelect: () => setTypeFilter(null) },
+                    ...types.map((name) => ({ key: name, label: TYPE_LABEL[name], checked: typeFilter === name, onSelect: () => replaceParams({ ftype: name, skip: null }) })),
+                  ],
+                },
+              ]}
+            />
+            {group || typeFilter ? (
+              <Button variant="tertiary" onClick={() => replaceParams({ group: null, ftype: null, skip: null })}>
+                Reset filters
               </Button>
-              {/* Keeps its words: "index it" is a decision about cost and speed,
-                  not a routine row action, and no glyph says it. */}
-              {field.isCustom && field.storage === 'jsonb' && !field.isHot ? (
-                <Button
-                  variant="tertiary"
-                  busy={busy}
-                  onClick={() =>
-                    void run(
-                      () => api.admin.fields.promoteToHot.mutate({ fieldId: field.id }),
-                      'Index requested. The worker builds it within the minute.',
-                    )
-                  }
-                >
-                  Index it
-                </Button>
-              ) : null}
-              {field.isCustom && field.storage === 'jsonb' ? (
-                <IconButton
-                  label={`Delete ${field.label}`}
-                  tone="destructive"
-                  icon={<ACTION_ICONS.delete size={16} />}
-                  onClick={() => void openRemove(field)}
-                />
-              ) : null}
-                </>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      {pager}
-
-      {deleted.length > 0 ? (
-        <section className="flex flex-col gap-2">
-          <div>
-            <h3 className="text-base font-semibold">Deleted properties</h3>
-            <p className="text-secondary">
-              Hidden everywhere, data untouched. Restore puts one back exactly as it was. Purging
-              strips the value out of every record and cannot be undone.
-            </p>
+            ) : null}
           </div>
-          <ul className="flex flex-col rounded-panel border border-line bg-surface">
-            {deleted.map((field) => (
-              <li
-                key={field.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-divider px-3 py-2 last:border-0"
-              >
-                <span className="min-w-0">
-                  <span className="font-medium">{field.label}</span>{' '}
-                  <code className="text-small text-secondary">{field.key}</code>
-                </span>
-                <span className="flex shrink-0 items-center gap-0.5">
-                  {canWrite ? (
-                  <IconButton
-                    label={`Restore ${field.label}`}
-                    icon={<ACTION_ICONS.restore size={16} />}
-                    disabled={busy}
-                    onClick={() =>
-                      void run(() => api.admin.fields.restore.mutate({ id: field.id }), 'Restored.')
-                    }
-                  />
-                  ) : null}
-                  {canWrite ? (
-                    <IconButton
-                      label={`Purge ${field.label} from every record`}
-                      tone="destructive"
-                      icon={<ACTION_ICONS.delete size={16} />}
-                      onClick={() => setPurging(field)}
-                    />
-                  ) : null}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="relative w-full min-w-0 sm:w-[24rem]">
+              <span className="sr-only">Search properties</span>
+              <input type="search" value={query} placeholder="Search properties" onChange={(event) => setQuery(event.target.value)} className={searchBox} />
+              <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />
+            </label>
+            {canWrite ? (
+              <Button onClick={() => setAction('create')}>Create property</Button>
+            ) : (
+              <p className="text-secondary">You need {hub} access to change the properties.</p>
+            )}
+          </div>
+
+          {visible.length === 0 ? (
+            <EmptyState
+              title={rows.length === 0 ? 'No properties yet' : 'No property matches'}
+              description={rows.length === 0 ? `Create a property to store something about every ${objectLabel.toLowerCase()} record.` : 'Try another name, or reset the filters.'}
+            />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={page}
+              rowKey={(field) => field.id}
+              caption={`${objectLabel} properties`}
+              storageKey="settings.properties"
+              {...(canWrite
+                ? {
+                    selection: { selected: picked, onChange: setPicked, noun: 'property' },
+                    headerBar:
+                      picked.size > 0 ? (
+                        // A group is the name on the properties in it, so making one
+                        // and moving properties into it are the same act.
+                        <div
+                          role="toolbar"
+                          aria-label={`Actions for ${fmt.number(picked.size)} selected properties`}
+                          className="flex h-full min-w-0 animate-drop-in items-center gap-1 rounded-hs border border-line bg-surface pl-4 motion-reduce:animate-none"
+                        >
+                          <span className="mr-3 min-w-0 shrink truncate font-semibold">{fmt.number(picked.size)} selected</span>
+                          <Select
+                            aria-label="Move the selected properties to a group"
+                            value=""
+                            disabled={busy}
+                            onChange={(event) => {
+                              const name = event.target.value
+                              if (!name) return
+                              void run(
+                                () => api.admin.fields.moveToGroup.mutate({ object, fieldIds: [...picked], groupName: name === 'ungrouped' ? null : name }),
+                                'Moved.',
+                              ).then((ok) => ok && setPicked(new Set()))
+                            }}
+                            className="h-control min-h-0 w-auto min-w-40"
+                          >
+                            <option value="">Move to group...</option>
+                            {groups.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
+                            ))}
+                            <option value="ungrouped">Ungrouped</option>
+                          </Select>
+                          <button
+                            type="button"
+                            className={bulkAction}
+                            onClick={() => {
+                              setGrouping({ name: '', rename: false })
+                              setGroupDraft('')
+                            }}
+                          >
+                            Create group
+                          </button>
+                        </div>
+                      ) : undefined,
+                  }
+                : {})}
+            />
+          )}
+          {pager}
+        </>
       ) : null}
 
-      {/* ---------------------------------------------------------- create */}
-      <Modal
-        open={creating}
-        title={`Create property on ${object}`}
-        onClose={() => setCreating(false)}
-        dirty={label !== '' || options !== '' || helpText !== '' || groupName !== ''}
-        onSubmit={() => void create()}
-        footer={
-          <>
-            <Button variant="tertiary" onClick={() => setCreating(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!label.trim()}>
-              Create property
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <Field id="prop-label" label="Label" hint="What people see on the record.">
-            <TextInput
-              id="prop-label"
-              value={label}
-              onChange={(event) => setLabel(event.target.value)}
-              autoFocus
-            />
-          </Field>
+      {tab === 'groups' ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="min-w-0">Properties are stored in groups so that you can keep them organized.</p>
+            {canWrite ? (
+              <Button
+                onClick={() => {
+                  setGrouping({ name: '', rename: false })
+                  setGroupDraft('')
+                }}
+              >
+                Create group
+              </Button>
+            ) : null}
+          </div>
+          {groupRows.length === 0 ? (
+            <EmptyState title="No groups yet" description="A group is made by moving properties into it." />
+          ) : (
+            <DataTable columns={groupColumns} rows={groupRows} rowKey={(row) => row.name} caption="Property groups" storageKey="settings.property-groups" />
+          )}
+        </>
+      ) : null}
 
-          <Field
-            id="prop-key"
-            label="Key"
-            hint="Stored under this name, in imports and in the agent tools. Generated from the label, and it never changes afterwards."
-          >
-            <TextInput
-              id="prop-key"
-              value={keyTouched ? key : keyFrom(label)}
-              onChange={(event) => {
-                setKeyTouched(true)
-                setKey(event.target.value)
-              }}
-            />
-          </Field>
-
-          <Field id="prop-type" label="Type">
-            <Select
-              id="prop-type"
-              value={type}
-              onChange={(event) => setType(event.target.value as FieldType)}
-            >
-              {TYPE_GROUPS.map((group) => (
-                <optgroup key={group.label} label={group.label}>
-                  {group.types.map((candidate) => (
-                    <option key={candidate} value={candidate}>
-                      {candidate}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </Select>
-          </Field>
-
-          {NEEDS_OPTIONS.has(type) ? (
-            <Field id="prop-options" label="Choices" hint="One per line.">
-              <TextArea id="prop-options" value={options} onChange={(event) => setOptions(event.target.value)} />
-            </Field>
-          ) : null}
-
-          <Field id="prop-help" label="Help text" hint="Optional. Shown under the input.">
-            <TextInput id="prop-help" value={helpText} onChange={(event) => setHelpText(event.target.value)} />
-          </Field>
-
-          {/* A free text box with the groups already in use offered beside it: a
-              group is created by naming one, the way HubSpot's is, and the
-              filter above only ever showed groups nothing could write. */}
-          <Field id="prop-group" label="Group" hint="Optional. Properties with the same group are shown together.">
-            <TextInput
-              id="prop-group"
-              list="property-groups"
-              value={groupName}
-              placeholder="Contact information"
-              onChange={(event) => setGroupName(event.target.value)}
-            />
-          </Field>
-
-
-          <ConditionalEditor
-            ownKey={editing?.key ?? (keyTouched ? key : keyFrom(label))}
-            fields={filterFields}
-            value={conditional}
-            onChange={setConditional}
-          />
-
-          <Toggles
-            isRequired={isRequired}
-            trackChanges={trackChanges}
-            onRequired={setIsRequired}
-            onTrack={setTrackChanges}
-          />
-        </div>
-      </Modal>
-
-      {/* ------------------------------------------------------------ edit */}
-      <Modal
-        open={editing !== null}
-        title={`Edit ${editing?.label ?? ''}`}
-        onClose={() => setEditing(null)}
-        dirty={
-          editing !== null &&
-          (label !== editing.label ||
-            options !== editing.options.join('\n') ||
-            helpText !== (editing.helpText ?? '') ||
-            groupName !== (editing.groupName ?? '') ||
-            isRequired !== editing.isRequired ||
-            trackChanges !== editing.trackChanges)
-        }
-        onSubmit={() => void saveEdit()}
-        footer={
-          <>
-            <Button variant="tertiary" onClick={() => setEditing(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!label.trim()}>
-              Save
-            </Button>
-          </>
-        }
-      >
-        <div className="flex flex-col gap-3">
-          <p className="text-secondary">
-            The key <code>{editing?.key}</code> and the type <code>{editing?.type}</code> are fixed.
-            Changing either would change what the stored values mean.
+      {tab === 'archived' ? (
+        <>
+          <p className="min-w-0">
+            Archived properties are hidden everywhere with their data untouched. Restore puts one back exactly as it was.
+            Purging strips the value out of every record and cannot be undone.
           </p>
+          {deleted.length === 0 ? (
+            <EmptyState title="No archived properties" description="A property you archive waits here until it is restored or purged." />
+          ) : (
+            <DataTable columns={archivedColumns} rows={deleted} rowKey={(field) => field.id} caption="Archived properties" storageKey="settings.properties-archived" />
+          )}
+        </>
+      ) : null}
 
-          <Field id="edit-label" label="Label">
-            <TextInput id="edit-label" value={label} onChange={(event) => setLabel(event.target.value)} autoFocus />
-          </Field>
+      {creating || editing ? (
+        <PropertyEditor
+          key={editing?.id ?? 'new'}
+          field={editing}
+          objectLabel={objectLabel}
+          groups={groups}
+          filterFields={filterFields}
+          recordCount={recordCount}
+          busy={busy}
+          onSave={(draft) => void save(draft)}
+          onClose={closeEditor}
+        />
+      ) : null}
 
-          {editing && NEEDS_OPTIONS.has(editing.type) ? (
-            <Field
-              id="edit-options"
-              label="Choices"
-              hint="One per line. Removing a choice does not clear it from records that already hold it."
-            >
-              <TextArea id="edit-options" value={options} onChange={(event) => setOptions(event.target.value)} />
-            </Field>
-          ) : null}
-
-          <Field id="edit-help" label="Help text">
-            <TextInput id="edit-help" value={helpText} onChange={(event) => setHelpText(event.target.value)} />
-          </Field>
-
-          <Field id="edit-group" label="Group" hint="Optional. Properties with the same group are shown together.">
-            <TextInput
-              id="edit-group"
-              list="property-groups"
-              value={groupName}
-              placeholder="Contact information"
-              onChange={(event) => setGroupName(event.target.value)}
-            />
-          </Field>
-
-
-          <ConditionalEditor
-            ownKey={editing?.key ?? (keyTouched ? key : keyFrom(label))}
-            fields={filterFields}
-            value={conditional}
-            onChange={setConditional}
-          />
-
-          <Toggles
-            isRequired={isRequired}
-            trackChanges={trackChanges}
-            onRequired={setIsRequired}
-            onTrack={setTrackChanges}
-          />
-        </div>
-      </Modal>
-
-      {/* ---------------------------------------------------------- delete */}
       <Modal
         open={removing !== null}
         size="sm"
-        title={`Delete ${removing?.label ?? ''}`}
+        title={`Archive ${removing?.label ?? ''}`}
         onClose={() => setRemoving(null)}
         footer={
           <>
@@ -758,12 +587,12 @@ export const PropertyList = ({
               onClick={() => {
                 const field = removing
                 if (!field) return
-                void run(() => api.admin.fields.remove.mutate({ id: field.id }), 'Deleted. The data is still there.').then(
+                void run(() => api.admin.fields.remove.mutate({ id: field.id }), 'Archived. The data is still there.').then(
                   (ok) => ok && setRemoving(null),
                 )
               }}
             >
-              Delete property
+              Archive property
             </Button>
           </>
         }
@@ -772,19 +601,18 @@ export const PropertyList = ({
           <p>
             The property disappears from every screen immediately.{' '}
             {usage === null
-              ? 'Counting how many records hold a value…'
+              ? 'Counting how many records hold a value...'
               : usage.filled === 0
                 ? 'No record holds a value for it.'
                 : `${fmt.number(usage.filled)} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
           </p>
           <p className="text-secondary">
-            Nothing is lost here. Restoring puts it back. Purging, which is a separate action, is
+            Nothing is lost here. Restoring it from Archived puts it back. Purging, which is a separate action, is
             what actually removes the data.
           </p>
         </div>
       </Modal>
 
-      {/* ----------------------------------------------------------- purge */}
       <Modal
         open={purging !== null}
         size="sm"
@@ -820,7 +648,6 @@ export const PropertyList = ({
         </div>
       </Modal>
 
-      {/* ----------------------------------------------------------- group */}
       <Modal
         open={grouping !== null}
         size="sm"
@@ -845,7 +672,7 @@ export const PropertyList = ({
             if (target.rename) setRenamed({ from: target.name, to: name })
             setGrouping(null)
             setPicked(new Set())
-            setGroup(name)
+            if (!target.rename) setGroup(name)
           })
         }}
         footer={
@@ -853,7 +680,7 @@ export const PropertyList = ({
             <Button variant="tertiary" onClick={() => setGrouping(null)}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!groupDraft.trim()}>
+            <Button type="submit" variant="primary" busy={busy} disabled={!groupDraft.trim() || (!grouping?.rename && picked.size === 0)}>
               {grouping?.rename ? 'Rename group' : 'Create group'}
             </Button>
           </>
@@ -868,150 +695,15 @@ export const PropertyList = ({
               autoFocus
             />
           </Field>
-          {grouping?.rename ? null : (
+          {grouping && !grouping.rename ? (
             <p className="text-secondary">
-              A group is the name on the properties in it, so this one exists once something is
-              under it. Select properties in the list and move them here.
-            </p>
-          )}
-          {grouping && !grouping.rename && picked.size === 0 ? (
-            <p className="text-secondary">
-              Nothing is selected, so the group would have no properties in it and nowhere to be
-              stored. Tick the ones that belong in it first.
+              {picked.size === 0
+                ? 'A group is the name on the properties in it, so it needs properties to exist. Tick the ones that belong in it on the Properties tab first.'
+                : `The ${fmt.number(picked.size)} selected propert${picked.size === 1 ? 'y moves' : 'ies move'} into it.`}
             </p>
           ) : null}
         </div>
       </Modal>
-      </div>
     </div>
   )
 }
-
-const GroupLink = ({
-  label,
-  count,
-  active,
-  onPick,
-}: {
-  label: string
-  count: number
-  active: boolean
-  onPick: () => void
-}) => {
-  const fmt = useFormat()
-  return (
-  <button
-    type="button"
-    aria-current={active ? 'true' : undefined}
-    onClick={onPick}
-    className={cn(
-      'flex min-w-0 flex-1 items-baseline justify-between gap-2 rounded-hs px-2 py-1 text-left',
-      active ? 'bg-fill font-medium' : 'hover:bg-fill',
-    )}
-  >
-    <span className="min-w-0 break-words">{label}</span>
-    <span className="shrink-0 text-small text-secondary tabular-nums">{fmt.number(count)}</span>
-  </button>
-)
-}
-
-/** Conditional property logic, written with the filter builder rather than a
- *  second control that means the same thing. HubSpot puts the rule on the
- *  controlling property and lists its dependants; this puts it on the property
- *  that is hidden, which is the one place anything has to look to decide whether
- *  to draw it. */
-const ConditionalEditor = ({
-  ownKey,
-  fields,
-  value,
-  onChange,
-}: {
-  ownKey: string
-  fields: FilterField[]
-  value: Conditional | null
-  onChange: (next: Conditional | null) => void
-}) => {
-  const [open, setOpen] = useState(value !== null)
-  const others = fields.filter((field) => field.key !== ownKey)
-
-  if (others.length === 0) return null
-
-  return (
-    <div className="flex flex-col gap-2">
-      <label className="flex items-start gap-2">
-        <input
-          type="checkbox"
-          checked={open}
-          onChange={(event) => {
-            setOpen(event.target.checked)
-            if (!event.target.checked) onChange(null)
-          }}
-        />
-        <span>
-          Only show this when other properties say so
-          <span className="block text-small text-secondary">
-            While the rule does not match, the property is off the record. An import, a job and the
-            agent tools still write it, exactly as HubSpot's conditional logic does.
-          </span>
-        </span>
-      </label>
-      {open ? (
-        <FilterBuilder
-          fields={others}
-          value={value ? [{ conjunction: value.conjunction, conditions: value.conditions as Group['conditions'] }] : []}
-          onApply={(groups) => {
-            const [first] = groups
-            onChange(first ? { conjunction: first.conjunction, conditions: first.conditions } : null)
-          }}
-        />
-      ) : null}
-    </div>
-  )
-}
-
-const Toggles = ({
-  isRequired,
-  trackChanges,
-  onRequired,
-  onTrack,
-}: {
-  isRequired: boolean
-  trackChanges: boolean
-  onRequired: (next: boolean) => void
-  onTrack: (next: boolean) => void
-}) => (
-  <div className="flex flex-col gap-1">
-    <label className="flex items-start gap-2">
-      <input type="checkbox" checked={isRequired} onChange={(event) => onRequired(event.target.checked)} />
-      <span>
-        Required
-        <span className="block text-small text-secondary">
-          A record cannot be created without it. Existing records that lack it are untouched.
-        </span>
-      </span>
-    </label>
-    <label className="flex items-start gap-2">
-      <input type="checkbox" checked={trackChanges} onChange={(event) => onTrack(event.target.checked)} />
-      <span>
-        Put changes on the timeline
-        <span className="block text-small text-secondary">
-          Off by default. An import of 88,000 contacts would otherwise write a timeline entry per
-          field per row.
-        </span>
-      </span>
-    </label>
-  </div>
-)
-
-const Badge = ({ tone, children }: { tone: 'ok' | 'warn' | 'muted'; children: React.ReactNode }) => (
-  <span
-    className={cn(
-      'rounded-hs px-1.5 py-0.5 text-small',
-      tone === 'ok' && 'bg-success-subtle text-success',
-      tone === 'warn' && 'bg-warning-subtle text-warning',
-      tone === 'muted' && 'bg-fill text-secondary',
-    )}
-  >
-    {children}
-  </span>
-)
