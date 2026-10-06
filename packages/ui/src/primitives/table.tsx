@@ -144,7 +144,7 @@ export const DataTable = <Row,>({
   // listeners behind for the rest of the session.
   useEffect(() => stop, [stop])
 
-  if (rows.length === 0 && empty) return <>{empty}</>
+  if (rows.length === 0 && empty) return fill ? <div className="min-h-0 flex-1">{empty}</div> : <>{empty}</>
 
   const startResize = (key: string, startX: number, startWidth: number) => {
     drag.current = { key, startX, startWidth }
