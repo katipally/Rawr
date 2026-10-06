@@ -19,7 +19,7 @@ const token = process.env.RAWR_MCP_TOKEN ?? ''
 
 if (!token) {
   process.stderr.write(
-    'RAWR_MCP_TOKEN is not set. Create a token under Settings → Agent access and export it.\n',
+    'RAWR_MCP_TOKEN is not set. Create a token under Settings → Agent Access and export it.\n',
   )
   process.exit(1)
 }

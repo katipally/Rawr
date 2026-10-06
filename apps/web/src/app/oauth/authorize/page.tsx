@@ -43,7 +43,7 @@ const AuthorizePage = async ({ searchParams }: Props) => {
         <span className="font-medium">{client.name}</span> wants to act in Rawr as{' '}
         <span className="font-medium">{session.email}</span>. {SCOPE_DESCRIPTION} Every change it
         makes lands on the timeline under your name, and you can revoke it any time from Settings,
-        under Agent access.
+        under Agent Access.
       </p>
 
       <p className="text-small text-secondary">

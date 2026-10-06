@@ -278,7 +278,7 @@ export const ImportWizard = ({
           <section className="flex flex-col gap-2">
             <h3 className="font-medium">Owners nobody here matches ({live.unmatchedOwners.length})</h3>
             <p className="text-secondary">
-              Those records came in unassigned. Invite these people under Settings, Members and run
+              Those records came in unassigned. Invite these people under Settings, Users &amp; Teams and run
               the same file again to fill the owner in.
             </p>
             <ul className="flex flex-wrap gap-1.5">

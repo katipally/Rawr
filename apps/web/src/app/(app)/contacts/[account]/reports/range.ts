@@ -63,7 +63,7 @@ export const rangeFrom = (
   }
 }
 
-/** The account's timezone, set under Settings, Account defaults, so everybody in
+/** The account's timezone, set under Settings, Account Defaults, so everybody in
  *  it reads the same days: two people on one report get one set of numbers. */
 export const reportRange = (session: Session, params: RangeParams): Range & { fromDay: string; toDay: string } =>
   rangeFrom(params, session.accountTimezone)

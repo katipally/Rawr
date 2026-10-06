@@ -261,10 +261,10 @@ const HomePage = async ({
                     <a href={`mailto:${a.email}?subject=${encodeURIComponent('Rawr role for ' + session.email)}`}>{a.name}</a>
                   </span>
                 ))}{' '}
-                to raise your role under Settings, Members.
+                to raise your role under Settings, Users &amp; Teams.
               </>
             ) : (
-              'An admin raises roles under Settings, Members.'
+              'An admin raises roles under Settings, Users & Teams.'
             )}
           </p>
         </section>

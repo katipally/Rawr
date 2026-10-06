@@ -398,7 +398,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     configFields: [],
     rows: ['Book Meeting', 'Calendar Links'],
     setup: [
-      'Nothing to paste here. Each host connects their own calendar from Your account, or Meetings, Calendars.',
+      'Nothing to paste here. Each host connects their own calendar from Settings, General, or Meetings, Calendars.',
       'Without a Google project behind it, the development calendar stands in.',
     ],
   },
