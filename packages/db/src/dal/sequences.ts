@@ -1950,6 +1950,7 @@ export type EmailTemplateRow = {
   subject: string
   bodyText: string
   authorName: string | null
+  createdAt: Date
   updatedAt: Date
 }
 
@@ -1965,6 +1966,7 @@ export const listEmailTemplates = async (ctx: AccountContext): Promise<EmailTemp
         subject: emailTemplate.subject,
         bodyText: emailTemplate.bodyText,
         authorName: userAccount.name,
+        createdAt: emailTemplate.createdAt,
         updatedAt: emailTemplate.updatedAt,
       })
       .from(emailTemplate)

@@ -22,6 +22,7 @@ const TemplatesPage = async () => {
         subject: row.subject,
         bodyText: row.bodyText,
         authorName: row.authorName,
+        createdAt: row.createdAt.toISOString(),
         updatedAt: row.updatedAt.toISOString(),
       }))}
     />
