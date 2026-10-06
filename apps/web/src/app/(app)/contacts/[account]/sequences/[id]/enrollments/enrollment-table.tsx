@@ -174,8 +174,8 @@ export const EnrollmentTable = ({
     <div className="flex min-w-0 flex-col gap-4">
       <SequenceHeader account={account} sequence={sequence} current="enrollments" />
 
-      <div className="flex min-w-0 flex-col gap-4 lg:flex-row lg:items-start">
-        <nav aria-label="Enrollment status" className="flex min-w-0 flex-wrap gap-1 lg:w-56 lg:shrink-0 lg:flex-col">
+      <div className="flex min-w-0 flex-col gap-4 @4xl:flex-row @4xl:items-start">
+        <nav aria-label="Enrollment status" className="flex min-w-0 flex-wrap gap-1 @4xl:w-56 @4xl:shrink-0 @4xl:flex-col">
           {FILTERS.map((each) => (
             <Link
               key={each ?? 'all'}

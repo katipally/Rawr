@@ -120,7 +120,7 @@ export const ObjectList = ({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="relative w-full min-w-0 sm:w-[16rem]">
+        <label className="relative w-full min-w-0 @lg:w-[16rem]">
           <span className="sr-only">Search objects</span>
           <input
             type="search"

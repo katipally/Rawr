@@ -114,7 +114,7 @@ export const TeamList = ({
       <p>Use teams to group users. A form or booking page set to round-robin within a team rotates through its members.</p>
       <div className="flex min-w-0 flex-col gap-3 rounded-panel border border-line px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <label className="relative w-full min-w-0 sm:w-56">
+          <label className="relative w-full min-w-0 @lg:w-56">
             <span className="sr-only">Search teams</span>
             <input
               type="search"

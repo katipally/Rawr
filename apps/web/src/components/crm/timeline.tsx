@@ -325,7 +325,7 @@ export const Timeline = ({
       </nav>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label className="relative w-full min-w-0 sm:w-52">
+        <label className="relative w-full min-w-0 @lg:w-52">
           <span className="sr-only">Search activities</span>
           <input
             type="search"

@@ -141,7 +141,7 @@ export const RestoreList = ({ object, objectLabel, objectPlural, limit, initial 
   return (
     <section className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="relative w-full min-w-0 sm:w-60">
+        <label className="relative w-full min-w-0 @lg:w-60">
           <span className="sr-only">Search deleted {objectPlural.toLowerCase()}</span>
           <input
             type="search"

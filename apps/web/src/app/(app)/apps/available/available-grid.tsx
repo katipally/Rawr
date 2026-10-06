@@ -38,7 +38,7 @@ export const AvailableGrid = ({ apps }: { apps: AvailableApp[] }) => {
 
   return (
     <div className="flex flex-col gap-6">
-      <label className="relative w-full min-w-0 sm:w-[25rem]">
+      <label className="relative w-full min-w-0 @lg:w-[25rem]">
         <span className="sr-only">Search apps</span>
         <input
           type="search"

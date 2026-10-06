@@ -47,7 +47,7 @@ export const PerformanceCharts = ({
   const label = METRICS.find((entry) => entry.key === metric)?.label ?? 'Conversion rate'
 
   return (
-    <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+    <div className="grid min-w-0 gap-4 @6xl:grid-cols-2">
       <Card>
         <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
           <p className="font-medium">By session date</p>

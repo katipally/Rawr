@@ -154,7 +154,7 @@ export const ImportHistory = ({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <label className="relative w-full min-w-0 sm:w-60">
+      <label className="relative w-full min-w-0 @lg:w-60">
         <span className="sr-only">Search imports</span>
         <input
           type="search"

@@ -73,10 +73,10 @@ export const InboxList = ({
   return (
     <div
       className={cn(
-        'flex w-full shrink-0 flex-col border-r border-line bg-surface md:w-[min(var(--spacing-inbox-list),40%)]',
+        'flex w-full shrink-0 flex-col border-r border-line bg-surface @2xl/inbox:w-[min(var(--spacing-inbox-list),40%)]',
         // On a phone the list and the conversation take turns: the list until a
         // thread is opened, then the conversation.
-        selected && 'hidden md:flex',
+        selected && 'hidden @2xl/inbox:flex',
       )}
     >
       <p className="flex h-10 shrink-0 items-center justify-between border-b border-line px-4 text-small">

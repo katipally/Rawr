@@ -123,7 +123,7 @@ export const QuestionList = ({
       {questions.map((question, index) => (
         <div
           key={rowIds.at(index)}
-          className="grid gap-2 rounded-hs border border-divider p-2 sm:grid-cols-2"
+          className="grid gap-2 rounded-hs border border-divider p-2 @lg:grid-cols-2"
         >
           <Field id={`q-label-${index}`} label="Question" required>
             <TextInput
@@ -212,11 +212,11 @@ export const QuestionList = ({
           {/* Accepted by the router, rendered by the public page and the embed,
               and until now settable nowhere. Behind a disclosure so a page with
               six questions stays readable. */}
-          <details className="sm:col-span-2">
+          <details className="@lg:col-span-2">
             <summary className="cursor-pointer text-xs text-secondary">
               Placeholder, help and conditions
             </summary>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="mt-2 grid gap-2 @lg:grid-cols-2">
               <Field id={`q-placeholder-${index}`} label="Placeholder">
                 <TextInput
                   id={`q-placeholder-${index}`}

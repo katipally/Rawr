@@ -16,7 +16,7 @@ const Loading = () => (
       ))}
     </div>
     <div className="flex flex-wrap gap-2">
-      <Skeleton className="h-control w-full rounded-pill sm:w-[13.375rem]" />
+      <Skeleton className="h-control w-full rounded-pill @lg:w-[13.375rem]" />
       <Skeleton className="h-control w-24 rounded-pill" />
     </div>
     <div className="flex flex-wrap gap-2">

@@ -81,7 +81,7 @@ export const TaskFilters = ({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <form className="relative w-full min-w-0 sm:w-[13.375rem]" action={tasksPath(account)}>
+        <form className="relative w-full min-w-0 @lg:w-[13.375rem]" action={tasksPath(account)}>
           {params.view !== 'all' ? <input type="hidden" name="view" value={params.view} /> : null}
           {params.mine ? <input type="hidden" name="mine" value="1" /> : null}
           {params.assignee ? <input type="hidden" name="assignee" value={params.assignee} /> : null}

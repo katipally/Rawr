@@ -22,7 +22,7 @@ const InboxPage = async ({
 
   return (
     <InboxFrame account={account} session={session} filters={filters} selected={null}>
-      <div className="hidden flex-1 flex-col justify-center md:flex">
+      <div className="hidden flex-1 flex-col justify-center @2xl/inbox:flex">
         <EmptyState title="Pick a conversation" description="Bodies are kept here, so a thread outlives the mailbox that brought it in." />
       </div>
     </InboxFrame>

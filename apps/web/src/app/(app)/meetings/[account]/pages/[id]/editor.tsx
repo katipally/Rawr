@@ -610,7 +610,7 @@ export const PageEditor = ({
             <div className="mt-4 flex min-w-0 flex-col gap-4">
               {numberField('page-horizon', 'When a meeting can be scheduled', 'Days ahead a visitor can book', 'maxHorizonDays', { min: 1, max: 365, fallback: 60 })}
               {numberField('page-notice', 'Minimum notice time', 'Minutes from now before the first offered slot. 240 is four hours.', 'minNoticeMinutes', { min: 0, max: 43200, fallback: 240 })}
-              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="grid min-w-0 gap-4 @lg:grid-cols-2">
                 {numberField('page-buffer-before', 'Buffer time before', 'Minutes kept free ahead of a meeting', 'bufferBeforeMinutes', { min: 0, max: 480, fallback: 0 })}
                 {numberField('page-buffer-after', 'Buffer time after', 'Minutes kept free after a meeting', 'bufferAfterMinutes', { min: 0, max: 480, fallback: 0 })}
               </div>

@@ -80,7 +80,7 @@ export const ReviewList = ({
             </span>
           </div>
 
-          <dl className="mt-2 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(6rem,auto)_1fr]">
+          <dl className="mt-2 grid gap-x-4 gap-y-1 text-sm @lg:grid-cols-[minmax(6rem,auto)_1fr]">
             {/* A file answer is the upload's id, which says nothing to a person.
                 The chip below carries the filename, so the id is dropped here
                 rather than printed twice in two unhelpful forms. */}
@@ -88,7 +88,7 @@ export const ReviewList = ({
               .filter(([, value]) => !row.uploads.some((file) => file.id === value))
               .map(([key, value]) => (
                 <div key={key} className="contents">
-                  <dt className="text-xs text-secondary sm:pt-0.5">{key}</dt>
+                  <dt className="text-xs text-secondary @lg:pt-0.5">{key}</dt>
                   {/* Long answers wrap rather than stretching the row, and a
                       500-character message does not break the layout. */}
                   <dd className="min-w-0 break-words whitespace-pre-wrap">

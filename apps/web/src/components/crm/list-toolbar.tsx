@@ -239,7 +239,7 @@ export const ListToolbar = ({
           with four buttons and overlapping them. */}
       <div className="flex flex-wrap items-center gap-2">
         <form
-          className="relative w-full min-w-0 sm:w-[13.375rem]"
+          className="relative w-full min-w-0 @lg:w-[13.375rem]"
           onSubmit={(event) => {
             event.preventDefault()
             goTo({ q: search })

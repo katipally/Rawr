@@ -129,7 +129,7 @@ export const AppsTable = ({ rows, canManage }: { rows: AppRow[]; canManage: bool
   return (
     <div className="flex flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
-        <label className="relative w-full min-w-0 sm:w-[25rem]">
+        <label className="relative w-full min-w-0 @lg:w-[25rem]">
           <span className="sr-only">Search for an app</span>
           <input
             type="search"

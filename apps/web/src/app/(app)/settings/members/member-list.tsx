@@ -308,7 +308,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
             aria-selected={view === entry.key}
             onClick={() => replaceParams({ view: entry.key === 'active' ? null : entry.key, skip: null })}
             className={cn(
-              'flex h-pill min-w-0 flex-1 basis-0 items-center gap-2 border border-line px-3 text-left whitespace-nowrap transition-colors duration-150 ease-out sm:max-w-[16.25rem] [&+&]:-ml-px',
+              'flex h-pill min-w-0 flex-1 basis-0 items-center gap-2 border border-line px-3 text-left whitespace-nowrap transition-colors duration-150 ease-out @lg:max-w-[16.25rem] [&+&]:-ml-px',
               view === entry.key ? 'bg-surface' : 'bg-fill hover:bg-fill-hover',
             )}
           >
@@ -320,7 +320,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
         ))}
       </div>
 
-      <label className="relative w-full min-w-0 sm:w-80">
+      <label className="relative w-full min-w-0 @lg:w-80">
         <span className="sr-only">Search name or email address</span>
         <input
           type="search"

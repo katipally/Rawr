@@ -121,7 +121,7 @@ const TemplatePicker = ({ account }: { account: string }) => (
       <h1 className="text-lg font-medium">Start a form</h1>
     </header>
 
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 @lg:grid-cols-2 @6xl:grid-cols-3">
       {SEED_FORMS.map((seed) => (
         <Link
           key={seed.slug}

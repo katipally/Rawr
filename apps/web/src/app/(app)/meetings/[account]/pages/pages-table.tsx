@@ -253,7 +253,7 @@ export const PagesTable = ({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-        <label className="relative w-full min-w-0 sm:w-60">
+        <label className="relative w-full min-w-0 @lg:w-60">
           <span className="sr-only">Search meeting names</span>
           <input
             type="search"

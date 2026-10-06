@@ -60,7 +60,7 @@ const ThreadPage = async ({
 
       <div className="flex min-h-15 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Link href={inboxPath(account)} aria-label="Back to the inbox" className="grid size-8 shrink-0 place-items-center rounded-pill text-body no-underline hover:bg-fill md:hidden">
+          <Link href={inboxPath(account)} aria-label="Back to the inbox" className="grid size-8 shrink-0 place-items-center rounded-pill text-body no-underline hover:bg-fill @2xl/inbox:hidden">
             <ChevronLeft aria-hidden="true" className="size-4" />
           </Link>
           <div className="flex min-w-0 flex-col">

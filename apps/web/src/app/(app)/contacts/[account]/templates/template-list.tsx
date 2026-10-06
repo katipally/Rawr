@@ -202,7 +202,7 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
-            <label className="relative w-full min-w-0 sm:w-60">
+            <label className="relative w-full min-w-0 @lg:w-60">
               <span className="sr-only">Search templates</span>
               <input
                 type="search"

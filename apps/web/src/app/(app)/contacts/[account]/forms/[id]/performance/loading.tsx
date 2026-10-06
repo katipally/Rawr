@@ -11,12 +11,12 @@ const Loading = () => (
         <Skeleton key={index} className="h-8 w-24" />
       ))}
     </div>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-3 @lg:grid-cols-2 @6xl:grid-cols-3">
       <Skeleton className="h-24 w-full" />
       <Skeleton className="h-24 w-full" />
       <Skeleton className="h-24 w-full" />
     </div>
-    <div className="grid gap-4 xl:grid-cols-2">
+    <div className="grid gap-4 @6xl:grid-cols-2">
       <Skeleton className="h-64 w-full" />
       <Skeleton className="h-64 w-full" />
     </div>

@@ -93,8 +93,8 @@ export const InboxFrame = async ({
           Your mailbox is not connected, so nothing of yours arrives here and replies are not read.
         </Alert>
       )}
-      <div className="flex min-h-0 flex-1">
-      <aside className="hidden w-inbox-nav shrink-0 flex-col border-r border-line bg-surface md:flex">
+      <div className="@container/inbox flex min-h-0 flex-1">
+      <aside className="hidden w-inbox-nav shrink-0 flex-col border-r border-line bg-surface @2xl/inbox:flex">
         <div className="flex flex-col gap-3 px-4 pt-4 pb-2">
           <h1 className="text-base font-semibold">Inbox</h1>
           <form action={inboxPath(account)} className="relative">

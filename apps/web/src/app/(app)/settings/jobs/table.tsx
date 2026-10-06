@@ -85,7 +85,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
-        <label className="relative w-full min-w-0 sm:w-[18rem]">
+        <label className="relative w-full min-w-0 @lg:w-[18rem]">
           <span className="sr-only">Search failed jobs</span>
           <input
             type="search"

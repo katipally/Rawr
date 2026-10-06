@@ -50,7 +50,7 @@ const PerformancePage = async ({
         aside={<RangePicker from={range.fromDay} to={range.toDay} />}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-3 @lg:grid-cols-2 @6xl:grid-cols-3">
         <Tile
           label="Views"
           value={fmt.number(report.totals.views)}
@@ -83,7 +83,7 @@ const PerformancePage = async ({
         contactType={report.contactType}
       />
 
-      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+      <div className="grid min-w-0 gap-4 @6xl:grid-cols-2">
         <Card title="Conversion pages">
           <Breakdown
             first="Page"

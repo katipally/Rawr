@@ -91,7 +91,7 @@ export const QueueManager = ({ account, queues, canWrite }: QueueManagerProps) =
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative w-full min-w-0 sm:w-[13.375rem]">
+        <div className="relative w-full min-w-0 @lg:w-[13.375rem]">
           <TextInput
             type="search"
             value={query}

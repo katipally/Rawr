@@ -12,7 +12,7 @@ const Loading = () => (
         <Skeleton key={index} className="h-10 w-24" />
       ))}
     </div>
-    <Skeleton className="h-control w-full rounded-pill sm:w-56" />
+    <Skeleton className="h-control w-full rounded-pill @lg:w-56" />
     <SkeletonRows rows={8} columns={3} />
   </div>
 )

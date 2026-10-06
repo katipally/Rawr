@@ -14,7 +14,7 @@ const Loading = () => (
       <Skeleton className="h-8 w-24" />
     </div>
     <Skeleton className="h-8 w-full" />
-    <Skeleton className="h-control w-full rounded-pill sm:w-80" />
+    <Skeleton className="h-control w-full rounded-pill @lg:w-80" />
     <SkeletonRows rows={8} />
   </div>
 )

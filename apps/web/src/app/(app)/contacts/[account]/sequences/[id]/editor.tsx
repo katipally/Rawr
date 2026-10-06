@@ -232,7 +232,7 @@ export const SequenceEditor = ({
         }
       />
 
-      <dl className="grid grid-cols-2 gap-y-4 rounded-panel border border-line p-4 sm:grid-cols-3 xl:grid-cols-6">
+      <dl className="grid grid-cols-2 gap-y-4 rounded-panel border border-line p-4 @lg:grid-cols-3 @6xl:grid-cols-6">
         {[
           { label: 'In flight', value: sequence.stats.active },
           { label: 'Sent', value: sequence.stats.sent },

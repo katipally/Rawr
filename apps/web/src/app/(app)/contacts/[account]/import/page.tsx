@@ -65,7 +65,7 @@ const ImportPage = async ({
 
       {allowed ? <UnfinishedUploads account={account} /> : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 @2xl:grid-cols-2">
         <section className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-6 shadow-panel">
           <h2 className="text-base font-semibold">Import a file</h2>
           <p className="text-secondary">One-time import from a file, directly into the CRM.</p>

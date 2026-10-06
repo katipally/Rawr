@@ -38,7 +38,7 @@ export const TemplatePreview = ({
   ]
 
   return (
-    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+    <div className="mt-3 grid gap-2 @lg:grid-cols-2">
       {cases.map((sample) => {
         const values = bookingTemplateValues({
           ...SAMPLE,

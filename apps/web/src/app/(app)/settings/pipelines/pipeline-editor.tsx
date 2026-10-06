@@ -199,7 +199,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <label className="relative w-full min-w-0 sm:w-[16rem]">
+            <label className="relative w-full min-w-0 @lg:w-[16rem]">
               <span className="sr-only">Search pipelines</span>
               <input type="search" value={query} placeholder="Search pipelines" onChange={(event) => setQuery(event.target.value)} className={searchBox} />
               <Search aria-hidden="true" className="absolute top-1/2 right-4 size-4 -translate-y-1/2" />

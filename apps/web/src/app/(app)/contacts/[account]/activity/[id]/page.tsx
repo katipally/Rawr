@@ -80,7 +80,7 @@ const PageViewScreen = async ({
               Nothing. The event carries only its name, so there is no detail to read.
             </p>
           ) : (
-            <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <dl className="grid gap-x-6 gap-y-3 @lg:grid-cols-2">
               {properties.map(([key, value]) => (
                 <Row key={key} label={key}>
                   {/* A property is whatever the site sent, so a nested object is
@@ -131,7 +131,7 @@ const PageViewScreen = async ({
       </header>
 
       <section className="rounded-panel border border-line bg-surface p-3">
-        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        <dl className="grid gap-x-6 gap-y-3 @lg:grid-cols-2">
           <Row label="URL">
             {/* rel=noreferrer so opening a prospect's page does not announce Rawr
                 in their analytics. */}
@@ -151,7 +151,7 @@ const PageViewScreen = async ({
       {utm.length > 0 ? (
         <section className="rounded-panel border border-line bg-surface p-3">
           <h2 className="mb-2 font-medium">Campaign parameters</h2>
-          <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          <dl className="grid gap-x-6 gap-y-2 @lg:grid-cols-2">
             {utm.map(([key, value]) => (
               <Row key={key} label={key}>
                 {value}

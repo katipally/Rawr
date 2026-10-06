@@ -164,7 +164,7 @@ export const SequenceList = ({
               </button>
             ))}
           </div>
-          <label className="relative w-full min-w-0 sm:w-60">
+          <label className="relative w-full min-w-0 @lg:w-60">
             <span className="sr-only">Search sequences</span>
             <input
               type="search"

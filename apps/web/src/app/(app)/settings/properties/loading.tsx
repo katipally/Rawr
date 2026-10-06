@@ -17,7 +17,7 @@ const Loading = () => (
       <Skeleton className="h-5 w-24" />
     </div>
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <Skeleton className="h-control w-full rounded-pill sm:w-80" />
+      <Skeleton className="h-control w-full rounded-pill @lg:w-80" />
       <Skeleton className="h-8 w-32" />
     </div>
     <SkeletonRows rows={10} />

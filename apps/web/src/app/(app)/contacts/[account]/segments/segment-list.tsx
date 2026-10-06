@@ -305,7 +305,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
         />
       </div>
 
-      <label className="relative w-full min-w-0 sm:w-64">
+      <label className="relative w-full min-w-0 @lg:w-64">
         <span className="sr-only">Search segments</span>
         <input
           type="search"
