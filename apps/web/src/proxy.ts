@@ -54,9 +54,11 @@ export const proxy = (request: NextRequest): NextResponse => {
 }
 
 export const config = {
-  // /forms, /submissions, /email, /sequences, /templates, /reports-dashboard
-  // and /reports-list exist only as HubSpot links to redirect; /settings is
-  // matched for HubSpot's calendar preference link alone.
+  // /forms, /submissions, /email, /sequences, /templates, /reports-dashboard,
+  // /reports-list, /import, /data-integration-home, /duplicates,
+  // /connected-apps, /integrations-settings, /marketplace and /ecosystem exist
+  // only as HubSpot links to redirect; /settings is matched for HubSpot's
+  // calendar preference link alone.
   matcher: [
     '/contacts/:path*',
     '/meetings/:path*',
@@ -67,6 +69,13 @@ export const config = {
     '/templates/:path*',
     '/reports-dashboard/:path*',
     '/reports-list/:path*',
+    '/import/:path*',
+    '/data-integration-home/:path*',
+    '/duplicates/:path*',
+    '/connected-apps/:path*',
+    '/integrations-settings/:path*',
+    '/marketplace/:path*',
+    '/ecosystem/:path*',
     '/settings/:path*',
   ],
 }

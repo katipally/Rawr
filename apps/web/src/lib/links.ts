@@ -54,7 +54,9 @@ const HUBSPOT_TASKS_PATH = /^(\/contacts\/[^/?#]+\/)objects\/0-27(?:\/views\/[^/
  *  paths of their own. A scheduling page is a /meetings link there, booked
  *  meetings are the 0-47 object, and the calendar connection is a preference.
  *  HubSpot's report ids name nothing here, so a report link opens the reports
- *  list. */
+ *  list, and its import ids name no run here, so an import link opens the
+ *  imports list. Connected apps and the marketplace are not scoped to an
+ *  account here, so their portal is dropped. */
 const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string][] = [
   [/^\/contacts\/([^/?#]+)\/objectLists\/create\/?$/, (account) => `/${CRM_ROOT}/${account}/segments?segment=new`],
   [/^\/contacts\/([^/?#]+)\/objectLists(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/segments`],
@@ -80,12 +82,20 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/reports-dashboard\/([^/?#]+)(?:\/view)?\/?$/, (account) => `/${CRM_ROOT}/${account}/reports/dashboards`],
   [/^\/reports-list\/([^/?#]+)\/dashboards(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/reports/dashboards`],
   [/^\/reports-list\/([^/?#]+)(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/reports/list`],
+  [/^\/(?:import|data-integration-home)\/([^/?#]+)\/new-import(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/import/new`],
+  [/^\/(?:import|data-integration-home)\/([^/?#]+)(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/import`],
+  [/^\/duplicates\/([^/?#]+)\/compan(?:y|ies)(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/duplicates?object=company`],
+  [/^\/duplicates\/([^/?#]+)(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/duplicates`],
+  [/^\/contacts\/([^/?#]+)\/objects\/(0-[123])\/restore\/?$/, (account, id) => restorePath(account, HUBSPOT_OBJECT_IDS[id])],
+  [/^\/(?:connected-apps|integrations-settings)\/[^/?#]+(?:\/[^?#]*)?$/, () => appsPath()],
+  [/^\/(?:marketplace|ecosystem)\/[^/?#]+(?:\/[^?#]*)?$/, () => availableAppsPath()],
 ]
 
 /** A link copied out of HubSpot, with 0-1 where this app says contact, as the
  *  same address with the readable key, a 0-27 tasks link as the tasks list, a
- *  segment, form, marketing email, sequence, template, meetings, dashboard or
- *  reports link as the screen that holds it, or null
+ *  segment, form, marketing email, sequence, template, meetings, dashboard,
+ *  reports, import, duplicates, restore or connected apps link as the screen
+ *  that holds it, or null
  *  when the path is none of those. Read by src/proxy.ts, which redirects to the
  *  answer. */
 export const fromHubspotPath = (path: string): string | null => {

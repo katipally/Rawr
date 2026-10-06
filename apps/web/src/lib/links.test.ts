@@ -210,6 +210,22 @@ test('a HubSpot dashboard or reports link opens the screen that holds it', () =>
   assert.equal(fromHubspotPath('/contacts/datasaur/reports/dashboards'), null)
 })
 
+test('a HubSpot import, duplicates, restore or connected apps link opens the screen that holds it', () => {
+  assert.equal(fromHubspotPath('/import/datasaur'), '/contacts/datasaur/import')
+  assert.equal(fromHubspotPath('/data-integration-home/datasaur/post/73801025'), '/contacts/datasaur/import')
+  assert.equal(fromHubspotPath('/data-integration-home/datasaur/new-import/standard'), '/contacts/datasaur/import/new')
+  assert.equal(fromHubspotPath('/duplicates/datasaur'), '/contacts/datasaur/duplicates')
+  assert.equal(fromHubspotPath('/duplicates/datasaur/contacts'), '/contacts/datasaur/duplicates')
+  assert.equal(fromHubspotPath('/duplicates/datasaur/companies'), '/contacts/datasaur/duplicates?object=company')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-1/restore'), '/contacts/datasaur/restore')
+  assert.equal(fromHubspotPath('/contacts/datasaur/objects/0-3/restore'), '/contacts/datasaur/restore?object=deal')
+  assert.equal(fromHubspotPath('/connected-apps/datasaur/installed'), '/apps')
+  assert.equal(fromHubspotPath('/connected-apps/datasaur/installed/basic/51323/overview'), '/apps')
+  assert.equal(fromHubspotPath('/integrations-settings/datasaur/installed'), '/apps')
+  assert.equal(fromHubspotPath('/marketplace/datasaur/apps'), '/apps/available')
+  assert.equal(fromHubspotPath('/ecosystem/datasaur/marketplace/apps'), '/apps/available')
+})
+
 test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)
