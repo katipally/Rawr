@@ -5,7 +5,10 @@ import { createTask, listTasks, logByHand } from '../src/dal/tasks.ts'
 import { listAttachments, recordAttachment } from '../src/dal/attachments.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { resolveRecord } from '../src/dal/resolve.ts'
-import { createField } from '../src/dal/admin-fields.ts'
+import { createField, deleteField, fieldUsage, purgeField } from '../src/dal/admin-fields.ts'
+import { dropIndexSql, planFieldIndex, promoteFieldToHot } from '../src/dal/fields.ts'
+import { readCalendar } from '../src/dal/calendar.ts'
+import { listViews } from '../src/dal/views.ts'
 import { createRecord, getRecord, listDeletedRecords, listRecords, restoreRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
@@ -76,6 +79,22 @@ try {
     recordId = made.id
     expect(made.displayName === 'Atlas rollout', made.displayName)
     return `"${made.displayName}"`
+  })
+
+  await check('its calendar reads custom_record and shows only its own records', async () => {
+    const month = await readCalendar(ctx, { object: key, month: '2026-10-15', fieldKey: 'starts_on' })
+    expect(month.entries.length === 1, `${month.entries.length} entries`)
+    expect(month.entries[0]!.id === recordId && month.entries[0]!.day === '2026-10-01', JSON.stringify(month.entries[0]))
+    const later = await readCalendar(ctx, { object: key, month: '2026-11-01', fieldKey: 'starts_on' })
+    expect(later.entries.length === 0, `${later.entries.length} entries in the wrong month`)
+    return `"${month.entries[0]!.displayName}" on ${month.entries[0]!.day}`
+  })
+
+  await check('its default view lists its first fields as columns', async () => {
+    const [view] = await listViews(ctx, key)
+    const fields = (await getRegistry(ctx)).byKey.get(key)!.fields.map((f) => f.key)
+    expect(view!.columns.length === 3 && view!.columns.join() === fields.join(), view!.columns.join())
+    return view!.columns.join(', ')
   })
 
   await check('it reads back with its values', async () => {
@@ -237,6 +256,141 @@ try {
     expect(result.failed[0]!.reason.includes('now belongs to another record'), result.failed[0]!.reason)
     await deleteRecord(ctx, 'contact', second.id)
     return result.failed[0]!.reason
+  })
+
+  await check('a property of a custom object can be indexed, on an index named by its id', async () => {
+    await createField(ctx, { objectKey: key, key: 'budget', label: 'Budget', type: 'number' })
+    forgetRegistry(ctx.accountId)
+    const fieldId = (await getRegistry(ctx)).byKey.get(key)!.byKey.get('budget')!.id
+    const promoted = await promoteFieldToHot(ctx, fieldId)
+    expect(promoted.pgIndexName === `hot_cr_${fieldId.replaceAll('-', '')}`, promoted.pgIndexName)
+    const [row] = await owner`select state, attempts, pg_index_name from field_index where id = ${promoted.fieldIndexId}`
+    expect(row?.state === 'pending' && row.attempts === 0, JSON.stringify(row))
+    try {
+      await promoteFieldToHot(ctx, fieldId)
+      throw new Error('a second promotion was allowed')
+    } catch (cause) {
+      expect(cause instanceof Error && cause.message.includes('already a hot field'), String(cause))
+    }
+    return promoted.pgIndexName
+  })
+
+  await check('a type no index can serve is refused before anything is written', async () => {
+    await createField(ctx, { objectKey: key, key: 'tags', label: 'Tags', type: 'multi_select', options: ['A', 'B'] })
+    forgetRegistry(ctx.accountId)
+    const fieldId = (await getRegistry(ctx)).byKey.get(key)!.byKey.get('tags')!.id
+    try {
+      await promoteFieldToHot(ctx, fieldId)
+      throw new Error('it was allowed')
+    } catch (cause) {
+      const said = cause instanceof Error ? cause.message : String(cause)
+      expect(said.includes('cannot be indexed on a custom object'), said)
+      const [{ n = 0 } = { n: 0 }] = await owner`select count(*)::int as n from field_index where field_id = ${fieldId}`
+      expect(n === 0, `${n} index rows were written`)
+      return said
+    }
+  })
+
+  await check('the date parsers are immutable, never raise, and read a bad value as empty', async () => {
+    const [fns] = await owner`
+      select count(*)::int as n, bool_and(provolatile = 'i') as immutable
+        from pg_proc where pronamespace = 'public'::regnamespace and proname in ('stored_date', 'stored_timestamptz')`
+    expect(fns?.n === 2 && fns.immutable === true, JSON.stringify(fns))
+    const [row] = await owner`
+      select public.stored_date('2026-10-01') = date '2026-10-01' as day,
+             public.stored_date('2026-02-30') is null as impossible_day,
+             public.stored_date('not a date') is null as words,
+             public.stored_timestamptz('2026-10-01T09:30:15.250Z') = timestamptz '2026-10-01 09:30:15.250+00' as moment,
+             public.stored_timestamptz('2026-10-01T09:30:00+05:30') = timestamptz '2026-10-01 04:00:00+00' as shifted,
+             public.stored_timestamptz('2026-10-01T25:00:00Z') is null as impossible_hour`
+    expect(Object.values(row!).every((value) => value === true), JSON.stringify(row))
+    return 'immutable, and a value that is not a day or a moment is null'
+  })
+
+  await check('a bad stored date empties that one row and breaks nothing', async () => {
+    const [bad] = await owner`
+      insert into custom_record (account_id, object_id, custom)
+      values (${ctx.accountId}, ${objectId}, '{"name":"Hand edited","starts_on":"2026-02-30"}'::jsonb)
+      returning id`
+    const sorted = await listRecords(ctx, { object: key, limit: 50, sorts: [{ key: 'starts_on', direction: 'asc' }] })
+    expect(sorted.rows.at(-1)?.id === bad!.id, 'the bad row is not last')
+    const month = await readCalendar(ctx, { object: key, month: '2026-10-15', fieldKey: 'starts_on' })
+    expect(!month.entries.some((entry) => entry.id === bad!.id), 'the bad row was placed on a day')
+    const dated = await listRecords(ctx, {
+      object: key,
+      limit: 50,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'starts_on', operator: 'on_or_after', value: '2000-01-01' }] }],
+    })
+    expect(!dated.rows.some((row) => row.id === bad!.id), 'the bad row matched a date filter')
+    await owner`delete from custom_record where id = ${bad!.id}`
+    return 'sorted last, off the calendar, outside every date filter'
+  })
+
+  await check('a date property can be indexed, and its index is accepted by Postgres', async () => {
+    const fieldId = (await getRegistry(ctx)).byKey.get(key)!.byKey.get('starts_on')!.id
+    const { name, create } = planFieldIndex({
+      fieldId,
+      fieldKey: 'starts_on',
+      fieldType: 'date',
+      objectKey: key,
+      objectId,
+      isCustomObject: true,
+    })
+    await owner.unsafe(create)
+    try {
+      const [built] = await owner`select i.indisvalid from pg_index i join pg_class c on c.oid = i.indexrelid where c.relname = ${name}`
+      expect(built?.indisvalid === true, JSON.stringify(built))
+    } finally {
+      await owner.unsafe(dropIndexSql(name))
+    }
+    const promoted = await promoteFieldToHot(ctx, fieldId)
+    expect(promoted.pgIndexName === name, promoted.pgIndexName)
+    return name
+  })
+
+  await check('a failed build is asked again through the same call, and a good one is not', async () => {
+    const fieldId = (await getRegistry(ctx)).byKey.get(key)!.byKey.get('budget')!.id
+    await owner`update field_index set state = 'failed', last_error = 'boom', attempts = 3 where field_id = ${fieldId}`
+    const again = await promoteFieldToHot(ctx, fieldId)
+    const [row] = await owner`select state, attempts, last_error, claimed_at from field_index where id = ${again.fieldIndexId}`
+    expect(row?.state === 'pending' && row.attempts === 0 && row.last_error === null && row.claimed_at === null, JSON.stringify(row))
+    return 'back to pending with its count cleared'
+  })
+
+  await check('the index is unique within an account, not across them', async () => {
+    const [index] = await owner`select indexdef from pg_indexes where indexname = 'field_index_account_name_key'`
+    expect(Boolean(index?.indexdef.includes('(account_id, pg_index_name)')), String(index?.indexdef))
+    const [old] = await owner`select 1 from pg_indexes where indexname = 'field_index_name_key'`
+    expect(!old, 'the account-wide unique index is still there')
+    return index!.indexdef
+  })
+
+  await check('deleting an indexed property takes its index row, and the object takes the rest', async () => {
+    const fieldId = (await getRegistry(ctx)).byKey.get(key)!.byKey.get('budget')!.id
+    await deleteField(ctx, fieldId)
+    const [{ n = 0 } = { n: 0 }] = await owner`select count(*)::int as n from field_index where field_id = ${fieldId}`
+    expect(n === 0, `${n} index rows survived`)
+    return 'the worker sweep drops the index itself on its next pass'
+  })
+
+  await check('counting and purging a custom object’s property touches only that object’s rows', async () => {
+    const other = await createCustomObject(ctx, { nameSingular: 'Vendor', namePlural: 'Vendors' })
+    for (const objectKey of [key, other.key]) await createField(ctx, { objectKey, key: 'codename', label: 'Codename', type: 'text' })
+    forgetRegistry(ctx.accountId)
+    await createRecord(ctx, key, { name: 'Probe', codename: 'alpha' })
+    await createRecord(ctx, other.key, { name: 'Acme', codename: 'beta' })
+    const registry = await getRegistry(ctx)
+    const fieldId = registry.byKey.get(key)!.byKey.get('codename')!.id
+    const usage = await fieldUsage(ctx, fieldId)
+    expect(usage.filled === 1, `${usage.filled} counted, one record holds it`)
+    await deleteField(ctx, fieldId)
+    const purged = await purgeField(ctx, fieldId)
+    expect(purged.stripped === 1, `${purged.stripped} stripped`)
+    const [{ n = 0 } = { n: 0 }] = await owner`
+      select count(*)::int as n from custom_record where object_id = ${other.id} and custom ? 'codename'`
+    expect(n === 1, `${n} of the other object's values survived`)
+    await deleteCustomObject(ctx, other.id)
+    return 'one counted, one stripped, the other object untouched'
   })
 
   await check('deleting the object takes its records', async () => {

@@ -269,7 +269,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
         {removing ? (
           <div className="flex flex-col gap-3">
             {removing.stage.dealCount === 0 ? (
-              <p>No deals sit in this stage, so nothing has to move.</p>
+              <p>No deals sit in this stage, so nothing has to move. Deals already deleted from it go to the first other stage on this pipeline, so Restore still finds them.</p>
             ) : (
               <>
                 <p>
@@ -336,7 +336,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
             <p>
               The pipeline and its {deleting.stages.length} stage
               {deleting.stages.length === 1 ? '' : 's'} go. A pipeline with deals in it is refused,
-              so nothing is lost either way, but a board somebody had open stops existing.
+              so nothing is lost either way, but a board somebody had open stops existing. Deals already deleted from it move to the first stage of the first other pipeline, so Restore still finds them.
             </p>
           </div>
         ) : null}

@@ -11,6 +11,7 @@ import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { archiveUsageCopy, purgeResultCopy } from '~/lib/field-usage-copy.ts'
 import { propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
@@ -211,6 +212,7 @@ export const PropertyList = ({
           TYPE_LABEL[field.type],
           field.isRequired ? 'Required' : null,
           field.isHot ? `Indexed${field.indexState ? ` (${field.indexState})` : ''}` : null,
+          field.indexError,
           field.conditional ? 'Conditional' : null,
           field.trackChanges ? 'On the timeline' : null,
         ].filter(Boolean)
@@ -232,6 +234,7 @@ export const PropertyList = ({
                 <DropdownMenu
                   label={`More for ${field.label}`}
                   align="start"
+                  className="max-w-80"
                   trigger={(props) => (
                     <button {...props} type="button" className={rowPill}>
                       More
@@ -252,12 +255,13 @@ export const PropertyList = ({
                             ]),
                         // "Index it" keeps its words: it is a decision about cost and
                         // speed, not a routine row action.
-                        ...(field.isCustom && field.storage === 'jsonb' && !field.isHot
+                        ...(field.isCustom && field.storage === 'jsonb' && (!field.isHot || field.indexState === 'failed')
                           ? [
                               {
                                 key: 'index',
-                                label: 'Index it',
-                                disabled: busy,
+                                label: field.isHot ? 'Retry index' : 'Index it',
+                                disabled: busy || Boolean(field.indexBlocker),
+                                ...(field.indexBlocker ? { description: field.indexBlocker } : {}),
                                 onSelect: () =>
                                   void run(
                                     () => api.admin.fields.promoteToHot.mutate({ fieldId: field.id }),
@@ -602,9 +606,7 @@ export const PropertyList = ({
             The property disappears from every screen immediately.{' '}
             {usage === null
               ? 'Counting how many records hold a value...'
-              : usage.filled === 0
-                ? 'No record holds a value for it.'
-                : `${fmt.number(usage.filled)} record${usage.filled === 1 ? '' : 's'} hold a value, and every one of those values stays exactly where it is.`}
+              : archiveUsageCopy(usage.filled, fmt.number(usage.filled))}
           </p>
           <p className="text-secondary">
             Nothing is lost here. Restoring it from Archived puts it back. Purging, which is a separate action, is
@@ -631,7 +633,7 @@ export const PropertyList = ({
                 if (!field) return
                 void run(async () => {
                   const result = await api.admin.fields.purge.mutate({ id: field.id })
-                  toast('info', `${fmt.number(result.stripped)} records had the value stripped.`)
+                  toast('info', purgeResultCopy(result.stripped, fmt.number(result.stripped)))
                 }, 'Purged.').then((ok) => ok && setPurging(null))
               }}
             >

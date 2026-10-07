@@ -10,6 +10,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { asc, eq } from 'drizzle-orm'
+import { notFound } from 'next/navigation'
 import type { EditableField } from '~/components/crm/field-input.tsx'
 import type { FilterField } from '~/components/crm/filter-builder.tsx'
 import type { TableColumn } from '~/components/crm/record-table.tsx'
@@ -178,7 +179,7 @@ export type CrmContext = {
 export const loadCrmContext = async (ctx: AccountContext, objectKey: string): Promise<CrmContext> => {
   const [registry, lookups] = await Promise.all([getRegistry(ctx), readLookups(ctx)])
   const object = registry.byKey.get(objectKey)
-  if (!object) throw new Error(`This account has no object called "${objectKey}".`)
+  if (!object) notFound()
   // A custom object has no write role of its own. Whoever may write a record may
   // write one of its records: the three roles that can change a contact. An admin
   // still decides what objects exist at all, which is the object_def role.

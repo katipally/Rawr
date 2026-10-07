@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '~/lib/env.ts'
+import { attachment } from '~/server/content-disposition.ts'
 
 /** Object storage over the S3 protocol, so the host is an endpoint rather than a
  *  rewrite: Supabase, R2, MinIO, S3 and B2 all speak it.
@@ -64,7 +65,7 @@ export const signedDownload = async (
       Bucket: env.S3_BUCKET,
       Key: key,
       // Saves under the name somebody uploaded rather than the random key segment.
-      ...(filename ? { ResponseContentDisposition: contentDisposition(filename) } : {}),
+      ...(filename ? { ResponseContentDisposition: attachment(filename) } : {}),
     }),
     { expiresIn: seconds },
   )
@@ -86,11 +87,6 @@ export const putObject = async (key: string, body: Uint8Array, contentType: stri
 export const removeObject = async (key: string): Promise<void> => {
   await client().send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }))
 }
-
-/** RFC 5987, so a name with a quote, a comma or an accent cannot break out of the
- *  header or arrive mangled. */
-const contentDisposition = (filename: string): string =>
-  `attachment; filename="${filename.replaceAll(/["\\\r\n]/g, '')}"; filename*=UTF-8''${encodeURIComponent(filename)}`
 
 /** A file too big for one request, sent in parts.
  *

@@ -10,6 +10,7 @@ import { ViewTabs } from '~/components/crm/view-tabs.tsx'
 import { decodeFilters, exportPath, importsPath, objectView, recordPath, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { loadCrmContext, toEditableFields, toFilterFields } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { isReadable } from '~/server/errors.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** The third way to look at a list: what is happening this month.
@@ -20,6 +21,9 @@ import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Shaped like an object key. The registry decides whether it is one. */
 const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
+
+/** A month from a URL goes into a date cast, and Postgres refuses `2026-13`. */
+const USABLE_MONTH = /^[1-9]\d{3}-(0[1-9]|1[0-2])/
 
 type Params = { account: string; object: string; view: string }
 type Search = { q?: string; filters?: string; month?: string; group?: string; new?: string; view?: string }
@@ -45,13 +49,16 @@ const CalendarPage = async ({
   const { account, object: objectParam, view: viewSlug } = await params
   // Not `isObjectKey`: an admin can invent an object, and its records are read
   // through exactly this page. Whether the key names one is the registry's
-  // answer, and loadCrmContext below throws with a sentence if it does not.
+  // answer, and loadCrmContext below answers 404 if it does not.
   if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
 
   const search = await searchParams
   const ctx = contextFrom(session)
-  const [{ object, objects, lookups, canWrite }, views, resolved] = await Promise.all([
-    loadCrmContext(ctx, objectParam),
+  // Alone and first: for a key that is not an object the reads beside it throw
+  // plain errors of their own, and one of those would reach the error screen
+  // before the 404 did.
+  const { object, objects, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
+  const [views, resolved] = await Promise.all([
     listViews(ctx, objectParam),
     resolveView(ctx, objectParam, viewSlug),
   ])
@@ -63,7 +70,7 @@ const CalendarPage = async ({
 
   const today = todayIn(session.accountTimezone)
   const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
-  const month = search.month ?? today.slice(0, 7)
+  const month = search.month && USABLE_MONTH.test(search.month) ? search.month : today.slice(0, 7)
   // A saved view's group is a board's grouping, which is a stage, not a date.
   // Honoured only when it happens to name a field a calendar can use, so opening
   // the calendar on a view saved as a board is a calendar rather than an error
@@ -71,10 +78,13 @@ const CalendarPage = async ({
   const stored = placeable.some((field) => field.key === resolved.view.groupByKey)
     ? resolved.view.groupByKey
     : null
-  const chosen = search.group ?? stored ?? placeable[0]!.key
+  const unusable = search.group !== undefined && !placeable.some((field) => field.key === search.group)
+  const chosen = unusable ? placeable[0]!.key : (search.group ?? stored ?? placeable[0]!.key)
 
+  let problem: string | null = unusable
+    ? `A calendar cannot be laid out on "${search.group}". Try one of: ${placeable.map((field) => field.label).join(', ')}.`
+    : null
   let calendar: Awaited<ReturnType<typeof readCalendar>> | null = null
-  let problem: string | null = null
   try {
     calendar = await readCalendar(ctx, {
       object: objectParam,
@@ -84,16 +94,10 @@ const CalendarPage = async ({
       search: search.q ?? '',
     })
   } catch (cause) {
-    // A hand-edited field in a URL is the usual cause, and the message names the
-    // ones that would have worked, so the first date field is worth one retry.
-    problem = cause instanceof Error ? cause.message : String(cause)
-    calendar = await readCalendar(ctx, {
-      object: objectParam,
-      month,
-      fieldKey: placeable[0]!.key,
-      filters,
-      search: search.q ?? '',
-    }).catch(() => null)
+    // A hand-edited filter in a URL is the usual cause. Only a sentence the data
+    // layer wrote for a person is shown; a driver error carries the statement.
+    if (!isReadable(cause)) throw cause
+    problem = cause.message
   }
 
   const listParams: ListParams = {

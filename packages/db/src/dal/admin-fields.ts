@@ -4,9 +4,9 @@ import { conditionalBlocker, readConditional, type Conditional } from '../regist
 import { MAX_CHOICES } from '../registry/mapping.ts'
 import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import { assertCanDo, type AccountContext } from './context.ts'
-import { assertUsableFieldKey } from './fields.ts'
+import { assertUsableFieldKey, unindexableReason } from './fields.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { forgetRegistry, getRegistry, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
+import { forgetRegistry, getRegistry, getRegistryIn, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
 
 /** The write side of the metadata registry. D4's whole premise is that marketing
  *  can add a property without a deploy, and that only holds if there is somewhere
@@ -38,6 +38,10 @@ export type AdminField = {
   source: string | null
   /** Set once a hot index has been asked for, so the UI can show its state. */
   indexState: string | null
+  /** Why the last build failed, while it is failed. */
+  indexError: string | null
+  /** Why this property cannot be indexed at all, or null when it can. */
+  indexBlocker: string | null
   /** How many records currently hold a value, so a delete can say what is at stake. */
   filledCount: number | null
   /** When that count was taken. A number with no date behind it reads as live,
@@ -73,6 +77,8 @@ export const listFields = async (ctx: AccountContext, objectKey?: string): Promi
         filledCount: fieldDef.filledCount,
         filledAt: fieldDef.filledAt,
         indexState: fieldIndex.state,
+        indexError: fieldIndex.lastError,
+        objectIsCustom: objectDef.isCustom,
       })
       .from(fieldDef)
       .innerJoin(objectDef, eq(objectDef.id, fieldDef.objectId))
@@ -103,15 +109,17 @@ export const listFields = async (ctx: AccountContext, objectKey?: string): Promi
       position: row.position,
       trackChanges: row.trackChanges,
       indexState: row.indexState ?? null,
+      indexError: row.indexState === 'failed' ? row.indexError : null,
+      indexBlocker: unindexableReason(row.type as FieldType, row.objectIsCustom),
       filledCount: row.filledCount,
       filledAt: row.filledAt,
       conditional: readConditional(row.conditional),
     }))
   })
 
-const objectRow = async (tx: Tx, objectKey: string): Promise<{ id: string; key: string }> => {
+const objectRow = async (tx: Tx, objectKey: string): Promise<{ id: string; key: string; isCustom: boolean }> => {
   const [found] = await tx
-    .select({ id: objectDef.id, key: objectDef.key })
+    .select({ id: objectDef.id, key: objectDef.key, isCustom: objectDef.isCustom })
     .from(objectDef)
     .where(eq(objectDef.key, objectKey))
     .limit(1)
@@ -251,6 +259,8 @@ const insertField = async (
     groupName: input.groupName?.trim() || null,
     source: input.source ?? null,
     indexState: null,
+    indexError: null,
+    indexBlocker: unindexableReason(input.type, object.isCustom),
     filledCount: null,
     filledAt: null,
     conditional,
@@ -469,14 +479,14 @@ export const fieldUsage = async (ctx: AccountContext, fieldId: string): Promise<
 
     assertUsableFieldKey(found.key)
     assertUsableFieldKey(found.objectKey)
-    const table = sql.raw(`"${found.objectKey}"`)
+    const object = objectOrThrow(await getRegistryIn(tx), found.objectKey)
     const predicate =
       found.storage === 'column' && found.columnName
         ? sql.raw(`"${found.columnName}" is not null`)
         : sql.raw(`custom ? '${found.key}' and custom ->> '${found.key}' is not null`)
 
     const [row] = await tx.execute<{ n: number }>(
-      sql`select count(*)::int as n from ${table} where deleted_at is null and ${predicate}`,
+      sql`select count(*)::int as n from ${tableFor(object)} where ${rowsOf(object)} and deleted_at is null and ${predicate}`,
     )
 
     // A form stores the field as "contact.email" and everything else as the bare
@@ -718,6 +728,8 @@ export const listDeletedFields = async (ctx: AccountContext): Promise<AdminField
       groupName: null,
       source: null,
       indexState: null,
+      indexError: null,
+      indexBlocker: null,
       filledCount: null,
       filledAt: null,
       conditional: null,
@@ -754,11 +766,11 @@ export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<
 
     assertUsableFieldKey(found.key)
     assertUsableFieldKey(found.objectKey)
-    const table = sql.raw(`"${found.objectKey}"`)
+    const object = objectOrThrow(await getRegistryIn(tx), found.objectKey)
     const key = sql.raw(`'${found.key}'`)
 
     const stripped = await tx.execute<{ id: string }>(
-      sql`update ${table} set custom = custom - ${key} where custom ? ${key} returning id`,
+      sql`update ${tableFor(object)} set custom = custom - ${key} where ${rowsOf(object)} and custom ? ${key} returning id`,
     )
     await tx.delete(fieldDef).where(eq(fieldDef.id, fieldId))
 

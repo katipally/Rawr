@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm'
 import {
+  IMMUTABLE_PARSER,
   LIST_OPERATORS,
   NULLARY_OPERATORS,
   TYPE_META,
@@ -9,6 +10,7 @@ import { isDateRange, resolveDateRange } from '../registry/date-ranges.ts'
 import type { AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { dayKey } from './slots.ts'
+import { filterValue } from './values.ts'
 import {
   fieldOrThrow,
   getRegistry,
@@ -55,7 +57,18 @@ export const fieldExpression = (object: RegistryObject, field: RegistryField): S
   }
   const meta = TYPE_META[field.type]
   if (meta.jsonbCast === 'jsonb') return sql.raw(`"${object.key}"."custom" -> '${field.key}'`)
-  return sql.raw(`("${object.key}"."custom" ->> '${field.key}')::${meta.jsonbCast}`)
+  const text = `"${object.key}"."custom" ->> '${field.key}'`
+  const parser = object.isCustom ? IMMUTABLE_PARSER[meta.jsonbCast] : undefined
+  return sql.raw(parser ? `${parser}(${text})` : `(${text})::${meta.jsonbCast}`)
+}
+
+const present = (value: unknown): boolean => value !== null && value !== undefined && value !== ''
+
+/** A token resolves from the session and is trusted. Anything else is somebody's
+ *  typing, from an address or a saved view, and has to fit the field. */
+const checked = (field: RegistryField, value: unknown, scope: QueryScope): unknown => {
+  const resolved = resolveToken(value, scope)
+  return resolved === value ? filterValue(field, value) : resolved
 }
 
 const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value])
@@ -95,13 +108,15 @@ const compileCondition = (
     return sql`(${expr} >= (${first}::date)::timestamp at time zone ${scope.zone} and ${expr} < (${last}::date + 1)::timestamp at time zone ${scope.zone})`
   }
 
-  const raw = resolveToken(condition.value, scope)
   // A token that resolved to nothing (an anonymous caller on an "@me" view) can
   // only match nothing. Saying so is better than quietly dropping the filter.
-  if (raw === null || raw === undefined || raw === '') return sql`false`
+  if (!present(resolveToken(condition.value, scope))) return sql`false`
 
   if (LIST_OPERATORS.includes(operator)) {
-    const values = asList(raw).map((v) => resolveToken(v, scope)).filter((v) => v !== null && v !== undefined && v !== '')
+    const values = asList(condition.value)
+      .filter(present)
+      .map((v) => checked(field, v, scope))
+      .filter(present)
     if (values.length === 0) return sql`false`
     if (operator === 'between') {
       const [from, to] = values
@@ -121,6 +136,7 @@ const compileCondition = (
     return operator === 'in' ? sql`${expr} in (${list})` : sql`(${expr} is null or ${expr} not in (${list}))`
   }
 
+  const raw = checked(field, condition.value, scope)
   switch (operator) {
     case 'is':
       return sql`${expr} = ${raw}`

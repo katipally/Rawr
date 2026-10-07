@@ -19,6 +19,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Button, DiscardConfirm, DropdownMenu, Field, Modal, Select, Skeleton, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
 import { useUrlParam } from '~/lib/url-params.ts'
+import { ChoicesInput } from '~/components/choices-input.tsx'
 import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMBED_PRESETS, resolveTheme } from '~/lib/embed-themes.ts'
@@ -615,19 +616,11 @@ export const FormBuilder = ({
                         label="Choices"
                         hint="One per line."
                       >
-                        <TextArea
+                        <ChoicesInput
                           id={`options-${index}`}
-                          value={(field.options ?? []).map((o) => o.label).join('\n')}
+                          choices={field.options}
                           disabled={!canEdit}
-                          onChange={(event) =>
-                            patch(index, {
-                              options: event.target.value
-                                .split('\n')
-                                .map((line) => line.trim())
-                                .filter(Boolean)
-                                .map((line) => ({ value: line, label: line })),
-                            })
-                          }
+                          onChange={(options) => patch(index, { options })}
                         />
                       </Field>
                     ) : null}

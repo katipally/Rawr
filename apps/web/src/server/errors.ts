@@ -32,6 +32,12 @@ const isSentence = (cause: unknown): cause is Error =>
   Object.getPrototypeOf(cause) === Error.prototype &&
   typeof (cause as { code?: unknown }).code !== 'string'
 
+/** What a page may print from a failed data read: a sentence, or the two refusals
+ *  the data layer words for a person (a value that does not fit, a field that is
+ *  not there). Anything else can hold a statement and its parameters. */
+export const isReadable = (cause: unknown): cause is Error =>
+  isSentence(cause) || cause instanceof ValueError || cause instanceof UnknownFieldError
+
 /** Every failure a person can reach has a sentence they can act on, never
  *  "something went wrong". 03-build-order, FAILING. */
 export const asTrpcError = (cause: unknown): TRPCError => {
@@ -47,12 +53,10 @@ export const asTrpcError = (cause: unknown): TRPCError => {
     return new TRPCError({ code: 'CONFLICT', message: cause.message, cause })
   }
   if (
-    cause instanceof ValueError ||
-    cause instanceof UnknownFieldError ||
     cause instanceof FormSchemaError ||
     cause instanceof RevokedError ||
     cause instanceof CalendarUnavailable ||
-    isSentence(cause)
+    isReadable(cause)
   ) {
     return new TRPCError({ code: 'BAD_REQUEST', message: cause.message, cause })
   }

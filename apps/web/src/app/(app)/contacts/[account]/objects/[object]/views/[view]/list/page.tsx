@@ -11,6 +11,7 @@ import { decodeFilters, decodeSort, duplicatesPath, exportCsvPath, exportPath, i
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { CUSTOM_KEY_FIELDS, SECTIONS } from '~/lib/record-layout.ts'
+import { isReadable } from '~/server/errors.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 const PAGE_SIZE = 25
@@ -79,7 +80,7 @@ const ListPage = async ({
   const { account, object: objectParam, view: viewSlug } = await params
   // Not `isObjectKey`: an admin can invent an object, and its records are read
   // through exactly this page. Whether the key names one is the registry's
-  // answer, and loadCrmContext below throws with a sentence if it does not.
+  // answer, and loadCrmContext below answers 404 if it does not.
   if (!USABLE_OBJECT_KEY.test(objectParam)) notFound()
 
   const search = await searchParams
@@ -89,8 +90,11 @@ const ListPage = async ({
   // own, and BEGIN plus the set_config plus COMMIT is three network round trips
   // before a row is fetched.
   const { object, objects, lookups, canWrite, views, resolved, page, queryError } = await withAccountReads(ctx, async () => {
-    const [crm, list, view] = await Promise.all([
-      loadCrmContext(ctx, objectParam),
+    // First and alone: for a key that is not an object the reads beside it throw
+    // plain errors of their own, and one of those would reach the error screen
+    // before the 404 did.
+    const crm = await loadCrmContext(ctx, objectParam)
+    const [list, view] = await Promise.all([
       listViews(ctx, objectParam),
       resolveView(ctx, objectParam, viewSlug),
     ])
@@ -120,8 +124,10 @@ const ListPage = async ({
       return { ...crm, views: list, resolved: view, page, queryError: null }
     } catch (cause) {
       // A hand-edited filter in a URL is the usual cause. Say so instead of
-      // showing a crash page.
-      return { ...crm, views: list, resolved: view, page: undefined, queryError: cause instanceof Error ? cause.message : String(cause) }
+      // showing a crash page, but only in a sentence the data layer wrote for a
+      // person; a driver error carries the statement.
+      if (!isReadable(cause)) throw cause
+      return { ...crm, views: list, resolved: view, page: undefined, queryError: cause.message }
     }
   })
   // A stale bookmark still shows the person their records, at the address the

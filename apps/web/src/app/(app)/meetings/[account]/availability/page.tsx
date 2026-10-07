@@ -79,6 +79,7 @@ const AvailabilityScreen = async ({
       ) : null}
 
       <ScheduleEditor
+        key={subject}
         schedule={schedule}
         editable={editable}
         isSelf={subject === session.userId}

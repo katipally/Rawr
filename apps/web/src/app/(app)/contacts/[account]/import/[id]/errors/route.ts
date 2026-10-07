@@ -1,5 +1,6 @@
 import { importErrorCsv, readImportRun } from '@rawr/db'
 import { NextResponse } from 'next/server'
+import { attachment } from '~/server/content-disposition.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Every refused row, with every original column, so the person fixes them in the
@@ -39,7 +40,7 @@ export const GET = async (
   return new Response(stream, {
     headers: {
       'content-type': 'text/csv; charset=utf-8',
-      'content-disposition': `attachment; filename="${run.filename.replace(/\.[^.]+$/, '')}-errors.csv"`,
+      'content-disposition': attachment(`${run.filename.replace(/\.[^.]+$/, '')}-errors.csv`),
       'cache-control': 'no-store',
     },
   })

@@ -56,7 +56,7 @@ import {
   readSegmentMembers,
   saveSegment,
 } from '../src/dal/segments.ts'
-import { bulkUpdateRecords, createRecord, getRecord, listRecords, updateRecord } from '../src/dal/records.ts'
+import { bulkUpdateRecords, createRecord, deleteRecord, getRecord, listRecords, restoreRecords, updateRecord } from '../src/dal/records.ts'
 import { readTimeline } from '../src/dal/activity.ts'
 import { readBoard, groupableFields } from '../src/dal/board.ts'
 import { recordOptions } from '../src/dal/search.ts'
@@ -482,6 +482,78 @@ try {
     const pipelines = await listPipelines(admin)
     expect(!pipelines.some((row) => row.id === pipelineId), 'the pipeline survived')
     return 'stages went with it'
+  })
+
+  const dealRow = async (id: string) =>
+    (await db.execute<{ pipeline_id: string; stage_id: string; deleted: boolean }>(
+      sql`select pipeline_id, stage_id, deleted_at is not null as deleted from deal where id = ${id}`,
+    ))[0]!
+  const hardDelete = async (id: string) => {
+    await db.execute(sql`delete from activity_link where entity_id = ${id}`)
+    await db.execute(sql`delete from deal where id = ${id}`)
+  }
+
+  await check('a pipeline holding only deleted deals deletes, and Restore finds the deals in the first other pipeline', async () => {
+    const trashed = await createPipeline(admin, `Verify trash ${stamp}`)
+    const stage = await createStage(admin, { pipelineId: trashed.id, name: 'Only' })
+    const first = (await listPipelines(admin))[0]!
+    expect(first.id !== trashed.id && first.stages.length > 0, 'no other pipeline with a stage to land in')
+    const ids: string[] = []
+    for (const n of [1, 2]) {
+      const created = await createRecord(admin, 'deal', { name: `Verify trashed ${n} ${stamp}`, pipeline_id: trashed.id, stage_id: stage.id })
+      await deleteRecord(admin, 'deal', created.id)
+      ids.push(created.id)
+    }
+    try {
+      await deletePipeline(admin, trashed.id)
+      for (const id of ids) {
+        const row = await dealRow(id)
+        expect(row.pipeline_id === first.id && row.stage_id === first.stages[0]!.id && row.deleted, 'a deleted deal did not land in the first stage of the first pipeline')
+      }
+      await restoreRecords(admin, 'deal', ids)
+      const restored = await getRecord(admin, 'deal', ids[0]!)
+      expect(restored?.values.stage_id === first.stages[0]!.id && restored.values.pipeline_id === first.id, 'the restored deal is not on the new pipeline and stage')
+      return `2 deleted deals moved to ${first.name}, first stage`
+    } finally {
+      for (const id of ids) await hardDelete(id)
+    }
+  })
+
+  await check('a stage holding only deleted deals deletes, and they land in its first other stage', async () => {
+    const holder = await createPipeline(admin, `Verify trash stage ${stamp}`)
+    const x = (await createStage(admin, { pipelineId: holder.id, name: 'X' })).id
+    const y = (await createStage(admin, { pipelineId: holder.id, name: 'Y' })).id
+    const created = await createRecord(admin, 'deal', { name: `Verify trashed stage ${stamp}`, pipeline_id: holder.id, stage_id: x })
+    await deleteRecord(admin, 'deal', created.id)
+    try {
+      const result = await deleteStage(admin, x, null)
+      const row = await dealRow(created.id)
+      expect(result.moved === 0 && row.stage_id === y && row.pipeline_id === holder.id && row.deleted, 'the deleted deal did not move to Y on its own pipeline')
+      const refusal = await refuses('deleting the only stage while a deleted deal sits in it', () => deleteStage(admin, y, null))
+      expect(refusal.includes('Add one to this pipeline first'), `unexpected refusal: "${refusal}"`)
+      return refusal
+    } finally {
+      await hardDelete(created.id)
+      await deletePipeline(admin, holder.id)
+    }
+  })
+
+  await check('a pipeline whose destination has no stage refuses with a sentence', async () => {
+    const trashed = await createPipeline(admin, `Verify no stage ${stamp}`)
+    const stage = await createStage(admin, { pipelineId: trashed.id, name: 'Only' })
+    const created = await createRecord(admin, 'deal', { name: `Verify trashed bare ${stamp}`, pipeline_id: trashed.id, stage_id: stage.id })
+    await deleteRecord(admin, 'deal', created.id)
+    const bare = await createPipeline(admin, `Verify bare ${stamp}`)
+    try {
+      await db.execute(sql`update pipeline set position = -1 where id = ${bare.id}`)
+      const refusal = await refuses('deleting into a pipeline with no stage', () => deletePipeline(admin, trashed.id))
+      expect(refusal.includes(`Add a stage to Verify bare ${stamp}`), `unexpected refusal: "${refusal}"`)
+      return refusal
+    } finally {
+      await hardDelete(created.id)
+      await deletePipeline(admin, trashed.id)
+      await deletePipeline(admin, bare.id)
+    }
   })
 
   await check('the last pipeline cannot be deleted', async () => {

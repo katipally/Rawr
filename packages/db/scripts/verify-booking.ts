@@ -1308,6 +1308,40 @@ try {
   )
   check('a slug with spaces and capitals is refused', badSlug)
 
+  const takenSlug = await refusesAsync(() =>
+    saveBookingPage(datasaur, {
+      slug: 'nobody-home',
+      name: 'Second page',
+      ...PAGE_SHAPE,
+      kind: 'round_robin',
+      location: 'zoom',
+      titleTpl: 'x',
+      descriptionTpl: '',
+      companyFallback: 'x',
+      questions: [],
+      isActive: false,
+      hosts: [],
+    }),
+  )
+  check('a new page cannot take an address another page holds', takenSlug)
+  check(
+    'and the page that holds it can save under it again',
+    !!(await saveBookingPage(datasaur, {
+      id: emptyPage,
+      slug: 'nobody-home',
+      name: 'Nobody home',
+      ...PAGE_SHAPE,
+      kind: 'round_robin',
+      location: 'zoom',
+      titleTpl: 'Meeting',
+      descriptionTpl: '',
+      companyFallback: 'a new team',
+      questions: [],
+      isActive: false,
+      hosts: [],
+    })),
+  )
+
   const phoneWithoutNumber = await refusesAsync(() =>
     saveBookingPage(datasaur, {
       slug: 'phone-page',

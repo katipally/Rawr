@@ -57,7 +57,15 @@ export class PayloadTooLarge extends Error {
   }
 }
 
-/** Reads a form-encoded or JSON body into a plain object, capped.
+export class UnreadableBody extends Error {
+  constructor() {
+    super('That submission could not be read.')
+    this.name = 'UnreadableBody'
+  }
+}
+
+/** Reads a form-encoded or JSON body into a plain object, capped. A JSON body
+ *  that is not valid JSON, or not an object, throws `UnreadableBody`.
  *
  *  Repeated keys become an array, which is how a multi_select arrives from a
  *  plain HTML form. Anything else would silently keep only the last checkbox. */
@@ -70,14 +78,14 @@ export const readBody = async (request: NextRequest): Promise<Record<string, unk
 
   const type = request.headers.get('content-type') ?? ''
   if (type.includes('application/json')) {
+    let parsed: unknown
     try {
-      const parsed: unknown = JSON.parse(text)
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {}
+      parsed = JSON.parse(text)
     } catch {
-      return {}
+      throw new UnreadableBody()
     }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new UnreadableBody()
+    return parsed as Record<string, unknown>
   }
 
   const params = new URLSearchParams(text)
@@ -165,3 +173,10 @@ export const CORS_HEADERS: Record<string, string> = {
   'access-control-allow-headers': 'content-type',
   'access-control-max-age': '86400',
 }
+
+/** How a route that answers with its own wording should refuse a body
+ *  `readBody` rejected. */
+export const bodyRefusal = (cause: unknown): { error: string; status: 400 | 413 } =>
+  cause instanceof PayloadTooLarge
+    ? { error: 'That request is larger than this page accepts.', status: 413 }
+    : { error: 'That request could not be read.', status: 400 }

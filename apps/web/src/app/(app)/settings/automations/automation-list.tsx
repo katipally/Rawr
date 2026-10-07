@@ -580,18 +580,16 @@ export const AutomationList = ({
   const [query, setQuery] = useState('')
   const [status, setStatus] = useUrlParam('status')
   const needle = query.trim().toLowerCase()
-  const shown = rows.filter(
-    (row) =>
-      (!needle || row.name.toLowerCase().includes(needle)) &&
-      (status !== 'on' || (switched[row.id] ?? row.isActive)) &&
-      (status !== 'off' || !(switched[row.id] ?? row.isActive)),
-  )
-  const { page, pager } = usePagedRows(shown, 'automations')
-  const [busy, setBusy] = useState(false)
   /** Whether a rule is on, as this browser has just set it. router.refresh takes a
    *  round trip, and a switch that snaps back for that long reads as a failure.
    *  Dropped on failure, leaving the server's answer. */
   const [switched, setSwitched] = useState<Record<string, boolean>>({})
+  const isOn = (row: AutomationRowView): boolean => switched[row.id] ?? row.isActive
+  const shown = rows.filter(
+    (row) => (!needle || row.name.toLowerCase().includes(needle)) && (status !== 'on' || isOn(row)) && (status !== 'off' || !isOn(row)),
+  )
+  const { page, pager } = usePagedRows(shown, 'automations')
+  const [busy, setBusy] = useState(false)
 
   const [name, setName] = useState('')
   const [trigger, setTrigger] = useState<Trigger>('record_created')
@@ -603,7 +601,6 @@ export const AutomationList = ({
   const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
   const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
   const labelOf = (key: string): string => objects.find((entry) => entry.key === key)?.label ?? key
-  const isOn = (row: AutomationRowView): boolean => switched[row.id] ?? row.isActive
   const setTrigger_ = (key: string, value: string) => setTriggerConfig({ ...triggerConfig, [key]: value })
 
   const editor: EditorContext = {

@@ -3,7 +3,7 @@ import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { fieldOrThrow, getRegistry, objectOrThrow, rowsOf, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
 
 /** What is happening this month.
  *
@@ -90,7 +90,7 @@ export const readCalendar = async (
     const to = instant ? sql`${monthEnd} at time zone ${zone}` : monthEnd
     const dayOfRow = instant ? sql`(${placed} at time zone ${zone})::date` : sql`(${placed})::date`
 
-    const where: SQL[] = [sql.raw(`"${object.key}"."deleted_at" is null`)]
+    const where: SQL[] = [rowsOf(object), sql.raw(`"${object.key}"."deleted_at" is null`)]
     // Half-open on the month: a record at 23:59 on the last day is in, and the
     // first instant of the next month is not. `>= start and < start + 1 month`
     // rather than `between`, which would include both ends of the boundary.
@@ -107,7 +107,7 @@ export const readCalendar = async (
       select ${sql.raw(`"${object.key}".*`)},
              ${dayOfRow} as calendar_day,
              ${instant ? sql`to_char(${placed} at time zone ${zone}, 'HH24:MI')` : sql`null::text`} as calendar_time
-        from ${sql.raw(`"${object.key}"`)}
+        from ${tableFor(object)}
        where ${sql.join(where, sql` and `)}
        order by ${placed} asc
        limit ${MAX_ENTRIES + 1}`)

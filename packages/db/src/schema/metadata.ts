@@ -99,10 +99,14 @@ export const fieldIndex = pgTable(
     pgIndexName: text('pg_index_name').notNull(),
     state: indexStateEnum('state').notNull().default('pending'),
     lastError: text('last_error'),
+    /** When the dispatcher last took this row. The stale-build clock runs from here. */
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    /** How many times the dispatcher has taken it; a build that never finishes stops at a cap. */
+    attempts: integer('attempts').notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex('field_index_name_key').on(t.pgIndexName),
+    uniqueIndex('field_index_account_name_key').on(t.accountId, t.pgIndexName),
     index('field_index_account_id_idx').on(t.accountId),
     index('field_index_field_id_idx').on(t.fieldId),
   ],

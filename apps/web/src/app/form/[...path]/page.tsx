@@ -15,6 +15,7 @@ import { inBackground } from '~/server/background.ts'
 import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
 import { presetOf, themeCss } from '~/lib/embed-themes.ts'
+import { hopHref } from '~/server/redirect-hop.ts'
 import { submitHostedForm } from './actions.ts'
 
 /** The hosted form page. Two jobs:
@@ -80,6 +81,7 @@ const HostedFormPage = async ({
   const errors = parseErrors(single('e'))
   const sent = single('sent') === '1'
   const held = single('held') === '1'
+  const hop = single('go') === '1' && form.settings.successMode === 'redirect' ? hopHref(form.settings.successValue) : null
 
   // The collector never runs here, so this is the only place a load of the
   // hosted page can be counted. Both steps at once: the page is the form, so
@@ -116,7 +118,15 @@ const HostedFormPage = async ({
       >
           <h1>{form.name}</h1>
 
-          {sent ? (
+          {sent && hop ? (
+            <div className="rawr-done" role="status">
+              <meta httpEquiv="refresh" content={`0;url=${hop}`} />
+              <p className="rawr-done-title">{FORM_COPY.sent}</p>
+              <a className="rawr-done-link" href={hop}>
+                Go there now
+              </a>
+            </div>
+          ) : sent ? (
             <div className="rawr-done" role="status">
               {held
                 ? 'Thanks. This has been received and is being reviewed, so it may take a little longer than usual.'

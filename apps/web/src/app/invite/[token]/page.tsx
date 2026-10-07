@@ -1,16 +1,18 @@
-import { acceptInvitation, readInvitationOffer } from '@rawr/db'
+import { readInvitationOffer } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Button, EmptyState } from '@rawr/ui'
-import { memberships, readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
+import { readSession } from '~/server/session.ts'
 
 /** The page an invitation link opens. It says who is inviting whom, and nothing
  *  about anybody else: an invitation link ends up in mail, and mail gets forwarded.
  *
- *  Somebody already signed in accepts here and is moved into the account they
- *  were seated in. Somebody signed out follows a link that parks the token in an
- *  httpOnly cookie and sends them to sign in; the callback redeems it and checks
- *  that the address they signed in with is the one that was invited. */
+ *  Reading never changes anything: accepting writes a seat and a cookie, which a
+ *  route handler may do and a page may not. Somebody signed in as the invited
+ *  address is sent to that handler, which accepts and seats them. Somebody signed
+ *  out follows a link to the same handler, which parks the token in an httpOnly
+ *  cookie and sends them to sign in; the callback redeems it and checks that the
+ *  address they signed in with is the one that was invited. */
 const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) => {
   const { token } = await params
   const offer = await readInvitationOffer(token)
@@ -38,33 +40,25 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
   }
 
   const session = await readSession()
+  const acceptPath = `/api/auth/invite/${token}`
 
   if (session) {
-    // Already signed in: redeem it now and land them where the seat is. The
-    // function refuses a token whose address is not theirs, so this is safe to
-    // run for anybody who happens to open the link.
-    const joined = await acceptInvitation(token, session.userId)
-    if (!joined) {
-      return (
-        <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
-          <EmptyState
-            title={`This invitation is for ${offer.email}`}
-            description={`You are signed in as ${session.email}. Sign out and sign back in as ${offer.email}, or ask for an invitation to the address you use.`}
-            action={
-              <form action="/api/auth/sign-out" method="post">
-                <Button type="submit" variant="primary">
-                  Sign out
-                </Button>
-              </form>
-            }
-          />
-        </main>
-      )
-    }
-    const mine = await memberships(session.userId)
-    const seated = mine.find((row) => row.accountId === joined) ?? mine[0]
-    if (seated) await writeSessionCookie(sessionFromMembership(seated))
-    redirect('/')
+    if (session.email.toLowerCase() === offer.email.toLowerCase()) redirect(acceptPath)
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center gap-4 p-6">
+        <EmptyState
+          title={`This invitation is for ${offer.email}`}
+          description={`You are signed in as ${session.email}. Sign out and sign back in as ${offer.email}, or ask for an invitation to the address you use.`}
+          action={
+            <form action="/api/auth/sign-out" method="post">
+              <Button type="submit" variant="primary">
+                Sign out
+              </Button>
+            </form>
+          }
+        />
+      </main>
+    )
   }
 
   return (
@@ -79,7 +73,7 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
           that Google account to accept it.
         </p>
         <Link
-          href={`/api/auth/invite/${token}`}
+          href={acceptPath}
           className="mt-4 inline-flex min-h-9 items-center rounded-hs bg-cta px-3 font-medium text-white no-underline hover:bg-cta-hover"
         >
           Continue to sign in

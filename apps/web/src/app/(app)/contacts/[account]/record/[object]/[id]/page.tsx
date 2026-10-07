@@ -136,8 +136,10 @@ const RecordPage = async ({
   const screen = !isUuid(id) ? null : await withAccountReads(ctx, async () => {
     // The record itself is fetched alongside the rest, not before them: a
     // missing record just discards their answers.
-    const [{ object, lookups, canWrite }, registry, record, counts, rail, queues] = await Promise.all([
-      loadCrmContext(ctx, objectParam),
+    // Alone and first, so an object that does not exist is a 404 and not
+    // whichever sibling read throws a plain error about it first.
+    const { object, lookups, canWrite } = await loadCrmContext(ctx, objectParam)
+    const [registry, record, counts, rail, queues] = await Promise.all([
       getRegistry(ctx),
       getRecord(ctx, objectParam, id),
       timelineCounts(ctx, entity),

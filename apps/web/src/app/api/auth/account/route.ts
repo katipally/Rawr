@@ -19,7 +19,8 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(back, 303)
   }
 
-  const form = await request.formData()
+  const form = await request.formData().catch(() => null)
+  if (!form) return new NextResponse(null, { status: 400 })
   const wanted = String(form.get('to') ?? '')
   const next = safePath(String(form.get('next') ?? ''))
 

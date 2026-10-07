@@ -1,6 +1,6 @@
 import { HOLD_MINUTES, publicBookingPage, releaseHold, renewHold } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
+import { CORS_HEADERS, bodyRefusal, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
 /** POST /b/:account/:slug/hold
  *
@@ -49,7 +49,13 @@ export const POST = async (
     )
   }
 
-  const body = await readBody(request)
+  let body: Record<string, unknown>
+  try {
+    body = await readBody(request)
+  } catch (cause) {
+    const { error, status } = bodyRefusal(cause)
+    return NextResponse.json({ error }, { status, headers: CORS_HEADERS })
+  }
   const slot = typeof body.slot === 'string' ? new Date(body.slot) : new Date(Number.NaN)
   if (Number.isNaN(slot.getTime())) {
     return NextResponse.json(

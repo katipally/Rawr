@@ -9,6 +9,7 @@ import {
   parseFilters,
   parseSorts,
   scopeFor,
+  type Condition,
   type FilterGroup,
 } from './query.ts'
 
@@ -147,6 +148,26 @@ test('a value a person typed is bound, never interpolated', () => {
   assert.deepEqual(params, [hostile])
 })
 
+test('a filter value that does not fit its field is refused as a sentence before any SQL', () => {
+  const only = (condition: Condition) => () => compile([{ conjunction: 'and', conditions: [condition] }])
+  assert.throws(only({ field: 'amount', operator: 'gt', value: 'abc' }), /^ValueError: amount: "abc" is not a number\.$/m)
+  assert.throws(only({ field: 'created_at', operator: 'after', value: 'soon' }), /not a date and time/)
+  assert.throws(only({ field: 'owner_id', operator: 'in', value: ['@me', 'nobody'] }), /"nobody" has to be picked from the list/)
+  assert.throws(only({ field: 'amount', operator: 'between', value: ['1', 'two'] }), /"two" is not a number/)
+  assert.throws(only({ field: 'uttr_pipeline', operator: 'is', value: 'perhaps' }), /not a yes or a no/)
+  assert.throws(only({ field: 'email', operator: 'is', value: ['a', 'b'] }), /takes one value in a filter/)
+})
+
+test('valid values and every operator on them compile as before', () => {
+  const run = (condition: Condition) => built(compile([{ conjunction: 'and', conditions: [condition] }]))
+  assert.deepEqual(run({ field: 'amount', operator: 'gte', value: ' 1e3 ' }).params, ['1e3'])
+  assert.deepEqual(run({ field: 'amount', operator: 'between', value: [10, '20'] }).params, [10, '20'])
+  assert.deepEqual(run({ field: 'created_at', operator: 'on_or_before', value: '2026-09-03' }).params, ['2026-09-03'])
+  assert.deepEqual(run({ field: 'owner_id', operator: 'is', value: '@me' }).params, ['user-1'])
+  assert.equal(run({ field: 'amount', operator: 'is_empty', value: 'not even looked at' }).params.length, 0)
+  assert.equal(run({ field: 'amount', operator: 'gt', value: '' }).text, '(false)')
+})
+
 test('@me resolves to the caller and an anonymous caller matches nothing', () => {
   const mine: FilterGroup[] = [
     { conjunction: 'and', conditions: [{ field: 'owner_id', operator: 'is', value: '@me' }] },
@@ -196,6 +217,36 @@ test('a jsonb field casts, and a jsonb array is matched by containment', () => {
     compile([{ conjunction: 'and', conditions: [{ field: 'products', operator: 'in', value: ['OCR', 'Audio'] }] }]),
   )
   assert.ok(text.includes('?|'), text)
+})
+
+test('a custom object filters and sorts a date through the parser, a core object through the cast', () => {
+  const due = field({ key: 'due', type: 'date', storage: 'jsonb', columnName: null, isCustom: true })
+  const seen = field({ key: 'seen', type: 'datetime', storage: 'jsonb', columnName: null, isCustom: true })
+  const make = (key: string, isCustom: boolean): RegistryObject => ({
+    ...contact,
+    key,
+    isCustom,
+    fields: [due, seen],
+    byKey: new Map([due, seen].map((f) => [f.key, f])),
+  })
+  const conditions: Condition[] = [
+    { field: 'due', operator: 'on_or_after', value: '2026-01-01' },
+    { field: 'seen', operator: 'between', value: ['2026-01-01', '2026-01-31'] },
+  ]
+  const run = (object: RegistryObject) => ({
+    filter: built(compileFilters(object, [{ conjunction: 'and', conditions }], scope)).text,
+    order: built(orderPlan(object, [{ key: 'seen', direction: 'desc' }]).orderBy).text,
+  })
+
+  const asset = run(make('asset', true))
+  assert.ok(asset.filter.includes(`public.stored_date("asset"."custom" ->> 'due') >=`), asset.filter)
+  assert.ok(asset.filter.includes(`public.stored_timestamptz("asset"."custom" ->> 'seen') between`), asset.filter)
+  assert.ok(asset.order.startsWith(`public.stored_timestamptz("asset"."custom" ->> 'seen') desc nulls last`), asset.order)
+  assert.doesNotMatch(asset.filter + asset.order, /::date\)|::timestamptz\)/)
+
+  const core = run(make('contact', false))
+  assert.ok(core.filter.includes(`("contact"."custom" ->> 'due')::date >=`), core.filter)
+  assert.ok(core.order.startsWith(`("contact"."custom" ->> 'seen')::timestamptz desc`), core.order)
 })
 
 test('is_not and not_contains treat a null as "not that value"', () => {

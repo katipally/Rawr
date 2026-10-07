@@ -6,7 +6,7 @@ import { isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 import { parseFilters, parseSorts, type FilterGroup, type Sort } from './query.ts'
 import { ConflictError } from './records.ts'
-import { getRegistry, objectOrThrow } from './registry.ts'
+import { getRegistry, objectOrThrow, type RegistryObject } from './registry.ts'
 
 export type ViewDefinition = {
   id: string | null
@@ -32,17 +32,17 @@ export type ViewDefinition = {
  *  account where every saved view has been deleted. */
 export const DEFAULT_VIEW_SLUG = 'all'
 
-const fallbackView = (objectKey: string, slug: string): ViewDefinition => {
+export const fallbackView = (object: RegistryObject, slug: string): ViewDefinition => {
   // A custom object has no seeded views, so it falls through to the defaults
   // below, which are "everything, newest first" — the right answer for one.
-  const seeded = (CORE_VIEWS[objectKey as keyof typeof CORE_VIEWS] ?? []).find((view) => view.slug === slug)
-    ?? CORE_VIEWS[objectKey as keyof typeof CORE_VIEWS]?.[0]
+  const seeded = (CORE_VIEWS[object.key as keyof typeof CORE_VIEWS] ?? []).find((view) => view.slug === slug)
+    ?? CORE_VIEWS[object.key as keyof typeof CORE_VIEWS]?.[0]
   return {
     id: null,
     slug: seeded?.slug ?? DEFAULT_VIEW_SLUG,
     name: seeded?.name ?? 'All records',
     kind: seeded?.kind ?? 'table',
-    columns: seeded?.columns ?? [],
+    columns: seeded?.columns ?? object.fields.slice(0, 8).map((field) => field.key),
     filters: parseFilters(seeded?.filters ?? []),
     sorts: parseSorts(seeded?.sorts ?? []),
     isShared: true,
@@ -124,7 +124,7 @@ export const listViews = async (
   )
 
   const views = rows.map(toDefinition)
-  return views.length > 0 ? views : [fallbackView(object.key, DEFAULT_VIEW_SLUG)]
+  return views.length > 0 ? views : [fallbackView(object, DEFAULT_VIEW_SLUG)]
 }
 
 /** Resolves the slug in the URL. An unknown slug falls back to the default rather
@@ -140,7 +140,7 @@ export const resolveView = async (
   const fallback = views.find((view) => view.slug === DEFAULT_VIEW_SLUG) ?? views[0]
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, objectKey)
-  return { view: fallback ?? fallbackView(object.key, DEFAULT_VIEW_SLUG), matched: false }
+  return { view: fallback ?? fallbackView(object, DEFAULT_VIEW_SLUG), matched: false }
 }
 
 const slugify = (name: string): string =>

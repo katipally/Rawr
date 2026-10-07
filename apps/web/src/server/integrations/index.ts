@@ -707,7 +707,7 @@ export const integrationTraffic = async (
     const [outbound, inbound, unmatched, enriched] = await Promise.all([
       // Either link: `operation` is always named for the kind, and reconnecting an
       // app nulls the foreign key of everything it did under the old row.
-      tx.execute<{ label: string; calls: number; last_at: Date | null }>(sql`
+      tx.execute<{ label: string; calls: number; last_at: string | null }>(sql`
         select operation as label, count(*)::int as calls, max(at) as last_at
           from outbound_call
          where at > now() - interval '30 days'
@@ -715,7 +715,7 @@ export const integrationTraffic = async (
          group by operation
          order by count(*) desc, operation
          limit 12`),
-      tx.execute<{ label: string; calls: number; last_at: Date | null }>(sql`
+      tx.execute<{ label: string; calls: number; last_at: string | null }>(sql`
         select kind as label, count(*)::int as calls, max(at) as last_at
           from inbound_event
          where source = ${kind} and at > now() - interval '30 days'
@@ -727,8 +727,8 @@ export const integrationTraffic = async (
       tx.execute<{ n: number }>(sql`
         select count(*)::int as n from field_source where provider = ${kind}`),
     ])
-    const toRows = (rows: { label: string; calls: number; last_at: Date | null }[]): TrafficRow[] =>
-      rows.map((row) => ({ label: row.label, calls: Number(row.calls), lastAt: row.last_at }))
+    const toRows = (rows: { label: string; calls: number; last_at: string | null }[]): TrafficRow[] =>
+      rows.map((row) => ({ label: row.label, calls: Number(row.calls), lastAt: row.last_at ? new Date(row.last_at) : null }))
     return {
       outbound: toRows(outbound),
       inbound: toRows(inbound),

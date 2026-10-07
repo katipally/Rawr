@@ -136,7 +136,7 @@ export const replayDeadLetter = async (ctx: AccountContext, id: string): Promise
 
     const reset = await tx
       .update(fieldIndex)
-      .set({ state: 'pending', lastError: null })
+      .set({ state: 'pending', lastError: null, attempts: 0, claimedAt: null })
       .where(eq(fieldIndex.id, fieldIndexId))
       .returning({ id: fieldIndex.id })
 

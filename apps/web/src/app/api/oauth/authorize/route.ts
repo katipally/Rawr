@@ -1,22 +1,24 @@
 import { createOauthCode } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { checkAuthorizeRequest, issuer } from '~/server/mcp/oauth.ts'
+import { checkAuthorizeRequest, issuer, oauthError } from '~/server/mcp/oauth.ts'
+import { hopResponse } from '~/server/redirect-hop.ts'
 import { memberships, readSession } from '~/server/session.ts'
 
 /** The Approve or Cancel press on the consent screen. The request is checked
  *  again here rather than trusted from the form, because the form is the
  *  browser's and the code is ours.
  *
- *  Every redirect out of here is 303, not the 307 NextResponse.redirect defaults
- *  to. A 307 preserves the method, so approving re-posted the whole consent form
- *  to the client's own redirect URI: an OAuth client expects a GET there, and the
- *  form fields have no business being sent to it. */
-export const POST = async (request: NextRequest): Promise<NextResponse> => {
+ *  Redirects to this site are 303, not the 307 NextResponse.redirect defaults to,
+ *  which would re-post the form. The way back to the client is not a redirect at
+ *  all: form-action 'self' makes Chrome refuse a cross-origin one after a form
+ *  post, so it is a page that navigates there (see redirect-hop.ts). */
+export const POST = async (request: NextRequest): Promise<Response> => {
   const origin = await issuer()
   const session = await readSession()
   if (!session) return NextResponse.redirect(new URL('/sign-in', origin), 303)
 
-  const form = await request.formData()
+  const form = await request.formData().catch(() => null)
+  if (!form) return oauthError('invalid_request', 'The request body could not be read.')
   const params = new URLSearchParams()
   for (const [key, value] of form.entries()) {
     if (typeof value === 'string') params.set(key, value)
@@ -36,7 +38,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   if (params.get('decision') !== 'approve') {
     back.searchParams.set('error', 'access_denied')
     back.searchParams.set('error_description', 'The person did not approve the connection.')
-    return NextResponse.redirect(back, 303)
+    return hopResponse(back)
   }
 
   // The account comes from the person's own memberships, never from the form
@@ -46,7 +48,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   if (!membership) {
     back.searchParams.set('error', 'access_denied')
     back.searchParams.set('error_description', 'That account is not one this account belongs to.')
-    return NextResponse.redirect(back, 303)
+    return hopResponse(back)
   }
 
   const code = await createOauthCode(
@@ -67,5 +69,5 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     },
   )
   back.searchParams.set('code', code)
-  return NextResponse.redirect(back, 303)
+  return hopResponse(back)
 }

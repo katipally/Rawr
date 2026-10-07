@@ -4,6 +4,7 @@
 // value from '@rawr/db' here pulls the Postgres driver into the client bundle.
 import { FORM_FIELD_TYPES, type FormField } from '@rawr/db/forms'
 import { Button, Field, Select, TextInput } from '@rawr/ui'
+import { ChoicesInput } from '~/components/choices-input.tsx'
 import { useRowIds } from '~/lib/row-ids.ts'
 
 /** The extra questions a booking page asks.
@@ -192,19 +193,11 @@ export const QuestionList = ({
               label="Choices"
               hint="One per line. A choice the page does not offer is refused on submit."
             >
-              <TextInput
+              <ChoicesInput
                 id={`q-options-${index}`}
-                value={(question.options ?? []).map((option) => option.label).join(', ')}
+                choices={question.options}
                 disabled={!editable}
-                onChange={(event) =>
-                  patch(index, {
-                    options: event.target.value
-                      .split(',')
-                      .map((label) => label.trim())
-                      .filter(Boolean)
-                      .map((label) => ({ value: label, label })),
-                  })
-                }
+                onChange={(options) => patch(index, { options })}
               />
             </Field>
           ) : null}

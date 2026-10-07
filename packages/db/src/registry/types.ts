@@ -134,6 +134,14 @@ export const TYPE_META: Record<FieldType, TypeMeta> = {
   json: { jsonbCast: 'jsonb', operators: ['is_empty', 'is_not_empty'], editor: 'json', readOnly: true },
 }
 
+/** A custom object reads a stored date or moment through one of these rather than
+ *  through the cast, because only a function declared IMMUTABLE (migration 0102)
+ *  can sit in an index expression. A core object keeps the cast. */
+export const IMMUTABLE_PARSER: Partial<Record<TypeMeta['jsonbCast'], string>> = {
+  date: 'public.stored_date',
+  timestamptz: 'public.stored_timestamptz',
+}
+
 export const operatorsFor = (type: FieldType): readonly Operator[] => TYPE_META[type].operators
 
 /** Longest value any text-shaped field accepts. A 40,000-character CSV cell is

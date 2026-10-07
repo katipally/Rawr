@@ -161,7 +161,7 @@ try {
   const [letter] = await owner`
     insert into dead_letter (account_id, job_name, payload, error, attempts)
     values (${accountId}, 'field-index.create',
-            ${owner.json({ accountId, fieldIndexId: fi!.id, objectKey: 'contact', fieldKey: 'guard_probe_admin' })},
+            ${owner.json({ accountId, fieldIndexId: fi!.id, fieldId: fieldIds.admin })},
             'Simulated failure for the guard check.', 5)
     returning id`
 

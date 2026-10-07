@@ -223,6 +223,96 @@ export const coerce = (field: RegistryField, input: unknown): Coerced => {
   }
 }
 
+const NUMERIC_LITERAL = /^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i
+const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/
+const ISO_MOMENT = /^(\d{4}-\d{2}-\d{2})[T ]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})?$/i
+
+const isRealDay = (text: string): boolean => {
+  const [, year, month, day] = ISO_DAY.exec(text) ?? []
+  if (!year || !month || !day) return false
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  return parsed.getUTCFullYear() === Number(year) && parsed.getUTCMonth() === Number(month) - 1 && parsed.getUTCDate() === Number(day)
+}
+
+const isRealMoment = (text: string): boolean => {
+  const [, day] = ISO_MOMENT.exec(text) ?? []
+  return day !== undefined && isRealDay(day) && !Number.isNaN(Date.parse(text.replace(' ', 'T')))
+}
+
+const shown = (input: unknown): string => {
+  const text = String(input)
+  return text.length > 40 ? `${text.slice(0, 40)}...` : text
+}
+
+/** What one filter value has to be before it reaches a comparison. A value a person
+ *  typed into an address or a saved view is compared by Postgres against a typed
+ *  column, and one that does not parse fails the whole statement with the
+ *  statement in the message. This refuses it first, as a sentence naming the field.
+ *
+ *  Only what Postgres would otherwise reject is checked. Text is compared as typed,
+ *  and a choice on a jsonb field that was since removed still matches nothing
+ *  rather than failing a saved view. A string that passes is returned trimmed and
+ *  otherwise as typed, so a valid filter compiles to what it did before. */
+export const filterValue = (field: RegistryField, input: unknown): unknown => {
+  if (typeof input === 'object' && input !== null && !(input instanceof Date)) {
+    throw new ValueError(field, 'takes one value in a filter, not a list or a group.')
+  }
+
+  switch (field.type) {
+    case 'number':
+    case 'currency':
+    case 'percent':
+    case 'rating': {
+      const text = typeof input === 'string' ? input.trim() : input
+      const valid = typeof text === 'number' ? Number.isFinite(text) : typeof text === 'string' && NUMERIC_LITERAL.test(text)
+      if (!valid) throw new ValueError(field, `"${shown(input)}" is not a number.`)
+      // A literal like 1e999 is well formed and still beyond anything held.
+      if (!Number.isFinite(Number(text))) throw new ValueError(field, `"${shown(input)}" is too large a number.`)
+      return text
+    }
+
+    case 'boolean':
+      return coerce(field, input).value
+
+    case 'date': {
+      const text = typeof input === 'string' ? input.trim() : input
+      if (text instanceof Date ? Number.isNaN(text.getTime()) : typeof text !== 'string' || !isRealDay(text)) {
+        throw new ValueError(field, `"${shown(input)}" is not a date. Use YYYY-MM-DD.`)
+      }
+      return text
+    }
+
+    case 'datetime': {
+      const text = typeof input === 'string' ? input.trim() : input
+      if (text instanceof Date ? Number.isNaN(text.getTime()) : typeof text !== 'string' || !(isRealDay(text) || isRealMoment(text))) {
+        throw new ValueError(field, `"${shown(input)}" is not a date and time. Use YYYY-MM-DD or YYYY-MM-DDThh:mm.`)
+      }
+      return text
+    }
+
+    case 'user':
+    case 'relation': {
+      const text = String(input).trim()
+      if (!UUID.test(text)) throw new ValueError(field, `"${shown(input)}" has to be picked from the list, not typed.`)
+      return text
+    }
+
+    // Held in a column of its own, a choice outside the list can be a value the
+    // column refuses outright; in jsonb it is only a value nothing has.
+    case 'select': {
+      if (field.storage !== 'column' || field.options.length === 0) return input
+      const choice = choiceOf(field.options, String(input).trim())
+      if (choice === undefined) {
+        throw new ValueError(field, `"${shown(input)}" is not one of its choices: ${namedChoices(field.options)}.`)
+      }
+      return choice
+    }
+
+    default:
+      return input
+  }
+}
+
 /** How a value leaves Rawr: one rule per type, used by CSV export and by anything
  *  that has to render a value as plain text. */
 export const formatForCsv = (type: FieldType, value: unknown): string => {

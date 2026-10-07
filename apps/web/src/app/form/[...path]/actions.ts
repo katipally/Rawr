@@ -9,6 +9,7 @@ import { redirect } from 'next/navigation'
 import type { NextRequest } from 'next/server'
 import { checkSubmitLimits, clientIpFrom } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
+import { hopHref } from '~/server/redirect-hop.ts'
 import { answersFromFormData, runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
 
@@ -94,7 +95,9 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
   }
 
   if (result.success?.mode === 'redirect' && result.success.value) {
-    redirect(result.success.value)
+    // A native POST answered with a cross-origin redirect is refused by
+    // form-action 'self', so the page itself hops (see redirect-hop.ts).
+    redirect(hopHref(result.success.value) ? `${back}?sent=1&go=1` : result.success.value)
   }
 
   const held = result.state === 'quarantined' || result.state === 'confirmed_spam'

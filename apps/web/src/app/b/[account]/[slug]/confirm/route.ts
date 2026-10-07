@@ -4,7 +4,7 @@ import { publicBaseUrl } from '~/lib/env.ts'
 import { localeFrom } from '~/lib/format.ts'
 import { bookingIcsPath, bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
 import { book } from '~/server/booking.ts'
-import { CORS_HEADERS, clientIp, rateLimit, readBody } from '~/server/edge.ts'
+import { CORS_HEADERS, bodyRefusal, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
 /** POST /b/:account/:slug/confirm
  *
@@ -40,7 +40,13 @@ export const POST = async (
     )
   }
 
-  const body = await readBody(request)
+  let body: Record<string, unknown>
+  try {
+    body = await readBody(request)
+  } catch (cause) {
+    const { error, status } = bodyRefusal(cause)
+    return NextResponse.json({ error }, { status, headers: CORS_HEADERS })
+  }
   const startsAt = typeof body.slot === 'string' ? new Date(body.slot) : new Date(Number.NaN)
   if (Number.isNaN(startsAt.getTime())) {
     return NextResponse.json(

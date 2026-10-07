@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ConflictError, ForbiddenError, ValueError, type RegistryField } from '@rawr/db'
+import { ConflictError, ForbiddenError, UnknownFieldError, ValueError, type RegistryField } from '@rawr/db'
 import { FormSchemaError } from '@rawr/db/forms'
 import { initTRPC, TRPCError } from '@trpc/server'
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
 import { DrizzleQueryError } from 'drizzle-orm'
 import { RevokedError } from './gmail.ts'
-import { asTrpcError, call, digestOf, formatError, serverFaultMessage } from './errors.ts'
+import { asTrpcError, call, digestOf, formatError, isReadable, serverFaultMessage } from './errors.ts'
 import superjson from 'superjson'
 
 /** A person sees a sentence they can act on for what they did, and a reference
@@ -36,6 +36,16 @@ test('a driver or runtime failure is a server fault, whatever it says', () => {
     const error = asTrpcError(cause)
     assert.equal(error.code, 'INTERNAL_SERVER_ERROR', String(cause))
     assert.doesNotMatch(error.message, /hunter2|secret|ECONNREFUSED|undefined/)
+  }
+})
+
+test('a page may print a sentence or a refused value, never a driver error', () => {
+  const dropped = Object.assign(new Error('write ECONNREFUSED 10.0.0.1:5432'), { code: 'ECONNREFUSED' })
+  assert.equal(isReadable(new Error('That file is empty.')), true)
+  assert.equal(isReadable(new UnknownFieldError('deal', 'zzz')), true)
+  assert.equal(isReadable(new ValueError({ key: 'close_date', label: 'Close date' } as RegistryField, 'That is not a date.')), true)
+  for (const cause of [driver(), dropped, new TypeError('x is undefined'), 'a string', undefined]) {
+    assert.equal(isReadable(cause), false, String(cause))
   }
 })
 

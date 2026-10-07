@@ -715,6 +715,20 @@
       "when": 1792601634179,
       "tag": "0100_a_booking_remembers_the_language_it_was_made_in",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792688034179,
+      "tag": "0101_an_index_build_is_counted_and_belongs_to_its_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1792774434179,
+      "tag": "0102_a_date_property_on_a_custom_object_can_be_indexed",
+      "breakpoints": true
     }
   ]
 }

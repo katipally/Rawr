@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { deal, lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
 import { recordActivity } from './activity.ts'
 import type { AccountContext } from './context.ts'
@@ -119,34 +119,73 @@ export const renamePipeline = async (ctx: AccountContext, id: string, name: stri
     }
   })
 
+const dealsOf = (count: number, deleted = false): string =>
+  `${count} ${deleted ? 'deleted ' : ''}deal${count === 1 ? '' : 's'}`
+
+/** What a pipeline refuses to be deleted over while live deals are in it. */
+export const liveDealsRefusal = (name: string, count: number): string => {
+  const them = count === 1 ? 'it' : 'them'
+  return `${name} still holds ${dealsOf(count)}. Move ${them} to another pipeline first; deleting would leave ${them} with no stage.`
+}
+
+/** What a pipeline or a stage refuses over deals in the trash, which still need a
+ *  stage to be restored into. `remedy` is what to do about it, already a sentence. */
+export const deletedDealsRefusal = (name: string, count: number, remedy: string): string =>
+  `${name} still holds ${dealsOf(count, true)} that ${count === 1 ? 'needs' : 'need'} ${remedy}`
+
 /** A pipeline with deals in it is not deletable at all: there is no "move these
  *  somewhere else" that makes sense across pipelines, because the stages differ.
- *  Emptying it first is the honest path and the message says so. */
+ *  Emptying it first is the honest path and the message says so. Deals already in
+ *  the trash cannot be purged and still hold the pipeline, so they move to the
+ *  first stage of the first other pipeline, where Restore will find them. */
 export const deletePipeline = async (ctx: AccountContext, id: string): Promise<void> =>
   mutate(ctx, 'pipeline', async (tx) => {
-    const [found] = await tx.select({ name: pipeline.name }).from(pipeline).where(eq(pipeline.id, id)).limit(1)
+    // Locked in one fixed order so two deletes cannot both see a spare pipeline and
+    // leave the account with none, or pick a destination the other is removing.
+    const all = await tx
+      .select({ id: pipeline.id, name: pipeline.name })
+      .from(pipeline)
+      .orderBy(asc(pipeline.position), asc(pipeline.name), asc(pipeline.id))
+      .for('update')
+    const found = all.find((row) => row.id === id)
     if (!found) throw new Error('That pipeline no longer exists.')
 
-    const [{ n = 0 } = { n: 0 }] = await tx.execute<{ n: number }>(
-      sql`select count(*)::int as n from deal where pipeline_id = ${id} and deleted_at is null`,
-    )
-    if (Number(n) > 0) {
-      throw new Error(
-        `${found.name} still holds ${n} deal${Number(n) === 1 ? '' : 's'}. Move them to another pipeline first; deleting would leave them with no stage.`,
-      )
+    const [{ live = 0, hidden = 0 } = {}] = await tx.execute<{ live: number; hidden: number }>(sql`
+      select count(*) filter (where deleted_at is null)::int as live,
+             count(*) filter (where deleted_at is not null)::int as hidden
+        from deal where pipeline_id = ${id}`)
+    if (Number(live) > 0) {
+      throw new Error(liveDealsRefusal(found.name, Number(live)))
     }
 
-    const [{ total = 0 } = { total: 0 }] = await tx.execute<{ total: number }>(
-      sql`select count(*)::int as total from pipeline`,
-    )
-    if (Number(total) <= 1) throw new Error('A account needs at least one pipeline.')
+    const target = all.find((row) => row.id !== id)
+    if (!target) throw new Error('A account needs at least one pipeline.')
+
+    if (Number(hidden) > 0) {
+      const [stage] = await tx
+        .select({ id: pipelineStage.id })
+        .from(pipelineStage)
+        .where(eq(pipelineStage.pipelineId, target.id))
+        .orderBy(asc(pipelineStage.position), asc(pipelineStage.id))
+        .limit(1)
+        .for('key share')
+      if (!stage) {
+        throw new Error(
+          deletedDealsRefusal(found.name, Number(hidden), `a stage to move to. Add a stage to ${target.name} first.`),
+        )
+      }
+      await tx
+        .update(deal)
+        .set({ pipelineId: target.id, stageId: stage.id, updatedAt: new Date() })
+        .where(and(eq(deal.pipelineId, id), sql`${deal.deletedAt} is not null`))
+    }
 
     await tx.delete(pipelineStage).where(eq(pipelineStage.pipelineId, id))
     await tx.delete(pipeline).where(eq(pipeline.id, id))
 
     return {
       result: undefined,
-      audit: { entity: 'pipeline', entityId: id, action: 'delete', before: found, after: null },
+      audit: { entity: 'pipeline', entityId: id, action: 'delete', before: { name: found.name, deletedDeals: Number(hidden) }, after: null },
     }
   })
 
@@ -269,7 +308,9 @@ export type StageDeleteResult = { moved: number }
 
 /** F1's edge case, implemented as written: deletion requires a destination, and
  *  every deal that moves writes a stage_change so the record reads as a move rather
- *  than as history that quietly changed. */
+ *  than as history that quietly changed. Deals already in the trash cannot be
+ *  purged and still hold the stage, so they move too, without a stage_change, to
+ *  the same destination or, when none is named, the pipeline's first other stage. */
 export const deleteStage = async (
   ctx: AccountContext,
   stageId: string,
@@ -281,25 +322,45 @@ export const deleteStage = async (
       .from(pipelineStage)
       .where(eq(pipelineStage.id, stageId))
       .limit(1)
+      .for('update')
     if (!found) throw new Error('That stage no longer exists.')
 
     const deals = await tx
       .select({ id: deal.id, name: deal.name })
       .from(deal)
       .where(and(eq(deal.stageId, stageId), sql`${deal.deletedAt} is null`))
+    const [{ hidden = 0 } = {}] = await tx.execute<{ hidden: number }>(
+      sql`select count(*)::int as hidden from deal where stage_id = ${stageId} and deleted_at is not null`,
+    )
 
-    if (deals.length > 0) {
-      if (!destinationStageId) {
+    if (deals.length > 0 && !destinationStageId) {
+      throw new Error(
+        `${found.name} holds ${deals.length} deal${deals.length === 1 ? '' : 's'}. Pick the stage they should move to before deleting it.`,
+      )
+    }
+    const needsHome = deals.length > 0 || Number(hidden) > 0
+    const [destination] = needsHome
+      ? await tx
+          .select({ id: pipelineStage.id, name: pipelineStage.name, pipelineId: pipelineStage.pipelineId })
+          .from(pipelineStage)
+          .where(
+            destinationStageId
+              ? eq(pipelineStage.id, destinationStageId)
+              : and(eq(pipelineStage.pipelineId, found.pipelineId), ne(pipelineStage.id, stageId)),
+          )
+          .orderBy(asc(pipelineStage.position), asc(pipelineStage.id))
+          .limit(1)
+          .for('key share')
+      : []
+
+    if (needsHome) {
+      if (!destination) {
         throw new Error(
-          `${found.name} holds ${deals.length} deal${deals.length === 1 ? '' : 's'}. Pick the stage they should move to before deleting it.`,
+          destinationStageId
+            ? 'That destination stage no longer exists.'
+            : deletedDealsRefusal(found.name, Number(hidden), 'another stage to move to. Add one to this pipeline first.'),
         )
       }
-      const [destination] = await tx
-        .select({ id: pipelineStage.id, name: pipelineStage.name, pipelineId: pipelineStage.pipelineId })
-        .from(pipelineStage)
-        .where(eq(pipelineStage.id, destinationStageId))
-        .limit(1)
-      if (!destination) throw new Error('That destination stage no longer exists.')
       if (destination.id === stageId) throw new Error('A stage cannot be its own destination.')
       if (destination.pipelineId !== found.pipelineId) {
         throw new Error(
@@ -307,13 +368,13 @@ export const deleteStage = async (
         )
       }
 
-      await tx.update(deal).set({ stageId: destinationStageId, updatedAt: new Date() }).where(eq(deal.stageId, stageId))
+      await tx.update(deal).set({ stageId: destination.id, updatedAt: new Date() }).where(eq(deal.stageId, stageId))
 
       for (const moved of deals) {
         await recordActivity(tx, ctx, {
           type: 'stage_change',
           subject: `moved ${moved.name ?? 'Unnamed deal'} from ${found.name} to ${destination.name}`,
-          payload: { field: 'stage_id', from: stageId, to: destinationStageId, fromLabel: found.name, toLabel: destination.name, reason: 'stage_deleted' },
+          payload: { field: 'stage_id', from: stageId, to: destination.id, fromLabel: found.name, toLabel: destination.name, reason: 'stage_deleted' },
           links: [{ entityType: 'deal', entityId: moved.id }],
         })
       }
@@ -327,8 +388,8 @@ export const deleteStage = async (
         entity: 'pipeline_stage',
         entityId: stageId,
         action: 'delete',
-        before: { name: found.name, deals: deals.length },
-        after: { movedTo: destinationStageId },
+        before: { name: found.name, deals: deals.length, deletedDeals: Number(hidden) },
+        after: { movedTo: destination?.id ?? null },
       },
     }
   })

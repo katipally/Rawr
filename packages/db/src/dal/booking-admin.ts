@@ -249,6 +249,12 @@ export const saveBookingPage = async (
       throw new Error('A booking page with no hosts cannot be published. Add a host or leave it off.')
     }
 
+    const [clash] = await tx.execute<{ name: string }>(sql`
+      select name from booking_page
+       where account_id = ${ctx.accountId} and slug = ${input.slug} and id is distinct from ${input.id ?? null}::uuid
+       limit 1`)
+    if (clash) throw new Error(`"${clash.name}" already uses the address "${input.slug}". Pick another.`)
+
     const [row] = await tx.execute<{ id: string }>(sql`
       insert into booking_page (
         id, account_id, slug, name, kind, owner_id, duration_minutes,

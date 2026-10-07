@@ -1,4 +1,4 @@
-import { calendarFields, isObjectKey, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
+import { calendarFields, isObjectKey, isUuid, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
@@ -10,6 +10,7 @@ import { decodeFilters, exportCsvPath, importsPath, objectView, type ListParams,
 import { loadCrmContext, toEditableFields, toFilterFields, toTableColumns } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { SECTIONS } from '~/lib/record-layout.ts'
+import { isReadable } from '~/server/errors.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
 
@@ -52,7 +53,8 @@ const BoardPage = async ({
   // the toolbar below reads group.conditions off every entry.
   const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
   // No pipeline in the URL means the first one, which is Enterprise in production.
-  const pipelineId = search.pipeline ?? lookups.pipelines[0]?.id ?? null
+  // One that is not an id goes into a uuid comparison, which Postgres refuses.
+  const pipelineId = (search.pipeline && isUuid(search.pipeline) ? search.pipeline : null) ?? lookups.pipelines[0]?.id ?? null
 
   // A board grouped by something other than stage spans every pipeline, because a
   // deal type or a product of interest is not a property of one pipeline.
@@ -69,11 +71,17 @@ const BoardPage = async ({
   } catch (cause) {
     // A hand-edited group in a URL is the usual cause, and the message names the
     // fields that would have worked, so the default grouping is worth one retry.
-    boardError = cause instanceof Error ? cause.message : String(cause)
+    // Only a sentence the data layer wrote for a person is shown; a driver error
+    // carries the statement.
+    if (!isReadable(cause)) throw cause
+    boardError = cause.message
     // A hand-edited filter is the other cause, and it survives that retry. Saying
     // so beats the crash screen the second throw used to reach.
     query = { pipelineId, filters, search: search.q ?? '', groupBy: 'stage_id' }
-    board = await readBoard(ctx, query).catch(() => null)
+    board = await readBoard(ctx, query).catch((retry) => {
+      if (!isReadable(retry)) throw retry
+      return null
+    })
   }
 
   const listParams: ListParams = {
