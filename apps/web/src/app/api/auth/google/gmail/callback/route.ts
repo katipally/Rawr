@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { mailboxesPath, safePath } from '~/lib/links.ts'
+import { NOTICE_PARAM, type NoticeCode } from '~/lib/notices.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
 import { authorisedAddress, grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -23,29 +24,27 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   jar.delete('rawr_gmail_verifier')
   jar.delete('rawr_gmail_return')
 
-  const back = (message?: string): NextResponse => {
+  const back = (notice?: NoticeCode): NextResponse => {
     const url = new URL(returnTo, env.AUTH_URL)
-    if (message) url.searchParams.set('error', message)
+    if (notice) url.searchParams.set(NOTICE_PARAM, notice)
     return NextResponse.redirect(url)
   }
 
   if (request.nextUrl.searchParams.get('error')) {
-    return back('Gmail access was not granted, so no history can be read for you.')
+    return back('gmail_denied')
   }
 
   const code = request.nextUrl.searchParams.get('code')
   const state = request.nextUrl.searchParams.get('state')
   if (!code || !state || !expectedState || !codeVerifier) {
-    return back('That link is incomplete. Start again from the mailboxes screen.')
+    return back('gmail_incomplete')
   }
-  if (state !== expectedState) return back('That attempt did not match this browser. Start again.')
+  if (state !== expectedState) return back('attempt_mismatch')
 
   try {
     const tokens = await googleClient(GOOGLE_GMAIL_CALLBACK_PATH).validateAuthorizationCode(code, codeVerifier)
     if (!tokens.hasRefreshToken()) {
-      return back(
-        'Google did not return a refresh token, so the back-fill would stop within the hour. Remove Rawr from your Google account permissions and connect again.',
-      )
+      return back('gmail_no_refresh_token')
     }
     await saveMailbox(contextFrom(session), {
       userId: session.userId,
@@ -59,9 +58,8 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
       canSend: grantedSending(tokens.hasScopes() ? tokens.scopes() : []),
     })
   } catch (cause) {
-    return back(
-      `That mailbox could not be connected: ${cause instanceof Error ? cause.message : String(cause)}`,
-    )
+    console.error('[gmail] connecting a mailbox failed:', cause)
+    return back('mailbox_failed')
   }
 
   return back()

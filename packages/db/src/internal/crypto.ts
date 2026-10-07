@@ -63,6 +63,17 @@ export const decryptToken = (value: string): string => {
   ]).toString('utf8')
 }
 
+const SEALED = /^v1\.[\w-]+\.[\w-]+\.[\w-]+$/
+
+/** For a signing key Rawr must read back, which a hash cannot give. Idempotent, so
+ *  a value that comes back from a screen already sealed is not sealed twice. */
+export const sealSecret = (secret: string): string => (!secret || SEALED.test(secret) ? secret : encryptToken(secret))
+
+/** Tolerant on purpose: a row written before keys were sealed is still plaintext
+ *  and keeps signing until `seal-secrets` reaches it. A sealed value that cannot
+ *  be opened throws, so a missing key is loud rather than a wrong signature. */
+export const openSecret = (stored: string): string => (SEALED.test(stored) ? decryptToken(stored) : stored)
+
 /** URL-safe, unguessable, and long enough that enumeration is not a strategy.
  *  Used for cancel, reschedule and hold tokens, which are the only credential
  *  their links carry. */

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readMcpClient, saveMcpClient, type McpClientRow } from '@rawr/db'
 import { requestOrigin } from '~/server/origin.ts'
+import { outboundRequest } from '~/server/outbound.ts'
 
 /** F5 §1, the OAuth 2.1 half. Rawr is both the resource server (/api/mcp) and the
  *  authorization server, on one origin, so the two discovery documents point at
@@ -113,13 +114,14 @@ export const resolveClient = async (clientId: string): Promise<McpClientRow | nu
 
   let document: { client_id?: string; client_name?: string; redirect_uris?: unknown }
   try {
-    const response = await fetch(clientId, {
+    const response = await outboundRequest({
+      url: clientId,
       headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(5_000),
-      redirect: 'error',
+      timeoutMs: 5_000,
+      maxBytes: 65_536,
     })
-    if (!response.ok) throw new Error(`answered ${response.status}`)
-    document = (await response.json()) as typeof document
+    if (!response.ok || response.truncated) throw new Error(`answered ${response.status}`)
+    document = JSON.parse(response.text) as typeof document
   } catch {
     // A stale copy beats a refusal when the document is briefly unreachable.
     return cached

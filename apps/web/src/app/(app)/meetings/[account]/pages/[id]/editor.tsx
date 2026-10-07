@@ -642,6 +642,8 @@ export const PageEditor = ({
             <Field id="page-redirect" label="Or send them to" hint="A full URL. Left empty, the confirmation is shown in place.">
               <TextInput
                 id="page-redirect"
+                type="url"
+                placeholder="https://"
                 value={form.redirectUrl ?? ''}
                 disabled={!editable}
                 onChange={(event) => set('redirectUrl', event.target.value)}

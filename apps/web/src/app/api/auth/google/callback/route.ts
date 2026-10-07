@@ -10,6 +10,7 @@ import {
 } from '@rawr/db'
 import { env, googleCalendarConfigured, hostedDomainRequired, newAccountsAllowed } from '~/lib/env.ts'
 import { accountInPath } from '~/lib/links.ts'
+import { NOTICE_PARAM, type NoticeCode } from '~/lib/notices.ts'
 import { GOOGLE_CALLBACK_PATH, decodeIdToken, googleClient, identityFromIdToken, type GoogleIdentity, type GoogleTokens } from '~/server/auth/google.ts'
 import { safeNext } from '~/server/auth/next.ts'
 import { INVITE_COOKIE } from '~/server/invite.ts'
@@ -20,8 +21,8 @@ import { contextFrom, sessionFromMembership, writeSessionCookie, type Session } 
  *  so it is sent back at most once. */
 const CONSENT_COOKIE = 'rawr_oauth_consented'
 
-const denied = (reason: string): NextResponse =>
-  NextResponse.redirect(new URL(`/sign-in?error=${encodeURIComponent(reason)}`, env.AUTH_URL))
+const denied = (notice: NoticeCode): NextResponse =>
+  NextResponse.redirect(new URL(`/sign-in?${NOTICE_PARAM}=${notice}`, env.AUTH_URL))
 
 export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const code = request.nextUrl.searchParams.get('code')
@@ -42,13 +43,13 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   jar.delete(INVITE_COOKIE)
 
   if (request.nextUrl.searchParams.get('error')) {
-    return denied('Google sign-in was cancelled.')
+    return denied('signin_cancelled')
   }
   if (!code || !state || !expectedState || !codeVerifier) {
-    return denied('That sign-in link is incomplete. Start again from the sign-in page.')
+    return denied('signin_incomplete')
   }
   if (state !== expectedState) {
-    return denied('That sign-in attempt did not match this browser. Start again.')
+    return denied('attempt_mismatch')
   }
 
   let identity: GoogleIdentity
@@ -57,14 +58,14 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     granted = await googleClient(GOOGLE_CALLBACK_PATH).validateAuthorizationCode(code, codeVerifier)
     identity = identityFromIdToken(decodeIdToken(granted.idToken()))
   } catch {
-    return denied('Google would not confirm that sign-in. Start again.')
+    return denied('signin_unconfirmed')
   }
 
   if (!identity.emailVerified) {
-    return denied('That Google account has an unverified email address.')
+    return denied('email_unverified')
   }
   if (hostedDomainRequired && identity.hostedDomain !== env.GOOGLE_HOSTED_DOMAIN) {
-    return denied(`Rawr is limited to ${env.GOOGLE_HOSTED_DOMAIN} accounts.`)
+    return denied('domain_not_allowed')
   }
 
   // An identity whose domain an account claims joins it, on that account's default
@@ -100,11 +101,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
   const asked = accountInPath(next)
   const membership = memberships.find((m) => m.accountSlug === asked) ?? memberships[0]
   if (!membership) {
-    return denied(
-      identity.hostedDomain
-        ? `${identity.email} signed in, but no account exists for ${identity.hostedDomain} and one could not be opened. Ask an admin to invite you.`
-        : `${identity.email} signed in, but has no seat. Ask an admin to invite you from Settings, Users & Teams.`,
-    )
+    return denied(identity.hostedDomain ? 'no_account_for_domain' : 'no_seat')
   }
 
   const session = sessionFromMembership(membership)

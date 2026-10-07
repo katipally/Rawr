@@ -23,16 +23,17 @@ the data layer is vendor-specific.
  pnpm db:seed                   # two fixture accounts, ~20 records each
 ```
 
-`.env.example` is written for a deployment, so on a laptop add these three and
+`.env.example` is written for a deployment, so on a laptop add these four and
 give the four secrets any value long enough to parse:
 
 ```
  RAWR_DEV_CALENDAR=1    free-busy without a Google project
  RAWR_DEV_GMAIL=1       mailbox sync without one either
  RAWR_DEV_INTEGRATIONS=1  stand-ins for Brevo, Apollo, Clay, Slack and GA4
+ RAWR_DEV_OUTBOUND=1    outbound calls may reach localhost, over http
 ```
 
-All three `RAWR_DEV_` flags refuse to work when `NODE_ENV` is production,
+All the `RAWR_DEV_` flags refuse to work when `NODE_ENV` is production,
 whatever they are set to.
 
 Every script reads `.env.local` through `node --env-file-if-exists`, so that file

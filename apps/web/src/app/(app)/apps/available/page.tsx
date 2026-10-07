@@ -28,7 +28,7 @@ const AvailableAppsPage = async () => {
         lead={`${available.length} not connected yet`}
         why={
           <p>
-            Everything Rawr has a client for. A shared app is connected once by a super admin and
+            Everything Rawr has a client for. A shared app is connected once by an account admin and
             used by every account here; a personal one is granted by each person for themselves.
           </p>
         }

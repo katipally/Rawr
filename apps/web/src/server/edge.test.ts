@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { NextRequest } from 'next/server'
-import { bodyRefusal, clientIpFrom, MAX_BODY_BYTES, PayloadTooLarge, readBody, UnreadableBody } from './edge.ts'
+import { bodyRefusal, clientIpFrom, MAX_BODY_BYTES, PayloadTooLarge, readBody, readRaw, UnreadableBody, unverified } from './edge.ts'
 
 /** TRUSTED_PROXY_HOPS defaults to 1, which is the deployment: one reverse proxy
  *  in front of the app. */
@@ -65,4 +65,48 @@ test('a refused body is 413 when too large and 400 otherwise', () => {
   assert.equal(bodyRefusal(new PayloadTooLarge()).status, 413)
   assert.equal(bodyRefusal(new UnreadableBody()).status, 400)
   assert.equal(bodyRefusal(new Error('x')).status, 400)
+})
+
+/** A body that arrives in 1 KB chunks with no content-length, as a chunked upload
+ *  does, counting how many chunks the reader actually pulled. */
+const chunked = (chunks: number) => {
+  let pulled = 0
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled >= chunks) return controller.close()
+      pulled += 1
+      controller.enqueue(new Uint8Array(1024).fill(97))
+    },
+  })
+  const request = new Request('http://localhost/w/webflow', { method: 'POST', body: stream, duplex: 'half' } as RequestInit) as NextRequest
+  return { request, pulled: () => pulled }
+}
+
+test('a chunked body over the cap is cut off without being read to the end', async () => {
+  const { request, pulled } = chunked(100_000)
+  await assert.rejects(readRaw(request), PayloadTooLarge)
+  assert.ok(pulled() <= MAX_BODY_BYTES / 1024 + 2, `pulled ${pulled()} chunks`)
+})
+
+test('a body of exactly the cap is read whole and an empty one is empty text', async () => {
+  assert.equal((await readRaw(chunked(MAX_BODY_BYTES / 1024).request)).length, MAX_BODY_BYTES)
+  assert.equal(await readRaw(new Request('http://localhost/w/x', { method: 'POST' }) as NextRequest), '')
+})
+
+test('a declared length over the cap is refused before any byte is read', async () => {
+  const request = new Request('http://localhost/w/x', { method: 'POST', headers: { 'content-length': String(MAX_BODY_BYTES + 1) }, body: 'x' }) as NextRequest
+  await assert.rejects(readRaw(request), PayloadTooLarge)
+})
+
+test('multi-byte text under the byte cap survives the stream join', async () => {
+  const text = 'é'.repeat(1000)
+  assert.equal(await readRaw(post(text, 'text/plain')), text)
+})
+
+test('every unverifiable inbound request gets the same 401 whatever the reason', async () => {
+  const a = unverified('/w/brevo', 'provider not connected')
+  const b = unverified('/w/webflow', 'signature mismatch')
+  assert.equal(a.status, 401)
+  assert.equal(b.status, 401)
+  assert.deepEqual(await a.json(), await b.json())
 })

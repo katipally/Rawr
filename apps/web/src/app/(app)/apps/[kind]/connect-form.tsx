@@ -86,7 +86,7 @@ export const ConnectForm = (props: ConnectFormProps) => {
     <div className="flex flex-col gap-4">
       {!props.canWrite ? (
         <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-          Only a super admin can change how {props.name} is connected. You can see what is set.
+          Only an account admin can change how {props.name} is connected. You can see what is set.
         </p>
       ) : null}
 

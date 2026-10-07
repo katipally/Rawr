@@ -26,6 +26,7 @@ import { NavigationProgress, NavigationProvider, useNavigation } from './navigat
 import { BookmarksPanel } from './bookmarks.tsx'
 import { NotificationBell } from './notifications.tsx'
 import { PREVIEW_DOCK } from '~/lib/docks.ts'
+import { forgetDrafts } from '~/lib/drafts.ts'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
 import { useUi, useUiReady, usePreferencesSync } from '~/lib/store/ui.ts'
 import { TaskTray } from './task-tray.tsx'
@@ -507,6 +508,7 @@ const Shell = ({
                     label: 'Sign out',
                     icon: <LogOut className="size-4" />,
                     onSelect: () => {
+                      forgetDrafts()
                       const form = document.createElement('form')
                       form.method = 'post'
                       form.action = '/api/auth/sign-out'

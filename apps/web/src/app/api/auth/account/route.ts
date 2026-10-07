@@ -2,6 +2,8 @@ import { membershipsForUser } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { safePath } from '~/lib/links.ts'
+import { NOTICE_PARAM } from '~/lib/notices.ts'
+import { crossOrigin } from '~/server/same-origin.ts'
 import { readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
 
 /** Switches the signed-in account. A POST, so a link or an image cannot do it on
@@ -9,13 +11,12 @@ import { readSession, sessionFromMembership, writeSessionCookie } from '~/server
  *  origin is checked besides. Membership is re-read from the database here; the
  *  slug is a request, never proof. */
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
-  const origin = request.headers.get('origin')
-  if (origin && origin !== new URL(env.AUTH_URL).origin) return new NextResponse(null, { status: 403 })
+  if (crossOrigin(request)) return new NextResponse(null, { status: 403 })
 
   const session = await readSession()
   if (!session) {
     const back = new URL('/sign-in', env.AUTH_URL)
-    back.searchParams.set('error', 'Sign in to open that link.')
+    back.searchParams.set(NOTICE_PARAM, 'sign_in_first')
     return NextResponse.redirect(back, 303)
   }
 
@@ -32,10 +33,7 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   const target = memberships.find((membership) => membership.accountSlug === wanted)
   if (!target) {
     const back = new URL('/', env.AUTH_URL)
-    back.searchParams.set(
-      'error',
-      `That link belongs to an account called "${wanted}", and you do not have a seat in it.`,
-    )
+    back.searchParams.set(NOTICE_PARAM, 'account_not_member')
     return NextResponse.redirect(back, 303)
   }
 

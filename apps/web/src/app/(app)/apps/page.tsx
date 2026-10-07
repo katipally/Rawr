@@ -7,7 +7,7 @@ import { AppLogo } from '~/components/app-logo.tsx'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
 import { appPath, availableAppsPath } from '~/lib/links.ts'
 import { connectPathFor, metaFor } from '~/server/integrations/index.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { AppsTable } from './apps-table.tsx'
 import { errorSummary } from './health.ts'
 import { AppsTabs } from './tabs.tsx'
@@ -37,7 +37,7 @@ const AppsPage = async () => {
         why={
           <p>
             An app is connected once for the whole account and everybody in it uses the same
-            credential. Only a super admin can connect or disconnect one; anybody can see what is
+            credential. Only an account admin can connect or disconnect one; anybody can see what is
             connected and whether it is working.
           </p>
         }
@@ -106,7 +106,7 @@ const AppsPage = async () => {
           />
         ) : (
           <AppsTable
-            canManage={session.isSuperAdmin}
+            canManage={sessionIsAdmin(session)}
             rows={connected.map((row) => {
               const meta = metaFor(row.kind)
               return {

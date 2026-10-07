@@ -452,6 +452,36 @@ try {
   check('an unconnected Slack leaves no dead letter behind',
     (slackLetters[0]?.n ?? 0) === 0, `${slackLetters[0]?.n ?? 0} rows`)
 
+  // ------------------------------------------------- success redirect address
+  section('the success redirect is an http or https address')
+
+  const redirecting = (successValue: string, slug = `redirecting-${stamp}`) => ({
+    name: `Redirecting ${stamp}`,
+    slug,
+    isActive: true,
+    fields: [{ key: 'email', label: 'Email', type: 'email' as const, required: true }],
+    settings: { ...contactUs.settings, successMode: 'redirect' as const, successValue },
+  })
+  for (const unsafe of ['javascript:alert(1)', 'java\nscript:alert(1)', 'data:text/html,x', '//evil.example', 'Thanks for that']) {
+    check(`a redirect of ${JSON.stringify(unsafe)} is refused`, await refusesAsync(() => saveForm(admin, redirecting(unsafe))))
+  }
+  const redirectingId = await saveForm(admin, redirecting('  https://example.com/thanks  '))
+  check('a typed redirect is stored as its normalised address',
+    (await getForm(admin, redirectingId))?.settings.successValue === 'https://example.com/thanks')
+
+  // A row saved before the gate existed must not reach a visitor as a link.
+  await scoped(admin, sql`
+    update form set settings = jsonb_set(settings, '{successValue}', to_jsonb('javascript:alert(1)'::text))
+     where id = ${redirectingId}`)
+  const legacy = await submitForm({
+    form: (await publicFormBySlug(SANDBOX.slug, `redirecting-${stamp}`))!,
+    body: { email: `legacy.${stamp}@verify-corp.example`, rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+  check('a stored non-http redirect answers with the message instead',
+    legacy.success?.mode === 'message' && !legacy.success.value.includes('javascript'), JSON.stringify(legacy.success))
+
   // The hosted page's rate limiter reads the right end of x-forwarded-for, which
   // is web-layer code this suite cannot import. Covered by
   // apps/web/src/server/edge.test.ts, with a forged left entry.

@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { draftKey, readDraft } from './draft-read.ts'
+import { draftKey, purgeDrafts, readDraft, SIGNED_OUT_KEY } from './draft-read.ts'
+import { useDraftUser } from './draft-scope.tsx'
 
 /** One create-or-edit form's unsaved input, kept in `localStorage` so it survives
  *  a closed tab or a browser restart, not just the remount create-record.tsx used
@@ -25,7 +26,8 @@ export const useDraft = <T,>(
   value: T,
   onRestore: (draft: T) => void,
 ): { forget: () => void } => {
-  const key = draftKey(account, object, recordId)
+  const userId = useDraftUser()
+  const key = userId ? draftKey(userId, account, object, recordId) : null
   const [restoredKey, setRestoredKey] = useState<string | null>(null)
   const onRestoreRef = useRef(onRestore)
   onRestoreRef.current = onRestore
@@ -36,6 +38,7 @@ export const useDraft = <T,>(
   const settled = useRef(false)
 
   useEffect(() => {
+    if (!key) return
     settled.current = false
     try {
       const read = readDraft<T>(localStorage.getItem(key), Date.now())
@@ -48,12 +51,13 @@ export const useDraft = <T,>(
   }, [key])
 
   useEffect(() => {
-    if (restoredKey !== key) return
+    if (!key || restoredKey !== key) return
     if (!settled.current) {
       settled.current = true
       return
     }
     try {
+      if (localStorage.getItem(SIGNED_OUT_KEY)) return
       localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }))
     } catch {
       // Quota exceeded or blocked: the form keeps working without a saved draft.
@@ -61,6 +65,7 @@ export const useDraft = <T,>(
   }, [key, value, restoredKey])
 
   const forget = () => {
+    if (!key) return
     try {
       localStorage.removeItem(key)
     } catch {
@@ -69,4 +74,15 @@ export const useDraft = <T,>(
   }
 
   return { forget }
+}
+
+/** Signing out takes the person's unsent text off this machine, and tells any other
+ *  tab still open on the session to stop saving more. */
+export const forgetDrafts = (): void => {
+  try {
+    purgeDrafts(localStorage)
+    localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()))
+  } catch {
+    // Blocked storage holds no drafts to forget.
+  }
 }

@@ -4,7 +4,7 @@ import { randomToken } from '../internal/crypto.ts'
 import { recordActivity } from './activity.ts'
 import { readAttribution, type AttributionInput } from './attribution.ts'
 import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
-import { readSchema, type FormField } from './form-schema.ts'
+import { readSchema, webAddress, type FormField } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
 import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
@@ -143,7 +143,7 @@ export const publicBookingPage = async (
     locationDetail: row.location_detail,
     questions: readQuestions(row.questions),
     isActive: row.is_active,
-    redirectUrl: row.redirect_url,
+    redirectUrl: row.redirect_url ? webAddress(row.redirect_url) : null,
     confirmationCopy: row.confirmation_copy,
     hostNames: Array.isArray(row.host_names) ? row.host_names.filter(Boolean) : [],
   }
@@ -258,7 +258,7 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
   companyFallback: row.company_fallback,
   questions: readQuestions(row.questions),
   isActive: row.is_active,
-  redirectUrl: row.redirect_url,
+  redirectUrl: row.redirect_url ? webAddress(row.redirect_url) : null,
   confirmationCopy: row.confirmation_copy,
   confirmationEnabled: row.confirmation_enabled,
   confirmationSubject: row.confirmation_subject,
@@ -633,23 +633,39 @@ export const readHolds = async (
     return new Map(rows.map((row) => [new Date(row.starts_at).getTime(), Number(row.n)]))
   })
 
+/** Live holds one booking page may carry at once. A hold closes a slot to everyone
+ *  else, and the route's per-address limit (5 a minute, so 25 live across the
+ *  five minute lifetime) does nothing against somebody rotating addresses. Twenty
+ *  keeps that to a bounded set of slots, sits under what one address alone could
+ *  park, and is well above how many people are mid-form on one page within
+ *  five minutes. */
+export const MAX_LIVE_HOLDS_PER_PAGE = 20
+
+/** Null when the page is already carrying its limit, so a hold stays a courtesy
+ *  that can be refused and never something that must succeed. */
 export const placeHold = async (
   accountId: string,
   pageId: string,
   startsAt: Date,
-): Promise<{ token: string; expiresAt: Date }> => {
+): Promise<{ token: string; expiresAt: Date } | null> => {
   const ctx = publicEdgeContext(accountId)
   const token = randomToken(18)
   const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000)
-  await withAccount(ctx, async (tx) => {
+  const placed = await withAccount(ctx, async (tx) => {
     // Expired holds are cleared on the way past rather than by a job: the only
     // query that cares is this one, and it is the only writer.
     await tx.execute(sql`delete from booking_hold where expires_at < now() - interval '1 hour'`)
-    await tx.execute(sql`
+    // Serialised per page: under read committed, two inserts could otherwise both
+    // count room for one more.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`hold|${pageId}`}, 0))`)
+    return tx.execute(sql`
       insert into booking_hold (account_id, booking_page_id, starts_at, token, expires_at)
-      values (${accountId}, ${pageId}, ${ts(startsAt)}, ${token}, ${ts(expiresAt)})`)
+      select ${accountId}, ${pageId}, ${ts(startsAt)}, ${token}, ${ts(expiresAt)}
+       where (select count(*) from booking_hold
+               where booking_page_id = ${pageId} and expires_at > now()) < ${MAX_LIVE_HOLDS_PER_PAGE}::int
+      returning token`)
   })
-  return { token, expiresAt }
+  return placed.length > 0 ? { token, expiresAt } : null
 }
 
 /** One token, moved from slot to slot as the person changes their mind, rather
@@ -668,7 +684,7 @@ export const renewHold = async (
   pageId: string,
   startsAt: Date,
   token: string | null,
-): Promise<{ token: string; expiresAt: Date }> => {
+): Promise<{ token: string; expiresAt: Date } | null> => {
   if (token) {
     const expiresAt = new Date(Date.now() + HOLD_MINUTES * 60_000)
     const moved = await withAccount(publicEdgeContext(accountId), (tx) =>

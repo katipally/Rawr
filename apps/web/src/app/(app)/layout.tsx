@@ -5,6 +5,7 @@ import { AppShell, type NavGroup, type NavSection } from '~/components/app-shell
 import { ShortcutSheet } from '~/components/shortcut-sheet.tsx'
 import { QueryProvider } from '~/components/query.tsx'
 import { AdoptZone, FormatProvider } from '~/components/zone.tsx'
+import { DraftScope } from '~/lib/draft-scope.tsx'
 import { CommandPalette, type Action } from '~/components/crm/command-palette.tsx'
 import { EnrichmentConsent } from '~/components/crm/enrichment-consent.tsx'
 import {
@@ -233,6 +234,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
     <QueryProvider>
     <FormatProvider locale={format.locale} zone={session.timezone} currency={session.accountCurrency}>
     <ToastProvider>
+    <DraftScope userId={session.userId}>
       <AppShell
         accountName={session.accountName}
         accountSlug={account}
@@ -288,6 +290,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
       </AppShell>
       <ShortcutSheet />
       <AdoptZone stored={session.timezone} />
+    </DraftScope>
     </ToastProvider>
     </FormatProvider>
     </QueryProvider>

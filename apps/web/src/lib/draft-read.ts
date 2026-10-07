@@ -10,8 +10,30 @@ export const DRAFT_EXPIRY_MS = 3 * 24 * 60 * 60 * 1000
 
 export type Stored<T> = { savedAt: number; value: T }
 
-export const draftKey = (account: string, object: string, recordId: string | undefined): string =>
-  recordId ? `rawr:draft:${account}:${object}:${recordId}` : `rawr:draft:${account}:${object}`
+const PREFIX = 'rawr:drafts:'
+const LEGACY_PREFIX = 'rawr:draft:'
+
+/** Set when a person signs out, so a tab still open on their session stops saving
+ *  drafts after the purge. The next signed-in page load clears it. */
+export const SIGNED_OUT_KEY = 'rawr:signed-out'
+
+const userPrefix = (userId: string): string => `${PREFIX}${userId}:`
+
+export const draftKey = (userId: string, account: string, object: string, recordId: string | undefined): string =>
+  `${userPrefix(userId)}${account}:${object}${recordId ? `:${recordId}` : ''}`
+
+/** Removes every draft except `keepUser`'s: all of them on sign-out, and on the next
+ *  signed-in load whatever another person, or the older account-only key format,
+ *  left behind. O(keys in storage). */
+export const purgeDrafts = (store: Pick<Storage, 'length' | 'key' | 'removeItem'>, keepUser?: string): void => {
+  const keep = keepUser ? userPrefix(keepUser) : null
+  const doomed: string[] = []
+  for (let index = 0; index < store.length; index += 1) {
+    const key = store.key(index)
+    if (key && (key.startsWith(PREFIX) || key.startsWith(LEGACY_PREFIX)) && !(keep && key.startsWith(keep))) doomed.push(key)
+  }
+  for (const key of doomed) store.removeItem(key)
+}
 
 /** What a raw `localStorage` read resolves to: nothing was ever saved under this
  *  key, what was saved has aged past `DRAFT_EXPIRY_MS`, or a value worth

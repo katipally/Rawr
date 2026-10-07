@@ -1,4 +1,4 @@
-import { readCustomEvent, readPageView, type PageViewDetail } from '@rawr/db'
+import { readCustomEvent, readPageView, webAddress, type PageViewDetail } from '@rawr/db'
 import { Breadcrumb, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
@@ -135,9 +135,13 @@ const PageViewScreen = async ({
           <Row label="URL">
             {/* rel=noreferrer so opening a prospect's page does not announce Rawr
                 in their analytics. */}
-            <a className="text-link" href={view.url} target="_blank" rel="noreferrer noopener">
-              {view.url}
-            </a>
+            {webAddress(view.url) ? (
+              <a className="text-link" href={view.url} target="_blank" rel="noreferrer noopener">
+                {view.url}
+              </a>
+            ) : (
+              view.url
+            )}
           </Row>
           <Row label="Path">{view.path}</Row>
           <Row label="Referrer">{view.referrer ?? 'Direct, no referrer'}</Row>

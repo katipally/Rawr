@@ -163,6 +163,22 @@ export const DEFAULT_SETTINGS: FormSettings = {
   assignOwner: { mode: 'none', userId: null, pool: [] },
 }
 
+/** The address in its serialized form when it is an absolute http or https one,
+ *  else null. The one rule for every stored address that later becomes a link or
+ *  a navigation: javascript:, data:, //host and relative paths all fail it, and
+ *  the URL parser has already dropped the tabs, newlines and padding that hide a
+ *  scheme from a string match. */
+export const webAddress = (value: string): string | null => {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+export const REDIRECT_BLOCKER = 'Send them to a page needs a full address that starts with https://.'
+
 /** The honeypot's name has to look like something a bot wants to fill and nothing
  *  a password manager or a browser autofill will touch. A field literally called
  *  "website" is filled by autofill often enough to burn real people. */
@@ -292,6 +308,7 @@ export const formBlockers = (input: {
   name: string
   slug: string
   fields: FormField[]
+  settings: Pick<FormSettings, 'successMode' | 'successValue'>
 }): string[] => {
   const blockers: string[] = []
   if (!input.name.trim()) blockers.push('A form needs a name.')
@@ -301,6 +318,9 @@ export const formBlockers = (input: {
         ? `"${input.slug}" is not a usable address. Use lowercase letters, numbers and hyphens.`
         : 'A form needs an address. It is the last part of the link people open.',
     )
+  }
+  if (input.settings.successMode === 'redirect' && !webAddress(input.settings.successValue)) {
+    blockers.push(REDIRECT_BLOCKER)
   }
   return [...blockers, ...schemaBlockers(input.fields)]
 }

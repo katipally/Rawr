@@ -6,10 +6,13 @@ import { readAttribution, type Attribution, type AttributionInput } from './attr
 import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
 import {
   assertSchemaIsUsable,
+  DEFAULT_SETTINGS,
   FORM_SLUG,
+  REDIRECT_BLOCKER,
   readPropertyRules,
   readSchema,
   readSettings,
+  webAddress,
   type FormField,
   type FormSettings,
   type PropertyRules,
@@ -68,6 +71,15 @@ type PublicFormRow = {
   settings: unknown
   is_active: boolean
   rules: unknown
+}
+
+/** A redirect whose stored address is not an http(s) one (a row saved before the
+ *  save gate existed) falls back to the message, so a visitor is never sent to
+ *  javascript: or to nothing. */
+const publicSuccess = ({ successMode, successValue }: FormSettings): NonNullable<SubmitResult['success']> => {
+  const href = successMode === 'redirect' ? webAddress(successValue) : null
+  if (href) return { mode: 'redirect', value: href }
+  return { mode: 'message', value: successMode === 'redirect' ? DEFAULT_SETTINGS.successValue : successValue }
 }
 
 const toPublicForm = (row: PublicFormRow): PublicForm => ({
@@ -332,7 +344,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
           contactId: seen.contactId,
           companyId: null,
           duplicate: true,
-          success: { mode: settings.successMode, value: settings.successValue },
+          success: publicSuccess(settings),
         }
       }
     }
@@ -457,7 +469,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
       contactId: linked.contactId,
       companyId: linked.companyId,
       confirmations,
-      success: { mode: settings.successMode, value: settings.successValue },
+      success: publicSuccess(settings),
       notify:
         verdict.state === 'clean' && settings.notifySlack && linked.contactId
           ? {
@@ -760,6 +772,8 @@ export const saveForm = async (ctx: AccountContext, input: SaveFormInput): Promi
       )
     }
     assertSchemaIsUsable(input.fields)
+    const successHref = input.settings.successMode === 'redirect' ? webAddress(input.settings.successValue) : null
+    if (input.settings.successMode === 'redirect' && !successHref) throw new Error(REDIRECT_BLOCKER)
 
     // The unique index would catch this, but as a constraint-violation stack
     // trace. The address is the one thing a person picks that another form may
@@ -777,7 +791,7 @@ export const saveForm = async (ctx: AccountContext, input: SaveFormInput): Promi
       name: input.name.trim(),
       slug: input.slug,
       schema: input.fields,
-      settings: input.settings,
+      settings: successHref ? { ...input.settings, successValue: successHref } : input.settings,
       isActive: input.isActive,
     }
 

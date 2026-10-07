@@ -18,6 +18,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { activityActor, activityLabel, EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { todayIn } from '~/lib/format.ts'
+import { noticeFor } from '~/lib/notices.ts'
 import {
   accountHome,
   bookedPath,
@@ -134,12 +135,13 @@ const HomePage = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ notice?: string }>
 }) => {
   const fmt = await getFormat()
   const session = await readSession()
   if (!session) redirect('/sign-in')
-  const [{ account }, { error }] = await Promise.all([params, searchParams])
+  const [{ account }, { notice }] = await Promise.all([params, searchParams])
+  const message = noticeFor(notice)
   const ctx = contextFrom(session)
   const isAdmin = sessionIsAdmin(session)
   const sales = canView(ctx, 'sales')
@@ -240,11 +242,7 @@ const HomePage = async ({
       </div>
       <div className="flex flex-col gap-2.5 px-2 pb-2 sm:px-4 sm:pb-4">
 
-      {error ? (
-        <Alert>
-          {error}
-        </Alert>
-      ) : null}
+      {message ? <Alert>{message}</Alert> : null}
 
       {sessionIsReadOnly(session) ? (
         <section className="rounded-panel border border-line-interactive bg-accent-subtle px-6 py-4">

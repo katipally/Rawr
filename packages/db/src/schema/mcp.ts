@@ -35,11 +35,15 @@ export const mcpToken = pgTable(
     scope: text('scope'),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     refreshHash: text('refresh_hash'),
+    /** The refresh hash this token replaced on its last rotation. Presenting it again
+     *  is a replay, and the token is revoked. */
+    prevRefreshHash: text('prev_refresh_hash'),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex('mcp_token_hash_key').on(t.tokenHash),
     uniqueIndex('mcp_token_refresh_key').on(t.refreshHash),
+    uniqueIndex('mcp_token_prev_refresh_key').on(t.prevRefreshHash),
     index('mcp_token_user_idx').on(t.accountId, t.userId, t.createdAt.desc()),
     index('mcp_token_user_id_idx').on(t.userId),
   ],
@@ -60,7 +64,8 @@ export const mcpClient = pgTable('mcp_client', {
 })
 
 /** One authorization code, alive for a few minutes between the consent screen and
- *  the token endpoint. Redeemed by deleting it, so it cannot be used twice. */
+ *  the token endpoint. Kept after redemption as a tombstone: a second presentation
+ *  is a replay, and revokes the token the first one linked here. */
 export const mcpOauthCode = pgTable(
   'mcp_oauth_code',
   {
@@ -76,12 +81,16 @@ export const mcpOauthCode = pgTable(
     resource: text('resource'),
     scope: text('scope'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+    replayedAt: timestamp('replayed_at', { withTimezone: true }),
+    tokenId: uuid('token_id').references(() => mcpToken.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex('mcp_oauth_code_hash_key').on(t.codeHash),
     index('mcp_oauth_code_account_id_idx').on(t.accountId),
     index('mcp_oauth_code_user_id_idx').on(t.userId),
+    index('mcp_oauth_code_token_id_idx').on(t.tokenId),
   ],
 )
 

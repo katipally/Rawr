@@ -100,3 +100,10 @@ test('it stays small enough to be a good guest on somebody else\'s page', () => 
   // the inlined stylesheet counts here too.
   assert.equal(script.length < 48_000, true, `the embed is ${script.length} bytes`)
 })
+
+test('a redirect only navigates, or links, to an http or https address', () => {
+  const guard = script.indexOf('!/^https?:[/][/]/i.test(success.value)')
+  assert.notEqual(guard, -1)
+  assert.ok(guard < script.indexOf('href: success.value'))
+  assert.ok(guard < script.indexOf('location.href = success.value'))
+})

@@ -25,7 +25,9 @@ import {
   recordGrantFailure,
   listBookings,
   offsetMs,
+  MAX_LIVE_HOLDS_PER_PAGE,
   placeHold,
+  renewHold,
   publicBookingPage,
   readBooking,
   readBookingPage,
@@ -1229,6 +1231,7 @@ try {
 
   const holdSlot = new Date('2026-09-17T17:00:00.000Z')
   const held = await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)
+  if (!held) throw new Error('the first hold on a page with none was refused')
   const holds = await readHolds(datasaur, page.bookingPageId, {
     from: new Date('2026-09-17T00:00:00Z'),
     to: new Date('2026-09-18T00:00:00Z'),
@@ -1258,6 +1261,7 @@ try {
   )
 
   const released = await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)
+  if (!released) throw new Error('a hold after the last one expired was refused')
   await releaseHold(datasaur.accountId, released.token)
   const afterRelease = await readHolds(datasaur, page.bookingPageId, {
     from: new Date('2026-09-17T00:00:00Z'),
@@ -1266,6 +1270,33 @@ try {
   check(
     'and somebody who changes their mind gives it back immediately',
     afterRelease.get(holdSlot.getTime()) === undefined,
+  )
+
+  const parked: string[] = []
+  for (let i = 0; i < MAX_LIVE_HOLDS_PER_PAGE; i++) {
+    const placed = await placeHold(
+      datasaur.accountId,
+      page.bookingPageId,
+      new Date(holdSlot.getTime() + i * 30 * 60_000),
+    )
+    if (placed) parked.push(placed.token)
+  }
+  check('a page takes holds up to its limit', parked.length === MAX_LIVE_HOLDS_PER_PAGE, `${parked.length}`)
+  check(
+    'and refuses the next one rather than parking another slot',
+    (await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)) === null,
+  )
+  const movedHold = await renewHold(datasaur.accountId, page.bookingPageId, holdSlot, parked[0] ?? null)
+  check('a hold already placed can still move at the limit', movedHold?.token === parked[0])
+  check(
+    'a renewal with no live token is a new hold and is refused at the limit',
+    (await renewHold(datasaur.accountId, page.bookingPageId, holdSlot, 'not-a-live-token')) === null,
+  )
+  await releaseHold(datasaur.accountId, parked[1] ?? '')
+  const afterGiveBack = await placeHold(datasaur.accountId, page.bookingPageId, holdSlot)
+  check('giving one back makes room for one', afterGiveBack !== null)
+  await withAccount(datasaur, (tx) =>
+    tx.execute(sql`delete from booking_hold where booking_page_id = ${page.bookingPageId}`),
   )
 
   // -----------------------------------------------------------------------
@@ -1358,6 +1389,31 @@ try {
     }),
   )
   check('a phone meeting with no number is refused', phoneWithoutNumber)
+
+  const withRedirect = (redirectUrl: string | null) =>
+    saveBookingPage(datasaur, {
+      id: emptyPage,
+      slug: 'nobody-home',
+      name: 'Nobody home',
+      ...PAGE_SHAPE,
+      kind: 'round_robin',
+      location: 'zoom',
+      titleTpl: 'Meeting',
+      descriptionTpl: '',
+      companyFallback: 'a new team',
+      questions: [],
+      isActive: false,
+      hosts: [],
+      redirectUrl,
+    })
+  for (const unsafe of ['javascript:alert(1)', 'java\nscript:alert(1)', 'data:text/html,x', '//evil.example', 'thanks']) {
+    check(`a redirect of ${JSON.stringify(unsafe)} is refused`, await refusesAsync(() => withRedirect(unsafe)))
+  }
+  await withRedirect('  https://example.com/thanks  ')
+  check('a typed redirect is stored as its normalised address',
+    (await readBookingPage(datasaur, emptyPage))?.redirectUrl === 'https://example.com/thanks')
+  await withRedirect('   ')
+  check('a blank redirect is stored as none', (await readBookingPage(datasaur, emptyPage))?.redirectUrl === null)
 
   await setPageActive(datasaur, page.bookingPageId, false)
   const deactivated = await readBookingPage(datasaur, page.bookingPageId)

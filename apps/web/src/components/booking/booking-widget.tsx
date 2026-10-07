@@ -348,7 +348,7 @@ export const BookingWidget = ({
         return
       }
 
-      if (result.redirectUrl) {
+      if (result.redirectUrl && /^https?:\/\//i.test(result.redirectUrl)) {
         location.href = result.redirectUrl
         return
       }

@@ -3,7 +3,9 @@ import type { AutomationRunState } from '../enums.ts'
 import { automation, automationRun } from '../schema/automation.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
+import { sealSecret } from '../internal/crypto.ts'
 import { accountZone, isUuid, mutate, withAccount } from './index.ts'
+import { checkOutboundUrl } from './outbound-policy.ts'
 import { compileFilters, fieldExpression, parseFilters, scopeFor, type FilterGroup } from './query.ts'
 import {
   fieldOrThrow,
@@ -329,11 +331,26 @@ const assertActionUsable = (
       throw new Error(`"${url}" is not an address anything can be sent to.`)
     }
     if (parsed.protocol !== 'https:') throw new Error('A webhook has to be https: the payload carries record data.')
+    checkOutboundUrl(url)
     if (!configText(step.config, 'secret')) {
       throw new Error('A webhook needs a secret, or the receiver cannot tell the call came from Rawr.')
     }
   }
 }
+
+/** The signing key of a webhook step, sealed before it reaches the row or the
+ *  audit history. A step with no `kind` is the shape rules had before steps
+ *  existed, and `parseSteps` still runs it, so it is sealed too. */
+export const sealSteps = (steps: AutomationStep[]): AutomationStep[] =>
+  steps.map((step) => {
+    if (step.kind === 'branch') {
+      return { ...step, matched: sealSteps(step.matched), otherwise: sealSteps(step.otherwise) }
+    }
+    if ('type' in step && step.type === 'webhook') {
+      return { ...step, config: { ...step.config, secret: sealSecret(configText(step.config, 'secret')) } }
+    }
+    return step
+  })
 
 export type SaveAutomationInput = {
   id?: string | null
@@ -394,7 +411,7 @@ export const saveAutomation = async (
       trigger: input.trigger,
       triggerConfig: { ...(input.triggerConfig ?? {}), object: input.objectKey },
       conditions: input.conditions,
-      steps: input.steps,
+      steps: sealSteps(input.steps),
       updatedAt: new Date(),
     }
 

@@ -1,3 +1,5 @@
+import { webAddress } from '@rawr/db/forms'
+
 /** Sending a browser to another origin after it posted a form.
  *
  *  The app's CSP says form-action 'self', and Chrome applies that to the redirect
@@ -14,14 +16,7 @@ export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, (ch
 /** The address in its serialized form when it is an absolute http or https one.
  *  Anything else (javascript:, data:, a relative path) is not a hop: a link to it
  *  would run in this origin or go nowhere. */
-export const hopHref = (target: string | URL): string | null => {
-  try {
-    const url = new URL(target)
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null
-  } catch {
-    return null
-  }
-}
+export const hopHref = (target: string | URL): string | null => webAddress(String(target))
 
 export const hopPage = (href: string): string => {
   const safe = escapeHtml(href)

@@ -4,6 +4,7 @@
 // value from '@rawr/db' here pulls the Postgres driver into the client bundle.
 import {
   CHOICE_TYPES,
+  DEFAULT_SETTINGS,
   FORM_FIELD_TYPES,
   formBlockers,
   toFormSlug,
@@ -194,7 +195,7 @@ export const FormBuilder = ({
 
   /** Every reason the server would refuse this, said before the click. The same
    *  function the data access layer runs, so the two can never drift. */
-  const blockers = formBlockers({ name, slug, fields })
+  const blockers = formBlockers({ name, slug, fields, settings })
 
   useEffect(() => {
     if (!dirty) return
@@ -690,10 +691,11 @@ export const FormBuilder = ({
                   value={settings.successMode}
                   disabled={!canEdit}
                   onChange={(event) =>
-                    setSettings({
-                      ...settings,
-                      successMode: event.target.value === 'redirect' ? 'redirect' : 'message',
-                    })
+                    setSettings(
+                      event.target.value === 'redirect'
+                        ? { ...settings, successMode: 'redirect', successValue: '' }
+                        : { ...settings, successMode: 'message', successValue: DEFAULT_SETTINGS.successValue },
+                    )
                   }
                 >
                   <option value="message">Show a message</option>
@@ -705,14 +707,23 @@ export const FormBuilder = ({
                   id="success-value"
                   label={settings.successMode === 'redirect' ? 'Redirect to' : 'Message'}
                 >
-                  <TextArea
-                    id="success-value"
-                    value={settings.successValue}
-                    disabled={!canEdit}
-                    onChange={(event) =>
-                      setSettings({ ...settings, successValue: event.target.value })
-                    }
-                  />
+                  {settings.successMode === 'redirect' ? (
+                    <TextInput
+                      id="success-value"
+                      type="url"
+                      placeholder="https://"
+                      value={settings.successValue}
+                      disabled={!canEdit}
+                      onChange={(event) => setSettings({ ...settings, successValue: event.target.value })}
+                    />
+                  ) : (
+                    <TextArea
+                      id="success-value"
+                      value={settings.successValue}
+                      disabled={!canEdit}
+                      onChange={(event) => setSettings({ ...settings, successValue: event.target.value })}
+                    />
+                  )}
                 </Field>
               </div>
               <Field id="lifecycle" label="Set lifecycle stage to">

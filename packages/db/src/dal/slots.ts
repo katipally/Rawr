@@ -321,6 +321,17 @@ export const computeSlots = (input: SlotInput): Date[] => {
   return slots.sort((a, b) => a.getTime() - b.getTime())
 }
 
+/** Whether an instant is inside the span a page can ever offer: past the notice
+ *  period and before the horizon, the same bounds `computeSlots` applies. A cheap
+ *  gate for an untrusted instant, ahead of anything that reads a calendar. */
+export const slotInWindow = (
+  page: Pick<SlotInput, 'minNoticeMinutes' | 'maxHorizonDays'>,
+  at: Date,
+  now: Date,
+): boolean =>
+  at.getTime() >= now.getTime() + page.minNoticeMinutes * MINUTE &&
+  at.getTime() < now.getTime() + page.maxHorizonDays * DAY
+
 /** Which wall-clock windows a given date offers. An override replaces the weekly
  *  rule for that date outright rather than intersecting with it: "I work 9 to 5,
  *  except Friday I am only free 2 to 4" is what a person means by an override. */

@@ -11,6 +11,7 @@ import {
   listLifecycleStages,
   openAutomationRun,
   openScannedRun,
+  openSecret,
   readAutomation,
   parkAutomationRun,
   readMailbox,
@@ -28,6 +29,7 @@ import {
 } from '@rawr/db'
 import { inBackground } from './background.ts'
 import { compose } from './sequences/compose.ts'
+import { hostOf, outboundRequest } from './outbound.ts'
 import { notifySubscribers, signPayload } from './webhooks.ts'
 import { queueHostAlert } from './notify.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
@@ -201,7 +203,7 @@ const runAction = async (
         id: event.entityId,
         name,
       })
-      await postWebhook(url, text(action.config, 'secret'), body)
+      await postWebhook(url, openSecret(text(action.config, 'secret')), body)
       return `called ${new URL(url).host}`
     }
   }
@@ -235,7 +237,8 @@ const contactAddress = async (ctx: AccountContext, event: AutomationEvent, name:
  *  on the third. */
 const postWebhook = async (url: string, secret: string, body: string): Promise<void> => {
   const once = async (): Promise<void> => {
-    const response = await fetch(url, {
+    const response = await outboundRequest({
+      url,
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -243,9 +246,10 @@ const postWebhook = async (url: string, secret: string, body: string): Promise<v
         'rawr-signature': signPayload(secret, body),
       },
       body,
-      signal: AbortSignal.timeout(5_000),
+      timeoutMs: 5_000,
+      maxBytes: 16_384,
     })
-    if (!response.ok) throw new Error(`${url} answered ${response.status}.`)
+    if (!response.ok) throw new Error(`${hostOf(url)} answered ${response.status}.`)
   }
   try {
     await once()

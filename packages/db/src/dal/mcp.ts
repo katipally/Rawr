@@ -337,6 +337,7 @@ export const createOauthCode = async (
     }
   })
   await appDb.execute(sql`update mcp_client set last_used_at = now() where id = ${input.clientId}`)
+  await appDb.execute(sql`select rawr.mcp_code_purge()`)
   return code
 }
 
@@ -349,10 +350,14 @@ export type RedeemedCode = {
   resource: string | null
   scope: string | null
   expiresAt: Date
+  /** The code was already redeemed. The caller refuses it and revokes `tokenId`. */
+  replayed: boolean
+  /** The token the first redemption issued, or null while that issue is still in flight. */
+  tokenId: string | null
 }
 
-/** Single use: the row is deleted as it is read. An expired code is returned so
- *  the caller can name the reason, and is gone either way. */
+/** Single use. The first presentation marks the code redeemed; a later one is
+ *  returned with `replayed` set, so the caller can revoke what the first one made. */
 export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode | null> => {
   const [row] = await appDb.execute<{
     account_id: string
@@ -363,6 +368,8 @@ export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode |
     resource: string | null
     scope: string | null
     expires_at: Date | string
+    replayed: boolean
+    token_id: string | null
   }>(sql`select * from rawr.mcp_code_redeem(${hashToken(plaintext)})`)
   if (!row) return null
   return {
@@ -374,10 +381,27 @@ export const redeemOauthCode = async (plaintext: string): Promise<RedeemedCode |
     resource: row.resource,
     scope: row.scope,
     expiresAt: new Date(row.expires_at),
+    replayed: row.replayed,
+    tokenId: row.token_id,
   }
 }
 
-export type IssuedOauthToken = { accessToken: string; refreshToken: string; expiresIn: number; scope: string | null }
+/** Ties a redeemed code to the token it issued. Returns true when the code was
+ *  presented again while that token was being issued, so the caller revokes it. */
+export const linkOauthCode = async (plaintext: string, tokenId: string): Promise<boolean> => {
+  const [row] = await appDb.execute<{ replayed: boolean | null }>(
+    sql`select rawr.mcp_code_link(${hashToken(plaintext)}, ${tokenId}) as replayed`,
+  )
+  return row?.replayed === true
+}
+
+export type IssuedOauthToken = {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+  scope: string | null
+  tokenId: string
+}
 
 const oauthContext = (accountId: string, userId: string): AccountContext => ({
   accountId,
@@ -392,6 +416,11 @@ const oauthContext = (accountId: string, userId: string): AccountContext => ({
   criticalGrants: [],
 })
 
+/** Revokes a token the OAuth flow issued, because one of its codes or refresh tokens
+ *  was replayed. Goes through the same revoke as Settings, so it is audited. */
+export const revokeOauthToken = (accountId: string, userId: string, tokenId: string): Promise<boolean> =>
+  revokeMcpToken(oauthContext(accountId, userId), tokenId)
+
 /** A token the consent flow issues. It is an mcp_token like any other, named
  *  after the client, so it appears in Settings and is revoked the same way. */
 export const issueOauthToken = async (input: {
@@ -405,7 +434,7 @@ export const issueOauthToken = async (input: {
   const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
   const ctx = oauthContext(input.accountId, input.userId)
 
-  await mutate(ctx, 'mcp_token', async (tx) => {
+  const tokenId = await mutate<string>(ctx, 'mcp_token', async (tx) => {
     const [row] = await tx.execute<{ id: string; prefix: string }>(sql`
       insert into mcp_token
         (account_id, user_id, name, token_hash, prefix, client_id, scope, expires_at, refresh_hash)
@@ -413,25 +442,28 @@ export const issueOauthToken = async (input: {
               ${accessToken.slice(0, PREFIX.length + PREVIEW_CHARS)}, ${input.clientId}, ${input.scope},
               now() + make_interval(secs => ${OAUTH_ACCESS_SECONDS}), ${hashToken(refreshToken)})
       returning id, prefix`)
+    if (!row) throw new Error('The token could not be created.')
     return {
-      result: undefined,
+      result: row.id,
       audit: {
         entity: 'mcp_token',
-        entityId: row?.id ?? null,
+        entityId: row.id,
         action: 'create',
         before: null,
-        after: { name: input.clientName, prefix: row?.prefix, clientId: input.clientId, via: 'oauth' },
+        after: { name: input.clientName, prefix: row.prefix, clientId: input.clientId, via: 'oauth' },
       },
     }
   })
 
-  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: input.scope }
+  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: input.scope, tokenId }
 }
 
 /** Rotation: the presented refresh token is replaced in the same update that
  *  mints the new access token, so the old one stops working the moment the new
- *  one exists. Returns null for a refresh token that is unknown, revoked, or
- *  already rotated, and the caller answers `invalid_grant`. */
+ *  one exists, and is kept as prev_refresh_hash so presenting it again is seen.
+ *  Returns null for a refresh token that is unknown, revoked, or rotated, and the
+ *  caller answers `invalid_grant`. Presenting one that was rotated away revokes
+ *  the token it belonged to (RFC 9700 4.14.2). */
 export const refreshOauthToken = async (
   plaintext: string,
   clientId: string,
@@ -443,8 +475,13 @@ export const refreshOauthToken = async (
     user_id: string
     client_id: string | null
     scope: string | null
+    replayed: boolean
   }>(sql`select * from rawr.mcp_refresh_owner(${hashToken(plaintext)})`)
   if (!owner || owner.client_id !== clientId) return null
+  if (owner.replayed) {
+    await revokeOauthToken(owner.account_id, owner.user_id, owner.token_id)
+    return null
+  }
 
   const accessToken = `${PREFIX}${randomToken(32)}`
   const refreshToken = `${REFRESH_PREFIX}${randomToken(32)}`
@@ -455,13 +492,18 @@ export const refreshOauthToken = async (
       update mcp_token
          set token_hash = ${hashToken(accessToken)},
              prefix = ${accessToken.slice(0, PREFIX.length + PREVIEW_CHARS)},
+             prev_refresh_hash = refresh_hash,
              refresh_hash = ${hashToken(refreshToken)},
              expires_at = now() + make_interval(secs => ${OAUTH_ACCESS_SECONDS})
        where id = ${owner.token_id} and refresh_hash = ${hashToken(plaintext)} and revoked_at is null
        returning id`)
     return rows.length > 0
   })
-  if (!rotated) return null
+  // Not rotated means another presentation of this same token won the race.
+  if (!rotated) {
+    await revokeOauthToken(owner.account_id, owner.user_id, owner.token_id)
+    return null
+  }
 
-  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: owner.scope }
+  return { accessToken, refreshToken, expiresIn: OAUTH_ACCESS_SECONDS, scope: owner.scope, tokenId: owner.token_id }
 }

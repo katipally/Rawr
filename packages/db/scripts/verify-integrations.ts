@@ -57,6 +57,7 @@ import { readTimeline } from '../src/dal/activity.ts'
 import { listFields } from '../src/dal/admin-fields.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
 import { recordDeadLetter } from '../src/dal/jobs.ts'
+import { openSecret } from '../src/internal/crypto.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
@@ -215,6 +216,15 @@ try {
       saveIntegration(accountMember, { kind: 'apollo', secret: 'nope' }),
     ),
   )
+
+  await check('an account admin who is not a super admin can connect and disconnect', async () => {
+    const hubOnly: AccountContext = { ...accountAdmin, isSuperAdmin: false }
+    expect(hubOnly.editHubs.includes('account'), 'the admin fixture lost the account hub')
+    await saveIntegration(hubOnly, { kind: 'lusha', secret: `hub-only-${stamp}` })
+    expect((await listIntegrations(hubOnly)).some((row) => row.kind === 'lusha' && row.state !== 'not_configured'), 'the save did not land')
+    await disconnectIntegration(hubOnly, 'lusha')
+    return 'save and disconnect allowed on the account hub alone'
+  })
 
   console.log('')
   console.log('-- account scope -----------------------------------------------')
@@ -1419,6 +1429,25 @@ try {
     // in a screenshot.
     expect(!JSON.stringify(mine).includes(made.secret), 'the signing key is readable after creation')
     return 'issued once, and never returned again'
+  })
+
+  await check('the signing key is sealed at rest, opened for signing, and a legacy plaintext row still signs', async () => {
+    const stored = async () =>
+      (await owner<{ secret: string }[]>`select secret from webhook_endpoint where id = ${endpointId}`)[0]?.secret ?? ''
+    const sent = async () =>
+      (await endpointsFor(admin, 'deal.stage_changed')).find((row) => row.id === endpointId)?.secret ?? ''
+
+    expect((await stored()).startsWith('v1.'), 'the key is stored readable')
+    expect((await sent()).startsWith('whsec_'), 'the key is not opened for signing')
+    expect(openSecret(await stored()) === (await sent()), 'the sealed key does not open to the one sent with')
+
+    await owner`update webhook_endpoint set secret = 'whsec_legacy_plaintext' where id = ${endpointId}`
+    expect((await sent()) === 'whsec_legacy_plaintext', 'a row from before sealing stopped signing')
+
+    const rolled = await rollWebhookSecret(admin, endpointId)
+    expect((await stored()).startsWith('v1.'), 'a rolled key is stored readable')
+    expect((await sent()) === rolled, 'the rolled key does not open to the one shown')
+    return 'sealed on create and roll, tolerant of the old plaintext'
   })
 
   await check('only the events it asked for reach it', async () => {

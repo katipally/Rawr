@@ -5,7 +5,7 @@ import { escapeHtml, hopHref, hopPage, hopResponse } from './redirect-hop.ts'
 test('only absolute http and https addresses can be hopped to', () => {
   assert.equal(hopHref('https://client.example/cb?code=a b'), 'https://client.example/cb?code=a%20b')
   assert.equal(hopHref(new URL('http://127.0.0.1:8123/cb')), 'http://127.0.0.1:8123/cb')
-  for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'JaVaScRiPt:alert(1)', '/thanks', 'thanks', '', '//evil.example']) {
+  for (const bad of ['javascript:alert(1)', 'data:text/html,hi', 'JaVaScRiPt:alert(1)', ' javascript:alert(1)', 'java\nscript:alert(1)', 'vbscript:x', '/thanks', 'thanks', '', '//evil.example']) {
     assert.equal(hopHref(bad), null, bad)
   }
 })

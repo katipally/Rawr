@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { recordDeadLetter, recordOutboundCall, type IntegrationKind, type AccountContext } from '@rawr/db'
+import { outboundRequest } from '../outbound.ts'
 
 /** The half of F6 §1 that is about talking to somebody else's server.
  *
@@ -143,29 +144,42 @@ export type JsonRequest = {
   headers?: Record<string, string>
   body?: unknown
   timeoutMs?: number
+  /** Set when the address came out of somebody's settings rather than being a
+   *  provider's own host, so it goes through the outbound guard. */
+  guarded?: boolean
 }
 
 /** One JSON call, with the provider's own error text kept intact. A generic
  *  "request failed" is exactly what F6 §1 forbids: the health panel has to be able
  *  to show what the provider actually said. */
 export const json = async <T>(request: JsonRequest): Promise<T> => {
-  const response = await fetch(request.url, {
-    method: request.method ?? 'GET',
-    headers: {
-      accept: 'application/json',
-      ...(request.body === undefined ? {} : { 'content-type': 'application/json' }),
-      ...request.headers,
-    },
-    ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-    signal: AbortSignal.timeout(request.timeoutMs ?? 15_000),
-  })
+  const method = request.method ?? 'GET'
+  const headers = {
+    accept: 'application/json',
+    ...(request.body === undefined ? {} : { 'content-type': 'application/json' }),
+    ...request.headers,
+  }
+  const body = request.body === undefined ? undefined : JSON.stringify(request.body)
+  const timeoutMs = request.timeoutMs ?? 15_000
 
-  const text = await response.text()
+  const response = request.guarded
+    ? await outboundRequest({ url: request.url, method, headers, body, timeoutMs, maxBytes: 1_048_576 })
+    : await fetch(request.url, { method, headers, ...(body === undefined ? {} : { body }), signal: AbortSignal.timeout(timeoutMs) }).then(
+        async (answer) => ({
+          ok: answer.ok,
+          status: answer.status,
+          statusText: answer.statusText,
+          retryAfter: answer.headers.get('retry-after'),
+          text: await answer.text(),
+        }),
+      )
+
+  const text = response.text
   if (!response.ok) {
     throw providerError(`${response.status} ${response.statusText}: ${text.slice(0, 400)}`, {
       status: response.status,
       disconnected: isCredentialRejection(response.status, text),
-      retryAfterMs: retryAfterMs(response.headers.get('retry-after')),
+      retryAfterMs: retryAfterMs(response.retryAfter),
     })
   }
   return (text ? JSON.parse(text) : null) as T

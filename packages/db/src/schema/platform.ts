@@ -184,7 +184,8 @@ export const webhookEndpoint = pgTable(
      *  not that nobody else read it. */
     url: text('url').notNull(),
     /** Shown once, when created or rolled. A secret a screen can redisplay is a
-     *  secret in a screenshot. */
+     *  secret in a screenshot. Stored sealed (`v1.…`); a row older than that is
+     *  plaintext until `db:seal-secrets` reaches it, and both are read the same. */
     secret: text('secret').notNull(),
     /** Event names this one wants. Empty means all of them, which is what piping
      *  Rawr into a warehouse actually wants and saves re-editing the list every

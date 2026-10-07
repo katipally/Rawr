@@ -1,5 +1,14 @@
-import { HOLD_MINUTES, publicBookingPage, releaseHold, renewHold } from '@rawr/db'
+import {
+  HOLD_MINUTES,
+  publicBookingPage,
+  publicEdgeContext,
+  readBookingPage,
+  releaseHold,
+  renewHold,
+  slotInWindow,
+} from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
+import { loadOffer } from '~/server/booking.ts'
 import { CORS_HEADERS, bodyRefusal, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
 /** POST /b/:account/:slug/hold
@@ -64,8 +73,37 @@ export const POST = async (
     )
   }
 
+  const notOnOffer = () =>
+    NextResponse.json(
+      { error: 'That time is not on offer.' },
+      { status: 400, headers: CORS_HEADERS },
+    )
+  const now = new Date()
+  if (!slotInWindow(summary, slot, now)) return notOnOffer()
+
+  // Only a time the page really offers can be held: a hold on anything else
+  // parks a row for nobody. Holds are ignored so moving your own hold onto the
+  // time it already sits on is not refused.
+  const page = await readBookingPage(publicEdgeContext(summary.accountId), summary.bookingPageId)
+  if (!page) return notOnOffer()
+  const offer = await loadOffer(page, {
+    from: slot,
+    to: new Date(slot.getTime() + page.durationMinutes * 60_000),
+    now,
+    ignoreHolds: true,
+  })
+  if (!offer.slots.some((offered) => offered.startsAt.getTime() === slot.getTime())) {
+    return notOnOffer()
+  }
+
   const token = typeof body.token === 'string' ? body.token : null
   const held = await renewHold(summary.accountId, summary.bookingPageId, slot, token)
+  if (!held) {
+    return NextResponse.json(
+      { error: 'Too many people are choosing a time right now. Confirm the time you picked, or try again in a few minutes.' },
+      { status: 429, headers: { ...CORS_HEADERS, 'retry-after': String(HOLD_MINUTES * 60) } },
+    )
+  }
   return NextResponse.json(
     { token: held.token, expiresAt: held.expiresAt.toISOString(), minutes: HOLD_MINUTES },
     { headers: CORS_HEADERS },

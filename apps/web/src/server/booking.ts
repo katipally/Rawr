@@ -49,7 +49,14 @@ import {
  *  live: what a person sees when Google is slow, and what is written when Zoom is
  *  down. */
 
-export type OfferWindow = { from: Date; to: Date; now?: Date }
+export type OfferWindow = {
+  from: Date
+  to: Date
+  now?: Date
+  /** Offer slots as if nobody were holding any. For asking whether a time is one
+   *  the page offers at all, so renewing your own hold on it does not fail. */
+  ignoreHolds?: boolean
+}
 
 export type PublicOffer = {
   slots: { startsAt: Date; hostUserIds: string[] }[]
@@ -91,7 +98,7 @@ export const loadOffer = async (
 
   const [{ busy, problems }, holds] = await Promise.all([
     busyForHosts(ctx, hosts, padded),
-    readHolds(ctx, page.bookingPageId, padded),
+    window.ignoreHolds ? new Map<number, number>() : readHolds(ctx, page.bookingPageId, padded),
   ])
 
   const offer = computeOffer({

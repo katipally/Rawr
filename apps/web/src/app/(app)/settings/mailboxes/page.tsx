@@ -1,6 +1,7 @@
 import { Alert, PageHeader } from '@rawr/ui'
 import { bodyProgress, internalDomainOf, listBlocklist, listMailboxes } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
+import { noticeFor } from '~/lib/notices.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { MailboxList } from './mailbox-list.tsx'
 
@@ -10,11 +11,11 @@ import { MailboxList } from './mailbox-list.tsx'
  *  Read only for now, `gmail.readonly` and nothing else. Bodies are stored here
  *  rather than fetched from Gmail on demand, which is what makes a thread outlive
  *  the mailbox that brought it in; each mailbox says who may read what it read. */
-const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?: string }> }) => {
+const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ notice?: string }> }) => {
   const session = await readSession()
   if (!session) return null
 
-  const { error } = await searchParams
+  const message = noticeFor((await searchParams).notice)
   const ctx = contextFrom(session)
   const [mailboxes, blocklist, internalDomain, progress] = await Promise.all([
     listMailboxes(ctx),
@@ -44,11 +45,7 @@ const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ error?:
         }
       />
 
-      {error ? (
-        <Alert>
-          {error}
-        </Alert>
-      ) : null}
+      {message ? <Alert>{message}</Alert> : null}
 
       <MailboxList
         rows={mailboxes.map((row) => ({

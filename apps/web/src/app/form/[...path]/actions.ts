@@ -4,10 +4,12 @@ import {
   publicEdgeContext,
   publicFormById,
 } from '@rawr/db'
-import { headers } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import type { NextRequest } from 'next/server'
+import { env } from '~/lib/env.ts'
 import { checkSubmitLimits, clientIpFrom } from '~/server/edge.ts'
+import { ECHO_MAX_AGE_SECONDS, echoCookieName, echoCookiePath, encodeEcho } from '~/server/form-echo.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { hopHref } from '~/server/redirect-hop.ts'
 import { answersFromFormData, runSubmission } from '~/server/submit.ts'
@@ -20,11 +22,10 @@ import { reportEvent } from '~/server/automations.ts'
  *  the same code then handles the enhanced case for free. There is one capture
  *  path behind both; only the signals differ.
  *
- *  Everything comes back through the URL on a redirect: per-field errors, and the
- *  answers already typed so nothing is lost. A redirect rather than a re-render
- *  keeps the back button and a page refresh from re-posting the form. */
-
-const MAX_ECHO = 200
+ *  Everything comes back on a redirect: per-field errors in the URL, and the
+ *  answers already typed in a short-lived cookie (see form-echo.ts) so nothing is
+ *  lost and nothing typed reaches a URL. A redirect rather than a re-render keeps
+ *  the back button and a page refresh from re-posting the form. */
 
 export const submitHostedForm = async (data: FormData): Promise<void> => {
   const formId = String(data.get('rawr_form_id') ?? '')
@@ -35,6 +36,8 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
   if (!form || !form.isActive) redirect(`${back}?e=${errorParam('That form is no longer accepting submissions.')}`)
 
   const incoming = await headers()
+  const jar = await cookies()
+  const cookiePath = echoCookiePath(path)
   // The left end of x-forwarded-for is whatever the caller chose to send, so
   // reading it put every forged header in its own rate-limit bucket.
   const ip = clientIpFrom((name) => incoming.get(name))
@@ -63,14 +66,20 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
     const byKey: Record<string, string> = {}
     for (const error of result.errors) byKey[error.key] = error.message
     const params = new URLSearchParams({ e: JSON.stringify({ byKey }) })
-    // Echo back what was typed so a validation error does not empty the form.
-    for (const [key, value] of Object.entries(body)) {
-      if (typeof value !== 'string' || value === '') continue
-      if (key.startsWith('rawr_')) continue
-      params.set(`v_${key}`, value.slice(0, MAX_ECHO))
-    }
+    const echo = encodeEcho(form.fields, body)
+    if (cookiePath && echo) {
+      jar.set(echoCookieName(form.formId), echo, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: env.NODE_ENV === 'production',
+        path: cookiePath,
+        maxAge: ECHO_MAX_AGE_SECONDS,
+      })
+    } else if (cookiePath) jar.delete({ name: echoCookieName(form.formId), path: cookiePath })
     redirect(`${back}?${params.toString()}`)
   }
+
+  if (cookiePath) jar.delete({ name: echoCookieName(form.formId), path: cookiePath })
 
   if (result.notify) {
     queueSlackNotification({

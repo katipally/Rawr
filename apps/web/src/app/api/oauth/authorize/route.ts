@@ -2,6 +2,7 @@ import { createOauthCode } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { checkAuthorizeRequest, issuer, oauthError } from '~/server/mcp/oauth.ts'
 import { hopResponse } from '~/server/redirect-hop.ts'
+import { crossOrigin } from '~/server/same-origin.ts'
 import { memberships, readSession } from '~/server/session.ts'
 
 /** The Approve or Cancel press on the consent screen. The request is checked
@@ -14,6 +15,7 @@ import { memberships, readSession } from '~/server/session.ts'
  *  post, so it is a page that navigates there (see redirect-hop.ts). */
 export const POST = async (request: NextRequest): Promise<Response> => {
   const origin = await issuer()
+  if (crossOrigin(request, origin)) return new NextResponse(null, { status: 403 })
   const session = await readSession()
   if (!session) return NextResponse.redirect(new URL('/sign-in', origin), 303)
 

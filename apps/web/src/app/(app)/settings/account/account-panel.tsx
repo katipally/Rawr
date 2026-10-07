@@ -5,7 +5,9 @@ import Link from 'next/link'
 import { LinkButton } from '~/components/link-button.tsx'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
+import { forgetDrafts } from '~/lib/drafts.ts'
 import { accountPath } from '~/lib/links.ts'
+import { NOTICE_PARAM } from '~/lib/notices.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -145,9 +147,10 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
     setSigningOut(true)
     try {
       await api.session.signOutEverywhere.mutate()
+      forgetDrafts()
       // This session is one of the ones just revoked; the redirect makes that
       // visible instead of leaving a page that will fail on its next click.
-      window.location.assign('/sign-in?error=' + encodeURIComponent('Signed out everywhere. Sign in again to continue.'))
+      window.location.assign(`/sign-in?${NOTICE_PARAM}=signed_out_everywhere`)
     } catch (cause) {
       toast('error', errorMessage(cause))
       setSigningOut(false)

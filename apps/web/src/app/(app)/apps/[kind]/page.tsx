@@ -10,7 +10,7 @@ import { appPath, appsPath, availableAppsPath, failedJobsPath, importsPath, type
 import { listEmailAccounts, listSequences } from '~/server/integrations/apollo.ts'
 import { clayDegraded } from '~/server/integrations/clay.ts'
 import { connectPathFor, integrationTraffic, metaFor } from '~/server/integrations/index.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
+import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { AppActions } from '../app-actions.tsx'
 import { HEALTH, errorSummary } from '../health.ts'
 import { ConnectForm } from './connect-form.tsx'
@@ -125,7 +125,7 @@ const AppPage = async ({
             name={meta.name}
             personal={personal}
             connectPath={connectPath}
-            canManage={session.isSuperAdmin}
+            canManage={sessionIsAdmin(session)}
           />
         ) : row.kind === 'hubspot' ? (
           // Nothing is stored and nothing is called: HubSpot is read from its own
@@ -273,7 +273,7 @@ const AppPage = async ({
               config={row.config}
               webhookBase={publicBaseUrl}
               siteKey={siteKey}
-              canWrite={session.isSuperAdmin}
+              canWrite={sessionIsAdmin(session)}
             />
           )}
         </Card>

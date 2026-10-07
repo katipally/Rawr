@@ -63,7 +63,7 @@ const BuilderPage = async ({
     slug: '',
     isActive: false,
     fields: template?.fields ?? [],
-    settings: template?.settings ?? readSettings({}),
+    settings: template?.settings ?? { ...readSettings({}), notifySlack: false },
   }
   const [form, registry, members, subscriptions, slack, sites] = await Promise.all([
     id === 'new' ? blank : getForm(ctx, id),

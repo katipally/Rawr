@@ -3,7 +3,7 @@ import {
   publicFormBySlug,
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { clientIp, rateLimit } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, rateLimit, readRaw, unverified } from '~/server/edge.ts'
 import { webflowSecret, webflowSignatureMatches } from '~/server/integrations/webflow.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
@@ -20,51 +20,48 @@ const REPLAY_WINDOW_MS = 5 * 60 * 1000
 const accepted = (detail: string): NextResponse =>
   NextResponse.json({ ok: true, detail }, { status: 200 })
 
-export const POST = async (request: NextRequest): Promise<NextResponse> => {
-  const raw = await request.text()
-  const signature = request.headers.get('x-webflow-signature')
-  const timestamp = request.headers.get('x-webflow-timestamp')
-
-  if (!signature || !timestamp) {
-    return NextResponse.json(
-      { error: 'Unsigned webhook. Create the webhook through an OAuth app so it is signed.' },
-      { status: 401 },
-    )
-  }
-
-  const age = Date.now() - Number(timestamp)
-  if (!Number.isFinite(age) || age > REPLAY_WINDOW_MS || age < -REPLAY_WINDOW_MS) {
-    return NextResponse.json({ error: 'That delivery is outside the replay window.' }, { status: 401 })
-  }
-
-  // Two reads happen before the signature can be checked, so cap unsigned callers.
+export const POST = async (request: NextRequest): Promise<Response> => {
+  // Unauthenticated, so shed load and bound the read before anything else.
   const ip = clientIp(request)
   if (!rateLimit(`w:webflow:${ip ?? 'unknown'}`, 60, 60).allowed) {
     return NextResponse.json({ error: 'Too many deliveries.' }, { status: 429 })
   }
 
-  // Read before the signature: the secret that verifies it belongs to this org.
+  let raw: string
+  try {
+    raw = await readRaw(request)
+  } catch (cause) {
+    const { error, status } = bodyRefusal(cause)
+    return NextResponse.json({ error }, { status })
+  }
+
+  const signature = request.headers.get('x-webflow-signature')
+  const timestamp = request.headers.get('x-webflow-timestamp')
+  if (!signature || !timestamp) return unverified('/w/webflow', 'unsigned delivery')
+
+  const age = Date.now() - Number(timestamp)
+  if (!Number.isFinite(age) || age > REPLAY_WINDOW_MS || age < -REPLAY_WINDOW_MS) {
+    return unverified('/w/webflow', 'outside the replay window')
+  }
+
+  // The form decides which account's secret verifies the signature, so it is read
+  // first. Every miss answers like a bad signature: nothing here says whether a
+  // form, an account or a Webflow connection exists.
   const url = new URL(request.url)
   const account = url.searchParams.get('account')
   const slug = url.searchParams.get('form')
-  if (!account || !slug) {
-    return accepted('This webhook URL carries no account and form mapping, so nothing was recorded.')
-  }
+  if (!account || !slug) return unverified('/w/webflow', 'no account and form mapping')
 
   const form = await publicFormBySlug(account, slug)
-  if (!form || !form.isActive) return accepted('That Rawr form is not accepting submissions.')
+  if (!form) return unverified('/w/webflow', 'unknown form')
 
   const secret = await webflowSecret(publicEdgeContext(form.accountId))
-  if (!secret) {
-    return NextResponse.json(
-      { error: 'Webflow is not connected. Paste the app client secret on Settings, Integrations.' },
-      { status: 503 },
-    )
+  if (!secret) return unverified('/w/webflow', 'webflow not connected')
+  if (!webflowSignatureMatches(secret, timestamp, raw, signature)) {
+    return unverified('/w/webflow', 'signature mismatch')
   }
 
-  if (!webflowSignatureMatches(secret, timestamp, raw, signature)) {
-    return NextResponse.json({ error: 'That signature does not match.' }, { status: 401 })
-  }
+  if (!form.isActive) return accepted('That Rawr form is not accepting submissions.')
 
   let payload: WebflowPayload
   try {

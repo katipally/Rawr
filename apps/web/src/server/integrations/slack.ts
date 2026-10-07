@@ -92,6 +92,7 @@ export const testSlack = async (ctx: AccountContext): Promise<ConnectionTest> =>
     // is marked as a test so nobody in the channel wonders what it was.
     await json({
       url: creds.webhookUrl!,
+      guarded: true,
       method: 'POST',
       body: { text: 'Rawr connection test. If you can see this, form fills will arrive here.' },
     })
@@ -141,6 +142,7 @@ export const postToSlack = async (
 
         const answer = await json<{ ok?: boolean; error?: string } | null>({
           url: target,
+          guarded: !creds.botToken,
           method: 'POST',
           headers: creds.botToken ? { authorization: `Bearer ${creds.botToken}` } : {},
           body,

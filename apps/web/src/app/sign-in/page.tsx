@@ -1,14 +1,16 @@
 import { Alert } from '@rawr/ui'
 import { calendarAtSignIn, env, googleConfigured, hostedDomainRequired, visitorAccessOpen } from '~/lib/env.ts'
 import { safePath } from '~/lib/links.ts'
+import { noticeFor } from '~/lib/notices.ts'
 
-type Props = { searchParams: Promise<{ error?: string; next?: string }> }
+type Props = { searchParams: Promise<{ notice?: string; next?: string }> }
 
 /** The front door. There is one way in, a verified Google account, and the page
  *  says plainly who can enter and what they get the first time. No passwords, no
  *  magic links, and nothing that takes an address on trust. */
 const SignIn = async ({ searchParams }: Props) => {
-  const { error, next } = await searchParams
+  const { notice, next } = await searchParams
+  const message = noticeFor(notice)
   const after = safePath(next, '')
 
   return (
@@ -21,11 +23,7 @@ const SignIn = async ({ searchParams }: Props) => {
         </p>
       </div>
 
-      {error ? (
-        <Alert>
-          {error}
-        </Alert>
-      ) : null}
+      {message ? <Alert>{message}</Alert> : null}
 
       <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-4">
         {googleConfigured ? (

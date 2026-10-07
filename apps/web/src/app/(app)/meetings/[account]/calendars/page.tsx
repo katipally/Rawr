@@ -4,6 +4,7 @@ import { listGrants } from '@rawr/db'
 import { redirect } from 'next/navigation'
 import { devCalendarEnabled, googleCalendarConfigured } from '~/lib/env.ts'
 import { availabilityPath } from '~/lib/links.ts'
+import { noticeFor } from '~/lib/notices.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
 import { CalendarRow } from './calendar-row.tsx'
@@ -24,10 +25,10 @@ const CalendarsScreen = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ notice?: string }>
 }) => {
   const { account } = await params
-  const { error } = await searchParams
+  const message = noticeFor((await searchParams).notice)
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
@@ -52,7 +53,7 @@ const CalendarsScreen = async ({
 
       <MeetingsTabs account={account} current="calendars" />
 
-      {error ? <Alert className="mb-4">{error}</Alert> : null}
+      {message ? <Alert className="mb-4">{message}</Alert> : null}
 
       {!googleCalendarConfigured ? (
         <Alert tone="warning" className="mb-4">

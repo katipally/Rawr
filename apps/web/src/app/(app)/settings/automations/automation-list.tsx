@@ -349,7 +349,7 @@ const ActionFields = ({
   if (type === 'webhook') {
     return (
       <div className="grid gap-2 @md:grid-cols-2">
-        <Field id={id('url')} label="Address" hint="https only. Five seconds to answer, then one retry.">
+        <Field id={id('url')} label="Address" hint="https only. Five seconds to answer, then one retry. Redirects are not followed.">
           <TextInput
             id={id('url')}
             inputMode="url"
@@ -358,8 +358,14 @@ const ActionFields = ({
             onChange={(e) => set('url', e.target.value)}
           />
         </Field>
-        <Field id={id('secret')} label="Secret" hint="Signs the call, so the receiver can prove it came from Rawr.">
-          <TextInput id={id('secret')} value={config.secret ?? ''} onChange={(e) => set('secret', e.target.value)} />
+        <Field id={id('secret')} label="Secret" hint="Signs the call, so the receiver can prove it came from Rawr. Stored encrypted; type a new one to replace it.">
+          <TextInput
+            id={id('secret')}
+            type="password"
+            autoComplete="off"
+            value={config.secret ?? ''}
+            onChange={(e) => set('secret', e.target.value)}
+          />
         </Field>
       </div>
     )

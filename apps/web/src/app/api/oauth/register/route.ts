@@ -2,7 +2,7 @@ import { saveMcpClient } from '@rawr/db'
 import { randomBytes } from 'node:crypto'
 import type { NextRequest } from 'next/server'
 import { oauthError, redirectAcceptable } from '~/server/mcp/oauth.ts'
-import { clientIp, rateLimit } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, rateLimit, readRaw } from '~/server/edge.ts'
 
 /** RFC 7591 dynamic client registration. Open, as the RFC allows for public
  *  clients: registering buys nothing but a name on a consent screen that a
@@ -16,9 +16,10 @@ export const POST = async (request: NextRequest): Promise<Response> => {
 
   let body: Record<string, unknown>
   try {
-    body = (await request.json()) as Record<string, unknown>
-  } catch {
-    return oauthError('invalid_client_metadata', 'The registration body is not JSON.')
+    body = JSON.parse(await readRaw(request)) as Record<string, unknown>
+  } catch (cause) {
+    const refusal = bodyRefusal(cause)
+    return oauthError('invalid_client_metadata', refusal.error, refusal.status)
   }
 
   const uris = Array.isArray(body.redirect_uris) ? body.redirect_uris : []

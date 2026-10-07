@@ -25,6 +25,8 @@ const BASELINE = [
   { key: 'referrer-policy', value: 'strict-origin-when-cross-origin' },
   // Nothing here asks for a camera, a microphone or a location, so nothing may.
   { key: 'permissions-policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
+  // Not a robots.txt Disallow: a crawler told not to fetch a page never sees this.
+  { key: 'x-robots-tag', value: 'noindex, nofollow' },
 ]
 
 /** React's development build calls eval() to rebuild a callstack across the

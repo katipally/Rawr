@@ -13,6 +13,7 @@
     "db:generate": "pnpm --filter @rawr/db generate",
     "db:migrate": "pnpm --filter @rawr/db migrate",
     "db:seed": "pnpm --filter @rawr/db seed",
+    "db:seal-secrets": "pnpm --filter @rawr/db seal:secrets",
     "db:verify": "pnpm --filter @rawr/db verify",
     "db:verify:sql": "pnpm --filter @rawr/db verify:sql",
     "db:verify:guards": "pnpm --filter @rawr/db verify:guards",

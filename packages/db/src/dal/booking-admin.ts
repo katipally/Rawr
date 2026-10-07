@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
 import { assertCanView, assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
-import { assertSchemaIsUsable } from './form-schema.ts'
+import { assertSchemaIsUsable, webAddress } from './form-schema.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import {
   readQuestions,
@@ -187,6 +187,11 @@ export const saveBookingPage = async (
   }
   if (!input.name.trim()) throw new Error('A booking page needs a name.')
   if (!input.titleTpl.trim()) throw new Error('The event title template cannot be empty.')
+  const typedRedirect = blankToNull(input.redirectUrl)
+  const redirectUrl = typedRedirect && webAddress(typedRedirect)
+  if (typedRedirect && !redirectUrl) {
+    throw new Error('The page to send them to needs a full address that starts with https://.')
+  }
   if ((input.location === 'phone' || input.location === 'custom') && !input.locationDetail?.trim()) {
     throw new Error(
       input.location === 'phone'
@@ -269,7 +274,7 @@ export const saveBookingPage = async (
         ${input.bufferAfterMinutes}, ${input.minNoticeMinutes}, ${input.maxHorizonDays},
         ${input.granularityMinutes}, ${input.location}, ${input.locationDetail ?? null},
         ${input.titleTpl}, ${input.descriptionTpl}, ${input.companyFallback},
-        ${JSON.stringify(questions)}::jsonb, ${input.isActive}, ${input.redirectUrl ?? null},
+        ${JSON.stringify(questions)}::jsonb, ${input.isActive}, ${redirectUrl},
         ${input.confirmationCopy ?? null}, ${input.confirmationEnabled ?? true},
         ${blankToNull(input.confirmationSubject)}, ${blankToNull(input.confirmationBody)},
         ${blankToNull(input.reminderSubject)}, ${blankToNull(input.reminderBody)})

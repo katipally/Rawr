@@ -1,8 +1,9 @@
 import { asc, eq } from 'drizzle-orm'
 import { webhookEndpoint } from '../schema/platform.ts'
-import { randomToken } from '../internal/crypto.ts'
+import { openSecret, randomToken, sealSecret } from '../internal/crypto.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
+import { checkOutboundUrl } from './outbound-policy.ts'
 import { getRegistry } from './registry.ts'
 
 /** Who is subscribed to what happens in Rawr, and the key that proves a delivery
@@ -77,38 +78,6 @@ const shape = (row: Record<string, unknown>): WebhookEndpointRow => ({
   createdAt: new Date(String(row.createdAt)),
 })
 
-/** https, and a host that resolves outside this machine.
- *
- *  A signature says a payload came from us; it says nothing about who read it on
- *  the way, so plaintext is refused. Loopback and the private ranges are refused
- *  because an endpoint pointing at the network Rawr itself runs on turns "add a
- *  webhook" into a request forgery any admin can aim wherever they like — at a
- *  cloud metadata service, most of all.
- *
- *  Both rules lift outside production, and only there, because the alternative is
- *  that a webhook cannot be developed against at all: the first receiver anybody
- *  writes runs on their own laptop. `NODE_ENV` is what separates them, the same
- *  switch the stand-in providers use. */
-const PRIVATE_HOST =
-  /^(localhost$|127\.|0\.|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$|\[?fc|\[?fd)/i
-
-const checkUrl = (raw: string): string => {
-  let parsed: URL
-  try {
-    parsed = new URL(raw.trim())
-  } catch {
-    throw new Error(`"${raw}" is not a URL.`)
-  }
-  const local = process.env.NODE_ENV !== 'production'
-  if (parsed.protocol !== 'https:' && !(local && parsed.protocol === 'http:')) {
-    throw new Error('A webhook endpoint has to be https. A record on the wire in plaintext is readable by anyone on the path.')
-  }
-  if (PRIVATE_HOST.test(parsed.hostname) && !local) {
-    throw new Error(`${parsed.hostname} is on a private network. An endpoint has to be somewhere Rawr can reach from the outside.`)
-  }
-  return parsed.toString()
-}
-
 const checkEvents = (known: readonly string[], events: string[]): string[] => {
   const unknown = events.filter((event) => !known.includes(event))
   if (unknown.length > 0) throw new Error(`Rawr does not send ${unknown.join(', ')}.`)
@@ -149,7 +118,7 @@ export const endpointsFor = async (
         const wanted = Array.isArray(row.events) ? (row.events as string[]) : []
         return wanted.length === 0 || wanted.includes(event)
       })
-      .map(({ id, url, secret }) => ({ id, url, secret }))
+      .map(({ id, url, secret }) => ({ id, url, secret: openSecret(secret) }))
   })
 
 export type IssuedEndpoint = { id: string; secret: string }
@@ -162,13 +131,13 @@ export const createWebhookEndpoint = async (
   mutate(ctx, 'webhook_endpoint', async (tx) => {
     const name = input.name.trim()
     if (!name) throw new Error('Give the endpoint a name, so the right one can be turned off later.')
-    const url = checkUrl(input.url)
+    const url = checkOutboundUrl(input.url)
     const events = checkEvents(await webhookEventsFor(ctx), input.events)
     const secret = `whsec_${randomToken(32)}`
 
     const [created] = await tx
       .insert(webhookEndpoint)
-      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, name, url, secret, events })
+      .values({ accountId: ctx.accountId, createdBy: ctx.actorId, name, url, secret: sealSecret(secret), events })
       .returning({ id: webhookEndpoint.id })
     if (!created) throw new Error('The endpoint could not be created.')
     return {
@@ -195,7 +164,7 @@ export const updateWebhookEndpoint = async (
 
     const values = {
       ...(input.name === undefined ? {} : { name: input.name.trim() }),
-      ...(input.url === undefined ? {} : { url: checkUrl(input.url) }),
+      ...(input.url === undefined ? {} : { url: checkOutboundUrl(input.url) }),
       ...(input.events === undefined ? {} : { events: checkEvents(await webhookEventsFor(ctx), input.events) }),
       ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
       updatedAt: new Date(),
@@ -218,7 +187,7 @@ export const rollWebhookSecret = async (ctx: AccountContext, id: string): Promis
       .limit(1)
     if (!before) throw new Error('That endpoint no longer exists.')
     const secret = `whsec_${randomToken(32)}`
-    await tx.update(webhookEndpoint).set({ secret, updatedAt: new Date() }).where(eq(webhookEndpoint.id, id))
+    await tx.update(webhookEndpoint).set({ secret: sealSecret(secret), updatedAt: new Date() }).where(eq(webhookEndpoint.id, id))
     return {
       result: secret,
       audit: { entity: 'webhook_endpoint', entityId: id, action: 'roll_secret', before: null, after: { name: before.name } },

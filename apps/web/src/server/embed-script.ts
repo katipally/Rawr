@@ -965,7 +965,7 @@ export const buildEmbedScript = (config: EmbedConfig): string => `/* Rawr embed.
     done.appendChild(el('p', { class: 'rawr-done-title' },
       success.mode === 'redirect' ? COPY.sent : (success.value || COPY.sent)));
 
-    if (success.mode !== 'redirect') {
+    if (success.mode !== 'redirect' || !/^https?:[/][/]/i.test(success.value)) {
       mount.innerHTML = '';
       mount.appendChild(done);
       return;

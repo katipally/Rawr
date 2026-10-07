@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DRAFT_EXPIRY_MS, draftKey, readDraft } from './draft-read.ts'
+import { DRAFT_EXPIRY_MS, draftKey, purgeDrafts, readDraft } from './draft-read.ts'
 
 /** `readDraft` is the pure half of `useDraft` (drafts.ts): given a raw
  *  `localStorage` read and "now", what should happen. The other half -- not
@@ -12,8 +12,55 @@ import { DRAFT_EXPIRY_MS, draftKey, readDraft } from './draft-read.ts'
  *  removal decision is built on. */
 
 test('a key with a record id nests under it; one without stays account/object wide', () => {
-  assert.equal(draftKey('datasaur', 'contact', undefined), 'rawr:draft:datasaur:contact')
-  assert.equal(draftKey('datasaur', 'task', 'task-1'), 'rawr:draft:datasaur:task:task-1')
+  assert.equal(draftKey('u1', 'datasaur', 'contact', undefined), 'rawr:drafts:u1:datasaur:contact')
+  assert.equal(draftKey('u1', 'datasaur', 'task', 'task-1'), 'rawr:drafts:u1:datasaur:task:task-1')
+})
+
+test('two people on one account and form never share a key, and neither matches the old account-only key', () => {
+  const keys = ['u1', 'u2', 'u10'].map((user) => draftKey(user, 'datasaur', 'task', undefined))
+  assert.equal(new Set(keys).size, 3)
+  assert.ok(!keys.includes('rawr:draft:datasaur:task'))
+})
+
+const storage = (entries: Record<string, string>) => {
+  const data = new Map(Object.entries(entries))
+  return {
+    store: {
+      get length() { return data.size },
+      key: (index: number) => [...data.keys()][index] ?? null,
+      removeItem: (key: string) => void data.delete(key),
+    },
+    keys: () => [...data.keys()].sort(),
+  }
+}
+
+const stored = {
+  'rawr:draft:datasaur:task': '{}',
+  'rawr:draft:datasaur:email:thread-1': '{}',
+  'rawr:drafts:u1:datasaur:task': '{}',
+  'rawr:drafts:u1:other:contact': '{}',
+  'rawr:drafts:u10:datasaur:task': '{}',
+  'rawr:drafts:u2:datasaur:task': '{}',
+  'rawr.recent-search': '[]',
+  'rawr:signed-out': '1',
+}
+
+test('signing out purges every draft, old format and every person, and nothing else', () => {
+  const { store, keys } = storage(stored)
+  purgeDrafts(store)
+  assert.deepEqual(keys(), ['rawr.recent-search', 'rawr:signed-out'])
+})
+
+test('a signed-in load keeps only that person drafts, not a person whose id merely starts the same', () => {
+  const { store, keys } = storage(stored)
+  purgeDrafts(store, 'u1')
+  assert.deepEqual(keys(), ['rawr.recent-search', 'rawr:drafts:u1:datasaur:task', 'rawr:drafts:u1:other:contact', 'rawr:signed-out'])
+})
+
+test('purging an empty store does nothing', () => {
+  const { store, keys } = storage({})
+  purgeDrafts(store, 'u1')
+  assert.deepEqual(keys(), [])
 })
 
 test('nothing stored reads as none, not expired', () => {

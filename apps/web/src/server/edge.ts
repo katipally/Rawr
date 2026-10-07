@@ -64,17 +64,38 @@ export class UnreadableBody extends Error {
   }
 }
 
+/** The raw body as text, never more than MAX_BODY_BYTES of it held in memory. A
+ *  declared length over the cap is refused unread, and the stream is cancelled the
+ *  moment the running total crosses it, so a body with no content-length (chunked)
+ *  or a lying one costs at most the cap. O(cap). Throws `PayloadTooLarge`. */
+export const readRaw = async (request: NextRequest): Promise<string> => {
+  const declared = Number(request.headers.get('content-length') ?? '0')
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new PayloadTooLarge()
+
+  const reader = request.body?.getReader()
+  if (!reader) return ''
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel()
+      throw new PayloadTooLarge()
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 /** Reads a form-encoded or JSON body into a plain object, capped. A JSON body
  *  that is not valid JSON, or not an object, throws `UnreadableBody`.
  *
  *  Repeated keys become an array, which is how a multi_select arrives from a
  *  plain HTML form. Anything else would silently keep only the last checkbox. */
 export const readBody = async (request: NextRequest): Promise<Record<string, unknown>> => {
-  const declared = Number(request.headers.get('content-length') ?? '0')
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) throw new PayloadTooLarge()
-
-  const text = await request.text()
-  if (byteLength(text) > MAX_BODY_BYTES) throw new PayloadTooLarge()
+  const text = await readRaw(request)
 
   const type = request.headers.get('content-type') ?? ''
   if (type.includes('application/json')) {
@@ -180,3 +201,12 @@ export const bodyRefusal = (cause: unknown): { error: string; status: 400 | 413 
   cause instanceof PayloadTooLarge
     ? { error: 'That request is larger than this page accepts.', status: 413 }
     : { error: 'That request could not be read.', status: 400 }
+
+/** The one answer for any inbound request that cannot prove who it is: unknown
+ *  account key, unknown or inactive form, provider not connected, missing or wrong
+ *  signature all read the same, so a caller learns nothing about what exists. The
+ *  specific reason goes to the server log only. */
+export const unverified = (route: string, reason: string): Response => {
+  console.warn(`[inbound] ${route} rejected: ${reason}`)
+  return Response.json({ error: 'That request could not be verified.' }, { status: 401 })
+}

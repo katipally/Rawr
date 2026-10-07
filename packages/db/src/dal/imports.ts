@@ -35,7 +35,7 @@ import { orderedPair } from './associations.ts'
 import { bulkWriteRecords, createRecord, updateRecord, DuplicateError, type BulkRow } from './records.ts'
 import { getRegistry, objectOrThrow, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
 import { assertUsableFieldKey } from './fields.ts'
-import { choiceOf, coerce, ValueError } from './values.ts'
+import { choiceOf, coerce, csvUncell, ValueError } from './values.ts'
 
 /** An import does not queue its rows for enrichment. A file of ninety thousand
  *  contacts would ask somebody to approve ninety thousand lookups in one modal,
@@ -189,11 +189,17 @@ const loose = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
  *  new record takes it. */
 export const isImportable = (field: RegistryField): boolean => !field.isSystem || field.key === 'created_at'
 
-/** The field a header names: exact key, then label, then key, on letters only. */
-const fieldNamed = (fields: RegistryField[], header: string): RegistryField | undefined =>
-  fields.find((field) => field.key === header.trim()) ??
-  fields.find((field) => loose(field.label) === loose(header)) ??
-  fields.find((field) => loose(field.key) === loose(header))
+/** The field a header names: exact key, then exact label, then key and label on letters
+ *  only. A header from a Rawr export carries the formula guard, so it is read back first. */
+const fieldNamed = (fields: RegistryField[], header: string): RegistryField | undefined => {
+  const name = csvUncell(header).trim()
+  return (
+    fields.find((field) => field.key === name) ??
+    fields.find((field) => field.label === name) ??
+    fields.find((field) => loose(field.label) === loose(name)) ??
+    fields.find((field) => loose(field.key) === loose(name))
+  )
+}
 
 export const suggestMapping = (
   object: RegistryObject,
@@ -1157,7 +1163,7 @@ const ROWS_PER_INSERT = 1000
 const storedRow = (row: ImportRow): ImportRow =>
   Object.fromEntries(
     Object.entries(row).flatMap(([header, value]) => {
-      const text = String(value ?? '').trim()
+      const text = csvUncell(String(value ?? '')).trim()
       return text ? [[header, text]] : []
     }),
   )

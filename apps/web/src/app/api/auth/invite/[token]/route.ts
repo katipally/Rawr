@@ -2,11 +2,9 @@ import { acceptInvitation, membershipsForUser, readInvitationOffer } from '@rawr
 import { NextResponse } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { invitePath } from '~/lib/links.ts'
+import { NOTICE_PARAM } from '~/lib/notices.ts'
 import { INVITE_COOKIE, INVITE_COOKIE_MAX_AGE_SECONDS } from '~/server/invite.ts'
 import { readSession, sessionFromMembership, writeSessionCookie } from '~/server/session.ts'
-
-const NOT_ACCEPTED =
-  'That invitation could not be accepted. It may have been used already or replaced. Ask whoever invited you to send another.'
 
 /** Where an invitation link does its work. A route handler rather than the page,
  *  because a server component may read cookies and not set them, and because
@@ -40,7 +38,7 @@ export const GET = async (
     const seated = joined && (await membershipsForUser(session.userId)).find((row) => row.accountId === joined)
     if (!seated) {
       const home = new URL('/', env.AUTH_URL)
-      home.searchParams.set('error', NOT_ACCEPTED)
+      home.searchParams.set(NOTICE_PARAM, 'invite_not_accepted')
       return NextResponse.redirect(home)
     }
     await writeSessionCookie(sessionFromMembership(seated))

@@ -7,11 +7,12 @@ import {
   publicEdgeContext,
   publicFormById,
   publicSite,
+  webAddress,
 } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { randomUUID } from 'node:crypto'
 import { inBackground } from '~/server/background.ts'
-import { byteLength, clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
+import { clientIp, rateLimit, readRaw } from '~/server/edge.ts'
 import { forwardToGa4 } from '~/server/integrations/ga4.ts'
 
 /** GET and POST /e — the collector, F4 §2.
@@ -144,12 +145,9 @@ const handle = async (
   const rawUrl = typeof payload.url === 'string' ? payload.url : null
   if (!rawUrl) return done()
 
-  let path = '/'
-  try {
-    path = new URL(rawUrl).pathname
-  } catch {
-    return done()
-  }
+  const href = webAddress(rawUrl)
+  if (!href) return done()
+  const path = new URL(href).pathname
 
   const name = typeof payload.name === 'string' ? payload.name.trim() : ''
 
@@ -211,11 +209,7 @@ const handle = async (
 export const POST = async (request: NextRequest): Promise<NextResponse> => {
   let body: Record<string, unknown>
   try {
-    const declared = Number(request.headers.get('content-length') ?? '0')
-    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return done()
-    const text = await request.text()
-    if (byteLength(text) > MAX_BODY_BYTES) return done()
-    const parsed: unknown = JSON.parse(text)
+    const parsed: unknown = JSON.parse(await readRaw(request))
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return done()
     body = parsed as Record<string, unknown>
   } catch {

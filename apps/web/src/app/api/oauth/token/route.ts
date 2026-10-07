@@ -1,7 +1,7 @@
-import { issueOauthToken, redeemOauthCode, refreshOauthToken } from '@rawr/db'
+import { issueOauthToken, linkOauthCode, redeemOauthCode, refreshOauthToken, revokeOauthToken } from '@rawr/db'
 import type { NextRequest } from 'next/server'
 import { oauthError, pkceMatches, resolveClient, resource as ourResource } from '~/server/mcp/oauth.ts'
-import { clientIp, rateLimit } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, rateLimit, readBody, readRaw } from '~/server/edge.ts'
 
 /** The token endpoint. Form-encoded in, JSON out, RFC 6749 error codes only:
  *  a client refreshing decides what to do next from `invalid_grant` and from
@@ -10,6 +10,7 @@ import { clientIp, rateLimit } from '~/server/edge.ts'
 export const dynamic = 'force-dynamic'
 
 const NO_STORE = { 'cache-control': 'no-store', pragma: 'no-cache' }
+const REPLAYED = 'That code was already used, so the tokens it made are revoked. Connect again.'
 
 export const POST = async (request: NextRequest): Promise<Response> => {
   const limit = rateLimit(`oauth-token:${clientIp(request) ?? 'unknown'}`, 60, 60)
@@ -17,13 +18,18 @@ export const POST = async (request: NextRequest): Promise<Response> => {
 
   const type = request.headers.get('content-type') ?? ''
   let form: URLSearchParams
-  if (type.includes('application/x-www-form-urlencoded')) {
-    form = new URLSearchParams(await request.text())
-  } else if (type.includes('application/json')) {
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
-    form = new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)]))
-  } else {
-    return oauthError('invalid_request', 'Send application/x-www-form-urlencoded.', 415)
+  try {
+    if (type.includes('application/x-www-form-urlencoded')) {
+      form = new URLSearchParams(await readRaw(request))
+    } else if (type.includes('application/json')) {
+      const body = await readBody(request)
+      form = new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)]))
+    } else {
+      return oauthError('invalid_request', 'Send application/x-www-form-urlencoded.', 415)
+    }
+  } catch (cause) {
+    const refusal = bodyRefusal(cause)
+    return oauthError('invalid_request', refusal.error, refusal.status)
   }
 
   const clientId = form.get('client_id') ?? ''
@@ -38,7 +44,11 @@ export const POST = async (request: NextRequest): Promise<Response> => {
     if (!code || !verifier) return oauthError('invalid_request', 'code and code_verifier are both required.')
 
     const redeemed = await redeemOauthCode(code)
-    if (!redeemed) return oauthError('invalid_grant', 'That code is unknown or was already used.')
+    if (!redeemed) return oauthError('invalid_grant', 'That code is unknown or has expired.')
+    if (redeemed.replayed) {
+      if (redeemed.tokenId) await revokeOauthToken(redeemed.accountId, redeemed.userId, redeemed.tokenId)
+      return oauthError('invalid_grant', REPLAYED)
+    }
     if (redeemed.expiresAt.getTime() < Date.now()) return oauthError('invalid_grant', 'That code has expired. Start the connection again.')
     if (redeemed.clientId !== clientId) return oauthError('invalid_grant', 'That code was issued to a different client.')
     const redirectUri = form.get('redirect_uri')
@@ -57,6 +67,11 @@ export const POST = async (request: NextRequest): Promise<Response> => {
       clientName: client.name,
       scope: redeemed.scope,
     })
+    // A second presentation that landed while this token was being issued.
+    if (await linkOauthCode(code, issued.tokenId)) {
+      await revokeOauthToken(redeemed.accountId, redeemed.userId, issued.tokenId)
+      return oauthError('invalid_grant', REPLAYED)
+    }
     return Response.json(
       {
         access_token: issued.accessToken,

@@ -9,6 +9,7 @@ import {
   type AccountContext,
 } from '@rawr/db'
 import { inBackground } from './background.ts'
+import { hostOf, outboundRequest } from './outbound.ts'
 
 /** Sending Rawr's own events out, and proving they came from us.
  *
@@ -100,7 +101,8 @@ export const deliverWebhook = async (job: WebhookJob): Promise<void> => {
   }
 
   try {
-    const response = await fetch(job.url, {
+    const response = await outboundRequest({
+      url: job.url,
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -111,28 +113,19 @@ export const deliverWebhook = async (job: WebhookJob): Promise<void> => {
       body: job.body,
       // A receiver slower than this is one whose answer nobody is waiting for.
       // A replay is the remedy, not a longer wait holding a socket open.
-      signal: AbortSignal.timeout(15_000),
+      timeoutMs: 15_000,
+      // Only the status is read; a receiver that answers with a page is not failing.
+      maxBytes: 16_384,
     })
 
     if (!response.ok) {
-      await failed(response.status, `${job.url} answered ${response.status}.`)
+      await failed(response.status, `${hostOf(job.url)} answered ${response.status}.`)
       return
     }
     await recordDelivery(ctx, job.endpointId, { ok: true, status: response.status })
   } catch (cause) {
-    await failed(null, describe(cause, job.url))
+    await failed(null, cause instanceof Error ? cause.message : String(cause))
   }
-}
-
-/** Node's fetch reports every transport failure as "fetch failed" and puts the
- *  real reason — refused, DNS, TLS, timed out — one level down in `cause`. An
- *  admin looking at a red row needs that reason and the address it was aimed at,
- *  not two words that are true of every possible failure. */
-const describe = (cause: unknown, url: string): string => {
-  if (cause instanceof Error && cause.name === 'TimeoutError') return `${url} did not answer within 15 seconds.`
-  const inner = cause instanceof Error ? (cause.cause as Error | undefined) : undefined
-  const reason = inner?.message ?? (cause instanceof Error ? cause.message : String(cause))
-  return `${url} could not be reached: ${reason}`
 }
 
 /** Tell everything subscribed to this event. Never awaited by a request: a slow

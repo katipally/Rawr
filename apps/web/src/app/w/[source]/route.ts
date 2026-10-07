@@ -5,13 +5,14 @@ import { handleApolloWebhook } from '~/server/integrations/apollo.ts'
 import { handleBrevoWebhook } from '~/server/integrations/brevo.ts'
 import { handleClayWebhook } from '~/server/integrations/clay.ts'
 import { handleWoodpeckerWebhook } from '~/server/integrations/woodpecker.ts'
-import { byteLength, clientIp, MAX_BODY_BYTES, rateLimit } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, rateLimit, readRaw, unverified } from '~/server/edge.ts'
 
 /** POST /w/:source — F0 §6's fourth public endpoint, and F6 §1's inbound half.
  *
  *  Per-provider signature verification, a replay window, and an idempotency key,
- *  in that order. A webhook with an invalid signature is rejected, logged and
- *  counted; a spike raises the integration's health rather than passing silently.
+ *  in that order. Anything that cannot prove itself gets one generic 401 and a line
+ *  in the server log, and never touches the integration's health: the site key is
+ *  public, so health may only change on a request that passed verification.
  *
  *  A provider retries on a non-2xx, so anything that can never be processed answers
  *  200 with a reason rather than inviting an infinite retry. Only a genuine "try me
@@ -40,7 +41,7 @@ const signatureMatches = (expected: string, presented: string): boolean => {
 export const POST = async (
   request: NextRequest,
   { params }: { params: Promise<{ source: string }> },
-): Promise<NextResponse> => {
+): Promise<Response> => {
   const { source } = await params
   if (!isSource(source)) return rejected(`Rawr takes no webhooks from "${source}".`, 404)
 
@@ -55,36 +56,25 @@ export const POST = async (
   // caller must not be able to name the tenant it writes into. F0 §2.
   const siteKey = request.nextUrl.searchParams.get('w') ?? ''
   const accountId = siteKey ? await accountIdForSite(siteKey) : null
-  if (!accountId) {
-    return rejected('That webhook URL is missing the account key Rawr issued with it.', 404)
-  }
+  if (!accountId) return unverified(`/w/${source}`, 'unknown or missing account key')
 
   const ctx = publicEdgeContext(accountId)
 
-  // The same 64 KB budget every other public reader works to. Applied here rather
-  // than through readBody because the signature is over the raw text, and an
-  // unauthenticated endpoint must not read an unbounded body to find that out.
-  const declared = Number(request.headers.get('content-length') ?? '0')
-  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
-    return rejected(`A webhook body may be at most ${MAX_BODY_BYTES / 1024}KB.`, 413)
-  }
-  const raw = await request.text()
-  if (byteLength(raw) > MAX_BODY_BYTES) {
-    return rejected(`A webhook body may be at most ${MAX_BODY_BYTES / 1024}KB.`, 413)
+  // The signature is over the raw text, so this is read here rather than through
+  // readBody, but under the same 64 KB budget and stream cap.
+  let raw: string
+  try {
+    raw = await readRaw(request)
+  } catch (cause) {
+    const { error, status } = bodyRefusal(cause)
+    return rejected(error, status)
   }
 
   const stored = await readCredentials(ctx, source)
-  if (!stored?.secret) {
-    return rejected(`${source} is not connected in this account, so its webhooks are refused.`, 503)
-  }
+  if (!stored?.secret) return unverified(`/w/${source}`, 'provider not connected')
 
   const verified = verify(source, request, raw, stored.secret, stored.config)
-  if (!verified.ok) {
-    // Counted against the integration's health, so a spike of bad signatures is
-    // visible rather than silently dropped. F6's edge-case table.
-    await recordHealth(ctx, source, { ok: false, error: `Rejected webhook: ${verified.detail}` })
-    return rejected(verified.detail, 401)
-  }
+  if (!verified.ok) return unverified(`/w/${source}`, verified.detail)
 
   let body: unknown
   try {

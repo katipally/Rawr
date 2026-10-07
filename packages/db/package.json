@@ -35,6 +35,7 @@
     "verify:sequences": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-sequences.ts",
     "verify:reporting": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-reporting.ts",
     "verify:scale": "DATABASE_POOL_MAX=8 node --env-file-if-exists=../../.env.local scripts/verify-scale.ts",
+    "seal:secrets": "node --env-file-if-exists=../../.env.local scripts/seal-secrets.ts",
     "reclaim": "node --env-file-if-exists=../../.env.local scripts/reclaim.mjs",
     "probe:large": "node --env-file-if-exists=../../.env.local scripts/probe-large-values.mjs",
     "verify:objects": "DATABASE_POOL_MAX=5 node --env-file-if-exists=../../.env.local scripts/verify-objects.ts",

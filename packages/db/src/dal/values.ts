@@ -313,6 +313,16 @@ export const filterValue = (field: RegistryField, input: unknown): unknown => {
   }
 }
 
+/** What Postgres prints for a timestamptz in a raw query (`2026-10-06 21:18:04.482-07`)
+ *  becomes the same ISO moment a `Date` exports as. Only a full moment with an
+ *  explicit offset is converted: `new Date` also accepts "hello 1" and reads a
+ *  zoneless time in the server's own zone, neither of which is a moment. */
+const MOMENT_WITH_OFFSET = /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d(?::?\d\d)?)$/
+const isoMoment = (text: string): string => {
+  const moment = new Date(text)
+  return MOMENT_WITH_OFFSET.test(text) && !Number.isNaN(moment.getTime()) ? moment.toISOString() : text
+}
+
 /** How a value leaves Rawr: one rule per type, used by CSV export and by anything
  *  that has to render a value as plain text. */
 export const formatForCsv = (type: FieldType, value: unknown): string => {
@@ -323,10 +333,39 @@ export const formatForCsv = (type: FieldType, value: unknown): string => {
     case 'multi_select':
       return Array.isArray(value) ? value.join(';') : String(value)
     case 'datetime':
-      return value instanceof Date ? value.toISOString() : String(value)
+      return value instanceof Date ? value.toISOString() : isoMoment(String(value))
     case 'json':
       return typeof value === 'object' ? JSON.stringify(value) : String(value)
     default:
       return String(value)
   }
 }
+
+/** A spreadsheet runs a cell that starts with one of these as a formula, after any
+ *  leading whitespace or invisible character too. A leading tab, CR or LF is
+ *  itself the injection (it hides the next cell's start in some readers). */
+const FORMULA_START = /^[\t\r\n]|^[\s\p{Cc}\p{Cf}]*[=+\-@]/u
+/** Plain numbers (signed, decimal, either separator, exponent) and international
+ *  phone numbers (at least seven digits) start with `-` or `+` and are not
+ *  formulas, so they keep their value. */
+const PLAIN_NUMBER = /^[+-]?\.?\d[\d.,]*(?:e[+-]?\d+)?$/i
+const PHONE_NUMBER = /^\+(?=(?:\D*\d){7,})[\d\s().-]+$/
+const LEADING_APOSTROPHES = /^'+/
+
+/** Leading apostrophes are ignored when deciding, so a real value that already
+ *  starts with `'=` is guarded too and `csvUncell` can tell it from a guard. */
+const needsFormulaGuard = (text: string): boolean => {
+  const bare = text.replace(LEADING_APOSTROPHES, '')
+  return FORMULA_START.test(bare) && !PLAIN_NUMBER.test(bare) && !PHONE_NUMBER.test(bare)
+}
+
+/** One CSV cell, quoted per RFC 4180 and made inert to a spreadsheet: text that
+ *  would run as a formula gets a leading `'`, which Excel and Sheets hide. O(length). */
+export const csvCell = (text: string): string => {
+  const safe = needsFormulaGuard(text) ? `'${text}` : text
+  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
+}
+
+/** The inverse of `csvCell` for a cell read back from a file, so a Rawr export
+ *  re-imported keeps every value exactly. */
+export const csvUncell = (text: string): string => (text.startsWith("'") && needsFormulaGuard(text) ? text.slice(1) : text)

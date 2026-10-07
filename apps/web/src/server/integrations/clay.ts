@@ -53,6 +53,7 @@ export const testClay = async (ctx: AccountContext): Promise<ConnectionTest> => 
     // real write the table can absorb, marked so a human can spot it.
     await json({
       url: config.webhookUrl,
+      guarded: true,
       method: 'POST',
       headers: { 'x-clay-webhook-auth': secret! },
       body: { rawr_connection_test: true, at: new Date().toISOString() },
@@ -113,6 +114,7 @@ export const enrichWithClay = async (
       () =>
         json({
           url: config.webhookUrl!,
+          guarded: true,
           method: 'POST',
           headers: { 'x-clay-webhook-auth': secret! },
           body: { domain: input.domain, rawr_company_id: input.companyId, wanted: input.missing },

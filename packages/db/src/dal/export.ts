@@ -4,7 +4,7 @@ import { assertCanDo, type AccountContext } from './context.ts'
 import { withAccount, writeAudit } from './index.ts'
 import { listRecords } from './records.ts'
 import { getRegistry, objectOrThrow } from './registry.ts'
-import { formatForCsv } from './values.ts'
+import { csvCell, formatForCsv } from './values.ts'
 import type { Cursor, FilterGroup, Sort } from './query.ts'
 
 const PAGE = 200
@@ -12,9 +12,6 @@ const PAGE = 200
 /** Excel reads a CSV without one as its local code page, so every accented name
  *  arrives mangled. The importer strips it, so a file goes out and back unchanged. */
 const BOM = '\uFEFF'
-
-const quoted = (value: string): string =>
-  /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
 
 /** Yields the CSV of exactly the current view: its filters, its columns, its sort
  *  order, nothing else. Streamed a page at a time, so memory holds one page
@@ -32,7 +29,7 @@ export async function* exportCsv(
   })
   if (fields.length === 0) throw new Error('Pick at least one column to export.')
 
-  yield `${BOM}${fields.map((field) => quoted(field.label)).join(',')}\n`
+  yield `${BOM}${fields.map((field) => csvCell(field.label)).join(',')}\n`
 
   let cursor: Cursor | null = null
   let emitted = 0
@@ -52,7 +49,7 @@ export async function* exportCsv(
         const cells = fields.map((field) => {
           // A relation exports as the name a person recognises, not as a uuid.
           const label = row.labels[field.key]
-          return quoted(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
+          return csvCell(label !== undefined && label !== '' ? label : formatForCsv(field.type, row.values[field.key]))
         })
         yield `${cells.join(',')}\n`
         emitted += 1
@@ -112,7 +109,7 @@ export async function* importErrorCsv(ctx: AccountContext, id: string): AsyncGen
   if (!run) throw new Error('That import does not exist.')
   const headers = run.headers as string[]
 
-  yield `${BOM}${['Row', 'Reason', ...headers].map(quoted).join(',')}\n`
+  yield `${BOM}${['Row', 'Reason', ...headers].map(csvCell).join(',')}\n`
   let after = -1
   for (;;) {
     const page = await withAccount(ctx, (tx) =>
@@ -125,7 +122,7 @@ export async function* importErrorCsv(ctx: AccountContext, id: string): AsyncGen
     )
     for (const row of page) {
       const values = row.values as Record<string, string>
-      yield `${[String(row.position + 2), row.reason ?? '', ...headers.map((header) => values[header] ?? '')].map(quoted).join(',')}\n`
+      yield `${[String(row.position + 2), row.reason ?? '', ...headers.map((header) => values[header] ?? '')].map(csvCell).join(',')}\n`
     }
     if (page.length < ERROR_PAGE) return
     after = page.at(-1)!.position

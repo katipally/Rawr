@@ -50,6 +50,21 @@ const check = (what: string, condition: boolean, detail?: string) => {
 const section = (title: string) =>
   console.log(`\n-- ${title} ${'-'.repeat(Math.max(0, 60 - title.length))}`)
 
+const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
+
+/** Where an approve or deny POST sends the browser. A 3xx carries it in Location;
+ *  otherwise the 200 hop page from redirect-hop.ts carries it in a meta refresh,
+ *  with its address HTML-escaped. One pass over the entities, so &amp;lt; stays &lt;. */
+const redirectTarget = async (res: Response): Promise<URL | null> => {
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get('location')
+    return location ? new URL(location, BASE) : null
+  }
+  const html = await res.text()
+  const refresh = html.match(/<meta http-equiv="refresh" content="0;url=([^"]*)"/)?.[1]
+  return refresh ? new URL(refresh.replace(/&(?:amp|lt|gt|quot|#39);/g, (e) => ENTITIES[e] ?? e)) : null
+}
+
 // ---------------------------------------------------------------------------
 // Talking to the endpoint
 // ---------------------------------------------------------------------------
@@ -612,11 +627,11 @@ try {
       }),
       redirect: 'manual',
     })
-    const back = new URL(approve.headers.get('location') ?? 'http://x/')
+    const back = await redirectTarget(approve)
     check(
       'approving sends a code back to the loopback with any port, plus state and iss',
-      back.port === '5555' && back.searchParams.get('state') === 'verify' && back.searchParams.get('iss') === BASE && Boolean(back.searchParams.get('code')),
-      back.toString(),
+      back?.hostname === 'localhost' && back.port === '5555' && back.searchParams.get('state') === 'verify' && back.searchParams.get('iss') === BASE && Boolean(back.searchParams.get('code')),
+      back?.toString() ?? `no redirect target, HTTP ${approve.status}`,
     )
 
     // RFC 8707. A client that echoes the address a person pasted names this
@@ -633,10 +648,11 @@ try {
       }),
       redirect: 'manual',
     })
+    const withQueryTarget = await redirectTarget(withQuery)
     check(
       'a resource carrying the toolsets query is this endpoint, not another one',
-      Boolean(new URL(withQuery.headers.get('location') ?? 'http://x/').searchParams.get('code')),
-      withQuery.headers.get('location') ?? String(withQuery.status),
+      Boolean(withQueryTarget?.searchParams.get('code')),
+      withQueryTarget?.toString() ?? `no redirect target, HTTP ${withQuery.status}`,
     )
     const otherHost = await fetch(`${BASE}/api/oauth/authorize`, {
       method: 'POST',
@@ -650,17 +666,19 @@ try {
       }),
       redirect: 'manual',
     })
+    // A refused resource goes back to this server's consent page, never to the client.
+    const refusal = await redirectTarget(otherHost)
     check(
       'and a resource naming somewhere else is still refused',
-      !new URL(otherHost.headers.get('location') ?? 'http://x/').searchParams.get('code'),
-      otherHost.headers.get('location') ?? String(otherHost.status),
+      refusal?.host === new URL(BASE).host && refusal.pathname === '/oauth/authorize' && !refusal.searchParams.get('code'),
+      refusal?.toString() ?? `no redirect target, HTTP ${otherHost.status}`,
     )
 
     const wrongVerifier = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code: back.searchParams.get('code') ?? '',
+        code: back?.searchParams.get('code') ?? '',
         code_verifier: 'x'.repeat(50),
         client_id: registered.client_id,
       }),
@@ -673,7 +691,7 @@ try {
       body: new URLSearchParams({ client_id: registered.client_id, redirect_uri: 'http://localhost:5555/callback', code_challenge: challenge, decision: 'approve' }),
       redirect: 'manual',
     })
-    const code = new URL(second.headers.get('location') ?? 'http://x/').searchParams.get('code') ?? ''
+    const code = (await redirectTarget(second))?.searchParams.get('code') ?? ''
     const tokens = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -684,30 +702,61 @@ try {
     const viaOauth = await call(tokens.access_token, 'get_record', { object: 'deal', id: mggId })
     check('the OAuth token reads as the person who approved', !viaOauth.isError && viaOauth.text.includes('MGG'), viaOauth.text.slice(0, 80))
 
-    const reused = await fetch(`${BASE}/api/oauth/token`, {
-      method: 'POST',
-      body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<OAuthFailure>)
-    check('a code cannot be redeemed twice', reused.error === 'invalid_grant')
-
     const refreshed = await fetch(`${BASE}/api/oauth/token`, {
       method: 'POST',
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
     }).then((r) => r.json() as Promise<IssuedTokens>)
     check('a refresh rotates both tokens', typeof refreshed.access_token === 'string' && refreshed.refresh_token !== tokens.refresh_token)
-    const staleRefresh = await fetch(`${BASE}/api/oauth/token`, {
-      method: 'POST',
-      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
-    }).then((r) => r.json() as Promise<OAuthFailure>)
-    check('the old refresh token is dead the moment the new one exists', staleRefresh.error === 'invalid_grant')
-    const staleAccess = await rpc(tokens.access_token, 'ping')
-    check('and so is the old access token', staleAccess.status === 401)
 
     const ownTokens = await listMcpTokens(sales)
     check(
       'the connection appears in Settings under the client name, revocable like any token',
       ownTokens.some((t) => t.name === `${MARK} client` && !t.revokedAt),
     )
+
+    const staleRefresh = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<OAuthFailure>)
+    check('an old refresh token presented again is refused', staleRefresh.error === 'invalid_grant')
+    const replayedAccess = await rpc(refreshed.access_token, 'ping')
+    check('and that replay revokes the connection: the newest access token is dead', replayedAccess.status === 401)
+    const afterReplay = await fetch(`${BASE}/api/oauth/token`, {
+      method: 'POST',
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshed.refresh_token, client_id: registered.client_id }),
+    }).then((r) => r.json() as Promise<OAuthFailure>)
+    check('and its newest refresh token no longer works', afterReplay.error === 'invalid_grant')
+    const staleAccess = await rpc(tokens.access_token, 'ping')
+    check('the first access token is dead too', staleAccess.status === 401)
+
+    // A code presented twice revokes the token its first use made. It is a second
+    // connection, so the one above is not revoked before its checks run.
+    const approveCode = async (): Promise<string> => {
+      const back = await fetch(`${BASE}/api/oauth/authorize`, {
+        method: 'POST',
+        headers: { cookie },
+        body: new URLSearchParams({
+          client_id: registered.client_id,
+          redirect_uri: 'http://localhost:5555/callback',
+          code_challenge: challenge,
+          decision: 'approve',
+        }),
+        redirect: 'manual',
+      })
+      return (await redirectTarget(back))?.searchParams.get('code') ?? ''
+    }
+    const exchange = (code: string) =>
+      fetch(`${BASE}/api/oauth/token`, {
+        method: 'POST',
+        body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: registered.client_id }),
+      }).then((r) => r.json() as Promise<Partial<IssuedTokens> & OAuthFailure>)
+    const replayCode = await approveCode()
+    const first = await exchange(replayCode)
+    check('a fresh code gets its own token for the replay check', typeof first.access_token === 'string', JSON.stringify(first))
+    const reused = await exchange(replayCode)
+    check('a code presented twice is refused', reused.error === 'invalid_grant')
+    const firstUseDead = await rpc(first.access_token ?? '', 'ping')
+    check('and the token its first use made is revoked', firstUseDead.status === 401)
   }
 
   // -----------------------------------------------------------------------

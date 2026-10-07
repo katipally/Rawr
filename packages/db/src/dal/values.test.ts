@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { TYPE_META, type FieldType } from '../registry/types.ts'
 import type { RegistryField } from './registry.ts'
-import { filterValue, ValueError } from './values.ts'
+import { csvCell, csvUncell, filterValue, formatForCsv, ValueError } from './values.ts'
 
 const field = (type: FieldType, over: Partial<RegistryField> = {}): RegistryField => ({
   id: `id-${type}`,
@@ -115,4 +115,78 @@ test('text is compared as typed, and a list or an object is not one value', () =
     assert.equal(filterValue(field(type), '  é ñ 日本 '), '  é ñ 日本 ')
   }
   for (const input of [['a', 'b'], { a: 1 }, [[1]]]) refused(field('text'), input, /takes one value in a filter/)
+})
+
+const unquote = (cell: string): string => (cell.startsWith('"') ? cell.slice(1, -1).replace(/""/g, '"') : cell)
+
+test('text a spreadsheet would run as a formula gets a leading apostrophe', () => {
+  for (const input of [
+    "=cmd|' /C calc'!A0",
+    '@SUM(1+1)',
+    '+1+1',
+    '-2+3',
+    '=HYPERLINK("http://x","y")',
+    '=1+1',
+    '\t=x',
+    '\r=x',
+    '\ttab first',
+    '\nnewline first',
+    ' =1+1',
+    ' =1+1',
+    '​@SUM(A1)',
+    '\u0001-2+3',
+    "'=1+1",
+    '-1-1+cmd',
+    '+1-1',
+  ]) {
+    assert.equal(unquote(csvCell(input)), `'${input}`, JSON.stringify(input))
+  }
+})
+
+test('numbers, phone numbers and ordinary text are left as they are', () => {
+  for (const input of ['-5', '+5', '-0.5', '-.5', '+1,234.50', '-1.234,50', '-1e5', '1,234.50', '+1 415 555 0100', '+44 (0) 20 7946 0958', '+1-415-555-0100', '', 'plain', 'a=b', 'x@y.com', '日本語', 'ñ é', "it's", "'quoted'", 'a-b', '5-3']) {
+    assert.equal(unquote(csvCell(input)), input, JSON.stringify(input))
+  }
+})
+
+test('quotes, commas and line breaks are still quoted, with or without the guard', () => {
+  assert.equal(csvCell('a,b'), '"a,b"')
+  assert.equal(csvCell('say "hi"'), '"say ""hi"""')
+  assert.equal(csvCell('one\ntwo'), '"one\ntwo"')
+  assert.equal(csvCell('=a,"b"\nc'), '"\'=a,""b""\nc"')
+})
+
+test('a very long value is guarded in one pass', () => {
+  const long = '='.repeat(1_000_000)
+  assert.equal(csvCell(long), `'${long}`)
+  assert.equal(csvCell('x'.repeat(1_000_000)).length, 1_000_000)
+  const blanks = ' '.repeat(1_000_000)
+  assert.equal(csvCell(blanks), blanks)
+  const apostrophes = "'".repeat(1_000_000)
+  assert.equal(csvCell(apostrophes), apostrophes)
+})
+
+test('a value survives the trip out through csvCell and back in through csvUncell', () => {
+  for (const input of ['=1+1', "'=1+1", "''@x", ' =x', '\t=x', '-5', '+1 415 555 0100', "'-5", "'+1 415 555 0100", "'plain", "'", "''", 'plain', '@', "'@", 'é=', '日本']) {
+    assert.equal(csvUncell(unquote(csvCell(input))), input, JSON.stringify(input))
+  }
+})
+
+test('a file from elsewhere with a leading apostrophe on ordinary text keeps it', () => {
+  for (const input of ["'hello", "'12", "'", "'-5", "'+1 415 555 0100"]) assert.equal(csvUncell(input), input)
+})
+
+test('a timestamp from a raw query exports as the ISO moment a Date does', () => {
+  assert.equal(formatForCsv('datetime', new Date('2026-10-07T04:18:04.482Z')), '2026-10-07T04:18:04.482Z')
+  for (const input of ['2026-10-06 21:18:04.482-07', '2026-10-06 21:18:04.482-0700', '2026-10-06T21:18:04.482-07:00', '2026-10-07T04:18:04.482Z']) {
+    assert.equal(formatForCsv('datetime', input), '2026-10-07T04:18:04.482Z', input)
+  }
+  assert.equal(formatForCsv('datetime', '2026-10-06 21:18:04+00'), '2026-10-06T21:18:04.000Z')
+})
+
+test('a datetime that is not a full moment with an offset is exported untouched', () => {
+  for (const input of ['2026-10-07', '2026-10-06 21:18:04', 'hello 1', '12', '2026-13-45 99:99:99+00', '=1+1']) {
+    assert.equal(formatForCsv('datetime', input), input, input)
+  }
+  assert.equal(formatForCsv('datetime', null), '')
 })

@@ -8,6 +8,7 @@ import {
   type PublicForm,
 } from '@rawr/db'
 import type { Metadata } from 'next'
+import { cookies } from 'next/headers'
 import { notFound } from 'next/navigation'
 import { cache } from 'react'
 import { PendingButton } from '~/components/pending-button.tsx'
@@ -15,6 +16,7 @@ import { inBackground } from '~/server/background.ts'
 import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
 import { presetOf, themeCss } from '~/lib/embed-themes.ts'
+import { decodeEcho, echoCookieName } from '~/server/form-echo.ts'
 import { hopHref } from '~/server/redirect-hop.ts'
 import { submitHostedForm } from './actions.ts'
 
@@ -75,10 +77,15 @@ const HostedFormPage = async ({
     return typeof value === 'string' ? value : null
   }
 
-  // Errors and the resubmitted answers come back through the URL, because a
-  // no-JS round trip has nowhere else to put them and a redirect is what keeps
-  // the back button honest.
-  const errors = parseErrors(single('e'))
+  // Errors come back through the URL, because a no-JS round trip has nowhere
+  // else to put them and a redirect is what keeps the back button honest. The
+  // answers typed travel in a cookie instead (form-echo.ts), and are only read
+  // when there are errors to fix: a fresh visit starts blank.
+  const rawErrors = single('e')
+  const errors = parseErrors(rawErrors)
+  const previous = rawErrors
+    ? decodeEcho(form.fields, (await cookies()).get(echoCookieName(form.formId))?.value)
+    : {}
   const sent = single('sent') === '1'
   const held = single('held') === '1'
   const hop = single('go') === '1' && form.settings.successMode === 'redirect' ? hopHref(form.settings.successValue) : null
@@ -153,7 +160,7 @@ const HostedFormPage = async ({
 
               <div className="rawr-step">
                 {form.fields.map((field) => (
-                  <Field key={field.key} field={field} error={errors.byKey[field.key]} previous={single(`v_${field.key}`)} />
+                  <Field key={field.key} field={field} error={errors.byKey[field.key]} previous={previous[field.key] ?? null} />
                 ))}
               </div>
 

@@ -10,11 +10,13 @@ import {
   listAutomationRuns,
   openScannedRun,
   parkAutomationRun,
+  readAutomation,
   removeAutomation,
   saveAutomation,
   scanTargets,
   setAutomationActive,
 } from '../src/dal/automations.ts'
+import { openSecret } from '../src/internal/crypto.ts'
 import { createRecord } from '../src/dal/records.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup, seatFor } from './fixture.ts'
@@ -310,6 +312,48 @@ try {
     )
     expect(unsigned.includes('secret'), unsigned)
     return `${plain} / ${unsigned}`
+  })
+
+  await check('a webhook step cannot be aimed at a private address', async () => {
+    const said = await refuses('a webhook at the metadata service', () =>
+      save({
+        name: `Inside hook ${stamp}`,
+        trigger: 'record_created',
+        objectKey: 'contact',
+        conditions: [],
+        steps: [{ kind: 'action', type: 'webhook', config: { url: 'https://169.254.169.254/latest/meta-data', secret: 'shh' } }],
+      }),
+    )
+    expect(said.includes('private network'), said)
+    return said
+  })
+
+  await check('a webhook step secret is stored sealed, inside a branch too, and opens to what was typed', async () => {
+    const hook = (secret: string) =>
+      ({ kind: 'action', type: 'webhook', config: { url: 'https://example.test/hook', secret } }) as const
+    const id = await save({
+      name: `Sealed hook ${stamp}`,
+      trigger: 'record_created',
+      objectKey: 'contact',
+      conditions: [],
+      steps: [hook('shh-top'), { kind: 'branch', conditions: [], matched: [hook('shh-arm')], otherwise: [] }],
+    })
+    const [stored] = await owner<{ steps: unknown }[]>`select steps from automation where id = ${id}`
+    expect(!JSON.stringify(stored?.steps).includes('shh-'), 'a signing key is readable in the row')
+    const rule = await readAutomation(admin, id)
+    const [top, branch] = rule?.steps ?? []
+    expect(top?.kind === 'action' && openSecret(String(top.config.secret)) === 'shh-top', 'the top step did not open')
+    expect(
+      branch?.kind === 'branch' &&
+        branch.matched[0]?.kind === 'action' &&
+        openSecret(String(branch.matched[0].config.secret)) === 'shh-arm',
+      'the step in the branch did not open',
+    )
+    // Saving what the editor handed back must keep the key, not seal the seal.
+    await save({ id, name: `Sealed hook ${stamp}`, trigger: 'record_created', objectKey: 'contact', conditions: [], steps: rule?.steps ?? [] })
+    const again = await readAutomation(admin, id)
+    expect(JSON.stringify(again?.steps) === JSON.stringify(rule?.steps), 'saving twice changed the sealed key')
+    return 'sealed at rest, opened by the runner, stable across an edit'
   })
 
   // -------------------------------------------------------------- branches
