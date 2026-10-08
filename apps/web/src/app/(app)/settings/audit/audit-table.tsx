@@ -109,7 +109,7 @@ export const AuditTable = ({
       key: 'target',
       header: 'Target',
       width: 220,
-      render: (row) => <span title={row.targetName ?? undefined} className="block truncate">{row.targetName ?? EMPTY_VALUE}</span>,
+      render: (row) => <span title={row.targetName ?? undefined} className="block truncate">{row.targetName ?? categoryOf(row.entity)}</span>,
     },
     { key: 'action', header: 'Action', width: 220, render: (row) => <span className="block truncate">{actionOf(row.action)}</span> },
     { key: 'details', header: 'Details', width: 360, render: (row) => <Diff before={row.before} after={row.after} names={names} /> },

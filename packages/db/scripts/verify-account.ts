@@ -27,6 +27,13 @@ import {
   touchSession,
 } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
+import { createPipeline, deletePipeline, renamePipeline } from '../src/dal/pipelines.ts'
+import { associate, dissociate } from '../src/dal/associations.ts'
+import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
+import { createRecord, deleteRecord, updateRecord } from '../src/dal/records.ts'
+import { createTaskQueue, deleteTaskQueue, renameTaskQueue } from '../src/dal/tasks.ts'
+import { deleteFormFolder, saveFormFolder } from '../src/dal/forms.ts'
+import { deleteEmailTemplate, saveEmailTemplate } from '../src/dal/sequences.ts'
 import { SALES_STAGES } from '../src/registry/core.ts'
 import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
 
@@ -378,6 +385,74 @@ try {
   const [teamCount] = await owner`select count(*)::int n from team_member where team_id = ${team.id}`
   check((teamCount!.n as number) === 1, 'a team holds the people put in it')
 
+  console.log('\n-- names in the history -----------------------------------------')
+
+  const nameInHistory = async (entity: string, entityId: string, action: string) =>
+    (await listAudit(superAdmin, { entity, limit: 200 })).rows.find((r) => r.entityId === entityId && r.action === action)?.targetName
+
+  const pipeName = `Verify pipeline ${Date.now()}`
+  const pipe = await createPipeline(superAdmin, pipeName)
+  check((await nameInHistory('pipeline', pipe.id, 'create')) === pipeName, 'a created pipeline is named by its name')
+  await renamePipeline(superAdmin, pipe.id, `${pipeName} renamed`)
+  check((await nameInHistory('pipeline', pipe.id, 'rename')) === `${pipeName} renamed`, 'a renamed pipeline is named by its new name')
+  await deletePipeline(superAdmin, pipe.id)
+  check((await nameInHistory('pipeline', pipe.id, 'delete')) === `${pipeName} renamed`, 'a deleted pipeline is still named, from the history')
+
+  const queueName = `Verify queue ${Date.now()}`
+  const queue = await createTaskQueue(superAdmin, queueName)
+  check((await nameInHistory('task_queue', queue.id, 'create')) === queueName, 'a created task queue is named by its name')
+  await renameTaskQueue(superAdmin, queue.id, `${queueName} renamed`)
+  check((await nameInHistory('task_queue', queue.id, 'rename')) === `${queueName} renamed`, 'a renamed task queue is named by its new name')
+  await deleteTaskQueue(superAdmin, queue.id)
+  check((await nameInHistory('task_queue', queue.id, 'delete')) === `${queueName} renamed`, 'a deleted task queue is still named, from the history')
+
+  const folderName = `Verify folder ${Date.now()}`
+  const folderId = await saveFormFolder(superAdmin, { name: folderName })
+  check((await nameInHistory('form_folder', folderId, 'create')) === folderName, 'a created form folder is named by its name')
+  await saveFormFolder(superAdmin, { id: folderId, name: `${folderName} renamed` })
+  check((await nameInHistory('form_folder', folderId, 'update')) === `${folderName} renamed`, 'an updated form folder is named by its new name')
+  await deleteFormFolder(superAdmin, folderId)
+  check((await nameInHistory('form_folder', folderId, 'delete')) === `${folderName} renamed`, 'a deleted form folder is still named, from the history')
+
+  const templateName = `Verify template ${Date.now()}`
+  const emailTemplate = await saveEmailTemplate(superAdmin, { name: templateName, subject: 'Hello', bodyText: 'Hi' })
+  check((await nameInHistory('email_template', emailTemplate.id, 'create')) === templateName, 'a created email template is named by its name')
+  await saveEmailTemplate(superAdmin, { id: emailTemplate.id, name: `${templateName} renamed`, subject: 'Hello', bodyText: 'Hi' })
+  check((await nameInHistory('email_template', emailTemplate.id, 'update')) === `${templateName} renamed`, 'an updated email template is named by its new name')
+  await deleteEmailTemplate(superAdmin, emailTemplate.id)
+  check((await nameInHistory('email_template', emailTemplate.id, 'delete')) === `${templateName} renamed`, 'a deleted email template is still named, from the history')
+
+  const customObject = await createCustomObject(superAdmin, { nameSingular: `Verify ${Date.now()}`, namePlural: 'Verify things' })
+  check((await nameInHistory('object_def', customObject.id, 'create')) === 'Verify things', 'a created object is named by its plural name')
+  const record = await createRecord(superAdmin, customObject.key, { name: 'Atlas rollout' })
+  check((await nameInHistory(customObject.key, record.id, 'create')) === 'Atlas rollout', 'a record of a custom object is named by its label field')
+  await updateRecord(superAdmin, customObject.key, record.id, { name: 'Atlas rollout phase two' })
+  check((await nameInHistory(customObject.key, record.id, 'update')) === 'Atlas rollout phase two', 'and an updated one by its new label')
+  await deleteRecord(superAdmin, customObject.key, record.id)
+  check((await nameInHistory(customObject.key, record.id, 'delete')) === 'Atlas rollout phase two', 'and a deleted one stays named')
+  await deleteCustomObject(superAdmin, customObject.id)
+
+  const acme = await createRecord(superAdmin, 'company', { name: 'Verify Acme' })
+  const ada = await createRecord(superAdmin, 'contact', { first_name: 'Ada', last_name: 'Verify', email: `ada-${Date.now()}@sandbox.test` })
+  const pair = { a: { entityType: 'company', entityId: acme.id }, b: { entityType: 'contact', entityId: ada.id } }
+  await associate(superAdmin, pair.a, pair.b)
+  const linked = (await listAudit(superAdmin, { entity: 'association', limit: 200 })).rows.find(
+    (r) => r.action === 'associate' && r.entityId === ada.id,
+  )
+  check(linked?.targetName === 'Ada Verify', 'a link is named by the record it points at', String(linked?.targetName))
+  await dissociate(superAdmin, pair.a, pair.b)
+  await owner`delete from contact where id = ${ada.id}`
+  await owner`delete from company where id = ${acme.id}`
+
+  const [unnamed] = await owner`insert into audit_log (account_id, actor_id, actor_kind, entity, entity_id, action)
+    values (${accountId}, ${adminId}, 'user', 'enrichment_request', null, 'approve') returning id`
+  const unnamedRow = (await listAudit(superAdmin, { entity: 'enrichment_request', limit: 200 })).rows.find((r) => r.id === unnamed!.id)
+  check(
+    unnamedRow !== undefined && unnamedRow.targetName === null,
+    'a row with no record to name has no target name, so it reads as its label',
+  )
+  await owner`delete from audit_log where id = ${unnamed!.id}`
+
   console.log('\n-- opening an account is a choice -----------------------------')
 
   const strangerDomain = `stranger-${Date.now()}.test`
@@ -539,8 +614,9 @@ try {
   )
   const accounts = await listAudit(superAdmin, { entity: 'account', limit: 5 })
   check(
-    accounts.rows.length > 0 && accounts.rows.every((r) => r.targetName === null),
-    'an entity outside the named six has no target name',
+    accounts.rows.some((r) => r.targetName === account.name),
+    'an account row is named by the account',
+    account.name,
   )
 
   await owner`delete from membership where user_id = ${probeId}`

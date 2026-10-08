@@ -11,7 +11,8 @@
     "./forms": "./src/dal/form-schema.ts",
     "./templates": "./src/dal/templates.ts",
     "./slots": "./src/dal/slots.ts",
-    "./sequence-rules": "./src/dal/sequence-rules.ts"
+    "./sequence-rules": "./src/dal/sequence-rules.ts",
+    "./audit-targets": "./src/dal/audit-targets.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

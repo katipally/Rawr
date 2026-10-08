@@ -26,9 +26,32 @@ const pastTense = (verb: string): string =>
 
 const sentence = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 
+/** Whole actions the verb rule cannot read: an activity type that is a noun, or an
+ *  action whose first word is not the verb it describes. */
+const PHRASE: Record<string, string> = {
+  note: 'added a note',
+  call: 'logged a call',
+  email: 'logged an email',
+  meeting: 'logged a meeting',
+  task: 'added a task',
+  booking: 'booked',
+  form_submission: 'submitted a form',
+  stage_change: 'changed the stage',
+  lifecycle_change: 'changed the lifecycle stage',
+  subscription_change: 'changed a subscription',
+  segment_change: 'changed a segment',
+  field_change: 'changed a field',
+  association_change: 'changed an association',
+  'conference-link': 'added a conference link',
+  send_failed: 'failed to send',
+  replay_failed: 'failed to replay',
+}
+
 /** What was done, in the Action column. Only the first word of an action is the
  *  verb, so `save_steps` is "Saved steps". */
 export const actionOf = (action: string): string => {
+  const phrase = PHRASE[action]
+  if (phrase) return sentence(phrase)
   const [verb = '', ...rest] = action.split('_')
   return sentence([pastTense(verb), ...rest].join(' '))
 }
