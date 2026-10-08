@@ -1,4 +1,4 @@
-import { bookingPageStats, getRegistry, mappedKeyIsWritable, readBookingPage, readPageHostList } from '@rawr/db'
+import { bookingPageStats, getRegistry, listTeams, mappedKeyIsWritable, readBookingPage, readPageHostList } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
@@ -51,12 +51,13 @@ const BookingPageEditorScreen = async ({
     )
   }
 
-  const [hosts, lookups, registry, zoom, stats] = await Promise.all([
+  const [hosts, lookups, registry, zoom, stats, teams] = await Promise.all([
     readPageHostList(ctx, id),
     readLookups(ctx),
     getRegistry(ctx),
     zoomReady(ctx),
     bookingPageStats(ctx, id),
+    listTeams(ctx),
   ])
 
   // Straight from the registry, so a custom field marketing added is available to
@@ -96,6 +97,7 @@ const BookingPageEditorScreen = async ({
         page={page}
         hosts={hosts}
         members={lookups.users}
+        teams={teams.map((team) => ({ id: team.id, name: team.name, seatedCount: team.members.filter((m) => m.seated).length }))}
         targets={targets}
         working={{ zoom, google_meet: googleCalendarConfigured }}
         stats={stats}

@@ -179,6 +179,7 @@ export const PageEditor = ({
   page,
   hosts,
   members,
+  teams,
   targets,
   working,
   stats,
@@ -192,6 +193,9 @@ export const PageEditor = ({
   page: BookingPageConfig
   hosts: PageHostRow[]
   members: Member[]
+  /** Teams a round robin page can take its hosts from. `seatedCount` is how many of
+   *  their members can take a booking today. */
+  teams: { id: string; name: string; seatedCount: number }[]
   targets: MappingTarget[]
   working: WorkingLocations
   stats: BookingPageStats
@@ -243,6 +247,10 @@ export const PageEditor = ({
 
   const available = members.filter((member) => !hostRows.some((row) => row.userId === member.id))
 
+  const usesTeam = form.teamId !== null
+  const chosenTeam = teams.find((team) => team.id === form.teamId)
+  const nobodyToHost = usesTeam ? (chosenTeam?.seatedCount ?? 0) === 0 : hostRows.length === 0
+
   const duplicateReminder =
     new Set(reminders.map((row) => `${row.unit}:${row.amount}`)).size !== reminders.length
 
@@ -263,6 +271,7 @@ export const PageEditor = ({
         name: form.name,
         kind: form.kind,
         ownerId: form.ownerId,
+        teamId: form.teamId,
         durationMinutes: form.durationMinutes,
         bufferBeforeMinutes: form.bufferBeforeMinutes,
         bufferAfterMinutes: form.bufferAfterMinutes,
@@ -329,6 +338,7 @@ export const PageEditor = ({
               // so the two move together rather than leaving a page owned by one
               // person and hosted by another.
               ownerId: kind === 'one_on_one' ? (current.ownerId ?? hostRows[0]?.userId ?? null) : null,
+              teamId: kind === 'round_robin' ? current.teamId : null,
             }))
           }}
         >
@@ -367,134 +377,180 @@ export const PageEditor = ({
       ) : (
         <div className="flex min-w-0 flex-col gap-2">
           <h3 className="font-semibold">Team members</h3>
-          <p className="text-small">
-            {collective
-              ? 'Every required host has to be free, and all of them are on the invitation. Adding one makes this page harder to book, not easier.'
-              : 'A meeting goes to whoever is furthest behind their share, among the hosts actually free for that time. Weight 2 takes twice as many meetings as weight 1.'}
-          </p>
-
-          {hostRows.length === 0 ? (
-            <p className="text-secondary">Nobody hosts this page yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {hostRows.map((row) => {
-                const host = hostsById.get(row.userId)
-                const label =
-                  host?.name ?? members.find((member) => member.id === row.userId)?.label ?? row.userId
-                const share = totalWeight > 0 ? Math.round((row.weight / totalWeight) * 100) : 0
-                return (
-                  <li key={row.userId} className="flex flex-wrap items-center gap-2">
-                    <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
-                    {host && host.grantState !== 'connected' ? (
-                      <Badge tone="error" dot>
-                        {host.grantState === 'unconfigured' ? 'no calendar' : host.grantState}
-                      </Badge>
-                    ) : (
-                      <span className="text-small text-secondary">{host?.timezone ?? 'no hours set'}</span>
-                    )}
-
-                    {collective ? (
-                      <Select
-                        id={`page-host-required-${row.userId}`}
-                        aria-label={`Whether ${label} has to be free`}
-                        value={row.isRequired ? 'required' : 'optional'}
-                        className="w-28"
-                        disabled={!editable}
-                        onChange={(event) =>
-                          setHostRows((current) =>
-                            current.map((existing) =>
-                              existing.userId === row.userId
-                                ? { ...existing, isRequired: event.target.value === 'required' }
-                                : existing,
-                            ),
-                          )
-                        }
-                      >
-                        <option value="required">Required</option>
-                        <option value="optional">Optional</option>
-                      </Select>
-                    ) : (
-                      <>
-                        {/* What the number means, next to the number. A bare
-                            weight of 2 tells nobody what share it buys. */}
-                        <span
-                          className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-fill"
-                          role="img"
-                          aria-label={`${share}% of meetings`}
-                          title={`${share}% of meetings`}
-                        >
-                          <span className="block h-full bg-cta" style={{ width: `${share}%` }} />
-                        </span>
-                        <label className="flex items-center gap-1 text-small">
-                          Weight
-                          <TextInput
-                            type="number"
-                            min={1}
-                            max={100}
-                            value={row.weight}
-                            disabled={!editable}
-                            className="w-16"
-                            onChange={(event) =>
-                              setHostRows((current) =>
-                                current.map((existing) =>
-                                  existing.userId === row.userId
-                                    ? { ...existing, weight: numeric(event.target.value, 1) }
-                                    : existing,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                      </>
-                    )}
-
-                    <IconButton
-                      label={`Remove ${label} as a host`}
-                      tone="destructive"
-                      icon={<ACTION_ICONS.delete size={16} />}
-                      disabled={!editable}
-                      onClick={() => setHostRows((current) => current.filter((existing) => existing.userId !== row.userId))}
-                    />
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-
-          {editable && available.length > 0 ? (
-            <Select
-              id="page-add-host"
-              aria-label="Add a host"
-              value=""
-              onChange={(event) => {
-                const userId = event.target.value
-                if (!userId) return
-                setHostRows((current) => [...current, { userId, weight: 1, isRequired: true }])
-              }}
+          {form.kind === 'round_robin' ? (
+            <Field
+              id="page-hosts-source"
+              label="Hosts"
+              hint="A team's rotation hands each meeting to the free member picked longest ago. Someone who joins the team takes the next turn."
             >
-              <option value="">Add a host…</option>
-              {available.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.label}
+              <Select
+                id="page-hosts-source"
+                value={usesTeam ? 'team' : 'people'}
+                disabled={!editable}
+                onChange={(event) => set('teamId', event.target.value === 'team' ? (teams[0]?.id ?? null) : null)}
+              >
+                <option value="people">Chosen people</option>
+                <option value="team" disabled={teams.length === 0}>
+                  {teams.length === 0 ? "A team's rotation (no teams yet)" : "A team's rotation"}
                 </option>
-              ))}
-            </Select>
+              </Select>
+            </Field>
           ) : null}
 
-          {collective && hostRows.length > 0 && !hostRows.some((row) => row.isRequired) ? (
-            <p className="text-error">
-              A group page needs at least one required host, or there is nothing to intersect and it
-              offers no times at all.
+          {usesTeam ? (
+            <div className="flex flex-col gap-2">
+              <Field id="page-team" label="Team">
+                <Select
+                  id="page-team"
+                  value={form.teamId ?? ''}
+                  disabled={!editable}
+                  onChange={(event) => set('teamId', event.target.value || null)}
+                >
+                  <option value="">Pick a team</option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {chosenTeam ? null : <p className="text-error">The team was deleted. Pick a person or another team.</p>}
+              {chosenTeam && chosenTeam.seatedCount === 0 ? (
+                <p className="text-error">Nobody in this team can take new work yet.</p>
+              ) : null}
+            </div>
+          ) : (
+            <>
+            <p className="text-small">
+              {collective
+                ? 'Every required host has to be free, and all of them are on the invitation. Adding one makes this page harder to book, not easier.'
+                : 'A meeting goes to whoever is furthest behind their share, among the hosts actually free for that time. Weight 2 takes twice as many meetings as weight 1.'}
             </p>
-          ) : null}
 
-          {unhealthy.length > 0 ? (
-            <p className="text-error">
-              {unhealthy.length === 1
-                ? 'One host has no working calendar, so no times are offered for them. A host with no calendar is treated as unavailable, never as free.'
-                : `${unhealthy.length} hosts have no working calendar, so no times are offered for them.`}
-            </p>
-          ) : null}
+            {hostRows.length === 0 ? (
+              <p className="text-secondary">Nobody hosts this page yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {hostRows.map((row) => {
+                  const host = hostsById.get(row.userId)
+                  const label =
+                    host?.name ?? members.find((member) => member.id === row.userId)?.label ?? row.userId
+                  const share = totalWeight > 0 ? Math.round((row.weight / totalWeight) * 100) : 0
+                  return (
+                    <li key={row.userId} className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+                      {host && host.grantState !== 'connected' ? (
+                        <Badge tone="error" dot>
+                          {host.grantState === 'unconfigured' ? 'no calendar' : host.grantState}
+                        </Badge>
+                      ) : (
+                        <span className="text-small text-secondary">{host?.timezone ?? 'no hours set'}</span>
+                      )}
+
+                      {collective ? (
+                        <Select
+                          id={`page-host-required-${row.userId}`}
+                          aria-label={`Whether ${label} has to be free`}
+                          value={row.isRequired ? 'required' : 'optional'}
+                          className="w-28"
+                          disabled={!editable}
+                          onChange={(event) =>
+                            setHostRows((current) =>
+                              current.map((existing) =>
+                                existing.userId === row.userId
+                                  ? { ...existing, isRequired: event.target.value === 'required' }
+                                  : existing,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="required">Required</option>
+                          <option value="optional">Optional</option>
+                        </Select>
+                      ) : (
+                        <>
+                          {/* What the number means, next to the number. A bare
+                              weight of 2 tells nobody what share it buys. */}
+                          <span
+                            className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-fill"
+                            role="img"
+                            aria-label={`${share}% of meetings`}
+                            title={`${share}% of meetings`}
+                          >
+                            <span className="block h-full bg-cta" style={{ width: `${share}%` }} />
+                          </span>
+                          <label className="flex items-center gap-1 text-small">
+                            Weight
+                            <TextInput
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={row.weight}
+                              disabled={!editable}
+                              className="w-16"
+                              onChange={(event) =>
+                                setHostRows((current) =>
+                                  current.map((existing) =>
+                                    existing.userId === row.userId
+                                      ? { ...existing, weight: numeric(event.target.value, 1) }
+                                      : existing,
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+                        </>
+                      )}
+
+                      <IconButton
+                        label={`Remove ${label} as a host`}
+                        tone="destructive"
+                        icon={<ACTION_ICONS.delete size={16} />}
+                        disabled={!editable}
+                        onClick={() => setHostRows((current) => current.filter((existing) => existing.userId !== row.userId))}
+                      />
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+
+            {editable && available.length > 0 ? (
+              <Select
+                id="page-add-host"
+                aria-label="Add a host"
+                value=""
+                onChange={(event) => {
+                  const userId = event.target.value
+                  if (!userId) return
+                  setHostRows((current) => [...current, { userId, weight: 1, isRequired: true }])
+                }}
+              >
+                <option value="">Add a host…</option>
+                {available.map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.label}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+
+            {collective && hostRows.length > 0 && !hostRows.some((row) => row.isRequired) ? (
+              <p className="text-error">
+                A group page needs at least one required host, or there is nothing to intersect and it
+                offers no times at all.
+              </p>
+            ) : null}
+
+            {unhealthy.length > 0 ? (
+              <p className="text-error">
+                {unhealthy.length === 1
+                  ? 'One host has no working calendar, so no times are offered for them. A host with no calendar is treated as unavailable, never as free.'
+                  : `${unhealthy.length} hosts have no working calendar, so no times are offered for them.`}
+              </p>
+            ) : null}
+            </>
+          )}
         </div>
       )}
 
@@ -583,8 +639,12 @@ export const PageEditor = ({
         <div className="min-w-0">
           <h3 className="font-semibold">Taking bookings</h3>
           <p>While this is off the page offers no times and its link says so.</p>
-          {form.isActive && hostRows.length === 0 ? (
-            <p className="text-error">A page with no hosts cannot be published. Add a host on Overview.</p>
+          {form.isActive && nobodyToHost ? (
+            <p className="text-error">
+              {usesTeam
+                ? 'Nobody in this team can take new work yet, so the page cannot be published. Add someone to the team or turn the page off.'
+                : 'A page with no hosts cannot be published. Add a host on Overview.'}
+            </p>
           ) : null}
         </div>
         <Switch

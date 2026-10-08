@@ -3,7 +3,7 @@ import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TeamList } from './team-list.tsx'
 import { UsersTeamsHeader } from '../members/users-teams-header.tsx'
 
-/** Named groups of people inside this account. Grouping only: no form or booking page routes by them yet. */
+/** Named groups of people inside this account. A form or booking page can hand its work to a team, which takes its members in turn. */
 const TeamsPage = async () => {
   const session = await readSession()
   if (!session) return null

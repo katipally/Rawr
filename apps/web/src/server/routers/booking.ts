@@ -109,6 +109,10 @@ export const bookingRouter = router({
             }),
           )
           .optional(),
+        teamId: z
+          .uuid()
+          .nullish()
+          .describe('Round robin only: the team id from admin.teams.list, whose turns pick the host. Team names are not looked up here.'),
       }),
     )
     .mutation(({ ctx, input }) => call(() => saveBookingPage(ctx.account, input))),

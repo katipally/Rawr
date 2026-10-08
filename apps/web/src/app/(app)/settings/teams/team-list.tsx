@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 type Person = { userId: string; name: string; email: string }
@@ -14,7 +15,9 @@ type Team = {
   id: string
   name: string
   description: string | null
-  members: { userId: string; name: string; email: string; isLead: boolean }[]
+  members: { userId: string; name: string; email: string; isLead: boolean; seated: boolean; lastAssignedAt: string | null }[]
+  formCount: number
+  bookingPageCount: number
 }
 
 export const TeamList = ({
@@ -30,6 +33,7 @@ export const TeamList = ({
 }) => {
   const router = useRouter()
   const toast = useToast()
+  const fmt = useFormat()
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<{ id: string | null; name: string; description: string } | null>(null)
   const [members, setMembers] = useState<{ team: Team; chosen: string[]; leads: string[] } | null>(null)
@@ -102,16 +106,52 @@ export const TeamList = ({
       ),
     },
     { key: 'count', header: 'Users', width: 100, align: 'right', render: (team) => (team.members.length === 0 ? EMPTY_VALUE : team.members.length) },
-    { key: 'people', header: 'Members', width: 360, render: (team) => <span title={names(team.members)} className="block truncate">{names(team.members) || EMPTY_VALUE}</span> },
+    {
+      key: 'people',
+      header: 'Members',
+      width: 360,
+      render: (team) =>
+        team.members.length === 0 ? (
+          EMPTY_VALUE
+        ) : (
+          <details className="min-w-0">
+            <summary title={names(team.members)} className="cursor-pointer truncate">{names(team.members)}</summary>
+            <ul className="mt-1 flex max-h-64 flex-col gap-1 overflow-y-auto text-small">
+              {team.members.map((member) => (
+                <li key={member.userId} className="flex flex-wrap justify-between gap-x-3">
+                  <span className="truncate">{member.seated ? member.name : `${member.name} (deactivated)`}</span>
+                  <span className="text-secondary">
+                    {member.lastAssignedAt ? `last assigned ${fmt.date(member.lastAssignedAt)}` : 'not assigned yet'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ),
+    },
     { key: 'leads', header: 'Leads', width: 220, render: (team) => {
         const leads = names(team.members.filter((member) => member.isLead))
         return <span title={leads} className="block truncate">{leads || EMPTY_VALUE}</span>
       }, },
+    {
+      key: 'used',
+      header: 'Used by',
+      width: 220,
+      render: (team) => {
+        const used = [
+          team.formCount > 0 ? `${team.formCount} ${team.formCount === 1 ? 'form' : 'forms'}` : null,
+          team.bookingPageCount > 0
+            ? `${team.bookingPageCount} booking ${team.bookingPageCount === 1 ? 'page' : 'pages'}`
+            : null,
+        ].filter((part): part is string => part !== null)
+        return used.length > 0 ? used.join(', ') : EMPTY_VALUE
+      },
+    },
   ]
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <p>Use teams to group people. Round robin on a form or booking page picks from the people chosen there. Teams do not route anything yet.</p>
+      <p>Use teams to group people. A form or booking page can hand its work to a team, which takes its members in turn.</p>
       <div className="flex min-w-0 flex-col gap-3 rounded-panel border border-line px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <label className="relative w-full min-w-0 @lg:w-56">
@@ -305,7 +345,7 @@ export const TeamList = ({
           }
         >
           <div className="flex flex-col gap-3">
-            <p>The team goes; nobody loses their seat.</p>
+            <p>The team goes; nobody loses their seat. Forms and booking pages that took their work from it need a new choice.</p>
           </div>
         </Modal>
       ) : null}

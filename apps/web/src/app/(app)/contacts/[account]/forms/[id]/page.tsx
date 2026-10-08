@@ -4,6 +4,7 @@ import {
   listMembers,
   listSites,
   listSubscriptionTypes,
+  listTeams,
   readSettings,
   SEED_FORMS,
   type FormDetail,
@@ -65,10 +66,11 @@ const BuilderPage = async ({
     fields: template?.fields ?? [],
     settings: template?.settings ?? { ...readSettings({}), notifySlack: false },
   }
-  const [form, registry, members, subscriptions, slack, sites] = await Promise.all([
+  const [form, registry, members, teams, subscriptions, slack, sites] = await Promise.all([
     id === 'new' ? blank : getForm(ctx, id),
     getRegistry(ctx),
     listMembers(ctx),
+    listTeams(ctx),
     listSubscriptionTypes(ctx),
     slackCredentials(ctx),
     listSites(ctx),
@@ -104,6 +106,7 @@ const BuilderPage = async ({
       form={form}
       targets={targets}
       members={members.filter((m) => m.isSuperAdmin || m.editHubs.includes('sales')).map((m) => ({ id: m.userId, name: m.name }))}
+      teams={teams.map((team) => ({ id: team.id, name: team.name, seatedCount: team.members.filter((m) => m.seated).length }))}
       subscriptions={subscriptions.map((type) => ({ name: type.name, isInternal: type.isInternal }))}
       baseUrl={publicBaseUrl}
       siteKey={siteKeyOf(sites)}

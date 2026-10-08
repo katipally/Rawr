@@ -111,6 +111,7 @@ export const FormBuilder = ({
   form,
   targets,
   members,
+  teams,
   subscriptions,
   baseUrl,
   siteKey,
@@ -122,6 +123,9 @@ export const FormBuilder = ({
   targets: Target[]
   /** Who a lead can be handed to: every admin and sales member. */
   members: { id: string; name: string }[]
+  /** Teams a lead can be handed to in turn. `seatedCount` is how many of their
+   *  members can take a lead today. */
+  teams: { id: string; name: string; seatedCount: number }[]
   /** Every subscription type in the account, by name: what a form can opt a
    *  new contact into. Matched by name on submit, so the list is the names. */
   subscriptions: { name: string; isInternal: boolean }[]
@@ -277,6 +281,8 @@ export const FormBuilder = ({
       ? [...stageNames, settings.lifecycleStageOnSubmit]
       : stageNames
   const askingConsent = fields.some((field) => field.type === 'consent')
+  const chosenTeamId = settings.assignOwner?.teamId ?? null
+  const chosenTeam = teams.find((team) => team.id === chosenTeamId)
 
   const panel = PANELS.some((entry) => entry.key === panelParam) || panelParam === 'none' ? panelParam : 'questions'
   const leave = () => router.push(form.id ? formPerformancePath(account, form.id) : formsPath(account))
@@ -770,7 +776,10 @@ export const FormBuilder = ({
                 onChange={(event) =>
                   setSettings({
                     ...settings,
-                    assignOwner: { ...(settings.assignOwner ?? { userId: null, pool: [] }), mode: event.target.value as 'none' | 'user' | 'round_robin' },
+                    assignOwner: {
+                      ...(settings.assignOwner ?? { userId: null, pool: [], teamId: null }),
+                      mode: event.target.value as 'none' | 'user' | 'round_robin' | 'team',
+                    },
                   })
                 }
                 className="max-w-xs"
@@ -778,6 +787,7 @@ export const FormBuilder = ({
                 <option value="none">Nobody, leave them unassigned</option>
                 <option value="user">One person</option>
                 <option value="round_robin">Round robin across the team</option>
+                <option value="team">A team's rotation</option>
               </Select>
               {settings.assignOwner?.mode === 'user' ? (
                 <Select
@@ -796,6 +806,44 @@ export const FormBuilder = ({
                     </option>
                   ))}
                 </Select>
+              ) : null}
+              {settings.assignOwner?.mode === 'team' ? (
+                <div className="flex flex-col gap-1">
+                  {teams.length === 0 ? (
+                    <p className="text-small text-secondary">This account has no teams yet. Make one under Settings, then come back.</p>
+                  ) : (
+                    <>
+                      <p className="text-small text-secondary">
+                        Each new contact goes to the member picked longest ago. Someone who joins the team takes the next turn.
+                      </p>
+                      <Select
+                        aria-label="Team"
+                        value={chosenTeamId ?? ''}
+                        disabled={!canEdit}
+                        onChange={(event) =>
+                          setSettings({
+                            ...settings,
+                            assignOwner: { ...settings.assignOwner, mode: 'team', teamId: event.target.value || null },
+                          })
+                        }
+                        className="max-w-xs"
+                      >
+                        <option value="">Pick a team</option>
+                        {teams.map((team) => (
+                          <option key={team.id} value={team.id}>
+                            {team.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </>
+                  )}
+                  {chosenTeamId && !chosenTeam ? (
+                    <Alert tone="warning">The team was deleted. Pick a person or another team.</Alert>
+                  ) : null}
+                  {chosenTeam && chosenTeam.seatedCount === 0 ? (
+                    <Alert tone="warning">Nobody in this team can take new work yet.</Alert>
+                  ) : null}
+                </div>
               ) : null}
               {settings.assignOwner?.mode === 'round_robin' ? (
                 <div className="flex flex-col gap-1">

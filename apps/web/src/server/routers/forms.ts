@@ -64,7 +64,12 @@ const settingsSchema = z.object({
   // reaches a stylesheet however it was stored.
   theme: z.object({ preset: z.string(), tokens: z.record(z.string(), z.string()) }).optional(),
   assignOwner: z
-    .object({ mode: z.enum(['none', 'user', 'round_robin']), userId: z.uuid().nullable().optional(), pool: z.array(z.uuid()).optional() })
+    .object({
+      mode: z.enum(['none', 'user', 'round_robin', 'team']),
+      userId: z.uuid().nullable().optional(),
+      pool: z.array(z.uuid()).optional(),
+      teamId: z.uuid().nullable().optional().describe('The team id from admin.teams.list. Team names are not looked up here.'),
+    })
     .optional(),
 })
 
