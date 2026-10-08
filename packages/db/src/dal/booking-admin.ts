@@ -5,6 +5,7 @@ import { assertSchemaIsUsable, webAddress } from './form-schema.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { mappedKeyIsWritable } from './people.ts'
 import {
+  pageRoster,
   readQuestions,
   REMINDER_UNITS,
   type BookingKind,
@@ -103,7 +104,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
     }>(sql`
       select p.id, p.slug, p.name, p.kind, p.owner_id, o.name as owner_name,
              p.duration_minutes, p.location, p.is_active,
-             count(distinct h.user_id) filter (where h.is_active) as host_count,
+             count(distinct h.user_id) as host_count,
              count(distinct b.id) filter (where b.state = 'confirmed' and b.starts_at >= now()) as upcoming,
              -- A subquery, not a join: joined, every view day would multiply the
              -- host and booking rows the other counts are taken over.
@@ -111,17 +112,17 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
              count(distinct b.id) filter (where b.state <> 'rescheduled') as booked,
              count(distinct b.id) > 0 as has_bookings,
              count(distinct h.user_id) filter (
-               where h.is_active and (g.state is null or g.state <> 'connected')
+               where g.state is null or g.state <> 'connected'
              ) as unhealthy,
              -- An empty weekly map offers no times, so a page whose every host has
              -- one is published and unbookable. Counted here rather than read per
              -- row, which would be a query per page on a list.
              count(distinct h.user_id) filter (
-               where h.is_active and a.weekly is not null and a.weekly <> '{}'::jsonb
+               where a.weekly is not null and a.weekly <> '{}'::jsonb
              ) as hosts_with_hours
         from booking_page p
         left join user_account o on o.id = p.owner_id
-        left join booking_host h on h.booking_page_id = p.id
+        left join lateral (${pageRoster(sql`p.id`)}) h on true
         left join calendar_grant g on g.user_id = h.user_id
         left join availability a on a.user_id = h.user_id and a.account_id = p.account_id
         left join booking b on b.booking_page_id = p.id
@@ -175,6 +176,10 @@ export type SaveBookingPage = {
   /** Shared pages only. Left undefined the host list is untouched. `isRequired`
    *  is read on a collective and ignored elsewhere, where each host stands alone. */
   hosts?: { userId: string; weight: number; isRequired?: boolean }[] | undefined
+  /** A round robin takes its hosts from this team's rotation instead of `hosts`. The
+   *  chosen hosts are switched off, so the page has one source of hosts at a time.
+   *  Null or absent means the page takes its hosts from its own list. */
+  teamId?: string | null | undefined
   confirmationEnabled?: boolean | undefined
   /** Empty or absent means the wording Rawr ships. Stored as null so improving
    *  that wording reaches every page that never customised it. */
@@ -250,6 +255,9 @@ export const saveBookingPage = async (
   if (input.kind === 'collective' && input.hosts && !input.hosts.some((host) => host.isRequired !== false)) {
     throw new Error('A collective page needs at least one required host.')
   }
+  if (input.teamId && input.kind !== 'round_robin') {
+    throw new Error('Only a round robin page can take its hosts from a team.')
+  }
 
   return mutate(ctx, 'booking_page', async (tx) => {
     const before = input.id ? await readPageForAudit(tx, input.id) : null
@@ -272,9 +280,23 @@ export const saveBookingPage = async (
     const hosts =
       input.kind === 'one_on_one' && ownerId
         ? [{ userId: ownerId, weight: 1 }]
-        : (input.hosts ?? null)
+        : input.teamId
+          ? []
+          : (input.hosts ?? null)
 
-    if (input.isActive && hosts !== null && hosts.length === 0) {
+    if (input.teamId) {
+      const [team] = await tx.execute<{ seated: string }>(sql`
+        select (select count(*) from team_member tm
+                  join membership m on m.user_id = tm.user_id and m.account_id = tm.account_id
+                 where tm.team_id = t.id and m.state <> 'deactivated') as seated
+          from team t where t.id = ${input.teamId}`)
+      if (!team) throw new Error('That team is not in this account.')
+      if (input.isActive && Number(team.seated) === 0) {
+        throw new Error('Nobody in this team can take new work yet, so the page cannot be published. Add someone to the team or leave the page off.')
+      }
+    }
+
+    if (input.isActive && hosts !== null && hosts.length === 0 && !input.teamId) {
       throw new Error('A booking page with no hosts cannot be published. Add a host or leave it off.')
     }
 
@@ -286,7 +308,7 @@ export const saveBookingPage = async (
 
     const [row] = await tx.execute<{ id: string }>(sql`
       insert into booking_page (
-        id, account_id, slug, name, kind, owner_id, duration_minutes,
+        id, account_id, slug, name, kind, owner_id, team_id, duration_minutes,
         buffer_before_minutes, buffer_after_minutes, min_notice_minutes, max_horizon_days,
         granularity_minutes, location, location_detail, title_tpl, description_tpl,
         company_fallback, questions, is_active, redirect_url, confirmation_copy,
@@ -294,7 +316,7 @@ export const saveBookingPage = async (
         reminder_subject, reminder_body)
       values (
         ${input.id ?? sql`gen_random_uuid()`}, ${ctx.accountId}, ${input.slug}, ${input.name.trim()},
-        ${input.kind}, ${ownerId}, ${input.durationMinutes}, ${input.bufferBeforeMinutes},
+        ${input.kind}, ${ownerId}, ${input.teamId ?? null}, ${input.durationMinutes}, ${input.bufferBeforeMinutes},
         ${input.bufferAfterMinutes}, ${input.minNoticeMinutes}, ${input.maxHorizonDays},
         ${input.granularityMinutes}, ${input.location}, ${input.locationDetail ?? null},
         ${input.titleTpl}, ${input.descriptionTpl}, ${input.companyFallback},
@@ -304,7 +326,7 @@ export const saveBookingPage = async (
         ${blankToNull(input.reminderSubject)}, ${blankToNull(input.reminderBody)})
       on conflict (id) do update set
         slug = excluded.slug, name = excluded.name, duration_minutes = excluded.duration_minutes,
-        kind = excluded.kind, owner_id = excluded.owner_id,
+        kind = excluded.kind, owner_id = excluded.owner_id, team_id = excluded.team_id,
         confirmation_enabled = excluded.confirmation_enabled,
         confirmation_subject = excluded.confirmation_subject,
         confirmation_body = excluded.confirmation_body,
@@ -333,7 +355,7 @@ export const saveBookingPage = async (
         entityId: row.id,
         action: input.id ? 'update' : 'create',
         before,
-        after: { slug: input.slug, name: input.name, kind: input.kind, isActive: input.isActive },
+        after: { slug: input.slug, name: input.name, kind: input.kind, isActive: input.isActive, teamId: input.teamId ?? null },
       },
     }
   })
@@ -539,7 +561,7 @@ export const setPageActive = async (
 
     if (isActive) {
       const [count] = await tx.execute<{ n: string }>(
-        sql`select count(*) as n from booking_host where booking_page_id = ${pageId} and is_active`,
+        sql`select count(*) as n from (${pageRoster(sql`${pageId}`)}) r`,
       )
       if (Number(count?.n ?? 0) === 0) {
         throw new Error('A booking page with no active hosts cannot be published.')
@@ -990,8 +1012,7 @@ export const pagesHostedBy = async (
     }>(sql`
       select p.id, p.slug, p.name, p.kind, p.is_active
         from booking_page p
-        join booking_host h on h.booking_page_id = p.id and h.is_active
-       where h.user_id = ${userId}
+        join lateral (${pageRoster(sql`p.id`)}) h on h.user_id = ${userId}
        order by p.kind, p.name`)
     return rows.map((row) => ({
       id: row.id,

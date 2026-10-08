@@ -9,6 +9,7 @@ import type { AssignOwner, FormField } from './form-schema.ts'
 import type { Tx } from './index.ts'
 import { companyByDomainQuery } from './records.ts'
 import { SYSTEM_FIELD_KEYS } from './registry.ts'
+import { takeTeamTurn } from './teams.ts'
 
 /** The one path by which a stranger becomes a contact.
  *
@@ -137,10 +138,11 @@ export const upsertCapturedPerson = async (
 /** Picks the owner a capture asked for and writes it, with the same timeline
  *  entry a person changing the field by hand would leave.
  *
- *  Round robin is "the eligible member who owns the fewest contacts", which is
- *  fair without any state to keep: two forms with two pools stay balanced on their
- *  own, and a member who leaves simply stops being eligible. One grouped count
- *  over the pool per lead. */
+ *  Round robin over a pool is "the eligible member who owns the fewest contacts",
+ *  which is fair without any state to keep: two forms with two pools stay balanced
+ *  on their own, and a member who leaves simply stops being eligible. One grouped
+ *  count over the pool per lead. A team takes its turns in order instead; see
+ *  `takeTeamTurn`. */
 const assignOwner = async (
   tx: Tx,
   ctx: AccountContext,
@@ -156,6 +158,8 @@ const assignOwner = async (
       sql`select user_id from membership where user_id = ${rule.userId ?? ''} and state = 'active' limit 1`,
     )
     ownerId = member?.user_id ?? null
+  } else if (rule.mode === 'team') {
+    ownerId = rule.teamId ? await takeTeamTurn(tx, rule.teamId, null) : null
   } else {
     const pool = (rule.pool ?? []).filter(Boolean)
     const [member] = await tx.execute<{ user_id: string }>(sql`

@@ -41,6 +41,10 @@ export const bookingPage = pgTable(
      *  and editable only to its owner, which is the whole difference between the
      *  two Notion rows. F2 §6. */
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'cascade' }),
+    /** Set on a round robin page that takes its hosts from a team's rotation. No foreign
+     *  key: a deleted team leaves its id, and reads treat that as no team, so the page
+     *  can say so. */
+    teamId: uuid('team_id'),
     durationMinutes: integer('duration_minutes').notNull().default(30),
     bufferBeforeMinutes: integer('buffer_before_minutes').notNull().default(0),
     bufferAfterMinutes: integer('buffer_after_minutes').notNull().default(0),
@@ -82,6 +86,7 @@ export const bookingPage = pgTable(
     uniqueIndex('booking_page_slug_key').on(t.accountId, t.slug),
     index('booking_page_owner_idx').on(t.accountId, t.ownerId),
     index('booking_page_owner_id_idx').on(t.ownerId),
+    index('booking_page_team_id_idx').on(t.teamId),
   ],
 )
 

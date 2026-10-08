@@ -29,9 +29,14 @@ import {
   readSchema,
   releaseSubmission,
   saveForm,
+  listTeams,
+  saveTeam,
   scoreSubmission,
+  setTeamMembers,
+  deleteTeam,
   sourceFrom,
   submitForm,
+  takeTeamTurn,
   validateAnswers,
   withAccount,
   type AccountContext,
@@ -711,6 +716,103 @@ try {
     anyOrder.has(`${consentTag}_a%b`) && !anyOrder.has(`${consentTag}_aXb`))
   check('a consent search fragment matches mid-word',
     (await consentFor(`${consentTag.slice(-3)}_a%`)).has(`${consentTag}_a%b`))
+  // ------------------------------------------------------ team rotation
+  section('a team takes the turns on a form')
+
+  const people = await scoped<{ id: string; email: string }>(datasaur, sql`
+    select u.id, u.email from user_account u
+      join membership m on m.user_id = u.id and m.account_id = ${datasaur.accountId}
+     where u.email in ('admin@sandbox.test', 'sales@sandbox.test', 'marketing@sandbox.test', 'former@sandbox.test')`)
+  const idOf = (email: string) => people.find((row) => row.email === email)?.id ?? ''
+  const former = idOf('former@sandbox.test')
+  const team = await saveTeam(datasaur, { name: `Rotation ${stamp}` })
+  await setTeamMembers(datasaur, {
+    teamId: team.id,
+    members: [idOf('admin@sandbox.test'), idOf('sales@sandbox.test'), idOf('marketing@sandbox.test'), former].map((userId) => ({ userId })),
+  })
+
+  const turns = () => scoped<{ user_id: string; last_assigned_at: string | null }>(datasaur, sql`
+    select user_id, last_assigned_at from team_member where team_id = ${team.id} order by user_id`)
+
+  await saveForm(datasaur, {
+    name: `Team lead ${stamp}`,
+    slug: `team-lead-${stamp}`,
+    isActive: true,
+    fields: [{ key: 'email', label: 'Email', type: 'email', required: true }],
+    settings: { ...contactUs.settings, assignOwner: { mode: 'team', pool: [], teamId: team.id } },
+  })
+  const teamForm = (await publicFormBySlug(SANDBOX.slug, `team-lead-${stamp}`))!
+  const lead = (n: number) => submitForm({
+    form: teamForm,
+    body: { email: `team.${n}.${stamp}@verify-corp.example`, rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+  const ownerOf = async (contactId: string | null) =>
+    (await scoped<{ owner_id: string | null }>(datasaur, sql`select owner_id from contact where id = ${contactId}`))[0]?.owner_id ?? null
+
+  const owners: (string | null)[] = []
+  for (let n = 1; n <= 4; n++) owners.push(await ownerOf((await lead(n)).contactId))
+  check('three new leads go to three different members, the fourth wraps to the first',
+    new Set(owners.slice(0, 3)).size === 3 && owners[3] === owners[0], owners.map((id) => id?.slice(0, 4)).join(' '))
+  check('a deactivated member on the team never takes a lead',
+    !owners.includes(former), 'former is skipped')
+
+  const beforeSave = JSON.stringify(await turns())
+  await setTeamMembers(datasaur, {
+    teamId: team.id,
+    members: [idOf('admin@sandbox.test'), idOf('sales@sandbox.test'), idOf('marketing@sandbox.test'), former].map((userId) => ({ userId, isLead: userId === former })),
+  })
+  check('saving the members of a team again keeps everybody\'s place in the rotation',
+    JSON.stringify(await turns()) === beforeSave, 'turns unchanged')
+
+  const beforeExisting = JSON.stringify(await turns())
+  const existing = await submitForm({
+    form: teamForm,
+    body: { email: `team.1.${stamp}@verify-corp.example`, rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+  check('a contact who already has an owner keeps them and takes no turn',
+    (await ownerOf(existing.contactId)) === owners[0] && JSON.stringify(await turns()) === beforeExisting,
+    'the rotation is unchanged')
+
+  const heldBefore = JSON.stringify(await turns())
+  const heldLead = await submitForm({
+    form: teamForm,
+    body: { email: `held.${stamp}@verify-corp.example`, rawr_t: Date.now() },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'unavailable',
+  })
+  check('a held submission assigns nobody and takes no turn',
+    heldLead.state === 'quarantined' && heldLead.contactId === null && JSON.stringify(await turns()) === heldBefore,
+    heldLead.state)
+
+  // The first pick holds the team's lock for 300 ms; the second starts 50 ms in and must wait for it.
+  const [pickA, pickB] = await Promise.all([
+    withAccount(datasaur, async (tx) => {
+      const picked = await takeTeamTurn(tx, team.id, null)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return picked
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, 50)).then(() =>
+      withAccount(datasaur, (tx) => takeTeamTurn(tx, team.id, null)),
+    ),
+  ])
+  check('two picks taken at the same instant never give the same member',
+    pickA !== null && pickB !== null && pickA !== pickB, `${pickA?.slice(0, 4)} and ${pickB?.slice(0, 4)}`)
+
+  const listed = (await listTeams(datasaur)).find((row) => row.id === team.id)
+  check('the team lists the form that takes its turns, its turns, and a deactivated member as not seated',
+    listed?.formCount === 1 && listed.members.some((member) => member.userId === former && !member.seated) &&
+      listed.members.filter((member) => member.lastAssignedAt !== null).length === 3,
+    `${listed?.formCount} form(s)`)
+
+  await deleteTeam(datasaur, team.id)
+  const orphan = await lead(6)
+  check('a form whose team was deleted leaves the lead unowned, and says so in the editor',
+    (await ownerOf(orphan.contactId)) === null, 'no owner, no error')
+
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.message : cause)

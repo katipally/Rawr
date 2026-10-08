@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { recordActivity } from './activity.ts'
@@ -9,6 +9,7 @@ import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
 import { publicEdgeContext } from './forms.ts'
 import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { mapAnswersToColumns, upsertCapturedPerson } from './people.ts'
+import { takeTeamTurn } from './teams.ts'
 import { aliasVisitor } from './stitch.ts'
 import {
   DEFAULT_WEEKLY,
@@ -153,6 +154,8 @@ export const publicBookingPage = async (
  *  so this is the shape the confirmation path and the admin screens use. */
 export type BookingPageConfig = PublicBookingPage & {
   ownerId: string | null
+  /** Set when the page takes its hosts from a team's rotation, null otherwise. */
+  teamId: string | null
   titleTpl: string
   descriptionTpl: string
   companyFallback: string
@@ -202,9 +205,25 @@ const readReminders = (raw: unknown): BookingReminder[] => {
     .sort((a, b) => reminderLeadMinutes(b) - reminderLeadMinutes(a))
 }
 
+/** The people a page can offer a time to: its chosen hosts, or the seated members of
+ *  its team. One definition, so the offer, the host counts and the public page cannot
+ *  disagree about who takes a booking. Columns: user_id, weight, is_required,
+ *  last_assigned_at. A team's members are all required and weigh one; their turns
+ *  come from team_member, not from the share a chosen host carries. */
+export const pageRoster = (pageId: SQL) => sql`
+  select h.user_id, h.weight, h.is_required, h.last_assigned_at
+    from booking_host h join booking_page bp on bp.id = h.booking_page_id
+   where h.booking_page_id = ${pageId} and h.is_active and bp.team_id is null
+  union all
+  select tm.user_id, 1, true, tm.last_assigned_at
+    from booking_page bp
+    join team_member tm on tm.team_id = bp.team_id
+    join membership m on m.user_id = tm.user_id and m.account_id = tm.account_id
+   where bp.id = ${pageId} and m.state <> 'deactivated'`
+
 const PAGE_COLUMNS = sql`
   p.account_id, a.slug as account_slug, a.name as account_name, p.id as booking_page_id,
-  p.slug, p.name, p.kind, p.owner_id, p.duration_minutes, p.buffer_before_minutes,
+  p.slug, p.name, p.kind, p.owner_id, p.team_id, p.duration_minutes, p.buffer_before_minutes,
   p.buffer_after_minutes, p.min_notice_minutes, p.max_horizon_days, p.granularity_minutes,
   p.location, p.location_detail, p.title_tpl, p.description_tpl, p.company_fallback,
   p.questions, p.is_active, p.redirect_url, p.confirmation_copy,
@@ -217,13 +236,13 @@ const PAGE_COLUMNS = sql`
   ) as reminders,
   coalesce(
     (select array_agg(u.name order by u.name)
-       from booking_host h join user_account u on u.id = h.user_id
-      where h.booking_page_id = p.id and h.is_active),
+       from (${pageRoster(sql`p.id`)}) r join user_account u on u.id = r.user_id),
     '{}'::text[]
   ) as host_names`
 
 type ConfigRow = PublicPageRow & {
   owner_id: string | null
+  team_id: string | null
   title_tpl: string
   description_tpl: string
   company_fallback: string
@@ -244,6 +263,7 @@ const toConfig = (row: ConfigRow): BookingPageConfig => ({
   name: row.name,
   kind: row.kind,
   ownerId: row.owner_id,
+  teamId: row.team_id,
   durationMinutes: row.duration_minutes,
   bufferBeforeMinutes: row.buffer_before_minutes,
   bufferAfterMinutes: row.buffer_after_minutes,
@@ -353,14 +373,13 @@ export const readPageHosts = async (
 ): Promise<HostAvailability[]> =>
   withAccount(ctx, async (tx) => {
     const hosts = await tx.execute<HostRow>(sql`
-      select h.user_id, u.name, u.email, h.weight, h.is_required, h.last_assigned_at,
+      select r.user_id, u.name, u.email, r.weight, r.is_required, r.last_assigned_at,
              a.timezone, a.weekly,
              g.provider, g.calendar_id, g.state as grant_state, g.last_error
-        from booking_host h
-        join user_account u on u.id = h.user_id
-        left join availability a on a.user_id = h.user_id
-        left join calendar_grant g on g.user_id = h.user_id
-       where h.booking_page_id = ${pageId} and h.is_active
+        from (${pageRoster(sql`${pageId}`)}) r
+        join user_account u on u.id = r.user_id
+        left join availability a on a.user_id = r.user_id
+        left join calendar_grant g on g.user_id = r.user_id
        order by u.name`)
 
     if (hosts.length === 0) return []
@@ -922,15 +941,32 @@ export const confirmBooking = async (
 
     // Who takes it. On a collective the organiser rotates through the required
     // hosts by the same share rule, so ownership of the lead is still shared out.
-    const chosenId = assignHost(
-      (collective ? required : free).map((host) => ({
-        userId: host.userId,
-        weight: host.weight,
-        lastAssignedAt: host.lastAssignedAt,
-        recentAssignments: host.recentAssignments,
-      })),
-      `${input.startsAt.toISOString()}|${email.toLowerCase()}`,
-    )
+    // A team page takes the free member whose turn is next, and the turn is spent
+    // only when this booking commits. A reschedule keeps its host while they are
+    // still free, and that keeps no new turn.
+    let chosenId: string | null
+    if (input.page.teamId) {
+      const [original] = input.rescheduleOf
+        ? await tx.execute<{ host_user_id: string }>(
+            sql`select host_user_id from booking where id = ${input.rescheduleOf}`,
+          )
+        : []
+      const keptId = original?.host_user_id
+      chosenId =
+        keptId && free.some((host) => host.userId === keptId)
+          ? keptId
+          : await takeTeamTurn(tx, input.page.teamId, free.map((host) => host.userId))
+    } else {
+      chosenId = assignHost(
+        (collective ? required : free).map((host) => ({
+          userId: host.userId,
+          weight: host.weight,
+          lastAssignedAt: host.lastAssignedAt,
+          recentAssignments: host.recentAssignments,
+        })),
+        `${input.startsAt.toISOString()}|${email.toLowerCase()}`,
+      )
+    }
     const host = free.find((candidate) => candidate.userId === chosenId)
     if (!host) throw new SlotGoneError()
 

@@ -158,7 +158,8 @@ export const invitation = pgTable(
   ],
 )
 
-/** A named group of people inside the account. Grouping only: no routing reads it yet. */
+/** A named group of people inside the account. A form or booking page can hand its
+ *  work to a team, which takes the members in turn. */
 export const team = pgTable(
   'team',
   {
@@ -183,6 +184,8 @@ export const teamMember = pgTable(
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
     isLead: boolean('is_lead').notNull().default(false),
+    /** The turn this member last took in the team's rotation. Null until first picked. */
+    lastAssignedAt: timestamp('last_assigned_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [

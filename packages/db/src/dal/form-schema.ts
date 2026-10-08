@@ -134,20 +134,30 @@ export type FormSettings = {
   theme?: FormTheme | undefined
   /** Who a new lead belongs to. 'user' names one person; 'round_robin' shares
    *  them across the pool, or across every super admin and every seat that can
-   *  edit the sales hub when the pool is empty. Either way the seat has to still
-   *  be active. A contact that already has an owner keeps them. */
+   *  edit the sales hub when the pool is empty; 'team' takes the team's members in
+   *  turn. Either way the seat has to still be active. A contact that already has
+   *  an owner keeps them. */
   assignOwner?: AssignOwner | undefined
 }
 
-export type AssignOwner = { mode: 'none' | 'user' | 'round_robin'; userId?: string | null | undefined; pool?: string[] | undefined }
+export type AssignOwner = {
+  mode: 'none' | 'user' | 'round_robin' | 'team'
+  userId?: string | null | undefined
+  pool?: string[] | undefined
+  teamId?: string | null | undefined
+}
+
+/** Same shape as index.ts checks. This file is bundled for the browser, so it cannot import the database module. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const readAssignOwner = (raw: unknown): AssignOwner => {
   const a = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
-  const mode = a.mode === 'user' || a.mode === 'round_robin' ? a.mode : 'none'
+  const mode = a.mode === 'user' || a.mode === 'round_robin' || a.mode === 'team' ? a.mode : 'none'
   return {
     mode,
     userId: typeof a.userId === 'string' && a.userId ? a.userId : null,
     pool: Array.isArray(a.pool) ? a.pool.filter((v): v is string => typeof v === 'string') : [],
+    teamId: typeof a.teamId === 'string' && UUID.test(a.teamId) ? a.teamId : null,
   }
 }
 
@@ -160,7 +170,7 @@ export const DEFAULT_SETTINGS: FormSettings = {
   lifecycleStageOnSubmit: null,
   subscriptionOptIns: [],
   theme: { preset: 'neutral', tokens: {} },
-  assignOwner: { mode: 'none', userId: null, pool: [] },
+  assignOwner: { mode: 'none', userId: null, pool: [], teamId: null },
 }
 
 /** The address in its serialized form when it is an absolute http or https one,

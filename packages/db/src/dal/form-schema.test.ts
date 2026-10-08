@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { formBlockers, REDIRECT_BLOCKER, webAddress, type FormField } from './form-schema.ts'
+import { formBlockers, readAssignOwner, REDIRECT_BLOCKER, webAddress, type FormField } from './form-schema.ts'
 
 test('webAddress accepts absolute http and https addresses and returns the serialized form', () => {
   assert.equal(webAddress('https://a.b/c?x=1'), 'https://a.b/c?x=1')
@@ -52,4 +52,12 @@ test('formBlockers asks for a full address only in redirect mode', () => {
   for (const value of ['', 'Thanks. We will be in touch.', 'javascript:alert(1)', '//evil.com', 'data:text/html,x']) {
     assert.deepEqual(blockers('redirect', value), [REDIRECT_BLOCKER], JSON.stringify(value))
   }
+})
+
+test('a team owner keeps its team only when the id is a uuid, so a bad one never reaches the database', () => {
+  const teamId = '3f2b8c1e-9a4d-4e7f-8b2a-1c5d6e7f8a9b'
+  assert.deepEqual(readAssignOwner({ mode: 'team', teamId }), { mode: 'team', userId: null, pool: [], teamId })
+  assert.equal(readAssignOwner({ mode: 'team', teamId: "'; drop table team" }).teamId, null)
+  assert.equal(readAssignOwner({ mode: 'team' }).teamId, null)
+  assert.equal(readAssignOwner({ mode: 'sideways', teamId }).mode, 'none')
 })

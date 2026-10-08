@@ -38,6 +38,10 @@ import {
   readSchedule,
   renderTemplate,
   saveBookingPage,
+  listTeams,
+  saveTeam,
+  setTeamMembers,
+  deleteTeam,
   clearOverride,
   saveOverride,
   saveSchedule,
@@ -203,7 +207,8 @@ const PAGE_SHAPE = {
  *  address it books with ends in one of these, and every page it creates is named
  *  here, so the cleanup is exact rather than a truncate. */
 const TEST_DOMAINS = ['acme-booking.test', 'race-booking.test']
-const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this', 'reminded-page']
+const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this', 'reminded-page', 'team-desk']
+const TEST_TEAM = 'Booking rotation (verify)'
 
 const cleanUp = async (ctx: AccountContext): Promise<void> => {
   await withAccount(ctx, async (tx) => {
@@ -215,6 +220,7 @@ const cleanUp = async (ctx: AccountContext): Promise<void> => {
     await tx.execute(sql`delete from booking_hold`)
     const pages = sql.join(TEST_PAGES.map((slug) => sql`${slug}`), sql`, `)
     await tx.execute(sql`delete from booking_page where slug in (${pages})`)
+    await tx.execute(sql`delete from team where name = ${TEST_TEAM}`)
     await tx.execute(
       sql`delete from contact where ${sql.join(
         TEST_DOMAINS.map((domain) => sql`email like ${'%@' + domain}`),
@@ -1983,6 +1989,126 @@ try {
       refusal,
     )
   }
+
+  // -----------------------------------------------------------------------
+  section('a team takes the turns on a round robin page')
+
+  const rosterWindow = { from: new Date('2026-09-01T00:00:00Z'), to: new Date('2026-12-01T00:00:00Z') }
+  const salesTeam = await bySlug(datasaur, 'sales-team')
+  const salesHosts = await readPageHosts(datasaur, salesTeam.bookingPageId, rosterWindow)
+  const [formerRow] = await scoped<{ id: string }>(datasaur, sql`select id from user_account where email = 'former@sandbox.test'`)
+  const former = formerRow?.id ?? ''
+
+  const desk = await saveTeam(datasaur, { name: TEST_TEAM })
+  await setTeamMembers(datasaur, {
+    teamId: desk.id,
+    members: [...salesHosts.map((host) => ({ userId: host.userId })), { userId: former }],
+  })
+  await saveBookingPage(datasaur, {
+    slug: 'team-desk',
+    name: 'Team desk',
+    ...PAGE_SHAPE,
+    kind: 'round_robin',
+    location: 'zoom',
+    titleTpl: 'Desk call',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: true,
+    teamId: desk.id,
+  })
+  const deskPage = await bySlug(datasaur, 'team-desk')
+  check('the page keeps the team it takes its hosts from', deskPage.teamId === desk.id)
+
+  const deskHosts = await readPageHosts(datasaur, deskPage.bookingPageId, rosterWindow)
+  check(
+    'the offer draws on the team: its three seated members, and not the deactivated one',
+    deskHosts.length === salesHosts.length && !deskHosts.some((host) => host.userId === former),
+    deskHosts.map((host) => host.name).join(', '),
+  )
+
+  const turns = () =>
+    scoped<{ user_id: string; last_assigned_at: string | null }>(
+      datasaur,
+      sql`select user_id, last_assigned_at from team_member where team_id = ${desk.id} order by user_id`,
+    )
+  const beforeListing = JSON.stringify(await turns())
+  await readPageHosts(datasaur, deskPage.bookingPageId, rosterWindow)
+  check('listing the free times takes no turn', JSON.stringify(await turns()) === beforeListing)
+
+  const made: { bookingId: string; hostUserId: string }[] = []
+  for (const [n, at] of ['2026-10-12', '2026-10-13', '2026-10-14'].entries()) {
+    made.push(await confirmBooking(
+      datasaur,
+      {
+        page: deskPage,
+        startsAt: new Date(`${at}T17:00:00.000Z`),
+        body: { name: `Desk ${n}`, email: `desk${n}@acme-booking.test` },
+        attendeeTimezone: 'America/Los_Angeles',
+        attribution: { pagePath: '/b/datasaur/team-desk' },
+      },
+      deskHosts,
+      fakeProvisioner,
+    ))
+  }
+  const picked = made.map((booked) => booked.hostUserId)
+  check(
+    'three bookings in a row go to three different members of the team',
+    new Set(picked).size === 3,
+    picked.map((id) => id.slice(0, 4)).join(' '),
+  )
+
+  const busy = await confirmBooking(
+    datasaur,
+    {
+      page: deskPage,
+      startsAt: new Date('2026-10-12T17:00:00.000Z'),
+      body: { name: 'Desk free', email: 'desk-free@acme-booking.test' },
+      attendeeTimezone: 'America/Los_Angeles',
+      attribution: { pagePath: '/b/datasaur/team-desk' },
+    },
+    deskHosts,
+    fakeProvisioner,
+  )
+  check(
+    'a member already booked at that time is not picked, even when they are next in turn',
+    busy.hostUserId !== picked[0] && deskHosts.some((host) => host.userId === busy.hostUserId),
+    busy.hostName,
+  )
+
+  const turnsBeforeMove = JSON.stringify(await turns())
+  const rescheduled = await confirmBooking(
+    datasaur,
+    {
+      page: deskPage,
+      startsAt: new Date('2026-10-15T17:00:00.000Z'),
+      rescheduleOf: made[1]!.bookingId,
+      body: { name: 'Desk 1', email: 'desk1@acme-booking.test' },
+      attendeeTimezone: 'America/Los_Angeles',
+      attribution: { pagePath: '/b/datasaur/team-desk' },
+    },
+    deskHosts,
+    fakeProvisioner,
+  )
+  check(
+    'a rescheduled meeting keeps its member and takes no new turn',
+    rescheduled.hostUserId === made[1]!.hostUserId && JSON.stringify(await turns()) === turnsBeforeMove,
+    rescheduled.hostName,
+  )
+
+  check(
+    'the team lists the booking page that takes its hosts from it',
+    (await listTeams(datasaur)).find((row) => row.id === desk.id)?.bookingPageCount === 1,
+    'one booking page',
+  )
+
+  await deleteTeam(datasaur, desk.id)
+  const orphaned = await bySlug(datasaur, 'team-desk')
+  check(
+    'a page whose team was deleted keeps the id, and offers no times until somebody picks again',
+    orphaned.teamId === desk.id && (await readPageHosts(datasaur, orphaned.bookingPageId, rosterWindow)).length === 0,
+    'no hosts',
+  )
 
 } catch (cause) {
   failures++
