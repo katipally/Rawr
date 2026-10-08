@@ -170,7 +170,7 @@ export const CalendarRow = ({
           </Button>
         ) : null}
 
-        {isSelf && !canConnectGoogle && canConnectDev ? (
+        {isSelf && canConnectDev ? (
           <Button
             type="button"
             variant={working ? 'secondary' : 'primary'}

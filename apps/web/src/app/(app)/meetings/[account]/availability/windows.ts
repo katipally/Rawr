@@ -65,6 +65,21 @@ export const toWeekly = (rows: Window[]): Ranges => {
   return weekly
 }
 
+/** Windows edited since the save: a row whose days or hours differ from the one
+ *  with its key, a row with a new key, and a saved row no longer present. A
+ *  person who edits one window's end time has made one change, however many days
+ *  that window covers. O(rows). */
+export const windowsChanged = (rows: Window[], saved: Window[]): number => {
+  const before = new Map(saved.map((row) => [row.key, row]))
+  const kept = new Set(rows.map((row) => row.key))
+  let changed = saved.filter((row) => !kept.has(row.key)).length
+  for (const row of rows) {
+    const was = before.get(row.key)
+    if (!was || was.days !== row.days || was.from !== row.from || was.to !== row.to) changed++
+  }
+  return changed
+}
+
 /** Days whose hours differ between two maps, an absent day reading as none. */
 export const daysChanged = (a: Ranges, b: Ranges): number =>
   DAY_GROUPS[0]!.days.filter((day) => JSON.stringify(a[day] ?? []) !== JSON.stringify(b[day] ?? [])).length

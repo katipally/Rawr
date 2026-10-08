@@ -1,24 +1,33 @@
 import {
   bookingFields,
+  bookingForToken,
   dayKey,
   isKnownTimezone,
-  publicBookingPage,
   publicEdgeContext,
   readBookingPage,
   recordBookingPageView,
   zonedTimeToUtc,
+  type BookingPageConfig,
+  type BookingRecord,
   type PublicBookingPage,
 } from '@rawr/db'
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { BookingWidget } from '~/components/booking/booking-widget.tsx'
+import {
+  BookingWidget,
+  type Booked,
+  type BookingMonth,
+  type BookingWidgetPage,
+} from '~/components/booking/booking-widget.tsx'
 import { EmbedHeight } from '~/components/booking/embed-height.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
-import { BOOKING_COPY } from '~/lib/edge-copy.ts'
+import { publicBaseUrl } from '~/lib/env.ts'
+import { bookingIcsPath, bookingManagePath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
-import { bookingIcsPath } from '~/lib/links.ts'
 import { inBackground } from '~/server/background.ts'
+import { whereLine } from '~/server/booking-mail.ts'
 import { loadOffer, nextAvailableAfter } from '~/server/booking.ts'
+import { requireSummary, summaryFor } from './lookup.ts'
 
 /** The public booking page. F2 §4 and §7.
  *
@@ -39,7 +48,7 @@ export const generateMetadata = async ({
   params: Promise<{ account: string; slug: string }>
 }): Promise<Metadata> => {
   const { account, slug } = await params
-  const page = await publicBookingPage(account, slug)
+  const page = await summaryFor(account, slug)
   // The page's own name, not "Book " plus it: pages are usually already named for
   // the action ("Book time with me"), and prefixing produced "Book Book time with
   // me" in the browser tab.
@@ -55,6 +64,58 @@ const nextMonthKey = (monthKey: string, by: number): string => {
   return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+const widgetPageOf = (account: string, slug: string, page: BookingPageConfig): BookingWidgetPage => ({
+  account,
+  slug,
+  name: page.name,
+  accountName: page.accountName,
+  hostNames: page.hostNames,
+  durationMinutes: page.durationMinutes,
+  maxHorizonDays: page.maxHorizonDays,
+  location: page.location,
+  fields: bookingFields(page.questions),
+  confirmationCopy: page.confirmationCopy,
+  redirectUrl: page.redirectUrl,
+})
+
+/** One month of open times, read for the zone the calendar is shown in. */
+const monthOf = async (page: BookingPageConfig, monthKey: string, timezone: string): Promise<BookingMonth> => {
+  const from = zonedTimeToUtc(`${monthKey}-01`, 0, timezone)
+  const to = zonedTimeToUtc(`${nextMonthKey(monthKey, 1)}-01`, 0, timezone)
+  const offer = await loadOffer(page, { from, to, now: new Date() })
+
+  // Only when the month is genuinely empty and availability was actually
+  // established: "nothing until December" is a lie when the truth is that no
+  // calendar could be read.
+  const nextOpen =
+    offer.slots.length === 0 && !offer.unavailable ? await nextAvailableAfter(page, to) : null
+
+  return {
+    month: monthKey,
+    timezone,
+    slots: offer.slots.map((slot) => ({
+      startsAt: slot.startsAt.toISOString(),
+      capacity: slot.hostUserIds.length,
+    })),
+    unavailable: offer.unavailable,
+    nextAvailable: nextOpen ? nextOpen.toISOString() : null,
+  }
+}
+
+/** The meeting as the widget's confirmation shows it straight after booking. */
+const bookedView = (booking: BookingRecord, page: BookingPageConfig): Booked => ({
+  startsAt: booking.startsAt.toISOString(),
+  endsAt: booking.endsAt.toISOString(),
+  hostName: booking.hostName,
+  conferenceUrl: booking.conferenceUrl,
+  where: whereLine(booking, booking.conferenceUrl),
+  calendarUrl: `${publicBaseUrl}${bookingIcsPath(booking.rescheduleToken)}`,
+  rescheduleUrl: `${publicBaseUrl}${bookingManagePath('reschedule', booking.rescheduleToken)}`,
+  cancelUrl: `${publicBaseUrl}${bookingManagePath('cancel', booking.cancelToken)}`,
+  warnings: [],
+  message: page.confirmationCopy,
+})
+
 const BookingPublicPage = async ({
   params,
   searchParams,
@@ -69,9 +130,9 @@ const BookingPublicPage = async ({
     return typeof value === 'string' && value !== '' ? value : null
   }
   const embedded = single('embed') === '1'
+  const locale = await visitorLocale()
 
-  const summary = await publicBookingPage(account, slug)
-  if (!summary) notFound()
+  const summary = await requireSummary(account, slug)
 
   // The widget needs the questions and the confirmation copy, which the public
   // resolver deliberately does not return. Reading them takes an account scope,
@@ -90,63 +151,24 @@ const BookingPublicPage = async ({
   }
 
   // A booking confirmed through the JSON endpoint by a script that then failed
-  // lands here. Rare, and the one moment somebody needs to be told the meeting is
-  // real, so it is answered from the URL rather than left to a widget that is
-  // evidently not running.
-  if (single('confirmed') === '1') {
-    // `at` has been in this URL since the confirm route was written and nothing
-    // ever read it, so the one screen whose whole job is to say a meeting is real
-    // did not say when it is. This is the path for somebody whose script died, so
-    // the confirmation mail may not have arrived either.
-    const confirmedAt = new Date(single('at') ?? '')
-    const zone = isKnownTimezone(single('tz') ?? '') ? (single('tz') as string) : 'UTC'
-    const locale = await visitorLocale()
-    const when = Number.isNaN(confirmedAt.getTime())
-      ? null
-      : confirmedAt.toLocaleString(locale.tag, {
-          timeZone: zone,
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-
+  // lands here. Answered from the booking's own reschedule token, so the screen is
+  // the one the widget shows straight after booking, and the URL carries no time
+  // that could drift from the record. A spent or cancelled token falls through to
+  // the booking page itself.
+  const token = single('r')
+  const confirmed =
+    single('confirmed') === '1' && token ? await bookingForToken('reschedule', token) : null
+  if (confirmed?.state === 'confirmed') {
+    const zone = isKnownTimezone(confirmed.attendeeTimezone) ? confirmed.attendeeTimezone : 'UTC'
+    const month = await monthOf(page, dayKey(confirmed.startsAt, zone).slice(0, 7), zone)
     return (
       <Shell page={summary} embedded={embedded}>
-        <div className="rawr-b">
-          <div className="rawr-b-body">
-            <p className="rawr-b-note" data-good>
-              <strong>{BOOKING_COPY.booked}</strong>{' '}
-              {page.confirmationCopy ??
-                'A calendar invitation is on its way to your inbox, with the joining details and links to move or cancel the meeting.'}
-            </p>
-            {when ? (
-              <p className="rawr-b-panel">
-                <span className="rawr-b-title">{page.name}</span>
-                <br />
-                {when} <span className="rawr-b-hint">({zone})</span>
-              </p>
-            ) : null}
-            <p className="rawr-b-actions">
-              {single('r') ? (
-                <>
-                  <a className="rawr-b-link" href={bookingIcsPath(single('r') as string)}>
-                    {BOOKING_COPY.addToCalendar}
-                  </a>
-                  <a className="rawr-b-link" href={`/b/manage/reschedule/${single('r')}`}>
-                    {BOOKING_COPY.reschedule}
-                  </a>
-                </>
-              ) : null}
-              {single('c') ? (
-                <a className="rawr-b-link" href={`/b/manage/cancel/${single('c')}`}>
-                  {BOOKING_COPY.cancel}
-                </a>
-              ) : null}
-            </p>
-          </div>
-        </div>
+        <BookingWidget
+          page={widgetPageOf(account, slug, page)}
+          locale={locale.tag}
+          initial={month}
+          initialBooked={bookedView(confirmed, page)}
+        />
       </Shell>
     )
   }
@@ -176,41 +198,12 @@ const BookingPublicPage = async ({
     ? (requested as string)
     : dayKey(now, timezone).slice(0, 7)
 
-  const from = zonedTimeToUtc(`${monthKey}-01`, 0, timezone)
-  const to = zonedTimeToUtc(`${nextMonthKey(monthKey, 1)}-01`, 0, timezone)
-  const offer = await loadOffer(page, { from, to, now })
-
-  // Only when the month is genuinely empty and availability was actually
-  // established: "nothing until December" is a lie when the truth is that no
-  // calendar could be read.
-  const nextOpen =
-    offer.slots.length === 0 && !offer.unavailable ? await nextAvailableAfter(page, to) : null
-
   return (
     <Shell page={summary} embedded={embedded}>
       <BookingWidget
-        page={{
-          account,
-          slug,
-          name: page.name,
-          accountName: page.accountName,
-          hostNames: page.hostNames,
-          durationMinutes: page.durationMinutes,
-          location: page.location,
-          fields: bookingFields(page.questions),
-          confirmationCopy: page.confirmationCopy,
-          redirectUrl: page.redirectUrl,
-        }}
-        initial={{
-          month: monthKey,
-          timezone,
-          slots: offer.slots.map((slot) => ({
-            startsAt: slot.startsAt.toISOString(),
-            capacity: slot.hostUserIds.length,
-          })),
-          unavailable: offer.unavailable,
-          nextAvailable: nextOpen ? nextOpen.toISOString() : null,
-        }}
+        page={widgetPageOf(account, slug, page)}
+        locale={locale.tag}
+        initial={await monthOf(page, monthKey, timezone)}
       />
     </Shell>
   )

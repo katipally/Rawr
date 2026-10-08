@@ -1,7 +1,7 @@
 'use client'
 
 import type { BookingKind } from '@rawr/db'
-import { Badge, DataTable, DropdownMenu, EmptyState, NOTHING_MATCHED, Switch, type Column, useToast } from '@rawr/ui'
+import { Badge, ConfirmDialog, DataTable, DropdownMenu, EmptyState, NOTHING_MATCHED, Switch, type Column, useToast } from '@rawr/ui'
 import { ChevronDown, ExternalLink, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -25,6 +25,7 @@ export type PageRow = {
   durationMinutes: number
   location: string
   isActive: boolean
+  hasBookings: boolean
   hostCount: number
   upcoming: number
   views: number
@@ -82,6 +83,7 @@ export const PagesTable = ({
   const toast = useToast()
   const copy = useCopy()
   const [embedding, setEmbedding] = useState<PageRow | null>(null)
+  const [deleting, setDeleting] = useState<PageRow | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const [needle, setNeedleState] = useState(query.q)
   const [owner, setOwnerState] = useState(query.owner)
@@ -121,6 +123,20 @@ export const PagesTable = ({
       toast('error', errorMessage(cause))
     } finally {
       setPending(null)
+    }
+  }
+
+  const remove = async (row: PageRow) => {
+    setPending(row.id)
+    try {
+      await api.booking.deletePage.mutate({ id: row.id })
+      toast('success', `“${row.name}” is deleted.`)
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setPending(null)
+      setDeleting(null)
     }
   }
 
@@ -167,6 +183,23 @@ export const PagesTable = ({
                     { key: 'booked', label: 'Booked meetings', href: bookedPath(account, { page: row.id }) },
                   ],
                 },
+                ...(viewer.isAdmin || row.ownerId === viewer.id
+                  ? [
+                      {
+                        key: 'remove',
+                        items: [
+                          {
+                            key: 'delete',
+                            label: 'Delete',
+                            destructive: true,
+                            disabled: row.hasBookings,
+                            description: row.hasBookings ? 'Meetings are booked on it, so turn it off instead.' : undefined,
+                            onSelect: () => setDeleting(row),
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
               ]}
               trigger={(props) => (
                 <button {...props} type="button" className={rowPill}>
@@ -339,6 +372,16 @@ export const PagesTable = ({
       />
       {pager}
       <EmbedDialog baseUrl={baseUrl} account={account} page={embedding} onClose={() => setEmbedding(null)} />
+      <ConfirmDialog
+        open={deleting !== null}
+        title={`Delete ${deleting?.name ?? 'this page'}?`}
+        confirm="Delete page"
+        busy={pending === deleting?.id}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => deleting && void remove(deleting)}
+      >
+        <p>The link stops working and the page is gone. Nothing else is affected, and it cannot be undone.</p>
+      </ConfirmDialog>
     </div>
   )
 }

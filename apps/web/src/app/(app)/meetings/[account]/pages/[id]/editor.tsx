@@ -26,6 +26,7 @@ import {
   DEFAULT_CONFIRMATION_SUBJECT,
   DEFAULT_REMINDER_BODY,
   DEFAULT_REMINDER_SUBJECT,
+  MAX_REMINDERS,
   REMINDER_UNITS,
 } from '~/lib/booking-tokens.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
@@ -33,6 +34,7 @@ import { SaveBar } from '~/components/save-bar.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { availabilityPath, bookedPath, bookingPagesPath, calendarsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { LeaveGuard } from '~/components/leave-guard.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { KINDS } from '../pages-table.tsx'
 import { EmbedDialog, hostedBookingUrl, useCopy } from '../snippet.tsx'
@@ -79,6 +81,22 @@ const DARK = 'Not set up here, so a meeting booked this way has no link.'
 
 const DUPLICATE_REMINDER =
   'Two reminders at the same moment would send the same mail twice. Change one of them.'
+
+/** A new reminder starts on the first of these that the page does not already use. */
+const REMINDER_OFFERS: { amount: number; unit: ReminderUnit }[] = [
+  { amount: 1, unit: 'day' },
+  { amount: 1, unit: 'hour' },
+  { amount: 2, unit: 'day' },
+  { amount: 1, unit: 'week' },
+  { amount: 30, unit: 'minute' },
+  { amount: 15, unit: 'minute' },
+]
+
+const newReminder = (current: ReminderDraft[]): ReminderDraft => {
+  const used = new Set(current.map((row) => `${row.unit}:${row.amount}`))
+  const offer = REMINDER_OFFERS.find((each) => !used.has(`${each.unit}:${each.amount}`)) ?? REMINDER_OFFERS[0]!
+  return { key: crypto.randomUUID(), ...offer }
+}
 
 const numeric = (value: string, fallback: number): number => {
   const parsed = Number(value)
@@ -696,7 +714,7 @@ export const PageEditor = ({
         line="Send an email reminder to attendees before a meeting starts."
         checked={reminders.length > 0}
         disabled={!editable}
-        onChange={(checked) => setReminders(checked ? [{ key: crypto.randomUUID(), amount: 1, unit: 'day' }] : [])}
+        onChange={(checked) => setReminders(checked ? [newReminder([])] : [])}
       >
         <p className="text-small">
           Each one is sent once per meeting. A reminder added after somebody booked still reaches them, as
@@ -747,11 +765,11 @@ export const PageEditor = ({
             </li>
           ))}
         </ul>
-        {editable ? (
+        {editable && reminders.length < MAX_REMINDERS ? (
           <Button
             type="button"
             className="self-start"
-            onClick={() => setReminders((current) => [...current, { key: crypto.randomUUID(), amount: 1, unit: 'day' }])}
+            onClick={() => setReminders((current) => [...current, newReminder(current)])}
           >
             + Add reminder
           </Button>
@@ -786,6 +804,7 @@ export const PageEditor = ({
   )
 
   return (
+    <>
     <form
       id={FORM_ID}
       className="mx-auto flex w-full max-w-[80rem] min-w-0 flex-col gap-6 pb-28"
@@ -896,5 +915,8 @@ export const PageEditor = ({
       />
       {leaving ? <DiscardConfirm onKeep={() => setLeaving(false)} onDiscard={leave} /> : null}
     </form>
+    {/* Outside the form: its dialog's submit would otherwise bubble up to the save. */}
+    <LeaveGuard dirty={changes > 0} />
+    </>
   )
 }

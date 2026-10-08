@@ -1167,6 +1167,8 @@ export type BookingRecord = {
   attendeeTimezone: string
   attendeeLocale: string | null
   answers: Record<string, unknown>
+  location: BookingLocation
+  locationDetail: string | null
   conferenceUrl: string | null
   conferenceRef: string | null
   calendarEventId: string | null
@@ -1196,6 +1198,8 @@ type BookingRow = {
   attendee_timezone: string
   attendee_locale: string | null
   answers: unknown
+  location: BookingLocation
+  location_detail: string | null
   conference_url: string | null
   conference_ref: string | null
   calendar_event_id: string | null
@@ -1210,7 +1214,8 @@ const BOOKING_COLUMNS = sql`
   b.id, b.account_id, b.booking_page_id, p.name as page_name, p.slug as page_slug,
   a.slug as account_slug, b.host_user_id, u.name as host_name, u.email as host_email,
   b.contact_id, b.company_id, b.starts_at, b.ends_at, b.attendee_name, b.attendee_email,
-  b.attendee_timezone, b.attendee_locale, b.answers, b.conference_url, b.conference_ref, b.calendar_event_id,
+  b.attendee_timezone, b.attendee_locale, b.answers, p.location, p.location_detail,
+  b.conference_url, b.conference_ref, b.calendar_event_id,
   b.calendar_id, b.state, b.cancel_token, b.reschedule_token, b.cancel_reason`
 
 const BOOKING_JOINS = sql`
@@ -1238,6 +1243,8 @@ const toBooking = (row: BookingRow): BookingRecord => ({
   attendeeTimezone: row.attendee_timezone,
   attendeeLocale: row.attendee_locale,
   answers: (row.answers ?? {}) as Record<string, unknown>,
+  location: row.location,
+  locationDetail: row.location_detail,
   conferenceUrl: row.conference_url,
   conferenceRef: row.conference_ref,
   calendarEventId: row.calendar_event_id,

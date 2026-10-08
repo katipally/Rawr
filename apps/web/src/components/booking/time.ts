@@ -25,6 +25,18 @@ export const shiftMonth = (monthKey: string, by: number): string => {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
+/** Which way the month in view can step. Back only while it is later than the
+ *  visitor's own current month; forward only while its first day is still inside
+ *  the bookable range, which ends on `lastKey`. Day keys compare as strings. */
+export const monthSteps = (
+  monthKey: string,
+  todayKey: string,
+  lastKey: string,
+): { earlier: boolean; later: boolean } => ({
+  earlier: monthKey > todayKey.slice(0, 7),
+  later: `${shiftMonth(monthKey, 1)}-01` <= lastKey,
+})
+
 /** Sunday is 0, matching Date.getUTCDay, because that is what the grid indexes on. */
 const weekdayOf = (day: string): number => new Date(`${day}T12:00:00Z`).getUTCDay()
 

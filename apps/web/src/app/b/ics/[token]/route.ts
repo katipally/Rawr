@@ -1,6 +1,7 @@
 import { bookingForToken } from '@rawr/db'
 import { NextResponse } from 'next/server'
 import { buildIcs } from '~/lib/ics.ts'
+import { placeDetail, whereLine } from '~/server/booking-mail.ts'
 import { CORS_HEADERS } from '~/server/edge.ts'
 
 /** GET /b/ics/:token.ics
@@ -44,8 +45,8 @@ export const GET = async (
     startsAt: booking.startsAt,
     endsAt: booking.endsAt,
     summary: `${booking.pageName} with ${booking.hostName}`,
-    description: booking.conferenceUrl ? `Join: ${booking.conferenceUrl}` : null,
-    location: booking.conferenceUrl,
+    description: whereLine(booking, booking.conferenceUrl) || null,
+    location: booking.conferenceUrl ?? placeDetail(booking),
     organiser: { name: booking.hostName, email: booking.hostEmail },
     attendee: { name: booking.attendeeName, email: booking.attendeeEmail },
     cancelled: booking.state === 'cancelled',

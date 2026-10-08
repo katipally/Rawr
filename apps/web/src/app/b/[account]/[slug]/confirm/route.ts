@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { publicBaseUrl } from '~/lib/env.ts'
 import { localeFrom } from '~/lib/format.ts'
 import { bookingIcsPath, bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
+import { whereLine } from '~/server/booking-mail.ts'
 import { book } from '~/server/booking.ts'
 import { CORS_HEADERS, bodyRefusal, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
@@ -105,6 +106,8 @@ export const POST = async (
       endsAt: booking.endsAt.toISOString(),
       hostName: booking.hostName,
       conferenceUrl: booking.conferenceUrl,
+      /** The place as the mail and the calendar file say it. */
+      where: whereLine(page, booking.conferenceUrl),
       rescheduleUrl: `${publicBaseUrl}${bookingManagePath('reschedule', booking.rescheduleToken)}`,
       /** For a calendar that is not the mailbox Google invited. */
       calendarUrl: `${publicBaseUrl}${bookingIcsPath(booking.rescheduleToken)}`,
@@ -113,7 +116,6 @@ export const POST = async (
        *  the hosted page. */
       confirmationUrl: `${publicBaseUrl}${bookingPublicPath(account, slug, {
         confirmed: '1',
-        at: booking.startsAt.toISOString(),
         r: booking.rescheduleToken,
         c: booking.cancelToken,
       })}`,

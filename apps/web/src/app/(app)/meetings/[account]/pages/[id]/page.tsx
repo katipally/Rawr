@@ -1,4 +1,4 @@
-import { bookingPageStats, getRegistry, readBookingPage, readPageHostList } from '@rawr/db'
+import { bookingPageStats, getRegistry, mappedKeyIsWritable, readBookingPage, readPageHostList } from '@rawr/db'
 import { Alert, EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
@@ -61,12 +61,16 @@ const BookingPageEditorScreen = async ({
 
   // Straight from the registry, so a custom field marketing added is available to
   // map an answer onto without a deploy. Contact and company only: a stranger
-  // booking a meeting does not create a deal.
+  // booking a meeting does not create a deal. System fields and marketing status
+  // are left out: a booking cannot write them, and the save refuses them too.
   const targets = registry.objects
     .filter((object) => object.key === 'contact' || object.key === 'company')
     .flatMap((object) =>
       object.fields
-        .filter((field) => field.type !== 'relation' && field.type !== 'user' && field.type !== 'json')
+        .filter(
+          (field) =>
+            field.type !== 'relation' && field.type !== 'user' && field.type !== 'json' && mappedKeyIsWritable(field.key),
+        )
         .map((field) => ({
           value: `${object.key}.${field.key}`,
           label: `${object.nameSingular} · ${field.label}`,

@@ -15,7 +15,7 @@ import {
   DEFAULT_REMINDER_SUBJECT,
 } from '~/lib/booking-tokens.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
-import { bookingManagePath } from '~/lib/links.ts'
+import { bookingIcsPath, bookingManagePath } from '~/lib/links.ts'
 import { compose } from './sequences/compose.ts'
 
 /** What a booking page puts in an inbox.
@@ -51,16 +51,24 @@ const splitName = (full: string): [string, string] => {
   return [first, rest.join(' ')]
 }
 
-/** Where the meeting happens, as a sentence rather than a field name. A Zoom link
- *  that has not arrived yet renders as nothing, so the reminder does not promise
- *  a link that is not in it. */
-const locationLine = (facts: BookingMailFacts): string => {
-  if (facts.conferenceUrl) return `Join: ${facts.conferenceUrl}`
-  if (facts.page.location === 'phone' && facts.page.locationDetail) {
-    return `Call: ${facts.page.locationDetail}`
-  }
-  if (facts.page.location === 'custom' && facts.page.locationDetail) return facts.page.locationDetail
-  return ''
+type PlaceFields = Pick<BookingPageConfig, 'location' | 'locationDetail'>
+
+/** The phone number or custom place a page names for itself. Zoom and Meet name
+ *  their place with the link, so they have none. */
+export const placeDetail = (place: PlaceFields): string | null =>
+  place.locationDetail && (place.location === 'phone' || place.location === 'custom')
+    ? place.locationDetail
+    : null
+
+/** Where the meeting happens, as a sentence rather than a field name. Shared by the
+ *  mail, the calendar file and the confirmation, so all three say the same thing.
+ *  A Zoom link that has not arrived yet renders as nothing, so nothing promises a
+ *  link that is not there. */
+export const whereLine = (place: PlaceFields, conferenceUrl: string | null): string => {
+  if (conferenceUrl) return `Join: ${conferenceUrl}`
+  const detail = placeDetail(place)
+  if (!detail) return ''
+  return place.location === 'phone' ? `Call: ${detail}` : detail
 }
 
 /** The attendee's own timezone, always: they picked the time in it, and a
@@ -84,7 +92,7 @@ export const bookingMailValues = (facts: BookingMailFacts): TemplateValues => {
     'host.signature': [facts.hostName, facts.page.accountName].filter(Boolean).join('\n'),
     'meeting.date': fmt.at(facts.startsAt, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     'meeting.time': `${fmt.time(facts.startsAt)} (${zone})`,
-    'meeting.location': locationLine(facts),
+    'meeting.location': whereLine(facts.page, facts.conferenceUrl),
     'meeting.description': renderTemplate(facts.page.descriptionTpl, {
       'contact.first_name': attendeeFirst,
       'contact.last_name': attendeeLast,
@@ -106,6 +114,7 @@ const manageLines = (facts: BookingMailFacts): string =>
     '',
     `Need a different time? ${publicBaseUrl}${bookingManagePath('reschedule', facts.rescheduleToken)}`,
     `Cannot make it? ${publicBaseUrl}${bookingManagePath('cancel', facts.cancelToken)}`,
+    `Add to calendar: ${publicBaseUrl}${bookingIcsPath(facts.rescheduleToken)}`,
   ].join('\n')
 
 /** Which mailbox this goes out of: the host's own, so a reply lands with the

@@ -2,7 +2,7 @@
 
 // Values come from the browser-safe subpath, not the barrel: importing a runtime
 // value from '@rawr/db' here pulls the Postgres driver into the client bundle.
-import { FORM_FIELD_TYPES, type FormField } from '@rawr/db/forms'
+import { FORM_FIELD_TYPES, type FormField, type FormFieldType } from '@rawr/db/forms'
 import { Button, Field, Select, TextInput } from '@rawr/ui'
 import { ChoicesInput } from '~/components/choices-input.tsx'
 import { useRowIds } from '~/lib/row-ids.ts'
@@ -25,6 +25,24 @@ const KEY = /^[a-z][a-z0-9_]{0,58}$/
 const BOOKING_QUESTION_TYPES = FORM_FIELD_TYPES.filter(
   (type) => !['radio', 'consent', 'file', 'heading', 'hidden'].includes(type),
 )
+
+const KIND_LABELS: Record<FormFieldType, string> = {
+  text: 'Text',
+  long_text: 'Long text',
+  email: 'Email',
+  phone: 'Phone',
+  url: 'URL',
+  select: 'Choice',
+  radio: 'Single choice',
+  multi_select: 'Multiple choice',
+  boolean: 'Yes or no',
+  consent: 'Consent',
+  number: 'Number',
+  date: 'Date',
+  file: 'File',
+  heading: 'Heading',
+  hidden: 'Hidden',
+}
 
 /** Blank is not an answer. Left as '' the parser would store an empty
  *  placeholder and the page would render one. */
@@ -159,7 +177,7 @@ export const QuestionList = ({
             >
               {BOOKING_QUESTION_TYPES.map((type) => (
                 <option key={type} value={type}>
-                  {type.replace('_', ' ')}
+                  {KIND_LABELS[type]}
                 </option>
               ))}
             </Select>

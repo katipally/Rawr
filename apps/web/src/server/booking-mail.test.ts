@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { BookingPageConfig } from '@rawr/db'
-import { bookingMailValues, hostMailbox, type BookingMailFacts } from './booking-mail.ts'
+import {
+  bookingMailValues,
+  hostMailbox,
+  placeDetail,
+  whereLine,
+  type BookingMailFacts,
+} from './booking-mail.ts'
 
 const box = (userId: string, canSend = true, state = 'connected') => ({ userId, canSend, state })
 
@@ -44,4 +50,18 @@ test('the date and time read the way the attendee reads them, in their own zone'
 
 test('a booking from before the language was kept reads in the fallback', () => {
   assert.equal(plain(bookingMailValues(facts(null))['meeting.date']), 'Tuesday, September 8, 2026')
+})
+
+test('the place reads the same in the mail, the calendar file and the confirmation', () => {
+  const phone = { location: 'phone', locationDetail: '+62 811 000 111' } as const
+  assert.equal(whereLine(phone, null), 'Call: +62 811 000 111')
+  assert.equal(whereLine({ location: 'custom', locationDetail: 'Room 4, floor 2' }, null), 'Room 4, floor 2')
+  assert.equal(whereLine(phone, 'https://zoom.test/j/1'), 'Join: https://zoom.test/j/1')
+  assert.equal(whereLine({ location: 'zoom', locationDetail: null }, null), '')
+  assert.equal(whereLine({ location: 'custom', locationDetail: null }, null), '')
+})
+
+test('the calendar location is the phone number or custom place when there is no link', () => {
+  assert.equal(placeDetail({ location: 'phone', locationDetail: '+62 811 000 111' }), '+62 811 000 111')
+  assert.equal(placeDetail({ location: 'google_meet', locationDetail: 'stale text' }), null)
 })

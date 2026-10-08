@@ -705,8 +705,10 @@ try {
     const stamp = Date.now()
     const company = await createRecord(sales, 'company', { name: `Card co ${stamp}`, domain: `cardco${stamp}.example` })
     const deal = await createRecord(sales, 'deal', { name: `Card deal ${stamp}`, company_id: company.id })
+    // Searched by the stamp so the deal is on the board whatever else the stage holds:
+    // a column shows fifty cards, and a sandbox stage can hold more than that.
     const cardOf = async () =>
-      (await readBoard(sales, {})).columns.flatMap((column) => column.cards).find((card) => card.id === deal.id)
+      (await readBoard(sales, { search: `Card deal ${stamp}` })).columns.flatMap((column) => column.cards).find((card) => card.id === deal.id)
 
     expect((await cardOf())?.companyId === company.id, 'the live company was not linked on the card')
     await deleteRecord(admin, 'company', company.id)

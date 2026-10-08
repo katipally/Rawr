@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { daysChanged, toWeekly, toWindows, type Ranges } from './windows.ts'
+import { daysChanged, toWeekly, toWindows, windowsChanged, type Ranges, type Window } from './windows.ts'
 
 let n = 0
 const key = () => String(n++)
@@ -41,4 +41,21 @@ test('two rows giving a day the same range store it once, in start order', () =>
 test('no hours at all is no rows', () => {
   assert.deepEqual(toWindows({}, key), [])
   assert.deepEqual(toWeekly([]), {})
+})
+
+test('one edited window counts once, however many days it covers', () => {
+  const saved: Window[] = [{ key: 'a', days: 'weekdays', from: '09:00', to: '17:00' }]
+  assert.equal(windowsChanged([{ ...saved[0]!, to: '18:00' }], saved), 1)
+  assert.equal(windowsChanged(saved, saved), 0)
+})
+
+test('a window added or removed counts once, and removing the first does not count the rest', () => {
+  const saved: Window[] = [
+    { key: 'a', days: '1', from: '09:00', to: '10:00' },
+    { key: 'b', days: '2', from: '09:00', to: '10:00' },
+    { key: 'c', days: '3', from: '09:00', to: '10:00' },
+  ]
+  assert.equal(windowsChanged(saved.slice(1), saved), 1)
+  assert.equal(windowsChanged([...saved, { key: 'd', days: '4', from: '09:00', to: '10:00' }], saved), 1)
+  assert.equal(windowsChanged([], saved), 3)
 })

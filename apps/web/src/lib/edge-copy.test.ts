@@ -44,6 +44,8 @@ test('every failure says the answers survived, so nobody retypes them', () => {
   assert.equal(BOOKING_COPY.failed.includes('Nothing was lost'), true)
   assert.equal(FORM_COPY.offline.includes('still here'), true)
   assert.equal(BOOKING_COPY.offline.includes('still here'), true)
+  assert.equal(BOOKING_COPY.monthOffline.includes('still here'), false)
+  assert.equal(BOOKING_COPY.monthFailed.includes('Nothing was lost'), false)
 })
 
 test('no message shows a status code or blames the visitor', () => {

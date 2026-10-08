@@ -12,7 +12,8 @@ import { NewPageButton } from './new-page.tsx'
 import { MeetingsTabs } from '../tabs.tsx'
 
 /** Every booking page in the account, plus this person's own calendar links.
- *  Somebody else's personal link is not listed, because it is theirs. F2 §6. */
+ *  Somebody else's personal link is listed only to an admin, who can open and
+ *  change it from the editor. F2 §6. */
 const BookingPagesScreen = async ({
   params,
   searchParams,
@@ -35,7 +36,7 @@ const BookingPagesScreen = async ({
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
-        title="Meetings"
+        title="Meeting links"
         lead={
           <>
             {shared.length === 1 ? '1 shared page' : `${shared.length} shared pages`} ·{' '}
@@ -52,7 +53,7 @@ const BookingPagesScreen = async ({
             ) : null}
           </>
         }
-        why="A shared round robin spreads inbound meetings across a team; a personal link is one person's own, for an email signature. A host with no working calendar is treated as unavailable rather than free, which is why the count above is worth chasing. There is no delete: a page that has taken meetings is what those meetings point at, so turning it off is how it ends. It stops offering times and the link stops working, and every meeting already booked on it keeps its history."
+        why="A shared round robin spreads inbound meetings across a team; a personal link is one person's own, for an email signature. A host with no working calendar is treated as unavailable rather than free, which is why the count above is worth chasing. A page with no meetings ever booked on it can be deleted. One that has taken meetings cannot: those meetings point at it, so it is turned off instead. It stops offering times and the link stops working, and every meeting already booked on it keeps its history."
         action={
           sessionIsReadOnly(session) ? null : (
             <NewPageButton

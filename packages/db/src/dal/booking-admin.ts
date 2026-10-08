@@ -3,6 +3,7 @@ import { decryptToken, encryptToken } from '../internal/crypto.ts'
 import { assertCanView, assertCanWrite, ForbiddenError, isAdmin, type AccountContext } from './context.ts'
 import { assertSchemaIsUsable, webAddress } from './form-schema.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
+import { mappedKeyIsWritable } from './people.ts'
 import {
   readQuestions,
   REMINDER_UNITS,
@@ -44,6 +45,9 @@ const assertOwnScheduleOrAdmin = (ctx: AccountContext, userId: string): void => 
 
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
+/** Mirrored in apps/web/src/lib/booking-tokens.ts for the editor's add button. */
+const MAX_REMINDERS = 20
+
 // ---------------------------------------------------------------------------
 // Pages
 // ---------------------------------------------------------------------------
@@ -58,6 +62,8 @@ export type BookingPageSummary = {
   durationMinutes: number
   location: BookingLocation
   isActive: boolean
+  /** Any booking row, in any state. A page with one cannot be deleted. */
+  hasBookings: boolean
   hostCount: number
   upcoming: number
   /** Every visit the page has had, and every meeting it took that was not later
@@ -91,6 +97,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       upcoming: string
       views: string
       booked: string
+      has_bookings: boolean
       unhealthy: string
       hosts_with_hours: string
     }>(sql`
@@ -102,6 +109,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
              -- host and booking rows the other counts are taken over.
              (select coalesce(sum(v.views), 0) from booking_page_view v where v.booking_page_id = p.id) as views,
              count(distinct b.id) filter (where b.state <> 'rescheduled') as booked,
+             count(distinct b.id) > 0 as has_bookings,
              count(distinct h.user_id) filter (
                where h.is_active and (g.state is null or g.state <> 'connected')
              ) as unhealthy,
@@ -117,7 +125,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
         left join calendar_grant g on g.user_id = h.user_id
         left join availability a on a.user_id = h.user_id and a.account_id = p.account_id
         left join booking b on b.booking_page_id = p.id
-       where p.kind <> 'one_on_one' or p.owner_id = ${ctx.actorId}
+       where p.kind <> 'one_on_one' or p.owner_id = ${ctx.actorId} or ${isAdmin(ctx)}
        group by p.id, o.name
        order by p.kind, p.name`)
 
@@ -135,6 +143,7 @@ export const listBookingPages = async (ctx: AccountContext): Promise<BookingPage
       upcoming: Number(row.upcoming),
       views: Number(row.views),
       booked: Number(row.booked),
+      hasBookings: row.has_bookings,
       unhealthyHosts: Number(row.unhealthy),
       hostsWithHours: Number(row.hosts_with_hours),
     }))
@@ -215,6 +224,12 @@ export const saveBookingPage = async (
   // the address are asked regardless.
   const questions = readQuestions(input.questions)
   if (questions.length > 0) assertSchemaIsUsable(questions, true)
+  for (const question of questions) {
+    const key = question.mapsTo?.split('.')[1]
+    if (key && !mappedKeyIsWritable(key)) {
+      throw new Error(`"${question.label}" cannot write to ${key}. The system or the contact's own status owns that field.`)
+    }
+  }
 
   const ownerId =
     input.kind === 'one_on_one'
@@ -392,6 +407,9 @@ const replaceReminders = async (
   pageId: string,
   reminders: { amount: number; unit: ReminderUnit }[],
 ): Promise<void> => {
+  if (reminders.length > MAX_REMINDERS) {
+    throw new Error(`A booking page can have at most ${MAX_REMINDERS} reminders.`)
+  }
   const wanted = new Map<string, { amount: number; unit: ReminderUnit }>()
   for (const reminder of reminders) {
     const amount = Math.trunc(reminder.amount)
@@ -400,6 +418,9 @@ const replaceReminders = async (
     }
     if (!REMINDER_UNITS.includes(reminder.unit)) {
       throw new Error(`"${reminder.unit}" is not a reminder unit.`)
+    }
+    if (wanted.has(`${reminder.unit}:${amount}`)) {
+      throw new Error('Two reminders at the same moment would send the same mail twice. Change one of them.')
     }
     wanted.set(`${reminder.unit}:${amount}`, { amount, unit: reminder.unit })
   }
@@ -422,6 +443,36 @@ const replaceReminders = async (
       values (${ctx.accountId}, ${pageId}, ${row.amount}, ${row.unit})
       on conflict (account_id, booking_page_id, unit, amount) do nothing`)
   }
+}
+
+/** A page with no booking rows in any state can be deleted. One with any is turned
+ *  off instead: its meetings point at it, and their history stays readable. */
+export const deleteBookingPage = async (ctx: AccountContext, pageId: string): Promise<void> => {
+  assertCanWrite(ctx, 'booking_page')
+  await mutate(ctx, 'booking_page', async (tx) => {
+    const before = await readPageForAudit(tx, pageId)
+    if (!before) throw new Error('That booking page no longer exists.')
+    assertOwnPageOrAdmin(ctx, before.owner_id)
+
+    const [booked] = await tx.execute<{ found: boolean }>(
+      sql`select exists (select 1 from booking where booking_page_id = ${pageId}) as found`,
+    )
+    if (booked?.found) {
+      throw new Error(`"${before.name}" has meetings booked on it, so it can only be turned off.`)
+    }
+
+    await tx.execute(sql`delete from booking_page where id = ${pageId}`)
+    return {
+      result: undefined,
+      audit: {
+        entity: 'booking_page',
+        entityId: pageId,
+        action: 'delete',
+        before: { slug: before.slug, name: before.name, kind: before.kind },
+        after: null,
+      },
+    }
+  })
 }
 
 export type PageHostRow = {

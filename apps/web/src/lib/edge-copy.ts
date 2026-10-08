@@ -50,6 +50,10 @@ export const BOOKING_COPY = {
   invalid: 'Check the highlighted answers.',
   failed: 'That could not be booked. Nothing was lost, so try again.',
   offline: 'You appear to be offline. Your answers are still here; book again once you are back.',
+  /** A month of times that did not load. No answers exist yet, so none are mentioned. */
+  monthFailed: 'The times could not be loaded.',
+  monthOffline: 'You appear to be offline. The times load again once you are back.',
+  retry: 'Try again',
   holdExpired: 'The hold on that time has run out. It may still be free; choose it again to check.',
   addToCalendar: 'Add to your calendar',
   reschedule: 'Move this meeting',

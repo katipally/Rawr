@@ -1,5 +1,6 @@
 import {
   clearOverride,
+  deleteBookingPage,
   disconnectGrant,
   FORM_FIELD_TYPES,
   listBookingPages,
@@ -117,6 +118,10 @@ export const bookingRouter = router({
     .mutation(({ ctx, input }) =>
       call(() => setPageActive(ctx.account, input.id, input.isActive)),
     ),
+
+  deletePage: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => deleteBookingPage(ctx.account, input.id))),
 
   booked: protectedProcedure
     .input(

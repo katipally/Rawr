@@ -117,7 +117,7 @@ const checkField = (field: FormField, value: unknown): string | null => {
 
   switch (field.type) {
     case 'email':
-      if (!normaliseEmail(text)) return `${field.label} is not an email address.`
+      if (!normaliseEmail(text)) return `Enter a valid email address for ${field.label}.`
       break
     case 'number': {
       const n = Number(text)

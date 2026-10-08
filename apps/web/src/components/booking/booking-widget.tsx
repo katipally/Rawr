@@ -20,6 +20,7 @@ import {
   knownTimezones,
   monthCells,
   monthKeyOf,
+  monthSteps,
   offsetLabel,
   shiftMonth,
   weekInfo,
@@ -43,6 +44,7 @@ export type BookingWidgetPage = {
   accountName: string
   hostNames: string[]
   durationMinutes: number
+  maxHorizonDays: number
   location: string
   fields: FormField[]
   confirmationCopy: string | null
@@ -59,11 +61,13 @@ export type BookingMonth = {
 
 type Step = 'day' | 'time' | 'form'
 
-type Booked = {
+export type Booked = {
   startsAt: string
   endsAt: string
   hostName: string
   conferenceUrl: string | null
+  /** The place as the mail says it: the join link, the phone number or the custom text. */
+  where: string
   calendarUrl: string
   rescheduleUrl: string
   cancelUrl: string
@@ -76,17 +80,25 @@ const HOLD_MS = 5 * 60 * 1000
 export const BookingWidget = ({
   page,
   initial,
+  locale,
+  initialBooked = null,
   baseUrl = '',
 }: {
   page: BookingWidgetPage
   initial: BookingMonth
+  /** The visitor's language as the server read it, so the first paint is already theirs. */
+  locale: string
+  /** A meeting already booked, shown straight away: the confirmation link opens here. */
+  initialBooked?: Booked | null
   baseUrl?: string
 }) => {
   const endpoint = `${baseUrl}/b/${encodeURIComponent(page.account)}/${encodeURIComponent(page.slug)}`
 
-  const [locale, setLocale] = useState('en-US')
   const [timezone, setTimezone] = useState(initial.timezone)
-  const [hour12, setHour12] = useState(true)
+  const [hour12, setHour12] = useState(
+    () => new Intl.DateTimeFormat(locale, { hour: 'numeric' }).resolvedOptions().hour12 === true,
+  )
+  const [ready, setReady] = useState(false)
   const [monthKey, setMonthKey] = useState(initial.month)
   const [month, setMonth] = useState<BookingMonth>(initial)
   const [loading, setLoading] = useState(false)
@@ -99,7 +111,7 @@ export const BookingWidget = ({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const [booked, setBooked] = useState<Booked | null>(null)
+  const [booked, setBooked] = useState<Booked | null>(initialBooked)
   const [tzOpen, setTzOpen] = useState(false)
 
   const [announcement, setAnnouncement] = useState('')
@@ -107,16 +119,14 @@ export const BookingWidget = ({
 
   const now = useRef(new Date()).current
 
-  // The visitor's own week and clock, which the server cannot know. Reading them
-  // after mount rather than during render keeps the server and client markup
-  // identical, so React never has to throw the first paint away.
+  // The visitor's own zone, which the server cannot know. Read after mount rather
+  // than during render so the server and client markup match and the first paint
+  // is never thrown away. Until `ready`, nothing says a month is empty: it is only
+  // empty in the server's zone.
   useEffect(() => {
-    const tag = navigator.languages?.[0] ?? navigator.language ?? 'en-US'
-    setLocale(tag)
-    // Whichever clock the visitor's own locale uses, not ours.
-    setHour12(new Intl.DateTimeFormat(tag, { hour: 'numeric' }).resolvedOptions().hour12 === true)
     const detected = detectTimezone()
     if (detected !== initial.timezone) setTimezone(detected)
+    setReady(true)
   }, [initial.timezone])
 
   const week = useMemo(() => weekInfo(locale), [locale])
@@ -124,6 +134,7 @@ export const BookingWidget = ({
 
   // ------------------------------------------------------------- reading a month
   const stale = month.month !== monthKey || month.timezone !== timezone
+  const settled = ready && !stale && !loading
   const requestId = useRef(0)
 
   const load = useCallback(
@@ -142,7 +153,7 @@ export const BookingWidget = ({
             month: targetMonth,
             timezone: targetZone,
             slots: [],
-            unavailable: body.error ?? BOOKING_COPY.failed,
+            unavailable: body.error ?? BOOKING_COPY.monthFailed,
             nextAvailable: null,
           })
           return
@@ -160,7 +171,7 @@ export const BookingWidget = ({
           month: targetMonth,
           timezone: targetZone,
           slots: [],
-          unavailable: navigator.onLine ? BOOKING_COPY.failed : BOOKING_COPY.offline,
+          unavailable: navigator.onLine ? BOOKING_COPY.monthFailed : BOOKING_COPY.monthOffline,
           nextAvailable: null,
         })
       } finally {
@@ -195,6 +206,11 @@ export const BookingWidget = ({
   const todayKey = dayKeyIn(now, timezone)
   const cells = useMemo(() => monthCells(monthKey, week.firstDay), [monthKey, week.firstDay])
   const monthIsEmpty = byDay.size === 0
+  const steps = monthSteps(
+    monthKey,
+    todayKey,
+    dayKeyIn(new Date(now.getTime() + page.maxHorizonDays * 86_400_000), timezone),
+  )
 
   const firstOpen = useMemo(() => {
     for (const cell of cells) if (cell && (byDay.get(cell)?.length ?? 0) > 0) return cell
@@ -331,7 +347,6 @@ export const BookingWidget = ({
           const map: Record<string, string> = {}
           for (const problem of result.fields) map[problem.key] = problem.message
           setErrors(map)
-          setNotice(BOOKING_COPY.invalid)
           return
         }
         // A slot that has gone is not a failure the visitor caused, so the list
@@ -407,6 +422,13 @@ export const BookingWidget = ({
               <div className="rawr-b-blank" role="status">
                 <b>No times can be offered right now</b>
                 <p>{month.unavailable}</p>
+                <button
+                  type="button"
+                  className="rawr-b-ghost"
+                  onClick={() => void load(monthKey, timezone)}
+                >
+                  {BOOKING_COPY.retry}
+                </button>
               </div>
             ) : (
               <>
@@ -428,6 +450,7 @@ export const BookingWidget = ({
                   today={todayKey}
                   locale={locale}
                   loading={loading}
+                  steps={steps}
                   onMonth={goMonth}
                   onDay={goDay}
                 />
@@ -438,7 +461,7 @@ export const BookingWidget = ({
                   <Blank
                     monthKey={monthKey}
                     locale={locale}
-                    empty={monthIsEmpty && !month.unavailable}
+                    empty={settled && monthIsEmpty && !month.unavailable}
                     nextAvailable={month.nextAvailable}
                     timezone={timezone}
                     firstOpen={firstOpen}
@@ -647,6 +670,7 @@ const Details = ({
   const start = new Date(slot)
   const end = new Date(start.getTime() + page.durationMinutes * 60_000)
   const urgent = remaining <= 60_000
+  const invalid = Object.keys(errors).length > 0
 
   return (
     <div className="rawr-b-fade" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -678,6 +702,12 @@ const Details = ({
       ) : null}
 
       <form className="rawr-b-form" onSubmit={onSubmit} noValidate>
+        {invalid ? (
+          <p className="rawr-b-note" data-bad role="alert">
+            <Icon name="warn" />
+            {BOOKING_COPY.invalid}
+          </p>
+        ) : null}
         {page.fields.map((field) => (
           <Question
             key={field.key}
@@ -747,7 +777,15 @@ const Done = ({
         </div>
         <div>
           <i>Where</i>
-          <b>{BOOKING_LOCATIONS[page.location] ?? page.location}</b>
+          <b>
+            {BOOKING_LOCATIONS[page.location] ?? page.location}
+            {booked.where ? (
+              <>
+                <br />
+                {booked.where}
+              </>
+            ) : null}
+          </b>
         </div>
       </div>
 

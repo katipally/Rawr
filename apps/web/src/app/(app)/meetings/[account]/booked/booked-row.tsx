@@ -32,9 +32,7 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
   const [busy, setBusy] = useState(false)
 
   const zone = useZone()
-  const start = new Date(booking.startsAt)
   const end = new Date(booking.endsAt)
-  const minutes = Math.round((end.getTime() - start.getTime()) / 60_000)
 
   const [asking, setAsking] = useState<'cancel' | 'reschedule' | null>(null)
   const [reason, setReason] = useState('')
@@ -173,7 +171,7 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
           <Field
             id={`move-${booking.id}`}
             label="New start"
-            hint={`${minutes} minutes. A datetime-local field carries no zone, so this is read in the browser's own clock, not ${zone}. A time the host is not free for is refused.`}
+            hint={`Times are in your browser's time zone, not ${zone}. A time the host is not free for is refused.`}
           >
             <TextInput
               id={`move-${booking.id}`}

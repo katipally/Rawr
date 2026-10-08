@@ -11,6 +11,7 @@ import {
   knownTimezones,
   monthCells,
   monthKeyOf,
+  monthSteps,
   offsetLabel,
   shiftMonth,
   weekInfo,
@@ -33,6 +34,7 @@ export const RescheduleWidget = ({
   token,
   action,
   cancelHref,
+  maxHorizonDays,
 }: {
   slots: string[]
   timezone: string
@@ -40,6 +42,7 @@ export const RescheduleWidget = ({
   token: string
   action: (data: FormData) => void | Promise<void>
   cancelHref: string
+  maxHorizonDays: number
 }) => {
   const [locale, setLocale] = useState('en-US')
   const [hour12, setHour12] = useState(true)
@@ -84,6 +87,11 @@ export const RescheduleWidget = ({
   const cells = useMemo(() => monthCells(monthKey, week.firstDay), [monthKey, week.firstDay])
   const daySlots = day ? (byDay.get(day) ?? []) : []
   const monthIsEmpty = cells.every((cell) => !cell || (byDay.get(cell)?.length ?? 0) === 0)
+  const steps = monthSteps(
+    monthKey,
+    dayKeyIn(now, timezone),
+    dayKeyIn(new Date(now.getTime() + maxHorizonDays * 86_400_000), timezone),
+  )
 
   return (
     <div className="rawr-b-panel" data-step={step}>
@@ -116,6 +124,7 @@ export const RescheduleWidget = ({
             today={dayKeyIn(now, timezone)}
             locale={locale}
             loading={false}
+            steps={steps}
             onMonth={(by) => {
               setMonthKey(shiftMonth(monthKey, by))
               setDay(null)

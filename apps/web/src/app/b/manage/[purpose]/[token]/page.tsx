@@ -30,8 +30,6 @@ export const metadata: Metadata = { title: 'Your meeting', robots: { index: fals
 const isPurpose = (value: string): value is 'cancel' | 'reschedule' =>
   value === 'cancel' || value === 'reschedule'
 
-const HORIZON_DAYS = 21
-
 const ManageBookingPage = async ({
   params,
   searchParams,
@@ -104,6 +102,8 @@ const ManageBookingPage = async ({
           {purpose === 'reschedule' && done ? (
             <>
               {' · '}
+              <a href={`/b/manage/reschedule/${booking.rescheduleToken}`}>Move again</a>
+              {' · '}
               <a href={`/b/manage/cancel/${booking.cancelToken}`}>Cancel this meeting</a>
             </>
           ) : null}
@@ -115,12 +115,14 @@ const ManageBookingPage = async ({
   // Idempotence, visible rather than implied: a second click lands here and says
   // the same thing as the first.
   if (booking.state === 'cancelled') {
+    const reason = booking.cancelReason?.trim()
+    const why = reason ? `: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}` : '.'
     return (
       <Shell>
         {details}
         <div className="rawr-b-note">
-          This meeting is cancelled{booking.cancelReason ? `: ${booking.cancelReason}` : '.'} Nothing
-          further is needed. The calendar invitation has been withdrawn.
+          This meeting is cancelled{why} Nothing further is needed. The calendar invitation has been
+          withdrawn.
         </div>
       </Shell>
     )
@@ -153,7 +155,7 @@ const ManageBookingPage = async ({
               <label htmlFor="reason">Anything you want to pass on? (optional)</label>
               <input id="reason" name="reason" type="text" maxLength={500} />
             </div>
-            <PendingButton className="rawr-b-cta" pendingLabel={BOOKING_COPY.cancelling}>
+            <PendingButton className="rawr-b-ghost" pendingLabel={BOOKING_COPY.cancelling}>
               Cancel this meeting
             </PendingButton>
             <p className="rawr-b-hint">
@@ -195,7 +197,7 @@ const ManageBookingPage = async ({
   const now = new Date()
   const offer = await loadOffer(page, {
     from: now,
-    to: new Date(now.getTime() + HORIZON_DAYS * 86_400_000),
+    to: new Date(now.getTime() + page.maxHorizonDays * 86_400_000),
     now,
   })
 
@@ -215,7 +217,7 @@ const ManageBookingPage = async ({
         </div>
       ) : offer.slots.length === 0 ? (
         <div className="rawr-b-note">
-          Nothing is open in the next {HORIZON_DAYS} days. Your meeting is unchanged; reply to{' '}
+          Nothing is open in the next {page.maxHorizonDays} days. Your meeting is unchanged; reply to{' '}
           {booking.hostName} to find another time.
         </div>
       ) : (
@@ -223,6 +225,7 @@ const ManageBookingPage = async ({
           slots={offer.slots.map((slot) => slot.startsAt.toISOString())}
           timezone={timezone}
           durationMinutes={page.durationMinutes}
+          maxHorizonDays={page.maxHorizonDays}
           token={token}
           action={rescheduleBookingAction}
           cancelHref={`/b/manage/cancel/${booking.cancelToken}`}

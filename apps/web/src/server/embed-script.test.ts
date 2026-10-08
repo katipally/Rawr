@@ -30,7 +30,7 @@ test('the checker the tests ran is the one that ships', () => {
   assert.equal(script.includes('function clientFieldError'), true)
   // Its own rules, not a paraphrase: if these vanish the browser has stopped
   // agreeing with the server.
-  assert.equal(script.includes('is not an email address.'), true)
+  assert.equal(script.includes('Enter a valid email address for '), true)
   assert.equal(script.includes('is not in the expected format.'), true)
 })
 

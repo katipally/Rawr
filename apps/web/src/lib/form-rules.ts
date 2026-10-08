@@ -67,7 +67,7 @@ export function clientFieldError(field: ClientField, value: unknown): string | n
 
   if (field.type === 'email') {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim().toLowerCase())) {
-      return field.label + ' is not an email address.'
+      return 'Enter a valid email address for ' + field.label + '.'
     }
   } else if (field.type === 'number') {
     var n = Number(text)

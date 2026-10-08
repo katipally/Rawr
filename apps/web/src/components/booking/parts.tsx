@@ -117,6 +117,7 @@ export const Calendar = ({
   today,
   locale,
   loading,
+  steps,
   onMonth,
   onDay,
 }: {
@@ -128,11 +129,30 @@ export const Calendar = ({
   today: string
   locale: string
   loading: boolean
+  /** Which way the month can move without leaving the bookable range. */
+  steps: { earlier: boolean; later: boolean }
   onMonth: (by: number) => void
   onDay: (day: string) => void
 }) => {
   const grid = useRef<HTMLDivElement>(null)
   const label = formatMonth(monthKey, locale)
+  /** The day of month to land on once a month change from the keyboard has rendered. */
+  const landOn = useRef<string | null>(null)
+
+  useEffect(() => {
+    const dayOfMonth = landOn.current
+    if (!dayOfMonth) return
+    landOn.current = null
+    const days = cells.filter((cell): cell is string => cell !== null)
+    const target = days.find((day) => day.endsWith(`-${dayOfMonth}`)) ?? days.at(-1)
+    if (target) grid.current?.querySelector<HTMLElement>(`[data-day="${target}"]`)?.focus()
+  }, [cells])
+
+  const step = (by: number, dayOfMonth?: string) => {
+    if (!(by < 0 ? steps.earlier : steps.later)) return
+    landOn.current = dayOfMonth ?? null
+    onMonth(by)
+  }
 
   /** Which cell tab lands on. One tab stop for the whole month, then arrows: a
    *  grid where every day is a tab stop takes thirty presses to leave. */
@@ -157,8 +177,8 @@ export const Calendar = ({
               ? -7
               : null
     if (by === null) {
-      if (event.key === 'PageDown') onMonth(1)
-      else if (event.key === 'PageUp') onMonth(-1)
+      if (event.key === 'PageDown') step(1, from.slice(8))
+      else if (event.key === 'PageUp') step(-1, from.slice(8))
       else return
       event.preventDefault()
       return
@@ -166,7 +186,7 @@ export const Calendar = ({
     event.preventDefault()
     const target = addDays(from, by)
     if (!target.startsWith(monthKey)) {
-      onMonth(by > 0 ? 1 : -1)
+      step(by > 0 ? 1 : -1, target.slice(8))
       return
     }
     grid.current?.querySelector<HTMLElement>(`[data-day="${target}"]`)?.focus()
@@ -183,7 +203,8 @@ export const Calendar = ({
             type="button"
             className="rawr-b-navb"
             aria-label="Earlier month"
-            onClick={() => onMonth(-1)}
+            disabled={!steps.earlier}
+            onClick={() => step(-1)}
           >
             <Icon name="left" />
           </button>
@@ -191,7 +212,8 @@ export const Calendar = ({
             type="button"
             className="rawr-b-navb"
             aria-label="Later month"
-            onClick={() => onMonth(1)}
+            disabled={!steps.later}
+            onClick={() => step(1)}
           >
             <Icon name="right" />
           </button>

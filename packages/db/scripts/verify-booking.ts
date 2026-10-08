@@ -20,6 +20,7 @@ import {
   HOLD_MINUTES,
   dayKey,
   isKnownTimezone,
+  deleteBookingPage,
   listBookingPages,
   markGrantOk,
   recordGrantFailure,
@@ -319,6 +320,25 @@ try {
     overrides: new Map(),
     busy: [] as Interval[],
   }
+
+  // A meeting from 03:00 to 03:30 UTC with 15 minutes wanted after it: 03:30 is
+  // taken, 03:45 is the first offer. Read in UTC so the clock is the one written here.
+  const everyDay = Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map((d) => [d, [['00:00', '24:00'] as [string, string]]]))
+  const utcDay = {
+    ...laHost,
+    timezone: 'UTC',
+    weekly: everyDay,
+    busy: [{ start: new Date('2026-09-07T03:00:00Z'), end: new Date('2026-09-07T03:30:00Z') }],
+    bufferBeforeMinutes: 0,
+    bufferAfterMinutes: 15,
+    granularityMinutes: 15,
+  }
+  const afterBuffer = computeSlots(utcDay).map((at) => at.toISOString().slice(11, 16))
+  check(
+    'the 15 minutes after a meeting are held back, the first time past them is offered',
+    !afterBuffer.includes('03:30') && afterBuffer.includes('03:45'),
+    afterBuffer.slice(0, 8).join(', '),
+  )
 
   const fullDay = computeSlots(laHost)
   check(
@@ -1728,15 +1748,37 @@ try {
       { amount: 1, unit: 'hour' },
       { amount: 1, unit: 'week' },
       { amount: 2, unit: 'day' },
-      // The same reminder twice is one reminder, or the attendee is mailed twice.
-      { amount: 1, unit: 'hour' },
     ],
   })
   const reminded = await readBookingPage(datasaur, remindedId)
   check(
-    'a page keeps several reminders and drops a duplicate pair',
+    'a page keeps several reminders',
     reminded?.reminders.length === 3,
     `${reminded?.reminders.length ?? 0} reminders`,
+  )
+  // The same reminder twice would mail the attendee twice, so the save is refused
+  // rather than quietly thinned, and nothing is written.
+  const duplicate = await refusalOf(saveBookingPage(datasaur, {
+    slug: 'reminded-duplicate',
+    name: 'Reminded',
+    ...PAGE_SHAPE,
+    kind: 'round_robin',
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+    hosts: [],
+    reminders: [
+      { amount: 1, unit: 'hour' },
+      { amount: 1, unit: 'hour' },
+    ],
+  }))
+  check(
+    'two identical reminders are refused, and nothing is saved',
+    duplicate.startsWith('Two reminders at the same moment'),
+    duplicate,
   )
   check(
     'and reads them back furthest from the meeting first',
@@ -1842,6 +1884,106 @@ try {
     `${shared?.kind ?? 'gone'}`,
   )
 
+  // -----------------------------------------------------------------------
+  section('meeting pages: who sees a personal link, and who may delete a page')
+
+  const [personalOwner, viewerId] = (
+    await scoped<{ id: string }>(
+      datasaur,
+      sql`select m.user_id as id from membership m
+           where m.deactivated_at is null and not m.is_super_admin
+           order by m.created_at limit 2`,
+    )
+  ).map((row) => row.id)
+  const personalViewer: AccountContext = { ...datasaur, actorId: viewerId ?? '', viewHubs: ['sales'], editHubs: [] }
+  // A run that stopped early leaves this page behind; it is ours, so it goes first.
+  for (const row of (await listBookingPages(datasaur)).filter((page) => page.slug === 'owned-personal-link')) {
+    await deleteBookingPage(datasaur, row.id)
+  }
+  const personalLink = await saveBookingPage(datasaur, {
+    slug: 'owned-personal-link',
+    name: 'Owned personal link',
+    ...PAGE_SHAPE,
+    kind: 'one_on_one',
+    ownerId: personalOwner,
+    location: 'zoom',
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+    isActive: false,
+    hosts: [],
+  })
+  check(
+    'an admin sees a personal link that belongs to somebody else',
+    (await listBookingPages(datasaur)).some((row) => row.id === personalLink),
+  )
+  check(
+    'somebody who is not the owner or an admin does not',
+    !(await listBookingPages(personalViewer)).some((row) => row.id === personalLink),
+  )
+  const viewerDelete = await refusalOf(deleteBookingPage(personalViewer, personalLink))
+  check('and cannot delete it', viewerDelete !== 'accepted', viewerDelete)
+
+  const meetingPage = (await listBookingPages(datasaur)).find((row) => row.hasBookings)
+  check('the sandbox has a page with meetings on it to test the refusal against', !!meetingPage, meetingPage?.slug ?? 'none')
+  if (meetingPage) {
+    const refusedDelete = await refusalOf(deleteBookingPage(datasaur, meetingPage.id))
+    check(
+      'a page with meetings on it is refused, and stays',
+      refusedDelete.includes('has meetings booked on it') &&
+        (await listBookingPages(datasaur)).some((row) => row.id === meetingPage.id),
+      refusedDelete,
+    )
+  }
+
+  await deleteBookingPage(datasaur, personalLink)
+  check(
+    'a page with no meetings is deleted',
+    !(await listBookingPages(datasaur)).some((row) => row.id === personalLink),
+  )
+
+  const overTwenty = Array.from({ length: 21 }, (_, index) => ({ amount: index + 1, unit: 'minute' as const }))
+  const overLimit = await refusalOf(
+    saveBookingPage(datasaur, {
+      slug: 'too-many-reminders',
+      name: 'Too many reminders',
+      ...PAGE_SHAPE,
+      kind: 'round_robin',
+      location: 'zoom',
+      titleTpl: 'Meeting',
+      descriptionTpl: '',
+      companyFallback: 'a new team',
+      questions: [],
+      isActive: false,
+      hosts: [],
+      reminders: overTwenty,
+    }),
+  )
+  check('a 21st reminder is refused, and nothing is saved', overLimit.startsWith('A booking page can have at most 20'), overLimit)
+
+  section('booking questions cannot write system or consent fields')
+  for (const target of ['contact.marketing_status', 'contact.created_at']) {
+    const refusal = await refusalOf(saveBookingPage(datasaur, {
+      slug: 'writes-locked-field',
+      name: 'Writes locked field',
+      ...PAGE_SHAPE,
+      kind: 'round_robin',
+      location: 'zoom',
+      titleTpl: 'Meeting',
+      descriptionTpl: '',
+      companyFallback: 'a new team',
+      questions: [{ key: 'answer', type: 'text', label: 'Answer', required: false, mapsTo: target }],
+      isActive: false,
+      hosts: [],
+    }))
+    check(
+      `a question that files onto ${target} is refused with the plain sentence`,
+      refusal === `"Answer" cannot write to ${target.split('.')[1]}. The system or the contact's own status owns that field.`,
+      refusal,
+    )
+  }
+
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.stack : cause)
@@ -1865,6 +2007,14 @@ async function bySlug(ctx: AccountContext, slug: string): Promise<BookingPageCon
   const page = await readBookingPage(ctx, id)
   if (!page) throw new Error(`booking page ${slug} could not be read.`)
   return page
+}
+
+/** What a save or delete answers: "accepted", or the reason it was refused. */
+async function refusalOf(run: Promise<unknown>): Promise<string> {
+  return run.then(
+    () => 'accepted',
+    (cause: unknown) => (cause instanceof Error ? cause.message : String(cause)),
+  )
 }
 
 async function refusesAsync(fn: () => Promise<unknown>): Promise<boolean> {

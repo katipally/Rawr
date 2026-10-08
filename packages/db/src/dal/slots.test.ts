@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addDays, dayKey, scheduleProblem, slotInWindow, windowProblem } from './slots.ts'
+import { addDays, computeSlots, dayKey, scheduleProblem, slotInWindow, windowProblem } from './slots.ts'
 
 const now = new Date('2026-10-07T12:00:00Z')
 const page = { minNoticeMinutes: 240, maxHorizonDays: 30 }
@@ -122,4 +122,35 @@ test('a day counted in milliseconds from now lands on the wrong day across DST, 
   assert.equal(dayKey(now, zone), '2026-03-07')
   assert.equal(dayKey(new Date(now.getTime() + 86_400_000), zone), '2026-03-09')
   assert.equal(addDays(dayKey(now, zone), 1), '2026-03-08')
+})
+
+test('the buffer after a meeting pushes the next offer back, and the buffer before pulls the last one in', () => {
+  const day = new Date('2026-10-14T00:00:00Z')
+  const meeting = { start: new Date('2026-10-14T03:00:00Z'), end: new Date('2026-10-14T03:30:00Z') }
+  const offered = (bufferBeforeMinutes: number, bufferAfterMinutes: number) =>
+    computeSlots({
+      from: day,
+      to: new Date('2026-10-15T00:00:00Z'),
+      now,
+      timezone: 'UTC',
+      weekly: Object.fromEntries(['1', '2', '3', '4', '5', '6', '7'].map((d) => [d, [['00:00', '24:00']]])),
+      overrides: new Map(),
+      busy: [meeting],
+      durationMinutes: 30,
+      bufferBeforeMinutes,
+      bufferAfterMinutes,
+      minNoticeMinutes: 0,
+      maxHorizonDays: 30,
+      granularityMinutes: 15,
+    }).map((at) => at.toISOString().slice(11, 16))
+
+  const afterOnly = offered(0, 15)
+  assert.equal(afterOnly.includes('03:30'), false, 'the 15 minutes after a 03:00 to 03:30 meeting are not free')
+  assert.equal(afterOnly.includes('03:45'), true)
+  assert.equal(afterOnly.includes('02:30'), true)
+
+  const beforeOnly = offered(15, 0)
+  assert.equal(beforeOnly.includes('02:30'), false, 'the 15 minutes before 03:00 are not free')
+  assert.equal(beforeOnly.includes('02:15'), true)
+  assert.equal(beforeOnly.includes('03:30'), true)
 })

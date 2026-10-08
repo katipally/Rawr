@@ -264,14 +264,14 @@ export const computeSlots = (input: SlotInput): Date[] => {
   const latest = Math.min(input.to.getTime(), horizonEnd)
   if (earliest >= latest) return []
 
-  /** A new slot needs `bufferBefore` clear ahead of it and `bufferAfter` clear
-   *  behind it, so an existing commitment [s, e] rules out any slot overlapping
-   *  [s − bufferAfter, e + bufferBefore]. Widening the commitment once is the same
+  /** A commitment [s, e] needs `bufferBefore` clear ahead of it and `bufferAfter`
+   *  clear behind it, so it rules out any slot overlapping
+   *  [s − bufferBefore, e + bufferAfter]. Widening the commitment once is the same
    *  test as narrowing every candidate, for a fraction of the work. */
   const blocked = mergeIntervals(
     input.busy.map((b) => ({
-      start: new Date(b.start.getTime() - input.bufferAfterMinutes * MINUTE),
-      end: new Date(b.end.getTime() + input.bufferBeforeMinutes * MINUTE),
+      start: new Date(b.start.getTime() - input.bufferBeforeMinutes * MINUTE),
+      end: new Date(b.end.getTime() + input.bufferAfterMinutes * MINUTE),
     })),
   )
 

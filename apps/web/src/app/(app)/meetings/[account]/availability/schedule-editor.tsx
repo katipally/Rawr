@@ -9,10 +9,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { SaveBar } from '~/components/save-bar.tsx'
 import { todayIn } from '~/lib/format.ts'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat, useZone } from '~/components/zone.tsx'
 import { bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { DAY_GROUPS, daysChanged, toWeekly, toWindows, type DayGroup, type Ranges, type Window } from './windows.ts'
+import { LeaveGuard } from '~/components/leave-guard.tsx'
+import { DAY_GROUPS, toWeekly, toWindows, windowsChanged, type DayGroup, type Ranges, type Window } from './windows.ts'
 
 /** Weekly hours as HubSpot's availability window rows, plus one-off overrides.
  *
@@ -24,6 +25,15 @@ import { DAY_GROUPS, daysChanged, toWeekly, toWindows, type DayGroup, type Range
 const FORM_ID = 'weekly-hours'
 
 const newKey = () => crypto.randomUUID()
+
+/** A clock time in the schedule's own zone, written the way the account reads
+ *  clocks. The rows are wall-clock rules, so this reads UTC rather than the viewer's zone. */
+const clock = (hhmm: string, locale: string): string => {
+  const [hours = 0, minutes = 0] = hhmm.split(':').map(Number)
+  return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
+    Date.UTC(2000, 0, 1, hours, minutes),
+  )
+}
 
 /** Node and the browser ship different ICU data, so this list differs between the
  *  two sides of a render. Read on the client only, after mount. */
@@ -53,19 +63,20 @@ export const ScheduleEditor = ({
 }) => {
   const show = useToast()
   const router = useRouter()
+  const fmt = useFormat()
   const zone = useZone()
-  /** The last hours the server confirmed, read back through the rows so a map
-   *  stored in another order does not count as a change. */
+  /** The last hours the server confirmed. Windows keep their keys across edits, so
+   *  a change is counted per window rather than per day. */
   const [saved, setSaved] = useState(() => ({
     timezone: schedule.timezone,
-    weekly: toWeekly(toWindows(schedule.weekly as Ranges, newKey)),
+    rows: toWindows(schedule.weekly as Ranges, newKey),
   }))
   const [timezone, setTimezone] = useState(saved.timezone)
-  const [rows, setRows] = useState<Window[]>(() => toWindows(saved.weekly, newKey))
+  const [rows, setRows] = useState<Window[]>(saved.rows)
   const [saving, setSaving] = useState(false)
   const weekly = useMemo(() => toWeekly(rows), [rows])
   const problem = useMemo(() => scheduleProblem(weekly), [weekly])
-  const changes = Number(timezone !== saved.timezone) + daysChanged(weekly, saved.weekly)
+  const changes = Number(timezone !== saved.timezone) + windowsChanged(rows, saved.rows)
 
   const [overrideDay, setOverrideDay] = useState(() => todayIn(zone))
   const [overrideKind, setOverrideKind] = useState<'off' | 'hours'>('off')
@@ -109,7 +120,7 @@ export const ScheduleEditor = ({
         weekly,
       })
       show('success', 'Saved. New times are offered from the next page load.')
-      setSaved({ timezone, weekly })
+      setSaved({ timezone, rows })
       router.refresh()
     } catch (cause) {
       show('error', errorMessage(cause))
@@ -157,7 +168,7 @@ export const ScheduleEditor = ({
       >
         <Field
           id="schedule-timezone"
-          label="Your time zone"
+          label="Time zone"
           required
           hint="Hours are kept in this zone, so nine in the morning stays nine when the clocks change."
         >
@@ -247,7 +258,7 @@ export const ScheduleEditor = ({
         </div>
         <SaveBar form={FORM_ID} changes={editable ? changes : 0} busy={saving} onCancel={() => {
           setTimezone(saved.timezone)
-          setRows(toWindows(saved.weekly, newKey))
+          setRows(saved.rows)
         }} />
       </form>
 
@@ -264,11 +275,11 @@ export const ScheduleEditor = ({
           <ul className="mb-3 flex flex-col gap-1 text-sm">
             {schedule.overrides.map((override) => (
               <li key={override.day} className="flex flex-wrap items-center gap-2">
-                <span className="w-28 font-medium">{override.day}</span>
+                <span className="w-28 font-medium">{fmt.date(override.day)}</span>
                 <span className="text-secondary">
                   {override.isUnavailable
                     ? 'Unavailable all day'
-                    : override.blocks.map(([from, to]) => `${from}–${to}`).join(', ')}
+                    : override.blocks.map(([from, to]) => `${clock(from, fmt.locale)} to ${clock(to, fmt.locale)}`).join(', ')}
                   {override.note ? ` · ${override.note}` : ''}
                 </span>
                 <IconButton
@@ -371,6 +382,8 @@ export const ScheduleEditor = ({
           </div>
         ) : null}
       </section>
+
+      <LeaveGuard dirty={changes > 0} />
 
       {hostedPages.length > 0 ? (
         <section className="rounded-panel border border-line bg-surface p-3 sm:p-4">

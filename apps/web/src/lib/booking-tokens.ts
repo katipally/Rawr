@@ -12,6 +12,9 @@ import type { ReminderUnit } from '@rawr/db'
  *  annotation is what makes a unit renamed there fail to compile here. */
 export const REMINDER_UNITS: readonly ReminderUnit[] = ['week', 'day', 'hour', 'minute']
 
+/** The data access layer refuses more than this many reminders on one page. */
+export const MAX_REMINDERS = 20
+
 export const BOOKING_MAIL_TOKENS = [
   'contact.firstname',
   'contact.lastname',

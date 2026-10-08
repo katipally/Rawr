@@ -5,6 +5,7 @@ import {
   dayKeyIn,
   monthCells,
   monthKeyOf,
+  monthSteps,
   offsetLabel,
   shiftMonth,
   weekInfo,
@@ -69,4 +70,11 @@ test('the offset is the one in force on the day, not a fixed number', () => {
   assert.equal(offsetLabel('Europe/London', new Date('2026-09-06T12:00:00Z')), 'GMT+1')
   // Runtimes disagree on whether zero is "GMT" or "GMT+0"; both say the same thing.
   assert.match(offsetLabel('Europe/London', new Date('2027-01-06T12:00:00Z')), /^GMT(\+0)?$/)
+})
+
+test('the month can step back only past the visitor\'s current month, and forward only inside the horizon', () => {
+  assert.deepEqual(monthSteps('2026-10', '2026-10-08', '2026-12-01'), { earlier: false, later: true })
+  assert.deepEqual(monthSteps('2026-11', '2026-10-08', '2026-11-30'), { earlier: true, later: false })
+  assert.deepEqual(monthSteps('2026-12', '2026-10-31', '2027-01-31'), { earlier: true, later: true })
+  assert.deepEqual(monthSteps('2027-01', '2026-10-08', '2026-12-31'), { earlier: true, later: false })
 })

@@ -74,6 +74,16 @@ export const BookedList = ({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // A refresh after a move or a cancel delivers new server rows. Load-more rows
+  // from before it are dropped, which is what the server now says is true.
+  const [fromServer, setFromServer] = useState(initialRows)
+  if (fromServer !== initialRows) {
+    setFromServer(initialRows)
+    setRows(initialRows)
+    setCursor(initialCursor)
+    setLinks(contactHrefs)
+  }
+
   const go = (change: Partial<Query>) => {
     const next = { ...query, ...change }
     router.push(

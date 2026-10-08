@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Button, DiscardConfirm, DropdownMenu, Field, Modal, Select, Skeleton, TextArea, TextInput, cn, useMounted, useToast } from '@rawr/ui'
+import { LeaveGuard } from '~/components/leave-guard.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { ChoicesInput } from '~/components/choices-input.tsx'
 import { darkPill, lightPill } from '~/components/editor-bar.ts'
@@ -197,12 +198,6 @@ export const FormBuilder = ({
    *  function the data access layer runs, so the two can never drift. */
   const blockers = formBlockers({ name, slug, fields, settings })
 
-  useEffect(() => {
-    if (!dirty) return
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
-    window.addEventListener('beforeunload', warn)
-    return () => window.removeEventListener('beforeunload', warn)
-  }, [dirty])
 
   const patch = (index: number, change: Partial<FormField>) =>
     setFields((all) => all.map((field, i) => (i === index ? { ...field, ...change } : field)))
@@ -909,6 +904,7 @@ export const FormBuilder = ({
         </main>
       </div>
       {leaving ? <DiscardConfirm onKeep={() => setLeaving(false)} onDiscard={leave} /> : null}
+      <LeaveGuard dirty={dirty} />
     </div>,
     document.body,
   )
