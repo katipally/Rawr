@@ -4,10 +4,11 @@ import { Alert, Badge, Button, Checkbox, ConfirmDialog, DataTable, Field, Select
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
-import { RowActions, rowPill } from '~/components/row-actions.tsx'
+import { rowPill } from '~/components/row-actions.tsx'
 import { plainError } from '~/lib/provider-errors.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { readNotice, sendingProblems } from './mailbox-rules.ts'
 
 export type MailboxSummary = {
   id: string
@@ -111,13 +112,7 @@ const SendingLimits = ({
 
   const capNumber = Number(cap)
   const gapNumber = Number(gap)
-  const valid =
-    Number.isInteger(capNumber) &&
-    capNumber >= 1 &&
-    capNumber <= 2000 &&
-    Number.isInteger(gapNumber) &&
-    gapNumber >= 0 &&
-    (hours === null || (hours.days.length > 0 && hours.start < hours.end))
+  const problems = sendingProblems({ cap: capNumber, gap: gapNumber, hours })
 
   return (
     <details className="w-full max-w-md">
@@ -130,7 +125,7 @@ const SendingLimits = ({
         }}
       >
         <div className="flex flex-wrap gap-3">
-          <Field id={`cap-${row.id}`} label="Most a day" hint="Sequence sends only. A mail written by hand never spends it.">
+          <Field id={`cap-${row.id}`} label="Most a day" hint="1 to 2000. Sequence sends only. A mail written by hand never spends it.">
             <TextInput
               id={`cap-${row.id}`}
               type="number"
@@ -141,7 +136,8 @@ const SendingLimits = ({
               onChange={(event) => setCap(event.target.value)}
             />
           </Field>
-          <Field id={`gap-${row.id}`} label="Seconds between sends" hint="The pause that keeps a run looking like a person typing.">
+          <Field id={`gap-${row.id}`} label="Seconds between sends" hint="0 to 86400. The pause that keeps a run looking like a person typing.">
+
             <TextInput
               id={`gap-${row.id}`}
               type="number"
@@ -224,7 +220,13 @@ const SendingLimits = ({
           </fieldset>
         ) : null}
 
-        <Button type="submit" variant="primary" busy={busy} disabled={!valid}>
+        {problems.map((problem) => (
+          <p key={problem} className="text-small text-error">
+            {problem}
+          </p>
+        ))}
+
+        <Button type="submit" variant="primary" busy={busy} disabled={problems.length > 0}>
           Save sending limits
         </Button>
       </form>
@@ -252,11 +254,11 @@ export const MailboxList = ({
 
   const mine = rows.find((row) => row.userId === currentUserId)
 
-  const run = async (fn: () => Promise<unknown>, done: string) => {
+  const run = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true)
     try {
       await fn()
-      toast('success', done)
+      if (done) toast('success', done)
       router.refresh()
       return true
     } catch (cause) {
@@ -275,11 +277,9 @@ export const MailboxList = ({
       render: (entry) => (
         <span className="flex min-w-0 items-center gap-2 py-1">
           <span title={entry.pattern} className="min-w-0 flex-1 truncate font-semibold">{entry.pattern}</span>
-          <RowActions>
-            <button type="button" className={rowPill} disabled={busy} onClick={() => setUnblocking(entry)}>
-              Stop excluding
-            </button>
-          </RowActions>
+          <button type="button" className={rowPill} disabled={busy} onClick={() => setUnblocking(entry)}>
+            Stop excluding
+          </button>
         </span>
       ),
     },
@@ -297,11 +297,11 @@ export const MailboxList = ({
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
         <h2 className="text-xl font-medium">Connected emails</h2>
-        {mine ? null : (
+        {mine && mine.state !== 'revoked' ? null : (
           <div className="flex flex-wrap gap-2">
             {googleReady ? (
               <Button variant="primary" onClick={() => { window.location.href = '/api/auth/google/gmail' }}>
-                Connect my Gmail
+                {mine ? 'Reconnect my Gmail' : 'Connect my Gmail'}
               </Button>
             ) : null}
             {devReady ? (
@@ -310,7 +310,7 @@ export const MailboxList = ({
                 onClick={() =>
                   void run(
                     () => api.mail.connectDev.mutate(),
-                    'Development mailbox connected. Run a pass to read its history.',
+                    'Development mailbox connected. Press Read now to read its history.',
                   )
                 }
               >
@@ -337,6 +337,7 @@ export const MailboxList = ({
             {rows.map((row) => {
               const copy = row.standIn ? STAND_IN_COPY : STATE_COPY[row.state]
               const isMine = row.userId === currentUserId
+              const sends = row.canSend && row.state !== 'revoked'
               return (
                 <li key={row.id} className="flex flex-col gap-1 border-b border-divider px-3 py-2 last:border-0">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -361,12 +362,12 @@ export const MailboxList = ({
                         {row.backfillDone ? 'History read in full' : 'History still being read'}
                       </p>
                       <p className="flex flex-wrap items-center gap-2 text-small text-secondary">
-                        {row.canSend ? (
+                        {sends ? (
                           <Badge tone="ok">
                             Can send, up to {fmt.number(row.dailyCap)} a day
                             {row.sendWindow ? `, ${row.sendWindow.start} to ${row.sendWindow.end}` : ''}
                           </Badge>
-                        ) : (
+                        ) : row.state === 'revoked' ? null : (
                           <Badge>Reading only</Badge>
                         )}
                         {row.pendingBodies > 0 ? (
@@ -431,7 +432,7 @@ export const MailboxList = ({
                             )
                           }
                         />
-                        {row.canSend ? (
+                        {sends ? (
                           <SendingLimits
                             row={row}
                             busy={busy}
@@ -458,12 +459,8 @@ export const MailboxList = ({
                           disabled={row.state === 'revoked'}
                           onClick={() =>
                             void run(async () => {
-                              const outcome = await api.mail.sync.mutate({ id: row.id })
-                              toast(
-                                'info',
-                                `${outcome.read} read: ${outcome.stored} new, ${outcome.alreadyHad} already had, ${outcome.skipped} refused.${outcome.reason ? ` ${outcome.reason}` : ''}`,
-                              )
-                            }, 'Pass finished.')
+                              toast('info', readNotice(await api.mail.sync.mutate({ id: row.id })))
+                            })
                           }
                         >
                           Read now

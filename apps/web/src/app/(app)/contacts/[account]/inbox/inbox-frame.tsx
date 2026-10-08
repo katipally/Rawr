@@ -9,35 +9,7 @@ import type { Session } from '~/server/session.ts'
 import { contextFrom } from '~/server/session.ts'
 import { InboxList } from './inbox-list.tsx'
 import { getFormat } from '~/server/format.ts'
-
-type Query = Record<string, string | string[] | undefined>
-
-const one = (value: string | string[] | undefined): string | null =>
-  Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
-
-export type InboxFilters = {
-  scope: 'mine' | 'all'
-  mailboxId: string | null
-  unreplied: boolean
-  unread: boolean
-  q: string | null
-}
-
-export const filtersFrom = (query: Query): InboxFilters => ({
-  scope: one(query.scope) === 'mine' ? 'mine' : 'all',
-  mailboxId: one(query.mailbox),
-  unreplied: one(query.unreplied) === '1',
-  unread: one(query.unread) === '1',
-  q: one(query.q),
-})
-
-const toParams = (filters: InboxFilters) => ({
-  scope: filters.scope === 'mine' ? 'mine' : undefined,
-  mailbox: filters.mailboxId ?? undefined,
-  unreplied: filters.unreplied ? '1' : undefined,
-  unread: filters.unread ? '1' : undefined,
-  q: filters.q ?? undefined,
-})
+import { mailboxFilter, toParams, type InboxFilters } from './filters.ts'
 
 /** HubSpot's inbox: three panes on the canvas. The views and mailboxes at the
  *  left, the threads that match in the middle, and the conversation, or an
@@ -135,7 +107,7 @@ export const InboxFrame = async ({
                 {mailboxes.map((box) => (
                   <li key={box.id}>
                     <Link
-                      href={inboxPath(account, toParams({ ...filters, mailboxId: filters.mailboxId === box.id ? null : box.id }))}
+                      href={inboxPath(account, toParams(mailboxFilter(filters, box.id)))}
                       aria-current={filters.mailboxId === box.id ? 'page' : undefined}
                       className={cn(link, filters.mailboxId === box.id && 'bg-fill font-semibold')}
                     >
@@ -146,6 +118,11 @@ export const InboxFrame = async ({
                 ))}
               </ul>
             </>
+          ) : null}
+          {filters.scope === 'mine' || filters.mailboxId || filters.unread || filters.unreplied ? (
+            <Link href={inboxPath(account, { q: filters.q ?? undefined })} className={cn(link, 'mt-2 text-secondary')}>
+              Clear filters
+            </Link>
           ) : null}
         </nav>
         <Link href={mailboxesPath()} className="flex items-center gap-2 border-t border-line px-4 py-3 text-body font-light no-underline hover:bg-fill">

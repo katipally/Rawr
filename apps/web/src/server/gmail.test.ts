@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorisedAddress, authorised, collectHistory, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
+import { authorisedAddress, authorised, collectHistory, devFetcher, htmlToText, isTransient, parseAddresses, RevokedError, sanitiseHtml, sendMail, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -242,4 +242,23 @@ test('a profile Google will not give is an error, never a guessed address', asyn
   google(() => fresh, () => ({ status: 200, body: {} }))
   await assert.rejects(authorisedAddress('token'))
   mock.restoreAll()
+})
+
+const devSend = async (body: object) =>
+  (await devFetcher('owner@datasaur.test', 'datasaur.ai')('/messages/send', undefined, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })) as { id: string; threadId: string }
+
+test('a dev send into an existing thread answers with that thread', async () => {
+  assert.equal((await devSend({ raw: 'x', threadId: 'thread-existing' })).threadId, 'thread-existing')
+})
+
+test('a dev send with no thread starts a thread named after its own message', async () => {
+  const sent = await devSend({ raw: 'x' })
+  assert.equal(sent.threadId, sent.id)
+})
+
+test('two new dev sends do not share a thread', async () => {
+  assert.notEqual((await devSend({ raw: 'a' })).threadId, (await devSend({ raw: 'b' })).threadId)
 })

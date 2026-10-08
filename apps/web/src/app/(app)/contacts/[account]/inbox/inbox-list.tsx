@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { threadPath } from '~/lib/links.ts'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
-import type { InboxFilters } from './inbox-frame.tsx'
+import { toParams, type InboxFilters } from './filters.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -97,7 +97,7 @@ export const InboxList = ({
             return (
               <li key={thread.id}>
                 <Link
-                  href={threadPath(account, thread.id)}
+                  href={threadPath(account, thread.id, toParams(filters))}
                   aria-current={open ? 'page' : undefined}
                   className={cn(
                     'flex gap-3 border-b border-line border-l-4 py-3 pr-3 pl-2 font-normal text-body no-underline transition-colors duration-150 ease-out hover:bg-fill',

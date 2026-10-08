@@ -197,7 +197,12 @@ export const EnrollDialog = ({
             options={(mailboxes ?? []).map((box) => ({
               value: box.id,
               label: box.email,
-              hint: box.canSend ? undefined : 'Connected for reading only',
+              hint:
+                box.state === 'revoked'
+                  ? 'Access withdrawn. Reconnect it under Inbox Settings.'
+                  : box.canSend
+                    ? undefined
+                    : 'Connected for reading only',
               disabled: !box.canSend || box.state === 'revoked',
             }))}
           />

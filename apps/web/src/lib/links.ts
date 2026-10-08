@@ -152,7 +152,7 @@ export type ListParams = {
   /** Board only: which field's values become the columns. */
   group?: string | undefined
   /** Calendar only: the month on screen, as 2026-09. In the URL for the reason
-   *  the filters are — a month somebody navigated to should paste — and it is
+   *  the filters are, since a month somebody navigated to should paste, and it is
    *  what makes Earlier and Later plain links rather than state. */
   month?: string | undefined
   /** Comma-separated field keys, when a person has chosen columns that the saved
@@ -377,21 +377,22 @@ export const tasksPath = (
 export const taskQueuesPath = (account: string, back?: string): string =>
   `/${CRM_ROOT}/${account}/tasks/queues${query({ back })}`
 
+type InboxParams = {
+  scope?: string | undefined
+  mailbox?: string | undefined
+  unreplied?: string | undefined
+  unread?: string | undefined
+  q?: string | undefined
+}
+
 /** The shared inbox. Every filter is in the address, so a filtered view pastes
  *  into Slack and the back button works. */
-export const inboxPath = (
-  account: string,
-  params: {
-    scope?: string | undefined
-    mailbox?: string | undefined
-    unreplied?: string | undefined
-    unread?: string | undefined
-    q?: string | undefined
-  } = {},
-): string => `/${CRM_ROOT}/${account}/inbox${query(params)}`
+export const inboxPath = (account: string, params: InboxParams = {}): string =>
+  `/${CRM_ROOT}/${account}/inbox${query(params)}`
 
-export const threadPath = (account: string, threadId: string): string =>
-  `/${CRM_ROOT}/${account}/inbox/${threadId}`
+/** A thread keeps the inbox filters it was opened from, so the list is where it was. */
+export const threadPath = (account: string, threadId: string, params: InboxParams = {}): string =>
+  `/${CRM_ROOT}/${account}/inbox/${threadId}${query(params)}`
 
 /** Sequences live in the CRM tree, not settings: they are outreach salespeople
  *  run, not configuration an admin sets once. */

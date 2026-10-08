@@ -682,7 +682,7 @@ export const hydrateMailboxBodies = async (
 /** A stand-in Gmail so the whole path — back-fill, cursor, participant matching,
  *  blocklist, incremental catch-up, revocation — is exercisable before a Google project
  *  lands. Same shape as the real API, five fixed messages, no network. */
-const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
+export const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
   const day = 24 * 60 * 60 * 1000
   const now = Date.now()
   const messages: GmailMessage[] = [
@@ -699,9 +699,11 @@ const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher => {
     if (path === '/messages/send' && send) {
       // Accepted and dropped. Everything downstream of the send is real: the row,
       // the tokens, the advance, the pixel and the click all work against this.
+      // A reply stays in its thread; a new mail gets a thread of its own, as Gmail gives.
       const id = `dev-sent-${Math.random().toString(36).slice(2, 10)}`
+      const threadId = (JSON.parse(send.body) as { threadId?: string }).threadId ?? id
       console.log(`[gmail:dev] pretending to send ${id}`)
-      return { id, threadId: 'dev-sent-thread' }
+      return { id, threadId }
     }
     if (path === '/profile') return { historyId: '1000' }
     if (path === '/messages') {

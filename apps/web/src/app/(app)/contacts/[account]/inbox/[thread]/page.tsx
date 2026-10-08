@@ -1,4 +1,4 @@
-import { canWrite as roleCanWrite, isUuid, readThread } from '@rawr/db'
+import { canWrite as roleCanWrite, isUuid, listMailboxes, readThread } from '@rawr/db'
 import { Card } from '@rawr/ui'
 import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
@@ -9,7 +9,8 @@ import { ReplyButton } from './reply.tsx'
 import { ThreadRead } from './thread-read.tsx'
 import { inboxPath, recordPath } from '~/lib/links.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
-import { InboxFrame, filtersFrom } from '../inbox-frame.tsx'
+import { filtersFrom, toParams } from '../filters.ts'
+import { InboxFrame } from '../inbox-frame.tsx'
 
 /** One conversation, in full. Read from here rather than from Gmail, so it is the
  *  same thread for whoever opens it, for as long as the account keeps it. */
@@ -27,11 +28,14 @@ const ThreadPage = async ({
   const filters = filtersFrom(await searchParams)
   if (!isUuid(threadId)) notFound()
 
-  const canWrite = roleCanWrite(contextFrom(session), 'contact')
-  const found = await readThread(contextFrom(session), threadId)
+  const ctx = contextFrom(session)
+  const canWrite = roleCanWrite(ctx, 'contact')
+  const [found, mailboxes] = await Promise.all([readThread(ctx, threadId), listMailboxes(ctx)])
   // Not here, or every message in it belongs to a mailbox this person may not
   // read. Both answer the same way: there is no such thread for you.
   if (!found) notFound()
+  // A connected mailbox is a team inbox or a colleague's, never a person to add.
+  const mailboxAddresses = new Set(mailboxes.map((box) => box.email.toLowerCase()))
 
   // Every address on the thread, with the contact it belongs to where there is
   // one. An address nobody in the CRM owns still shows: that is often the
@@ -60,7 +64,7 @@ const ThreadPage = async ({
 
       <div className="flex min-h-15 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <Link href={inboxPath(account)} aria-label="Back to the inbox" className="grid size-8 shrink-0 place-items-center rounded-pill text-body no-underline hover:bg-fill @2xl/inbox:hidden">
+          <Link href={inboxPath(account, toParams(filters))} aria-label="Back to the inbox" className="grid size-8 shrink-0 place-items-center rounded-pill text-body no-underline hover:bg-fill @2xl/inbox:hidden">
             <ChevronLeft aria-hidden="true" className="size-4" />
           </Link>
           <div className="flex min-w-0 flex-col">
@@ -95,7 +99,7 @@ const ThreadPage = async ({
                     </Link>
                   ) : null}
                   <span className="break-all text-secondary">{address}</span>
-                  {person || !canWrite || address === session.email ? null : (
+                  {person || !canWrite || address === session.email || mailboxAddresses.has(address.toLowerCase()) ? null : (
                     <span className="mt-0.5">
                       <AddParticipant address={address} />
                     </span>

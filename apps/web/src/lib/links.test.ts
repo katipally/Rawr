@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, fromHubspotPath, layoutParams, objectView, recordPath, accountInPath, safeFrom, safePath, tabParams } from './links.ts'
+import { exportCsvPath, exportPath, fromHubspotPath, layoutParams, objectView, recordPath, accountInPath, safeFrom, safePath, tabParams, threadPath } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -307,4 +307,9 @@ test('a layout switch keeps the search, pipeline, sort and filters but drops the
 test('a layout switch from a calendar with nothing else set lands on the bare layout', () => {
   const url = objectView('datasaur', 'deal', 'all', 'board', layoutParams({ group: 'close_date', month: '2026-10' }))
   assert.equal(url, '/contacts/datasaur/objects/deal/views/all/board')
+})
+
+test('a thread opens bare, or carries the inbox filters it was opened from', () => {
+  assert.equal(threadPath('datasaur', 'abc'), '/contacts/datasaur/inbox/abc')
+  assert.equal(threadPath('datasaur', 'abc', { scope: 'mine', unread: '1', q: 'pricing' }), '/contacts/datasaur/inbox/abc?scope=mine&unread=1&q=pricing')
 })

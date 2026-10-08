@@ -143,7 +143,9 @@ const AutomationsPage = async () => {
         dateFieldsByObject={dateFieldsByObject}
         filterFieldsByObject={filterFieldsByObject}
         templates={templates.map((template) => ({ id: template.id, name: template.name }))}
-        mailboxes={mailboxes.map((box) => ({ id: box.id, email: box.email }))}
+        mailboxes={mailboxes
+          .filter((box) => box.canSend && box.state !== 'revoked')
+          .map((box) => ({ id: box.id, email: box.email }))}
         sequences={sequences.map((entry) => ({ id: entry.id, name: entry.name }))}
       />
     </div>

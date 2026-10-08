@@ -1,7 +1,8 @@
 import { EmptyState } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { readSession } from '~/server/session.ts'
-import { InboxFrame, filtersFrom } from './inbox-frame.tsx'
+import { filtersFrom } from './filters.ts'
+import { InboxFrame } from './inbox-frame.tsx'
 
 /** Every thread anybody in the account may read, newest first. The shared inbox
  *  is what makes a colleague's correspondence usable rather than merely stored:

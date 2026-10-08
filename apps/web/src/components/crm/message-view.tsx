@@ -5,6 +5,7 @@ import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useFormat } from '~/components/zone.tsx'
+import { messageFrameSandbox, openMailLink } from './message-frame.ts'
 
 /** Item 16. What this mail did after it left, for the ones that carried tracking.
  *
@@ -48,8 +49,8 @@ const Engagement = ({ engagement }: { engagement: MessageEngagement }) => {
 
 /** One message, with its stored body.
  *
- *  Sender HTML is rendered inside a sandboxed iframe. The sandbox grants only
- *  `allow-same-origin`, and never `allow-scripts`, so nothing in the mail runs:
+ *  Sender HTML is rendered inside a sandboxed iframe. The sandbox never grants
+ *  `allow-scripts`, so nothing in the mail runs:
  *  script elements, event handlers and javascript: URLs are stripped before the
  *  body is stored, and the sandbox refuses to execute them even if one survived.
  *  Same-origin is what makes the frame measurable, and a frame nobody can measure
@@ -97,11 +98,16 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
       observer.observe(body)
     }
 
-    // srcdoc may have parsed already, or may still be on its way.
-    measure()
-    box.addEventListener('load', measure)
+    // srcdoc may have parsed already, or may still be on its way. Each load is a new
+    // document, so the link handler is attached again on every load.
+    const attach = () => {
+      box.contentDocument?.addEventListener('click', openMailLink)
+      measure()
+    }
+    attach()
+    box.addEventListener('load', attach)
     return () => {
-      box.removeEventListener('load', measure)
+      box.removeEventListener('load', attach)
       observer?.disconnect()
     }
   }, [document_, showHtml])
@@ -109,12 +115,10 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
   return (
     <article className="rounded-hs border border-line bg-surface px-3 py-2">
       <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-small">
-        <span className="min-w-0 break-all font-medium">
-          {message.direction === 'outbound' ? 'To ' : 'From '}
-          {message.direction === 'outbound'
-            ? message.toAddrs.join(', ') || '(nobody)'
-            : (message.fromAddr ?? '(unknown)')}
-        </span>
+        <div className="flex min-w-0 flex-col">
+          <span className="break-all font-medium">From {message.fromAddr ?? '(unknown)'}</span>
+          <span className="break-all text-secondary">To {message.toAddrs.join(', ') || '(nobody)'}</span>
+        </div>
         <time className="text-secondary tabular-nums" dateTime={new Date(message.sentAt).toISOString()}>
           {fmt.dateTime(message.sentAt)}
         </time>
@@ -139,7 +143,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
         <iframe
           ref={frame}
           title={`Message from ${message.fromAddr ?? 'unknown sender'}`}
-          sandbox="allow-same-origin"
+          sandbox={messageFrameSandbox}
           srcDoc={document_ ?? ''}
           style={{ height }}
           className="mt-2 w-full border-0"
@@ -147,11 +151,11 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
       ) : (
         <pre className="mt-2 max-h-[60vh] overflow-auto break-words font-[inherit] text-body whitespace-pre-wrap">
           {message.text ?? message.snippet ?? '(no readable text)'}
-          {message.truncated
-            ? '\n\n[This message was longer than is kept here. Open it in Gmail for the rest.]'
-            : ''}
         </pre>
       )}
+      {message.truncated ? (
+        <p className="mt-1 text-small text-secondary">This message was longer than is kept here. Open it in Gmail for the rest.</p>
+      ) : null}
 
       {message.engagement ? <Engagement engagement={message.engagement} /> : null}
 
