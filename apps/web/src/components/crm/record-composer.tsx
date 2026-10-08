@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { announceChange } from '~/lib/record-events.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { replaceParams } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, replaceParams } from '~/lib/url-params.ts'
 import { TaskForm } from './task-form.tsx'
 import { LOGGABLE, type Loggable } from './timeline.tsx'
 import { ACTIVITY_LABELS as TYPE_LABELS } from './value.tsx'
@@ -78,11 +78,14 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
   const mounted = useMounted()
   const logging = LOGGABLE.find((entry) => entry.type === mode)
 
-  const close = () => {
+  const reset = () => {
     setFoldedOn(null)
     setExpanded(false)
     setNote('')
     setHappenedOn('')
+  }
+  const close = () => {
+    reset()
     openInteraction(null)
   }
   // A task keeps its own draft, so only a typed note or a chosen date can be lost.
@@ -116,12 +119,10 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
         // land on the day before in a zone behind the browser.
         ...(logging.dated && happenedOn ? { occurredAt: new Date(`${happenedOn}T12:00`) } : {}),
       })
-      setNote('')
-      setHappenedOn('')
       toast('success', `${TYPE_LABELS[logging.type]} added.`)
       announceChange('timeline')
-      close()
-      router.refresh()
+      reset()
+      closeParamsAndRefresh(router, { interaction: null, log: null, task: null })
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
@@ -227,8 +228,8 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
                     entity={{ entityType: object, entityId: recordId }}
                     onSaved={() => {
                       announceChange('tasks')
-                      close()
-                      router.refresh()
+                      reset()
+                      closeParamsAndRefresh(router, { interaction: null, log: null, task: null })
                     }}
                     className="flex flex-wrap items-end gap-2"
                   />
