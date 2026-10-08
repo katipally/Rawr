@@ -69,6 +69,9 @@ export type BoardColumn = {
 /** Our own type, so a file or a link dragged onto the board is ignored rather than
  *  read as a deal id. */
 const DRAG_TYPE = 'application/x-rawr-deal'
+/** The key of the column for deals with no value for the grouping field. A card can
+ *  be dragged out of it, but a move writes a value, so nothing is dropped into it. */
+const NO_VALUE_KEY = ''
 
 /** HubSpot's 24px round icon buttons in a card's corner. */
 const cardIcon = 'size-6 text-secondary transition-colors duration-150 hover:bg-fill-hover hover:text-body'
@@ -245,7 +248,7 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
       key: 'move',
       label: `Move to`,
       items: columns
-        .filter((column) => column.key !== columnKey)
+        .filter((column) => column.key !== columnKey && column.key !== NO_VALUE_KEY)
         .map((column) => ({
           key: column.key,
           label: column.name,
@@ -286,14 +289,14 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
           <section
             key={column.key}
             onDragOver={(event) => {
-              if (!canWrite) return
+              if (!canWrite || column.key === NO_VALUE_KEY) return
               event.preventDefault()
               setOver(column.key)
             }}
             onDragLeave={() => setOver((current) => (current === column.key ? null : current))}
             onDrop={(event) => {
               event.preventDefault()
-              if (!canWrite) return
+              if (!canWrite || column.key === NO_VALUE_KEY) return
               // The id travels in the drag itself rather than in React state, so a
               // drop cannot be lost to a render that has not flushed yet.
               const dealId = event.dataTransfer.getData(DRAG_TYPE) || dragging

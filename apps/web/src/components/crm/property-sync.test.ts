@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { type PanelSync, readArrived, reloadRequested } from './property-sync.ts'
+import { type PanelSync, editKeyAction, readArrived, reloadRequested } from './property-sync.ts'
 
 const conflicted: PanelSync = {
   base: 'old',
@@ -49,4 +49,20 @@ test('a second Reload after the note settles again against the value then stored
   const second = readArrived(reloadRequested(first, 'title'), { title: 'v3' }, {})
   assert.equal(second.base, 'v3')
   assert.equal(second.errors.title?.message, 'Reloaded. Your text is kept. Save to apply it over "v3".')
+})
+
+test('Enter saves and Escape cancels an inline edit', () => {
+  const plain = { keepsEnter: false, composing: false }
+  assert.equal(editKeyAction('Enter', plain), 'save')
+  assert.equal(editKeyAction('Escape', plain), 'cancel')
+  assert.equal(editKeyAction('Escape', { keepsEnter: true, composing: false }), 'cancel')
+  assert.equal(editKeyAction('a', plain), null)
+})
+
+test('Enter keeps its newline in a text area, a rich note and a focused button', () => {
+  assert.equal(editKeyAction('Enter', { keepsEnter: true, composing: false }), null)
+})
+
+test('Enter that confirms an IME composition does not save', () => {
+  assert.equal(editKeyAction('Enter', { keepsEnter: false, composing: true }), null)
 })

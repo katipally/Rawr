@@ -10,6 +10,7 @@ import { pageViewPath, threadPath } from '~/lib/links.ts'
 import { useOnChange } from '~/lib/record-events.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { ACTIVITY_LABELS as TYPE_LABELS, activityActor, activityLabel } from './value.tsx'
+import { assignedChipLabel, authorsFromParam, searchEmptyHint, withFilters } from './timeline-filters.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import { useQueryClient } from '@tanstack/react-query'
@@ -159,6 +160,7 @@ export const Timeline = ({
   const toast = useToast()
   const params = useSearchParams()
   const urlTypes = params.get('type')
+  const urlAuthors = authorsFromParam(params.get('who'), people.map((person) => person.id))
 
   const [selected, setSelected] = useState<string[]>(urlTypes ? urlTypes.split(',').filter(Boolean) : [])
   const [rows, setRows] = useState(initial)
@@ -172,7 +174,7 @@ export const Timeline = ({
   const [removing, setRemoving] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [needle, setNeedle] = useState('')
-  const [authors, setAuthors] = useState<string[]>([])
+  const [authors, setAuthors] = useState<string[]>(urlAuthors)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   const total = Object.values(counts).reduce((sum, n) => sum + n, 0)
@@ -185,6 +187,12 @@ export const Timeline = ({
   // on every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
+    // A link that names a person opens filtered to them, as a link naming a type does.
+    if (urlAuthors.length > 0) {
+      void load(selected, null, false)
+      setHydrated(true)
+      return
+    }
     if (urlTypes !== null) {
       setHydrated(true)
       return
@@ -238,19 +246,18 @@ export const Timeline = ({
     }
   }
 
+  // The filters go in the URL so the filtered timeline can be linked to.
+  const writeFilters = (types: string[], ids: string[]) => window.history.replaceState(null, '', `?${withFilters(params.toString(), types, ids)}`)
   const choose = (next: string[], actorIds = authors) => {
     setSelected(next)
     setTimelineKinds(object, next)
-    // Put the choice in the URL so the filtered timeline can be linked to.
-    const search = new URLSearchParams(params.toString())
-    if (next.length === 0) search.delete('type')
-    else search.set('type', next.join(','))
-    window.history.replaceState(null, '', `?${search.toString()}`)
+    writeFilters(next, actorIds)
     void load(next, null, false, actorIds)
   }
   const toggle = (type: string) => choose(selected.includes(type) ? selected.filter((t) => t !== type) : [...selected, type])
   const chooseAuthors = (next: string[]) => {
     setAuthors(next)
+    writeFilters(selected, next)
     void load(selected, null, false, next)
   }
   const filtered = selected.length > 0 || authors.length > 0
@@ -394,11 +401,7 @@ export const Timeline = ({
             trigger={(props) => (
               <button {...props} type="button" className="inline-flex min-w-0 items-center gap-1 py-1">
                 <span className="truncate">
-                  {authors.length === 1
-                    ? (people.find((person) => person.id === authors[0])?.label ?? 'Activity assigned to')
-                    : authors.length > 1
-                      ? `Activity assigned to (${fmt.number(authors.length)})`
-                      : 'Activity assigned to'}
+                  {assignedChipLabel(authors, (id) => people.find((person) => person.id === id)?.label, (n) => fmt.number(n))}
                 </span>
                 <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
               </button>
@@ -433,7 +436,7 @@ export const Timeline = ({
           title={query ? 'Nothing matches that search' : filtered ? 'Nothing matches those filters yet' : 'Nothing has happened here yet'}
           description={
             query
-              ? 'Only what is loaded is searched. Load older entries to search further back.'
+              ? searchEmptyHint(cursor !== null)
               : filtered
                 ? 'Clear the filters above to see everything on this record.'
                 : 'Notes, emails, meetings and property changes all land here as they happen.'

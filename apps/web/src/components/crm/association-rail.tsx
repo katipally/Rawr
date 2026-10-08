@@ -387,8 +387,7 @@ export const AssociationRail = ({
         }
       >
         <p>
-          The two records stay. Only the link between them goes, along with its label and whether it
-          was primary.
+          The two records stay. Only the link between them goes.
         </p>
       </ConfirmDialog>
 

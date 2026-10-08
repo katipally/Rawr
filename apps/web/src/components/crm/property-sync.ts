@@ -27,3 +27,11 @@ export const readArrived = (sync: PanelSync, values: Record<string, unknown>, la
     },
   }
 }
+
+/** Enter saves an inline edit and Escape cancels it. Enter keeps its own meaning
+ *  where it is taken already: a newline in a text area or note, and the press that
+ *  activates a focused button. Enter during IME composition confirms the text. */
+export const editKeyAction = (key: string, { keepsEnter, composing }: { keepsEnter: boolean; composing: boolean }): 'save' | 'cancel' | null => {
+  if (key === 'Escape') return 'cancel'
+  return key === 'Enter' && !keepsEnter && !composing ? 'save' : null
+}

@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
+import { listMembers } from './members.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
@@ -63,7 +64,8 @@ export type Board = {
    *  answer rather than a hardcoded list. A5. */
   groupableFields: { key: string; label: string }[]
   columns: BoardColumn[]
-  /** Deals whose group value is set to something no longer on the board. */
+  /** Deals with no column of their own: a stage board has no column for them, so
+   *  they are counted here and nowhere else. */
   unassigned: number
 }
 
@@ -73,9 +75,10 @@ const CARDS_PER_COLUMN = 50
  *  can weight a total, because probability is a property of a pipeline stage and
  *  of nothing else. Any select field is groupable: "by deal type" and "by product
  *  of interest" are boards somebody will want, and the registry already knows both
- *  their values and their labels. A5. */
+ *  their values and their labels. A user field is groupable too, so a board has a
+ *  column per owner. A5. */
 const GROUPABLE = (field: RegistryField): boolean =>
-  field.key === 'stage_id' || field.type === 'select'
+  field.key === 'stage_id' || field.type === 'select' || field.type === 'user'
 
 export const groupableFields = (object: RegistryObject): { key: string; label: string }[] =>
   object.fields.filter(GROUPABLE).map((field) => ({ key: field.key, label: field.label }))
@@ -125,7 +128,7 @@ const boardShape = async (ctx: AccountContext, input: BoardInput) => {
 
 type CardRow = {
   id: string
-  group_key: string | null
+  group_key: string
   name: string | null
   amount: string | null
   currency: string
@@ -157,11 +160,11 @@ type CardRow = {
  *  thousand-deal pipeline that was four thousand index lookups to draw six
  *  hundred cards. Now it is four per card actually returned, at most
  *  4 x 50 x columns. */
-const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: number, upTo: number) =>
+const readCards = (ctx: AccountContext, bucket: SQL, predicate: SQL, after: number, upTo: number) =>
   withAccount(ctx, (tx) => tx.execute<CardRow>(sql`
     with ranked as (
       select "deal"."id" as id,
-             ${groupExpr} as group_key,
+             ${bucket} as group_key,
              "deal"."name" as name,
              "deal"."amount"::text as amount,
              "deal"."currency" as currency,
@@ -175,7 +178,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
              c."id" as company_id,
              coalesce(c."name", c."domain") as company_name,
              row_number() over (
-               partition by ${groupExpr}
+               partition by ${bucket}
                order by "deal"."close_date" asc nulls last, "deal"."id" desc
              ) as rank
         from "deal"
@@ -260,33 +263,48 @@ const toCard = (object: RegistryObject, card: CardRow): BoardCard => ({
   emailContactId: card.email_contact_id,
 })
 
+type ColumnDef = { key: string; name: string; probability: number | null }
+
+/** The columns a board lays out, in order. Stage takes them from the pipeline so an
+ *  empty stage still shows; a select takes its option list and a user field takes
+ *  the members, for the same reason. */
+const columnDefsFor = async (ctx: AccountContext, groupBy: RegistryField, pipelineId?: string | null): Promise<ColumnDef[]> => {
+  if (groupBy.key === 'stage_id') {
+    const stages = await withAccount(ctx, (tx) => tx.execute<{ id: string; name: string; probability: string | null }>(sql`
+      select s.id, s.name, s.probability
+        from pipeline_stage s
+        ${pipelineId ? sql`where s.pipeline_id = ${pipelineId}` : sql``}
+       order by s.position asc`))
+    return stages.map((stage) => ({
+      key: stage.id,
+      name: stage.name,
+      probability: stage.probability === null ? null : Number(stage.probability),
+    }))
+  }
+  if (groupBy.type === 'user') {
+    // Every member, deactivated ones too: a person who has left still owns deals.
+    const members = await listMembers(ctx)
+    return members.map((member) => ({ key: member.userId, name: member.name || member.email, probability: null }))
+  }
+  return groupBy.options.map((option) => ({ key: option, name: option, probability: null }))
+}
+
+/** The column a deal lands in: its own value when a column stands for it, otherwise
+ *  the no-value column (key ''). Partitioning and totals both group by this, so a
+ *  column's cards and its count always agree about which deals are in it. */
+const bucketExpr = (groupExpr: SQL, keys: string[]): SQL =>
+  keys.length === 0
+    ? sql`''::text`
+    : sql`(case when ${groupExpr}::text in (${sql.join(keys.map((key) => sql`${key}`), sql`, `)}) then ${groupExpr}::text else ''::text end)`
+
 /** Two queries for the whole board, whatever the column count: one grouped
  *  aggregate for the footers, one windowed fetch for the visible cards. Counting
  *  and totalling from the loaded cards would be wrong the moment a column has more
  *  than CARDS_PER_COLUMN deals. A5. */
 export const readBoard = async (ctx: AccountContext, input: BoardInput): Promise<Board> => {
   const { object, groupBy, groupExpr, byStage, predicate } = await boardShape(ctx, input)
-
-  // The columns a board lays out, and their order. Stage takes them from the
-  // pipeline so an empty stage still shows; a select takes them from the
-  // registry's own option list for the same reason.
-  // Three independent reads, three connections, so the board costs one read's
-  // round trips rather than three in a row. See withAccountReads.
-  const columnsRead = byStage
-    ? withAccount(ctx, async (tx) =>
-        (
-          await tx.execute<{ id: string; name: string; probability: string | null }>(sql`
-            select s.id, s.name, s.probability
-              from pipeline_stage s
-              ${input.pipelineId ? sql`where s.pipeline_id = ${input.pipelineId}` : sql``}
-             order by s.position asc`)
-        ).map((stage) => ({
-          key: stage.id,
-          name: stage.name,
-          probability: stage.probability === null ? null : Number(stage.probability),
-        })),
-      )
-    : Promise.resolve(groupBy.options.map((option) => ({ key: option, name: option, probability: null })))
+  const defs = await columnDefsFor(ctx, groupBy, input.pipelineId)
+  const bucket = bucketExpr(groupExpr, defs.map((column) => column.key))
 
   // Weighting only means anything against a stage's probability, so a board
   // grouped by anything else reports a total and leaves weighted equal to it
@@ -297,13 +315,13 @@ export const readBoard = async (ctx: AccountContext, input: BoardInput): Promise
   const weightJoin = byStage ? sql`left join pipeline_stage s on s.id = "deal"."stage_id"` : sql``
 
   const totalsRead = withAccount(ctx, (tx) => tx.execute<{
-    group_key: string | null
+    group_key: string
     currency: string
     n: number
     total: string | null
     weighted: string | null
   }>(sql`
-    select ${groupExpr} as group_key,
+    select ${bucket} as group_key,
            "deal"."currency" as currency,
            count(*)::int as n,
            coalesce(sum("deal"."amount"), 0)::text as total,
@@ -313,20 +331,21 @@ export const readBoard = async (ctx: AccountContext, input: BoardInput): Promise
      where ${predicate}
      group by 1, 2`))
 
-  const cardsRead = readCards(ctx, groupExpr, predicate, 0, CARDS_PER_COLUMN)
+  const [totals, cards] = await Promise.all([totalsRead, readCards(ctx, bucket, predicate, 0, CARDS_PER_COLUMN)])
 
-  const [columnDefs, totals, cards] = await Promise.all([columnsRead, totalsRead, cardsRead])
+  // A stage board has no column for a deal without a stage, so it is only counted.
+  // Every other board gets a column for them, so no deal falls off the board.
+  const unassigned = totals.filter((row) => row.group_key === '').reduce((sum, row) => sum + Number(row.n), 0)
+  if (!byStage && unassigned > 0) defs.push({ key: '', name: `No ${groupBy.label}`, probability: null })
 
   const grouped = new Map<string, CardRow[]>()
   for (const card of cards) {
-    const key = card.group_key ?? ''
-    const bucket = grouped.get(key)
-    if (bucket) bucket.push(card)
-    else grouped.set(key, [card])
+    const bucketCards = grouped.get(card.group_key)
+    if (bucketCards) bucketCards.push(card)
+    else grouped.set(card.group_key, [card])
   }
 
-  const known = new Set(columnDefs.map((column) => column.key))
-  const columns: BoardColumn[] = columnDefs.map((column) => {
+  const columns: BoardColumn[] = defs.map((column) => {
     const rows = totals.filter((row) => row.group_key === column.key)
     const columnCards = grouped.get(column.key) ?? []
     const count = rows.reduce((sum, row) => sum + Number(row.n), 0)
@@ -350,11 +369,7 @@ export const readBoard = async (ctx: AccountContext, input: BoardInput): Promise
     groupByLabel: groupBy.label,
     groupableFields: groupableFields(object),
     columns,
-    // Includes deals with no value at all for the grouping field, which is a real
-    // state for a select and is never a state for a stage.
-    unassigned: totals
-      .filter((row) => row.group_key === null || !known.has(row.group_key))
-      .reduce((sum, row) => sum + Number(row.n), 0),
+    unassigned,
   }
 }
 
@@ -365,11 +380,12 @@ export const readBoardColumn = async (
   ctx: AccountContext,
   input: BoardInput & { groupKey: string; offset: number },
 ): Promise<{ cards: BoardCard[]; hasMore: boolean }> => {
-  const { object, groupExpr, predicate } = await boardShape(ctx, input)
-  const onlyThisColumn = sql.join([predicate, sql`${groupExpr}::text = ${input.groupKey}`], sql` and `)
+  const { object, groupBy, groupExpr, predicate } = await boardShape(ctx, input)
+  const bucket = bucketExpr(groupExpr, (await columnDefsFor(ctx, groupBy, input.pipelineId)).map((column) => column.key))
+  const onlyThisColumn = sql.join([predicate, sql`${bucket} = ${input.groupKey}`], sql` and `)
   // One card past the page, so the button knows whether to stay without a second
   // count query.
-  const rows = await readCards(ctx, groupExpr, onlyThisColumn, input.offset, input.offset + CARDS_PER_COLUMN + 1)
+  const rows = await readCards(ctx, bucket, onlyThisColumn, input.offset, input.offset + CARDS_PER_COLUMN + 1)
   return {
     cards: rows.slice(0, CARDS_PER_COLUMN).map((row) => toCard(object, row)),
     hasMore: rows.length > CARDS_PER_COLUMN,

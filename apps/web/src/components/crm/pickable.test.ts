@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { pickable } from './pickable.ts'
+import { emptyOption, pickable } from './pickable.ts'
 
 const choices = [
   { id: 'ana', label: 'Ana', deactivated: false },
@@ -18,4 +18,12 @@ test('a deactivated member stays offered while a record points at them', () => {
 
 test('an empty list stays empty', () => {
   assert.deepEqual(pickable([], 'ben'), [])
+})
+
+test('a required select offers no Not set option', () => {
+  assert.deepEqual(emptyOption(true), { label: 'Pick one', disabled: true })
+})
+
+test('an optional select keeps Not set, which writes null', () => {
+  assert.deepEqual(emptyOption(false), { label: 'Not set', disabled: false })
 })

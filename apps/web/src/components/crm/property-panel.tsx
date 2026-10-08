@@ -9,7 +9,7 @@ import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
-import { type PanelSync, readArrived, reloadRequested } from './property-sync.ts'
+import { type PanelSync, editKeyAction, readArrived, reloadRequested } from './property-sync.ts'
 import { EMPTY_VALUE, Value } from './value.tsx'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -74,6 +74,14 @@ export const PropertyPanel = ({
   }
 
   const byKey = new Map(fields.map((field) => [field.key, field]))
+
+  const cancel = (key: string) => {
+    setEditing(null)
+    setSync((current) => {
+      const { [key]: _dropped, ...errors } = current.errors
+      return { ...current, errors }
+    })
+  }
 
   const save = async (field: EditableField) => {
     const previous = local[field.key]
@@ -191,7 +199,23 @@ export const PropertyPanel = ({
                   <dt className="min-w-0 text-small text-secondary">{field.label}</dt>
                   <dd className="min-w-0">
                     {isEditing ? (
-                      <div className="flex flex-col gap-1">
+                      <fieldset
+                        aria-label={field.label}
+                        className="flex min-w-0 flex-col gap-1"
+                        onKeyDown={(event) => {
+                          if (event.defaultPrevented) return
+                          const keepsEnter =
+                            field.type === 'rich_text' || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLButtonElement
+                          const action = editKeyAction(event.key, { keepsEnter, composing: event.nativeEvent.isComposing })
+                          if (action === 'cancel') {
+                            event.preventDefault()
+                            cancel(field.key)
+                          } else if (action === 'save' && saving !== field.key) {
+                            event.preventDefault()
+                            void save(field)
+                          }
+                        }}
+                      >
                         <FieldInput
                           id={`edit-${field.key}`}
                           field={scoped(field, local)}
@@ -210,18 +234,12 @@ export const PropertyPanel = ({
                           </Button>
                           <Button
                             variant="tertiary"
-                            onClick={() => {
-                              setEditing(null)
-                              setSync((current) => {
-                                const { [field.key]: _dropped, ...errors } = current.errors
-                                return { ...current, errors }
-                              })
-                            }}
+                            onClick={() => cancel(field.key)}
                           >
                             Cancel
                           </Button>
                         </div>
-                      </div>
+                      </fieldset>
                     ) : field.type === 'rich_text' ? (
                       // Its own shape, because the click-to-edit affordance
                       // below is a <button>, and a formatted note is blocks

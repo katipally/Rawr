@@ -42,7 +42,7 @@ import {
   storageKeyFor } from '../src/dal/attachments.ts'
 import { linksForContacts, readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { createTask, deleteTask, listTasks, logByHand, updateTask } from '../src/dal/tasks.ts'
-import { readBoard } from '../src/dal/board.ts'
+import { readBoard, readBoardColumn } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
 import { compileFilters, listKpis, parseFilters, scopeFor, type Condition } from '../src/dal/query.ts'
 import { readCalendar } from '../src/dal/calendar.ts'
@@ -58,7 +58,7 @@ import {
   resolveView,
   saveView,
   setViewPinned } from '../src/dal/views.ts'
-import { associate, associateMany, readAssociations, groupFor } from '../src/dal/associations.ts'
+import { associate, associateMany, dissociate, readAssociations, groupFor } from '../src/dal/associations.ts'
 import { upsertCapturedPerson } from '../src/dal/people.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { readBulkOperation, runBulkChunk, startBulkOperation } from '../src/dal/bulk.ts'
@@ -720,6 +720,81 @@ try {
     await deleteRecord(admin, 'deal', deal.id)
     await deleteRecord(admin, 'company', company.id)
     return 'hidden while trashed, linked again after restore'
+  })
+
+  await check('unlinking a company held in a Primary company column clears that column, from either side', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Unlink co ${stamp}`, domain: `unlinkco${stamp}.example` })
+    const other = await createRecord(sales, 'company', { name: `Unlink other ${stamp}`, domain: `unlinkother${stamp}.example` })
+    const held = await createRecord(sales, 'contact', { first_name: `Unlink held ${stamp}`, company_id: company.id })
+    const plain = await createRecord(sales, 'contact', { first_name: `Unlink plain ${stamp}`, company_id: other.id })
+    const deal = await createRecord(sales, 'deal', { name: `Unlink deal ${stamp}`, company_id: company.id })
+    const companyRef = { entityType: 'company' as const, entityId: company.id }
+    const contactsOfCompany = async () =>
+      (groupFor(await readAssociations(sales, companyRef), 'contact')?.records ?? []).map((row) => row.id)
+    const dealsOfCompany = async () =>
+      (groupFor(await readAssociations(sales, companyRef), 'deal')?.records ?? []).map((row) => row.id)
+
+    await associate(sales, { entityType: 'contact', entityId: held.id }, companyRef)
+    await associate(sales, { entityType: 'contact', entityId: plain.id }, companyRef)
+    expect((await contactsOfCompany()).length === 2, 'both contacts were not on the company rail before the unlink')
+
+    await dissociate(sales, companyRef, { entityType: 'contact', entityId: held.id })
+    expect((await getRecord(sales, 'contact', held.id))?.values.company_id === null, 'the held contact still points at the company')
+    expect(!(await contactsOfCompany()).includes(held.id), 'the held contact is still on the company rail')
+    const trail = await readTimeline(sales, { entity: { entityType: 'contact', entityId: held.id } })
+    expect(trail.rows.some((row) => row.type === 'field_change'), 'clearing the company wrote no change to the timeline')
+
+    // A plain link row never touches the column it is not the holder of.
+    await dissociate(sales, companyRef, { entityType: 'contact', entityId: plain.id })
+    expect((await getRecord(sales, 'contact', plain.id))?.values.company_id === other.id, 'a plain link cleared a company that is not its link')
+    expect(!(await contactsOfCompany()).includes(plain.id), 'the plain link is still on the company rail')
+
+    await dissociate(sales, { entityType: 'deal', entityId: deal.id }, companyRef)
+    expect((await getRecord(sales, 'deal', deal.id))?.values.company_id === null, 'the deal still points at the company after unlinking from the company side')
+    expect(!(await dealsOfCompany()).includes(deal.id), 'the deal is still on the company rail')
+
+    const again = await refuses('a second unlink', () => dissociate(sales, companyRef, { entityType: 'contact', entityId: held.id }))
+    expect(again.includes('not associated'), `a second unlink was refused with: ${again}`)
+
+    for (const [kind, id] of [['contact', held.id], ['contact', plain.id], ['deal', deal.id]] as const) await deleteRecord(admin, kind, id)
+    for (const id of [company.id, other.id]) await deleteRecord(admin, 'company', id)
+    return 'the column clears from either side, a plain link leaves its column, and an unlinked pair is refused'
+  })
+
+  await check('a board grouped by owner has a column per person, and an unowned deal lands in one column', async () => {
+    const stamp = Date.now()
+    const mine = await createRecord(sales, 'deal', { name: `Owner mine ${stamp}`, owner_id: sales.actorId! })
+    const theirs = await createRecord(sales, 'deal', { name: `Owner theirs ${stamp}`, owner_id: admin.actorId! })
+    const loose = await createRecord(sales, 'deal', { name: `Owner loose ${stamp}`, owner_id: sales.actorId! })
+    await updateRecord(sales, 'deal', loose.id, { owner_id: null })
+
+    const board = await readBoard(sales, { groupBy: 'owner_id', search: String(stamp) })
+    const cardsIn = (key: string) => board.columns.find((column) => column.key === key)?.cards.map((card) => card.id) ?? []
+    expect(cardsIn(sales.actorId!).includes(mine.id), 'a deal owned by sales is not in its owner column')
+    expect(cardsIn(admin.actorId!).includes(theirs.id), 'a deal owned by admin is not in its owner column')
+    const unowned = board.columns.find((column) => column.key === '')
+    expect(unowned?.name === 'No Deal owner' && unowned.count === 1, `the no-owner column reads ${unowned?.name} with ${unowned?.count}`)
+    expect(cardsIn('').includes(loose.id), 'an unowned deal is not in the no-owner column')
+
+    for (const id of [mine.id, theirs.id, loose.id]) await deleteRecord(admin, 'deal', id)
+    return 'one column per owner, and an unowned deal lands in the no-owner column'
+  })
+
+  await check('a board grouped by a select puts a stale value and no value in one column', async () => {
+    const stamp = Date.now()
+    const typed = await createRecord(sales, 'deal', { name: `Typed ${stamp}`, deal_type: 'New Business' })
+    const stale = await createRecord(sales, 'deal', { name: `Stale ${stamp}` })
+    await withAccount(sales, (tx) => tx.execute(sql`update deal set deal_type = 'Retired type' where id = ${stale.id}`))
+    const byType = await readBoard(sales, { groupBy: 'deal_type', search: String(stamp) })
+    expect(byType.columns.find((column) => column.key === 'New Business')?.cards.some((card) => card.id === typed.id) === true, 'a typed deal is not in its option column')
+    const noType = byType.columns.find((column) => column.key === '')
+    expect(noType?.count === 1, `the no-type column counts ${noType?.count} for a stale value and no type`)
+    const noTypeCards = await readBoardColumn(sales, { groupBy: 'deal_type', search: String(stamp), groupKey: '', offset: 0 })
+    expect(noTypeCards.cards.map((card) => card.id).join() === stale.id, 'the no-type column pages the stale deal wrongly')
+
+    for (const id of [typed.id, stale.id]) await deleteRecord(admin, 'deal', id)
+    return 'a typed deal is in its option column, and a stale value lands in the no-value column'
   })
 
   await check('a rail count is the number of linked records it can draw, and a trashed record on either side is not counted', async () => {
@@ -2040,7 +2115,7 @@ try {
     const contacts = groupFor(await readAssociations(admin, { entityType: 'company', entityId: company.id }), 'contact')
     expect(contacts?.records.length === 3, `the rail showed ${contacts?.records.length ?? 0} contacts`)
     expect(contacts!.records.every((row) => !row.isPrimary), 'a company called its contacts primary')
-    expect(contacts!.records.every((row) => !row.canUnlink), 'a company offered to unlink a contact it does not link by row')
+    expect(contacts!.records.every((row) => row.canUnlink), 'a company could not unlink a contact that holds it as its primary company')
 
     // The badge belongs on the one company a contact points at, which is the half
     // of the pair that has to keep working.

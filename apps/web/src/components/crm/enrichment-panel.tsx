@@ -252,26 +252,37 @@ type Loaded = { state: 'loading' } | { state: 'error'; message: string } | { sta
 
 /** What Apollo's own sequences did for this contact.
  *
- *  Read-only: enrolling happens in Rawr's own sequences now, from the member's
- *  Gmail, which is what makes the mail thread with the rest of the conversation
- *  and stop when somebody replies. Anything already running in Apollo still shows
- *  here and still reaches the timeline. */
+ *  Opening the record only reads. Pulling Apollo's activity onto the timeline is
+ *  the explicit Sync now. Enrolling happens in Rawr's own sequences now, from the
+ *  member's Gmail, which is what makes the mail thread with the rest of the
+ *  conversation and stop when somebody replies. Anything already running in
+ *  Apollo still shows here and still reaches the timeline on Sync now. */
 const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () => void }) => {
   const queryClient = useQueryClient()
   const [loaded, setLoaded] = useState<Loaded>({ state: 'loading' })
 
   // One request, so it must run once per contact and not once per render of the
-  // record page. That holds because onChanged is stable at the call site.
+  // record page. That holds because the effect depends on contactId alone.
   const load = useCallback(async () => {
     setLoaded({ state: 'loading' })
     try {
-      const status = await queryClient.fetchQuery({ ...trpc.integrations.apolloStatus.queryOptions({ contactId }), staleTime: 0 })
-      setLoaded({ state: 'ready', statuses: status.statuses })
-      if (status.recorded > 0) onChanged()
+      const { statuses } = await queryClient.fetchQuery({ ...trpc.integrations.apolloStatus.queryOptions({ contactId }), staleTime: 0 })
+      setLoaded({ state: 'ready', statuses })
     } catch (cause) {
       setLoaded({ state: 'error', message: errorMessage(cause) })
     }
-  }, [contactId, onChanged, queryClient])
+  }, [contactId, queryClient])
+
+  const sync = async () => {
+    setLoaded({ state: 'loading' })
+    try {
+      const result = await api.integrations.apolloSync.mutate({ contactId })
+      setLoaded({ state: 'ready', statuses: result.statuses })
+      if (result.recorded > 0) onChanged()
+    } catch (cause) {
+      setLoaded({ state: 'error', message: errorMessage(cause) })
+    }
+  }
 
   useEffect(() => {
     void load()
@@ -282,7 +293,7 @@ const Sequences = ({ contactId, onChanged }: { contactId: string; onChanged: () 
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-small font-medium">Apollo sequences</h4>
         {loaded.state !== 'loading' ? (
-          <Button variant="tertiary" onClick={() => void load()}>
+          <Button variant="tertiary" onClick={() => void sync()}>
             Sync now
           </Button>
         ) : null}

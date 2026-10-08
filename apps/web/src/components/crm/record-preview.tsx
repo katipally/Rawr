@@ -1,7 +1,7 @@
 'use client'
 
-import { Alert, Avatar, IconButton, Spinner, useMounted, usePresence } from '@rawr/ui'
-import { CalendarDays, Mail, Phone, SquareCheck, StickyNote, X } from 'lucide-react'
+import { Alert, Avatar, IconButton, Spinner, cn, useMounted, usePresence } from '@rawr/ui'
+import { CalendarDays, Mail, Phone, SquareCheck, StickyNote, X, type LucideIcon } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -11,13 +11,14 @@ import { PREVIEW_DOCK } from '~/lib/docks.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { recordPath } from '~/lib/links.ts'
 import { trpc } from '~/lib/rpc.ts'
+import { emailContactOf } from './email-contact.ts'
 import type { TableColumn } from './record-table.tsx'
 import { EMPTY_VALUE, Value } from './value.tsx'
 import { useQueryClient } from '@tanstack/react-query'
 
 type Loaded = {
   record: { displayName: string; values: Record<string, unknown>; labels: Record<string, string> }
-  groups: { objectKey: string; namePlural: string; total: number; records: { id: string; displayName: string }[] }[]
+  groups: { objectKey: string; namePlural: string; total: number; records: { id: string; displayName: string; email: string | null }[] }[]
 }
 
 export type RecordPreviewProps = {
@@ -95,12 +96,24 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
   const data = loaded?.id === current ? loaded.data : undefined
   const open = (params: Parameters<typeof recordPath>[3]) => recordPath(account, object, current, { from, ...params })
   const email = typeof data?.record.values.email === 'string' ? data.record.values.email : ''
-  const actions = [
-    { label: 'Note', icon: StickyNote, params: { interaction: 'note' } },
-    ...(object === 'contact' && email ? [{ label: 'Email', icon: Mail, params: { tab: 'activities', compose: '1' } }] : []),
-    { label: 'Call', icon: Phone, params: { interaction: 'call' } },
-    { label: 'Task', icon: SquareCheck, params: { interaction: 'task' } },
-    { label: 'Meeting', icon: CalendarDays, params: { interaction: 'meeting' } },
+  // A deal's mail goes to its first linked contact with an address. With none, the
+  // action stays and says why, as the board card does.
+  const dealContact = object === 'deal' && data ? emailContactOf(data.groups) : null
+  const emailAction =
+    object === 'contact' && email
+      ? { href: open({ tab: 'activities', compose: '1' }), reason: null }
+      : object === 'deal' && data
+        ? {
+            href: dealContact ? recordPath(account, 'contact', dealContact.id, { from, tab: 'activities', compose: '1' }) : null,
+            reason: 'No contact on this deal has an email address',
+          }
+        : null
+  const actions: { label: string; icon: LucideIcon; href: string | null; reason: string | null }[] = [
+    { label: 'Note', icon: StickyNote, href: open({ interaction: 'note' }), reason: null },
+    ...(emailAction ? [{ label: 'Email', icon: Mail, ...emailAction }] : []),
+    { label: 'Call', icon: Phone, href: open({ interaction: 'call' }), reason: null },
+    { label: 'Task', icon: SquareCheck, href: open({ interaction: 'task' }), reason: null },
+    { label: 'Meeting', icon: CalendarDays, href: open({ interaction: 'meeting' }), reason: null },
   ]
 
   return createPortal(
@@ -155,18 +168,26 @@ export const RecordPreview = ({ account, object, objectLabel, id, fields, canWri
                 </div>
                 {canWrite ? (
                   <div className="flex flex-wrap justify-between gap-2">
-                    {actions.map((action) => (
-                      <Link
-                        key={action.label}
-                        href={open(action.params)}
-                        className="group flex flex-col items-center gap-1 text-small font-light text-body no-underline"
-                      >
-                        <span className="grid size-8 place-items-center rounded-pill border border-line-strong transition-all duration-150 ease-out group-hover:bg-fill">
-                          <action.icon aria-hidden="true" className="size-4" />
+                    {actions.map((action) => {
+                      const content = (
+                        <>
+                          <span className="grid size-8 place-items-center rounded-pill border border-line-strong transition-all duration-150 ease-out group-hover:bg-fill">
+                            <action.icon aria-hidden="true" className="size-4" />
+                          </span>
+                          {action.label}
+                        </>
+                      )
+                      const className = 'group flex flex-col items-center gap-1 text-small font-light text-body no-underline'
+                      return action.href ? (
+                        <Link key={action.label} href={action.href} className={className}>
+                          {content}
+                        </Link>
+                      ) : (
+                        <span key={action.label} aria-disabled="true" title={action.reason ?? undefined} className={cn(className, 'opacity-50')}>
+                          {content}
                         </span>
-                        {action.label}
-                      </Link>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : null}
               </div>

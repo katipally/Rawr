@@ -33,6 +33,7 @@ import {
 } from '../integrations/brevo.ts'
 import {
   apolloContactUrl,
+  readSequenceStatus,
   syncSequenceActivity,
 } from '../integrations/apollo.ts'
 import { replayJob } from '../integrations/replay.ts'
@@ -164,13 +165,18 @@ export const integrationsRouter = router({
     .input(z.object({ companyId: z.uuid() }))
     .mutation(({ ctx, input }) => call(() => enrichCompanyRecord(ctx.account, input.companyId))),
 
-  /** What Apollo's own sequences did for this contact, read back onto the
-   *  timeline. Enrolling happens in Rawr now: mail sent from Apollo does not
-   *  thread with the rest of the conversation and does not stop when somebody
-   *  replies here, which is the whole reason sequences moved in-house. */
+  /** What Apollo's own sequences did for this contact. Read only: opening a record
+   *  never writes to its timeline. Enrolling happens in Rawr now: mail sent from
+   *  Apollo does not thread with the rest of the conversation and does not stop
+   *  when somebody replies here, which is the whole reason sequences moved in-house. */
   apolloStatus: protectedProcedure
     .input(z.object({ contactId: z.uuid() }))
-    .query(({ ctx, input }) => call(() => syncSequenceActivity(ctx.account, input.contactId))),
+    .query(({ ctx, input }) => call(async () => ({ statuses: await readSequenceStatus(ctx.account, input.contactId) }))),
+
+  /** Pulls what Apollo's sequences did onto the contact timeline, once each. */
+  apolloSync: protectedProcedure
+    .input(z.object({ contactId: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => syncSequenceActivity(ctx.account, input.contactId))),
 
   /** F6 §4. What enrichment was not allowed to write, so a person can decide. */
   suggestions: protectedProcedure

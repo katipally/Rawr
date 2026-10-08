@@ -13,8 +13,8 @@ import { api, errorMessage } from '~/lib/rpc.ts'
  *  covers the batch on screen and nothing that arrives afterwards, so a form
  *  burst tomorrow asks again rather than riding on today's yes.
  *
- *  The prompt opens itself once per browser session, because a bar somebody has
- *  to notice is not consent being asked for. Closing it leaves the batch
+ *  The prompt opens from the bar's Review button and never on its own, because it
+ *  would cover whatever page the person landed on. Closing it leaves the batch
  *  waiting: the bar stays, and nothing has been spent either way. */
 
 /** How stale the count may get while somebody works. Long enough not to be a
@@ -46,11 +46,8 @@ export const EnrichmentConsent = ({ canWrite }: { canWrite: boolean }) => {
       .query()
       .then((next) => {
         setPending(next)
-        // Asked once per session rather than on every page: a modal that reopens
-        // as somebody moves around is a modal they learn to dismiss unread.
         if (next.total > 0 && sessionStorage.getItem(ASKED) !== '1') {
           sessionStorage.setItem(ASKED, '1')
-          setOpen(true)
         }
       })
       .catch(() => {

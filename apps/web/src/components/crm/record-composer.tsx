@@ -14,7 +14,7 @@ import {
   useToast,
 } from '@rawr/ui'
 import { ChevronDown, ChevronUp, Maximize2, Minimize2, X } from 'lucide-react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { announceChange } from '~/lib/record-events.ts'
@@ -58,6 +58,7 @@ const interactionOf = (params: URLSearchParams): Interaction | null => {
  *  show a text box. */
 export const RecordComposer = ({ account, object, recordId, canWrite, assignees, queues }: RecordComposerProps) => {
   const toast = useToast()
+  const router = useRouter()
   const params = useSearchParams()
   const asked = interactionOf(params)
   // What was open, kept through the exit animation after the address lets go.
@@ -119,6 +120,7 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
       setHappenedOn('')
       toast('success', `${TYPE_LABELS[logging.type]} added.`)
       announceChange('timeline')
+      router.refresh()
       close()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -225,6 +227,7 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
                     entity={{ entityType: object, entityId: recordId }}
                     onSaved={() => {
                       announceChange('tasks')
+                      router.refresh()
                       close()
                     }}
                     className="flex flex-wrap items-end gap-2"

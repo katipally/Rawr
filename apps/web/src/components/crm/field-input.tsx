@@ -3,7 +3,7 @@
 import { Select, TextArea, TextInput } from '@rawr/ui'
 import type { Conditional, FieldType, ObjectKey } from '@rawr/db'
 import { useState } from 'react'
-import { pickable } from './pickable.ts'
+import { emptyOption, pickable } from './pickable.ts'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { RichTextInput } from './rich-text-input.tsx'
 
@@ -99,6 +99,8 @@ const RelationField = ({
  *  a branch here and nowhere else on the write side. */
 export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }: FieldInputProps) => {
   const common = { id, 'aria-label': field.label, autoFocus }
+  const none = emptyOption(field.isRequired)
+  const empty = <option value="" disabled={none.disabled}>{none.label}</option>
 
   if (field.pickObject) {
     return (
@@ -117,7 +119,7 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
   if (field.choices) {
     return (
       <Select {...common} value={String(value ?? '')} onChange={(event) => onChange(event.target.value || null)}>
-        <option value="">Not set</option>
+        {empty}
         {pickable(field.choices, value).map((choice) => (
           <option key={choice.id} value={choice.id}>
             {choice.label}
@@ -159,7 +161,7 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
     case 'select':
       return (
         <Select {...common} value={String(value ?? '')} onChange={(event) => onChange(event.target.value || null)}>
-          <option value="">Not set</option>
+          {empty}
           {field.options.map((option) => (
             <option key={option} value={option}>
               {option}

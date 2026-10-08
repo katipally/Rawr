@@ -96,7 +96,7 @@ const BOOLEAN_FALSE = new Set(['false', 'f', 'no', 'n', '0', 'off'])
  *  so none of them can accept something the others would refuse. */
 export const coerce = (field: RegistryField, input: unknown): Coerced => {
   if (input === null || input === undefined || input === '') {
-    if (field.isRequired) throw new ValueError(field, 'is required and cannot be emptied.')
+    if (field.isRequired) throw new ValueError(field, 'pick one. It cannot be empty.')
     return { value: null }
   }
 

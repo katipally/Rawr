@@ -400,13 +400,70 @@ const ACTIVITY_KIND: Record<string, MarketingEvent['kind']> = {
   bounced: 'sequence_step',
 }
 
-/** The read-back F6 §3 promises: where each sequence got to, and every event on
- *  the way, written once each onto the contact timeline. */
+/** Apollo's view of a contact, read and never written: no timeline rows, no Last
+ *  contacted, and no Apollo contact created just to look. A contact Apollo was
+ *  never matched to has no sequences to read, so it reads as none. */
+export const readSequenceStatus = async (ctx: AccountContext, contactId: string): Promise<SequenceStatus[]> => {
+  const apollo = await knownApolloContact(ctx, contactId)
+  return apollo ? (await readSequences(ctx, apollo)).statuses : []
+}
+
+/** Where each sequence got to, and every event on the way, written once each onto
+ *  the contact timeline. */
 export const syncSequenceActivity = async (
   ctx: AccountContext,
   contactId: string,
 ): Promise<{ statuses: SequenceStatus[]; recorded: number }> => {
   const apollo = await apolloContactId(ctx, contactId)
+  const { statuses, events } = await readSequences(ctx, apollo)
+
+  let recorded = 0
+  for (const event of events) {
+    const kind = ACTIVITY_KIND[event.type]
+    if (!kind) continue
+    const name = event.sequence_name ?? 'a sequence'
+    const outcome = await ingestMarketingEvent(ctx, {
+      source: 'apollo',
+      providerEventId: event.message_id
+        ? `msg:${event.message_id}:${event.type}`
+        : `${apollo.id}:${event.sequence_id}:${event.type}:${event.occurred_at}`,
+      kind,
+      email: apollo.email,
+      // An open, a click or a send is about one email; the rest is about the sequence.
+      // A one-off email sent from Apollo has no sequence at all, so its subject is
+      // the only name it has.
+      subject: (kind === 'open' || kind === 'click' || event.type === 'delivered' || !event.sequence_id) && event.subject ? event.subject : name,
+      at: new Date(event.occurred_at),
+      detail: {
+        sequence: name,
+        sequenceId: event.sequence_id,
+        step: event.step_position ?? null,
+        event: event.type === 'delivered' ? 'sent' : event.type === 'bounced' ? 'failed' : event.type,
+        reason: event.reason ?? null,
+      },
+    })
+    if (outcome.stored) recorded += 1
+  }
+
+  await setExternalId(ctx, contactId, 'apollo:synced_at', new Date().toISOString())
+  await recordHealth(ctx, 'apollo', { ok: true })
+
+  return { recorded, statuses }
+}
+
+const knownApolloContact = async (ctx: AccountContext, contactId: string): Promise<{ id: string; email: string } | null> => {
+  const record = await getRecord(ctx, 'contact', contactId)
+  const email = typeof record?.values.email === 'string' ? record.values.email : ''
+  const id = await externalIdOf(ctx, contactId, 'apollo')
+  return record && email && id ? { id, email } : null
+}
+
+/** The contact-status and mail reads that both functions above share. Event names
+ *  are resolved here, so the ingest loop only ever sees a name. */
+const readSequences = async (
+  ctx: AccountContext,
+  apollo: { id: string; email: string },
+): Promise<{ statuses: SequenceStatus[]; events: RawEvent[] }> => {
   const sequences = await listSequences(ctx)
   const nameOf = new Map(sequences.map((row) => [row.id, row.name]))
 
@@ -455,39 +512,7 @@ export const syncSequenceActivity = async (
         return { statuses, events }
       })()
 
-  let recorded = 0
-  for (const event of events) {
-    const kind = ACTIVITY_KIND[event.type]
-    if (!kind) continue
-    const name = event.sequence_name ?? nameOf.get(event.sequence_id) ?? 'a sequence'
-    const outcome = await ingestMarketingEvent(ctx, {
-      source: 'apollo',
-      providerEventId: event.message_id
-        ? `msg:${event.message_id}:${event.type}`
-        : `${apollo.id}:${event.sequence_id}:${event.type}:${event.occurred_at}`,
-      kind,
-      email: apollo.email,
-      // An open, a click or a send is about one email; the rest is about the sequence.
-      // A one-off email sent from Apollo has no sequence at all, so its subject is
-      // the only name it has.
-      subject: (kind === 'open' || kind === 'click' || event.type === 'delivered' || !event.sequence_id) && event.subject ? event.subject : name,
-      at: new Date(event.occurred_at),
-      detail: {
-        sequence: name,
-        sequenceId: event.sequence_id,
-        step: event.step_position ?? null,
-        event: event.type === 'delivered' ? 'sent' : event.type === 'bounced' ? 'failed' : event.type,
-        reason: event.reason ?? null,
-      },
-    })
-    if (outcome.stored) recorded += 1
-  }
-
-  await setExternalId(ctx, contactId, 'apollo:synced_at', new Date().toISOString())
-  await recordHealth(ctx, 'apollo', { ok: true })
-
   return {
-    recorded,
     statuses: statuses.map((row) => ({
       sequenceId: row.emailer_campaign_id,
       sequenceName: nameOf.get(row.emailer_campaign_id) ?? 'Unknown sequence',
@@ -496,6 +521,7 @@ export const syncSequenceActivity = async (
       addedAt: row.added_at ?? null,
       failureReason: row.failure_reason ?? null,
     })),
+    events: events.map((event) => ({ ...event, sequence_name: event.sequence_name ?? nameOf.get(event.sequence_id) ?? 'a sequence' })),
   }
 }
 

@@ -10,6 +10,7 @@ import { EnrollDialog } from './enroll-dialog.tsx'
 import { useEffect, useState } from 'react'
 import { objectView } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
+import { replaceParams } from '~/lib/url-params.ts'
 import { Value } from './value.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import type { EditableField } from './field-input.tsx'
@@ -183,7 +184,10 @@ export const RecordActions = ({
           account={account}
           to={values.email}
           contactId={recordId}
-          onClose={() => setShowCompose(false)}
+          onClose={() => {
+            setShowCompose(false)
+            replaceParams({ compose: null })
+          }}
           onSent={() => router.refresh()}
         />
       ) : null}

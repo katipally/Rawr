@@ -199,13 +199,10 @@ const BoardPage = async ({
           }
         />
 
-        {board && board.unassigned > 0 ? (
+        {board && byStage && board.unassigned > 0 ? (
           <Alert tone="warning">
             {fmt.number(board.unassigned)} deal{board.unassigned === 1 ? '' : 's'}{' '}
-            {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board.{' '}
-            {byStage
-              ? 'Switch pipelines above to find them.'
-              : `Filter on ${board.groupByLabel} being empty to see them.`}
+            {board.unassigned === 1 ? 'has' : 'have'} no {board.groupByLabel.toLowerCase()} on this board. Switch pipelines above to find them.
           </Alert>
         ) : null}
 

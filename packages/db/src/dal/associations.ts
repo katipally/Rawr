@@ -2,7 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import { recordActivity, recordActivityFanout, type EntityRef, type EntityType } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { assertIdsBelong } from './records.ts'
+import { assertIdsBelong, updateRecord } from './records.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type Registry, type RegistryObject } from './registry.ts'
 import { everyFragment, fragmentsOf } from './text-match.ts'
 
@@ -15,9 +15,9 @@ export type AssociatedRecord = {
    *  or a deal, and the single company it points at. The reverse of that link is
    *  not primary, because a company has no primary contact. A4. */
   isPrimary: boolean
-  /** Only an association row can be unlinked from here. What a record stores on
-   *  itself is changed on the record instead, so the rail offers no button that
-   *  would be refused. */
+  /** Every row can be unlinked from here. A company held in a record's own Primary
+   *  company column is cleared on that record, the same write as editing the
+   *  column, and any association row between the two is removed too. */
   canUnlink: boolean
   /** Only a contact has one. What the record page's Email action opens the
    *  composer on when the record itself has no address. */
@@ -83,7 +83,7 @@ const toRecord = (object: RegistryObject, row: Row, kind: Kind, label: string | 
   displayName: row.name?.trim() || `Unnamed ${object.nameSingular.toLowerCase()}`,
   detail: row.detail,
   isPrimary: kind === 'primary',
-  canUnlink: kind === 'linked',
+  canUnlink: true,
   email: row.email ?? null,
   label,
   createdAt: row.created_at === null ? null : new Date(row.created_at).toISOString(),
@@ -330,6 +330,27 @@ export const associate = async (
     }
   })
 
+/** The contact or deal whose Primary company column names this company, when the
+ *  pair is one. Both sides of a link hold the column: the company's own contacts
+ *  and deals, and the record that points at it. */
+const primaryCompanyPair = (a: EntityRef, b: EntityRef): { holder: EntityRef; company: EntityRef } | null => {
+  const company = [a, b].find((ref) => ref.entityType === 'company')
+  const holder = [a, b].find((ref) => ref.entityType === 'contact' || ref.entityType === 'deal')
+  return company && holder ? { holder, company } : null
+}
+
+/** Clears the column through updateRecord, so the change is coerced, conflict-checked,
+ *  audited and on the timeline exactly as an edit to Primary company is. Runs inside
+ *  the transaction `dissociate` already holds, so either both writes land or neither. */
+const clearPrimaryCompany = async (ctx: AccountContext, tx: Tx, holder: EntityRef, company: EntityRef): Promise<boolean> => {
+  const [row] = await tx.execute<{ company_id: string | null }>(
+    sql`select company_id from ${sql.raw(`"${holder.entityType}"`)} where id = ${holder.entityId} limit 1`,
+  )
+  if (row?.company_id !== company.entityId) return false
+  await updateRecord(ctx, holder.entityType, holder.entityId, { company_id: null })
+  return true
+}
+
 export const dissociate = async (ctx: AccountContext, a: EntityRef, b: EntityRef): Promise<void> =>
   mutate(ctx, 'association', async (tx) => {
     const [from, to] = orderedPair(a, b)
@@ -339,16 +360,21 @@ export const dissociate = async (ctx: AccountContext, a: EntityRef, b: EntityRef
          and to_type = ${to.entityType} and to_id = ${to.entityId}
       returning to_id`)
 
-    if (removed.length === 0) throw new Error('Those records are not associated.')
+    const primary = primaryCompanyPair(a, b)
+    const cleared = primary ? await clearPrimaryCompany(ctx, tx, primary.holder, primary.company) : false
+    if (removed.length === 0 && !cleared) throw new Error('Those records are not associated.')
 
-    const registry = await getRegistryIn(tx)
-    const [fromName, toName] = await Promise.all([nameOf(tx, registry, from), nameOf(tx, registry, to)])
-    await recordActivity(tx, ctx, {
-      type: 'association_change',
-      subject: `unlinked ${fromName} from ${toName}`,
-      payload: { from, to },
-      links: [from, to],
-    })
+    // A cleared column already wrote its own change to the timeline.
+    if (removed.length > 0) {
+      const registry = await getRegistryIn(tx)
+      const [fromName, toName] = await Promise.all([nameOf(tx, registry, from), nameOf(tx, registry, to)])
+      await recordActivity(tx, ctx, {
+        type: 'association_change',
+        subject: `unlinked ${fromName} from ${toName}`,
+        payload: { from, to },
+        links: [from, to],
+      })
+    }
 
     return {
       result: undefined,
