@@ -134,3 +134,27 @@ test('a number field that does not parse says so in plain words', async () => {
   const { error } = (await response.json()) as { error: { json: { message: string } } }
   assert.equal(error.json.message, 'That needs to be a number.')
 })
+
+const sized = t.router({
+  choice: t.procedure.input(z.object({ options: z.array(z.string().max(120)) })).query(() => 'ok'),
+  text: t.procedure.input(z.object({ label: z.string().max(120) })).query(() => 'ok'),
+})
+
+test('a string over its limit says how long it may be, in plain words', async () => {
+  for (const [procedure, json, message] of [
+    ['choice', { options: ['x'.repeat(121)] }, 'A choice can be at most 120 characters.'],
+    ['text', { label: 'x'.repeat(121) }, 'That text can be at most 120 characters.'],
+  ] as const) {
+    const input = encodeURIComponent(JSON.stringify({ json }))
+    const response = await fetchRequestHandler({
+      endpoint: '/t',
+      req: new Request(`http://localhost/t/${procedure}?input=${input}`),
+      router: sized,
+      createContext: async () => ({ session: null, account: null }),
+      onError: () => {},
+    })
+    assert.equal(response.status, 400, procedure)
+    const { error } = (await response.json()) as { error: { json: { message: string } } }
+    assert.equal(error.json.message, message, procedure)
+  }
+})

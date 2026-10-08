@@ -7,13 +7,14 @@ import { type ObjectScope, scopeRule } from './object-scope.ts'
 const field = (key: string, label: string): FilterField => ({ key, label, type: 'text', options: [], operators: ['is'] })
 const contact = [field('first_name', 'First name'), field('last_name', 'Last name'), field('name', 'Name')]
 const company = [field('name', 'Name'), field('domain', 'Domain')]
-const scope = (filterFields: FilterField[], dates: ObjectScope['dates'] = [], settable = filterFields.map((f) => f.key)): ObjectScope => ({
+const scope = (filterFields: FilterField[], dates: ObjectScope['dates'], settable: string[], hasInbox: boolean): ObjectScope => ({
   filterFields,
   settable,
   dates,
+  hasInbox,
 })
-const contactScope = scope(contact, [{ key: 'birthday', label: 'Birthday' }], ['first_name', 'last_name', 'name', 'birthday'])
-const companyScope = scope(company, [{ key: 'founded_on', label: 'Founded on' }], ['name', 'domain', 'founded_on'])
+const contactScope = scope(contact, [{ key: 'birthday', label: 'Birthday' }], ['first_name', 'last_name', 'name', 'birthday'], true)
+const companyScope = scope(company, [{ key: 'founded_on', label: 'Founded on' }], ['name', 'domain', 'founded_on'], false)
 const noTrigger = {}
 
 const row = (key: string) => ({ field: key, operator: 'is' as const, value: 'x' })
@@ -102,4 +103,27 @@ test('a rule with nothing to drop comes back unchanged', () => {
     triggerConfig: {},
     removed: [],
   })
+})
+
+const email: StepView = { kind: 'action', type: 'send_email', config: { templateId: 't', mailboxId: 'm' } }
+
+test('a contact-only action is dropped on a company and named by its label', () => {
+  const out = scopeRule({ conditions: [], steps: [task, email], triggerConfig: noTrigger }, companyScope, contactScope)
+  assert.deepEqual(out.steps, [task])
+  assert.deepEqual(out.removed, ['Send an email'])
+})
+
+test('a contact-only action is kept on a contact', () => {
+  const out = scopeRule({ conditions: [], steps: [email], triggerConfig: noTrigger }, contactScope, contactScope)
+  assert.deepEqual(out.steps, [email])
+  assert.deepEqual(out.removed, [])
+})
+
+test('a contact-only action inside a branch is dropped at any depth', () => {
+  const steps: StepView[] = [
+    { kind: 'branch', conditions: [], matched: [email], otherwise: [{ kind: 'branch', conditions: [], matched: [], otherwise: [email, task] }] },
+  ]
+  const out = scopeRule({ conditions: [], steps, triggerConfig: noTrigger }, companyScope, contactScope)
+  assert.deepEqual(out.steps, [{ kind: 'branch', conditions: [], matched: [], otherwise: [{ kind: 'branch', conditions: [], matched: [], otherwise: [task] }] }])
+  assert.deepEqual(out.removed, ['Send an email', 'Send an email'])
 })

@@ -90,6 +90,10 @@ export const formatError = ({
   if (error.code === 'BAD_REQUEST' && error.cause instanceof ZodError) {
     const first = error.cause.issues[0]
     if (first?.code === 'invalid_type' && 'received' in first && first.received === 'NaN') return { ...shape, message: 'That needs to be a number.' }
+    if (first?.code === 'too_big' && first.origin === 'string') {
+      const what = first.path.includes('options') ? 'A choice' : 'That text'
+      return { ...shape, message: `${what} can be at most ${first.maximum} characters.` }
+    }
     return { ...shape, message: first?.message ?? 'That value was not valid.' }
   }
   return shape

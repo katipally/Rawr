@@ -1,14 +1,14 @@
 'use client'
 
 import { RunActivity, type RunView } from './run-activity.tsx'
-import { type ObjectScope, scopeRule } from './object-scope.ts'
+import { ACTIONS, CONTACT_ONLY, type ObjectScope, scopeRule } from './object-scope.ts'
 import { stepsComplete } from './steps-complete.ts'
 import { DELAY_UNITS, type DelayUnit, delayText, describeWait, waitFits, waitMinutes } from './wait-input.ts'
 import { Alert, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { groupsComplete } from '~/components/crm/filter-rules.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
@@ -29,7 +29,7 @@ type Trigger =
   | 'date_reached'
   | 'no_activity'
 
-type ActionType =
+export type ActionType =
   | 'set_field'
   | 'set_lifecycle'
   | 'assign_owner'
@@ -126,21 +126,6 @@ const TRIGGERS: { key: Trigger; label: string; objects: string[] | null }[] = [
 /** The two nothing announces. Rawr looks for them once an hour instead, and a
  *  rule fires at most once a day per record, which is what the copy says. */
 const SCANNED: Trigger[] = ['date_reached', 'no_activity']
-
-const ACTIONS: { key: ActionType; label: string }[] = [
-  { key: 'set_field', label: 'Set a field' },
-  { key: 'set_lifecycle', label: 'Move the lifecycle stage' },
-  { key: 'assign_owner', label: 'Assign an owner' },
-  { key: 'create_task', label: 'Create a task' },
-  { key: 'notify_slack', label: 'Post to Slack' },
-  { key: 'send_email', label: 'Send an email' },
-  { key: 'enroll_in_sequence', label: 'Enroll in a sequence' },
-  { key: 'webhook', label: 'Call a webhook' },
-]
-
-/** The two that write to a person. A rule watching a company or a deal cannot
- *  offer them: only a contact has an inbox. */
-const CONTACT_ONLY: ActionType[] = ['send_email', 'enroll_in_sequence']
 
 /** The trigger in words, with what it needs: the date and which side of it, or the
  *  days of silence. The object is in its own column, so it is not repeated here. */
@@ -708,6 +693,7 @@ export const AutomationList = ({
     filterFields: filterFieldsByObject[key] ?? [],
     settable: (fieldsByObject[key] ?? []).map((field) => field.key),
     dates: dateFieldsByObject[key] ?? [],
+    hasInbox: key === 'contact',
   })
 
   const changeObject = (next: string) => {
@@ -732,19 +718,25 @@ export const AutomationList = ({
   }
 
   // Seeded from the address rather than the click, so a reloaded or pasted
-  // ?automation= opens with the rule's own values.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only a different rule reseeds the form, not a refreshed copy of the same one
-  useEffect(() => {
-    if (editing === null) return
-    const seed = editing === 'new' ? null : editing
-    setName(seed?.name ?? '')
-    setTrigger(seed?.trigger ?? 'record_created')
-    setObject(seed?.objectKey ?? 'contact')
-    setDropped([])
-    setConditions(seed?.conditions ?? [])
-    setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...seed?.triggerConfig })
-    setSteps(seed && seed.steps.length > 0 ? seed.steps : [{ kind: 'action', type: 'create_task', config: {} }])
-  }, [automationParam])
+  // ?automation= opens with the rule's own values. It runs while rendering, not in
+  // an effect: an effect runs after the form has mounted, and the builders would
+  // keep the empty state they copied on the way in. Only a different rule reseeds,
+  // not a refreshed copy of the same one.
+  const seedKey = editing === null ? null : automationParam
+  const [seededFor, setSeededFor] = useState<string | null>(null)
+  if (seedKey !== seededFor) {
+    setSeededFor(seedKey)
+    if (editing !== null) {
+      const seed = editing === 'new' ? null : editing
+      setName(seed?.name ?? '')
+      setTrigger(seed?.trigger ?? 'record_created')
+      setObject(seed?.objectKey ?? 'contact')
+      setDropped([])
+      setConditions(seed?.conditions ?? [])
+      setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...seed?.triggerConfig })
+      setSteps(seed && seed.steps.length > 0 ? seed.steps : [{ kind: 'action', type: 'create_task', config: {} }])
+    }
+  }
 
   const run = async (what: () => Promise<unknown>, said: string, undo?: () => void) => {
     setBusy(true)
@@ -941,7 +933,8 @@ export const AutomationList = ({
           </>
         }
       >
-        <div className="flex flex-col gap-3">
+        {/* Keyed by the address so a switch to another rule remounts every builder, each of which copies its value once. */}
+        <div key={automationParam} className="flex flex-col gap-3">
           <Field id="automation-name" label="Name">
             <TextInput id="automation-name" value={name} onChange={(event) => setName(event.target.value)} />
           </Field>
@@ -979,7 +972,7 @@ export const AutomationList = ({
             </Select>
             {dropped.length > 0 ? (
               <Alert tone="info">
-                Removed because {labelOf(object)} has no {[...new Set(dropped)].join(', ')}.
+                Removed because {labelOf(object)} can&apos;t use {[...new Set(dropped)].join(', ')}.
               </Alert>
             ) : null}
           </Field>

@@ -8,6 +8,7 @@ import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { groupsComplete } from '~/components/crm/filter-rules.ts'
 import { useFormat } from '~/components/zone.tsx'
+import { pasteRows } from '~/lib/choices.ts'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 
@@ -281,6 +282,18 @@ export const PropertyEditor = ({
                               onChange={(event) =>
                                 setChoices(choices.map((entry, at) => (at === index ? { ...entry, value: event.target.value } : entry)))
                               }
+                              onPaste={(event) => {
+                                const { value, selectionStart, selectionEnd } = event.currentTarget
+                                const rows = pasteRows(value, selectionStart ?? value.length, selectionEnd ?? value.length, event.clipboardData.getData('text'))
+                                if (!rows) return
+                                event.preventDefault()
+                                const [first, ...more] = rows
+                                setChoices(
+                                  choices.flatMap((entry, at) =>
+                                    at === index ? [{ ...entry, value: first }, ...more.map((row) => ({ origin: null, value: row }))] : [entry],
+                                  ),
+                                )
+                              }}
                             />
                             <Button variant="tertiary" onClick={() => setChoices(choices.filter((_, at) => at !== index))}>
                               Remove
