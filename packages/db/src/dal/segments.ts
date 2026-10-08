@@ -3,7 +3,7 @@ import { segment, segmentMembership } from '../schema/marketing.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import { recordActivityFanout } from './activity.ts'
 import { assertCanView, assertCanWrite, type AccountContext } from './context.ts'
-import { accountZone, mutate, withAccount, type Tx } from './index.ts'
+import { accountZone, isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { compileFilters, parseFilters, scopeFor, type FilterGroup, type QueryScope } from './query.ts'
 import { assertIdsBelong, displayName } from './records.ts'
 import { getRegistryIn, objectOrThrow, type RegistryObject } from './registry.ts'
@@ -465,6 +465,7 @@ export const previewSegment = async (
 export const readSegment = async (ctx: AccountContext, id: string): Promise<SegmentRow | null> =>
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'contacts', 'segments')
+    if (!isUuid(id)) return null
     const registry = await getRegistryIn(tx)
     const [row] = await tx
       .select({
