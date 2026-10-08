@@ -12,8 +12,10 @@ import {
   getRecord,
   getRegistry,
   isActivityType,
+  listDismissedDuplicates,
   listTasks,
   logActivity,
+  putBackDuplicate,
   readBoard,
   readSchedule,
   readTimeline,
@@ -24,6 +26,7 @@ import {
   type McpCaller,
   type Registry,
   type RegistryObject } from '@rawr/db'
+import { z } from 'zod'
 import { readLookups, type Lookups } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { recordCreated, recordUpdated, type Actor } from '../record-events.ts'
@@ -739,8 +742,104 @@ const logActivityTool: ToolDefinition = {
   },
 }
 
-/** The ten that talk the way a person does, first, then one tool per procedure
- *  so nothing the screens can do is out of an assistant's reach. */
+// ---------------------------------------------------------------------------
+// Duplicates
+// ---------------------------------------------------------------------------
+
+const DUPLICATE_OBJECTS = ['contact', 'company'] as const
+
+/** The duplicates queue only covers contacts and companies. */
+export const duplicateObject = (value: unknown) => DUPLICATE_OBJECTS.find((key) => key === value)
+
+const DUPLICATE_OBJECT_ARG = {
+  type: 'string',
+  enum: [...DUPLICATE_OBJECTS],
+  description: 'Contacts or companies.',
+}
+
+const DUPLICATE_OBJECT_REFUSAL = 'Duplicates are kept for contacts and companies. Say which one this is.'
+
+const listSetAsideDuplicates: ToolDefinition = {
+  name: 'list_set_aside_duplicates',
+  title: 'List set-aside duplicates',
+  writes: false,
+  toolset: 'crm',
+  description: () =>
+    'Duplicate pairs that were set aside with Reject, newest first. Each row gives keep_id and absorb_id. Pass them to put_back_duplicate to return the pair to the duplicates queue. Needs write access, the same as the queue.',
+  inputSchema: () => ({
+    type: 'object',
+    properties: { object: DUPLICATE_OBJECT_ARG, limit: limit(MAX_ROWS) },
+    required: ['object'],
+    additionalProperties: false,
+  }),
+  run: async (context, args) => {
+    const object = duplicateObject(args.object)
+    if (!object) return { text: DUPLICATE_OBJECT_REFUSAL, isError: true }
+
+    const pairs = await listDismissedDuplicates(context.caller.ctx, object, {
+      limit: clamp(args.limit, DEFAULT_ROWS, MAX_ROWS),
+    })
+    if (pairs.length === 0) return { text: 'No duplicate pairs are set aside.', data: { pairs: [] } }
+
+    const lines = pairs.map(
+      (pair) =>
+        `  ${pair.keep.displayName} and ${pair.absorb.displayName}, set aside ${pair.setAsideAt.toISOString().slice(0, 10)}. keep_id ${pair.keep.id}, absorb_id ${pair.absorb.id}`,
+    )
+    return {
+      text: [`${pairs.length} set aside:`, ...lines].join('\n'),
+      data: {
+        pairs: pairs.map((pair) => ({
+          keepId: pair.keep.id,
+          absorbId: pair.absorb.id,
+          keep: pair.keep.displayName,
+          absorb: pair.absorb.displayName,
+          setAsideAt: pair.setAsideAt.toISOString(),
+        })),
+      },
+    }
+  },
+}
+
+const putBackDuplicateTool: ToolDefinition = {
+  name: 'put_back_duplicate',
+  title: 'Put a set-aside duplicate back',
+  writes: true,
+  toolset: 'crm',
+  description: () =>
+    'Undo Reject on a duplicate pair: the pair goes back in the duplicates queue to be merged or set aside again. Take keep_id and absorb_id from list_set_aside_duplicates. Needs write access, the same as Reject.',
+  inputSchema: () => ({
+    type: 'object',
+    properties: {
+      object: DUPLICATE_OBJECT_ARG,
+      keep_id: { type: 'string', description: 'The older record of the pair, from list_set_aside_duplicates.' },
+      absorb_id: { type: 'string', description: 'The newer record of the pair, from list_set_aside_duplicates.' },
+    },
+    required: ['object', 'keep_id', 'absorb_id'],
+    additionalProperties: false,
+  }),
+  run: async (context, args) => {
+    const object = duplicateObject(args.object)
+    if (!object) return { text: DUPLICATE_OBJECT_REFUSAL, isError: true }
+
+    const ids = z.object({ keep_id: z.uuid(), absorb_id: z.uuid() }).safeParse(args)
+    if (!ids.success || ids.data.keep_id === ids.data.absorb_id) {
+      return {
+        text: 'A duplicate pair is two different records. Take keep_id and absorb_id from list_set_aside_duplicates.',
+        isError: true,
+      }
+    }
+
+    await putBackDuplicate(context.caller.ctx, object, { leftId: ids.data.keep_id, rightId: ids.data.absorb_id })
+    return {
+      text: `Put back in the duplicates queue: keep ${ids.data.keep_id}, absorb ${ids.data.absorb_id}.`,
+      data: { object, keepId: ids.data.keep_id, absorbId: ids.data.absorb_id },
+    }
+  },
+}
+
+/** The ten that talk the way a person does, first, then the hand-written pairs
+ *  that need their own sentence, then one tool per procedure so nothing the
+ *  screens can do is out of an assistant's reach. */
 export const CURATED_TOOLS: ToolDefinition[] = [
   searchRecords,
   getRecordTool,
@@ -752,6 +851,8 @@ export const CURATED_TOOLS: ToolDefinition[] = [
   createNoteTool,
   createTaskTool,
   logActivityTool,
+  listSetAsideDuplicates,
+  putBackDuplicateTool,
 ]
 
 // ---------------------------------------------------------------------------

@@ -1257,6 +1257,45 @@ try {
   )
 
   // -----------------------------------------------------------------------
+  section('put back: a set-aside duplicate pair returns to the queue over MCP')
+
+  const pairA = await call(salesToken, 'create_record', {
+    object: 'contact',
+    fields: { first_name: 'F5', last_name: 'Pair A', email: 'f5-verify-pair-a@northwind-labs.test' },
+  })
+  const pairB = await call(salesToken, 'create_record', {
+    object: 'contact',
+    fields: { first_name: 'F5', last_name: 'Pair B', email: 'f5-verify-pair-b@northwind-labs.test' },
+  })
+  for (const made of [pairA, pairB]) if (made.data?.id) created.contacts.push(made.data.id)
+  const [aId, bId] = [pairA.data?.id, pairB.data?.id]
+  const sameTwo = (pair: ToolData) => [pair.keepId, pair.absorbId].sort().join() === [aId, bId].sort().join()
+
+  const dismissed = await call(salesToken, 'crm_records_dismiss_duplicate', { object: 'contact', leftId: aId, rightId: bId })
+  check('a pair is set aside over MCP', !dismissed.isError, dismissed.text)
+
+  const setAside = await call(salesToken, 'list_set_aside_duplicates', { object: 'contact' })
+  const row = setAside.data?.pairs?.find(sameTwo)
+  check('the set-aside list shows it, with the ids a put back takes', row !== undefined, setAside.text)
+
+  const viewerPut = await call(viewerToken, 'put_back_duplicate', { object: 'contact', keep_id: row?.keepId, absorb_id: row?.absorbId })
+  check('a read-only token cannot put a pair back', viewerPut.isError, viewerPut.text)
+  const stillSet = await call(salesToken, 'list_set_aside_duplicates', { object: 'contact' })
+  check('and the pair is still set aside after the refusal', stillSet.data?.pairs?.some(sameTwo) === true, stillSet.text)
+
+  const putBackArgs = { object: 'contact', keep_id: row?.keepId, absorb_id: row?.absorbId }
+  const mailOnlyPut = await rpc(salesToken, 'tools/call', { name: 'put_back_duplicate', arguments: putBackArgs }, 'mail')
+  check(
+    'with the CRM group off, put back is refused the way a missing name is',
+    /^Unknown tool: put_back_duplicate\./.test(mailOnlyPut.body?.error?.message ?? ''),
+    mailOnlyPut.body?.error?.message ?? '',
+  )
+  const putBack = await call(salesToken, 'put_back_duplicate', putBackArgs)
+  check('put back succeeds for a person with write access', !putBack.isError, putBack.text)
+  const afterPut = await call(salesToken, 'list_set_aside_duplicates', { object: 'contact' })
+  check('and the pair is no longer set aside', afterPut.data?.pairs?.some(sameTwo) === false, afterPut.text)
+
+  // -----------------------------------------------------------------------
   section('tenancy')
 
   const crossRead = await call(probeToken, 'get_record', { object: 'deal', id: mggId })
@@ -1405,6 +1444,9 @@ try {
       await tx.execute(sql`delete from activity where subject like ${`${MARK}%`} or body like ${`${MARK}%`}`)
       await tx.execute(sql`delete from task where title like ${`${MARK}%`}`)
       await tx.execute(sql`delete from deal where name like ${`${MARK}%`}`)
+      await tx.execute(sql`delete from duplicate_dismissal where entity_type = 'contact' and (left_id in (
+        select id from contact where email like 'f5-verify%@northwind-labs.test')
+        or right_id in (select id from contact where email like 'f5-verify%@northwind-labs.test'))`)
       await tx.execute(sql`delete from contact where email like 'f5-verify%@northwind-labs.test'`)
       await tx.execute(sql`delete from webhook_endpoint where name like ${`${MARK}%`}`)
       await tx.execute(sql`delete from mcp_call where token_id in (
