@@ -720,12 +720,12 @@ export const AutomationList = ({
   // Seeded from the address rather than the click, so a reloaded or pasted
   // ?automation= opens with the rule's own values. It runs while rendering, not in
   // an effect: an effect runs after the form has mounted, and the builders would
-  // keep the empty state they copied on the way in. Only a different rule reseeds,
-  // not a refreshed copy of the same one.
-  const seedKey = editing === null ? null : automationParam
-  const [seededFor, setSeededFor] = useState<string | null>(null)
-  if (seedKey !== seededFor) {
-    setSeededFor(seedKey)
+  // keep the empty state they copied on the way in. It follows the row object, not
+  // the id: router.refresh after a save hands back a new object, and a reopen that
+  // raced that refresh has to take the saved values once they arrive.
+  const [seeded, setSeeded] = useState<{ of: AutomationRowView | 'new' | null; round: number }>({ of: null, round: 0 })
+  if (editing !== seeded.of) {
+    setSeeded({ of: editing, round: seeded.round + 1 })
     if (editing !== null) {
       const seed = editing === 'new' ? null : editing
       setName(seed?.name ?? '')
@@ -934,7 +934,7 @@ export const AutomationList = ({
         }
       >
         {/* Keyed by the address so a switch to another rule remounts every builder, each of which copies its value once. */}
-        <div key={automationParam} className="flex flex-col gap-3">
+        <div key={seeded.round} className="flex flex-col gap-3">
           <Field id="automation-name" label="Name">
             <TextInput id="automation-name" value={name} onChange={(event) => setName(event.target.value)} />
           </Field>

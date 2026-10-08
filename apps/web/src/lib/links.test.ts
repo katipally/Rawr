@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, fromHubspotPath, layoutParams, objectView, recordPath, accountInPath, safeFrom, safePath, tabParams, threadPath } from './links.ts'
+import { exportCsvPath, exportPath, fromHubspotPath, layoutParams, newViewHref, objectView, recordPath, accountInPath, safeFrom, safePath, tabParams, threadPath } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -316,6 +316,16 @@ test('a layout switch keeps the search, pipeline, sort and filters but drops the
 test('a layout switch from a calendar with nothing else set lands on the bare layout', () => {
   const url = objectView('datasaur', 'deal', 'all', 'board', layoutParams({ group: 'close_date', month: '2026-10' }))
   assert.equal(url, '/contacts/datasaur/objects/deal/views/all/board')
+})
+
+test('add view keeps the grouping and filters on screen, and opens the save dialog without the page', () => {
+  const url = new URL(newViewHref('datasaur', 'deal', 'all', 'board', { group: 'deal_type', filters: '[]', q: 'acme', page: '2' }), 'https://rawr.test')
+  assert.equal(url.pathname, '/contacts/datasaur/objects/deal/views/all/board')
+  assert.equal(url.searchParams.get('group'), 'deal_type')
+  assert.equal(url.searchParams.get('filters'), '[]')
+  assert.equal(url.searchParams.get('q'), 'acme')
+  assert.equal(url.searchParams.get('page'), null)
+  assert.equal(url.searchParams.get('view'), 'new')
 })
 
 test('a thread opens bare, or carries the inbox filters it was opened from', () => {

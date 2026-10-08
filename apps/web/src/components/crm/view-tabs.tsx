@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { objectView, tabParams, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { newViewHref, objectView, tabParams, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
@@ -62,7 +62,6 @@ export const ViewTabs = ({
 
   // The open tab always shows, even when it is not pinned, so a link into an
   // unpinned view does not land on a bar that has no tab for where you are.
-  const currentHref = href({ slug: current })
   const tabs = views.filter((view) => view.pinned || view.slug === current)
   const unpinned = views.filter((view) => !view.pinned && view.slug !== current)
 
@@ -276,7 +275,7 @@ export const ViewTabs = ({
 
       {canWrite ? (
         <Link
-          href={`${currentHref}${currentHref.includes('?') ? '&' : '?'}view=new`}
+          href={newViewHref(account, object, current, currentKind, params)}
           aria-label="Add view"
           title="Add view"
           className="grid size-8 place-items-center rounded-pill text-body no-underline hover:bg-fill"

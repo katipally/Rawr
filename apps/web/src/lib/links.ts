@@ -195,6 +195,12 @@ export const objectView = (
  *  being left, so a tab carries only the search text and the pipeline. */
 export const tabParams = ({ q, pipeline }: ListParams): ListParams => ({ q, pipeline })
 
+/** Add view opens the save dialog on the screen as it is, so the new view starts
+ *  from what is on screen: filters, sort, columns, grouping and search. Only the
+ *  page is left out. */
+export const newViewHref = (account: string, object: string, view: string, kind: ViewKind, params: ListParams): string =>
+  objectView(account, object, view, kind, { ...params, page: undefined, view: 'new' } as ListParams)
+
 /** `group` is a board's field and a calendar's place-on field, and `month` only
  *  the calendar reads. A switch drops all three so the destination applies the
  *  view's saved value for its own kind. */
