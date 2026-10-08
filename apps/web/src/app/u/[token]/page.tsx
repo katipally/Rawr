@@ -94,14 +94,27 @@ const UnsubscribePage = async ({
     )
   }
 
-  if (done === '1') {
+  const kind = target.subscriptionTypeName ? (
+    <strong className="text-body">{target.subscriptionTypeName}</strong>
+  ) : null
+
+  if (done === '1' || target.alreadyDone) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-lg flex-col justify-center p-6">
         <div className="rounded-panel border border-line bg-surface p-4">
           <h1 className="text-base font-medium">You are unsubscribed</h1>
           <p className="mt-1 text-secondary">
-            {target.contactEmail} will not receive any more of this. Anything already scheduled has
-            been stopped.
+            {kind ? (
+              <>
+                {target.contactEmail} is unsubscribed from {kind}. Sequences that send {kind} have
+                stopped for them.
+              </>
+            ) : (
+              <>
+                {target.contactEmail} will not receive any more sequence emails from us. Anything
+                already scheduled has been stopped.
+              </>
+            )}
           </p>
         </div>
       </main>
@@ -113,8 +126,18 @@ const UnsubscribePage = async ({
       <div className="rounded-panel border border-line bg-surface p-4">
         <h1 className="text-base font-medium">Stop receiving these emails?</h1>
         <p className="mt-1 text-secondary">
-          This stops <strong className="text-body">{target.sequenceName}</strong> and anything else of
-          the same kind to {target.contactEmail}. You can still reply to the sender directly.
+          {kind ? (
+            <>
+              This unsubscribes <strong className="text-body">{target.contactEmail}</strong> from{' '}
+              {kind}. Sequences that send {kind} stop for them. Nothing else changes.
+            </>
+          ) : (
+            <>
+              This stops every sequence email we would send to{' '}
+              <strong className="text-body">{target.contactEmail}</strong>.
+            </>
+          )}{' '}
+          You can still reply to the sender directly.
         </p>
         <form action={unsubscribeAction} className="mt-4">
           <input type="hidden" name="token" value={token} />

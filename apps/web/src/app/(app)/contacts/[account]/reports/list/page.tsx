@@ -27,7 +27,7 @@ const ReportsListScreen = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <ReportsHeader account={account} current="dashboards" from={range.fromDay} to={range.toDay} />
+      <ReportsHeader account={account} current="dashboards" from={range.fromDay} to={range.toDay} clipped={range.clipped} />
       <ReportList
         account={account}
         from={range.fromDay}

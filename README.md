@@ -135,7 +135,7 @@ the real database. Each exits non-zero on failure:
  db:verify:forms          schema rules, spam scoring, capture, review queue
  db:verify:booking        availability, holds, double-booking, timezones
  db:verify:mail           stored bodies, who may read a mailbox, the inbox
- db:verify:sequences      enrolment, the queue, tracking, every way one stops
+ db:verify:sequences      enrollment, the queue, tracking, every way one stops
  db:verify:integrations   connection tests, health, idempotency, replay
  db:verify:mcp            the agent surface, against the real /api/mcp — so
                           this one needs the app running

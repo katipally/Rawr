@@ -45,7 +45,7 @@ const dayStart = (day: string, timeZone: string): Date => {
 export const rangeFrom = (
   params: RangeParams,
   timeZone: string,
-): Range & { fromDay: string; toDay: string } => {
+): Range & { fromDay: string; toDay: string; clipped: boolean } => {
   // A date with no time means the whole of that day, so the end is exclusive at
   // midnight the following morning rather than excluding the day it names.
   const lastDay = params.to ?? dayKey(new Date(), timeZone)
@@ -65,5 +65,5 @@ export const rangeFrom = (
 
 /** The account's timezone, set under Settings, Account Defaults, so everybody in
  *  it reads the same days: two people on one report get one set of numbers. */
-export const reportRange = (session: Session, params: RangeParams): Range & { fromDay: string; toDay: string } =>
+export const reportRange = (session: Session, params: RangeParams): Range & { fromDay: string; toDay: string; clipped: boolean } =>
   rangeFrom(params, session.accountTimezone)

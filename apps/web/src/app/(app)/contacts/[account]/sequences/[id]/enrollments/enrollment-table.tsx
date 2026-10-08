@@ -68,9 +68,14 @@ export const EnrollmentTable = ({
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<Row[]>([])
+  /** Ticked rows the bulk Unenroll left out because they are already removed. */
+  const [skipped, setSkipped] = useState(0)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const { page, pager } = usePagedRows(rows, 'contacts')
   const ticked = rows.filter((row) => selected.has(row.id))
+  const unenrollable = ticked.filter((row) => row.state !== 'removed')
+  const on = sequence.state === 'active'
+  const resumeHint = 'Turn the sequence on first'
 
   /** One existing call per contact, side by side: a page holds at most 200, and
    *  one refused contact should not keep the others where they were. */
@@ -116,13 +121,21 @@ export const EnrollmentTable = ({
                 </button>
               ) : null}
               {row.state === 'paused' ? (
-                <button type="button" className={rowPill} disabled={busy} onClick={() => void resume([row])}>
+                <button
+                  type="button"
+                  className={rowPill}
+                  disabled={busy || !on}
+                  title={on ? undefined : resumeHint}
+                  onClick={() => void resume([row])}
+                >
                   Resume
                 </button>
               ) : null}
-              <button type="button" className={rowPill} disabled={busy} onClick={() => setRemoving([row])}>
-                Unenroll
-              </button>
+              {row.state === 'removed' ? null : (
+                <button type="button" className={rowPill} disabled={busy} onClick={() => setRemoving([row])}>
+                  Unenroll
+                </button>
+              )}
             </RowActions>
           ) : null}
         </span>
@@ -220,12 +233,24 @@ export const EnrollmentTable = ({
                   <button
                     type="button"
                     className={bulkAction}
-                    disabled={busy || !ticked.some((row) => row.state === 'paused')}
+                    disabled={busy || !on || !ticked.some((row) => row.state === 'paused')}
+                    title={on ? undefined : resumeHint}
                     onClick={() => void resume(ticked.filter((row) => row.state === 'paused'))}
                   >
                     Resume
                   </button>
-                  <button type="button" className={bulkAction} disabled={busy} onClick={() => setRemoving(ticked)}>
+                  {!on && ticked.some((row) => row.state === 'paused') ? (
+                    <span className="ml-1 min-w-0 shrink truncate text-small text-secondary">{resumeHint}</span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={bulkAction}
+                    disabled={busy || unenrollable.length === 0}
+                    onClick={() => {
+                      setSkipped(ticked.length - unenrollable.length)
+                      setRemoving(unenrollable)
+                    }}
+                  >
                     Unenroll
                   </button>
                   <IconButton
@@ -240,7 +265,7 @@ export const EnrollmentTable = ({
             empty={
               <EmptyState
                 title="Nobody here"
-                description="Enrol somebody from a contact, or from a selection on the contacts list."
+                description="Enroll somebody from a contact, or from a selection on the contacts list."
               />
             }
           />
@@ -252,22 +277,33 @@ export const EnrollmentTable = ({
         open={removing.length > 0}
         title={
           removing.length === 1
-            ? `Take ${removing[0]?.contactName ?? 'them'} out of ${sequence.name}?`
-            : `Take ${fmt.number(removing.length)} contacts out of ${sequence.name}?`
+            ? `Unenroll ${removing[0]?.contactName ?? 'them'} from ${sequence.name}?`
+            : `Unenroll ${fmt.number(removing.length)} contacts from ${sequence.name}?`
         }
         confirm="Unenroll"
         busy={busy}
-        onCancel={() => setRemoving([])}
+        onCancel={() => {
+          setRemoving([])
+          setSkipped(0)
+        }}
         onConfirm={() => {
           const targets = removing
           void runEach(
             targets,
             (row) => api.sequences.enrollments.remove.mutate({ id: row.id }),
             targets.length === 1 ? `${targets[0]?.contactName ?? 'They'} is out of this sequence.` : 'They are out of this sequence.',
-          ).then(() => setRemoving([]))
+          ).then(() => {
+            setRemoving([])
+            setSkipped(0)
+          })
         }}
       >
         <p>No further step of this sequence is sent to them.</p>
+        {skipped > 0 ? (
+          <p>
+            {fmt.number(skipped)} already removed {skipped === 1 ? 'is' : 'are'} left out.
+          </p>
+        ) : null}
       </ConfirmDialog>
     </div>
   )

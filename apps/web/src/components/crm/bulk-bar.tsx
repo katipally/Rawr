@@ -454,11 +454,11 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
         <EnrollDialog
           contactIds={ids}
           contactLabel={`${ids.length} ${noun}`}
-          onClose={() => setShowEnroll(false)}
-          onEnrolled={() => {
+          onClose={() => {
+            setShowEnroll(false)
             onDone()
-            router.refresh()
           }}
+          onEnrolled={() => router.refresh()}
         />
       ) : null}
 

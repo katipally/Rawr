@@ -35,7 +35,7 @@ const DashboardScreen = async ({
   if (!found) {
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <ReportsHeader account={account} current="dashboards" from={range.fromDay} to={range.toDay} />
+        <ReportsHeader account={account} current="dashboards" from={range.fromDay} to={range.toDay} clipped={range.clipped} />
         <EmptyState
           title="That dashboard is not here"
           description="It may have been deleted, or it may be somebody's private one."

@@ -146,3 +146,19 @@ export type MergeFieldKey = (typeof MERGE_FIELD_KEYS)[number]
 
 export const unknownMergeFields = (template: string): string[] =>
   mergeFields(template).filter((key) => !(MERGE_FIELD_KEYS as readonly string[]).includes(key))
+
+export const SEQUENCE_NAME_MAX = 120
+
+/** The name a duplicate takes: "Name (copy)", then "Name (copy 2)", and so on,
+ *  the first one nobody in the account already has. The base is cut so the whole
+ *  name still fits SEQUENCE_NAME_MAX, by code point so no character is split. */
+export const copyName = (name: string, taken: ReadonlySet<string>): string => {
+  const candidate = (copy: number): string => {
+    const suffix = copy === 1 ? ' (copy)' : ` (copy ${copy})`
+    const base = Array.from(name).slice(0, SEQUENCE_NAME_MAX - suffix.length).join('')
+    return `${base}${suffix}`
+  }
+  let copy = 1
+  while (taken.has(candidate(copy))) copy += 1
+  return candidate(copy)
+}

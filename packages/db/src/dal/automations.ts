@@ -79,7 +79,7 @@ export const ACTION_TYPES: ActionType[] = [
  *  action named rather than failing on the first record that matches it. */
 export const CONTACT_ONLY_ACTIONS: Partial<Record<ActionType, string>> = {
   send_email: 'Send an email',
-  enroll_in_sequence: 'Enrol in a sequence',
+  enroll_in_sequence: 'Enroll in a sequence',
 }
 
 export type AutomationAction = { type: ActionType; config: Record<string, unknown> }

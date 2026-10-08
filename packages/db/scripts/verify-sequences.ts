@@ -1,33 +1,42 @@
 import { sql } from 'drizzle-orm'
+import { isDeepStrictEqual } from 'node:util'
 import postgres from 'postgres'
 import type { AccountContext } from '../src/dal/context.ts'
 import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { ingestMessage, saveMailbox, type IncomingMessage } from '../src/dal/messages.ts'
 import { createRecord, deleteRecord, mergeRecords } from '../src/dal/records.ts'
-import { setSubscription } from '../src/dal/subscriptions.ts'
+import { createSubscriptionType, setSubscription, unsubscribeByToken } from '../src/dal/subscriptions.ts'
+import { saveAutomation } from '../src/dal/automations.ts'
 import { setTaskStatus } from '../src/dal/tasks.ts'
 import {
+  cloneSequence,
   claimEnrollmentRun,
   createStepTask,
+  deleteSequence,
   directTracking,
   enroll,
+  type EnrollOutcome,
   listEnrollments,
   listSends,
   listSequences,
+  pauseEnrollment,
   readSequence,
+  removeEnrollment,
   recordClick,
   recordOpen,
   recordSend,
   recordSendFailure,
+  resumeEnrollment,
   saveSequence,
   saveSteps,
   setSequenceState,
   setTrackingConsentRequired,
   trackingAllowed,
-  unsubscribeByToken,
+  type SequenceStep,
 } from '../src/dal/sequences.ts'
-import { SANDBOX, cleanup } from './fixture.ts'
+import { publicEdgeContext } from '../src/dal/forms.ts'
+import { PEER, SANDBOX, cleanup, seatFor } from './fixture.ts'
 
 /** The engine, end to end, without Google: enrolment and every rule that refuses
  *  it, the claim that stops two workers sending the same step, and every way a
@@ -41,6 +50,8 @@ const check = (ok: boolean, label: string, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  ${detail}` : ''}`)
   if (!ok) failures.push(label)
 }
+
+const reasonOf = (row: EnrollOutcome | undefined): string | undefined => (row && !row.enrolled ? row.reason : undefined)
 
 const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
   try {
@@ -171,7 +182,7 @@ try {
   })
   check(outcomes.find((row) => row.contactId === person.id)?.enrolled === true, 'somebody with an address goes in')
   check(
-    outcomes.find((row) => row.contactId === noEmail.id)?.reason === 'No email address.',
+    reasonOf(outcomes.find((row) => row.contactId === noEmail.id)) === 'No email address.',
     'and somebody without one is refused, by name',
   )
 
@@ -189,7 +200,7 @@ try {
   )
 
   const again = await enroll(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: box.id })
-  check(again[0]?.reason === 'Already in this sequence.', 'enrolling the same person twice is refused')
+  check(reasonOf(again[0]) === 'Already in this sequence.', 'enrolling the same person twice is refused')
 
   const readOnly = await refused(() =>
     enroll(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: readOnlyBox!.id as string }),
@@ -516,9 +527,131 @@ try {
 
   const blockedNow = await enroll(sales, { sequenceId: created.id, contactIds: [fifth.id], mailboxId: box.id })
   check(
-    blockedNow[0]?.reason?.includes('opted out') === true,
+    reasonOf(blockedNow[0])?.includes('opted out') === true,
     'and they cannot be enrolled again',
-    blockedNow[0]?.reason ?? '',
+    reasonOf(blockedNow[0]) ?? '',
+  )
+
+  console.log('')
+  console.log('-- the unsubscribe link ------------------------------------------')
+
+  // The same scope the public link route builds: a stranger, with marketing and nothing else.
+  const publicScope = { ...publicEdgeContext(accountId), actorKind: 'public' as const }
+  const everyDay = { sendWindow: { days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '23:59', timezone: 'UTC' } }
+  const optA = await createSubscriptionType(admin, { name: `Verify unsub A ${stamp}` })
+  const optB = await createSubscriptionType(admin, { name: `Verify unsub B ${stamp}` })
+  const seqA1 = await saveSequence(sales, { name: `Verify unsub A1 ${stamp}`, settings: { ...everyDay, subscriptionTypeId: optA.id } })
+  const seqA2 = await saveSequence(sales, { name: `Verify unsub A2 ${stamp}`, settings: { ...everyDay, subscriptionTypeId: optA.id } })
+  const seqB = await saveSequence(sales, { name: `Verify unsub B ${stamp}`, settings: { ...everyDay, subscriptionTypeId: optB.id } })
+  const seqNone = await saveSequence(sales, { name: `Verify unsub none ${stamp}`, settings: everyDay })
+  const olive = await createRecord(admin, 'contact', { first_name: 'Olive', last_name: 'Opted', email: `unsub-${stamp}-x@partner1.example` })
+  const yara = await createRecord(admin, 'contact', { first_name: 'Yara', last_name: 'Typeless', email: `unsub-${stamp}-y@partner1.example` })
+  for (const sequenceId of [seqA1.id, seqA2.id, seqB.id]) {
+    await enroll(sales, { sequenceId, contactIds: [olive.id], mailboxId: box.id })
+  }
+  for (const sequenceId of [seqNone.id, seqA1.id, seqB.id]) {
+    await enroll(sales, { sequenceId, contactIds: [yara.id], mailboxId: box.id })
+  }
+  const tokenFor = async (sequenceId: string, contactId: string) => {
+    const [row] = await owner`select unsubscribe_token from sequence_enrollment where sequence_id = ${sequenceId} and contact_id = ${contactId}`
+    return row!.unsubscribe_token as string
+  }
+  const statesOf = async (contactId: string) =>
+    Object.fromEntries(
+      (await owner`select s.name, e.state from sequence_enrollment e join sequence s on s.id = e.sequence_id where e.contact_id = ${contactId}`).map(
+        (row) => [row.name as string, row.state as string],
+      ),
+    )
+  const unsubscribeEvents = async (contactId: string) =>
+    Number(
+      (await owner`select count(*)::int as n from sequence_event ev join sequence_enrollment e on e.id = ev.enrollment_id
+                    where e.contact_id = ${contactId} and ev.kind = 'unsubscribe'`)[0]?.n,
+    )
+
+  check(await unsubscribeByToken(publicScope, await tokenFor(seqA1.id, olive.id)), 'the link from a type works')
+  const oliveStates = await statesOf(olive.id)
+  check(
+    oliveStates[`Verify unsub A1 ${stamp}`] === 'unsubscribed' && oliveStates[`Verify unsub A2 ${stamp}`] === 'unsubscribed',
+    'one link stops every enrollment of that type',
+    JSON.stringify(oliveStates),
+  )
+  check(
+    oliveStates[`Verify unsub B ${stamp}`] === 'paused',
+    'a contact enrolled in a different type is untouched by it',
+    oliveStates[`Verify unsub B ${stamp}`] ?? 'missing',
+  )
+  const [oliveOptA] = await owner`select state from subscription_state where contact_id = ${olive.id} and subscription_type_id = ${optA.id}`
+  const [oliveOptB] = await owner`select state from subscription_state where contact_id = ${olive.id} and subscription_type_id = ${optB.id}`
+  check(oliveOptA?.state === 'unsubscribed', 'and it writes the opt-out for that type', String(oliveOptA?.state))
+  check(oliveOptB === undefined, 'but no opt-out for the other type', String(oliveOptB?.state))
+
+  const eventsBefore = await unsubscribeEvents(olive.id)
+  check(
+    !(await unsubscribeByToken(publicScope, await tokenFor(seqA1.id, olive.id))),
+    'a second use changes nothing',
+  )
+  check(
+    (await unsubscribeEvents(olive.id)) === eventsBefore && eventsBefore === 2,
+    'and writes no second round of events',
+    `${eventsBefore}`,
+  )
+
+  check(await unsubscribeByToken(publicScope, await tokenFor(seqNone.id, yara.id)), 'the link from a sequence with no type works')
+  const yaraStates = await statesOf(yara.id)
+  check(
+    Object.values(yaraStates).every((state) => state === 'unsubscribed'),
+    'with no type it stops every enrollment the contact has',
+    JSON.stringify(yaraStates),
+  )
+  const [yaraOpt] = await owner`select state from subscription_state where contact_id = ${yara.id}`
+  check(yaraOpt === undefined, 'and records no opt-out, because there is no type to record one against')
+
+  // Turned off on unsubscribe, so the app's own opt-out leaves the enrollment
+  // running. The send itself must still refuse.
+  const gate = await saveSequence(sales, {
+    name: `Verify unsub gate ${stamp}`,
+    settings: { ...everyDay, stopOnUnsubscribe: false, subscriptionTypeId: optA.id },
+  })
+  await saveSteps(sales, {
+    sequenceId: gate.id,
+    steps: [{ kind: 'email', delayDays: 0, delayHours: 0, subject: 'Hello', bodyText: 'A note.' }],
+  })
+  await setSequenceState(sales, { id: gate.id, state: 'active' })
+  const wren = await createRecord(admin, 'contact', { first_name: 'Wren', last_name: 'Gated', email: `unsub-${stamp}-w@partner1.example` })
+  await enroll(sales, { sequenceId: gate.id, contactIds: [wren.id], mailboxId: box.id })
+  const [wrenRow] = await listEnrollments(sales, { sequenceId: gate.id })
+  await setSubscription(admin, { contactId: wren.id, typeId: optA.id, state: 'unsubscribed' })
+  const [wrenAfterRecord] = await owner`select state from sequence_enrollment where id = ${wrenRow!.id}`
+  check(wrenAfterRecord?.state === 'active', 'a sequence that does not stop on unsubscribe keeps the enrollment', String(wrenAfterRecord?.state))
+  await owner`update sequence_enrollment set next_run_at = now() where id = ${wrenRow!.id}`
+  const refusedSend = await claimEnrollmentRun(sales, wrenRow!.id)
+  check(
+    refusedSend.claimed === null && refusedSend.reason.includes('opted out'),
+    'but it does not send to them once they have opted out',
+    refusedSend.claimed === null ? refusedSend.reason : 'claimed',
+  )
+  const [wrenStopped] = await owner`select state from sequence_enrollment where id = ${wrenRow!.id}`
+  check(wrenStopped?.state === 'unsubscribed', 'and the enrollment is stopped as unsubscribed', String(wrenStopped?.state))
+
+  const quinn = await createRecord(admin, 'contact', { first_name: 'Quinn', last_name: 'Fresh', email: `unsub-${stamp}-q@partner1.example` })
+  const nemo = await createRecord(admin, 'contact', { first_name: 'Nemo', last_name: 'Mail' })
+  const named = await enroll(sales, { sequenceId: seqA1.id, contactIds: [olive.id, quinn.id, nemo.id], mailboxId: box.id })
+  const nameOf = (contactId: string) => named.find((row) => row.contactId === contactId)
+  check(nameOf(quinn.id)?.enrolled === true && nameOf(quinn.id)?.displayName === 'Quinn Fresh', 'an enrolled contact is named in the outcome')
+  check(
+    nameOf(olive.id)?.enrolled === false && nameOf(olive.id)?.displayName === 'Olive Opted' && reasonOf(nameOf(olive.id))?.includes('opted out') === true,
+    'a refused contact is named with the reason',
+    JSON.stringify(nameOf(olive.id)),
+  )
+  check(nameOf(nemo.id)?.displayName === 'Nemo Mail' && nameOf(nemo.id)?.enrolled === false, 'a contact with no address is still named')
+
+  const cora = await createRecord(admin, 'company', { name: `Verify unsub co ${stamp}` })
+  await createRecord(admin, 'contact', { first_name: 'Cora', last_name: 'Company', email: `unsub-${stamp}-c@partner1.example`, company_id: cora.id })
+  const companyWide = await enroll(sales, { sequenceId: seqNone.id, companyId: cora.id, mailboxId: box.id })
+  check(
+    companyWide.length === 1 && companyWide[0]?.displayName === 'Cora Company' && companyWide[0]?.enrolled === true,
+    'the company-wide enroll names the people it enrolled',
+    JSON.stringify(companyWide),
   )
 
   console.log('')
@@ -526,9 +659,9 @@ try {
 
   const listed = (await listSequences(sales)).find((row) => row.id === created.id)
   check(listed !== undefined, 'the sequence is listed with its numbers')
-  // Three were sent and one of them bounced, which stops counting as sent: a
-  // delivery rate that includes mail that never arrived is not a rate.
-  check(listed?.stats.sent === 2, 'sends are counted, and a bounced one is not one of them', String(listed?.stats.sent))
+  // Three left and one of them bounced. Sent counts all three, the way the report
+  // does; the bounce is shown beside it, and it is never an open or a click.
+  check(listed?.stats.sent === 3, 'sent counts every mail that left, a bounced one included', String(listed?.stats.sent))
   check(listed?.stats.replied === 1, 'and so are replies', String(listed?.stats.replied))
   check(listed?.stats.bounced === 1, 'and bounces', String(listed?.stats.bounced))
   check(listed?.stats.unsubscribed === 2, 'and opt-outs', String(listed?.stats.unsubscribed))
@@ -767,6 +900,266 @@ try {
   )
 
   console.log('')
+  console.log('-- a paused sequence ----------------------------------------------')
+
+  // Four people, each in a state the pause has to meet: enrolled and left alone,
+  // parked on a task, paused by hand, and marked active by hand under a paused
+  // sequence. Nothing here may send while the sequence is off.
+  const [heldA, heldB, heldC, heldD] = await Promise.all(
+    ['a', 'b', 'c', 'd'].map((tag) =>
+      createRecord(admin, 'contact', { first_name: 'Paused', last_name: tag.toUpperCase(), email: `paused-${tag}-${stamp}@partner1.example` }),
+    ),
+  )
+  await enroll(sales, {
+    sequenceId: created.id,
+    contactIds: [heldA!.id, heldB!.id, heldC!.id, heldD!.id],
+    mailboxId: box.id,
+  })
+  const rowFor = async (contactId: string) =>
+    (await listEnrollments(sales, { sequenceId: created.id })).find((row) => row.contactId === contactId)!
+  const [a, b, c, d] = await Promise.all([heldA!, heldB!, heldC!, heldD!].map((p) => rowFor(p.id)))
+  const stateOf = async (id: string) => (await listEnrollments(sales, { sequenceId: created.id })).find((row) => row.id === id)?.state
+
+  const dFirst = (await claimEnrollmentRun(sales, d!.id)).claimed
+  await recordSend(sales, {
+    enrollmentId: d!.id,
+    stepId: dFirst!.step!.id,
+    mailboxId: box.id,
+    providerMessageId: `pm-paused-d-${stamp}`,
+    internetMessageId: `<paused-d-${stamp}@sandbox.test>`,
+    token: `tok-paused-d-${stamp}`,
+    links: [],
+    subject: 'Hello',
+    contactId: heldD!.id,
+  })
+  const parkedD = await createStepTask(sales, {
+    enrollmentId: d!.id,
+    contactId: heldD!.id,
+    title: 'Ring them',
+    body: null,
+    assigneeId: salesUser!.id as string,
+  })
+
+  await pauseEnrollment(sales, c!.id)
+  await setSequenceState(sales, { id: created.id, state: 'paused' })
+  check(
+    (await stateOf(a!.id)) === 'paused' && (await stateOf(b!.id)) === 'paused',
+    'pausing the sequence pauses who is running in it',
+  )
+  check((await stateOf(c!.id)) === 'paused', 'a person paused by hand stays paused', await stateOf(c!.id) ?? '')
+  check((await stateOf(d!.id)) === 'waiting_task', 'and a person parked on a task is left where they are')
+
+  const resumeA = await refused(() => resumeEnrollment(sales, a!.id))
+  check(resumeA === 'Turn the sequence on first.', 'resuming one of them while the sequence is paused is refused', resumeA ?? 'accepted')
+  const resumeC = await refused(() => resumeEnrollment(sales, c!.id))
+  check(resumeC === 'Turn the sequence on first.', 'and so is resuming one paused by hand', resumeC ?? 'accepted')
+  check((await stateOf(c!.id)) === 'paused', 'a refused resume changes nothing', await stateOf(c!.id) ?? '')
+
+  // The row says active while the sequence is paused, which is what a worker
+  // would see if the cascade had missed it. The claim must not take it.
+  await owner`update sequence_enrollment set state = 'active', next_run_at = now() where id = ${a!.id}::uuid`
+  const heldClaim = await claimEnrollmentRun(sales, a!.id)
+  check(heldClaim.claimed === null, 'an enrollment marked active under a paused sequence is not claimed', heldClaim.claimed === null ? heldClaim.reason : 'claimed')
+  const [heldLease] = await owner`select lease_until from sequence_enrollment where id = ${a!.id}::uuid`
+  check(heldLease?.lease_until === null, 'and takes no lease', String(heldLease?.lease_until))
+
+  // Finishing the task under a paused sequence must not start the step.
+  await setTaskStatus(sales, parkedD.taskId, 'done')
+  check((await stateOf(d!.id)) === 'paused', 'a task finished under a paused sequence leaves the person paused', await stateOf(d!.id) ?? '')
+
+  await setSequenceState(sales, { id: created.id, state: 'active' })
+  check((await stateOf(b!.id)) === 'active', 'turning the sequence on resumes the people it paused', await stateOf(b!.id) ?? '')
+  check((await stateOf(d!.id)) === 'active', 'and the person whose task was finished under the pause', await stateOf(d!.id) ?? '')
+
+  const bClaim = (await claimEnrollmentRun(sales, b!.id)).claimed
+  check(bClaim?.step?.position === 0, 'and once it is on, the first person is claimed and sent to', String(bClaim?.step?.position))
+  await recordSend(sales, {
+    enrollmentId: b!.id,
+    stepId: bClaim!.step!.id,
+    mailboxId: box.id,
+    providerMessageId: `pm-paused-b-${stamp}`,
+    internetMessageId: `<paused-b-${stamp}@sandbox.test>`,
+    token: `tok-paused-b-${stamp}`,
+    links: [],
+    subject: 'Hello',
+    contactId: heldB!.id,
+  })
+  const dClaim = (await claimEnrollmentRun(sales, d!.id)).claimed
+  check(dClaim?.step?.position === 2, 'and the one whose task was finished moves on to the step after it', String(dClaim?.step?.position))
+
+  await pauseEnrollment(sales, c!.id)
+  await resumeEnrollment(sales, c!.id)
+  check((await stateOf(c!.id)) === 'active', 'a resume by hand works once the sequence is on', await stateOf(c!.id) ?? '')
+
+  console.log('')
+  console.log('-- archive, restore, copy and delete ----------------------------------')
+
+  const always = { sendWindow: { days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '23:59', timezone: 'UTC' } }
+  const stateIn = async (sequenceId: string, contactId: string) =>
+    (await listEnrollments(sales, { sequenceId })).find((row) => row.contactId === contactId)?.state
+  const sequenceState = async (id: string) => (await readSequence(sales, id))?.sequence.state
+
+  const life = await saveSequence(sales, {
+    name: `Verify life ${stamp}`,
+    description: 'Made for the lifecycle checks.',
+    settings: always,
+  })
+  await saveSteps(sales, {
+    sequenceId: life.id,
+    steps: [
+      { kind: 'email', delayDays: 0, delayHours: 0, subject: 'First {{first_name|there}}', subjectB: 'First, tested', bodyText: 'One.' },
+      { kind: 'call', delayDays: 1, delayHours: 0, taskTitle: 'Ring them' },
+      { kind: 'email', delayDays: 2, delayHours: 3, subject: 'Third', bodyText: 'Three.' },
+    ],
+  })
+  const lifeA = await createRecord(admin, 'contact', { first_name: 'Life', last_name: 'A', email: `life-${stamp}-a@partner1.example` })
+  const lifeB = await createRecord(admin, 'contact', { first_name: 'Life', last_name: 'B', email: `life-${stamp}-b@partner1.example` })
+
+  await enroll(sales, { sequenceId: life.id, contactIds: [lifeA.id], mailboxId: box.id })
+  check(
+    (await stateIn(life.id, lifeA.id)) === 'paused',
+    'a draft takes people in paused, so nothing goes out before it is on',
+    (await stateIn(life.id, lifeA.id)) ?? '',
+  )
+  await setSequenceState(sales, { id: life.id, state: 'active' })
+  check((await stateIn(life.id, lifeA.id)) === 'active', 'turning a draft on starts the people already in it')
+
+  await setSequenceState(sales, { id: life.id, state: 'archived' })
+  check((await sequenceState(life.id)) === 'archived', 'archiving takes the sequence off the active list')
+  check((await stateIn(life.id, lifeA.id)) === 'paused', 'and pauses who is running in it', await stateIn(life.id, lifeA.id) ?? '')
+  check(
+    (await refused(() => enroll(sales, { sequenceId: life.id, contactIds: [lifeB.id], mailboxId: box.id })))
+      === 'That sequence is archived. Restore it to use it again.',
+    'and says how to use it again',
+  )
+  const archivedClaim = await claimEnrollmentRun(sales, (await listEnrollments(sales, { sequenceId: life.id }))[0]!.id)
+  check(archivedClaim.claimed === null, 'an archived sequence sends nothing, even to someone it paused')
+
+  await setSequenceState(sales, { id: life.id, state: 'paused' })
+  check((await sequenceState(life.id)) === 'paused', 'restoring an archived sequence returns it to paused')
+  check((await stateIn(life.id, lifeA.id)) === 'paused', 'and it is still paused until somebody turns it on')
+  await setSequenceState(sales, { id: life.id, state: 'active' })
+  check((await stateIn(life.id, lifeA.id)) === 'active', 'turning it on after a restore resumes them')
+
+  await setSequenceState(sales, { id: life.id, state: 'archived' })
+  await setSequenceState(sales, { id: life.id, state: 'active' })
+  check((await stateIn(life.id, lifeA.id)) === 'active', 'turning on straight from archived resumes them too')
+
+  const copy = await cloneSequence(sales, life.id)
+  const copied = await readSequence(sales, copy.id)
+  check(copied?.sequence.name === `Verify life ${stamp} (copy)`, 'a copy takes the name with a copy suffix', copied?.sequence.name ?? '')
+  check(copied?.sequence.state === 'draft', 'and starts as a draft')
+  check(copied?.sequence.description === 'Made for the lifecycle checks.', 'with the description kept')
+  const stepsOf = (steps: SequenceStep[]) => JSON.stringify(steps.map((step) => ({ ...step, id: undefined })))
+  check(
+    stepsOf(copied?.steps ?? []) === stepsOf((await readSequence(sales, life.id))?.steps ?? []),
+    'with every step copied: order, waits, subjects, bodies and tasks',
+  )
+  check(isDeepStrictEqual(copied?.sequence.settings.sendWindow, always.sendWindow), 'and the send window')
+  check((await listEnrollments(sales, { sequenceId: copy.id })).length === 0, 'and nobody in it')
+
+  const copyTwo = await cloneSequence(sales, life.id)
+  check(
+    (await readSequence(sales, copyTwo.id))?.sequence.name === `Verify life ${stamp} (copy 2)`,
+    'a second copy is numbered rather than refused',
+  )
+
+  const wp = await saveSequence(sales, {
+    name: `Verify life wp ${stamp}`,
+    sender: 'woodpecker',
+    settings: { ...always, woodpeckerCampaignId: 4242 },
+  })
+  const wpCopy = await cloneSequence(sales, wp.id)
+  const wpCopied = await readSequence(sales, wpCopy.id)
+  check(wpCopied?.sequence.sender === 'woodpecker', 'a copy of a Woodpecker sequence is still a Woodpecker one')
+  check(
+    wpCopied?.sequence.settings.woodpeckerCampaignId === null,
+    'but not its campaign, which would hand the same people over twice',
+  )
+
+  const copyName = copied!.sequence.name
+  check(
+    (await refused(() => saveSequence(sales, { id: life.id, name: '   ' }))) === 'A sequence needs a name.',
+    'a rename to nothing is refused',
+  )
+  check(
+    (await refused(() => saveSequence(sales, { id: life.id, name: copyName })))?.includes('already has a sequence called') === true,
+    'a rename to a name the account already has is refused in the same words as a create',
+  )
+  await saveSequence(sales, { id: life.id, name: `  Verify life renamed ${stamp}  ` })
+  const renamed = await readSequence(sales, life.id)
+  check(renamed?.sequence.name === `Verify life renamed ${stamp}`, 'a rename is trimmed and saved')
+  check(renamed?.sequence.description === 'Made for the lifecycle checks.', 'and keeps the description')
+  check(renamed?.sequence.state === 'active', 'and keeps the state')
+  const sameName = await refused(() => saveSequence(sales, { id: life.id, name: `Verify life renamed ${stamp}` }))
+  check(sameName === null, 'a rename to its own name is not a clash', sameName ?? '')
+
+  const viewerRefusals = [
+    await refused(() => saveSequence(viewer, { id: life.id, name: 'Viewer name' })),
+    await refused(() => cloneSequence(viewer, life.id)),
+    await refused(() => deleteSequence(viewer, copy.id)),
+  ]
+  check(
+    viewerRefusals.every((message) => message?.includes('sales') === true),
+    'a read-only seat cannot rename, copy or delete',
+    viewerRefusals.join(' | '),
+  )
+
+  const peerRow = (await owner`select id from account where slug = ${PEER.slug}`)[0]!
+  const peer: AccountContext = {
+    accountId: peerRow.id as string,
+    actorId: await seatFor(peerRow.id as string, PEER.slug),
+    actorKind: 'user',
+    isSuperAdmin: true,
+    viewHubs: [],
+    editHubs: ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'],
+  }
+  const notHere = 'That sequence is not in this account.'
+  check((await refused(() => saveSequence(peer, { id: life.id, name: 'Hijacked' }))) === notHere, 'another account cannot rename a sequence')
+  check((await refused(() => cloneSequence(peer, life.id))) === notHere, 'another account cannot copy one')
+  check((await refused(() => deleteSequence(peer, copy.id))) === notHere, 'another account cannot delete one')
+  check(
+    (await readSequence(sales, life.id))?.sequence.name === `Verify life renamed ${stamp}`,
+    'and the sequence is what it was',
+  )
+
+  const empty = await saveSequence(sales, { name: `Verify life empty ${stamp}` })
+  await deleteSequence(sales, empty.id)
+  check((await readSequence(sales, empty.id)) === null, 'a sequence nobody was in is deleted')
+
+  await deleteSequence(sales, copy.id)
+  check((await readSequence(sales, copy.id)) === null, 'and so is a copy that was never run')
+  const [orphanSteps] = await owner`select count(*)::int as n from sequence_step where sequence_id = ${copy.id}::uuid`
+  check(Number(orphanSteps?.n) === 0, 'its steps go with it', String(orphanSteps?.n))
+
+  await enroll(sales, { sequenceId: copyTwo.id, contactIds: [lifeB.id], mailboxId: box.id })
+  await removeEnrollment(sales, (await listEnrollments(sales, { sequenceId: copyTwo.id }))[0]!.id)
+  const removedBlock = await refused(() => deleteSequence(sales, copyTwo.id))
+  check(
+    removedBlock?.includes('has had people in it') === true,
+    'a sequence with a person removed from it cannot be deleted',
+    removedBlock ?? 'deleted',
+  )
+  check((await readSequence(sales, copyTwo.id)) !== null, 'and it is still there after the refusal')
+
+  const feeder = await saveAutomation(admin, {
+    name: `Verify life feeder ${stamp}`,
+    trigger: 'record_created',
+    objectKey: 'contact',
+    conditions: [],
+    steps: [{ kind: 'action', type: 'enroll_in_sequence', config: { sequenceId: wpCopy.id, mailboxId: box.id } }],
+  })
+  const feederBlock = await refused(() => deleteSequence(sales, wpCopy.id))
+  check(
+    feederBlock === `The automation "Verify life feeder ${stamp}" enrolls people in Verify life wp ${stamp} (copy). Change it before deleting this.`,
+    'an automation that enrolls into a sequence blocks its deletion, by name',
+    feederBlock ?? 'deleted',
+  )
+  await owner`delete from automation where id = ${feeder.id}::uuid`
+  await deleteSequence(sales, wpCopy.id)
+  check((await readSequence(sales, wpCopy.id)) === null, 'and once that automation is gone, the copy can go')
+
+  console.log('')
   console.log('-- what the queue rests on ----------------------------------------')
 
   // All three depend on migration 0063.
@@ -795,9 +1188,15 @@ try {
   await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from sequence where id = ${created.id}::uuid`)
   })
+  await owner`delete from subscription_state where subscription_type_id in (select id from subscription_type where name like ${`Verify unsub % ${stamp}`})`
+  await owner`delete from subscription_type where name like ${`Verify unsub % ${stamp}`}`
+  await owner`delete from sequence where name like ${`Verify unsub % ${stamp}`}`
   await owner`delete from message_thread where provider_thread_id like ${`%-${stamp}`}`
   await owner`delete from mailbox where id in (${box.id}, ${readOnlyBox!.id})`
-  await owner`delete from contact where account_id = ${accountId} and (email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or email like ${`orphan-${stamp}%`} or email like ${`lost-${stamp}%`} or email like ${`paced-${stamp}%`} or email like ${`quiet-${stamp}%`} or (first_name = 'Lost' and last_name = 'Address') or (first_name = 'No' and last_name = 'Address'))`
+  await owner`delete from automation where name like ${`Verify life%${stamp}%`}`
+  await owner`delete from sequence where name like ${`Verify life%${stamp}%`}`
+  await owner`delete from contact where account_id = ${accountId} and (email like ${`life-${stamp}-%`} or email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or email like ${`orphan-${stamp}%`} or email like ${`unsub-${stamp}-%`} or email like ${`lost-${stamp}%`} or email like ${`paced-${stamp}%`} or email like ${`quiet-${stamp}%`} or email like ${`paused-%-${stamp}@%`} or (first_name = 'Lost' and last_name = 'Address') or (first_name = 'No' and last_name = 'Address') or (first_name = 'Nemo' and last_name = 'Mail'))`
+  await owner`delete from company where name = ${`Verify unsub co ${stamp}`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
   await cleanup()

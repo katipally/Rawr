@@ -1,4 +1,7 @@
 import {
+  SEQUENCE_NAME_MAX,
+  cloneSequence,
+  deleteSequence,
   enroll,
   enrollmentsForContact,
   listEmailTemplates,
@@ -61,7 +64,11 @@ export const sequencesRouter = router({
     .input(
       z.object({
         id: z.uuid().nullable().optional(),
-        name: z.string().trim().min(1).max(120),
+        name: z
+          .string()
+          .trim()
+          .min(1)
+          .max(SEQUENCE_NAME_MAX, `A sequence name can be ${SEQUENCE_NAME_MAX} characters at most.`),
         description: z.string().trim().max(500).nullable().optional(),
         sender: z.enum(['gmail', 'woodpecker']).optional(),
         settings: settings.optional(),
@@ -72,6 +79,14 @@ export const sequencesRouter = router({
   setState: protectedProcedure
     .input(z.object({ id: z.uuid(), state: z.enum(['draft', 'active', 'paused', 'archived']) }))
     .mutation(({ ctx, input }) => call(() => setSequenceState(ctx.account, input))),
+
+  duplicate: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => cloneSequence(ctx.account, input.id))),
+
+  delete: protectedProcedure
+    .input(z.object({ id: z.uuid() }))
+    .mutation(({ ctx, input }) => call(() => deleteSequence(ctx.account, input.id))),
 
   saveSteps: protectedProcedure
     .input(

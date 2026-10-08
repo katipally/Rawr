@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { capReached, inWindow, mergeFields, mergeTokenPattern, nextSendAt, renderMergeFields, type SendWindow } from './sequence-rules.ts'
+import {
+  SEQUENCE_NAME_MAX,
+  capReached,
+  copyName,
+  inWindow,
+  mergeFields,
+  mergeTokenPattern,
+  nextSendAt,
+  renderMergeFields,
+  type SendWindow,
+} from './sequence-rules.ts'
 
 /** The arithmetic that decides when somebody's prospect gets an email. Getting it
  *  wrong sends at three in the morning, or on a Sunday, or twice. */
@@ -165,4 +175,24 @@ test('a merge token does not match a longer key, bare prose, or a dot-separated 
   assert.ok(!pattern('title').test('"title"'))
   assert.ok(!pattern('contact.title').test('{{contactXtitle}}'))
   assert.ok(pattern('contact.title').test('{{contact.title}}'))
+})
+
+test('a copy is named with a copy suffix, then numbered past the ones taken', () => {
+  assert.equal(copyName('Outbound', new Set(['Outbound'])), 'Outbound (copy)')
+  assert.equal(copyName('Outbound', new Set(['Outbound', 'Outbound (copy)'])), 'Outbound (copy 2)')
+  assert.equal(copyName('Outbound', new Set(['Outbound (copy)', 'Outbound (copy 3)'])), 'Outbound (copy 2)')
+})
+
+test('a copy of a name at the length limit still fits it', () => {
+  const longest = 'x'.repeat(SEQUENCE_NAME_MAX)
+  const copy = copyName(longest, new Set([longest]))
+  assert.equal(copy.length, SEQUENCE_NAME_MAX)
+  assert.ok(copy.endsWith(' (copy)'))
+})
+
+test('a copy never splits a character outside the basic plane', () => {
+  const longest = '🙂'.repeat(SEQUENCE_NAME_MAX)
+  const copy = copyName(longest, new Set([longest]))
+  assert.equal(Array.from(copy).length, SEQUENCE_NAME_MAX)
+  assert.ok(!/[\uD800-\uDBFF]$/.test(copy))
 })

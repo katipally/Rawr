@@ -5,7 +5,7 @@ import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, writeAudit } from './index.ts'
-import { onUnsubscribe } from './sequences.ts'
+import { endEnrollmentsForLink, onUnsubscribe, unsubscribeTarget } from './sequences.ts'
 
 export type SubscriptionState = 'subscribed' | 'unsubscribed' | 'unspecified'
 
@@ -108,6 +108,33 @@ export const setSubscription = async (
         after: { state: input.state, typeId: input.typeId },
       },
     }
+  })
+
+/** The unsubscribe link in a mail. Ends the enrollments it covers and records the
+ *  opt-out for the sequence's type, in one transaction, so a stopped enrollment
+ *  never exists without its opt-out. Idempotent: a second use finds nothing live
+ *  and the opt-out already recorded, so it writes nothing and returns false. */
+export const unsubscribeByToken = async (ctx: AccountContext, token: string): Promise<boolean> =>
+  withAccount(ctx, async (tx) => {
+    const target = await unsubscribeTarget(tx, token)
+    if (!target) return false
+
+    const ended = await endEnrollmentsForLink(tx, ctx, target)
+
+    let recorded = false
+    if (target.subscriptionTypeId) {
+      const [current] = await tx
+        .select({ state: subscriptionState.state })
+        .from(subscriptionState)
+        .where(
+          sql`${subscriptionState.contactId} = ${target.contactId} and ${subscriptionState.subscriptionTypeId} = ${target.subscriptionTypeId}`,
+        )
+      if (current?.state !== 'unsubscribed') {
+        await setSubscription(ctx, { contactId: target.contactId, typeId: target.subscriptionTypeId, state: 'unsubscribed', source: 'link' })
+        recorded = true
+      }
+    }
+    return ended.length > 0 || recorded
   })
 
 // ------------------------------------------------------- managing the types

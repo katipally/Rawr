@@ -168,11 +168,11 @@ const CARDS: CardDef[] = [
     group: 'Sequences',
     render: ({ sequences }, fmt) => {
       const rows = sequences?.sequences ?? []
-      const sent = sum(rows, (row) => row.sent)
+      const contacted = sum(rows, (row) => row.contacted)
       return {
         kind: 'metric',
-        value: fmt.number(sent),
-        hint: `${percent(sum(rows, (row) => row.replied), sent)} replied`,
+        value: fmt.number(sum(rows, (row) => row.sent)),
+        hint: `${percent(sum(rows, (row) => row.replied), contacted)} of ${contacted} people replied`,
       }
     },
   },
@@ -195,10 +195,10 @@ const CARDS: CardDef[] = [
     group: 'Sequences',
     render: ({ sequences }) => ({
       kind: 'table',
-      columns: ['Sequence', 'Sent', 'Opened', 'Replied'],
+      columns: ['Sequence', 'Sent', 'Bounced', 'Opened', 'Replied'],
       rows: (sequences?.sequences ?? [])
         .slice(0, TOP)
-        .map((row) => [row.sequence, row.sent, row.opened, row.replied]),
+        .map((row) => [row.sequence, row.sent, row.bounced, row.opened, row.replied]),
     }),
   },
 

@@ -121,7 +121,7 @@ const ACTIONS: { key: ActionType; label: string }[] = [
   { key: 'create_task', label: 'Create a task' },
   { key: 'notify_slack', label: 'Post to Slack' },
   { key: 'send_email', label: 'Send an email' },
-  { key: 'enroll_in_sequence', label: 'Enrol in a sequence' },
+  { key: 'enroll_in_sequence', label: 'Enroll in a sequence' },
   { key: 'webhook', label: 'Call a webhook' },
 ]
 

@@ -88,8 +88,11 @@ export const ComposeDialog = ({
             threadId: threadId ?? null,
             contactId: contactId ?? null,
           })
-          .then(() => {
-            toast('success', 'Sent. It is on the record and in the inbox already.')
+          .then((result) => {
+            toast(
+              'success',
+              result.stored ? 'Sent. It is on the record and in the inbox already.' : 'Sent. It is not on a contact, so it is not in the inbox.',
+            )
             onSent?.()
             router.refresh()
             forget()

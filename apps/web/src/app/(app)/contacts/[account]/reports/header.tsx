@@ -2,6 +2,8 @@ import { MAX_DAYS } from '@rawr/db'
 import { PageHeader, Tabs } from '@rawr/ui'
 import { RangePicker } from '~/components/reports/range-picker.tsx'
 import { reportsPath } from '~/lib/links.ts'
+import { rangeLabel } from '~/lib/range-label.ts'
+import { getFormat } from '~/server/format.ts'
 
 /** The frame around all six reports: which one is open, and over what range.
  *
@@ -21,39 +23,43 @@ const TABS = [
   { key: 'dashboards', label: 'Dashboards' },
 ]
 
-const daysIn = (from: string, to: string): number =>
-  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1
-
-export const ReportsHeader = ({
+export const ReportsHeader = async ({
   account,
   current,
   from,
   to,
+  clipped,
 }: {
   account: string
   /** The tab's own key: '' for the overview. */
   current: string
   from: string
   to: string
-}) => (
-  <>
-    <PageHeader
-      title="Reports"
-      lead={`${from} to ${to}${daysIn(from, to) >= MAX_DAYS ? `. Reports cover at most ${MAX_DAYS} days, so a longer range is cut to its most recent ${MAX_DAYS}.` : ''}`}
-      why="Every chart carries the same figures as a table underneath it, so a number can be read off rather than estimated from a shape. The range lives in the URL, which means a link to a report is a link to the period somebody was looking at."
-      action={<RangePicker from={from} to={to} />}
-    />
-
-    <div className="border-b border-divider">
-      <Tabs
-        label="Reports"
-        items={TABS.map((tab) => ({
-          key: tab.key || 'overview',
-          label: tab.label,
-          href: reportsPath(account, { ...(tab.key ? { tab: tab.key } : {}), from, to }),
-          current: current === tab.key,
-        }))}
+  /** The range was longer than the reports cover, and was cut to its last MAX_DAYS. */
+  clipped: boolean
+}) => {
+  const fmt = await getFormat()
+  const label = rangeLabel(from, to, fmt.today(), fmt)
+  return (
+    <>
+      <PageHeader
+        title="Reports"
+        lead={clipped ? `${label}. Reports cover at most ${MAX_DAYS} days, so this range was cut to its most recent ${MAX_DAYS}.` : label}
+        why="Every chart carries the same figures as a table underneath it, so a number can be read off rather than estimated from a shape. The range lives in the URL, which means a link to a report is a link to the period somebody was looking at."
+        action={<RangePicker from={from} to={to} />}
       />
-    </div>
-  </>
-)
+
+      <div className="border-b border-divider">
+        <Tabs
+          label="Reports"
+          items={TABS.map((tab) => ({
+            key: tab.key || 'overview',
+            label: tab.label,
+            href: reportsPath(account, { ...(tab.key ? { tab: tab.key } : {}), from, to }),
+            current: current === tab.key,
+          }))}
+        />
+      </div>
+    </>
+  )
+}

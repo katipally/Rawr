@@ -42,7 +42,10 @@ export type ComposeInput = {
   contactId?: string | null | undefined
 }
 
-export type ComposeResult = { messageId: string | null; threadId: string | null }
+/** `stored` is false when the sent mail was not kept as a message: the ingest
+ *  keeps nothing for a thread with nobody on it who is a contact or at a company
+ *  here. The ids are null then. */
+export type ComposeResult = { stored: boolean; messageId: string | null; threadId: string | null }
 
 export const compose = async (ctx: AccountContext, input: ComposeInput): Promise<ComposeResult> => {
   const box = await readMailbox(ctx, input.mailboxId)
@@ -146,6 +149,7 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   }
 
   return {
+    stored: stored?.stored === true,
     messageId: stored?.stored ? stored.messageId : null,
     threadId: stored?.stored ? stored.threadId : null,
   }

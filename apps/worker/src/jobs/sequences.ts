@@ -30,7 +30,9 @@ const dispatch = defineJob({
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
       select e.id, e.account_id, a.slug from sequence_enrollment e
         join account a on a.id = e.account_id
+        join sequence s on s.id = e.sequence_id
        where e.state = 'active'
+         and s.state = 'active'
          and e.next_run_at is not null
          and e.next_run_at <= now()
          and (e.lease_until is null or e.lease_until < now())

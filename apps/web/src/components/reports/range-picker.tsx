@@ -5,6 +5,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useRef, useState } from 'react'
 import { todayIn } from '~/lib/format.ts'
+import { rangeLabel } from '~/lib/range-label.ts'
 import { useFormat, useZone } from '~/components/zone.tsx'
 
 /** The range every report reads, kept in the URL so a report somebody found worth
@@ -29,7 +30,7 @@ const startOf = (to: string, days: number): string => {
 /** A preset's name, or the two days, for the tag a dashboard card carries. */
 export const useRangeLabel = (from: string, to: string): string => {
   const fmt = useFormat()
-  return PRESETS.find((entry) => startOf(to, entry.days) === from)?.label ?? `${fmt.dayShort(from)} to ${fmt.dayShort(to)}`
+  return PRESETS.find((entry) => startOf(to, entry.days) === from)?.label ?? rangeLabel(from, to, fmt.today(), fmt)
 }
 
 const item =

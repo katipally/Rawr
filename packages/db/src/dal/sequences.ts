@@ -19,6 +19,7 @@ import { mutate, withAccount, type Tx } from './index.ts'
 import {
   DEFAULT_WINDOW,
   MERGE_FIELD_KEYS,
+  copyName,
   nextSendAt,
   unknownMergeFields,
   type SendWindow } from './sequence-rules.ts'
@@ -97,7 +98,9 @@ export type SequenceStats = {
   replied: number
   bounced: number
   unsubscribed: number
+  /** Every mail that left, bounced ones included, as the sequence report counts it. */
   sent: number
+  /** Delivered mail only: a bounce is never an open or a click. */
   opened: number
   clicked: number
 }
@@ -123,11 +126,11 @@ const statsSql = sql`
     'bounced',      (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'bounced'),
     'unsubscribed', (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'unsubscribed'),
     'sent',         (select count(*) from sequence_send d join sequence_enrollment e on e.id = d.enrollment_id
-                      where e.sequence_id = s.id and d.state = 'sent'),
+                      where e.sequence_id = s.id and d.state in ('sent', 'bounced')),
     'opened',       (select count(*) from sequence_send d join sequence_enrollment e on e.id = d.enrollment_id
-                      where e.sequence_id = s.id and d.open_count > 0),
+                      where e.sequence_id = s.id and d.state = 'sent' and d.open_count > 0),
     'clicked',      (select count(*) from sequence_send d join sequence_enrollment e on e.id = d.enrollment_id
-                      where e.sequence_id = s.id and d.click_count > 0)
+                      where e.sequence_id = s.id and d.state = 'sent' and d.click_count > 0)
   )`
 
 export const listSequences = async (ctx: AccountContext): Promise<SequenceRow[]> =>
@@ -262,6 +265,15 @@ export const readSequence = async (
     }
   })
 
+const nameTakenError = (name: string): Error => new Error(`This account already has a sequence called "${name}".`)
+
+/** The unique index on (account, name) decides a clash. Matching the constraint
+ *  rather than any unique violation keeps an unrelated one from being read as this. */
+const isNameClash = (cause: unknown): boolean => {
+  const driver = (cause as { cause?: { code?: string; constraint_name?: string } } | null)?.cause
+  return driver?.code === '23505' && driver.constraint_name === 'sequence_account_name_key'
+}
+
 export const saveSequence = async (
   ctx: AccountContext,
   input: {
@@ -304,6 +316,9 @@ export const saveSequence = async (
           updatedAt: new Date(),
         })
         .where(eq(sequence.id, input.id))
+        .catch((cause: unknown) => {
+          throw isNameClash(cause) ? nameTakenError(name) : cause
+        })
       await resnapWaiting(tx, input.id, before.settings.sendWindow, settings.sendWindow)
       return {
         result: { id: input.id },
@@ -326,7 +341,7 @@ export const saveSequence = async (
       })
       .onConflictDoNothing()
       .returning({ id: sequence.id })
-    if (!row) throw new Error(`This account already has a sequence called "${name}".`)
+    if (!row) throw nameTakenError(name)
     return {
       result: { id: row.id },
       audit: { entity: 'sequence', entityId: row.id, action: 'create', after: { name } },
@@ -480,15 +495,17 @@ export const setSequenceState = async (
 
     await tx.update(sequence).set({ state: input.state, updatedAt: new Date() }).where(eq(sequence.id, input.id))
 
-    // Pausing the sequence pauses what is in flight; resuming puts them back on
-    // the queue where they were rather than starting anybody over.
-    if (input.state === 'paused') {
+    // Anything but on pauses what is in flight, so a paused, drafted or archived
+    // sequence never shows people as Active. Turning it on from any other state
+    // puts the paused people back on the queue where they were, rather than
+    // starting anybody over. Draft people are paused at enrolment, so draft and
+    // archived need the same resume as paused.
+    if (input.state !== 'active') {
       await tx
         .update(sequenceEnrollment)
         .set({ state: 'paused' })
         .where(and(eq(sequenceEnrollment.sequenceId, input.id), eq(sequenceEnrollment.state, 'active')))
-    }
-    if (input.state === 'active' && before.state === 'paused') {
+    } else if (before.state !== 'active') {
       await tx
         .update(sequenceEnrollment)
         .set({ state: 'active' })
@@ -594,9 +611,78 @@ export const saveSteps = async (
     }
   })
 
+/** A draft copy of a sequence: its description, settings and steps, with nobody in
+ *  it. The Woodpecker campaign is not carried over, because a second sequence
+ *  pointed at it would hand the same people over twice. */
+export const cloneSequence = (ctx: AccountContext, id: string): Promise<{ id: string }> =>
+  mutate(ctx, 'sequence', async (tx) => {
+    const [source] = await tx.select().from(sequence).where(eq(sequence.id, id))
+    if (!source) throw new Error('That sequence is not in this account.')
+    const taken = new Set((await tx.select({ name: sequence.name }).from(sequence)).map((row) => row.name))
+    const name = copyName(source.name, taken)
+    const [row] = await tx
+      .insert(sequence)
+      .values({
+        accountId: ctx.accountId,
+        name,
+        description: source.description,
+        sender: source.sender,
+        settings: { ...source.settings, woodpeckerCampaignId: null },
+        ownerId: ctx.actorId,
+        createdBy: ctx.actorId,
+      })
+      .onConflictDoNothing()
+      .returning({ id: sequence.id })
+    if (!row) throw nameTakenError(name)
+
+    await tx.execute(sql`
+      insert into sequence_step (account_id, sequence_id, position, kind, delay_days, delay_hours,
+                                 subject, subject_b, body_html, body_text, task_title, task_body)
+      select account_id, ${row.id}::uuid, position, kind, delay_days, delay_hours,
+             subject, subject_b, body_html, body_text, task_title, task_body
+        from sequence_step where sequence_id = ${id}::uuid`)
+
+    return {
+      result: { id: row.id },
+      audit: { entity: 'sequence', entityId: row.id, action: 'duplicate', after: { name, copiedFrom: id } },
+    }
+  })
+
+/** Only a sequence nobody has been enrolled in can go. Anybody who was, removed or
+ *  not, leaves a record of what was sent to them, so the sequence is archived
+ *  instead. An automation that enrols into it would fail on every run, so it has
+ *  to be changed first. */
+export const deleteSequence = (ctx: AccountContext, id: string): Promise<void> =>
+  mutate(ctx, 'sequence', async (tx) => {
+    const [before] = await tx.select({ name: sequence.name }).from(sequence).where(eq(sequence.id, id))
+    if (!before) throw new Error('That sequence is not in this account.')
+
+    // Every send belongs to an enrollment, so no enrollment means no send either.
+    const [ran] = await tx
+      .select({ id: sequenceEnrollment.id })
+      .from(sequenceEnrollment)
+      .where(eq(sequenceEnrollment.sequenceId, id))
+      .limit(1)
+    if (ran) throw new Error(`${before.name} has had people in it, so it cannot be deleted. Archive it instead.`)
+
+    const [automation] = await tx.execute<{ name: string }>(sql`
+      select name from automation where steps::text like ${`%${id}%`} limit 1`)
+    if (automation) {
+      throw new Error(`The automation "${automation.name}" enrolls people in ${before.name}. Change it before deleting this.`)
+    }
+
+    await tx.delete(sequence).where(eq(sequence.id, id))
+    return {
+      result: undefined,
+      audit: { entity: 'sequence', entityId: id, action: 'delete', before: { name: before.name } },
+    }
+  })
+
 // ---------------------------------------------------------------- enrolment
 
-export type EnrollOutcome = { contactId: string; enrolled: boolean; reason?: string }
+export type EnrollOutcome =
+  | { contactId: string; displayName: string; enrolled: true }
+  | { contactId: string; displayName: string; enrolled: false; reason: string }
 
 /** Puts contacts into a sequence, and says per contact why any of them did not go
  *  in. A silent partial success is how somebody discovers three months later that
@@ -611,7 +697,7 @@ export const enroll = async (
       .from(sequence)
       .where(eq(sequence.id, input.sequenceId))
     if (!found) throw new Error('That sequence is not in this account.')
-    if (found.state === 'archived') throw new Error('That sequence is archived. Copy it to use it again.')
+    if (found.state === 'archived') throw new Error('That sequence is archived. Restore it to use it again.')
 
     // Everyone at a company, resolved here rather than in the browser: a company
     // with four hundred contacts should not send four hundred ids over the wire,
@@ -628,7 +714,7 @@ export const enroll = async (
         ).map((row) => row.id)
       : (input.contactIds ?? [])
     if (contactIds.length === 0) {
-      if (!input.companyId) throw new Error('Nobody was named to enrol.')
+      if (!input.companyId) throw new Error('Nobody was named to enroll.')
       const [target] = await tx
         .select({ deletedAt: company.deletedAt })
         .from(company)
@@ -664,7 +750,7 @@ export const enroll = async (
       .select({
         id: contact.id,
         email: contact.email,
-        label: sql<string>`coalesce(nullif(trim(concat_ws(' ', ${contact.firstName}, ${contact.lastName})), ''), ${contact.email})`,
+        label: sql<string>`coalesce(nullif(trim(concat_ws(' ', ${contact.firstName}, ${contact.lastName})), ''), ${contact.email}, 'Unnamed contact')`,
       })
       .from(contact)
       .where(inArray(contact.id, ids))
@@ -701,19 +787,19 @@ export const enroll = async (
     for (const id of ids) {
       const person = byId.get(id)
       if (!person) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'That contact is not in this account.' })
+        outcomes.push({ contactId: id, displayName: 'Unknown contact', enrolled: false, reason: 'That contact is not in this account.' })
         continue
       }
       if (!person.email) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'No email address.' })
+        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'No email address.' })
         continue
       }
       if (optedOut.has(id)) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'They have opted out of this kind of mail.' })
+        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'They have opted out of this kind of mail.' })
         continue
       }
       if (alreadyIn.has(id)) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'Already in this sequence.' })
+        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'Already in this sequence.' })
         continue
       }
 
@@ -732,7 +818,7 @@ export const enroll = async (
         .onConflictDoNothing()
         .returning({ id: sequenceEnrollment.id })
       if (!created) {
-        outcomes.push({ contactId: id, enrolled: false, reason: 'Already in this sequence.' })
+        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'Already in this sequence.' })
         continue
       }
 
@@ -748,7 +834,7 @@ export const enroll = async (
         payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: person.label },
         links: await linksForContacts(tx, [id]),
       })
-      outcomes.push({ contactId: id, enrolled: true })
+      outcomes.push({ contactId: id, displayName: person.label, enrolled: true })
     }
 
     return {
@@ -930,7 +1016,11 @@ export const resumeEnrollment = async (ctx: AccountContext, id: string): Promise
     if (!row) throw new Error('That enrollment no longer exists.')
     if (row.state !== 'paused') throw new Error('That enrollment is not paused.')
 
-    const [seq] = await tx.select({ settings: sequence.settings }).from(sequence).where(eq(sequence.id, row.sequenceId))
+    const [seq] = await tx
+      .select({ state: sequence.state, settings: sequence.settings })
+      .from(sequence)
+      .where(eq(sequence.id, row.sequenceId))
+    if (seq?.state !== 'active') throw new Error('Turn the sequence on first.')
     await tx
       .update(sequenceEnrollment)
       .set({
@@ -939,7 +1029,7 @@ export const resumeEnrollment = async (ctx: AccountContext, id: string): Promise
           after: new Date(),
           delayDays: 0,
           delayHours: 0,
-          window: seq?.settings.sendWindow ?? DEFAULT_WINDOW,
+          window: seq.settings.sendWindow ?? DEFAULT_WINDOW,
         }),
       })
       .where(eq(sequenceEnrollment.id, id))
@@ -1039,6 +1129,7 @@ export const claimEnrollmentRun = async (
          select id from sequence_enrollment
           where id = ${enrollmentId}::uuid
             and state = 'active'
+            and exists (select 1 from sequence s where s.id = sequence_enrollment.sequence_id and s.state = 'active')
             and next_run_at is not null
             and next_run_at <= now()
             and (lease_until is null or lease_until < now())
@@ -1078,6 +1169,7 @@ export const claimEnrollmentRun = async (
       tracking_domain: string | null
       tracking_consent: TrackingConsent
       tracking_requires_consent: boolean | null
+      subscription_state: string | null
     }>(sql`
       select e.id as enrollment_id, s.id as sequence_id, s.name as sequence_name, s.sender, s.settings,
              s.owner_id as sequence_owner_id, e.enrolled_by,
@@ -1105,7 +1197,10 @@ export const claimEnrollmentRun = async (
                  and d.sent_at >= date_trunc('day', now() at time zone w.zone) at time zone w.zone)::int as sent_today,
              c.tracking_consent,
              (select a.tracking_domain from account a limit 1) as tracking_domain,
-             (select a.tracking_requires_consent from account a limit 1) as tracking_requires_consent
+             (select a.tracking_requires_consent from account a limit 1) as tracking_requires_consent,
+             (select ss.state from subscription_state ss
+               where ss.contact_id = e.contact_id
+                 and ss.subscription_type_id::text = s.settings ->> 'subscriptionTypeId') as subscription_state
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
         join contact c on c.id = e.contact_id and c.deleted_at is null
@@ -1119,6 +1214,22 @@ export const claimEnrollmentRun = async (
     `)
     const row = rows[0]
     if (!row) return { claimed: null, reason: NOT_DUE }
+    // Checked at send time, not only when the opt-out is recorded: a sequence that
+    // does not stop on unsubscribe keeps its enrollments, and they must not send.
+    if (row.subscription_state === 'unsubscribed') {
+      const reason = 'They opted out of this kind of mail. The enrollment is stopped rather than sent.'
+      await tx
+        .update(sequenceEnrollment)
+        .set({ state: 'unsubscribed', stopReason: reason, nextRunAt: null, finishedAt: new Date(), leaseUntil: null })
+        .where(eq(sequenceEnrollment.id, enrollmentId))
+      await tx.insert(sequenceEvent).values({
+        accountId: ctx.accountId,
+        enrollmentId,
+        kind: 'stopped',
+        detail: { state: 'unsubscribed', reason },
+      })
+      return { claimed: null, reason }
+    }
     if (!row.mailbox_id || !row.mailbox_email || !row.contact_email) {
       const reason = row.mailbox_id && row.mailbox_email ? NO_ADDRESS : NO_MAILBOX
       await tx
@@ -1452,7 +1563,10 @@ export const onTaskDone = async (tx: Tx, ctx: AccountContext, taskId: string): P
     .where(and(eq(sequenceEnrollment.waitingTaskId, taskId), eq(sequenceEnrollment.state, 'waiting_task')))
   if (!waiting) return
 
-  const [seq] = await tx.select({ settings: sequence.settings }).from(sequence).where(eq(sequence.id, waiting.sequenceId))
+  const [seq] = await tx
+    .select({ state: sequence.state, settings: sequence.settings })
+    .from(sequence)
+    .where(eq(sequence.id, waiting.sequenceId))
   const next = waiting.currentStep + 1
   const [following] = await tx
     .select({ delayDays: sequenceStep.delayDays, delayHours: sequenceStep.delayHours })
@@ -1466,7 +1580,8 @@ export const onTaskDone = async (tx: Tx, ctx: AccountContext, taskId: string): P
       waitingTaskId: null,
       ...(following
         ? {
-            state: 'active' as const,
+            // A paused sequence keeps its people paused: turning it on puts them back on the queue.
+            state: seq?.state === 'active' ? ('active' as const) : ('paused' as const),
             nextRunAt: nextSendAt({
               after: new Date(),
               delayDays: following.delayDays,
@@ -1799,8 +1914,15 @@ export type UnsubscribeTarget = {
   accountId: string
   contactId: string
   contactEmail: string | null
+  sequenceId: string
   sequenceName: string
+  /** Null when the sequence has no type, or its type has since been deleted: either
+   *  way the link covers every enrollment the contact has. */
   subscriptionTypeId: string | null
+  subscriptionTypeName: string | null
+  /** Whether the link has nothing left to do, so the page says so rather than
+   *  offering to do it again. */
+  alreadyDone: boolean
 }
 
 /** Who an unsubscribe token belongs to. Read outside any scope, because the
@@ -1812,14 +1934,26 @@ export const unsubscribeTarget = async (tx: Tx, token: string): Promise<Unsubscr
     account_id: string
     contact_id: string
     contact_email: string | null
+    sequence_id: string
     sequence_name: string
     subscription_type_id: string | null
+    subscription_type_name: string | null
+    already_done: boolean
   }>(sql`
     select e.id as enrollment_id, e.account_id, e.contact_id, c.email as contact_email,
-           s.name as sequence_name, s.settings ->> 'subscriptionTypeId' as subscription_type_id
+           s.id as sequence_id, s.name as sequence_name, t.id as subscription_type_id, t.name as subscription_type_name,
+           case when t.id is null
+             then not exists (
+               select 1 from sequence_enrollment x
+                where x.contact_id = e.contact_id and x.state in ('active', 'waiting_task', 'paused'))
+             else exists (
+               select 1 from subscription_state ss
+                where ss.contact_id = e.contact_id and ss.subscription_type_id = t.id and ss.state = 'unsubscribed')
+           end as already_done
       from sequence_enrollment e
       join sequence s on s.id = e.sequence_id
       join contact c on c.id = e.contact_id
+      left join subscription_type t on t.id::text = s.settings ->> 'subscriptionTypeId'
      where e.unsubscribe_token = ${token}
      limit 1`)
   const row = rows[0]
@@ -1829,50 +1963,56 @@ export const unsubscribeTarget = async (tx: Tx, token: string): Promise<Unsubscr
     accountId: row.account_id,
     contactId: row.contact_id,
     contactEmail: row.contact_email,
+    sequenceId: row.sequence_id,
     sequenceName: row.sequence_name,
     subscriptionTypeId: row.subscription_type_id,
+    subscriptionTypeName: row.subscription_type_name,
+    alreadyDone: row.already_done,
   }
 }
 
-/** Records the opt-out itself. Idempotent: a mail client that prefetches the
- *  one-click URL must not produce two different answers from two fetches. */
-export const unsubscribeByToken = async (ctx: AccountContext, token: string): Promise<boolean> =>
-  withAccount(ctx, async (tx) => {
-    const [enrollment] = await tx
-      .update(sequenceEnrollment)
-      .set({
-        state: 'unsubscribed',
-        stopReason: 'They used the unsubscribe link.',
-        nextRunAt: null,
-        finishedAt: new Date(),
-        leaseUntil: null,
-      })
-      // Not already unsubscribed, so a client prefetching the one-click URL and
-      // then the person pressing it do not write the event twice.
-      .where(
-        and(
-          eq(sequenceEnrollment.unsubscribeToken, token),
-          sql`${sequenceEnrollment.state} <> 'unsubscribed'`,
-        ),
-      )
-      .returning({ id: sequenceEnrollment.id, contactId: sequenceEnrollment.contactId, sequenceId: sequenceEnrollment.sequenceId })
-    if (!enrollment) return false
+/** Ends the live enrollments an unsubscribe link covers: every one of the sequence's
+ *  type, or every one of the contact's when there is no type. Finished, replied and
+ *  bounced enrollments keep their history. Returns the ids it ended. */
+export const endEnrollmentsForLink = async (
+  tx: Tx,
+  ctx: AccountContext,
+  target: UnsubscribeTarget,
+): Promise<string[]> => {
+  const ended = await tx.execute<{ id: string }>(sql`
+    update sequence_enrollment e
+       set state = 'unsubscribed',
+           stop_reason = 'They used the unsubscribe link.',
+           next_run_at = null,
+           finished_at = now(),
+           lease_until = null
+      from sequence s
+     where s.id = e.sequence_id
+       and e.contact_id = ${target.contactId}::uuid
+       and e.state in ('active', 'waiting_task', 'paused')
+       ${target.subscriptionTypeId ? sql`and s.settings ->> 'subscriptionTypeId' = ${target.subscriptionTypeId}` : sql``}
+    returning e.id`)
+  const ids = ended.map((row) => row.id)
+  if (ids.length === 0) return ids
 
-    await tx.insert(sequenceEvent).values({
+  await tx.insert(sequenceEvent).values(
+    ids.map((enrollmentId) => ({
       accountId: ctx.accountId,
-      enrollmentId: enrollment.id,
-      kind: 'unsubscribe',
+      enrollmentId,
+      kind: 'unsubscribe' as const,
       detail: { via: 'link' },
-    })
-    const [seq] = await tx.select({ name: sequence.name }).from(sequence).where(eq(sequence.id, enrollment.sequenceId))
+    })),
+  )
+  if (ids.includes(target.enrollmentId)) {
     await recordActivity(tx, ctx, {
       type: 'sequence_activity',
-      subject: `unsubscribed from ${seq?.name ?? 'a sequence'}`,
-      payload: { event: 'unsubscribed', sequenceId: enrollment.sequenceId, sequenceName: seq?.name ?? null, contactName: await contactLabels(tx, [enrollment.contactId]) },
-      links: await linksForContacts(tx, [enrollment.contactId]),
+      subject: `unsubscribed from ${target.sequenceName}`,
+      payload: { event: 'unsubscribed', sequenceId: target.sequenceId, sequenceName: target.sequenceName, contactName: await contactLabels(tx, [target.contactId]) },
+      links: await linksForContacts(tx, [target.contactId]),
     })
-    return true
-  })
+  }
+  return ids
+}
 
 /** The mailbox's own window, when it has one, otherwise the sequence's. */
 export const windowFor = (run: ClaimedRun): SendWindow => run.mailboxWindow ?? run.settings.sendWindow

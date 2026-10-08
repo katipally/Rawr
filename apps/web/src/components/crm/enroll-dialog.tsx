@@ -4,12 +4,12 @@ import { Badge, Button, Combobox, Modal, Spinner, useToast } from '@rawr/ui'
 import { useEffect, useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
-import type { SequenceStep } from '@rawr/db'
+import type { EnrollOutcome, SequenceStep } from '@rawr/db'
 import { STEP_KIND_LABEL } from './value.tsx'
+import { summarizeEnrollment } from './enroll-outcome.ts'
 
 type Sequence = { id: string; name: string; state: string; stepCount: number }
 type Mailbox = { id: string; email: string; canSend: boolean; state: string }
-type Outcome = { contactId: string; enrolled: boolean; reason?: string }
 
 /** Putting contacts into a sequence.
  *
@@ -39,7 +39,7 @@ export const EnrollDialog = ({
   const [sequenceId, setSequenceId] = useState<string | null>(null)
   const [mailboxId, setMailboxId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [outcomes, setOutcomes] = useState<Outcome[] | null>(null)
+  const [outcomes, setOutcomes] = useState<EnrollOutcome[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [steps, setSteps] = useState<SequenceStep[] | null>(null)
 
@@ -77,8 +77,7 @@ export const EnrollDialog = ({
   }, [queryClient, sequenceId])
 
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
-  const refused = outcomes?.filter((row) => !row.enrolled) ?? []
-  const enrolled = outcomes?.filter((row) => row.enrolled).length ?? 0
+  const summary = outcomes ? summarizeEnrollment(outcomes) : null
 
   return (
     <Modal
@@ -181,16 +180,17 @@ export const EnrollDialog = ({
         </div>
       ) : null}
 
-      {outcomes ? (
+      {summary ? (
         <div className="flex flex-col gap-3">
           <p>
-            <Badge tone={enrolled > 0 ? 'ok' : 'warn'}>{enrolled} enrolled</Badge>
-            {refused.length > 0 ? <span className="ml-2 text-secondary">{refused.length} were not.</span> : null}
+            <Badge tone={summary.enrolled > 0 ? 'ok' : 'warn'}>{summary.headline}</Badge>
           </p>
-          {refused.length > 0 ? (
+          {summary.refused.length > 0 ? (
             <ul className="flex flex-col gap-1 text-small text-secondary">
-              {refused.map((row) => (
-                <li key={row.contactId}>{row.reason}</li>
+              {summary.refused.map((row) => (
+                <li key={row.contactId}>
+                  <span className="text-body">{row.displayName}</span>: {row.reason}
+                </li>
               ))}
             </ul>
           ) : null}

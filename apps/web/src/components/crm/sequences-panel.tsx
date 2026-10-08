@@ -77,7 +77,7 @@ export const SequencesPanel = ({
         </h2>
         {canWrite ? (
           <Button variant="tertiary" onClick={() => setEnrolling(true)}>
-            {companyId ? 'Enrol everyone here' : 'Enrol'}
+            {companyId ? 'Enroll everyone here' : 'Enroll'}
           </Button>
         ) : null}
       </header>
@@ -119,7 +119,7 @@ export const SequencesPanel = ({
                     </Button>
                   )}
                   <Button variant="tertiary" busy={busy === row.id} onClick={() => void act(row.id, 'remove')}>
-                    Remove
+                    Unenroll
                   </Button>
                 </div>
               ) : null}

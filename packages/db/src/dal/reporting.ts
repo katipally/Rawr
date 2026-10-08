@@ -35,7 +35,7 @@ export const clampRange = (
     to?: Date | string | null | undefined
   },
   zone = 'UTC',
-): Range => {
+): Range & { clipped: boolean } => {
   const parse = (value: Date | string | null | undefined): Date | null => {
     if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
     if (typeof value !== 'string' || Number.isNaN(Date.parse(value))) return null
@@ -46,10 +46,8 @@ export const clampRange = (
   const to = parse(input.to) ?? midnight(addDays(dayKey(new Date(), zone), 1))
   const from = parse(input.from) ?? midnight(addDays(dayKey(new Date(to.getTime() - 1), zone), -29))
   const [start, end] = from.getTime() <= to.getTime() ? [from, to] : [to, from]
-  const capped = end.getTime() - start.getTime() > MAX_DAYS * DAY_MS
-    ? new Date(end.getTime() - MAX_DAYS * DAY_MS)
-    : start
-  return { from: capped, to: end }
+  const clipped = end.getTime() - start.getTime() > MAX_DAYS * DAY_MS
+  return { from: clipped ? new Date(end.getTime() - MAX_DAYS * DAY_MS) : start, to: end, clipped }
 }
 
 /** The calendar day an instant falls on in `zone`. A bare `::date` reads it in the
@@ -366,49 +364,60 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
 export type SequencesReport = {
   sequences: {
     sequence: string
+    /** Every mail that left: delivered plus bounced. Failed mail never left. */
     sent: number
-    opened: number
-    clicked: number
-    replied: number
+    /** The part of `sent` that came back as a delivery failure. */
     bounced: number
+    /** Sent mails opened at least once. A bounced mail is never an open. */
+    opened: number
+    /** Sent mails clicked at least once. A bounced mail is never a click. */
+    clicked: number
+    /** People with at least one mail that left in the range: the base for `replied`. */
+    contacted: number
+    /** People who replied. A person counts once however many mails they got. */
+    replied: number
   }[]
   mailboxes: { mailbox: string; sent: number; bounced: number; failed: number }[]
 }
 
 /** How outreach performed, per sequence and per mailbox.
  *
- *  Opens are counted from sends that were opened at least once rather than from
- *  every pixel load, because a mail read four times is one person reading it. The
- *  same send opened by a privacy proxy and by the recipient is still one. */
+ *  "Sent" is every mail that left, bounced ones included, so it agrees with the
+ *  sends log (Every send, less Failed). Opens and clicks are counted from delivered
+ *  mail only, and from sends opened at least once rather than from every pixel
+ *  load: a mail read four times is one person reading it. Replies are people, so
+ *  their rate is over the people contacted, not over mails. */
 export const sequencesReport = async (ctx: AccountContext, range: Range): Promise<SequencesReport> =>
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'reports', 'reports')
     const sequences = await tx.execute<{
       sequence: string
       sent: number
+      bounced: number
       opened: number
       clicked: number
+      contacted: number
       replied: number
-      bounced: number
     }>(sql`
       select q.name as sequence,
-             count(*) filter (where d.state = 'sent')::int as sent,
-             count(*) filter (where d.open_count > 0)::int as opened,
-             count(*) filter (where d.click_count > 0)::int as clicked,
-             -- A reply belongs to the enrollment, not to each mail it sent.
-             count(distinct d.enrollment_id) filter (where e.state = 'replied')::int as replied,
-             count(*) filter (where d.state = 'bounced')::int as bounced
+             count(*)::int as sent,
+             count(*) filter (where d.state = 'bounced')::int as bounced,
+             count(*) filter (where d.state = 'sent' and d.open_count > 0)::int as opened,
+             count(*) filter (where d.state = 'sent' and d.click_count > 0)::int as clicked,
+             count(distinct d.enrollment_id)::int as contacted,
+             count(distinct d.enrollment_id) filter (where e.state = 'replied')::int as replied
         from sequence_send d
         join sequence_enrollment e on e.id = d.enrollment_id
         join sequence q on q.id = e.sequence_id
-       where ${bounds(range, 'd.sent_at')}
+       where d.state in ('sent', 'bounced')
+         and ${bounds(range, 'd.sent_at')}
        group by q.id, q.name
        order by 2 desc
        limit ${MAX_ROWS}`)
 
     const mailboxes = await tx.execute<{ mailbox: string | null; sent: number; bounced: number; failed: number }>(sql`
       select coalesce(m.email, 'A disconnected mailbox') as mailbox,
-             count(*) filter (where d.state = 'sent')::int as sent,
+             count(*) filter (where d.state in ('sent', 'bounced'))::int as sent,
              count(*) filter (where d.state = 'bounced')::int as bounced,
              count(*) filter (where d.state = 'failed')::int as failed
         from sequence_send d
@@ -426,10 +435,11 @@ export const sequencesReport = async (ctx: AccountContext, range: Range): Promis
       sequences: sequences.map((row) => ({
         sequence: row.sequence,
         sent: Number(row.sent),
+        bounced: Number(row.bounced),
         opened: Number(row.opened),
         clicked: Number(row.clicked),
+        contacted: Number(row.contacted),
         replied: Number(row.replied),
-        bounced: Number(row.bounced),
       })),
       mailboxes: mailboxes.map((row) => ({
         mailbox: row.mailbox ?? 'A disconnected mailbox',

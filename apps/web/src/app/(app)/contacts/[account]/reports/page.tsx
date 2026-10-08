@@ -77,6 +77,7 @@ const ReportsOverview = async ({
   const submissions = forms.days.reduce((total, day) => total + day.clean + day.held, 0)
   const held = forms.days.reduce((total, day) => total + day.held, 0)
   const sent = sequences.sequences.reduce((total, row) => total + row.sent, 0)
+  const contacted = sequences.sequences.reduce((total, row) => total + row.contacted, 0)
   const replied = sequences.sequences.reduce((total, row) => total + row.replied, 0)
   const outbound = email.mailboxes.reduce((total, row) => total + row.sent, 0)
   const inbound = email.mailboxes.reduce((total, row) => total + row.received, 0)
@@ -84,7 +85,7 @@ const ReportsOverview = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <ReportsHeader account={account} current="" from={range.fromDay} to={range.toDay} />
+      <ReportsHeader account={account} current="" from={range.fromDay} to={range.toDay} clipped={range.clipped} />
 
       <Card title="The headline from each report">
         <div className="grid gap-3 @2xl:grid-cols-2 @4xl:grid-cols-3">
@@ -104,7 +105,7 @@ const ReportsOverview = async ({
             href={link('sequences')}
             label="Sequence emails sent"
             value={String(sent)}
-            hint={`${percent(replied, sent)} replied`}
+            hint={`${percent(replied, contacted)} of ${contacted} people replied`}
           />
           <Tile
             href={link('email')}

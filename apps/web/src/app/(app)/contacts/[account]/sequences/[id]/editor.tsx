@@ -18,13 +18,14 @@ import {
 } from '@rawr/ui'
 import { ChevronDown, GripVertical, ListTodo, Mail, MessageSquare, Phone, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import { type ReactNode, useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { rowPill } from '~/components/row-actions.tsx'
 import { STEP_KIND_LABEL } from '~/components/crm/value.tsx'
+import { SequenceActions } from '../sequence-actions.tsx'
 import { SequenceHeader } from './sequence-header.tsx'
 
 type Draft = SequenceStep & { key: string }
@@ -51,8 +52,6 @@ const DAYS = [
   { value: 7, label: 'Sun' },
 ]
 
-/** A stable key for a step that has no id yet, so React does not remount the row
- *  a person is typing into every time the list re-renders. */
 /** Every zone this runtime knows, with the one currently saved guaranteed to be
  *  among them. `supportedValuesOf` omits UTC in several runtimes, and a select
  *  whose value matches no option silently displays the first one: pressing Save
@@ -62,12 +61,6 @@ const timezones = (current: string): string[] => {
   const known = Intl.supportedValuesOf?.('timeZone') ?? []
   const all = known.length > 0 ? known : ['UTC']
   return all.includes(current) ? all : [current, ...all]
-}
-
-let keyCounter = 0
-const newKey = (): string => {
-  keyCounter += 1
-  return `step-${keyCounter}`
 }
 
 export const SequenceEditor = ({
@@ -88,7 +81,11 @@ export const SequenceEditor = ({
 }) => {
   const router = useRouter()
   const toast = useToast()
-  const [steps, setSteps] = useState<Draft[]>(initial.map((step) => ({ ...step, key: newKey() })))
+  const [steps, setSteps] = useState<Draft[]>(initial.map((step) => ({ ...step, key: step.id })))
+  /** A stable key for a step that has no id yet, so React does not remount the row
+   *  a person is typing into every time the list re-renders. Per editor, so server and
+   *  client render the same ids. */
+  const newStepCount = useRef(0)
   // In the address so a HubSpot settings link, a reload or a pasted link opens it.
   const [settingsParam, setSettingsParam] = useUrlParam('settings')
   const settingsOpen = settingsParam === 'open'
@@ -148,11 +145,13 @@ export const SequenceEditor = ({
       return next
     })
 
-  const addStep = (kind: StepKind, at: number) =>
+  const addStep = (kind: StepKind, at: number) => {
+    newStepCount.current += 1
+    const key = `new-${newStepCount.current}`
     setSteps((current) => [
       ...current.slice(0, at),
       {
-        key: newKey(),
+        key,
         id: '',
         position: at,
         kind,
@@ -169,6 +168,7 @@ export const SequenceEditor = ({
       },
       ...current.slice(at),
     ])
+  }
 
   const saveSteps = () =>
     run(
@@ -201,7 +201,7 @@ export const SequenceEditor = ({
           canWrite ? (
             <>
               <Button onClick={() => setSettingsOpen(true)}>Settings</Button>
-              {sequence.state === 'active' ? (
+              {sequence.state === 'archived' ? null : sequence.state === 'active' ? (
                 <Button
                   busy={busy}
                   onClick={() =>
@@ -227,6 +227,7 @@ export const SequenceEditor = ({
                   Turn on
                 </Button>
               )}
+              <SequenceActions account={account} sequence={sequence} />
             </>
           ) : null
         }
@@ -251,10 +252,13 @@ export const SequenceEditor = ({
       {sender === 'woodpecker' ? (
         <Card title="Woodpecker owns the steps">
           <p className="text-secondary">
-            This sequence hands each contact to Woodpecker campaign{' '}
-            {settings.woodpeckerCampaignId ?? 'nobody has picked yet'}, once. The steps, the delays
-            and the sending accounts are Woodpecker's; what comes back here are its events, on the
-            contact's timeline. Pick the campaign in settings.
+            This sequence hands each contact to{' '}
+            {settings.woodpeckerCampaignId === null
+              ? 'a Woodpecker campaign'
+              : `Woodpecker campaign ${campaigns?.find((campaign) => campaign.id === settings.woodpeckerCampaignId)?.name ?? settings.woodpeckerCampaignId}`}
+            , once. The steps, the delays and the sending accounts are Woodpecker's; what comes back
+            here are its events, on the contact's timeline.
+            {settings.woodpeckerCampaignId === null ? ' No campaign is picked yet. Pick the campaign in settings.' : null}
           </p>
         </Card>
       ) : null}
@@ -555,7 +559,8 @@ export const SequenceEditor = ({
           <fieldset className={cn('flex flex-col gap-2', sender === 'woodpecker' && 'hidden')}>
             <legend className="font-medium">When it may send</legend>
             <p className="text-small text-secondary">
-              Wall-clock time in the timezone below, so it does not drift when the clocks change.
+              Wall-clock time in the timezone below, so it does not drift when the clocks change. A mailbox
+              that has its own send window uses that one instead of this.
             </p>
             <div className="flex flex-wrap gap-2">
               {DAYS.map((day) => (
@@ -636,7 +641,8 @@ export const SequenceEditor = ({
               onChange={(event) => setSettings({ ...settings, stopOnBounce: event.target.checked })}
             />
             <Switch
-              label="Stop when they unsubscribe"
+              label="Stop right away when they unsubscribe"
+              hint="Off: they stop when their next step is due, and nothing is sent first. Either way, nothing more goes to someone who has opted out."
               disabled={!canWrite}
               checked={settings.stopOnUnsubscribe}
               onChange={(event) => setSettings({ ...settings, stopOnUnsubscribe: event.target.checked })}
@@ -646,7 +652,7 @@ export const SequenceEditor = ({
               value={settings.subscriptionTypeId}
               disabled={!canWrite}
               onChange={(subscriptionTypeId) => setSettings({ ...settings, subscriptionTypeId })}
-              hint="Somebody who has opted out of this is never enrolled, and unsubscribing here opts them out of it."
+              hint="Someone who has opted out of this type is never enrolled. Unsubscribing, from a mail or on their record, opts them out of it."
               options={subscriptionTypes.map((type) => ({ value: type.id, label: type.name }))}
             />
           </fieldset>

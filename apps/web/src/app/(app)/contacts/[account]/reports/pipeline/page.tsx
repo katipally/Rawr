@@ -43,7 +43,7 @@ const PipelineReport = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <ReportsHeader account={account} current="pipeline" from={range.fromDay} to={range.toDay} />
+      <ReportsHeader account={account} current="pipeline" from={range.fromDay} to={range.toDay} clipped={range.clipped} />
 
       <div className="grid gap-4 @4xl:grid-cols-2">
         <Card className="@4xl:col-span-2">

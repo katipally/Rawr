@@ -12,6 +12,7 @@ import { RowActions, StatusDot, rowPill, type StatusTone } from '~/components/ro
 import { useFormat } from '~/components/zone.tsx'
 import { enrollmentsPath, sequencePath, sequenceSendsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { SequenceActions } from './sequence-actions.tsx'
 
 const STATE_TONE: Record<SequenceState, StatusTone> = {
   draft: 'off',
@@ -31,8 +32,8 @@ const STATE_LABEL: Record<SequenceState, string> = {
  *  out, and 0 of 0 is not 0%. */
 const rate = (part: number, whole: number): string => (whole === 0 ? EMPTY_VALUE : `${Math.round((part / whole) * 100)}%`)
 
-/** Archived is deliberately not one: an archived sequence is out of the way, and
- *  the tab that shows it is "All". */
+/** Archived has a tab of its own. All still lists archived sequences too, so none
+ *  drops out of the full list. */
 const FILTERS: (SequenceState | null)[] = [null, 'draft', 'active', 'paused', 'archived']
 
 /** HubSpot's sequences Manage table: the name with its state, then the numbers
@@ -98,6 +99,7 @@ export const SequenceList = ({
             <Link href={sequenceSendsPath(account, row.id)} className={rowPill}>
               Emails sent
             </Link>
+            {canWrite ? <SequenceActions account={account} sequence={row} inRow /> : null}
           </RowActions>
         </span>
       ),

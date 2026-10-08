@@ -24,7 +24,7 @@ const SequencesReport = async ({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <ReportsHeader account={account} current="sequences" from={range.fromDay} to={range.toDay} />
+      <ReportsHeader account={account} current="sequences" from={range.fromDay} to={range.toDay} clipped={range.clipped} />
 
       <div className="flex flex-col gap-4">
         <Card>
@@ -41,9 +41,10 @@ const SequencesReport = async ({
             ]}
           />
           <p className="mt-2 max-w-prose text-small text-secondary">
-            Opens count mails that were opened at least once, not pixel loads: a mail read four times
-            is one person reading it. Apple's privacy proxy opens some mail on the recipient's behalf,
-            so treat opens as a floor on interest rather than a measurement of it.
+            Sent is every mail that left, and bounced is the part of it that never arrived. Opened and
+            clicked count delivered mail only, and a mail counts once however often it was read. Apple's
+            privacy proxy opens some mail on the recipient's behalf, so treat opens as a floor on interest
+            rather than a measurement of it. Replied counts people, not mails.
           </p>
         </Card>
 
@@ -57,7 +58,7 @@ const SequencesReport = async ({
                   <tr className="border-b border-divider text-left text-secondary">
                     <th scope="col" className="py-1 pr-3 font-medium">Mailbox</th>
                     <th scope="col" className="py-1 pr-3 text-right font-medium">Sent</th>
-                    <th scope="col" className="py-1 pr-3 text-right font-medium">Bounced</th>
+                    <th scope="col" className="py-1 pr-3 text-right font-medium">of which bounced</th>
                     <th scope="col" className="py-1 text-right font-medium">Failed</th>
                   </tr>
                 </thead>

@@ -653,13 +653,19 @@ try {
     await send(quiet, 5, 'sent')
     const bounced = await enroll('bounced', 'bounced')
     await send(bounced, 6, 'bounced')
+    const failed = await enroll('failed', 'failed')
+    await send(failed, 7, 'failed')
+    // A bounced mail that was also opened is still a bounce, never an open.
+    await owner`update sequence_send set open_count = 1 where enrollment_id = ${quiet.id} or enrollment_id = ${bounced.id}`
 
     const report = await sequencesReport(probeCtx, march)
     const row = report.sequences.find((each) => each.sequence === `${tag}-seq`)
-    expect(row?.sent === 3, `sent ${row?.sent}`)
-    expect(row?.replied === 1, `replied ${row?.replied}, and one enrollment replied`)
+    expect(row?.sent === 4, `sent ${row?.sent}: two replied, one quiet and one bounced; the failed one never left`)
     expect(row?.bounced === 1, `bounced ${row?.bounced}`)
-    return 'sent 3, replied 1, bounced 1'
+    expect(row?.opened === 1, `opened ${row?.opened}: the quiet one, not the bounced one`)
+    expect(row?.contacted === 3, `contacted ${row?.contacted}: the failed enrollment never sent`)
+    expect(row?.replied === 1, `replied ${row?.replied}, and one enrollment replied`)
+    return 'sent 4 (one bounced), opened 1, contacted 3, replied 1'
   })
 
   await check('A-03: a submission whose company has two later deals is still one submission', async () => {
