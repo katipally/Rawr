@@ -139,8 +139,7 @@ export const invitation = pgTable(
   ],
 )
 
-/** A team inside the account. Round robin assignment rotates within a team, so a
- *  form can hand European leads to the people who work them. */
+/** A named group of people inside the account. Grouping only: no routing reads it yet. */
 export const team = pgTable(
   'team',
   {

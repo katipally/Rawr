@@ -1,6 +1,7 @@
 'use client'
 
-import { Button, Combobox, Field, Switch, Tabs, TextInput, useToast } from '@rawr/ui'
+import { Button, Combobox, Field, Switch, Tabs, TextInput, cn, useToast } from '@rawr/ui'
+import { Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { SaveBar } from '~/components/save-bar.tsx'
@@ -136,7 +137,7 @@ export const DefaultsPanel = ({
 
             {/* The domain is what Google asserts about a sign-in, so it is shown and
                 never edited: changing it here would not change who Google lets in. */}
-            <Field id="account-domain" label="Google hosted domain">
+            <Field id="account-domain" label="Google hosted domain" hint="Set by Google sign-in. It cannot be changed here.">
               <TextInput id="account-domain" value={account.hostedDomain} readOnly disabled />
             </Field>
 
@@ -150,11 +151,14 @@ export const DefaultsPanel = ({
                 options={zones.map((zone) => ({ value: zone, label: zone, keywords: [zone.replaceAll('_', ' ')] }))}
                 disabled={!canWrite}
               />
-              {canWrite && browserZone && browserZone !== timezone && zones.includes(browserZone) ? (
-                <Button type="button" variant="secondary" className="self-start" onClick={() => setTimezone(browserZone)}>
-                  Use {browserZone}, where this browser is
-                </Button>
-              ) : null}
+              <Button
+                type="button"
+                variant="secondary"
+                className={cn('self-start', !(canWrite && browserZone && browserZone !== timezone && zones.includes(browserZone)) && 'invisible')}
+                onClick={() => browserZone && setTimezone(browserZone)}
+              >
+                Use {browserZone}, where this browser is
+              </Button>
             </div>
 
             <Field id="account-seats" label="Seats" hint={`${account.seatsUsed} in use. Leave empty for no cap.`}>
@@ -200,12 +204,14 @@ export const DefaultsPanel = ({
                     key={hub}
                     type="button"
                     variant={defaultHubs.includes(hub) ? 'primary' : 'secondary'}
+                    aria-pressed={defaultHubs.includes(hub)}
                     onClick={() =>
                       setDefaultHubs(
                         defaultHubs.includes(hub) ? defaultHubs.filter((h) => h !== hub) : [...defaultHubs, hub],
                       )
                     }
                   >
+                    {defaultHubs.includes(hub) ? <Check aria-hidden="true" className="size-4" /> : null}
                     <span className="capitalize">{hub}</span>
                   </Button>
                 ))}

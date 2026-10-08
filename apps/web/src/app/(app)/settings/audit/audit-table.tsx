@@ -1,10 +1,11 @@
 'use client'
 
-import { Badge, Button, DataTable, EmptyState, NOTHING_MATCHED, Spinner, cn, useToast, type Column } from '@rawr/ui'
+import { Badge, Button, DataTable, EmptyState, Spinner, cn, useToast, type Column } from '@rawr/ui'
 import Link from 'next/link'
 import { Fragment, useState } from 'react'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { FilterChip, ghostFilter } from '~/components/filter-chip.tsx'
+import { actionOf, categoryOf, fieldOf } from '~/lib/audit-labels.ts'
 import { auditPath } from '~/lib/links.ts'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -17,6 +18,7 @@ type Row = {
   actorKind: string
   entity: string
   entityId: string | null
+  targetName: string | null
   action: string
   before: unknown
   after: unknown
@@ -30,43 +32,6 @@ const KIND_TONE: Record<string, 'neutral' | 'accent' | 'info' | 'warn'> = {
   job: 'info',
   integration: 'info',
   public: 'warn',
-}
-
-/** English past tense, by rule. The action column holds a verb stem and new ones
- *  are added all over the DAL without touching this file, so a lookup table would
- *  be stale the week after it was written; these are the stems the rule gets
- *  wrong. */
-const IRREGULAR: Record<string, string> = {
-  send: 'sent',
-  resend: 'resent',
-  read: 'read',
-  set: 'set',
-  submit: 'submitted',
-  status: 'changed the status of',
-  run: 'ran',
-}
-
-const pastTense = (verb: string): string =>
-  IRREGULAR[verb] ??
-  (verb.endsWith('e')
-    ? `${verb}d`
-    : /^[^aeiou]*[aeiou][bdgmnpt]$/.test(verb)
-      ? `${verb}${verb.at(-1)}ed`
-      : /[aeiou]l$/.test(verb)
-        ? `${verb}led`
-        : `${verb}ed`)
-
-/** What was done, in the Action column. Only the first word of an action is the
- *  verb, so `save_steps` is "Saved steps". */
-const actionOf = (action: string): string => {
-  const [verb = '', ...rest] = action.split('_')
-  const did = [pastTense(verb), ...rest].join(' ')
-  return did.charAt(0).toUpperCase() + did.slice(1)
-}
-
-const categoryOf = (entity: string): string => {
-  const words = entity.replaceAll('_', ' ')
-  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 /** A filtered history is an address, so it can be sent to whoever has to answer for it. */
@@ -94,11 +59,13 @@ export const AuditTable = ({
   actorId: string | null
 }) => {
   const queryClient = useQueryClient()
+  const filtered = entity !== null || actorId !== null
   const fmt = useFormat()
   const toast = useToast()
   const [rows, setRows] = useState(initial)
   const [cursor, setCursor] = useState<Cursor>(initialCursor)
   const [busy, setBusy] = useState(false)
+  const names = new Map(people.map((person) => [person.userId, person.name]))
 
   const loadOlder = async () => {
     setBusy(true)
@@ -138,8 +105,14 @@ export const AuditTable = ({
       ),
     },
     { key: 'category', header: 'Category', width: 200, render: (row) => <span className="block truncate">{categoryOf(row.entity)}</span> },
+    {
+      key: 'target',
+      header: 'Target',
+      width: 220,
+      render: (row) => <span title={row.targetName ?? undefined} className="block truncate">{row.targetName ?? EMPTY_VALUE}</span>,
+    },
     { key: 'action', header: 'Action', width: 220, render: (row) => <span className="block truncate">{actionOf(row.action)}</span> },
-    { key: 'details', header: 'Details', width: 360, render: (row) => <Diff before={row.before} after={row.after} /> },
+    { key: 'details', header: 'Details', width: 360, render: (row) => <Diff before={row.before} after={row.after} names={names} /> },
   ]
 
   return (
@@ -155,7 +128,7 @@ export const AuditTable = ({
           clear={hrefFor(entity, null)}
           options={people.map((person) => ({ key: person.userId, label: person.name, href: hrefFor(entity, person.userId), on: person.userId === actorId }))}
         />
-        {entity || actorId ? (
+        {filtered ? (
           <>
             <span aria-hidden="true" className="mx-1.5 h-5 w-px bg-line" />
             <Link href={auditPath()} className={cn(ghostFilter, 'no-underline')}>
@@ -166,7 +139,11 @@ export const AuditTable = ({
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState {...NOTHING_MATCHED} />
+        filtered ? (
+          <EmptyState title="Nothing matches" description="No changes match these filters. Reset filters to see the whole history." />
+        ) : (
+          <EmptyState title="No changes yet" description="Changes made in this account show up here." />
+        )
       ) : (
         <DataTable columns={columns} rows={rows} rowKey={(row) => row.id} caption="Audit log" storageKey="settings.audit" />
       )}
@@ -185,8 +162,12 @@ export const AuditTable = ({
   )
 }
 
-const show = (value: unknown): string => {
+/** Only these keys hold a member's id. Anything else that looks like an id is shown as stored. */
+const PERSON_KEYS = new Set(['reassignedTo'])
+
+const show = (key: string, value: unknown, names: Map<string, string>): string => {
   if (value === null || value === undefined || value === '') return EMPTY_VALUE
+  if (PERSON_KEYS.has(key) && typeof value === 'string') return names.get(value) ?? 'Unknown person'
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
@@ -199,11 +180,11 @@ const asRecord = (value: unknown): Record<string, unknown> =>
  *  Qualified to Closed won, which is the thing anybody reading a history came
  *  for. Only the keys that differ, because a record with forty fields and one
  *  edit should read as one line. Both sides are already stored on the row. */
-const Diff = ({ before, after }: { before: unknown; after: unknown }) => {
+const Diff = ({ before, after, names }: { before: unknown; after: unknown; names: Map<string, string> }) => {
   const from = asRecord(before)
   const to = asRecord(after)
   const keys = [...new Set([...Object.keys(from), ...Object.keys(to)])].filter(
-    (key) => show(from[key]) !== show(to[key]),
+    (key) => show(key, from[key], names) !== show(key, to[key], names),
   )
   if (keys.length === 0) return null
 
@@ -215,11 +196,11 @@ const Diff = ({ before, after }: { before: unknown; after: unknown }) => {
       <dl className="mt-1 grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)] gap-x-3 gap-y-1 text-small">
         {keys.map((key) => (
           <Fragment key={key}>
-            <dt className="truncate text-secondary">{key.replaceAll('_', ' ')}</dt>
+            <dt className="truncate text-secondary">{fieldOf(key)}</dt>
             <dd className="min-w-0 break-words">
-              <span className="text-secondary line-through">{show(from[key])}</span>
+              <span className="text-secondary line-through">{show(key, from[key], names)}</span>
               <span aria-hidden="true"> → </span>
-              <span>{show(to[key])}</span>
+              <span>{show(key, to[key], names)}</span>
             </dd>
           </Fragment>
         ))}

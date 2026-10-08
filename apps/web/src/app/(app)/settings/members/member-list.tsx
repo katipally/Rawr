@@ -43,6 +43,7 @@ export type InvitationRow = {
   criticalGrants: CriticalAction[]
   invitedByName: string | null
   expiresAt: string
+  expired: boolean
   createdAt: string
 }
 
@@ -290,7 +291,17 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
     },
     { key: 'access', header: 'Access', width: 340, render: (row) => <span title={summarise(row)} className="block truncate">{summarise(row)}</span> },
     { key: 'by', header: 'Invited by', width: 200, render: (row) => <span className="block truncate">{row.invitedByName ?? EMPTY_VALUE}</span> },
-    { key: 'expires', header: 'Expires', width: 160, render: (row) => <span className="whitespace-nowrap">{fmt.date(row.expiresAt)}</span> },
+    {
+      key: 'expires',
+      header: 'Expires',
+      width: 200,
+      render: (row) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="whitespace-nowrap">{fmt.date(row.expiresAt)}</span>
+          {row.expired ? <Badge tone="warn" className="shrink-0">Expired</Badge> : null}
+        </span>
+      ),
+    },
   ]
 
   return (

@@ -148,6 +148,7 @@ export type PendingInvitation = {
   criticalGrants: CriticalAction[]
   invitedByName: string | null
   expiresAt: Date
+  expired: boolean
   createdAt: Date
 }
 
@@ -165,6 +166,7 @@ export const listInvitations = async (ctx: AccountContext): Promise<PendingInvit
         criticalGrants: invitation.criticalGrants,
         invitedByName: userAccount.name,
         expiresAt: invitation.expiresAt,
+        expired: sql<boolean>`${invitation.expiresAt} < now()`,
         createdAt: invitation.createdAt,
       })
       .from(invitation)
@@ -239,6 +241,20 @@ export const invite = async (
 
     const viewHubs = assertHubs(input.viewHubs ?? [])
     const editHubs = assertHubs(input.editHubs ?? [])
+    // An open link past its date no longer blocks a new one to the same address.
+    // Revoked rather than deleted, so the history still shows it.
+    const [replaced] = await tx
+      .update(invitation)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(invitation.email, email),
+          isNull(invitation.acceptedAt),
+          isNull(invitation.revokedAt),
+          sql`${invitation.expiresAt} < now()`,
+        ),
+      )
+      .returning({ id: invitation.id })
     const token = newToken()
     const [created] = await tx
       .insert(invitation)
@@ -263,7 +279,12 @@ export const invite = async (
 
     return {
       result: { token, id: created.id },
-      audit: { entity: 'invitation', entityId: created.id, action: 'invite', after: { email } },
+      audit: {
+        entity: 'invitation',
+        entityId: created.id,
+        action: 'invite',
+        after: replaced ? { email, replacedExpired: replaced.id } : { email },
+      },
     }
   })
 
@@ -377,7 +398,7 @@ export const deactivateMember = async (
         entityId: userId,
         action: 'deactivate',
         before: { state: current.state },
-        after: { reassignedTo: reassignTo, ...moved },
+        after: { state: 'deactivated', reassignedTo: reassignTo, ...moved },
       },
     }
   })
@@ -397,7 +418,13 @@ export const reactivateMember = async (ctx: AccountContext, userId: string): Pro
     if (!row) throw new Error('That person is not deactivated.')
     return {
       result: undefined,
-      audit: { entity: 'membership', entityId: userId, action: 'reactivate' },
+      audit: {
+        entity: 'membership',
+        entityId: userId,
+        action: 'reactivate',
+        before: { state: 'deactivated' },
+        after: { state: 'active' },
+      },
     }
   })
 

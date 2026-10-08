@@ -30,6 +30,7 @@ test('the client scope list matches the data access layer', () => {
 
 test('every scope has a label and every record hub is a hub', () => {
   for (const scope of SCOPES) assert.ok(SCOPE_LABEL[scope], `${scope} has no label`)
+  for (const scope of SCOPES) assert.match(SCOPE_LABEL[scope], / records$/, `${scope} is not in the records vocabulary`)
   for (const hub of HUBS_WITH_RECORDS) assert.ok(HUBS.includes(hub), `${hub} is not a hub`)
 })
 

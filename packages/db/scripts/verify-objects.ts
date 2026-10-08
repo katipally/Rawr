@@ -1,4 +1,5 @@
-import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
+import { createCustomObject, deleteCustomObject, listCustomObjects } from '../src/dal/objects.ts'
+import { listAudit } from '../src/dal/audit.ts'
 import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { associate, groupFor, readAssociations } from '../src/dal/associations.ts'
 import { createTask, listTasks, logByHand } from '../src/dal/tasks.ts'
@@ -576,6 +577,30 @@ try {
       expect(said.includes('built on'), said)
       return said
     }
+  })
+
+  await check('the objects page lists the built-in objects with live counts; the default read is custom only', async () => {
+    const page = await listCustomObjects(ctx, { withBuiltIn: true })
+    for (const table of ['contact', 'company', 'deal'] as const) {
+      const row = page.find((r) => r.key === table)
+      expect(row !== undefined, `${table} is not listed`)
+      expect(row!.custom === false, `${table} reads as custom`)
+      const [live] = await owner`select count(*)::int as n from ${owner(table)} where account_id = ${ws!.id} and deleted_at is null`
+      expect(row!.recordCount === live?.n, `${table} counts ${row!.recordCount}, the table holds ${live?.n} live rows`)
+    }
+    const custom = await listCustomObjects(ctx)
+    expect(custom.every((r) => r.custom), 'the default read includes a built-in object')
+    return `${page.length} listed, ${custom.length} custom`
+  })
+
+  await check('the history names a contact and a company by their names', async () => {
+    const person = await createRecord(ctx, 'contact', { first_name: 'Audit', last_name: 'Named', email: `named.${Date.now()}@audit.example` })
+    const org = await createRecord(ctx, 'company', { name: 'Audit Co' })
+    const contacts = await listAudit(ctx, { entity: 'contact', limit: 200 })
+    expect(contacts.rows.find((r) => r.entityId === person.id)?.targetName === 'Audit Named', 'the contact row has no name')
+    const companies = await listAudit(ctx, { entity: 'company', limit: 200 })
+    expect(companies.rows.find((r) => r.entityId === org.id)?.targetName === 'Audit Co', 'the company row has no name')
+    return 'Audit Named, Audit Co'
   })
 
   console.log('')

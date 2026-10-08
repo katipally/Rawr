@@ -3,9 +3,8 @@ import { team, teamMember } from '../schema/identity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 
-/** A named group inside one account. Round robin assignment rotates within a
- *  team, which is what lets a form hand European leads to the people who work
- *  them rather than to whoever happens to own the fewest contacts overall. */
+/** A named group of people inside one account. Grouping only: no routing reads
+ *  it yet, so round robin on a form or booking page picks from its own list. */
 
 export type TeamRow = {
   id: string

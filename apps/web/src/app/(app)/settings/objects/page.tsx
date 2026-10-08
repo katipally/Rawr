@@ -9,7 +9,7 @@ const ObjectsPage = async () => {
   if (!session) return null
 
   const ctx = contextFrom(session)
-  const rows = await listCustomObjects(ctx)
+  const rows = await listCustomObjects(ctx, { withBuiltIn: true })
 
   return (
     <div className="flex flex-col gap-4">
@@ -47,6 +47,7 @@ const ObjectsPage = async () => {
           namePlural: row.namePlural,
           fieldCount: row.fieldCount,
           recordCount: row.recordCount,
+          custom: row.custom,
         }))}
         account={session.accountSlug}
         canWrite={sessionIsAdmin(session)}

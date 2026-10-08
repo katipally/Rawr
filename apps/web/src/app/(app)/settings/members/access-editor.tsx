@@ -90,7 +90,7 @@ const hubLine = (grants: Grants, hub: Hub): string => {
   if (grants.isSuperAdmin) return 'View and Edit (All records), as a Super Admin'
   const level = levelOf(grants, hub)
   if (level === 'none') return 'No access'
-  const reach = HUBS_WITH_RECORDS.has(hub) ? ` (${SCOPE_LABEL[scopeOf(grants, hub)]} records)` : ''
+  const reach = HUBS_WITH_RECORDS.has(hub) ? ` (${SCOPE_LABEL[scopeOf(grants, hub)]})` : ''
   return level === 'edit' ? `View${reach} and Edit${reach}` : `View${reach}`
 }
 
@@ -216,14 +216,16 @@ export const AccessEditor = ({ name, initial, templates, copyFrom, busy, onSave,
     return (
       <li key={key} className="border-b border-line last:border-b-0">
         <div className="flex items-start gap-3 px-3 py-4 sm:px-4">
-          <button type="button" aria-expanded={open} aria-label={open ? 'Hide detail' : 'Show detail'} onClick={() => toggle(key)} className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-hs hover:bg-fill">
-            {open ? <ChevronDown aria-hidden="true" className="size-4" /> : <ChevronRight aria-hidden="true" className="size-4" />}
+          <button type="button" aria-expanded={open} onClick={() => toggle(key)} className="flex min-w-0 flex-1 items-start gap-3 rounded-hs text-left">
+            <span aria-hidden="true" className="mt-0.5 grid size-5 shrink-0 place-items-center">
+              {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="font-semibold break-words">{title}</span>
+              <span className="break-words">{hint}</span>
+              <span className="font-semibold break-words">{line}</span>
+            </span>
           </button>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h4 className="font-semibold break-words">{title}</h4>
-            <p className="break-words">{hint}</p>
-            <p className="font-semibold break-words">{line}</p>
-          </div>
           <OnOff on={toggleOn} label={title} disabled={draft.isSuperAdmin} onChange={onToggle} />
         </div>
         {open ? <div className="flex flex-col gap-3 border-t border-line bg-surface px-4 py-4 sm:pl-12">{detail}</div> : null}
@@ -432,7 +434,7 @@ export const AccessEditor = ({ name, initial, templates, copyFrom, busy, onSave,
                                     >
                                       {SCOPES.map((option) => (
                                         <option key={option} value={option}>
-                                          {SCOPE_LABEL[option]} records
+                                          {SCOPE_LABEL[option]}
                                         </option>
                                       ))}
                                     </Select>,

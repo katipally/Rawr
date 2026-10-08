@@ -18,6 +18,7 @@ export type ObjectView = {
   namePlural: string
   fieldCount: number
   recordCount: number
+  custom: boolean
 }
 
 export const ObjectList = ({
@@ -91,10 +92,12 @@ export const ObjectList = ({
                     key: 'object',
                     items: [
                       { key: 'properties', label: 'Manage properties', href: propertiesPath(row.key) },
-                      { key: 'rename', label: 'Rename', onSelect: () => setRenaming(row) },
+                      ...(row.custom ? [{ key: 'rename', label: 'Rename', onSelect: () => setRenaming(row) }] : []),
                     ],
                   },
-                  { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
+                  ...(row.custom
+                    ? [{ key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] }]
+                    : []),
                 ]}
               />
             </RowActions>
@@ -174,6 +177,7 @@ export const ObjectList = ({
                 // Its naming field is created with it.
                 fieldCount: 1,
                 recordCount: 0,
+                custom: true,
               },
             ])
           }, `${plural} was created. Add its fields under Properties.`).then((ok) => ok && setCreating(false))

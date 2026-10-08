@@ -111,7 +111,7 @@ export const TeamList = ({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <p>Use teams to group users. A form or booking page set to round-robin within a team rotates through its members.</p>
+      <p>Use teams to group people. Round robin on a form or booking page picks from the people chosen there. Teams do not route anything yet.</p>
       <div className="flex min-w-0 flex-col gap-3 rounded-panel border border-line px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <label className="relative w-full min-w-0 @lg:w-56">
@@ -135,7 +135,7 @@ export const TeamList = ({
         {shown.length === 0 ? (
           <EmptyState
             title={wanted ? 'No team matches' : 'No teams yet'}
-            description={wanted ? 'No team, and nobody on one, has that name.' : 'A team is a name and a list of people. Assignment rotates within it.'}
+            description={wanted ? 'No team, and nobody on one, has that name.' : 'A team is a name and a list of people.'}
           />
         ) : (
           <DataTable columns={columns} rows={page} rowKey={(team) => team.id} caption="Teams" storageKey="settings.teams" />
@@ -148,7 +148,7 @@ export const TeamList = ({
         <Modal
           open
           size="sm"
-          title={editing.id ? `Rename ${editing.name}` : 'Create team'}
+          title={editing.id ? `Rename ${teams.find((team) => team.id === editing.id)?.name ?? 'team'}` : 'Create team'}
           onClose={() => setEditing(null)}
           dirty={!editing.id && (editing.name !== '' || editing.description !== '')}
           onSubmit={() =>
@@ -160,7 +160,11 @@ export const TeamList = ({
                   description: editing.description.trim() || null,
                 }),
               editing.id ? 'Saved.' : `${editing.name} is ready. Add people to it next.`,
-            ).then((ok) => ok && setEditing(null))
+            ).then((ok) => {
+              if (!ok) return
+              setEditing(null)
+              if (!editing.id) setNeedle('')
+            })
           }
           footer={
             <>
@@ -301,10 +305,7 @@ export const TeamList = ({
           }
         >
           <div className="flex flex-col gap-3">
-            <p>
-              The team goes; nobody loses their seat. Anything set to round-robin within it falls back to
-              rotating through the whole account.
-            </p>
+            <p>The team goes; nobody loses their seat.</p>
           </div>
         </Modal>
       ) : null}

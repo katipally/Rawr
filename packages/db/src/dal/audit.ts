@@ -20,6 +20,9 @@ export type AuditRow = {
   action: string
   before: unknown
   after: unknown
+  /** The name of what the row is about, read live from its current row. Null for an
+   *  entity this does not resolve, or a row whose target has since been removed. */
+  targetName: string | null
 }
 
 export type AuditPage = { rows: AuditRow[]; cursor: { at: string; id: string } | null }
@@ -51,11 +54,25 @@ export const listAudit = async (
       action: string
       before: unknown
       after: unknown
+      target_name: string | null
     }>(sql`
       select a.id, a.at, a.actor_id, u.name as actor_name, a.actor_kind,
-             a.entity, a.entity_id, a.action, a.before, a.after
+             a.entity, a.entity_id, a.action, a.before, a.after,
+             coalesce(
+               member.name,
+               t.name,
+               nullif(trim(concat_ws(' ', c.first_name, c.last_name)), ''),
+               co.name,
+               d.name,
+               case when a.entity = 'invitation' then coalesce(a.after ->> 'email', a.before ->> 'email') end
+             ) as target_name
         from audit_log a
         left join user_account u on u.id = a.actor_id
+        left join user_account member on a.entity = 'membership' and member.id = a.entity_id
+        left join team t on a.entity = 'team' and t.id = a.entity_id
+        left join contact c on a.entity = 'contact' and c.id = a.entity_id
+        left join company co on a.entity = 'company' and co.id = a.entity_id
+        left join deal d on a.entity = 'deal' and d.id = a.entity_id
        where (${input.entity ?? null}::text is null or a.entity = ${input.entity ?? null})
          and (${input.actorId ?? null}::uuid is null or a.actor_id = ${input.actorId ?? null}::uuid)
          and (${input.from ?? null}::timestamptz is null or a.at >= ${input.from ?? null}::timestamptz)
@@ -82,6 +99,7 @@ export const listAudit = async (
         action: row.action,
         before: row.before,
         after: row.after,
+        targetName: row.target_name,
       })),
       cursor: rows.length > limit && last ? { at: new Date(last.at).toISOString(), id: last.id } : null,
     }

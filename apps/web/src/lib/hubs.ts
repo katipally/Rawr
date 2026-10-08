@@ -22,9 +22,9 @@ export const HUBS_WITHOUT_SCREENS = new Set<Hub>(['service'])
 export const HUBS_WITH_RECORDS = new Set<Hub>(['contacts', 'sales'])
 
 export const SCOPE_LABEL: Record<Scope, string> = {
-  everything: 'All',
-  team: "Team's",
-  own: 'Mine',
+  everything: 'All records',
+  team: "Team's records",
+  own: 'My records',
 }
 
 export const CRITICAL_LABEL: Record<CriticalAction, string> = {

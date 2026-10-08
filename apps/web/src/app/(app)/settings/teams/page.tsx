@@ -3,9 +3,7 @@ import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { TeamList } from './team-list.tsx'
 import { UsersTeamsHeader } from '../members/users-teams-header.tsx'
 
-/** Named groups inside this account. A form or a booking page that round-robins
- *  within a team hands European inbound to the people who work it, rather than to
- *  whoever happens to own the fewest contacts overall. */
+/** Named groups of people inside this account. Grouping only: no form or booking page routes by them yet. */
 const TeamsPage = async () => {
   const session = await readSession()
   if (!session) return null

@@ -22,6 +22,7 @@ export type CustomObjectRow = {
   nameSingular: string
   namePlural: string
   icon: string | null
+  custom: boolean
   fieldCount: number
   recordCount: number
 }
@@ -59,7 +60,13 @@ const RESERVED = new Set([
   'attachment',
 ])
 
-export const listCustomObjects = async (ctx: AccountContext): Promise<CustomObjectRow[]> =>
+/** Custom objects by default, which is what the admin API and MCP read. The objects
+ *  page asks for the built-in ones too: their records live in their own tables, so
+ *  their counts are live rows there rather than custom_record rows. */
+export const listCustomObjects = async (
+  ctx: AccountContext,
+  options: { withBuiltIn?: boolean } = {},
+): Promise<CustomObjectRow[]> =>
   withAccount(ctx, async (tx) => {
     const rows = await tx.execute<{
       id: string
@@ -67,17 +74,20 @@ export const listCustomObjects = async (ctx: AccountContext): Promise<CustomObje
       name_singular: string
       name_plural: string
       icon: string | null
+      is_custom: boolean
       fields: number
       records: number
     }>(sql`
-      select o.id, o.key, o.name_singular, o.name_plural, o.icon,
-             count(distinct f.id)::int as fields,
-             count(distinct r.id)::int as records
+      select o.id, o.key, o.name_singular, o.name_plural, o.icon, o.is_custom,
+             (select count(*) from field_def f where f.object_id = o.id and f.deleted_at is null)::int as fields,
+             (case o.key
+               when 'contact' then (select count(*) from contact x where x.deleted_at is null)
+               when 'company' then (select count(*) from company x where x.deleted_at is null)
+               when 'deal' then (select count(*) from deal x where x.deleted_at is null)
+               else (select count(*) from custom_record x where x.object_id = o.id and x.deleted_at is null)
+             end)::int as records
         from object_def o
-        left join field_def f on f.object_id = o.id and f.deleted_at is null
-        left join custom_record r on r.object_id = o.id and r.deleted_at is null
-       where o.is_custom = true
-       group by o.id
+       where ${options.withBuiltIn ? sql`true` : sql`o.is_custom = true`}
        order by o.name_plural`)
     return rows.map((row) => ({
       id: String(row.id),
@@ -85,6 +95,7 @@ export const listCustomObjects = async (ctx: AccountContext): Promise<CustomObje
       nameSingular: String(row.name_singular),
       namePlural: String(row.name_plural),
       icon: row.icon,
+      custom: row.is_custom,
       fieldCount: Number(row.fields),
       recordCount: Number(row.records),
     }))

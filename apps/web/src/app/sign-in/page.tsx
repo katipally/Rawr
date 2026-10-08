@@ -11,6 +11,8 @@ type Props = { searchParams: Promise<{ notice?: string; next?: string }> }
 const SignIn = async ({ searchParams }: Props) => {
   const { notice, next } = await searchParams
   const message = noticeFor(notice)
+  // Signing out everywhere succeeded; only the other notices are failures.
+  const tone = notice === 'signed_out_everywhere' ? 'info' : 'error'
   const after = safePath(next, '')
 
   return (
@@ -23,7 +25,7 @@ const SignIn = async ({ searchParams }: Props) => {
         </p>
       </div>
 
-      {message ? <Alert>{message}</Alert> : null}
+      {message ? <Alert tone={tone}>{message}</Alert> : null}
 
       <div className="flex flex-col gap-3 rounded-panel border border-line bg-surface p-4">
         {googleConfigured ? (

@@ -28,10 +28,12 @@ const AuditPage = async ({
   // is not one.
   const actor = askedActor && isUuid(askedActor) ? askedActor : null
   // Read here rather than only in the client, so a link somebody pasted arrives
-  // already filtered instead of flashing the whole history first.
-  const [page, entities, members] = await Promise.all([
-    listAudit(ctx, { entity: askedEntity ?? null, actorId: actor, limit: 50 }),
-    auditEntities(ctx),
+  // already filtered instead of flashing the whole history first. An entity
+  // outside the list has no chip to show, so it is dropped like a bad actor.
+  const entities = await auditEntities(ctx)
+  const entity = askedEntity && entities.includes(askedEntity) ? askedEntity : null
+  const [page, members] = await Promise.all([
+    listAudit(ctx, { entity, actorId: actor, limit: 50 }),
     listMembers(ctx),
   ])
 
@@ -49,12 +51,12 @@ const AuditPage = async ({
       />
 
       <AuditTable
-        key={`${askedEntity ?? ''}|${actor ?? ''}`}
+        key={`${entity ?? ''}|${actor ?? ''}`}
         initial={page.rows.map((row) => ({ ...row, at: row.at.toISOString() }))}
         cursor={page.cursor}
         entities={entities}
         people={members.map((member) => ({ userId: member.userId, name: member.name }))}
-        entity={askedEntity ?? null}
+        entity={entity}
         actorId={actor}
       />
     </div>

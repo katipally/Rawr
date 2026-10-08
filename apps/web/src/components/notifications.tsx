@@ -197,7 +197,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                 <li
                   key={row.id}
                   className={cn(
-                    'flex items-start gap-2 border-b border-divider px-4 py-3',
+                    'relative flex items-start gap-2 border-b border-divider px-4 py-3',
                     unread && 'bg-fill',
                   )}
                 >
@@ -209,6 +209,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                     )}
                   />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    {unread ? <span className="sr-only">Unread: </span> : null}
                     {href ? (
                       <Link
                         href={href}
@@ -216,7 +217,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                           setOpen(false)
                           if (unread) void act(() => api.notifications.markRead.mutate({ id: row.id }))
                         }}
-                        className="font-medium text-body no-underline hover:underline"
+                        className="font-medium text-body no-underline hover:underline after:absolute after:inset-0 after:content-['']"
                       >
                         {row.title}
                       </Link>
@@ -229,7 +230,7 @@ export const NotificationBell = ({ accountSlug }: { accountSlug: string }) => {
                       {row.count > 1 ? ` · ${row.count} times` : ''}
                     </span>
                   </span>
-                  <span className="shrink-0">
+                  <span className="relative z-10 shrink-0">
                     {row.trashedAt ? (
                       <IconButton
                         label={`Restore ${row.title}`}

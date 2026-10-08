@@ -167,6 +167,34 @@ try {
   )
   check((await acceptInvitation(token, adminId)) === null, 'and its link stops working')
 
+  const staleEmail = `stale-${Date.now()}@sandbox.test`
+  const stale = await invite(superAdmin, { email: staleEmail })
+  check(
+    (await refused(() => invite(superAdmin, { email: staleEmail }))) !== null,
+    'a live invitation still blocks a second one to its address',
+  )
+  check(
+    (await listInvitations(superAdmin)).find((i) => i.id === stale.id)?.expired === false,
+    'and is not listed as expired before its date',
+  )
+  await owner`update invitation set expires_at = now() - interval '1 day' where id = ${stale.id}`
+  check(
+    (await listInvitations(superAdmin)).find((i) => i.id === stale.id)?.expired === true,
+    'an open invitation past its date is listed as expired',
+  )
+  const fresh = await invite(superAdmin, { email: staleEmail })
+  check(fresh.id !== stale.id, 'an expired invitation does not block a new one to its address')
+  const [old] = await owner`select revoked_at from invitation where id = ${stale.id}`
+  check(Boolean(old?.revoked_at), 'the expired one is revoked, not deleted')
+  const [inviteRow] = await owner`select after->>'replacedExpired' as replaced from audit_log
+    where entity = 'invitation' and entity_id = ${fresh.id} and action = 'invite'`
+  check(inviteRow?.replaced === stale.id, 'the new invitation names the one it replaced in the history', String(inviteRow?.replaced))
+  check(
+    (await listInvitations(superAdmin)).find((i) => i.id === fresh.id)?.expired === false,
+    'and the new one is open and not expired',
+  )
+  await revokeInvitation(superAdmin, fresh.id)
+
   console.log('\n-- grants ------------------------------------------------------')
 
   const probeEmail = `grant-${Date.now()}@sandbox.test`
@@ -380,6 +408,46 @@ try {
   check(
     history.rows.every((r) => r.actorId !== null || r.actorKind !== 'user'),
     'every act by a person names the person',
+  )
+
+  const [deactivation] = await owner`select before->>'state' as was, after->>'state' as becomes, after->>'reassignedTo' as heir
+    from audit_log where entity = 'membership' and entity_id = ${probeId} and action = 'deactivate'`
+  check(
+    deactivation?.was === 'active' && deactivation?.becomes === 'deactivated' && deactivation?.heir === adminId,
+    'ending access records the state it moved from and to, and who took the work',
+    JSON.stringify(deactivation),
+  )
+  const [reactivation] = await owner`select before->>'state' as was, after->>'state' as becomes
+    from audit_log where entity = 'membership' and entity_id = ${probeId} and action = 'reactivate'`
+  check(
+    reactivation?.was === 'deactivated' && reactivation?.becomes === 'active',
+    'restoring records the state it moved from and to',
+    JSON.stringify(reactivation),
+  )
+
+  const [probeName] = await owner`select name from user_account where id = ${probeId}`
+  const members = await listAudit(superAdmin, { entity: 'membership', limit: 200 })
+  check(
+    members.rows.find((r) => r.entityId === probeId && r.action === 'deactivate')?.targetName === probeName?.name,
+    'a membership row is named by the person it is about',
+    String(probeName?.name),
+  )
+  const [teamName] = await owner`select name from team where id = ${team.id}`
+  const teams = await listAudit(superAdmin, { entity: 'team', limit: 20 })
+  check(
+    teams.rows.find((r) => r.entityId === team.id && r.action === 'create')?.targetName === teamName?.name,
+    'a team row is named by the team',
+    String(teamName?.name),
+  )
+  const invites = await listAudit(superAdmin, { entity: 'invitation', limit: 200 })
+  check(
+    invites.rows.find((r) => r.entityId === fresh.id && r.action === 'invite')?.targetName === staleEmail,
+    'an invitation row is named by its address',
+  )
+  const accounts = await listAudit(superAdmin, { entity: 'account', limit: 5 })
+  check(
+    accounts.rows.length > 0 && accounts.rows.every((r) => r.targetName === null),
+    'an entity outside the named six has no target name',
   )
 
   await owner`delete from membership where user_id = ${probeId}`
