@@ -450,7 +450,7 @@ const updateRecordTool: ToolDefinition = {
   description: ({ registry }) =>
     [
       'Change fields on one record, of any object in this account. Dates may be written the way a person says them ("October 15th", "next Friday") and are resolved in your timezone; the response states the ISO date that was actually set.',
-      'Stages, owners and companies may be named rather than given as ids. A name that matches more than one record changes nothing and comes back with the candidates.',
+      'Stages, owners and companies may be named rather than given as ids. A stage name is looked up in the pipeline the same call names, else the deal\'s own pipeline. A name that matches more than one record changes nothing and comes back with the candidates.',
       '',
       'Fields, with their types and allowed values:',
       fieldCatalogue(registry),
@@ -479,17 +479,19 @@ const updateRecordTool: ToolDefinition = {
     const found = await resolveOrExplain(context, object, String(args.id ?? ''))
     if ('problem' in found) return found.problem
 
+    // Read first, so the response can state the change rather than assert it. §4.
+    const before = await getRecord(context.caller.ctx, key, found.id)
+    if (!before) return { text: 'That record no longer exists.', isError: true }
+
+    const currentPipeline = typeof before.values.pipeline_id === 'string' ? before.values.pipeline_id : null
     const prepared = await prepareFields(
       context.caller.ctx,
       object,
       context.lookups,
       asRecord(args.fields),
       context.today,
+      currentPipeline,
     )
-
-    // Read first, so the response can state the change rather than assert it. §4.
-    const before = await getRecord(context.caller.ctx, key, found.id)
-    if (!before) return { text: 'That record no longer exists.', isError: true }
 
     const expected = new Date(String(args.expectedUpdatedAt ?? ''))
     if (Number.isNaN(expected.getTime())) {

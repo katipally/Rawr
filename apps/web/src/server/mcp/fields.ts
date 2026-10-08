@@ -5,7 +5,7 @@ import {
   type RegistryObject,
   type AccountContext,
 } from '@rawr/db'
-import type { Lookups } from '~/server/crm.ts'
+import type { Choice, Lookups } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { resolveDate } from './dates.ts'
 
@@ -44,6 +44,7 @@ export const prepareFields = async (
   lookups: Lookups,
   input: Record<string, unknown>,
   today: string,
+  currentPipelineId?: string | null,
 ): Promise<Prepared> => {
   const keys = Object.keys(input)
   if (keys.length === 0) throw new FieldError('No fields were given, so there is nothing to change.')
@@ -62,6 +63,7 @@ export const prepareFields = async (
 
   const values: Record<string, unknown> = {}
   const notes: string[] = []
+  const pipelineId = pipelineScope(lookups, input, currentPipelineId)
 
   for (const key of keys) {
     const field = object.byKey.get(key)!
@@ -105,7 +107,7 @@ export const prepareFields = async (
       }
 
       case 'relation': {
-        const resolved = await relationValue(ctx, key, lookups, String(raw))
+        const resolved = await relationValue(ctx, key, lookups, String(raw), pipelineId)
         values[key] = resolved.id
         notes.push(`${field.label} set to ${resolved.label}.`)
         break
@@ -165,22 +167,65 @@ const choiceRefusal = (
 /** The five relation fields the registry declares. Four are short fixed lists and
  *  resolve by name; a company is a record like any other and goes through the same
  *  resolver as a deal reference, ambiguity and all. */
+/** The pipeline a stage name is looked up in: the one this call names, else the one the
+ *  record is in, else the first pipeline that has stages, which is where reconcileDeal
+ *  puts a new deal. Null when none of those can be read, and the name is then searched
+ *  in every pipeline. */
+const pipelineScope = (
+  lookups: Lookups,
+  input: Record<string, unknown>,
+  currentPipelineId: string | null | undefined,
+): string | null => {
+  const named = input.pipeline_id
+  if (named !== undefined && named !== null && named !== '') {
+    const match = matchChoice(lookups.pipelines, String(named))
+    return match.kind === 'one' ? match.choice.id : null
+  }
+  if (currentPipelineId) return currentPipelineId
+  const withStages = new Set(lookups.stages.map((stage) => stage.pipelineId))
+  return lookups.pipelines.find((pipeline) => withStages.has(pipeline.id))?.id ?? null
+}
+
+/** Two pipelines can each have an "Appointment Scheduled", so a stage name is only a
+ *  clash within the pipeline it is looked up in. An id is found in any pipeline, and
+ *  reconcileDeal is what refuses one that sits in a different pipeline than the call
+ *  names. */
+const stageValue = (lookups: Lookups, pipelineId: string | null, wanted: string): Choice => {
+  const byId = lookups.stages.find((stage) => stage.id === wanted)
+  if (byId) return byId
+
+  const choices = lookups.stages
+    .filter((stage) => pipelineId === null || stage.pipelineId === pipelineId)
+    .map((stage) => ({ id: stage.id, label: stage.label }))
+  const match = matchChoice(choices, wanted)
+  if (match.kind === 'one') return match.choice
+  if (match.kind === 'none') throw new FieldError(choiceRefusal('stage', wanted, match, choices))
+
+  const pipelineLabel = new Map(lookups.pipelines.map((pipeline) => [pipeline.id, pipeline.label] as const))
+  const named = match.choices.map((choice) => {
+    const stage = lookups.stages.find((candidate) => candidate.id === choice.id)!
+    return `${choice.label} (${pipelineLabel.get(stage.pipelineId)})`
+  })
+  throw new FieldError(`"${wanted}" matches more than one stage: ${named.join(', ')}. Nothing was changed. Say which one.`)
+}
+
 const relationValue = async (
   ctx: AccountContext,
   key: string,
   lookups: Lookups,
   wanted: string,
+  pipelineId: string | null,
 ): Promise<{ id: string; label: string }> => {
+  if (key === 'stage_id') return stageValue(lookups, pipelineId, wanted)
+
   const list =
-    key === 'stage_id'
-      ? lookups.stages.map((stage) => ({ id: stage.id, label: stage.label }))
-      : key === 'pipeline_id'
-        ? lookups.pipelines
-        : key === 'lifecycle_stage_id'
-          ? lookups.lifecycleStages
-          : key === 'owner_id'
-            ? lookups.users
-            : null
+    key === 'pipeline_id'
+      ? lookups.pipelines
+      : key === 'lifecycle_stage_id'
+        ? lookups.lifecycleStages
+        : key === 'owner_id'
+          ? lookups.users
+          : null
 
   if (list) {
     const match = matchChoice(list, wanted)
