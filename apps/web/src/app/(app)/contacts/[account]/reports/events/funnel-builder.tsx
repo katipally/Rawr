@@ -29,13 +29,19 @@ export const FunnelBuilder = ({
   const fmt = useFormat()
   const toast = useToast()
   const [steps, setSteps] = useState<string[]>(() =>
-    names.slice(0, MIN_STEPS).map((option) => option.name),
+    Array.from({ length: MIN_STEPS }, (_each, index) => names[index]?.name ?? ''),
   )
   const [result, setResult] = useState<Step[] | null>(null)
   const [busy, setBusy] = useState(false)
 
   const chosen = steps.filter(Boolean)
-  const ready = chosen.length >= MIN_STEPS
+  const ready = new Set(chosen).size >= MIN_STEPS
+  const short =
+    names.length === 0
+      ? 'None have been collected yet. Events appear here once a site fires one.'
+      : names.length < MIN_STEPS
+        ? 'Only one event has been collected so far. A funnel needs two different events.'
+        : null
 
   const run = () => {
     setBusy(true)
@@ -48,17 +54,6 @@ export const FunnelBuilder = ({
 
   const labelOf = (name: string) => names.find((option) => option.name === name)?.label ?? name
 
-  if (names.length < MIN_STEPS) {
-    return (
-      <Card title="Funnel">
-        <p className="text-secondary">
-          A funnel needs at least two event names. None have been collected yet, so there is nothing
-          to put in one.
-        </p>
-      </Card>
-    )
-  }
-
   return (
     <Card title="Funnel">
       <div className="flex flex-col gap-3">
@@ -67,6 +62,8 @@ export const FunnelBuilder = ({
           people who reached the step above it first, so this says where they stop rather than how
           often each thing happened on its own.
         </p>
+
+        {short ? <p className="text-small text-secondary">{short}</p> : null}
 
         <div className="flex flex-col gap-2">
           {steps.map((step, index) => (

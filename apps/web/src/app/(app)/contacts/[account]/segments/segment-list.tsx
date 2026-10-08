@@ -68,11 +68,11 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
   const [objectFilter, setObjectFilter] = useState<'all' | ObjectKey>('all')
   const [removing, setRemoving] = useState<SegmentRow | null>(null)
 
-  const run = async (fn: () => Promise<unknown>, done: string) => {
+  const run = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true)
     try {
       await fn()
-      toast('success', done)
+      if (done) toast('success', done)
       void queryClient.invalidateQueries(trpc.segments.pathFilter())
       router.refresh()
       return true
@@ -101,7 +101,7 @@ export const SegmentList = ({ account, rows, fieldsByObject, canWrite, hub }: Se
     void run(async () => {
       const result = await api.segments.evaluate.mutate({ id: row.id })
       toast('info', `${result.members} members: ${result.entered} joined, ${result.exited} left.`)
-    }, 'Recomputed.')
+    })
 
   const columns: Column<SegmentRow>[] = [
     {

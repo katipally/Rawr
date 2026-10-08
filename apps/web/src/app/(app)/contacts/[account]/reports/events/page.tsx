@@ -66,8 +66,8 @@ const EventsReport = async ({
           ) : (
             <BarChart
               format={fmt.number}
-              title="Events by day"
-              labels={days}
+              title="Times fired"
+              labels={days.map((day) => fmt.dayShort(day))}
               series={top.slice(0, 4).map(([name], index) => ({
                 label: labelOf.get(name) ?? name,
                 values: perDay(name),

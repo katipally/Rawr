@@ -3,6 +3,7 @@
 import { Button, Field, Select, TextInput, useToast } from '@rawr/ui'
 import { useState } from 'react'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { useFormat } from '~/components/zone.tsx'
 
 /** A push is the one write this screen makes, and it is keyed on the segment and
  *  the members it has right now, so pressing it twice does not double a list. */
@@ -12,12 +13,13 @@ export const NewsletterPanel = ({
   canWrite,
   hub,
 }: {
-  segments: { id: string; name: string }[]
+  segments: { id: string; name: string; memberCount: number }[]
   defaultListId: string
   canWrite: boolean
   hub: string
 }) => {
   const toast = useToast()
+  const fmt = useFormat()
   const [segmentId, setSegmentId] = useState(segments[0]?.id ?? '')
   const [listId, setListId] = useState(defaultListId)
   const [busy, setBusy] = useState(false)
@@ -73,7 +75,7 @@ export const NewsletterPanel = ({
             <Select id="newsletter-segment" value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>
               {segments.map((segment) => (
                 <option key={segment.id} value={segment.id}>
-                  {segment.name}
+                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'})`}
                 </option>
               ))}
             </Select>

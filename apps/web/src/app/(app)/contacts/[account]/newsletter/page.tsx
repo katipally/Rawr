@@ -78,7 +78,7 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
 
       <Card title="Push an audience across">
         <NewsletterPanel
-          segments={segments.map((segment) => ({ id: segment.id, name: segment.name }))}
+          segments={segments.map((segment) => ({ id: segment.id, name: segment.name, memberCount: segment.memberCount }))}
           defaultListId={listId}
           canWrite={allowed}
           hub="marketing"
@@ -87,7 +87,7 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
 
       <Card title="Campaigns">
         <CampaignPanel
-          segments={segments.map((segment) => ({ id: segment.id, name: segment.name }))}
+          segments={segments.map((segment) => ({ id: segment.id, name: segment.name, memberCount: segment.memberCount }))}
           defaultListId={listId}
           canWrite={allowed}
           hub="marketing"

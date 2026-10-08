@@ -35,7 +35,7 @@ type Campaign = {
 }
 
 export type CampaignPanelProps = {
-  segments: { id: string; name: string }[]
+  segments: { id: string; name: string; memberCount: number }[]
   defaultListId: string
   canWrite: boolean
   hub: string
@@ -345,7 +345,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
             >
               {segments.map((segment) => (
                 <option key={segment.id} value={segment.id}>
-                  {segment.name}
+                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'})`}
                 </option>
               ))}
             </Select>

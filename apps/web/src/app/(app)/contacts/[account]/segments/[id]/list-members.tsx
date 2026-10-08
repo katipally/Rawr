@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, ConfirmDialog, DataTable, DropdownMenu, EmptyState, IconButton, Pagination, useToast, type Column } from '@rawr/ui'
-import { ChevronDown, ChevronLeft, Pencil, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronLeft, Pencil, Trash2, X } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState, type ReactNode } from 'react'
@@ -15,8 +15,12 @@ import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { OBJECT_LABEL, SegmentBuilder, SegmentConditions } from '../segment-builder.tsx'
 import type { SegmentRow } from '../segment-list.tsx'
+import { lastPageStart } from './page-offset.ts'
 
 type Member = { id: string; displayName: string; enteredAt: string }
+type MemberSort = { by: 'name' | 'added'; dir: 'asc' | 'desc' }
+
+const DEFAULT_SORT: MemberSort = { by: 'added', dir: 'desc' }
 
 export type ListMembersProps = {
   account: string
@@ -55,19 +59,24 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
   const [members, setMembers] = useState(initial)
   const [offset, setOffset] = useState(0)
   const [perPage, setPerPage] = useState(pageSize)
+  const [sort, setSort] = useState<MemberSort>(DEFAULT_SORT)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [removing, setRemoving] = useState<string[] | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [segmentParam, setSegmentParam] = useUrlParam('segment')
 
-  const load = async (next: number, size = perPage) => {
+  const load = async (next: number, size = perPage, order = sort) => {
     setBusy(true)
     try {
-      const rows = await queryClient.fetchQuery({ ...trpc.segments.members.queryOptions({ id: list.id, limit: size, offset: next }), staleTime: 0 })
+      const rows = await queryClient.fetchQuery({
+        ...trpc.segments.members.queryOptions({ id: list.id, limit: size, offset: next, by: order.by, dir: order.dir }),
+        staleTime: 0,
+      })
       setMembers(rows.map((row) => ({ ...row, enteredAt: row.enteredAt.toISOString() })))
       setOffset(next)
       setPerPage(size)
+      setSort(order)
       setSelected(new Set())
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -82,10 +91,9 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
       const result = await api.segments.removeMembers.mutate({ id: list.id, ids })
       toast('success', `${result.removed} taken off ${list.name}.`)
       setSelected(new Set())
-      // Back to the same place in the list, which is now one page shorter than it
-      // was; asking for an offset past the end returns nothing, so step back.
-      const stillThere = Math.max(0, Math.min(offset, list.memberCount - result.removed - 1))
-      await load(stillThere)
+      // Back to the same place in the list, unless that place is past the last
+      // row now; asking for an offset past the end returns nothing.
+      await load(Math.min(offset, lastPageStart(list.memberCount - result.removed, perPage)))
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -95,11 +103,11 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
     }
   }
 
-  const act = async (fn: () => Promise<unknown>, done: string) => {
+  const act = async (fn: () => Promise<unknown>, done?: string) => {
     setBusy(true)
     try {
       await fn()
-      toast('success', done)
+      if (done) toast('success', done)
       void queryClient.invalidateQueries(trpc.segments.pathFilter())
       return true
     } catch (cause) {
@@ -113,11 +121,30 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
   const editable = canWrite && list.isStatic
   const conditions = list.filters.reduce((sum, group) => sum + group.conditions.length, 0)
 
+  const sortControl = (by: MemberSort['by'], label: string) => {
+    const active = sort.by === by ? sort.dir : null
+    const next: MemberSort = { by, dir: active === 'asc' ? 'desc' : active === 'desc' ? 'asc' : by === 'name' ? 'asc' : 'desc' }
+    const Icon = active === 'asc' ? ArrowUp : active === 'desc' ? ArrowDown : ArrowUpDown
+    return (
+      <button
+        type="button"
+        aria-label={`Sort by ${label} ${next.dir === 'asc' ? 'ascending' : 'descending'}`}
+        disabled={busy}
+        onClick={() => void load(0, perPage, next)}
+        className="grid size-6 shrink-0 place-items-center rounded-pill text-body hover:bg-fill-hover disabled:text-muted"
+      >
+        <Icon aria-hidden="true" className="size-3.5" />
+      </button>
+    )
+  }
+
   const columns: Column<Member>[] = [
     {
       key: 'name',
       header: 'Name',
       width: 360,
+      headerAside: sortControl('name', 'name'),
+      ...(sort.by === 'name' ? { sort: sort.dir === 'asc' ? 'ascending' : 'descending' } : {}),
       render: (row) => (
         <span className="flex min-w-0 items-center gap-2">
           <Link
@@ -137,7 +164,14 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
         </span>
       ),
     },
-    { key: 'entered', header: 'Added', width: 220, render: (row) => fmt.dateTime(row.enteredAt) },
+    {
+      key: 'entered',
+      header: 'Added',
+      width: 220,
+      headerAside: sortControl('added', 'date added'),
+      ...(sort.by === 'added' ? { sort: sort.dir === 'asc' ? 'ascending' : 'descending' } : {}),
+      render: (row) => fmt.dateTime(row.enteredAt),
+    },
   ]
 
   const ticked = [...selected]
@@ -197,10 +231,11 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
                                 label: 'Recompute',
                                 onSelect: () =>
                                   void act(async () => {
-                                    await api.segments.evaluate.mutate({ id: list.id })
+                                    const result = await api.segments.evaluate.mutate({ id: list.id })
+                                    toast('info', `${result.members} members: ${result.entered} joined, ${result.exited} left.`)
                                     await load(0)
                                     router.refresh()
-                                  }, 'Recomputed.'),
+                                  }),
                               },
                             ],
                           },

@@ -294,8 +294,8 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
     const days = await tx.execute<{ day: string; clean: number; held: number }>(sql`
       with days as (${calendar(range, 'day', zone)})
       select c.bucket as day,
-             count(s.id) filter (where s.spam_state = 'clean')::int as clean,
-             count(s.id) filter (where s.spam_state <> 'clean')::int as held
+             count(s.id) filter (where s.spam_state in ('clean', 'released'))::int as clean,
+             count(s.id) filter (where s.spam_state = 'quarantined')::int as held
         from days c
         left join form_submission s
           on ${daily('s.at', zone)} = c.bucket and ${bounds(range, 's.at')}
@@ -328,11 +328,12 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
       deals: number
     }>(sql`
       -- distinct: the deal join repeats a submission once per later deal.
+      -- A confirmed spam is neither a fill nor held: nobody approved it, and it is not a lead.
       select f.id, f.name as form,
-             count(distinct s.id)::int as submissions,
-             count(distinct s.id) filter (where s.spam_state <> 'clean')::int as held,
-             count(distinct s.contact_id)::int as contacts,
-             count(distinct d.id)::int as deals
+             count(distinct s.id) filter (where s.spam_state <> 'confirmed_spam')::int as submissions,
+             count(distinct s.id) filter (where s.spam_state = 'quarantined')::int as held,
+             count(distinct s.contact_id) filter (where s.spam_state <> 'confirmed_spam')::int as contacts,
+             count(distinct d.id) filter (where s.spam_state <> 'confirmed_spam')::int as deals
         from form f
         join form_submission s on s.form_id = f.id and ${bounds(range, 's.at')}
         left join company sc on sc.id = s.company_id and sc.deleted_at is null

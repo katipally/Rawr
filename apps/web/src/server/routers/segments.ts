@@ -108,10 +108,17 @@ export const segmentsRouter = router({
         id: z.uuid(),
         limit: z.number().int().min(1).max(200).optional(),
         offset: z.number().int().min(0).optional(),
+        by: z.enum(['name', 'added']).optional(),
+        dir: z.enum(['asc', 'desc']).optional(),
       }),
     )
     .query(({ ctx, input }) =>
-      call(() => readSegmentMembers(ctx.account, input.id, input.limit ?? 50, input.offset ?? 0)),
+      call(() =>
+        readSegmentMembers(ctx.account, input.id, input.limit ?? 50, input.offset ?? 0, {
+          by: input.by ?? 'added',
+          dir: input.dir ?? 'desc',
+        }),
+      ),
     ),
 
   /** What the builder shows before anything is saved: the count and a handful of

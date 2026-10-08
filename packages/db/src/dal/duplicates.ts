@@ -80,71 +80,78 @@ const NORMALISED_COMPANY_NAME = (alias: string) =>
         '\\s+', ' ', 'g')),
       '( (${LEGAL_SUFFIX}))+$', ''))`)
 
+type Query = ReturnType<typeof sql>
+
+/** Each record in a group is paired with the oldest one in it, so k copies give
+ *  k-1 pairs and every copy after the first surfaces on its own. The oldest is the
+ *  keep side of each of its pairs. The newest members come first, so the cap keeps
+ *  the freshest proposals. */
+const anchored = (rule: DuplicateRule, from: Query, where: Query, key: Query, because: Query, limit: number) => sql`
+  select ${rule}::text as rule, ranked.because, ranked.anchor_id as a_id, ranked.member_id as b_id
+    from (
+      select ${because} as because, c.id::text as member_id, c.created_at as member_created,
+             first_value(c.id::text) over w as anchor_id, row_number() over w as position
+        from ${from}
+       where ${where}
+      window w as (partition by ${key} order by c.created_at, c.id)
+    ) ranked
+   where ranked.position > 1
+   order by ranked.member_created desc, ranked.member_id
+   limit ${limit}`
+
+const CONTACT_HAS_EMAIL = sql`c.deleted_at is null and c.email is not null and c.email <> ''`
+const SAME_PERSON_KEY = sql`${CANONICAL_LOCAL} || '@' || split_part(lower(c.email), '@', 2)`
+const PHONE_DIGITS = sql`regexp_replace(c.phone, '[^0-9]', '', 'g')`
+
 /** Every rule for contacts. Each returns the same shape, so the caller unions
  *  them and does no per-rule work. */
-const CONTACT_RULES: { rule: DuplicateRule; query: (limit: number) => ReturnType<typeof sql> }[] = [
+const CONTACT_RULES: { rule: DuplicateRule; query: (limit: number) => Query }[] = [
   {
     rule: 'same_address',
-    query: (limit) => sql`
-      select 'same_address' as rule, lower(c.email) as because,
-             min(c.id::text) as a_id, max(c.id::text) as b_id
-        from contact c
-       where c.deleted_at is null and c.email is not null and c.email <> ''
-       group by lower(c.email)
-      having count(*) > 1
-       limit ${limit}`,
+    query: (limit) => anchored('same_address', sql`contact c`, CONTACT_HAS_EMAIL, sql`lower(c.email)`, sql`lower(c.email)`, limit),
   },
   {
     rule: 'same_person_at_company',
-    query: (limit) => sql`
-      select 'same_person_at_company' as rule,
-             ${CANONICAL_LOCAL} || '@' || split_part(lower(c.email), '@', 2) as because,
-             min(c.id::text) as a_id, max(c.id::text) as b_id
-        from contact c
-       where c.deleted_at is null and c.email is not null and c.email <> ''
-       group by ${CANONICAL_LOCAL} || '@' || split_part(lower(c.email), '@', 2)
-      having count(*) > 1
-       limit ${limit}`,
+    query: (limit) => anchored('same_person_at_company', sql`contact c`, CONTACT_HAS_EMAIL, SAME_PERSON_KEY, SAME_PERSON_KEY, limit),
   },
   {
     rule: 'same_name_and_company',
-    query: (limit) => sql`
-      select 'same_name_and_company' as rule,
-             ${CONTACT_NAME} || ' at ' || coalesce(co.name, 'no company') as because,
-             min(c.id::text) as a_id, max(c.id::text) as b_id
-        from contact c left join company co on co.id = c.company_id and co.deleted_at is null
-       where c.deleted_at is null
-         and ${CONTACT_NAME} <> ''
-         and c.company_id is not null
-       group by ${CONTACT_NAME}, co.name, c.company_id
-      having count(*) > 1
-       limit ${limit}`,
+    query: (limit) =>
+      anchored(
+        'same_name_and_company',
+        sql`contact c left join company co on co.id = c.company_id and co.deleted_at is null`,
+        sql`c.deleted_at is null and ${CONTACT_NAME} <> '' and c.company_id is not null`,
+        sql`${CONTACT_NAME}, co.name, c.company_id`,
+        sql`${CONTACT_NAME} || ' at ' || coalesce(co.name, 'no company')`,
+        limit,
+      ),
   },
   {
     rule: 'same_phone',
-    query: (limit) => sql`
-      select 'same_phone' as rule, regexp_replace(c.phone, '[^0-9]', '', 'g') as because,
-             min(c.id::text) as a_id, max(c.id::text) as b_id
-        from contact c
-       where c.deleted_at is null and c.phone is not null
-         and length(regexp_replace(c.phone, '[^0-9]', '', 'g')) >= 7
-       group by regexp_replace(c.phone, '[^0-9]', '', 'g')
-      having count(*) > 1
-       limit ${limit}`,
+    query: (limit) =>
+      anchored(
+        'same_phone',
+        sql`contact c`,
+        sql`c.deleted_at is null and c.phone is not null and length(${PHONE_DIGITS}) >= 7`,
+        PHONE_DIGITS,
+        PHONE_DIGITS,
+        limit,
+      ),
   },
 ]
 
-const COMPANY_RULES: { rule: DuplicateRule; query: (limit: number) => ReturnType<typeof sql> }[] = [
+const COMPANY_RULES: { rule: DuplicateRule; query: (limit: number) => Query }[] = [
   {
     rule: 'same_domain',
-    query: (limit) => sql`
-      select 'same_domain' as rule, lower(c.domain) as because,
-             min(c.id::text) as a_id, max(c.id::text) as b_id
-        from company c
-       where c.deleted_at is null and c.domain is not null and c.domain <> ''
-       group by lower(c.domain)
-      having count(*) > 1
-       limit ${limit}`,
+    query: (limit) =>
+      anchored(
+        'same_domain',
+        sql`company c`,
+        sql`c.deleted_at is null and c.domain is not null and c.domain <> ''`,
+        sql`lower(c.domain)`,
+        sql`lower(c.domain)`,
+        limit,
+      ),
   },
   {
     // "Acme" against "Acme, Inc." Deliberately an exact match on a normalised name
@@ -171,6 +178,7 @@ const COMPANY_RULES: { rule: DuplicateRule; query: (limit: number) => ReturnType
          and a.name is not null and b.name is not null
          and ${NORMALISED_COMPANY_NAME('a')} <> ''
          and coalesce(a.domain, '') = '' and coalesce(b.domain, '') = ''
+       order by greatest(a.created_at, b.created_at) desc, a.id, b.id
        limit ${limit}`,
   },
 ]
@@ -218,11 +226,15 @@ export const dismissDuplicate = async (
     }
   })
 
-/** Likely duplicate pairs, newest rule first, capped.
+/** Likely duplicate pairs, newest first, capped.
  *
  *  Read-only, but gated on write: this is the queue for an irreversible action
  *  and it lists two records side by side with the reason they might be the same
- *  person. A viewer has no use for it and no business seeing it framed that way. */
+ *  person. A viewer has no use for it and no business seeing it framed that way.
+ *
+ *  The cap is applied after every rule has been merged and sorted by the newer of
+ *  each pair's two records. Capping per rule in rule order let one rule's older
+ *  pairs fill the cap, and a rule with no ORDER BY cut an arbitrary subset. */
 export const findDuplicates = async (
   ctx: AccountContext,
   objectKey: 'contact' | 'company',
@@ -240,15 +252,14 @@ export const findDuplicates = async (
       .from(duplicateDismissal)
       .where(eq(duplicateDismissal.entityType, objectKey))
     const seen = new Set(dismissed.map((row) => `${row.leftId}:${row.rightId}`))
-    const out: DuplicatePair[] = []
 
+    const proposed: PairRow[] = []
     for (const found of rules) {
-      if (out.length >= limit) break
       // Names are joined back on rather than selected in the group, because a
       // grouped query cannot carry a column it did not group by and repeating the
       // whole name expression in the GROUP BY is how the two drift apart.
-      const rows = await tx.execute<PairRow>(sql`
-        with pair as (${found.query(limit - out.length)})
+      proposed.push(...(await tx.execute<PairRow>(sql`
+        with pair as (${found.query(limit)})
         select pair.rule, pair.because,
                pair.a_id, pair.b_id,
                ${sql.raw(objectKey === 'contact' ? `trim(coalesce(a."first_name", '') || ' ' || coalesce(a."last_name", ''))` : `a."name"`)} as a_name,
@@ -257,29 +268,32 @@ export const findDuplicates = async (
                b.created_at as b_created
           from pair
           join ${sql.raw(`"${objectKey}"`)} a on a.id = pair.a_id::uuid
-          join ${sql.raw(`"${objectKey}"`)} b on b.id = pair.b_id::uuid`)
-
-      for (const row of rows) {
-        // One pair per two records, whichever rule proposed it first. Somebody
-        // reviewing the same two people four times because they share a name, an
-        // address, a phone and a company stops reviewing.
-        const key = [row.a_id, row.b_id].sort().join(':')
-        if (seen.has(key)) continue
-        seen.add(key)
-
-        const a = { id: row.a_id, displayName: row.a_name?.trim() || row.a_id, createdAt: asDate(row.a_created) }
-        const b = { id: row.b_id, displayName: row.b_name?.trim() || row.b_id, createdAt: asDate(row.b_created) }
-        const [keep, absorb] = a.createdAt <= b.createdAt ? [a, b] : [b, a]
-        out.push({
-          rule: row.rule as DuplicateRule,
-          because: REASON[row.rule as DuplicateRule](row.because),
-          keep,
-          absorb,
-        })
-      }
+          join ${sql.raw(`"${objectKey}"`)} b on b.id = pair.b_id::uuid`)))
     }
+    const newer = (row: PairRow) => Math.max(asDate(row.a_created).getTime(), asDate(row.b_created).getTime())
+    proposed.sort((x, y) => newer(y) - newer(x))
 
-    return out.slice(0, limit)
+    const out: DuplicatePair[] = []
+    for (const row of proposed) {
+      if (out.length === limit) break
+      // One pair per two records, whichever rule proposed it first. Somebody
+      // reviewing the same two people four times because they share a name, an
+      // address, a phone and a company stops reviewing.
+      const key = [row.a_id, row.b_id].sort().join(':')
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      const a = { id: row.a_id, displayName: row.a_name?.trim() || row.a_id, createdAt: asDate(row.a_created) }
+      const b = { id: row.b_id, displayName: row.b_name?.trim() || row.b_id, createdAt: asDate(row.b_created) }
+      const [keep, absorb] = a.createdAt <= b.createdAt ? [a, b] : [b, a]
+      out.push({
+        rule: row.rule as DuplicateRule,
+        because: REASON[row.rule as DuplicateRule](row.because),
+        keep,
+        absorb,
+      })
+    }
+    return out
   })
 }
 

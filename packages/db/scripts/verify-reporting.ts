@@ -720,6 +720,44 @@ try {
     return '2 submissions, 1 held, 2 deals'
   })
 
+  await check('B10-F05: a released fill is kept, a quarantined one held, a confirmed spam in neither', async () => {
+    const [form] = await owner<{ id: string }[]>`
+      insert into form (account_id, name, slug) values (${probe.id}, ${`${tag}-states`}, ${`${tag}-states`}) returning id`
+    await owner`insert into form_submission (account_id, form_id, at, spam_state)
+                values (${probe.id}, ${form!.id}, '2001-03-22T18:00:00Z', 'clean'),
+                       (${probe.id}, ${form!.id}, '2001-03-22T18:05:00Z', 'released'),
+                       (${probe.id}, ${form!.id}, '2001-03-22T18:10:00Z', 'quarantined'),
+                       (${probe.id}, ${form!.id}, '2001-03-22T18:15:00Z', 'confirmed_spam')`
+
+    const report = await formsReport(probeCtx, march)
+    const row = report.forms.find((each) => each.id === form!.id)
+    expect(row?.submissions === 3, `submissions ${row?.submissions}: the confirmed spam is no fill`)
+    expect(row?.held === 1, `held ${row?.held}`)
+    const day = report.days.find((each) => each.day === '2001-03-22')
+    expect(day?.clean === 2, `kept ${day?.clean ?? 'no bucket'}: clean and released`)
+    expect(day?.held === 1, `held ${day?.held ?? 'no bucket'}`)
+    return '3 fills (2 kept, 1 held), the confirmed spam in neither'
+  })
+
+  await check('B10-F05: a confirmed spam with a contact and a deal is in no submission, contact or deal count', async () => {
+    const [form] = await owner<{ id: string }[]>`
+      insert into form (account_id, name, slug) values (${probe.id}, ${`${tag}-spam-links`}, ${`${tag}-spam-links`}) returning id`
+    const company = await makeCompany('spam-links-co')
+    const spamContact = await makeContact('spam-links-spam', '2001-03-24T18:00:00Z', company, null)
+    const fillContact = await makeContact('spam-links-fill', '2001-03-24T18:00:00Z', null, null)
+    await owner`insert into form_submission (account_id, form_id, contact_id, company_id, at, spam_state)
+                values (${probe.id}, ${form!.id}, ${spamContact}, ${company}, '2001-03-24T18:05:00Z', 'confirmed_spam'),
+                       (${probe.id}, ${form!.id}, ${fillContact}, null, '2001-03-24T18:10:00Z', 'clean')`
+    await makeDeal('spam-links-deal', openStage, '2001-03-24T18:20:00Z', { company })
+
+    const report = await formsReport(probeCtx, march)
+    const row = report.forms.find((each) => each.id === form!.id)
+    expect(row?.submissions === 1, `submissions ${row?.submissions}`)
+    expect(row?.contacts === 1, `contacts ${row?.contacts}: only the kept fill's contact`)
+    expect(row?.deals === 0, `deals ${row?.deals}: the deal hangs off the confirmed spam's company`)
+    return '1 submission, 1 contact, 0 deals'
+  })
+
   await check('A-04: one 100,000 deal at a company with three contacts is 100,000', async () => {
     const channel = `verify-${stamp}`
     const company = await makeCompany('attr-co')

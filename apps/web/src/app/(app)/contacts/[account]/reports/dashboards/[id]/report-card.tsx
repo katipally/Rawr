@@ -17,8 +17,8 @@ export type RenderedCard = { key: string; label: string; report: string; data: C
 const onHover = 'opacity-0 transition-opacity duration-150 ease-out group-hover/card:opacity-100 group-focus-within/card:opacity-100 [@media(hover:none)]:opacity-100'
 
 /** One report on a dashboard, in HubSpot's tile: the name as a link into the
- *  report it comes from, the range it covers as a tag, and on hover a grip to
- *  drag it by and the More actions menu. */
+ *  report it comes from, the range it covers as a tag, a grip to drag it by, and
+ *  the More actions menu, which shows on hover. */
 export const ReportCard = ({
   card,
   href,
@@ -61,9 +61,9 @@ export const ReportCard = ({
             onDragStart={grip.onDragStart}
             onDragEnd={grip.onDragEnd}
             title="Drag to move"
-            className={cn('absolute top-4 left-0 flex cursor-grab text-secondary', onHover)}
+            className="-ml-1.5 flex size-6 shrink-0 cursor-grab items-center justify-center text-secondary"
           >
-            <GripVertical aria-hidden="true" className="size-3" />
+            <GripVertical aria-hidden="true" className="size-3.5" />
           </span>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col items-start gap-1">

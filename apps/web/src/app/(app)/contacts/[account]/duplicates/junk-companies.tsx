@@ -59,11 +59,10 @@ export const JunkCompanies = ({ account, companies, limit, total }: JunkCompanie
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <h2 className="font-medium">Companies named after a HubSpot id</h2>
+        <h2 className="font-medium">Companies with a number for a name</h2>
         <p className="text-secondary">
-          Each of these is a company whose name is only digits, the id of a HubSpot company that
-          was merged or deleted by the time this contact was exported. Open one to see who is
-          attached, and delete it yourself if it turns out to hold nobody real.
+          These companies were named with only digits, usually by an import that had no name to
+          give them. Open one to see who is attached, and delete it yourself if nobody real is on it.
         </p>
       </div>
 

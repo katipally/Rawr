@@ -1444,6 +1444,29 @@ try {
     return 'reported as it stands, never recomputed'
   })
 
+  await check('a list sorts by name either way, pages hold together, and the default is added newest first', async () => {
+    const byName = async (dir: 'asc' | 'desc') => (await readSegmentMembers(admin, contactListId, 50, 0, { by: 'name', dir })).map((m) => m.displayName)
+    const asc = await byName('asc')
+    const desc = await byName('desc')
+    expect(asc.length === 2 && asc[0]! <= asc[1]!, `name ascending came back ${asc.join(' | ')}`)
+    expect(JSON.stringify(desc) === JSON.stringify([...asc].reverse()), `name descending came back ${desc.join(' | ')}`)
+
+    const sort = { by: 'name' as const, dir: 'asc' as const }
+    const first = await readSegmentMembers(admin, contactListId, 1, 0, sort)
+    const second = await readSegmentMembers(admin, contactListId, 1, 1, sort)
+    const whole = await readSegmentMembers(admin, contactListId, 50, 0, sort)
+    expect(first.length === 1 && second.length === 1, `pages of one held ${first.length} and ${second.length}`)
+    expect(
+      [...first, ...second].map((m) => m.id).join() === whole.map((m) => m.id).join(),
+      'two pages of one did not hold the same records, in the same order, as one page',
+    )
+
+    const defaults = await readSegmentMembers(admin, contactListId, 50)
+    const addedNewest = await readSegmentMembers(admin, contactListId, 50, 0, { by: 'added', dir: 'desc' })
+    expect(defaults.map((m) => m.id).join() === addedNewest.map((m) => m.id).join(), 'the default is not added newest first')
+    return 'name both ways, two one-row pages hold the whole list, default is added newest first'
+  })
+
   await check('companies get lists too, and an active list refuses hand editing', async () => {
     const company = await createRecord(sales, 'company', {
       name: `Listed co ${listStamp}`,
@@ -2194,6 +2217,33 @@ try {
     expect(mine.length === 1, `${mine.length} pairs for that domain: ${mine.map((p) => p.because).join(' | ')}`)
     expect(mine[0]!.rule === 'same_person_at_company', mine[0]!.rule)
     return 'dots and a plus tag are noise, a different local part is not'
+  })
+
+  await check('three spellings of one person queue as two pairs on the oldest, and a set-aside copy leaves the third', async () => {
+    // Live addresses are unique on lower(email), so three copies differ by a dot
+    // or a plus tag: the same person, three records.
+    const domain = `trio-${stamp}.example.test`
+    const ids: string[] = []
+    for (const local of [`t${stamp}`, `t.${stamp}`, `t${stamp}+news`]) {
+      const rows = await db.execute<{ id: string }>(sql`
+        insert into contact (account_id, email, first_name, last_name)
+        values (${datasaur!.id}, ${`${local}@${domain}`}, 'Trio', ${local}) returning id`)
+      ids.push(rows[0]!.id)
+    }
+
+    const mine = (await findDuplicates(admin, 'contact')).filter((pair) => pair.because.includes(domain))
+    expect(mine.length === 2, `${mine.length} pairs for three spellings`)
+    expect(mine.every((pair) => pair.keep.id === ids[0]), 'a pair did not keep the oldest copy')
+    expect(
+      mine.map((pair) => pair.absorb.id).sort().join() === [ids[1], ids[2]].sort().join(),
+      'the pairs did not reach the two newer copies',
+    )
+
+    await dismissDuplicate(admin, 'contact', { leftId: ids[0]!, rightId: ids[1]! })
+    const left = (await findDuplicates(admin, 'contact')).filter((pair) => pair.because.includes(domain))
+    expect(left.length === 1, `${left.length} pairs left after setting one aside`)
+    expect(left[0]!.keep.id === ids[0] && left[0]!.absorb.id === ids[2], 'the third copy was not paired with the oldest')
+    return 'two pairs on the oldest; setting one aside leaves the third'
   })
 
   await check('two spellings of one company name are, and a sibling is not', async () => {

@@ -129,7 +129,6 @@ export const NewImport = ({ account, kinds }: { account: string; kinds: ImportKi
                 name="file"
                 type="file"
                 aria-label="File to import"
-                required
                 accept=".csv,.tsv,.txt,.xlsx"
                 onChange={(event) => setFile(event.currentTarget.files?.[0] ?? null)}
                 className="absolute inset-0 cursor-pointer opacity-0"

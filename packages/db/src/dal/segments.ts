@@ -347,11 +347,15 @@ export const evaluateAllSegments = async (
 
 export type SegmentMember = { id: string; displayName: string; enteredAt: Date }
 
+export type SegmentMemberSort = { by: 'name' | 'added'; dir: 'asc' | 'desc' }
+const NEWEST_FIRST: SegmentMemberSort = { by: 'added', dir: 'desc' }
+
 export const readSegmentMembers = async (
   ctx: AccountContext,
   segmentId: string,
   limit = 50,
   offset = 0,
+  sort: SegmentMemberSort = NEWEST_FIRST,
 ): Promise<SegmentMember[]> =>
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'contacts', 'segments')
@@ -369,13 +373,20 @@ export const readSegmentMembers = async (
       object.key === 'contact'
         ? sql.raw(`r."first_name", r."last_name", r."email"`)
         : sql.raw(`r."name"${object.key === 'company' ? ', r."domain"' : ''}`)
+    // Sorts on the same words displayName shows: first and last name, else the email.
+    const label =
+      object.key === 'contact'
+        ? sql`lower(coalesce(nullif(trim(coalesce(r.first_name, '') || ' ' || coalesce(r.last_name, '')), ''), r.email, ''))`
+        : sql`lower(coalesce(r.name, ''))`
+    const primary = sort.by === 'name' ? label : sql`m.entered_at`
+    const direction = sql.raw(sort.dir === 'asc' ? 'asc' : 'desc')
 
     const rows = await tx.execute<Record<string, unknown> & { id: string; entered_at: Date }>(sql`
       select r.id, m.entered_at, ${labelColumns}
         from segment_membership m
         join ${sql.raw(`"${object.key}"`)} r on r.id = m.entity_id
        where m.segment_id = ${segmentId} and m.exited_at is null and r.deleted_at is null
-       order by m.entered_at desc, r.id
+       order by ${primary} ${direction}, ${label}, r.id
        limit ${Math.min(Math.max(limit, 1), 200)} offset ${Math.max(offset, 0)}`)
 
     return rows.map((member) => ({

@@ -28,6 +28,7 @@ import { NotificationBell } from './notifications.tsx'
 import { PREVIEW_DOCK } from '~/lib/docks.ts'
 import { forgetDrafts } from '~/lib/drafts.ts'
 import { appsPath, availableAppsPath } from '~/lib/links.ts'
+import { currentNavItem } from '~/lib/nav-match.ts'
 import { useUi, useUiReady, usePreferencesSync } from '~/lib/store/ui.ts'
 import { TaskTray } from './task-tray.tsx'
 import { useRememberBeforeSettings } from '~/lib/use-origin.ts'
@@ -185,10 +186,8 @@ const Shell = ({
     return () => document.removeEventListener('keydown', onKey)
   }, [flyout, onKey])
 
-  const isCurrent = (item: NavItem) => {
-    const prefix = item.match ?? item.href
-    return prefix === '/' ? here === '/' : here.startsWith(prefix)
-  }
+  const current = currentNavItem(nav.flatMap((section) => (section.groups ?? []).flatMap((group) => group.items)), here)
+  const isCurrent = (item: NavItem) => item === current
   const sectionIsCurrent = (section: NavSection) =>
     section.href
       ? here.startsWith(section.href)

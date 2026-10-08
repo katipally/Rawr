@@ -113,31 +113,6 @@ export const EnrollmentTable = ({
             </Link>
             <span className="truncate text-small text-secondary">{row.contactEmail ?? 'No email'}</span>
           </span>
-          {canWrite ? (
-            <RowActions>
-              {row.state === 'active' ? (
-                <button type="button" className={rowPill} disabled={busy} onClick={() => void pause([row])}>
-                  Pause
-                </button>
-              ) : null}
-              {row.state === 'paused' ? (
-                <button
-                  type="button"
-                  className={rowPill}
-                  disabled={busy || !on}
-                  title={on ? undefined : resumeHint}
-                  onClick={() => void resume([row])}
-                >
-                  Resume
-                </button>
-              ) : null}
-              {row.state === 'removed' ? null : (
-                <button type="button" className={rowPill} disabled={busy} onClick={() => setRemoving([row])}>
-                  Unenroll
-                </button>
-              )}
-            </RowActions>
-          ) : null}
         </span>
       ),
     },
@@ -151,7 +126,7 @@ export const EnrollmentTable = ({
         </Badge>
       ),
     },
-    { key: 'step', header: 'Latest step', width: 130, render: (row) => `Step ${row.currentStep + 1}` },
+    { key: 'step', header: 'Latest step', width: 150, render: (row) => `Step ${row.currentStep + 1}` },
     {
       key: 'engagement',
       header: 'Engagement',
@@ -181,6 +156,40 @@ export const EnrollmentTable = ({
         )
       },
     },
+    ...(canWrite
+      ? [
+          {
+            key: 'actions',
+            header: 'Actions',
+            width: 200,
+            render: (row: Row) => (
+              <RowActions>
+                {row.state === 'active' ? (
+                  <button type="button" className={rowPill} disabled={busy} onClick={() => void pause([row])}>
+                    Pause
+                  </button>
+                ) : null}
+                {row.state === 'paused' ? (
+                  <button
+                    type="button"
+                    className={rowPill}
+                    disabled={busy || !on}
+                    title={on ? undefined : resumeHint}
+                    onClick={() => void resume([row])}
+                  >
+                    Resume
+                  </button>
+                ) : null}
+                {row.state === 'removed' ? null : (
+                  <button type="button" className={rowPill} disabled={busy} onClick={() => setRemoving([row])}>
+                    Unenroll
+                  </button>
+                )}
+              </RowActions>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
