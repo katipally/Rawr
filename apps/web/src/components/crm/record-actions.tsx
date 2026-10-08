@@ -107,11 +107,24 @@ export const RecordActions = ({
     }
   }
 
+  const restore = async () => {
+    try {
+      await api.crm.records.restore.mutate({ object, ids: [recordId] })
+      toast('success', `Put back the ${objectLabel.toLowerCase()}.`)
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    }
+  }
+
   const remove = async () => {
     setBusy(true)
     try {
       await api.crm.records.remove.mutate({ object, id: recordId })
-      toast('success', `${objectLabel} deleted. Its history is kept on the records it touched.`)
+      // The toast outlives this page, and restore needs only the id.
+      toast('success', `${objectLabel} deleted. Its history is kept on the records it touched.`, {
+        label: 'Undo',
+        run: restore,
+      })
       navigate(objectView(account, object, 'all'))
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -287,7 +300,7 @@ export const RecordActions = ({
           <p>
             The record is hidden everywhere immediately. Its timeline entries stay on the records
             they also touched, reading as a deleted {objectLabel.toLowerCase()}, so history is not
-            rewritten.
+            rewritten. Restore records, under Data Management, puts it back.
           </p>
           <p className="text-secondary">Type the name to confirm:</p>
           {/* The name is shown here, in full and selectable, rather than only in

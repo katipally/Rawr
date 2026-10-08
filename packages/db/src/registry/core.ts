@@ -1,4 +1,4 @@
-import type { FieldType } from './types.ts'
+import { OPEN_STAGE, type FieldType } from './types.ts'
 
 export type ObjectKey = 'company' | 'contact' | 'deal'
 
@@ -192,7 +192,11 @@ export const CORE_VIEWS: Record<ObjectKey, CoreView[]> = {
       kind: 'table',
       columns: ['name', 'stage_id', 'amount', 'next_step', 'next_step_date', 'owner_id'],
       // The Monday chase. A past next_step_date is the signal, not an error. A9.
-      filters: [{ field: 'next_step_date', operator: 'before', value: '@today' }],
+      // A won or lost deal is not chased, the same rule the Tasks overdue list uses.
+      filters: [
+        { field: 'next_step_date', operator: 'before', value: '@today' },
+        { field: 'stage_id', operator: 'is', value: OPEN_STAGE },
+      ],
       sorts: [{ key: 'next_step_date', direction: 'asc' }],
       groupBy: 'stage_id',
       position: 1,

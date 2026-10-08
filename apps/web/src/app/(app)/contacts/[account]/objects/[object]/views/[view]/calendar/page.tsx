@@ -121,7 +121,7 @@ const CalendarPage = async ({
         }
         more={[
           { key: 'import', label: 'Import', href: importsPath(account) },
-          { key: 'export', label: 'Export', href: exportPath(account) },
+          { key: 'export', label: 'Export', href: exportPath(account, objectParam) },
         ]}
       />
 

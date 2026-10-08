@@ -9,11 +9,13 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FILTERS_DOCK } from '~/lib/docks.ts'
 import { encodeFilters, layoutParams, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { firstDirection, sortWords } from '~/lib/sort-labels.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import { typingInto } from '~/lib/typing-into.ts'
 import { replaceParams } from '~/lib/url-params.ts'
 import { FilterBuilder, type FilterField, type Group } from './filter-builder.tsx'
+import { chooserRows, withNameParts } from './column-chooser.ts'
 import { CreateRecordPanel, type CreateField } from './create-record.tsx'
 import { QuickFilters } from './quick-filters.tsx'
 
@@ -162,7 +164,7 @@ export const ListToolbar = ({
     return () => document.removeEventListener('keydown', onKey)
   }, [showAdvanced])
   const [viewName, setViewName] = useState('')
-  const [shared, setShared] = useState(true)
+  const [shared, setShared] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const goTo = (next: ListParams) => {
@@ -172,6 +174,10 @@ export const ListToolbar = ({
   }
 
   const activeConditions = filters.reduce((sum, group) => sum + group.conditions.length, 0)
+  // A filter that arrives in the address (a list tile, a pasted link) shows its chips.
+  useEffect(() => {
+    if (activeConditions > 0) setShowFilters(true)
+  }, [activeConditions])
   const choices = Object.fromEntries(createFields.flatMap((field) => (field.choices ? [[field.key, field.choices]] : [])))
   const applyFilters = (groups: Group[]) => goTo({ filters: encodeFilters(groups) })
 
@@ -228,6 +234,8 @@ export const ListToolbar = ({
 
   const sortKey = sorts[0]?.key ?? ''
   const sortDirection = sorts[0]?.direction ?? 'desc'
+  const typeOf = (key: string) => filterFields.find((field) => field.key === key)?.type ?? 'text'
+  const words = sortWords(typeOf(sortKey))
   // What the table shows, plus whatever the view sorts by when that is not one
   // of them, so the select never claims a sort that is not the real one.
   const sortable = sortKey && !columns.includes(sortKey) ? [sortKey, ...columns] : columns
@@ -237,13 +245,16 @@ export const ListToolbar = ({
     setShowColumns(true)
   }
 
+  const rows = chooserRows(draftColumns)
+  const rowLabel = (key: string) => (key === 'first_name' ? 'Name' : labelOf(key))
+
   const move = (index: number, by: -1 | 1) => {
-    const next = [...draftColumns]
+    const next = [...rows]
     const target = index + by
     if (target < 0 || target >= next.length) return
     const [moved] = next.splice(index, 1)
     next.splice(target, 0, moved!)
-    setDraftColumns(next)
+    setDraftColumns(withNameParts(next))
   }
 
   return (
@@ -265,7 +276,7 @@ export const ListToolbar = ({
             aria-label={`Search ${objectLabel.toLowerCase()}`}
             placeholder="Search ( / )"
             onChange={(event) => setSearch(event.target.value)}
-            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4"
+            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4 [&::-webkit-search-cancel-button]:appearance-none"
           />
           <button
             type="submit"
@@ -317,7 +328,10 @@ export const ListToolbar = ({
                   <select
                     aria-label="Property to sort by"
                     value={sortKey}
-                    onChange={(event) => goTo({ sort: sortDirection === 'desc' ? `-${event.target.value}` : event.target.value })}
+                    onChange={(event) => {
+                      const direction = sorts[0] ? sortDirection : firstDirection(typeOf(event.target.value))
+                      goTo({ sort: direction === 'desc' ? `-${event.target.value}` : event.target.value })
+                    }}
                     className="h-control min-w-0 flex-1 rounded-hs border border-line-strong bg-surface pl-3 text-body"
                   >
                     {sortKey ? null : <option value="">Choose a property</option>}
@@ -338,7 +352,7 @@ export const ListToolbar = ({
                         onClick={() => goTo({ sort: direction === 'desc' ? `-${sortKey}` : sortKey })}
                         className="h-full rounded-pill border border-transparent px-3 text-small transition-all duration-150 ease-out hover:bg-fill disabled:cursor-not-allowed disabled:text-muted aria-pressed:border-line-strong aria-pressed:bg-surface aria-pressed:shadow-panel"
                       >
-                        {direction === 'desc' ? 'Most recent' : 'Oldest'}
+                        {direction === 'desc' ? words.desc : words.asc}
                       </button>
                     ))}
                   </fieldset>
@@ -550,24 +564,26 @@ export const ListToolbar = ({
           </p>
 
           <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-hs border border-line p-2">
-            {draftColumns.map((key, index) => (
+            {rows.map((key, index) => (
               <div key={key} className="flex items-center gap-1">
                 <Checkbox
                   className="min-w-0 flex-1"
                   checked
-                  label={labelOf(key)}
-                  onChange={() => setDraftColumns(draftColumns.filter((other) => other !== key))}
+                  label={rowLabel(key)}
+                  onChange={() =>
+                    setDraftColumns(draftColumns.filter((other) => other !== key && !(key === 'first_name' && other === 'last_name')))
+                  }
                 />
                 <IconButton
-                  label={`Move ${labelOf(key)} earlier`}
+                  label={`Move ${rowLabel(key)} earlier`}
                   icon={<ArrowUp aria-hidden="true" className="size-4" />}
                   disabled={index === 0}
                   onClick={() => move(index, -1)}
                 />
                 <IconButton
-                  label={`Move ${labelOf(key)} later`}
+                  label={`Move ${rowLabel(key)} later`}
                   icon={<ArrowDown aria-hidden="true" className="size-4" />}
-                  disabled={index === draftColumns.length - 1}
+                  disabled={index === rows.length - 1}
                   onClick={() => move(index, 1)}
                 />
               </div>
@@ -581,13 +597,13 @@ export const ListToolbar = ({
 
           <div className="grid max-h-56 gap-1.5 overflow-y-auto rounded-hs border border-line p-2 @md:grid-cols-2">
             {allColumns
-              .filter((field) => !draftColumns.includes(field.key))
+              .filter((field) => !draftColumns.includes(field.key) && field.key !== 'last_name')
               .map((field) => (
                 <Checkbox
                   key={field.key}
                   checked={false}
-                  label={field.label}
-                  onChange={() => setDraftColumns([...draftColumns, field.key])}
+                  label={rowLabel(field.key)}
+                  onChange={() => setDraftColumns(withNameParts([...rows, field.key]))}
                 />
               ))}
           </div>

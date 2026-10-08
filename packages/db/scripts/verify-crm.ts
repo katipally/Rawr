@@ -44,7 +44,7 @@ import { linksForContacts, readTimeline, timelineCounts } from '../src/dal/activ
 import { createTask, deleteTask, listTasks, logByHand, updateTask } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
-import { compileFilters, listKpis, scopeFor, type Condition } from '../src/dal/query.ts'
+import { compileFilters, listKpis, parseFilters, scopeFor, type Condition } from '../src/dal/query.ts'
 import { readCalendar } from '../src/dal/calendar.ts'
 import { hitsOf, recordOptions, searchAll } from '../src/dal/search.ts'
 import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
@@ -1084,6 +1084,47 @@ try {
       return 'today and last 7 days split the two, a fixed range still binds its dates'
     } finally {
       await db.delete(s.contact).where(sql`${s.contact.id} in (${fresh.id}, ${older.id})`)
+    }
+  })
+
+  await check('the overdue next-step view leaves out won and lost deals, and keeps open ones', async () => {
+    const tag = `overdue${Date.now().toString(36)}`
+    const [first] = await db
+      .select({ id: s.pipeline.id })
+      .from(s.pipeline)
+      .where(eq(s.pipeline.accountId, datasaur.id))
+      .orderBy(s.pipeline.position)
+    const stages = await db
+      .select({ id: s.pipelineStage.id, won: s.pipelineStage.isClosedWon, lost: s.pipelineStage.isClosedLost })
+      .from(s.pipelineStage)
+      .where(eq(s.pipelineStage.pipelineId, first!.id))
+      .orderBy(s.pipelineStage.position)
+    const open = stages.find((stage) => !stage.won && !stage.lost)
+    const won = stages.find((stage) => stage.won)
+    const lost = stages.find((stage) => stage.lost)
+    expect(open !== undefined && won !== undefined && lost !== undefined, 'the sales pipeline lacks an open, a won or a lost stage')
+
+    const [view] = await db
+      .select({ filters: s.savedView.filters })
+      .from(s.savedView)
+      .innerJoin(s.objectDef, eq(s.objectDef.id, s.savedView.objectId))
+      .where(and(eq(s.savedView.accountId, datasaur.id), eq(s.objectDef.key, 'deal'), eq(s.savedView.slug, 'overdue-next-step')))
+    expect(view !== undefined, 'the account has no overdue next-step view')
+
+    const made = {
+      open: await createRecord(sales, 'deal', { name: `Overdue open ${tag}`, stage_id: open!.id, next_step_date: '2000-01-01' }),
+      won: await createRecord(sales, 'deal', { name: `Overdue won ${tag}`, stage_id: won!.id, next_step_date: '2000-01-01' }),
+      lost: await createRecord(sales, 'deal', { name: `Overdue lost ${tag}`, stage_id: lost!.id, next_step_date: '2000-01-01' }),
+    }
+    try {
+      const page = await listRecords(sales, { object: 'deal', columns: ['name'], filters: parseFilters(view!.filters), sorts: [], limit: 500 })
+      const listed = new Set(page.rows.map((row) => row.id))
+      expect(listed.has(made.open.id), 'an overdue open deal is missing from the view')
+      expect(!listed.has(made.won.id), 'a won deal is still listed as overdue')
+      expect(!listed.has(made.lost.id), 'a lost deal is still listed as overdue')
+      return 'open deal listed, won and lost left out'
+    } finally {
+      for (const row of Object.values(made)) await deleteRecord(admin, 'deal', row.id)
     }
   })
 

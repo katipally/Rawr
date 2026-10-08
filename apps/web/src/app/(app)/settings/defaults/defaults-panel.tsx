@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { SaveBar } from '~/components/save-bar.tsx'
 import { defaultsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
+import { pushParams, useUrlParam } from '~/lib/url-params.ts'
 import { HUBS, type Hub } from '~/lib/hubs.ts'
 
 type Account = {
@@ -122,7 +122,7 @@ export const DefaultsPanel = ({
           href: entry.key === 'general' ? defaultsPath() : `${defaultsPath()}?tab=${entry.key}`,
           current: entry.key === tab.key,
         }))}
-        onSelect={(key) => replaceParams({ tab: key === 'general' ? null : key })}
+        onSelect={(key) => pushParams({ tab: key === 'general' ? null : key })}
       />
       <p className="border-b border-line pb-4">{tab.lead}</p>
       {canWrite ? null : <p className="text-secondary">You need to be a super admin to change these.</p>}

@@ -8,7 +8,7 @@ import { Button } from './button.tsx'
  *  the text away without a word. `dismiss` is the one handler all three share. It
  *  closes a clean dialog, asks about a dirty one, and answers "keep editing" when
  *  the question is already open, so a second Escape backs out of it. */
-export const useDismiss = (open: boolean, dirty: boolean, onClose: () => void) => {
+export const useDismiss = (open: boolean, dirty: boolean, onClose: () => void, onDiscard?: () => void) => {
   const [asking, setAsking] = useState(false)
   const from = useRef<HTMLElement | null>(null)
   // The dialog behind the question is inert while it is open, so focus can only go
@@ -35,6 +35,7 @@ export const useDismiss = (open: boolean, dirty: boolean, onClose: () => void) =
     keep: () => setAsking(false),
     discard: () => {
       setAsking(false)
+      onDiscard?.()
       onClose()
     },
   }

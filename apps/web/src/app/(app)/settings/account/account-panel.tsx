@@ -9,7 +9,7 @@ import { forgetDrafts } from '~/lib/drafts.ts'
 import { accountPath } from '~/lib/links.ts'
 import { NOTICE_PARAM } from '~/lib/notices.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
+import { pushParams, useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
 
 type Service = {
@@ -168,7 +168,7 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
           href: entry.key === 'profile' ? accountPath() : `${accountPath()}?tab=${entry.key}`,
           current: entry.key === tab,
         }))}
-        onSelect={(key) => replaceParams({ tab: key === 'profile' ? null : key })}
+        onSelect={(key) => pushParams({ tab: key === 'profile' ? null : key })}
       />
       <p className="border-b border-line pb-4">These preferences only apply to you.</p>
 

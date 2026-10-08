@@ -7,11 +7,12 @@
 /** Narrower than this is a column nobody can grab the handle of again. */
 export const MIN_WIDTH = 64
 
-/** What a column that asked for more is squeezed to at the narrowest: under this,
- *  a header or a value such as "Round robin" breaks a letter at a time. A table
- *  too wide for its box at this width scrolls instead. A column that asked for
- *  less keeps what it asked for. */
-export const READABLE_WIDTH = 96
+/** What a column that asked for more is squeezed to at the narrowest. A header is
+ *  48px of padding, up to 52px of sort and column controls, and then a label that
+ *  needs room to say something; under this the label is a letter. A table too wide
+ *  for its box at this width scrolls instead. A column that asked for less keeps
+ *  what it asked for. */
+export const READABLE_WIDTH = 160
 
 /** What a column with no opinion asks for. */
 export const DEFAULT_WIDTH = 180

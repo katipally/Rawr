@@ -109,7 +109,7 @@ export const bookingMailValues = (facts: BookingMailFacts): TemplateValues => {
 
 /** Every mail from a booking page carries these, because the calendar invitation
  *  is not the only place somebody looks when they need to move a meeting. */
-const manageLines = (facts: BookingMailFacts): string =>
+export const manageLines = (facts: BookingMailFacts): string =>
   [
     '',
     `Need a different time? ${publicBaseUrl}${bookingManagePath('reschedule', facts.rescheduleToken)}`,

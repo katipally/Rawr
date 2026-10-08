@@ -1,6 +1,7 @@
 'use client'
 
 import { matchesConditional } from '@rawr/db/registry'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button, Field, SidePanel, useToast } from '@rawr/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
@@ -9,7 +10,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useId, useState } from 'react'
 import { useDraft } from '~/lib/drafts.ts'
 import { objectView, recordPath } from '~/lib/links.ts'
-import { api, errorMessage } from '~/lib/rpc.ts'
+import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { FieldInput, firstStageOf, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -49,6 +50,7 @@ export const CreateRecordPanel = ({
   const { navigate } = useNavigation()
   const router = useRouter()
   const toast = useToast()
+  const queryClient = useQueryClient()
   const prefix = useId()
   // A deal starts on the first pipeline's first stage, the way HubSpot opens the
   // form, rather than on "Not set" twice. It is also what "clear the fields"
@@ -65,20 +67,29 @@ export const CreateRecordPanel = ({
    *  count changes behind it -- and a refresh that remounts the toolbar takes this
    *  component's state with it, emptying a half-filled form under somebody's hands.
    *  The draft outlives the mount (and the tab), so it comes back. */
-  const { forget } = useDraft(account, object, undefined, values, (draft) =>
-    setValues((current) => ({ ...current, ...draft })),
-  )
+  const [restored, setRestored] = useState(false)
+  const { forget } = useDraft(account, object, undefined, values, (draft) => {
+    setValues((current) => ({ ...current, ...draft }))
+    setRestored(true)
+  })
 
   const [error, setError] = useState<string | null>(null)
-  const [duplicateId, setDuplicateId] = useState<string | null>(null)
+  // The value that collided, so "Find it in the list" searches for it.
+  const [duplicate, setDuplicate] = useState<string | null>(null)
   const [saving, setSaving] = useState<'create' | 'another' | null>(null)
   const [showMore, setShowMore] = useState(false)
   const [needle, setNeedle] = useState('')
 
-  // Cancel and the panel's own X are a dismissal, not a discard: the draft is
-  // only forgotten once the record actually exists.
+  // Cancel and the X are a dismissal and keep the draft. Only Discard, on the
+  // question a dirty close asks, and a saved record clears it.
   const close = () => {
     onClose()
+  }
+  const discardDraft = () => {
+    forget()
+    setValues(blank)
+    setContact(null)
+    setRestored(false)
   }
 
   /** Conditional property logic, the same rule the record panel applies: a
@@ -113,7 +124,7 @@ export const CreateRecordPanel = ({
     if (needs) return
     setSaving(another ? 'another' : 'create')
     setError(null)
-    setDuplicateId(null)
+    setDuplicate(null)
     try {
       const created = await api.crm.records.create.mutate({ object, values: filled })
       if (contact) {
@@ -128,6 +139,8 @@ export const CreateRecordPanel = ({
         toast('info', 'Filed under the company that matches the email domain.')
       }
       forget()
+      setRestored(false)
+      void queryClient.invalidateQueries(trpc.crm.kpis.queryFilter())
       if (another) {
         toast('success', `${created.displayName} created.`, {
           label: 'View',
@@ -150,8 +163,7 @@ export const CreateRecordPanel = ({
       const message = errorMessage(cause)
       setError(message)
       // A duplicate is not a dead end: the other record is offered as a link.
-      const match = /already belongs to another record/.test(message)
-      if (match) setDuplicateId('unknown')
+      if (/already belongs to another record/.test(message)) setDuplicate(String((object === 'company' ? filled.domain : filled.email) ?? ''))
     } finally {
       setSaving(null)
     }
@@ -188,6 +200,7 @@ export const CreateRecordPanel = ({
       onClose={close}
       onSubmit={() => void submit(false)}
       dirty={dirty}
+      onDiscard={discardDraft}
       footer={
         <>
           <Button type="submit" variant="primary" busy={saving === 'create'} disabled={needs !== null || saving !== null}>
@@ -208,6 +221,14 @@ export const CreateRecordPanel = ({
       }
     >
       <div className="flex flex-col gap-3">
+        {restored ? (
+          <p className="flex flex-wrap items-center justify-between gap-2 text-small text-secondary">
+            Draft restored.
+            <Button variant="tertiary" onClick={discardDraft}>
+              Discard draft
+            </Button>
+          </p>
+        ) : null}
         {lead.map((field, index) => renderField(field, index === 0))}
 
         {/* A rail-created deal is already linked to the record it was opened from. */}
@@ -228,13 +249,10 @@ export const CreateRecordPanel = ({
         {error ? (
           <p role="alert" className="text-error">
             {error}
-            {duplicateId ? (
+            {duplicate !== null ? (
               <>
                 {' '}
-                <Link href={objectView(account, object, 'all')}>
-                  Find it in the list
-                </Link>{' '}
-                and merge instead.
+                <Link href={objectView(account, object, 'all', 'list', { q: duplicate })}>Find it in the list</Link> and merge instead.
               </>
             ) : null}
           </p>

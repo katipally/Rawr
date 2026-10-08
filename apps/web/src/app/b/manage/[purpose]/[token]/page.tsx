@@ -9,6 +9,7 @@ import { RescheduleWidget } from '~/components/booking/reschedule-widget.tsx'
 import { PendingButton } from '~/components/pending-button.tsx'
 import { BOOKING_STYLES, HOSTED_BOOKING_STYLES } from '~/lib/booking-styles.ts'
 import { BOOKING_COPY } from '~/lib/edge-copy.ts'
+import { cancelledWhy, rescheduleWindow } from '~/lib/booking-manage.ts'
 import { bookingIcsPath } from '~/lib/links.ts'
 import { visitorLocale } from '~/lib/visitor-locale.ts'
 import { loadOffer } from '~/server/booking.ts'
@@ -115,8 +116,7 @@ const ManageBookingPage = async ({
   // Idempotence, visible rather than implied: a second click lands here and says
   // the same thing as the first.
   if (booking.state === 'cancelled') {
-    const reason = booking.cancelReason?.trim()
-    const why = reason ? `: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}` : '.'
+    const why = cancelledWhy(booking.cancelReason)
     return (
       <Shell>
         {details}
@@ -194,12 +194,7 @@ const ManageBookingPage = async ({
     )
   }
 
-  const now = new Date()
-  const offer = await loadOffer(page, {
-    from: now,
-    to: new Date(now.getTime() + page.maxHorizonDays * 86_400_000),
-    now,
-  })
+  const offer = await loadOffer(page, rescheduleWindow(new Date(), page.maxHorizonDays))
 
   return (
     <Shell>

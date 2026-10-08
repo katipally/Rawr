@@ -17,6 +17,8 @@ export type SidePanelProps = {
   onSubmit?: () => void
   /** Something has been entered that closing would lose; see `Modal`. */
   dirty?: boolean
+  /** Runs only when the person picks Discard on the question a dirty close asks. */
+  onDiscard?: () => void
 }
 
 export const SidePanel = ({
@@ -27,9 +29,10 @@ export const SidePanel = ({
   footer,
   onSubmit,
   dirty = false,
+  onDiscard,
 }: SidePanelProps) => {
   const dialog = useRef<HTMLElement>(null)
-  const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose)
+  const { asking, dismiss, keep, discard } = useDismiss(open, dirty, onClose, onDiscard)
   const shown = useOverlay(open, dismiss, dialog)
   const { present, closing } = usePresence(shown, SLIDE_EXIT_MS)
   const Shell = onSubmit ? 'form' : 'div'

@@ -8,7 +8,7 @@ import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
+import { pushParams, useUrlParam } from '~/lib/url-params.ts'
 import { invitePath } from '~/lib/links.ts'
 import { CRITICAL_ACTIONS, CRITICAL_LABEL, HUBS, HUBS_WITH_RECORDS, SCOPE_LABEL, type CriticalAction, type Hub, type Scope } from '~/lib/hubs.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -307,7 +307,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
             type="button"
             role="tab"
             aria-selected={view === entry.key}
-            onClick={() => replaceParams({ view: entry.key === 'active' ? null : entry.key, skip: null })}
+            onClick={() => pushParams({ view: entry.key === 'active' ? null : entry.key, skip: null })}
             className={cn(
               'flex h-pill min-w-0 flex-1 basis-0 items-center gap-2 border border-line px-3 text-left whitespace-nowrap transition-colors duration-150 ease-out @lg:max-w-[16.25rem] [&+&]:-ml-px',
               view === entry.key ? 'bg-surface' : 'bg-fill hover:bg-fill-hover',

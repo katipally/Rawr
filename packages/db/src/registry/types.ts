@@ -2,6 +2,11 @@ import { fieldTypeEnum } from '../schema/enums.ts'
 
 export type FieldType = (typeof fieldTypeEnum.enumValues)[number]
 
+/** A filter value on a stage field meaning "any stage that is not closed won or
+ *  closed lost". Read against the stages when the view runs, so it follows a stage
+ *  that is closed or reopened later. */
+export const OPEN_STAGE = '@open_stage'
+
 /** The operator vocabulary. Every filter anywhere in Rawr is one of these, so the
  *  builder, the query compiler, the segment evaluator and the MCP tool schema all
  *  speak the same language. */

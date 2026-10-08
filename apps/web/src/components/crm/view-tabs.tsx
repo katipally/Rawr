@@ -11,6 +11,9 @@ import { api, errorMessage } from '~/lib/rpc.ts'
 
 const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
 
+/** The view every link falls back to. dal/views.ts refuses to unpin it, so its tab has no close and no unpin. */
+const DEFAULT_TAB = 'all'
+
 export type ViewTab = {
   /** Null for the view every account falls back to before one is saved. It has
    *  no row, so it cannot be renamed, pinned or deleted. */
@@ -112,15 +115,19 @@ export const ViewTabs = ({
               navigate(href(copy))
             }),
         },
-        {
-          key: 'pin',
-          label: view.pinned ? 'Unpin from the tab bar' : 'Pin as a tab',
-          icon: <Pin aria-hidden="true" className="size-4" />,
-          onSelect: () =>
-            void run(view.pinned ? 'Unpinned.' : 'Pinned.', () =>
-              api.crm.views.pin.mutate({ id: view.id!, pinned: !view.pinned }),
-            ),
-        },
+        ...(view.slug === DEFAULT_TAB
+          ? []
+          : [
+              {
+                key: 'pin',
+                label: view.pinned ? 'Unpin from the tab bar' : 'Pin as a tab',
+                icon: <Pin aria-hidden="true" className="size-4" />,
+                onSelect: () =>
+                  void run(view.pinned ? 'Unpinned.' : 'Pinned.', () =>
+                    api.crm.views.pin.mutate({ id: view.id!, pinned: !view.pinned }),
+                  ),
+              },
+            ]),
         ...(view.pinned && at > 0
           ? [{ key: 'left', label: 'Move left', onSelect: () => moveBy(view, -1) }]
           : []),
@@ -186,7 +193,7 @@ export const ViewTabs = ({
               if (moved && movable) moveTo(moved, tabs.filter((tab) => tab.id).indexOf(view))
             }}
             className={cn(
-              'group/tab flex h-pill items-center rounded-hs transition-all duration-150 ease-out',
+              'group/tab flex h-pill max-w-full items-center rounded-hs transition-all duration-150 ease-out',
               active ? 'bg-fill-hover text-body' : 'bg-surface text-secondary hover:bg-fill-hover hover:text-body',
               dragging === view.slug && 'opacity-60',
             )}
@@ -194,14 +201,14 @@ export const ViewTabs = ({
             <Link
               href={href(view)}
               aria-current={active ? 'page' : undefined}
-              className="flex min-w-0 max-w-56 items-center gap-2 px-3 py-px font-normal text-current no-underline"
+              className="flex min-w-0 items-center gap-2 px-3 py-px font-normal text-current no-underline"
             >
               <Icon aria-hidden="true" className={cn('size-4 shrink-0', movable && 'group-hover/tab:hidden')} />
               {movable ? <GripVertical aria-hidden="true" className="hidden size-4 shrink-0 cursor-grab group-hover/tab:block" /> : null}
               <span className="truncate">{view.name}</span>
               {view.isShared ? null : <span className="text-small text-secondary">(mine)</span>}
             </Link>
-            {active && movable ? (
+            {active && movable && view.slug !== DEFAULT_TAB ? (
               <button
                 type="button"
                 disabled={busy}

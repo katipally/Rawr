@@ -3,6 +3,7 @@ import {
   IMMUTABLE_PARSER,
   LIST_OPERATORS,
   NULLARY_OPERATORS,
+  OPEN_STAGE,
   TYPE_META,
   type Operator,
 } from '../registry/types.ts'
@@ -146,6 +147,12 @@ const compileCondition = (
     const [from = null, to = null] = asList(condition.value).map((value) => (present(value) ? String(checked(field, value, scope)) : null))
     if (from === null && to === null) return sql`false`
     return between(expr, field.type, from, to, scope.zone)
+  }
+
+  // A deal with no stage counts as open, the same as the Tasks overdue list does.
+  if (condition.value === OPEN_STAGE) {
+    const open = sql`(${expr} is null or ${expr} in (select s.id from pipeline_stage s where not s.is_closed_won and not s.is_closed_lost))`
+    return operator === 'is_not' ? sql`not ${open}` : open
   }
 
   // A token that resolved to nothing (an anonymous caller on an "@me" view) can

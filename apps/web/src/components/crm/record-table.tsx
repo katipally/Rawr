@@ -1,6 +1,6 @@
 'use client'
 
-import { Avatar, DataTable, DropdownMenu, EmptyState, IconButton, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
+import { Avatar, Button, DataTable, DropdownMenu, EmptyState, IconButton, Pagination, buttonClass, cn, type Column } from '@rawr/ui'
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, EllipsisVertical, PanelRight } from 'lucide-react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
@@ -8,6 +8,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useState } from 'react'
 import type { FieldType } from '@rawr/db'
 import { objectView, recordPath, type ListParams } from '~/lib/links.ts'
+import { sortWords } from '~/lib/sort-labels.ts'
 import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
@@ -100,6 +101,7 @@ export const RecordTable = ({
   const headerAside = (column: TableColumn, index: number) => {
     const sorted = sorts[0]?.key === column.key ? sorts[0].direction : null
     const SortIcon = sorted === 'asc' ? ArrowUp : sorted === 'desc' ? ArrowDown : ArrowUpDown
+    const words = sortWords(column.type)
     // The Name column stands for both halves of a person's name, so it goes as one.
     const owned = index === 0 && namedPerson ? NAME_PARTS : [column.key]
     const rest = keys.filter((key) => !owned.includes(key))
@@ -122,8 +124,8 @@ export const RecordTable = ({
             {
               key: 'sort',
               items: [
-                { key: 'asc', label: 'Sort ascending', checked: sorted === 'asc', onSelect: () => goTo({ sort: column.key }) },
-                { key: 'desc', label: 'Sort descending', checked: sorted === 'desc', onSelect: () => goTo({ sort: `-${column.key}` }) },
+                { key: 'asc', label: words.asc, checked: sorted === 'asc', onSelect: () => goTo({ sort: column.key }) },
+                { key: 'desc', label: words.desc, checked: sorted === 'desc', onSelect: () => goTo({ sort: `-${column.key}` }) },
               ],
             },
             {
@@ -160,6 +162,7 @@ export const RecordTable = ({
     header: index === 0 && namedPerson ? 'Name' : column.label,
     align: column.numeric ? 'right' : 'left',
     width: index === 0 ? 240 : column.width,
+    ...(sorts[0]?.key === column.key ? { sort: sorts[0].direction === 'asc' ? 'ascending' : 'descending' } : {}),
     headerAside: headerAside(column, index),
     render: (row) => {
       const value = row.values[column.key]
@@ -292,6 +295,13 @@ export const RecordTable = ({
                 : params.filters
                   ? 'No record matches these filters. Widen them, or clear them.'
                   : 'This view has no records yet. Import a file, or create one.'
+            }
+            action={
+              params.q || params.filters ? (
+                <Button variant="secondary" onClick={() => goTo({ q: undefined, filters: undefined })}>
+                  Clear search and filters
+                </Button>
+              ) : undefined
             }
           />
         }

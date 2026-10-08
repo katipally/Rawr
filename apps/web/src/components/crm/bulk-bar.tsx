@@ -76,7 +76,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
   const [lists, setLists] = useState<{ id: string; name: string }[]>([])
   const [listId, setListId] = useState<string | null>(null)
   const [survivorId, setSurvivorId] = useState<string | null>(null)
-  const [pair, setPair] = useState<{ id: string; name: string }[]>([])
+  const [pair, setPair] = useState<{ id: string; name: string; detail: string }[]>([])
   const [progress, setProgress] = useState<Progress | null>(null)
 
   const field = fields.find((candidate) => candidate.key === fieldKey)
@@ -263,10 +263,15 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     setSurvivorId(ids[0] ?? null)
     setPair([])
     try {
-      const names = await Promise.all(
-        ids.map(async (id) => ({ id, name: (await queryClient.fetchQuery(trpc.crm.nameOf.queryOptions({ object, id }))) ?? id })),
+      // The email or domain is what tells two people of the same name apart.
+      const picks = await Promise.all(
+        ids.map(async (id) => {
+          const record = await queryClient.fetchQuery(trpc.crm.records.get.queryOptions({ object, id }))
+          const detail = record?.values[object === 'company' ? 'domain' : 'email']
+          return { id, name: record?.displayName ?? id, detail: typeof detail === 'string' ? detail : '' }
+        }),
       )
-      setPair(names)
+      setPair(picks)
     } catch (cause) {
       toast('error', errorMessage(cause))
     }
@@ -602,7 +607,10 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
               busy={busy}
               disabled={!listId}
               onClick={() =>
-                void start({ type: 'add_to_list', listId: listId! }, (n) => `${n} ${noun} added.`)
+                void start(
+                  { type: 'add_to_list', listId: listId! },
+                  (n) => `${n} ${noun} added to ${lists.find((row) => row.id === listId)?.name ?? 'the list'}.`,
+                )
               }
             >
               Add {ids.length}
@@ -667,7 +675,10 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
                     checked={survivorId === row.id}
                     onChange={() => setSurvivorId(row.id)}
                   />
-                  <span className="min-w-0 truncate">{row.name}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate">{row.name}</span>
+                    {row.detail ? <span className="block truncate text-small text-secondary">{row.detail}</span> : null}
+                  </span>
                 </label>
               ))}
             </fieldset>

@@ -22,6 +22,8 @@ export type ExportObject = {
 export type ExportPickerProps = {
   account: string
   objects: ExportObject[]
+  /** The object the person was on when they opened the page. Unknown keys fall back to the first object. */
+  initialObject?: string | undefined
 }
 
 /** Empty, because a view's slug never is, and "all" is a real slug: the default
@@ -36,8 +38,8 @@ type Include = 'view' | 'all' | 'choose'
 /** Picks what a CSV holds, laid out as HubSpot's export dialog. The download
  *  itself is a plain link so the browser owns it: the file keeps arriving after
  *  this tab is closed, and a slow export never blocks the page it started from. */
-export const ExportPicker = ({ account, objects }: ExportPickerProps) => {
-  const [objectKey, setObjectKey] = useState(objects[0]?.key ?? '')
+export const ExportPicker = ({ account, objects, initialObject }: ExportPickerProps) => {
+  const [objectKey, setObjectKey] = useState(objects.find((candidate) => candidate.key === initialObject)?.key ?? objects[0]?.key ?? '')
   const object = objects.find((candidate) => candidate.key === objectKey) ?? objects[0]
   const [viewSlug, setViewSlug] = useState(ALL_FIELDS)
   const [include, setInclude] = useState<Include>('all')

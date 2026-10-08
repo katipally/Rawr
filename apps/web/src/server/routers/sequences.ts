@@ -3,6 +3,7 @@ import {
   cloneSequence,
   deleteSequence,
   enroll,
+  enrollPreview,
   enrollmentsForContact,
   listEmailTemplates,
   saveEmailTemplate,
@@ -38,6 +39,15 @@ const window = z.object({
   end: z.string().regex(/^\d{2}:\d{2}$/),
   timezone: z.string().min(1).max(64),
 })
+
+const enrollInput = z
+  .object({
+    sequenceId: z.uuid(),
+    contactIds: z.array(z.uuid()).min(1).max(500).optional(),
+    companyId: z.uuid().nullish(),
+    mailboxId: z.uuid(),
+  })
+  .refine((value) => Boolean(value.contactIds) !== Boolean(value.companyId), 'Name the contacts, or name the company, not both.')
 
 const settings = z
   .object({
@@ -117,21 +127,10 @@ export const sequencesRouter = router({
   /** Named contacts, or everyone at a company. One of the two, never both: a
    *  list and a company are different intentions and a caller sending both means
    *  something nobody can guess. */
-  enroll: protectedProcedure
-    .input(
-      z
-        .object({
-          sequenceId: z.uuid(),
-          contactIds: z.array(z.uuid()).min(1).max(500).optional(),
-          companyId: z.uuid().nullish(),
-          mailboxId: z.uuid(),
-        })
-        .refine(
-          (value) => Boolean(value.contactIds) !== Boolean(value.companyId),
-          'Name the contacts, or name the company, not both.',
-        ),
-    )
-    .mutation(({ ctx, input }) => call(() => enroll(ctx.account, input))),
+  enroll: protectedProcedure.input(enrollInput).mutation(({ ctx, input }) => call(() => enroll(ctx.account, input))),
+
+  /** The same answer enroll would give, before anything is written. */
+  enrollPreview: protectedProcedure.input(enrollInput).query(({ ctx, input }) => call(() => enrollPreview(ctx.account, input))),
 
   /** Every mail one sequence actually sent. Paged at the database, because a
    *  sequence over the whole list has one row here per contact per step. */

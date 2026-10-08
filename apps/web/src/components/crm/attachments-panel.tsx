@@ -128,8 +128,7 @@ export const AttachmentsPanel = ({
       <div className="flex min-w-0 flex-col gap-2 px-6 pb-6">
       {!configured ? (
         <Alert tone="info">
-          File storage is not connected, so nothing can be attached yet. An admin sets
-          the S3_* variables and creates the bucket.
+          File storage is not connected, so nothing can be attached yet. Ask whoever runs Rawr to connect it.
         </Alert>
       ) : files.length === 0 ? (
         <EmptyState

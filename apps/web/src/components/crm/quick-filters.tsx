@@ -1,6 +1,6 @@
 'use client'
 
-import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
+import { DATE_RANGES, isDateRange } from '@rawr/db/registry'
 import { Button, Checkbox, IconButton, Popover, TextInput, cn } from '@rawr/ui'
 import { ChevronDown, ListFilter, Pencil, Plus, X } from 'lucide-react'
 import { useRef, useState, type ReactNode } from 'react'
@@ -8,10 +8,11 @@ import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Choice } from './field-input.tsx'
 import type { Condition, FilterField, Group } from './filter-builder.tsx'
+import { summarize, valuesOf } from './quick-filter-summary.ts'
 
 /** HubSpot's row for every object: owner, create date, last activity, status.
  *  Each object shows the ones it has. */
-const DEFAULT_KEYS = ['owner_id', 'created_at', 'last_contacted_at', 'lead_status', 'close_date']
+const DEFAULT_KEYS = ['owner_id', 'created_at', 'last_contacted_at', 'lead_status', 'close_date', 'industry', 'lifecycle_stage_id']
 const TEMPORAL = new Set(['date', 'datetime'])
 /** Past this many options a list gets a search box. */
 const SEARCH_FROM = 8
@@ -27,12 +28,6 @@ const withQuick = (filters: Group[], key: string, condition: Condition | null): 
   ...filters.filter((group) => !isQuick(group, key)),
   ...(condition ? [{ conjunction: 'and' as const, conditions: [condition] }] : []),
 ]
-
-const valuesOf = (condition: Condition | undefined): string[] => {
-  const value = condition?.value
-  if (Array.isArray(value)) return value.map(String)
-  return value === null || value === undefined || value === '' ? [] : [String(value)]
-}
 
 type Editor = 'list' | 'date' | 'text' | null
 
@@ -182,16 +177,8 @@ const Chip = ({
   const anchor = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const values = valuesOf(condition)
-  const nameOf = (id: string) => options.find((option) => option.id === id)?.label ?? id
-
-  const summary = ((): string | null => {
-    if (!condition) return null
-    if (condition.operator === 'in') return values.length > 1 ? `${nameOf(values[0]!)} +${values.length - 1}` : nameOf(values[0] ?? '')
-    if (condition.operator === 'on_or_after') return values[0] === '@today' ? 'Today' : `Since ${fmt.date(values[0])}`
-    if (condition.operator === 'between') return isDateRange(condition.value) ? dateRangeLabel(condition.value) : `${fmt.date(values[0])} to ${fmt.date(values[1])}`
-    if (condition.operator === 'contains') return `“${values[0]}”`
-    return 'Filtered'
-  })()
+  const day = (value: string) => (value === '@today' ? 'Today' : TEMPORAL.has(field.type) ? fmt.date(value) : value)
+  const summary = condition ? summarize(condition, options, day) : null
   const label = summary ? `${field.label}: ${summary}` : field.label
   const apply = (next: Condition | null, close = true) => {
     onApply(next)

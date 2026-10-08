@@ -80,6 +80,12 @@ test('an unmeasured box renders the asked-for widths', () => {
 })
 
 test('a narrow table scrolls before a column goes under what it can be read at', () => {
-  const columns = [{ key: 'name', width: 320 }, { key: 'views', width: 80 }, { key: 'type', width: 130 }]
+  const columns = [{ key: 'name', width: 320 }, { key: 'views', width: 80 }, { key: 'type', width: 200 }]
   assert.deepEqual(layoutWidths({}, columns, 100), [READABLE_WIDTH, 80, READABLE_WIDTH])
+})
+
+test('a header with its controls keeps room for a readable label, however narrow the box', () => {
+  const columns = Array.from({ length: 6 }, (_, index) => ({ key: `c${index}`, width: 180 }))
+  // 48px of header padding, up to 52px of controls, and a label that can say something.
+  for (const width of layoutWidths({}, columns, 400)) assert.ok(width >= 160)
 })

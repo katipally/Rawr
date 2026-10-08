@@ -19,6 +19,8 @@ export type Suggestion = {
   at: string
 }
 
+const PROVIDER_NAME: Record<string, string> = { apollo: 'Apollo', lusha: 'Lusha', clay: 'Clay' }
+
 export type ProviderHealth = {
   state: 'connected' | 'degraded' | 'disconnected' | 'not_configured'
   lastError: string | null
@@ -199,8 +201,8 @@ export const EnrichmentPanel = ({
           {suggestions.map((s) => (
             <li key={s.id} className="flex flex-col gap-1 border-b border-divider px-6 py-2 last:border-0">
               <p className="text-small text-secondary">
-                {s.provider} suggests <span className="font-medium text-body">{s.fieldLabel}</span>
-                {s.current ? ' should change' : ''}
+                {PROVIDER_NAME[s.provider] ?? s.provider} suggests {s.current ? 'changing' : 'setting'}{' '}
+                <span className="font-medium text-body">{s.fieldLabel}</span>
               </p>
               <p className="break-words">
                 {s.current ? (

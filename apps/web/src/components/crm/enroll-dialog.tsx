@@ -4,7 +4,7 @@ import { Badge, Button, Combobox, Modal, Spinner, useToast } from '@rawr/ui'
 import { useEffect, useState } from 'react'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
-import type { EnrollOutcome, SequenceStep } from '@rawr/db'
+import type { EnrollOutcome, EnrollPreview, SequenceStep } from '@rawr/db'
 import { STEP_KIND_LABEL } from './value.tsx'
 import { summarizeEnrollment } from './enroll-outcome.ts'
 
@@ -42,6 +42,10 @@ export const EnrollDialog = ({
   const [outcomes, setOutcomes] = useState<EnrollOutcome[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [steps, setSteps] = useState<SequenceStep[] | null>(null)
+  const [preview, setPreview] = useState<EnrollPreview | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  // The parent passes a new array on every render, so the effect keys on the joined ids.
+  const contactKey = (contactIds ?? []).join(',')
 
   useEffect(() => {
     Promise.all([queryClient.fetchQuery({ ...trpc.sequences.list.queryOptions(), staleTime: 0 }), queryClient.fetchQuery({ ...trpc.mail.mailboxes.queryOptions(), staleTime: 0 })])
@@ -76,6 +80,26 @@ export const EnrollDialog = ({
     }
   }, [queryClient, sequenceId])
 
+  // Asked with the same input enroll gets, so the count shown is the count it will act on.
+  useEffect(() => {
+    setPreview(null)
+    setPreviewError(null)
+    if (!sequenceId || !mailboxId || (!companyId && !contactKey)) return
+    let live = true
+    const target = companyId ? { companyId } : { contactIds: contactKey.split(',') }
+    api.sequences.enrollPreview
+      .query({ sequenceId, mailboxId, ...target })
+      .then((found) => {
+        if (live) setPreview(found)
+      })
+      .catch((cause) => {
+        if (live) setPreviewError(errorMessage(cause))
+      })
+    return () => {
+      live = false
+    }
+  }, [sequenceId, mailboxId, companyId, contactKey])
+
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
   const summary = outcomes ? summarizeEnrollment(outcomes) : null
 
@@ -93,7 +117,7 @@ export const EnrollDialog = ({
             <Button
               variant="primary"
               busy={busy}
-              disabled={!sequenceId || !mailboxId}
+              disabled={!sequenceId || !mailboxId || !preview || preview.willEnroll === 0}
               onClick={() => {
                 if (!sequenceId || !mailboxId) return
                 setBusy(true)
@@ -177,6 +201,29 @@ export const EnrollDialog = ({
               disabled: !box.canSend || box.state === 'revoked',
             }))}
           />
+
+          {sequenceId && mailboxId ? (
+            previewError ? (
+              <p className="text-error">{previewError}</p>
+            ) : preview === null ? (
+              <Spinner label="Checking who would be enrolled" />
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="font-medium">
+                  {preview.willEnroll} will enroll, {preview.refused.length} skipped.
+                </p>
+                {preview.refused.length > 0 ? (
+                  <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto text-small text-secondary">
+                    {preview.refused.map((row) => (
+                      <li key={row.contactId}>
+                        <span className="text-body">{row.displayName}</span>: {row.reason}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            )
+          ) : null}
         </div>
       ) : null}
 

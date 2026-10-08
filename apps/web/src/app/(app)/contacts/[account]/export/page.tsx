@@ -7,9 +7,10 @@ import { contextFrom, readSession } from '~/server/session.ts'
 /** B8. The CSV route is a download, so it can never render an error a person can
  *  read or a form they can change. This is that form: pick the object, start from
  *  a view or from every field, then hand over to the route. */
-const ExportPage = async () => {
+const ExportPage = async ({ searchParams }: { searchParams: Promise<{ object?: string }> }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
+  const { object: initialObject } = await searchParams
 
   const ctx = contextFrom(session)
   const objects = await withAccountReads(ctx, async (): Promise<ExportObject[]> => {
@@ -44,7 +45,7 @@ const ExportPage = async () => {
           </p>
         }
       />
-      <ExportPicker account={session.accountSlug} objects={objects} />
+      <ExportPicker account={session.accountSlug} objects={objects} initialObject={initialObject} />
     </div>
   )
 }

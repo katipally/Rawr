@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { TYPE_META, type Operator } from '../registry/types.ts'
+import { OPEN_STAGE, TYPE_META, type Operator } from '../registry/types.ts'
 import type { RegistryField, RegistryObject } from './registry.ts'
 import {
   compileFilters,
@@ -175,6 +175,15 @@ test('@me resolves to the caller and an anonymous caller matches nothing', () =>
   assert.ok(compileFilters(contact, mine, scope))
   // Saying "false" beats quietly dropping the filter and showing every record.
   assert.equal(built(compileFilters(contact, mine, scopeFor(null, 'UTC'))).text, '(false)')
+})
+
+test('@open_stage matches a deal with no stage or a stage that is not closed, read when the query runs', () => {
+  const deal: RegistryObject = { ...contact, id: 'object-deal', key: 'deal', table: 'deal', fields: [field({ key: 'stage_id', type: 'relation' })] }
+  deal.byKey = new Map(deal.fields.map((f) => [f.key, f]))
+  const open = built(compileFilters(deal, [{ conjunction: 'and', conditions: [{ field: 'stage_id', operator: 'is', value: OPEN_STAGE }] }], scope)).text
+  assert.match(open, /"deal"\."stage_id" is null or "deal"\."stage_id" in \(select s\.id from pipeline_stage s where not s\.is_closed_won and not s\.is_closed_lost\)/)
+  const notOpen = built(compileFilters(deal, [{ conjunction: 'and', conditions: [{ field: 'stage_id', operator: 'is_not', value: OPEN_STAGE }] }], scope)).text
+  assert.match(notOpen, /^\(not \(/)
 })
 
 test('@today is the day in the account zone, not in UTC', () => {

@@ -1,9 +1,7 @@
 import { publicBookingPage, publicEdgeContext, readBookingPage } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
-import { publicBaseUrl } from '~/lib/env.ts'
 import { localeFrom } from '~/lib/format.ts'
-import { bookingIcsPath, bookingManagePath, bookingPublicPath } from '~/lib/links.ts'
-import { whereLine } from '~/server/booking-mail.ts'
+import { confirmationBody } from '~/server/booking-confirm.ts'
 import { book } from '~/server/booking.ts'
 import { CORS_HEADERS, bodyRefusal, clientIp, rateLimit, readBody } from '~/server/edge.ts'
 
@@ -99,32 +97,8 @@ export const POST = async (
     )
   }
 
-  const booking = outcome.booking
   return NextResponse.json(
-    {
-      startsAt: booking.startsAt.toISOString(),
-      endsAt: booking.endsAt.toISOString(),
-      hostName: booking.hostName,
-      conferenceUrl: booking.conferenceUrl,
-      /** The place as the mail and the calendar file say it. */
-      where: whereLine(page, booking.conferenceUrl),
-      rescheduleUrl: `${publicBaseUrl}${bookingManagePath('reschedule', booking.rescheduleToken)}`,
-      /** For a calendar that is not the mailbox Google invited. */
-      calendarUrl: `${publicBaseUrl}${bookingIcsPath(booking.rescheduleToken)}`,
-      cancelUrl: `${publicBaseUrl}${bookingManagePath('cancel', booking.cancelToken)}`,
-      /** Where to send somebody whose script then fails. Same booking, shown by
-       *  the hosted page. */
-      confirmationUrl: `${publicBaseUrl}${bookingPublicPath(account, slug, {
-        confirmed: '1',
-        r: booking.rescheduleToken,
-        c: booking.cancelToken,
-      })}`,
-      /** A Zoom outage does not fail a booking; it lands here so the embed can say
-       *  the link is coming rather than pretending there is one. */
-      warnings: booking.warnings,
-      redirectUrl: page.redirectUrl,
-      message: page.confirmationCopy,
-    },
+    confirmationBody(account, slug, page, outcome.booking),
     { headers: CORS_HEADERS },
   )
 }

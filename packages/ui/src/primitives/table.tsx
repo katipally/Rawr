@@ -11,6 +11,8 @@ export type Column<Row> = {
   /** Starting width in pixels. Resizing is per-column and never collapses to zero. */
   width?: number
   align?: 'left' | 'right'
+  /** The order the rows are sorted in by this column, announced on its header. */
+  sort?: 'ascending' | 'descending'
   /** Controls drawn after the header label: a sort mark, a column menu. A
    *  header that has them lights up under the pointer, which says it does
    *  something. */
@@ -235,6 +237,7 @@ export const DataTable = <Row,>({
                 <th
                   key={column.key}
                   scope="col"
+                  aria-sort={column.sort}
                   className={cn(
                     'group/header relative sticky top-0 z-10 h-row border-b border-line px-6 align-middle',
                     'truncate bg-surface font-normal text-secondary',

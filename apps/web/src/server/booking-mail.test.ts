@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { BookingPageConfig } from '@rawr/db'
+import { publicBaseUrl } from '~/lib/env.ts'
 import {
   bookingMailValues,
   hostMailbox,
+  manageLines,
   placeDetail,
   whereLine,
   type BookingMailFacts,
@@ -64,4 +66,12 @@ test('the place reads the same in the mail, the calendar file and the confirmati
 test('the calendar location is the phone number or custom place when there is no link', () => {
   assert.equal(placeDetail({ location: 'phone', locationDetail: '+62 811 000 111' }), '+62 811 000 111')
   assert.equal(placeDetail({ location: 'google_meet', locationDetail: 'stale text' }), null)
+})
+
+test('every booking mail ends with the move, cancel and add-to-calendar links', () => {
+  assert.deepEqual(manageLines(facts(null)).split('\n').slice(1), [
+    `Need a different time? ${publicBaseUrl}/b/manage/reschedule/r`,
+    `Cannot make it? ${publicBaseUrl}/b/manage/cancel/c`,
+    `Add to calendar: ${publicBaseUrl}/b/ics/r.ics`,
+  ])
 })

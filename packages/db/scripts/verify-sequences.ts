@@ -16,6 +16,7 @@ import {
   deleteSequence,
   directTracking,
   enroll,
+  enrollPreview,
   type EnrollOutcome,
   listEnrollments,
   listSends,
@@ -201,6 +202,32 @@ try {
 
   const again = await enroll(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: box.id })
   check(reasonOf(again[0]) === 'Already in this sequence.', 'enrolling the same person twice is refused')
+
+  // The preview gives the answer enroll gives, and writes nothing. It writes to a
+  // sequence of its own, so the enrolments the checks below read keep their order.
+  const previewed = await saveSequence(sales, {
+    name: `Verify preview ${stamp}`,
+    settings: { sendWindow: { days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '23:59', timezone: 'UTC' } },
+  })
+  const fresh = await createRecord(admin, 'contact', { first_name: 'Verify', last_name: 'Preview', email: `seq-preview-${stamp}@partner1.example` })
+  const previewInput = { sequenceId: previewed.id, contactIds: [person.id, noEmail.id, fresh.id], mailboxId: box.id }
+  const preview = await enrollPreview(sales, previewInput)
+  const [wrote] = await owner`select count(*)::int as n from sequence_enrollment where sequence_id = ${previewed.id}::uuid`
+  check(preview.willEnroll === 2 && wrote?.n === 0, 'the preview counts who would go in and writes nothing', `${preview.willEnroll} would enroll`)
+  check(
+    preview.refused.length === 1 && preview.refused[0]?.contactId === noEmail.id && preview.refused[0]?.reason === 'No email address.',
+    'and names each refused contact with the reason',
+  )
+  const alreadyPreview = await enrollPreview(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: box.id })
+  check(alreadyPreview.refused[0]?.reason === 'Already in this sequence.', 'the preview gives the same reason enroll gives for a repeat')
+  const previewReadOnly = await refused(() => enrollPreview(sales, { ...previewInput, mailboxId: readOnlyBox!.id as string }))
+  check(previewReadOnly?.includes('reading only') === true, 'the preview refuses the same mailbox enroll refuses', previewReadOnly ?? '')
+  const applied = await enroll(sales, previewInput)
+  check(
+    applied.filter((row) => row.enrolled).length === preview.willEnroll && applied.filter((row) => !row.enrolled).length === preview.refused.length,
+    'enroll then takes the count the preview promised',
+    `${applied.filter((row) => row.enrolled).length} enrolled, ${applied.filter((row) => !row.enrolled).length} refused`,
+  )
 
   const readOnly = await refused(() =>
     enroll(sales, { sequenceId: created.id, contactIds: [person.id], mailboxId: readOnlyBox!.id as string }),

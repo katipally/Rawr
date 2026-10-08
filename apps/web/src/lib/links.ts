@@ -262,7 +262,8 @@ export const createRecordPath = (account: string, object: string): string =>
 /** The export screen, and the file it hands over. The CSV lives one segment
  *  deeper than the page so the page has an address of its own: a download route
  *  cannot also be a screen somebody browses to. */
-export const exportPath = (account: string): string => `/${CRM_ROOT}/${account}/export`
+export const exportPath = (account: string, object?: string): string =>
+  `/${CRM_ROOT}/${account}/export${query({ object })}`
 
 export const duplicatesPath = (account: string, object?: 'contact' | 'company'): string =>
   `/${CRM_ROOT}/${account}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`

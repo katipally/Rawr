@@ -211,7 +211,7 @@ const ListPage = async ({
           }
           more={[
             { key: 'import', label: 'Import', href: importsPath(account) },
-            { key: 'export', label: 'Export', href: exportPath(account) },
+            { key: 'export', label: 'Export', href: exportPath(account, objectParam) },
             ...(objectParam === 'contact' || objectParam === 'company'
               ? [{ key: 'duplicates', label: 'Manage duplicates', href: duplicatesPath(account, objectParam) }]
               : []),

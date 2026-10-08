@@ -14,7 +14,7 @@ import { useFormat } from '~/components/zone.tsx'
 import { archiveUsageCopy, dependantsCopy, purgeResultCopy } from '~/lib/field-usage-copy.ts'
 import { propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
-import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
+import { pushParams, replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { NEEDS_OPTIONS, PropertyEditor, TYPE_LABEL, type PropertyDraft } from './property-editor.tsx'
 
@@ -312,7 +312,7 @@ export const PropertyList = ({
           <button
             type="button"
             title={row.label}
-            onClick={() => replaceParams({ tab: null, group: row.name, ftype: null, skip: null })}
+            onClick={() => pushParams({ tab: null, group: row.name, ftype: null, skip: null })}
             className="min-w-0 flex-1 truncate text-left font-light hover:underline"
           >
             {row.label}
@@ -387,7 +387,7 @@ export const PropertyList = ({
 
       <Tabs
         label="Property views"
-        onSelect={(key) => replaceParams({ tab: key === 'properties' ? null : key, skip: null })}
+        onSelect={(key) => pushParams({ tab: key === 'properties' ? null : key, skip: null })}
         items={[
           { key: 'properties', label: `Properties (${fmt.number(rows.length)})`, href: tabHref('properties'), current: tab === 'properties' },
           { key: 'groups', label: 'Groups', href: tabHref('groups'), current: tab === 'groups' },
@@ -411,9 +411,9 @@ export const PropertyList = ({
                 {
                   key: 'groups',
                   items: [
-                    { key: '', label: 'All groups', checked: !group, onSelect: () => replaceParams({ group: null, skip: null }) },
-                    ...groups.map((name) => ({ key: name, label: name, checked: group === name, onSelect: () => replaceParams({ group: name, skip: null }) })),
-                    ...(counts.has('') ? [{ key: 'ungrouped', label: 'Ungrouped', checked: group === 'ungrouped', onSelect: () => replaceParams({ group: 'ungrouped', skip: null }) }] : []),
+                    { key: '', label: 'All groups', checked: !group, onSelect: () => pushParams({ group: null, skip: null }) },
+                    ...groups.map((name) => ({ key: name, label: name, checked: group === name, onSelect: () => pushParams({ group: name, skip: null }) })),
+                    ...(counts.has('') ? [{ key: 'ungrouped', label: 'Ungrouped', checked: group === 'ungrouped', onSelect: () => pushParams({ group: 'ungrouped', skip: null }) }] : []),
                   ],
                 },
               ]}
@@ -432,13 +432,13 @@ export const PropertyList = ({
                   key: 'types',
                   items: [
                     { key: '', label: 'All field types', checked: !typeFilter, onSelect: () => setTypeFilter(null) },
-                    ...types.map((name) => ({ key: name, label: TYPE_LABEL[name], checked: typeFilter === name, onSelect: () => replaceParams({ ftype: name, skip: null }) })),
+                    ...types.map((name) => ({ key: name, label: TYPE_LABEL[name], checked: typeFilter === name, onSelect: () => pushParams({ ftype: name, skip: null }) })),
                   ],
                 },
               ]}
             />
             {group || typeFilter ? (
-              <Button variant="tertiary" onClick={() => replaceParams({ group: null, ftype: null, skip: null })}>
+              <Button variant="tertiary" onClick={() => pushParams({ group: null, ftype: null, skip: null })}>
                 Reset filters
               </Button>
             ) : null}

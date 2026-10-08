@@ -79,6 +79,7 @@ test('an empty or absent parameter is left out rather than written blank', () =>
 
 test('the export page and the file it hands over are different addresses', () => {
   assert.equal(exportPath('datasaur'), '/contacts/datasaur/export')
+  assert.equal(exportPath('datasaur', 'company'), '/contacts/datasaur/export?object=company')
   assert.equal(
     exportCsvPath('datasaur', { object: 'contact', columns: 'email' }),
     '/contacts/datasaur/export/csv?object=contact&columns=email',

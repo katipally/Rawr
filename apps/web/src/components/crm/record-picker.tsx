@@ -27,7 +27,7 @@ const DEBOUNCE_MS = 200
 
 /** A record picker that asks the server instead of holding the object in memory.
  *
- *  Every picker in the app used to be a select element filled from a capped list —
+ *  Every picker in the app used to be a select element filled from a capped list:
  *  the first 500 companies, the 200 newest contacts. Against the real portal that
  *  hides most records permanently: you cannot file a contact under a company whose
  *  name sorts late, and you cannot merge a duplicate that is not recent. So the
@@ -169,7 +169,7 @@ export const RecordPicker = ({
         side="bottom"
         align="start"
         label={label}
-        className="min-w-64 py-1"
+        className="min-w-64 max-w-[min(20rem,100vw-2rem)] py-1"
       >
         {/* A listbox holds options, not list items, so the options sit directly
             inside it. */}
@@ -198,9 +198,9 @@ export const RecordPicker = ({
                   index === active && 'bg-fill',
                 )}
               >
-                <span className="w-full truncate">{option.label}</span>
+                <span className="w-full truncate" title={option.label}>{option.label}</span>
                 {option.detail ? (
-                  <span className="w-full truncate text-small text-secondary">{option.detail}</span>
+                  <span className="w-full truncate text-small text-secondary" title={option.detail}>{option.detail}</span>
                 ) : null}
               </button>
             ))

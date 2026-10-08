@@ -690,122 +690,139 @@ export type EnrollOutcome =
   | { contactId: string; displayName: string; enrolled: true }
   | { contactId: string; displayName: string; enrolled: false; reason: string }
 
+export type EnrollInput = {
+  sequenceId: string
+  contactIds?: string[] | undefined
+  companyId?: string | null | undefined
+  mailboxId: string
+}
+
+export type EnrollPreview = {
+  willEnroll: number
+  refused: { contactId: string; displayName: string; reason: string }[]
+}
+
+type Verdict = { contactId: string; displayName: string; reason: string | null }
+
+/** Who would go into the sequence and who would be refused, and why. Enroll and
+ *  the preview both read this, so a preview cannot promise what enroll refuses. */
+const judgeEnrollment = async (tx: Tx, input: EnrollInput) => {
+  const [found] = await tx
+    .select({ id: sequence.id, name: sequence.name, state: sequence.state, settings: sequence.settings, sender: sequence.sender })
+    .from(sequence)
+    .where(eq(sequence.id, input.sequenceId))
+  if (!found) throw new Error('That sequence is not in this account.')
+  if (found.state === 'archived') throw new Error('That sequence is archived. Restore it to use it again.')
+
+  // Everyone at a company, resolved here rather than in the browser: a company
+  // with four hundred contacts should not send four hundred ids over the wire,
+  // and who is at a company is not the client's decision to make.
+  const contactIds = input.companyId
+    ? (
+        await tx.execute<{ id: string }>(sql`
+          select c.id from contact c
+            join company co on co.id = c.company_id and co.deleted_at is null
+           where c.company_id = ${input.companyId}::uuid
+             and c.deleted_at is null
+             and coalesce(c.email, '') <> ''
+           order by c.created_at`)
+      ).map((row) => row.id)
+    : (input.contactIds ?? [])
+  if (contactIds.length === 0) {
+    if (!input.companyId) throw new Error('Nobody was named to enroll.')
+    const [target] = await tx
+      .select({ deletedAt: company.deletedAt })
+      .from(company)
+      .where(eq(company.id, input.companyId))
+    throw new Error(
+      target?.deletedAt
+        ? 'That company is in the trash, so nobody at it can be enrolled.'
+        : 'Nobody at that company has an email address to write to.',
+    )
+  }
+
+  const [box] = await tx
+    .select({ id: mailbox.id, state: mailbox.state, canSend: mailbox.canSend, email: mailbox.email })
+    .from(mailbox)
+    .where(eq(mailbox.id, input.mailboxId))
+  if (!box) throw new Error('That mailbox is not connected.')
+  // A Woodpecker sequence never sends from this mailbox: the campaign there has
+  // its own sending accounts, and the mailbox only names who owns the outreach.
+  // So the grant to send is asked for only when Rawr is the one sending.
+  if (found.sender === 'gmail') {
+    if (box.state === 'revoked') throw new Error(`${box.email} is disconnected. Reconnect it before enrolling anybody.`)
+    if (!box.canSend) {
+      throw new Error(`${box.email} was connected for reading only. Reconnect it and allow sending.`)
+    }
+  }
+
+  const ids = [...new Set(contactIds)]
+  if (ids.length === 0) return { found, verdicts: [] as Verdict[] }
+
+  // The label comes back with the row rather than from a call per contact: it is
+  // the same expression contactLabels uses, and the row is already being read.
+  const people = await tx
+    .select({
+      id: contact.id,
+      email: contact.email,
+      label: sql<string>`coalesce(nullif(trim(concat_ws(' ', ${contact.firstName}, ${contact.lastName})), ''), ${contact.email}, 'Unnamed contact')`,
+    })
+    .from(contact)
+    .where(inArray(contact.id, ids))
+  // Keyed, because walking the list per id is O(N^2) over a selection that can
+  // be a whole company.
+  const byId = new Map(people.map((row) => [row.id, row]))
+
+  // Everything that would refuse a contact, asked once for the whole batch
+  // rather than once per contact: three statements, not three times N.
+  const optedOut = new Set(
+    found.settings.subscriptionTypeId
+      ? (
+          await tx.execute<{ contact_id: string }>(sql`
+            select contact_id from subscription_state
+             where subscription_type_id = ${found.settings.subscriptionTypeId}::uuid
+               and state = 'unsubscribed'
+               and contact_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
+        ).map((row) => row.contact_id)
+      : [],
+  )
+  const alreadyIn = new Set(
+    (
+      await tx.execute<{ contact_id: string }>(sql`
+        select contact_id from sequence_enrollment
+         where sequence_id = ${input.sequenceId}
+           and state in ('active', 'waiting_task', 'paused')
+           and contact_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
+    ).map((row) => row.contact_id),
+  )
+
+  const verdicts = ids.map((id): Verdict => {
+    const person = byId.get(id)
+    if (!person) return { contactId: id, displayName: 'Unknown contact', reason: 'That contact is not in this account.' }
+    const reason = !person.email
+      ? 'No email address.'
+      : optedOut.has(id)
+        ? 'They have opted out of this kind of mail.'
+        : alreadyIn.has(id)
+          ? 'Already in this sequence.'
+          : null
+    return { contactId: id, displayName: person.label, reason }
+  })
+  return { found, verdicts }
+}
+
 /** Puts contacts into a sequence, and says per contact why any of them did not go
  *  in. A silent partial success is how somebody discovers three months later that
  *  half the list was never contacted. */
-export const enroll = async (
-  ctx: AccountContext,
-  input: { sequenceId: string; contactIds?: string[] | undefined; companyId?: string | null | undefined; mailboxId: string },
-): Promise<EnrollOutcome[]> =>
+export const enroll = async (ctx: AccountContext, input: EnrollInput): Promise<EnrollOutcome[]> =>
   mutate(ctx, 'sequence_enrollment', async (tx) => {
-    const [found] = await tx
-      .select({ id: sequence.id, name: sequence.name, state: sequence.state, settings: sequence.settings, sender: sequence.sender })
-      .from(sequence)
-      .where(eq(sequence.id, input.sequenceId))
-    if (!found) throw new Error('That sequence is not in this account.')
-    if (found.state === 'archived') throw new Error('That sequence is archived. Restore it to use it again.')
-
-    // Everyone at a company, resolved here rather than in the browser: a company
-    // with four hundred contacts should not send four hundred ids over the wire,
-    // and who is at a company is not the client's decision to make.
-    const contactIds = input.companyId
-      ? (
-          await tx.execute<{ id: string }>(sql`
-            select c.id from contact c
-              join company co on co.id = c.company_id and co.deleted_at is null
-             where c.company_id = ${input.companyId}::uuid
-               and c.deleted_at is null
-               and coalesce(c.email, '') <> ''
-             order by c.created_at`)
-        ).map((row) => row.id)
-      : (input.contactIds ?? [])
-    if (contactIds.length === 0) {
-      if (!input.companyId) throw new Error('Nobody was named to enroll.')
-      const [target] = await tx
-        .select({ deletedAt: company.deletedAt })
-        .from(company)
-        .where(eq(company.id, input.companyId))
-      throw new Error(
-        target?.deletedAt
-          ? 'That company is in the trash, so nobody at it can be enrolled.'
-          : 'Nobody at that company has an email address to write to.',
-      )
-    }
-
-    const [box] = await tx
-      .select({ id: mailbox.id, state: mailbox.state, canSend: mailbox.canSend, email: mailbox.email })
-      .from(mailbox)
-      .where(eq(mailbox.id, input.mailboxId))
-    if (!box) throw new Error('That mailbox is not connected.')
-    // A Woodpecker sequence never sends from this mailbox: the campaign there has
-    // its own sending accounts, and the mailbox only names who owns the outreach.
-    // So the grant to send is asked for only when Rawr is the one sending.
-    if (found.sender === 'gmail') {
-      if (box.state === 'revoked') throw new Error(`${box.email} is disconnected. Reconnect it before enrolling anybody.`)
-      if (!box.canSend) {
-        throw new Error(`${box.email} was connected for reading only. Reconnect it and allow sending.`)
-      }
-    }
-
-    const ids = [...new Set(contactIds)]
-    if (ids.length === 0) return { result: [], audit: { entity: 'sequence_enrollment', entityId: input.sequenceId, action: 'enroll', after: { count: 0 } } }
-
-    // The label comes back with the row rather than from a call per contact: it is
-    // the same expression contactLabels uses, and the row is already being read.
-    const people = await tx
-      .select({
-        id: contact.id,
-        email: contact.email,
-        label: sql<string>`coalesce(nullif(trim(concat_ws(' ', ${contact.firstName}, ${contact.lastName})), ''), ${contact.email}, 'Unnamed contact')`,
-      })
-      .from(contact)
-      .where(inArray(contact.id, ids))
-    // Keyed, because walking the list per id is O(N^2) over a selection that can
-    // be a whole company.
-    const byId = new Map(people.map((row) => [row.id, row]))
-
-    // Everything that would refuse a contact, asked once for the whole batch
-    // rather than once per contact: three statements, not three times N.
-    const optedOut = new Set(
-      found.settings.subscriptionTypeId
-        ? (
-            await tx.execute<{ contact_id: string }>(sql`
-              select contact_id from subscription_state
-               where subscription_type_id = ${found.settings.subscriptionTypeId}::uuid
-                 and state = 'unsubscribed'
-                 and contact_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
-          ).map((row) => row.contact_id)
-        : [],
-    )
-    const alreadyIn = new Set(
-      (
-        await tx.execute<{ contact_id: string }>(sql`
-          select contact_id from sequence_enrollment
-           where sequence_id = ${input.sequenceId}
-             and state in ('active', 'waiting_task', 'paused')
-             and contact_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)
-      ).map((row) => row.contact_id),
-    )
-
+    const { found, verdicts } = await judgeEnrollment(tx, input)
     const window = found.settings.sendWindow
     const outcomes: EnrollOutcome[] = []
 
-    for (const id of ids) {
-      const person = byId.get(id)
-      if (!person) {
-        outcomes.push({ contactId: id, displayName: 'Unknown contact', enrolled: false, reason: 'That contact is not in this account.' })
-        continue
-      }
-      if (!person.email) {
-        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'No email address.' })
-        continue
-      }
-      if (optedOut.has(id)) {
-        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'They have opted out of this kind of mail.' })
-        continue
-      }
-      if (alreadyIn.has(id)) {
-        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'Already in this sequence.' })
+    for (const { contactId: id, displayName, reason } of verdicts) {
+      if (reason) {
+        outcomes.push({ contactId: id, displayName, enrolled: false, reason })
         continue
       }
 
@@ -824,7 +841,7 @@ export const enroll = async (
         .onConflictDoNothing()
         .returning({ id: sequenceEnrollment.id })
       if (!created) {
-        outcomes.push({ contactId: id, displayName: person.label, enrolled: false, reason: 'Already in this sequence.' })
+        outcomes.push({ contactId: id, displayName, enrolled: false, reason: 'Already in this sequence.' })
         continue
       }
 
@@ -837,10 +854,10 @@ export const enroll = async (
       await recordActivity(tx, ctx, {
         type: 'sequence_activity',
         subject: `was enrolled in ${found.name}`,
-        payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: person.label },
+        payload: { event: 'enrolled', sequenceId: input.sequenceId, sequenceName: found.name, enrollmentId: created.id, contactName: displayName },
         links: await linksForContacts(tx, [id]),
       })
-      outcomes.push({ contactId: id, displayName: person.label, enrolled: true })
+      outcomes.push({ contactId: id, displayName, enrolled: true })
     }
 
     return {
@@ -852,6 +869,17 @@ export const enroll = async (
         after: { enrolled: outcomes.filter((row) => row.enrolled).length, refused: outcomes.filter((row) => !row.enrolled).length },
       },
     }
+  })
+
+/** What enroll would do with the same input, read-only. The count is a snapshot:
+ *  a contact who gets enrolled or opts out between the two calls is refused or
+ *  taken by enroll itself, and the reason says so. */
+export const enrollPreview = async (ctx: AccountContext, input: EnrollInput): Promise<EnrollPreview> =>
+  withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'sequences')
+    const { verdicts } = await judgeEnrollment(tx, input)
+    const refused = verdicts.flatMap((row) => (row.reason ? [{ contactId: row.contactId, displayName: row.displayName, reason: row.reason }] : []))
+    return { willEnroll: verdicts.length - refused.length, refused }
   })
 
 export type EnrollmentRow = {

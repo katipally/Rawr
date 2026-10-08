@@ -60,7 +60,7 @@ export const describeCondition = (fields: FilterField[], condition: Condition): 
   if (NULLARY.has(condition.operator)) return `${label} ${operator}`
   if (isDateRange(condition.value)) return `${label} is ${dateRangeLabel(condition.value).toLowerCase()}`
   const names = new Map(field?.choices?.map((choice) => [choice.id, choice.label]))
-  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : (names.get(entry) ?? entry)))
+  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : entry === '@open_stage' ? 'open' : (names.get(entry) ?? entry)))
   const value = condition.operator === RANGE ? values.join(' and ') : values.join(', ')
   return `${label} ${operator} ${value}`
 }
