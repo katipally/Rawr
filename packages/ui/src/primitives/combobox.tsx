@@ -124,13 +124,13 @@ export const Combobox = (props: ComboboxProps) => {
       <div
         ref={box}
         className={cn(
-          'flex min-h-9 flex-wrap items-center gap-1 rounded-hs border bg-surface px-2 py-1',
+          'flex min-h-9 flex-wrap items-center gap-1 rounded-hs border bg-fill px-2 py-1 focus-within:bg-surface',
           // The input inside carries no outline of its own, so the ring is drawn
           // on the box: a combobox reads as one control, and a 1px border going
           // teal is not a focus indicator anybody notices.
           'has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent',
           error ? 'border-error' : 'border-line focus-within:border-line-interactive',
-          disabled && 'bg-disabled',
+          disabled && 'border-dashed bg-transparent text-secondary',
         )}
       >
         {props.multiple

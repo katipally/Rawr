@@ -5,12 +5,17 @@ import { cn } from '../cn.ts'
  *  kept, but it was the only affordance: these were the one family of controls in
  *  the app with no focus ring, while every button, link and resize handle takes
  *  the 2px accent outline from globals.css. Both, and the ring is the one that
- *  carries at a glance. */
+ *  carries at a glance.
+ *
+ *  Editable is the fill, and focus turns it to the surface. Disabled and read-only
+ *  drop the fill and dash the border, so a field you cannot change does not look
+ *  like one you can. */
 const control =
   'w-full min-w-0 rounded-hs border border-line bg-fill px-3 py-1.5 text-body ' +
   'transition-colors duration-150 placeholder:text-secondary ' +
   'focus:border-line-interactive focus:bg-surface ' +
-  'disabled:cursor-not-allowed disabled:bg-disabled disabled:text-secondary ' +
+  'read-only:border-dashed read-only:bg-transparent read-only:text-secondary ' +
+  'disabled:cursor-not-allowed disabled:border-dashed disabled:bg-transparent disabled:text-secondary ' +
   'aria-[invalid=true]:border-error'
 
 export type FieldProps = {
