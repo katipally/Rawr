@@ -29,6 +29,9 @@ export type CreateRecordPanelProps = {
   /** Where to go once it exists. Absent means open the new record; the rail passes
    *  one so the person stays where they were and sees the link appear. */
   onCreated?: (id: string) => Promise<void> | void
+  /** Set when the rail is on a contact: a deal made here is linked to that contact
+   *  once it exists, so the form names it rather than asking for it. */
+  contactName?: string | undefined
 }
 
 const isEmpty = (value: unknown): boolean =>
@@ -45,6 +48,7 @@ export const CreateRecordPanel = ({
   onClose,
   initial = {},
   onCreated,
+  contactName,
 }: CreateRecordPanelProps) => {
   const fmt = useFormat()
   const { navigate } = useNavigation()
@@ -231,7 +235,15 @@ export const CreateRecordPanel = ({
         ) : null}
         {lead.map((field, index) => renderField(field, index === 0))}
 
-        {/* A rail-created deal is already linked to the record it was opened from. */}
+        {/* A deal made from a contact's rail is linked to that contact on create, so it is shown, not picked. */}
+        {object === 'deal' && onCreated && contactName ? (
+          <Field id={`${prefix}-associated`} label="Associated contact">
+            <p id={`${prefix}-associated`} className="text-secondary">
+              {contactName}
+            </p>
+          </Field>
+        ) : null}
+
         {object === 'deal' && !onCreated ? (
           <Field id={`${prefix}-contact`} label="Associated contact">
             <RecordPicker
@@ -252,7 +264,7 @@ export const CreateRecordPanel = ({
             {duplicate !== null ? (
               <>
                 {' '}
-                <Link href={objectView(account, object, 'all', 'list', { q: duplicate })}>Find it in the list</Link> and merge instead.
+                <Link href={objectView(account, object, 'all', 'list', { q: duplicate })}>Find it in the list</Link>.
               </>
             ) : null}
           </p>

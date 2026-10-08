@@ -713,6 +713,7 @@ const RecordPage = async ({
             account={account}
             object={objectParam}
             recordId={id}
+            recordName={record.displayName}
             cards={rail.groups}
             linkable={linkable}
             createFields={createFields}

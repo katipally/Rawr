@@ -40,6 +40,17 @@ export const purgeDrafts = (store: Pick<Storage, 'length' | 'key' | 'removeItem'
  *  restoring. */
 export type DraftRead<T> = { kind: 'none' } | { kind: 'expired' } | { kind: 'value'; value: T }
 
+const isEmpty = (value: unknown): boolean =>
+  value === '' || value === null || value === undefined || (Array.isArray(value) && value.length === 0)
+
+/** Whether a form's value says nothing beyond what it held at mount. An emptied
+ *  field counts as untouched, so typing into a field and clearing it again is
+ *  pristine too. */
+export const isPristine = (value: object, mounted: object): boolean => {
+  const meaningful = (entries: object) => JSON.stringify(Object.entries(entries).filter(([, field]) => !isEmpty(field)))
+  return meaningful(value) === meaningful(mounted)
+}
+
 export const readDraft = <T,>(raw: string | null, now: number): DraftRead<T> => {
   if (!raw) return { kind: 'none' }
   let parsed: Stored<T>

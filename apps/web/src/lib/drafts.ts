@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { draftKey, purgeDrafts, readDraft, SIGNED_OUT_KEY } from './draft-read.ts'
+import { draftKey, isPristine, purgeDrafts, readDraft, SIGNED_OUT_KEY } from './draft-read.ts'
 import { useDraftUser } from './draft-scope.tsx'
 
 /** One create-or-edit form's unsaved input, kept in `localStorage` so it survives
@@ -19,7 +19,7 @@ import { useDraftUser } from './draft-scope.tsx'
  *  render where it first equals `key` is guaranteed to be the render after
  *  restore's own state updates landed, batched together with it. Until then the
  *  save effect does not run at all. */
-export const useDraft = <T,>(
+export const useDraft = <T extends object>(
   account: string,
   object: string,
   recordId: string | undefined,
@@ -36,6 +36,7 @@ export const useDraft = <T,>(
   // a pristine default that never should have been treated as a saved draft) can
   // be skipped without also skipping every real edit after it.
   const settled = useRef(false)
+  const mounted = useRef(value)
 
   useEffect(() => {
     if (!key) return
@@ -58,7 +59,10 @@ export const useDraft = <T,>(
     }
     try {
       if (localStorage.getItem(SIGNED_OUT_KEY)) return
-      localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }))
+      // A form reset to its mount values (Discard, create and add another) must
+      // drop the draft, not write an empty one back for the next open to restore.
+      if (isPristine(value, mounted.current)) localStorage.removeItem(key)
+      else localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }))
     } catch {
       // Quota exceeded or blocked: the form keeps working without a saved draft.
     }

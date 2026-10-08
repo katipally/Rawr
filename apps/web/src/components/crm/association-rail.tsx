@@ -56,6 +56,7 @@ export type AssociationRailProps = {
   account: string
   object: string
   recordId: string
+  recordName: string
   cards: AssociationCard[]
   /** Which objects can be linked from here. The records themselves are searched,
    *  never listed: a deal's next contact is very rarely among the newest few
@@ -75,6 +76,7 @@ export const AssociationRail = ({
   account,
   object,
   recordId,
+  recordName,
   cards,
   linkable,
   createFields,
@@ -401,6 +403,7 @@ export const AssociationRail = ({
           // so the link exists without an association row.
           initial={createInitial[creating.objectKey] ?? {}}
           onClose={() => setCreating(null)}
+          contactName={object === 'contact' ? recordName : undefined}
           onCreated={async (id) => {
             const target = creating.objectKey
             const already = object === 'company' && Boolean(createInitial[target]?.company_id)

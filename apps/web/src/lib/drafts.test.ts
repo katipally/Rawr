@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DRAFT_EXPIRY_MS, draftKey, purgeDrafts, readDraft } from './draft-read.ts'
+import { DRAFT_EXPIRY_MS, draftKey, isPristine, purgeDrafts, readDraft } from './draft-read.ts'
 
 /** `readDraft` is the pure half of `useDraft` (drafts.ts): given a raw
  *  `localStorage` read and "now", what should happen. The other half -- not
@@ -95,4 +95,20 @@ test('an old empty draft is expired the same as an old real one', () => {
   const now = Date.now()
   const raw = JSON.stringify({ savedAt: now - DRAFT_EXPIRY_MS * 2, value: {} })
   assert.deepEqual(readDraft(raw, now), { kind: 'expired' })
+})
+
+test('a form back at its mount values is pristine, so its draft is dropped rather than saved', () => {
+  assert.equal(isPristine({ subject: '', text: '' }, { subject: '', text: '' }), true)
+  assert.equal(isPristine({ subject: 'Re: x', text: '' }, { subject: 'Re: x', text: '' }), true)
+})
+
+test('an emptied field counts as untouched, whether it was blank or absent at mount', () => {
+  assert.equal(isPristine({ email: '', tags: [], pipeline_id: 'p1' }, { pipeline_id: 'p1' }), true)
+  assert.equal(isPristine({ email: null, name: undefined }, {}), true)
+})
+
+test('real content is not pristine, whether a field is new or differs from mount', () => {
+  assert.equal(isPristine({ subject: 'hi', text: '' }, { subject: '', text: '' }), false)
+  assert.equal(isPristine({ pipeline_id: 'p2' }, { pipeline_id: 'p1' }), false)
+  assert.equal(isPristine({ tags: ['a'] }, { tags: [] }), false)
 })
