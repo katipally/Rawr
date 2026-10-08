@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { dashboardPath, reportsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
+import { moveKey } from '../card-order.ts'
 import { CardPicker, type CardChoice } from '../card-picker.tsx'
 import { DashboardSwitcher, type SwitchChoice } from './dashboard-switcher.tsx'
 import { ReportCard, type RenderedCard } from './report-card.tsx'
@@ -45,6 +46,7 @@ export const DashboardView = ({
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [dragging, setDragging] = useState<string | null>(null)
+  const [announced, setAnnounced] = useState('')
   // The order just dropped, drawn until the refresh that follows the save brings
   // the same order back from the server.
   const [placed, setPlaced] = useState<string[] | null>(null)
@@ -82,6 +84,17 @@ export const DashboardView = ({
     const without = keys.filter((key) => key !== dragging)
     without.splice(keys.indexOf(onto), 0, dragging)
     void relayout(without)
+  }
+
+  /** The grip's arrow keys: the same move the picker's up and down buttons make.
+   *  Returns whether the card moved, so the grip keeps focus only then. */
+  const step = (index: number, by: number): boolean => {
+    const keys = cards.map((card) => card.key)
+    const next = moveKey(keys, index, by)
+    if (next === keys) return false
+    setAnnounced(`${cards[index]!.label} is now ${index + by + 1} of ${keys.length}.`)
+    void relayout(next)
+    return true
   }
 
   const save = async (input: { name: string; cards: string[]; isShared: boolean }) => {
@@ -158,6 +171,7 @@ export const DashboardView = ({
       </div>
 
       <div className="flex min-w-0 flex-col gap-3">
+      <p aria-live="polite" className="sr-only">{announced}</p>
       {retired > 0 ? (
         <Alert tone="warning">
           {retired === 1
@@ -171,7 +185,7 @@ export const DashboardView = ({
         <EmptyState title="Nothing to draw" description="Every card on this dashboard has been retired." />
       ) : (
         <div className="grid min-w-0 gap-2.5 @2xl:grid-cols-2 @5xl:grid-cols-3">
-          {cards.map((card) => (
+          {cards.map((card, index) => (
             <ReportCard
               key={card.key}
               card={card}
@@ -186,6 +200,7 @@ export const DashboardView = ({
                         event.dataTransfer.effectAllowed = 'move'
                       },
                       onDragEnd: () => setDragging(null),
+                      onStep: (by) => step(index, by),
                     }
                   : null
               }

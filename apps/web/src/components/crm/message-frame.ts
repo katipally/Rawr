@@ -17,7 +17,7 @@ export const openMailLink = (event: MouseEvent) => {
  *  escaped slash, is not read as a comment. Comments are dropped; the rest is kept. */
 const STRING_ESCAPE_OR_COMMENT = /("(?:\\[\s\S]|[^"\\])*"?|'(?:\\[\s\S]|[^'\\])*'?|\\[\s\S])|\/\*[\s\S]*?(?:\*\/|$)/g
 const CSS_HEX_ESCAPE = /\\([0-9a-f]{1,6})[ \t\n\r\f]?|\\([\s\S])/gi
-const REMOTE_FUNCTION = /(?:url|src|image|image-set)\(/i
+const REMOTE_FUNCTION = /(?:url|src|image|image-set)\(|@import/i
 
 /** Whether a CSS value (a style attribute or a style element) can make the browser
  *  fetch something. Reads it the way CSS does: comments go, escapes are decoded, and
@@ -32,13 +32,31 @@ export const loadsRemotely = (css: string): boolean => {
   return REMOTE_FUNCTION.test(decoded)
 }
 
+/** An SVG href the browser follows with no request: a fragment in this document, or
+ *  an inline image. Anything else (a web address, a protocol-relative one, a data
+ *  URL that is not an image) would fetch from somewhere the reader never chose. */
+export const localSvgRef = (value: string): boolean => {
+  const clean = value.replace(/\s/g, '')
+  return clean.startsWith('#') || /^data:image\//i.test(clean)
+}
+
 /** Takes every remote load out of stored mail HTML until the reader asks for them.
  *  The browser's own parser finds the attributes, so a load in any form is caught:
  *  an image, a responsive source set, a table or cell background, a video poster,
- *  a style attribute that calls url() or image(), and a style or link element. */
+ *  a style attribute that calls url() or image(), a style or link element, and an
+ *  SVG use, image or feImage href. */
 export const blockRemoteLoads = (html: string): { html: string; blocked: number } => {
   const doc = new DOMParser().parseFromString(html, 'text/html')
   let blocked = 0
+  for (const element of doc.body.querySelectorAll('use, image, feImage')) {
+    for (const name of ['href', 'xlink:href']) {
+      const value = element.getAttribute(name)
+      if (value !== null && !localSvgRef(value)) {
+        element.removeAttribute(name)
+        blocked++
+      }
+    }
+  }
   for (const element of doc.body.querySelectorAll('[src],[srcset],[background],[poster],[style]')) {
     let hit = false
     for (const name of ['src', 'srcset', 'background', 'poster']) {

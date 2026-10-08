@@ -1,9 +1,15 @@
 import { redirect } from 'next/navigation'
-import { objectView } from '~/lib/links.ts'
+import { objectView, type ListParams } from '~/lib/links.ts'
 
-const ObjectRoot = async ({ params }: { params: Promise<{ account: string; object: string }> }) => {
+const ObjectRoot = async ({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ account: string; object: string }>
+  searchParams: Promise<ListParams>
+}) => {
   const { account, object } = await params
-  redirect(objectView(account, object, 'all'))
+  redirect(objectView(account, object, 'all', 'list', await searchParams))
 }
 
 export default ObjectRoot

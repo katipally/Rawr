@@ -171,3 +171,10 @@ test('a long run of unknown wrappers is unwrapped without depth cost, and keeps 
 test('a dropped element inside an unknown wrapper is still dropped', () => {
   assert.equal(sanitiseHtml('<section><script>x()</script><p>keep</p></section>'), '<p>keep</p>')
 })
+
+test('svg use, image and feImage references to remote files never reach the stored mail', () => {
+  const cleaned = sanitiseHtml(
+    '<svg><use href="https://t.example/x.svg#a"/><image xlink:href="//t.example/p.gif"/><filter><feImage href="https://t.example/f.png"/></filter></svg><p>x</p>',
+  )
+  assert.equal(cleaned, '<p>x</p>')
+})

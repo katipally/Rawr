@@ -13,6 +13,7 @@ import { invitePath } from '~/lib/links.ts'
 import { CRITICAL_ACTIONS, CRITICAL_LABEL, HUBS, HUBS_WITH_RECORDS, SCOPE_LABEL, type CriticalAction, type Hub, type Scope } from '~/lib/hubs.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { AccessEditor, EMPTY_GRANTS, levelOf, scopeOf, type Grants, type RoleTemplate } from './access-editor.tsx'
+import { overlaid, stage, unstage, type Overlays } from './member-overlay.ts'
 
 type HubScopes = Partial<Record<Hub, Scope>>
 
@@ -113,31 +114,25 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   /** What a member looks like after a change this browser has made but the server
    *  has not sent back yet. router.refresh takes a round trip, and a permission
    *  row that still reads the old way for that long looks like the save failed.
-   *  Dropped on failure, so the server rows are what is left. */
-  const [pending, setPending] = useState<Record<string, Partial<MemberListRow>>>({})
+   *  Dropped on failure, and on success once the refresh replaces the rows it sits over. */
+  const [pending, setPending] = useState<Overlays<MemberListRow>>({})
 
   const run = async (what: () => Promise<unknown>, done: string, ahead?: { userId: string; patch: Partial<MemberListRow> }) => {
     setBusy(true)
-    if (ahead) setPending((current) => ({ ...current, [ahead.userId]: { ...current[ahead.userId], ...ahead.patch } }))
+    if (ahead) setPending((current) => stage(current, rows, ahead.userId, ahead.patch))
     try {
       await what()
       toast('success', done)
       router.refresh()
     } catch (error) {
-      if (ahead) {
-        setPending((current) => {
-          const next = { ...current }
-          delete next[ahead.userId]
-          return next
-        })
-      }
+      if (ahead) setPending((current) => unstage(current, ahead.userId))
       toast('error', errorMessage(error))
     } finally {
       setBusy(false)
     }
   }
 
-  const members = rows.map((row) => (pending[row.userId] ? { ...row, ...pending[row.userId] } : row))
+  const members = overlaid(rows, pending)
   const counts: Record<View, number> = {
     active: members.filter((row) => row.state === 'active').length,
     pending: invitations.length,
@@ -152,17 +147,13 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
 
   const save = async (userId: string, grants: Grants) => {
     setBusy(true)
-    setPending((current) => ({ ...current, [userId]: { ...current[userId], ...grants } }))
+    setPending((current) => stage(current, rows, userId, grants))
     try {
       await api.account.members.setGrants.mutate({ userId, ...grants })
       toast('success', 'Permissions saved.')
       closeParamsAndRefresh(router, { member: null })
     } catch (error) {
-      setPending((current) => {
-        const next = { ...current }
-        delete next[userId]
-        return next
-      })
+      setPending((current) => unstage(current, userId))
       toast('error', errorMessage(error))
     } finally {
       setBusy(false)

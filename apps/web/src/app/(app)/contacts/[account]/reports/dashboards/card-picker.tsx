@@ -3,6 +3,7 @@
 import { Button, Checkbox, Field, Modal, Switch, TextInput } from '@rawr/ui'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
 import { useState } from 'react'
+import { moveKey } from './card-order.ts'
 
 export type CardChoice = { key: string; label: string; group: string; report: string }
 
@@ -51,14 +52,7 @@ export const CardPicker = ({
 
   const labelOf = (key: string) => catalogue.find((card) => card.key === key)?.label ?? key
 
-  const move = (index: number, by: number) => {
-    const to = index + by
-    if (to < 0 || to >= cards.length) return
-    const next = [...cards]
-    const [moved] = next.splice(index, 1)
-    if (moved) next.splice(to, 0, moved)
-    setCards(next)
-  }
+  const move = (index: number, by: number) => setCards(moveKey(cards, index, by))
 
   const groups = [...new Set(catalogue.map((card) => card.group))]
 

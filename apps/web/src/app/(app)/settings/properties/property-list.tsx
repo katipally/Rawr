@@ -92,12 +92,12 @@ export const PropertyList = ({
     if (renamed && !rows.some((field) => field.groupName === renamed.from)) setRenamed(null)
   }, [rows, renamed])
 
-  const run = async (fn: () => Promise<unknown>, done: string) => {
+  const run = async (fn: () => Promise<unknown>, done: string, refresh = true) => {
     setBusy(true)
     try {
       await fn()
       toast('success', done)
-      router.refresh()
+      if (refresh) router.refresh()
       return true
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -135,6 +135,8 @@ export const PropertyList = ({
               trackChanges: draft.trackChanges,
             }),
       field ? 'Property saved.' : 'Property created. It is on the record editor now.',
+      // Closing the editor is what refreshes here, so a second refresh would fetch the list twice.
+      false,
     )
     if (ok) closeParamsAndRefresh(router, editorParams)
   }

@@ -3,7 +3,7 @@
 import { cn, DropdownMenu } from '@rawr/ui'
 import { GripVertical, MoreVertical } from 'lucide-react'
 import Link from 'next/link'
-import type { DragEvent } from 'react'
+import { type DragEvent, useEffect, useRef } from 'react'
 import { useFormat } from '~/components/zone.tsx'
 
 type CardData =
@@ -11,6 +11,9 @@ type CardData =
   | { kind: 'table'; columns: string[]; rows: (string | number)[][] }
 
 export type RenderedCard = { key: string; label: string; report: string; data: CardData }
+
+/** Arrow keys on the grip: left and up move a card earlier, right and down later. */
+const STEP_BY_KEY: Partial<Record<string, number>> = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1 }
 
 /** Shown while the pointer is over the card or something in it has focus, and
  *  always where there is no hover to show it with. */
@@ -31,8 +34,9 @@ export const ReportCard = ({
   card: RenderedCard
   href: string
   range: string
-  /** The drag handle's own events, or null when this person cannot rearrange. */
-  grip: { onDragStart: (event: DragEvent) => void; onDragEnd: () => void } | null
+  /** The drag handle's own events, and the keyboard move by `by` places, which
+   *  reports whether the card moved. Null when this person cannot rearrange. */
+  grip: { onDragStart: (event: DragEvent) => void; onDragEnd: () => void; onStep: (by: number) => boolean } | null
   dragging: boolean
   /** Where a dragged card would land, or null when nothing is being dragged. */
   target: { onDragOver: (event: DragEvent) => void; onDrop: (event: DragEvent) => void } | null
@@ -42,6 +46,15 @@ export const ReportCard = ({
 }) => {
   const fmt = useFormat()
   const { data } = card
+  const gripRef = useRef<HTMLButtonElement>(null)
+  // Moving the card moves its grip in the DOM, which drops focus, so it is put back
+  // once the new order has rendered.
+  const keepFocus = useRef(false)
+  useEffect(() => {
+    if (!keepFocus.current) return
+    keepFocus.current = false
+    gripRef.current?.focus()
+  })
 
   return (
     <section
@@ -55,16 +68,24 @@ export const ReportCard = ({
     >
       <header className="flex min-w-0 items-start gap-1">
         {grip ? (
-          // biome-ignore lint/a11y/noStaticElementInteractions: the grip is the pointer's shortcut; the order is also set in Add content
-          <span
+          <button
+            ref={gripRef}
+            type="button"
             draggable
             onDragStart={grip.onDragStart}
             onDragEnd={grip.onDragEnd}
+            onKeyDown={(event) => {
+              const by = STEP_BY_KEY[event.key]
+              if (by === undefined) return
+              event.preventDefault()
+              keepFocus.current = grip.onStep(by)
+            }}
+            aria-label="Move card, use arrow keys"
             title="Drag to move"
-            className="-ml-1.5 flex size-6 shrink-0 cursor-grab items-center justify-center text-secondary"
+            className="-ml-1.5 flex size-6 shrink-0 cursor-grab items-center justify-center rounded-pill text-secondary"
           >
             <GripVertical aria-hidden="true" className="size-3.5" />
-          </span>
+          </button>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-col items-start gap-1">
           <Link href={href} className="max-w-full break-words text-base font-semibold">

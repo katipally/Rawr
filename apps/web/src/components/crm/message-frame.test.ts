@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it, test } from 'node:test'
-import { loadsRemotely, messageFrameSandbox } from './message-frame.ts'
+import { loadsRemotely, localSvgRef, messageFrameSandbox } from './message-frame.ts'
 
 test('a mail frame never runs script and never opens a window itself', () => {
   const tokens = messageFrameSandbox.split(' ')
@@ -47,9 +47,36 @@ describe('loadsRemotely', () => {
     assert.equal(loadsRemotely('color: red /* background: url(https://tracker.example/p.gif)'), false)
   })
 
+  it('flags an @import, which fetches a stylesheet', () => {
+    assert.equal(loadsRemotely('@import "https://tracker.example/x.css"'), true)
+    assert.equal(loadsRemotely(String.raw`@\69mport "https://tracker.example/x.css"`), true)
+  })
+
   it('lets ordinary styles through', () => {
     for (const css of ['color: #1a1a1a; font-weight: 700', 'background: #fff', 'margin: 0 auto; padding: 8px 12px', 'background-image: none']) {
       assert.equal(loadsRemotely(css), false, css)
+    }
+  })
+})
+
+describe('localSvgRef', () => {
+  it('keeps a fragment in this document and an inline image', () => {
+    for (const value of ['#glyph', ' #glyph', 'data:image/png;base64,iVBORw0KGgo=', 'DATA:IMAGE/svg+xml,<svg/>']) {
+      assert.equal(localSvgRef(value), true, value)
+    }
+  })
+
+  it('refuses anything the browser would fetch or run', () => {
+    for (const value of [
+      'https://tracker.example/x.svg#a',
+      'HTTP://tracker.example/x.svg',
+      '//tracker.example/x.svg#a',
+      'ht\ttps://tracker.example/x.svg',
+      'data:text/html,<script>x</script>',
+      'javascript:alert(1)',
+      'x.svg#a',
+    ]) {
+      assert.equal(localSvgRef(value), false, value)
     }
   })
 })
