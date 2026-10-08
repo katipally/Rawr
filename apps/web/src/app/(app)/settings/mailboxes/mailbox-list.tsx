@@ -1,6 +1,6 @@
 'use client'
 
-import { Alert, Badge, Button, Checkbox, ConfirmDialog, DataTable, Field, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { Alert, Badge, Button, Checkbox, ConfirmDialog, DataTable, Field, Select, Switch, TextInput, TimeField, cn, useToast, type Column } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import type { BlocklistRow, MailboxState, SendWindow } from '@rawr/db'
@@ -106,6 +106,7 @@ const SendingLimits = ({
   busy: boolean
   onSave: (input: { dailyCap: number; minGapSeconds: number; sendWindow: SendWindow | null }) => Promise<boolean>
 }) => {
+  const fmt = useFormat()
   const [cap, setCap] = useState(String(row.dailyCap))
   const [gap, setGap] = useState(String(row.minGapSeconds))
   const [hours, setWindow] = useState<SendWindow | null>(row.sendWindow)
@@ -185,21 +186,21 @@ const SendingLimits = ({
             </div>
             <div className="flex flex-wrap gap-3">
               <Field id={`from-${row.id}`} label="From">
-                <TextInput
+                <TimeField
                   id={`from-${row.id}`}
-                  type="time"
+                  locale={fmt.locale}
                   value={hours.start}
                   disabled={busy}
-                  onChange={(event) => setWindow({ ...hours, start: event.target.value })}
+                  onChange={(value) => setWindow({ ...hours, start: value })}
                 />
               </Field>
               <Field id={`to-${row.id}`} label="To">
-                <TextInput
+                <TimeField
                   id={`to-${row.id}`}
-                  type="time"
+                  locale={fmt.locale}
                   value={hours.end}
                   disabled={busy}
-                  onChange={(event) => setWindow({ ...hours, end: event.target.value })}
+                  onChange={(value) => setWindow({ ...hours, end: value })}
                 />
               </Field>
               <Field id={`zone-${row.id}`} label="Timezone">
