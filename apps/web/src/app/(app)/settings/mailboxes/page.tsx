@@ -8,7 +8,7 @@ import { MailboxList } from './mailbox-list.tsx'
 /** The continuity requirement: a successor opens a contact and sees the whole
  *  email history without anybody having forwarded anything.
  *
- *  Read only for now, `gmail.readonly` and nothing else. Bodies are stored here
+ *  Reads with `gmail.readonly`, and changes labels with `gmail.modify` so archive, trash and unread reach Gmail. Bodies are stored here
  *  rather than fetched from Gmail on demand, which is what makes a thread outlive
  *  the mailbox that brought it in; each mailbox says who may read what it read. */
 const MailboxesPage = async ({ searchParams }: { searchParams: Promise<{ notice?: string }> }) => {

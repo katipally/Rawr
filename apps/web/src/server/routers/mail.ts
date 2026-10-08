@@ -1,6 +1,7 @@
 import {
   attachContactToMail,
   addBlocklistEntry,
+  changeThread,
   DEV_ACCESS_TOKEN,
   bodyProgress,
   disconnectMailbox,
@@ -66,6 +67,7 @@ export const mailRouter = router({
         // The development mailbox can send, because the send goes nowhere: the
         // whole engine below it is otherwise unexercisable without Google.
         canSend: true,
+        canModify: true,
       })
     }),
   ),
@@ -170,6 +172,8 @@ export const mailRouter = router({
           mailboxId: z.uuid().nullable().optional(),
           unreplied: z.boolean().optional(),
           unread: z.boolean().optional(),
+          assignedToMe: z.boolean().optional(),
+          folder: z.enum(['inbox', 'archived', 'trash']).optional(),
           q: z.string().trim().max(200).nullable().optional(),
           limit: z.number().int().min(1).max(100).optional(),
           cursor: z.object({ lastAt: z.string(), id: z.uuid() }).nullable().optional(),
@@ -200,4 +204,20 @@ export const mailRouter = router({
   markRead: protectedProcedure
     .input(z.object({ threadId: z.uuid() }))
     .mutation(({ ctx, input }) => call(() => markThreadRead(ctx.account, input.threadId))),
+
+  /** Archive, Trash, assignment and unread, one change at a time. Recorded here at
+   *  once; the worker sends it on to Gmail. */
+  changeThread: protectedProcedure
+    .input(
+      z.object({
+        threadId: z.uuid(),
+        change: z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('archived'), value: z.boolean() }),
+          z.object({ kind: z.literal('trashed'), value: z.boolean() }),
+          z.object({ kind: z.literal('assignee'), value: z.uuid().nullable() }),
+          z.object({ kind: z.literal('unread'), value: z.boolean() }),
+        ]),
+      }),
+    )
+    .mutation(({ ctx, input }) => call(() => changeThread(ctx.account, input.threadId, input.change))),
 })

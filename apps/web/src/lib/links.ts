@@ -402,6 +402,8 @@ type InboxParams = {
   mailbox?: string | undefined
   unreplied?: string | undefined
   unread?: string | undefined
+  assigned?: string | undefined
+  folder?: string | undefined
   q?: string | undefined
 }
 

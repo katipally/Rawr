@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm'
 import {
   mailbox,
   message,
@@ -25,6 +25,7 @@ import { requestEnrichment } from './enrichment.ts'
 import { decryptToken, encryptToken } from '../internal/crypto.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { mutate, withAccount, writeAudit, type Tx } from './index.ts'
+import { requeueThreadsOfMailbox } from './thread-state.ts'
 
 /** F1 phase B, the storage half. The Gmail calls live in the app; everything that
  *  decides what is kept, who it belongs to and what is refused lives here. */
@@ -57,6 +58,9 @@ export type MailboxRow = {
   /** True once it has been reconnected with the send scope. Until then it reads
    *  and cannot send, whatever a sequence asks of it. */
   canSend: boolean
+  /** Whether Google granted gmail.modify. Without it, archive, trash and unread stay in
+   *  Rawr and are not sent to Gmail until the mailbox is reconnected. */
+  canModify: boolean
   dailyCap: number
   minGapSeconds: number
   /** This mailbox's own sending window, which overrides the sequence's when set.
@@ -77,6 +81,7 @@ export const listMailboxes = async (ctx: AccountContext): Promise<MailboxRow[]> 
         state: mailbox.state,
         visibility: mailbox.visibility,
         canSend: mailbox.canSend,
+        canModify: mailbox.canModify,
         dailyCap: mailbox.dailyCap,
         minGapSeconds: mailbox.minGapSeconds,
         sendWindow: mailbox.sendWindow,
@@ -115,6 +120,7 @@ export type SaveMailboxInput = {
   /** What Google actually granted, not what was asked for. Absent means read
    *  only, which is what a mailbox connected before sending existed had. */
   canSend?: boolean | undefined
+  canModify?: boolean | undefined
 }
 
 /** Connecting twice re-authorises rather than starting a second cursor over the
@@ -133,6 +139,7 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
         refreshToken: encryptToken(input.refreshToken),
         accessTokenExpiresAt: input.accessTokenExpiresAt,
         canSend: input.canSend ?? false,
+        canModify: input.canModify ?? false,
         visibility: 'private',
         lastError: null,
         lastErrorAt: null,
@@ -148,6 +155,7 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
           // Reconnecting without the send scope takes sending away again, which
           // is what somebody unticking it on the consent screen meant.
           canSend: input.canSend ?? false,
+          canModify: input.canModify ?? false,
           lastError: null,
           lastErrorAt: null,
         },
@@ -158,6 +166,7 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
     // The withdrawal notice was true until this moment. A stored row does not
     // heal itself, so the reconnect that makes it false says so.
     await resolveNotifications(tx, ctx, `mailbox_revoked:${saved.id}`)
+    if (input.canModify) await requeueThreadsOfMailbox(tx, saved.id, new Date())
 
     return {
       result: { id: saved.id },
@@ -166,7 +175,10 @@ export const saveMailbox = async (ctx: AccountContext, input: SaveMailboxInput):
         entityId: saved.id,
         action: 'connect',
         before: null,
-        after: { email: input.email, scope: input.canSend ? 'gmail.readonly + gmail.send' : 'gmail.readonly' },
+        after: {
+          email: input.email,
+          scope: [input.canModify ? 'gmail.modify' : null, input.canSend ? 'gmail.send' : null].filter(Boolean).join(' + ') || 'gmail.readonly',
+        },
       },
     }
   })
@@ -263,6 +275,12 @@ export const recordMailboxFailure = async (
       })
       .where(eq(mailbox.id, mailboxId))
   })
+}
+
+/** Google refused a change for want of gmail.modify. The mailbox keeps reading; the
+ *  change stays in Rawr and the thread says the mailbox must be reconnected. */
+export const markMailboxCannotModify = async (ctx: AccountContext, mailboxId: string): Promise<void> => {
+  await withAccount(ctx, (tx) => tx.update(mailbox).set({ canModify: false }).where(eq(mailbox.id, mailboxId)))
 }
 
 const STOPPED_BY_DISCONNECT =
@@ -1016,10 +1034,18 @@ export const readThread = async (
   ctx: AccountContext,
   threadId: string,
 ): Promise<{
-  thread: ThreadSummary
+  thread: ThreadSummary & {
+    archivedAt: Date | null
+    trashedAt: Date | null
+    assignedTo: string | null
+    /** Unread for the person asking, by the same rule the inbox list uses. */
+    unread: boolean
+  }
   /** Everyone on the thread who is a contact, so the header can link them. */
   contacts: { id: string; name: string; email: string | null }[]
   messages: ThreadMessage[]
+  /** Mailboxes this person may see that hold the thread and cannot change Gmail. */
+  gmailGaps: { id: string; email: string; userId: string; canSend: boolean }[]
 } | null> =>
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'contacts', 'the inbox')
@@ -1030,11 +1056,35 @@ export const readThread = async (
         firstAt: messageThread.firstAt,
         lastAt: messageThread.lastAt,
         messageCount: messageThread.messageCount,
+        archivedAt: messageThread.archivedAt,
+        trashedAt: messageThread.trashedAt,
+        assignedTo: messageThread.assignedTo,
+        unread: sql<boolean>`(${messageThreadRead.lastReadAt} is null or ${messageThreadRead.lastReadAt} < ${messageThread.lastAt})`,
       })
       .from(messageThread)
+      .leftJoin(
+        messageThreadRead,
+        and(
+          eq(messageThreadRead.threadId, messageThread.id),
+          sql`${messageThreadRead.userId} = ${ctx.actorId ?? null}::uuid`,
+        ),
+      )
       .where(eq(messageThread.id, threadId))
       .limit(1)
     if (!thread) return null
+
+    const gmailGaps = await tx
+      .selectDistinct({ id: mailbox.id, email: mailbox.email, userId: mailbox.userId, canSend: mailbox.canSend })
+      .from(message)
+      .innerJoin(mailbox, eq(mailbox.id, message.mailboxId))
+      .where(
+        and(
+          eq(message.threadId, threadId),
+          readable(ctx),
+          eq(mailbox.canModify, false),
+          ne(mailbox.state, 'revoked'),
+        ),
+      )
 
     const rows = await tx
       .select({
@@ -1119,6 +1169,7 @@ export const readThread = async (
 
     return {
       thread,
+      gmailGaps,
       contacts: people.map((person) => ({
         id: person.id,
         name: person.name,
@@ -1248,7 +1299,12 @@ export const markThreadRead = async (ctx: AccountContext, threadId: string): Pro
       .values({ accountId: ctx.accountId, threadId, userId: ctx.actorId as string, lastReadAt: new Date() })
       .onConflictDoUpdate({
         target: [messageThreadRead.accountId, messageThreadRead.threadId, messageThreadRead.userId],
-        set: { lastReadAt: new Date() },
+        // A pending Gmail UNREAD is dropped by reading the thread: what the person now
+        // does is what Gmail should say. Nothing pending stays nothing.
+        set: {
+          lastReadAt: new Date(),
+          gmailUnread: sql`case when ${messageThreadRead.gmailUnread} then false else ${messageThreadRead.gmailUnread} end`,
+        },
       })
     return { result: undefined, audit: { entity: 'message_thread_read', entityId: threadId, action: 'read' } }
   })
@@ -1271,6 +1327,15 @@ export type InboxThread = {
 
 export type InboxPage = { threads: InboxThread[]; cursor: { lastAt: string; id: string } | null }
 
+/** The Inbox is what is in neither Archive nor Trash. */
+export type InboxFolder = 'inbox' | 'archived' | 'trash'
+
+const folderFilter = (folder: InboxFolder | undefined) => {
+  if (folder === 'archived') return sql`(t.archived_at is not null and t.trashed_at is null)`
+  if (folder === 'trash') return sql`t.trashed_at is not null`
+  return sql`(t.archived_at is null and t.trashed_at is null)`
+}
+
 /** The shared inbox. Keyset paged on (last_at desc, id desc) over
  *  `message_thread_last_idx`, so page fifty costs what page one costs.
  *
@@ -1280,6 +1345,8 @@ export const listInboxThreads = async (
   ctx: AccountContext,
   input: {
     scope?: 'mine' | 'all' | undefined
+    folder?: InboxFolder | undefined
+    assignedToMe?: boolean | undefined
     mailboxId?: string | null | undefined
     unreplied?: boolean | undefined
     unread?: boolean | undefined
@@ -1352,6 +1419,8 @@ export const listInboxThreads = async (
               select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))
          and (${input.mailboxId ?? null}::uuid is null or exists (
               select 1 from visible v where v.thread_id = t.id and v.mailbox_id = ${input.mailboxId ?? null}::uuid))
+         and ${folderFilter(input.folder)}
+         and (${input.assignedToMe !== true} or t.assigned_to = ${actor ?? null}::uuid)
          and (${input.unreplied !== true} or w.direction = 'inbound')
          and (${input.unread !== true} or r.last_read_at is null or r.last_read_at < t.last_at)
          and ${matchMail ?? sql`true`}
@@ -1383,17 +1452,26 @@ export const listInboxThreads = async (
     }
   })
 
-export type InboxCounts = { all: number; mine: number; unreplied: number; unread: number }
+export type InboxCounts = {
+  all: number
+  mine: number
+  unreplied: number
+  unread: number
+  assignedToMe: number
+  archived: number
+  trash: number
+}
 
 /** The numbers beside the inbox views: every thread this person may read, the
  *  ones in their own mailboxes, the ones whose newest message is inbound, and
- *  the ones they have not opened since the last message. One pass over the
- *  visible threads, O(threads) in one round trip rather than four. */
+ *  the ones they have not opened since the last message. The first four count the
+ *  Inbox folder only, the rest count what is filed under each folder. One pass over
+ *  the visible threads, O(threads) in one round trip rather than seven. */
 export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'contacts', 'the inbox')
     const actor = ctx.actorId
-    const [row] = await tx.execute<{ all: number; mine: number; unreplied: number; unread: number }>(sql`
+    const [row] = await tx.execute<InboxCounts>(sql`
       with visible as (
         select m.thread_id, m.direction, m.sent_at, m.is_auto_reply, mb.user_id as mailbox_user
           from message m
@@ -1413,18 +1491,34 @@ export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
           from visible v
          where not v.is_auto_reply
          order by v.thread_id, v.sent_at desc
+      ),
+      counted as (
+        select t.id, t.last_at, t.assigned_to, t.archived_at, t.trashed_at, w.direction as waiting_direction,
+               exists (select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid) as mine,
+               (r.last_read_at is null or r.last_read_at < t.last_at) as unread
+          from message_thread t
+          join newest n on n.thread_id = t.id
+          left join waiting w on w.thread_id = t.id
+          left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
       )
-      select count(*)::int as all,
-             count(*) filter (where exists (
-               select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))::int as mine,
-             count(*) filter (where w.direction = 'inbound')::int as unreplied,
-             count(*) filter (where r.last_read_at is null or r.last_read_at < t.last_at)::int as unread
-        from message_thread t
-        join newest n on n.thread_id = t.id
-        left join waiting w on w.thread_id = t.id
-        left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
+      select count(*) filter (where archived_at is null and trashed_at is null)::int as all,
+             count(*) filter (where archived_at is null and trashed_at is null and mine)::int as mine,
+             count(*) filter (where archived_at is null and trashed_at is null and waiting_direction = 'inbound')::int as unreplied,
+             count(*) filter (where archived_at is null and trashed_at is null and unread)::int as unread,
+             count(*) filter (where archived_at is null and trashed_at is null and assigned_to = ${actor}::uuid)::int as "assignedToMe",
+             count(*) filter (where archived_at is not null and trashed_at is null)::int as archived,
+             count(*) filter (where trashed_at is not null)::int as trash
+        from counted
     `)
-    return { all: row?.all ?? 0, mine: row?.mine ?? 0, unreplied: row?.unreplied ?? 0, unread: row?.unread ?? 0 }
+    return {
+      all: row?.all ?? 0,
+      mine: row?.mine ?? 0,
+      unreplied: row?.unreplied ?? 0,
+      unread: row?.unread ?? 0,
+      assignedToMe: row?.assignedToMe ?? 0,
+      archived: row?.archived ?? 0,
+      trash: row?.trash ?? 0,
+    }
   })
 
 /** How many bodies are still to fetch, and for which mailbox. Shown on the

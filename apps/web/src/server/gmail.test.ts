@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorisedAddress, authorised, collectHistory, devFetcher, htmlToText, isTransient, parseAddresses, RevokedError, sendMail, type Fetcher } from './gmail.ts'
+import { authorisedAddress, authorised, collectHistory, devFetcher, grantedModifying, htmlToText, isTransient, parseAddresses, RevokedError, ScopeShortfall, sendMail, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -164,12 +164,12 @@ const added = (...ids: string[]) => ids.map((id) => ({ id: `rec-${id}`, messages
 test('every page of history is read, and the cursor is the last response\'s head', async () => {
   const asked: (string | undefined)[] = []
   const fetcher: Fetcher = async (_, params) => {
-    asked.push(params?.pageToken)
+    asked.push(params?.pageToken as string | undefined)
     if (!params?.pageToken) return { history: added('a', 'b'), nextPageToken: 'p2', historyId: '500' }
     if (params.pageToken === 'p2') return { history: added('b', 'c'), nextPageToken: 'p3', historyId: '510' }
     return { history: added('d'), historyId: '520' }
   }
-  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: ['a', 'b', 'c', 'd'], cursor: '520', more: false })
+  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: ['a', 'b', 'c', 'd'], threadIds: [], cursor: '520', more: false })
   assert.deepEqual(asked, [undefined, 'p2', 'p3'])
 })
 
@@ -194,7 +194,7 @@ test('an aged-out history id is null, which means list everything again', async 
 
 test('nothing new keeps the cursor moving to the head', async () => {
   const fetcher: Fetcher = async () => ({ historyId: '700' })
-  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: [], cursor: '700', more: false })
+  assert.deepEqual(await collectHistory(fetcher, '100'), { ids: [], threadIds: [], cursor: '700', more: false })
 })
 
 test('the mailbox is named by the address Google authorised, not the one hinted at', async () => {
@@ -226,4 +226,45 @@ test('a dev send with no thread starts a thread named after its own message', as
 
 test('two new dev sends do not share a thread', async () => {
   assert.notEqual((await devSend({ raw: 'a' })).threadId, (await devSend({ raw: 'b' })).threadId)
+})
+
+test('a mailbox is granted changes to Gmail only with gmail.modify on its scope list', () => {
+  assert.equal(grantedModifying(['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify']), true)
+  assert.equal(grantedModifying(['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send']), false)
+  assert.equal(grantedModifying([]), false)
+})
+
+// ------------------------------------------------------------- folders
+
+test('a label change to the Inbox or Trash names its thread, and read state does not', async () => {
+  const asked: Record<string, string | string[]> = {}
+  const fetcher: Fetcher = async (_, params) => {
+    Object.assign(asked, params)
+    return {
+      history: [
+        { id: '1', labelsRemoved: [{ message: { id: 'a', threadId: 'gt-archived' }, labelIds: ['INBOX'] }] },
+        { id: '2', labelsAdded: [{ message: { id: 'b', threadId: 'gt-trashed' }, labelIds: ['TRASH'] }] },
+        { id: '3', labelsAdded: [{ message: { id: 'c', threadId: 'gt-read' }, labelIds: ['UNREAD'] }] },
+      ],
+      historyId: '600',
+    }
+  }
+  const result = await collectHistory(fetcher, '100')
+  assert.deepEqual(result?.threadIds, ['gt-archived', 'gt-trashed'])
+  assert.deepEqual(result?.ids, [])
+  assert.deepEqual(asked.historyTypes, ['messageAdded', 'labelAdded', 'labelRemoved'])
+})
+
+test('Gmail refusing a change for want of gmail.modify is a scope shortfall, not a withdrawal', async () => {
+  const live = { accessToken: 'live', refreshToken: 'refresh', accessTokenExpiresAt: new Date(Date.now() + 3_600_000) }
+  google(() => fresh, () => ({ status: 403, body: { error: { message: 'Request had insufficient authentication scopes.', reason: 'insufficientPermissions' } } }))
+  const { fetcher } = await authorised(ctx, 'm', live, noStore)
+  await assert.rejects(fetcher('/threads/gt-1/trash', undefined, { method: 'POST', body: '{}' }), (cause) => cause instanceof ScopeShortfall)
+  mock.restoreAll()
+})
+
+test('a dev thread is read as sitting in the Inbox, and a change to it is accepted', async () => {
+  const dev = devFetcher('me@example.test', 'example.test')
+  assert.deepEqual(await dev('/threads/dev-t1', { format: 'minimal' }), { messages: [{ labelIds: ['INBOX'] }] })
+  assert.deepEqual(await dev('/threads/dev-t1/modify', undefined, { method: 'POST', body: '{}' }), {})
 })

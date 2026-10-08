@@ -17,7 +17,7 @@ import { dispatchImports, importJobs } from './jobs/imports.ts'
 import { notificationOverdue, notificationReminders, notificationSweep } from './jobs/notification-sweep.ts'
 import { rollUpActivity } from './jobs/roll-up-activity.ts'
 import { syncApollo } from './jobs/sync-apollo.ts'
-import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
+import { dispatchMailboxBodies, dispatchMailboxes, dispatchMailPush, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchSequences, sequenceJobs, sweepSequenceLeases } from './jobs/sequences.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
 import type { Job } from './jobs/registry.ts'
@@ -135,6 +135,10 @@ await every(dispatchMailboxes, '*/10 * * * *')
 // Bodies follow the messages a few minutes behind, so a thread opened right after
 // a sync shows its snippets now and its full text shortly after.
 await every(dispatchMailboxBodies, '*/5 * * * *')
+
+// Inbox changes Rawr recorded, on their way to Gmail. Two minutes is the bound on how
+// long Gmail trails the inbox.
+await every(dispatchMailPush, '*/2 * * * *')
 
 // Every minute: a run somebody started before a deploy or a sleep picks itself
 // up again, and a run that finishes its chunk queues the next one itself.

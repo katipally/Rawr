@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { createdAt, pk, accountId } from './columns.ts'
 import {
   bodyStateEnum,
@@ -69,6 +70,9 @@ export const mailbox = pgTable(
     /** Off by default: a sequence of two hundred sends would otherwise fill one
      *  person's bell with two hundred notices they never asked for. */
     alertOnOpen: boolean('alert_on_open').notNull().default(false),
+    /** Whether Google granted gmail.modify, which archive, trash and unread need. False
+     *  for a mailbox connected before it was asked for. */
+    canModify: boolean('can_modify').notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [
@@ -91,6 +95,15 @@ export const messageThread = pgTable(
     firstAt: timestamp('first_at', { withTimezone: true }),
     lastAt: timestamp('last_at', { withTimezone: true }),
     messageCount: integer('message_count').notNull().default(0),
+    /** Shared by everybody who may see the thread. Archive and Trash are the inbox's
+     *  own folders; a thread in neither is in the Inbox. */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    trashedAt: timestamp('trashed_at', { withTimezone: true }),
+    assignedTo: uuid('assigned_to').references(() => userAccount.id, { onDelete: 'set null' }),
+    /** Set by every change Rawr makes. gmail_synced_at takes the same value once Gmail
+     *  has been told, so a thread is waiting to be pushed while the two differ. */
+    stateChangedAt: timestamp('state_changed_at', { withTimezone: true }),
+    gmailSyncedAt: timestamp('gmail_synced_at', { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -98,6 +111,10 @@ export const messageThread = pgTable(
     // colleagues on the same thread store it once. B's edge-case table.
     uniqueIndex('message_thread_provider_key').on(t.accountId, t.provider, t.providerThreadId),
     index('message_thread_last_idx').on(t.accountId, t.lastAt),
+    index('message_thread_assigned_to_idx').on(t.accountId, t.assignedTo),
+    index('message_thread_gmail_pending_idx')
+      .on(t.accountId)
+      .where(sql`state_changed_at is distinct from gmail_synced_at`),
   ],
 )
 
@@ -208,11 +225,17 @@ export const messageThreadRead = pgTable(
       .notNull()
       .references(() => userAccount.id, { onDelete: 'cascade' }),
     lastReadAt: timestamp('last_read_at', { withTimezone: true }).notNull().defaultNow(),
+    /** What Gmail's UNREAD flag should say for this person's copy, while a change is
+     *  waiting to be pushed. Null when nothing is waiting. */
+    gmailUnread: boolean('gmail_unread'),
   },
   (t) => [
     uniqueIndex('message_thread_read_key').on(t.accountId, t.threadId, t.userId),
     index('message_thread_read_thread_id_idx').on(t.threadId),
     index('message_thread_read_user_id_idx').on(t.userId),
+    index('message_thread_read_gmail_unread_idx')
+      .on(t.accountId)
+      .where(sql`gmail_unread is not null`),
   ],
 )
 

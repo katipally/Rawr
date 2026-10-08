@@ -37,14 +37,23 @@ export const InboxFrame = async ({
     inboxCounts(ctx),
   ])
 
+  const view: InboxFilters = { scope: 'all', mailboxId: null, unreplied: false, unread: false, assignedToMe: false, folder: 'inbox', q: null }
   const views: { key: string; label: string; count: number; filters: InboxFilters }[] = [
-    { key: 'all', label: 'All', count: counts.all, filters: { scope: 'all', mailboxId: null, unreplied: false, unread: false, q: null } },
-    { key: 'mine', label: 'In my mailbox', count: counts.mine, filters: { scope: 'mine', mailboxId: null, unreplied: false, unread: false, q: null } },
-    { key: 'unreplied', label: 'Waiting on us', count: counts.unreplied, filters: { scope: 'all', mailboxId: null, unreplied: true, unread: false, q: null } },
-    { key: 'unread', label: 'Unread', count: counts.unread, filters: { scope: 'all', mailboxId: null, unreplied: false, unread: true, q: null } },
+    { key: 'all', label: 'All', count: counts.all, filters: view },
+    { key: 'mine', label: 'In my mailbox', count: counts.mine, filters: { ...view, scope: 'mine' } },
+    { key: 'unreplied', label: 'Waiting on us', count: counts.unreplied, filters: { ...view, unreplied: true } },
+    { key: 'unread', label: 'Unread', count: counts.unread, filters: { ...view, unread: true } },
+    { key: 'assigned', label: 'Assigned to me', count: counts.assignedToMe, filters: { ...view, assignedToMe: true } },
+    { key: 'archived', label: 'Archived', count: counts.archived, filters: { ...view, folder: 'archived' } },
+    { key: 'trash', label: 'Trash', count: counts.trash, filters: { ...view, folder: 'trash' } },
   ]
   const same = (a: InboxFilters, b: InboxFilters) =>
-    a.scope === b.scope && a.mailboxId === b.mailboxId && a.unreplied === b.unreplied && a.unread === b.unread
+    a.scope === b.scope &&
+    a.mailboxId === b.mailboxId &&
+    a.unreplied === b.unreplied &&
+    a.unread === b.unread &&
+    a.assignedToMe === b.assignedToMe &&
+    a.folder === b.folder
   const current = views.find((view) => same(view.filters, filters))?.key ?? null
   const link = 'flex min-h-8 items-center justify-between gap-2 py-1 pr-6 pl-2 text-body font-normal no-underline hover:bg-fill'
 
@@ -73,6 +82,8 @@ export const InboxFrame = async ({
             {filters.scope === 'mine' ? <input type="hidden" name="scope" value="mine" /> : null}
             {filters.unreplied ? <input type="hidden" name="unreplied" value="1" /> : null}
             {filters.unread ? <input type="hidden" name="unread" value="1" /> : null}
+            {filters.assignedToMe ? <input type="hidden" name="assigned" value="1" /> : null}
+            {filters.folder !== 'inbox' ? <input type="hidden" name="folder" value={filters.folder} /> : null}
             {filters.mailboxId ? <input type="hidden" name="mailbox" value={filters.mailboxId} /> : null}
             <input
               type="search"
@@ -119,8 +130,8 @@ export const InboxFrame = async ({
               </ul>
             </>
           ) : null}
-          {filters.scope === 'mine' || filters.mailboxId || filters.unread || filters.unreplied ? (
-            <Link href={inboxPath(account, { q: filters.q ?? undefined })} className={cn(link, 'mt-2 text-secondary')}>
+          {filters.scope === 'mine' || filters.mailboxId || filters.unread || filters.unreplied || filters.assignedToMe ? (
+            <Link href={inboxPath(account, { folder: filters.folder === 'inbox' ? undefined : filters.folder, q: filters.q ?? undefined })} className={cn(link, 'mt-2 text-secondary')}>
               Clear filters
             </Link>
           ) : null}

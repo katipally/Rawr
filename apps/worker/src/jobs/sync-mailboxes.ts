@@ -156,6 +156,61 @@ const hydrate = defineJob({
   },
 })
 
-export const mailJobs = [dispatch, sync, hydrateDispatch, hydrate]
+/** Inbox changes made in Rawr (archive, trash, unread) that Gmail has not had yet. The
+ *  change is already saved when this runs, so the dispatcher only finds the threads that
+ *  are waiting: one indexed scan, one job per thread, and a job already queued for a
+ *  thread is not queued twice.
+ *
+ *  A thread still waiting after a day is left to the dead letter that its failed job
+ *  raised, rather than being retried every few minutes for ever. */
+const pushDispatch = defineJob({
+  name: 'mail.push.dispatch',
+  schema: z.object({}),
+  retryLimit: 3,
+  retryDelaySeconds: 60,
+  audience: `select distinct account_id from message_thread where state_changed_at is distinct from gmail_synced_at`,
+  handle: async () => {
+    const rows = await owner`
+      select account_id, thread_id from (
+        select t.account_id, t.id as thread_id
+          from message_thread t
+         where t.state_changed_at is distinct from t.gmail_synced_at
+           and t.state_changed_at > now() - interval '1 day'
+        union
+        select r.account_id, r.thread_id
+          from message_thread_read r
+          join mailbox b on b.user_id = r.user_id and b.account_id = r.account_id
+         where r.gmail_unread is not null and b.can_modify and b.state <> 'revoked'
+      ) waiting
+       limit 500`
+
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send('mail.push', { accountId: row.account_id, threadId: row.thread_id }, { singletonKey: String(row.thread_id) }),
+    )
+  },
+})
+
+const push = defineJob({
+  name: 'mail.push',
+  schema: z.object({ accountId: z.uuid(), threadId: z.uuid() }),
+  retryLimit: 4,
+  retryDelaySeconds: 120,
+  policy: 'short',
+  handle: async ({ accountId, threadId }) => {
+    const response = await fetch(`${APP_BASE}/api/internal/mail-push`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-rawr-internal': INTERNAL_SECRET },
+      body: JSON.stringify({ accountId, threadId }),
+      signal: AbortSignal.timeout(90_000),
+    })
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null
+      throw new Error(body?.error ?? `The app answered ${response.status} for thread ${threadId}.`)
+    }
+  },
+})
+
+export const mailJobs = [dispatch, sync, hydrateDispatch, hydrate, pushDispatch, push]
 export const dispatchMailboxes = dispatch
 export const dispatchMailboxBodies = hydrateDispatch
+export const dispatchMailPush = pushDispatch

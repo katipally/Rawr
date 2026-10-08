@@ -5,7 +5,7 @@ import { env } from '~/lib/env.ts'
 import { mailboxesPath, safePath } from '~/lib/links.ts'
 import { NOTICE_PARAM, type NoticeCode } from '~/lib/notices.ts'
 import { GOOGLE_GMAIL_CALLBACK_PATH, googleClient } from '~/server/auth/google.ts'
-import { authorisedAddress, grantedSending } from '~/server/gmail.ts'
+import { authorisedAddress, grantedModifying, grantedSending } from '~/server/gmail.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 
 /** Stores the mailbox. The tokens are encrypted with a key held outside this
@@ -56,6 +56,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
       // on the consent screen, and a mailbox that claims it can send when it
       // cannot fails at the worst moment.
       canSend: grantedSending(tokens.hasScopes() ? tokens.scopes() : []),
+      canModify: grantedModifying(tokens.hasScopes() ? tokens.scopes() : []),
     })
   } catch (cause) {
     console.error('[gmail] connecting a mailbox failed:', cause)

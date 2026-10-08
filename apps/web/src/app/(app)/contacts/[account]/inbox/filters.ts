@@ -3,27 +3,40 @@ type Query = Record<string, string | string[] | undefined>
 const one = (value: string | string[] | undefined): string | null =>
   Array.isArray(value) ? (value[0] ?? null) : (value ?? null)
 
+export type InboxFolder = 'inbox' | 'archived' | 'trash'
+
 export type InboxFilters = {
   scope: 'mine' | 'all'
   mailboxId: string | null
   unreplied: boolean
   unread: boolean
+  assignedToMe: boolean
+  folder: InboxFolder
   q: string | null
 }
 
-export const filtersFrom = (query: Query): InboxFilters => ({
-  scope: one(query.scope) === 'mine' ? 'mine' : 'all',
-  mailboxId: one(query.mailbox),
-  unreplied: one(query.unreplied) === '1',
-  unread: one(query.unread) === '1',
-  q: one(query.q),
-})
+const FOLDERS: InboxFolder[] = ['inbox', 'archived', 'trash']
+
+export const filtersFrom = (query: Query): InboxFilters => {
+  const folder = one(query.folder)
+  return {
+    scope: one(query.scope) === 'mine' ? 'mine' : 'all',
+    mailboxId: one(query.mailbox),
+    unreplied: one(query.unreplied) === '1',
+    unread: one(query.unread) === '1',
+    assignedToMe: one(query.assigned) === '1',
+    folder: FOLDERS.find((name) => name === folder) ?? 'inbox',
+    q: one(query.q),
+  }
+}
 
 export const toParams = (filters: InboxFilters) => ({
   scope: filters.scope === 'mine' ? 'mine' : undefined,
   mailbox: filters.mailboxId ?? undefined,
   unreplied: filters.unreplied ? '1' : undefined,
   unread: filters.unread ? '1' : undefined,
+  assigned: filters.assignedToMe ? '1' : undefined,
+  folder: filters.folder === 'inbox' ? undefined : filters.folder,
   q: filters.q ?? undefined,
 })
 

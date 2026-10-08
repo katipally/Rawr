@@ -1,34 +1,45 @@
 import {
+  acknowledgeThreadPush,
+  acknowledgeUnreadPush,
   blockedPatterns,
+  folderChanges,
+  gmailLabelsFor,
   isAdmin,
   failBody,
   ingestMessage,
   internalDomainOf,
+  labelsOfThread,
+  markMailboxCannotModify,
   notify,
   pendingBodies,
   readMailbox,
+  reconcileThreadFolders,
   recordMailboxFailure,
   storeBody,
+  threadPushPlan,
+  threadStateFromLabels,
   updateMailboxCursor,
   withAccount,
   DEV_ACCESS_TOKEN,
   type IncomingAttachment,
   type IncomingMessage,
   type AccountContext,
+  type ThreadPush,
 } from '@rawr/db'
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
 import { isRateLimited, sendWithBackoff } from './integrations/provider.ts'
 import { sanitiseHtml } from './mail-html.ts'
 
-/** Reading is what every mailbox is connected for. Nothing about the CRM needs
- *  more than this, and every extra scope widens the blast radius of a leaked
- *  token. */
-export const GMAIL_READ_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+const MODIFY_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
+
+/** Reading is what every mailbox is connected for. `gmail.modify` is asked with it
+ *  because Archive, Trash and Mark unread have to reach Gmail; it is the narrowest
+ *  scope that changes labels and the Trash. Nothing else is asked for on connect. */
+export const GMAIL_READ_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', MODIFY_SCOPE]
 
 /** Sending is asked for separately and only by somebody who wants sequences sent
- *  as themselves. `gmail.send` can only send: it cannot read, modify or delete,
- *  which is why it is the one to ask for rather than `gmail.modify`.
+ *  as themselves. `gmail.send` can only send: it cannot read, modify or delete.
  *
  *  A mailbox connected before this existed keeps reading and cannot send until
  *  its owner reconnects and grants it, which is the honest way round. */
@@ -42,6 +53,10 @@ const isDevMailbox = (box: { accessToken: string }): boolean =>
  *  untick one on the consent screen. */
 export const grantedSending = (scopes: string[]): boolean =>
   scopes.includes('https://www.googleapis.com/auth/gmail.send')
+
+/** Whether Google granted gmail.modify. Stored on the mailbox, so the thread can say
+ *  a reconnect is needed without asking Google each time. */
+export const grantedModifying = (scopes: string[]): boolean => scopes.includes(MODIFY_SCOPE)
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
@@ -108,6 +123,20 @@ export const isTransient = (cause: unknown): boolean =>
   (cause instanceof TypeError && cause.message === 'fetch failed') ||
   (cause instanceof OAuth2RequestError && /^http_5/.test(cause.code))
 
+/** Google refused a call because the grant lacks a scope it needs. The grant itself is
+ *  fine, so this is not a revocation: the change stays in Rawr and the mailbox is asked
+ *  to reconnect. The body wording is inferred from Google's usual error reason; it is
+ *  not in the Gmail error reference, so a real account has to confirm it. */
+export class ScopeShortfall extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ScopeShortfall'
+  }
+}
+
+const isScopeShortfall = (status: number, body: string): boolean =>
+  status === 403 && /insufficient(permission|authentication)/i.test(body)
+
 /** Google's own signal that the grant is gone. Anything else is a transient error
  *  and is retried; this one stops the mailbox, because a withdrawn consent does
  *  not come back on its own and retrying would be the wrong answer to it. */
@@ -118,7 +147,7 @@ const isRevocation = (status: number, body: string): boolean =>
 
 export type Fetcher = (
   path: string,
-  params?: Record<string, string>,
+  params?: Record<string, string | string[]>,
   /** Set to POST a body. Reads pass neither and get a GET, which is every call
    *  this module made before sending existed. */
   send?: { method: 'POST'; body: string },
@@ -159,7 +188,9 @@ export const authorised = async (
 
   const fetcher: Fetcher = async (path, params, send) => {
     const url = new URL(`${API}${path}`)
-    for (const [key, value] of Object.entries(params ?? {})) url.searchParams.set(key, value)
+    for (const [key, value] of Object.entries(params ?? {})) {
+      for (const item of [value].flat()) url.searchParams.append(key, item)
+    }
 
     // A send is not repeated on a 5xx: Gmail takes no idempotency key, so a
     // failure after it acted would put the mail in the inbox twice.
@@ -188,6 +219,7 @@ export const authorised = async (
     if (response.ok) return response.json()
 
     const body = await response.text()
+    if (isScopeShortfall(response.status, body)) throw new ScopeShortfall(`Gmail needs a permission this mailbox was not given: ${body.slice(0, 200)}`)
     if (!isRateLimited(response.status, body) && isRevocation(response.status, body)) {
       throw new RevokedError('Access to this mailbox has been withdrawn in the Google account.')
     }
@@ -496,11 +528,21 @@ const currentHistoryId = async (fetcher: Fetcher): Promise<string | null> => {
   return profile.historyId ?? null
 }
 
+type HistoryMessage = { id?: string; threadId?: string }
 type HistoryPage = {
-  history?: { id?: string; messagesAdded?: { message: { id?: string } }[] }[]
+  history?: {
+    id?: string
+    messagesAdded?: { message: HistoryMessage }[]
+    labelsAdded?: { message: HistoryMessage; labelIds?: string[] }[]
+    labelsRemoved?: { message: HistoryMessage; labelIds?: string[] }[]
+  }[]
   nextPageToken?: string
   historyId?: string
 }
+
+/** Only a label change to the Inbox or to Trash moves a thread in Rawr. Read state and
+ *  the other labels are not read back. */
+const FOLDER_LABELS = ['INBOX', 'TRASH']
 
 /** Pages per pass. A mailbox that was away for days can owe thousands of records,
  *  and a pass has to end inside the worker's timeout. */
@@ -510,14 +552,18 @@ const HISTORY_PAGES_PER_PASS = 5
  *  cursor to continue from. A history list is a hundred records a page, so reading
  *  one page and moving the cursor to the mailbox's head loses everything past it.
  *
+ *  `threadIds` are the threads whose Inbox or Trash label changed in Gmail: archiving
+ *  in Gmail is a label removal, so it arrives here and nowhere else.
+ *
  *  When the page limit stops the read, the cursor is the last record read rather
  *  than the head, and `more` says to come back. Null is an expired cursor: Gmail
  *  answers 404 once the history has aged out, which means a full re-list. */
 export const collectHistory = async (
   fetcher: Fetcher,
   startHistoryId: string,
-): Promise<{ ids: string[]; cursor: string; more: boolean } | null> => {
+): Promise<{ ids: string[]; threadIds: string[]; cursor: string; more: boolean } | null> => {
   const ids = new Set<string>()
+  const threadIds = new Set<string>()
   let cursor = startHistoryId
   let pageToken: string | undefined
 
@@ -526,7 +572,7 @@ export const collectHistory = async (
     try {
       result = (await fetcher('/history', {
         startHistoryId,
-        historyTypes: 'messageAdded',
+        historyTypes: ['messageAdded', 'labelAdded', 'labelRemoved'],
         ...(pageToken ? { pageToken } : {}),
       })) as HistoryPage
     } catch (cause) {
@@ -537,13 +583,33 @@ export const collectHistory = async (
     const records = result.history ?? []
     for (const record of records) {
       for (const added of record.messagesAdded ?? []) if (added.message.id) ids.add(added.message.id)
+      for (const change of [...(record.labelsAdded ?? []), ...(record.labelsRemoved ?? [])]) {
+        const folder = (change.labelIds ?? []).some((label) => FOLDER_LABELS.includes(label))
+        if (folder && change.message.threadId) threadIds.add(change.message.threadId)
+      }
     }
 
     pageToken = result.nextPageToken
-    if (!pageToken) return { ids: [...ids], cursor: result.historyId ?? cursor, more: false }
+    if (!pageToken) return { ids: [...ids], threadIds: [...threadIds], cursor: result.historyId ?? cursor, more: false }
     cursor = records.at(-1)?.id ?? cursor
-    if (page === HISTORY_PAGES_PER_PASS) return { ids: [...ids], cursor, more: true }
+    if (page === HISTORY_PAGES_PER_PASS) return { ids: [...ids], threadIds: [...threadIds], cursor, more: true }
   }
+}
+
+/** A thread's folders as Gmail has them now. The read is stamped before the call, so a
+ *  Rawr change made after it is never overwritten by what Gmail said before. */
+const readBackFolders = async (ctx: AccountContext, fetcher: Fetcher, threadId: string): Promise<void> => {
+  const readAt = new Date()
+  let thread: { messages?: { labelIds?: string[] }[] }
+  try {
+    thread = (await fetcher(`/threads/${threadId}`, { format: 'minimal' })) as typeof thread
+  } catch (cause) {
+    if ((cause as { status?: number }).status === 404) return
+    throw cause
+  }
+  const labels = (thread.messages ?? []).map((message) => message.labelIds ?? [])
+  if (labels.length === 0) return
+  await reconcileThreadFolders(ctx, threadId, threadStateFromLabels(labels), readAt)
 }
 
 const incremental = async (
@@ -583,6 +649,8 @@ const incremental = async (
     }
     await store(ctx, box, incoming, options, tally)
   }
+
+  for (const threadId of added.threadIds) await readBackFolders(ctx, fetcher, threadId)
 
   await updateMailboxCursor(ctx, box.id, { historyId: added.cursor, state: 'connected' })
 
@@ -656,6 +724,96 @@ export const hydrateMailboxBodies = async (
   return { stored, failed, remaining: pending.length === limit }
 }
 
+// ------------------------------------------------------------- push
+
+const EMPTY_POST = { method: 'POST' as const, body: '{}' }
+
+/** Brings a thread's folders in Gmail to what Rawr says: Trash, then the Inbox label.
+ *  Reads Gmail first and sends only what differs, so running it again changes nothing. */
+const applyFolders = async (fetcher: Fetcher, plan: ThreadPush): Promise<void> => {
+  const path = `/threads/${plan.providerThreadId}`
+  let thread: { messages?: { labelIds?: string[] }[] }
+  try {
+    thread = (await fetcher(path, { format: 'minimal' })) as typeof thread
+  } catch (cause) {
+    // The thread is gone from Gmail, so there is nothing left to move.
+    if ((cause as GmailError).status === 404) return
+    throw cause
+  }
+  const inGmail = labelsOfThread((thread.messages ?? []).map((message) => message.labelIds ?? []))
+  const change = folderChanges(inGmail, gmailLabelsFor({ archived: plan.archived, trashed: plan.trashed }))
+  if (change.trash) await fetcher(`${path}/trash`, undefined, EMPTY_POST)
+  if (change.untrash) await fetcher(`${path}/untrash`, undefined, EMPTY_POST)
+  if (change.addInbox || change.removeInbox) {
+    await fetcher(`${path}/modify`, undefined, {
+      method: 'POST',
+      body: JSON.stringify({
+        addLabelIds: change.addInbox ? ['INBOX'] : [],
+        removeLabelIds: change.removeInbox ? ['INBOX'] : [],
+      }),
+    })
+  }
+}
+
+/** Sets the UNREAD label on one person's copy of the thread. A thread Gmail no longer
+ *  has is nothing to mark. */
+const applyUnread = async (fetcher: Fetcher, providerThreadId: string, wanted: boolean): Promise<void> => {
+  try {
+    await fetcher(`/threads/${providerThreadId}/modify`, undefined, {
+      method: 'POST',
+      body: JSON.stringify(wanted ? { addLabelIds: ['UNREAD'] } : { removeLabelIds: ['UNREAD'] }),
+    })
+  } catch (cause) {
+    if ((cause as GmailError).status !== 404) throw cause
+  }
+}
+
+/** Pushes what Rawr has recorded for a thread to every mailbox that holds it and can
+ *  change Gmail. Called by the worker, after the change itself is already saved.
+ *
+ *  A mailbox that cannot change Gmail is passed over and the thread is still marked
+ *  delivered: the reconnect requeues it (requeueThreadsOfMailbox), so nothing is lost
+ *  and nothing is retried forever. A transient failure is thrown, and the job retries
+ *  the whole thread, which is safe because every step reads Gmail before it writes. */
+export const pushThreadToGmail = async (ctx: AccountContext, threadId: string): Promise<void> => {
+  const plan = await threadPushPlan(ctx, threadId)
+  if (!plan) return
+
+  for (const holder of plan.mailboxes) {
+    if (holder.state === 'revoked' || !holder.canModify) continue
+    const tokens = await readMailbox(ctx, holder.id)
+    if (!tokens) continue
+    try {
+      await guarding(ctx, tokens, async () => {
+        const { fetcher } = isDevMailbox(tokens)
+          ? { fetcher: devFetcher(tokens.email, await internalDomainOf(ctx)) }
+          : await authorised(ctx, tokens.id, tokens)
+        await applyFolders(fetcher, plan)
+        for (const row of plan.unread) {
+          if (row.userId !== holder.userId) continue
+          await applyUnread(fetcher, plan.providerThreadId, row.wanted)
+          await acknowledgeUnreadPush(ctx, threadId, row.userId, row.wanted)
+        }
+      })
+    } catch (cause) {
+      if (cause instanceof RevokedError) continue
+      if (cause instanceof ScopeShortfall) {
+        await markMailboxCannotModify(ctx, holder.id)
+        continue
+      }
+      throw cause
+    }
+  }
+
+  // A reader whose mailbox does not hold the thread has nothing in Gmail to change.
+  for (const row of plan.unread) {
+    if (!plan.mailboxes.some((holder) => holder.userId === row.userId)) {
+      await acknowledgeUnreadPush(ctx, threadId, row.userId, row.wanted)
+    }
+  }
+  if (plan.version) await acknowledgeThreadPush(ctx, threadId, plan.version)
+}
+
 // ------------------------------------------------------- development only
 
 /** A stand-in Gmail so the whole path — back-fill, cursor, participant matching,
@@ -684,6 +842,9 @@ export const devFetcher = (ownerEmail: string, internalDomain: string): Fetcher 
       console.log(`[gmail:dev] pretending to send ${id}`)
       return { id, threadId }
     }
+    // A thread is read as sitting in the Inbox. A change to one is accepted and dropped,
+    // the same as a send: what the thread view shows is what Rawr recorded.
+    if (path.startsWith('/threads/')) return send ? {} : { messages: [{ labelIds: ['INBOX'] }] }
     if (path === '/profile') return { historyId: '1000' }
     if (path === '/messages') {
       const from = params?.pageToken ? Number(params.pageToken) : 0
@@ -737,10 +898,7 @@ const devMessage = (
 
 /** A fetcher bound to one mailbox, for anything outside this module that needs to
  *  talk to Gmail as that person: the sequence sender, and one-off replies. */
-export const gmailFetcherFor = async (
-  ctx: AccountContext,
-  mailboxId: string,
-): Promise<(path: string, params?: Record<string, string>, send?: { method: 'POST'; body: string }) => Promise<unknown>> => {
+export const gmailFetcherFor = async (ctx: AccountContext, mailboxId: string): Promise<Fetcher> => {
   const box = await readMailbox(ctx, mailboxId)
   if (!box) throw new Error('That mailbox is not connected.')
   if (box.state === 'revoked') {

@@ -205,6 +205,7 @@ const ANY_MEMBER = new Set([
   'mailbox',
   'message_blocklist',
   'message_thread_read',
+  'message_thread',
 ])
 
 export const canWrite = (ctx: AccountContext, entity: string): boolean => {

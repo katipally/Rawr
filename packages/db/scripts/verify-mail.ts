@@ -12,6 +12,7 @@ import {
   inboxCounts,
   internalDomainOf,
   listInboxThreads,
+  markMailboxCannotModify,
   markThreadRead,
   pendingBodies,
   readThread,
@@ -26,6 +27,7 @@ import {
   type IncomingMessage,
 } from '../src/dal/messages.ts'
 import { createRecord, mergeRecords } from '../src/dal/records.ts'
+import { acknowledgeThreadPush, changeThread, reconcileThreadFolders, threadPushPlan } from '../src/dal/thread-state.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
 /** What B3 added: bodies kept here rather than fetched from somebody's mailbox,
@@ -451,12 +453,124 @@ try {
   const primaryFiled = await filedUnder(`win.${stamp}@mailwon${stamp}.example`, 'primary')
   check(primaryFiled === primary.id, 'a primary domain beats an alias on the same domain', `${primaryFiled ?? 'nothing'}`)
 
+  console.log('-- inbox folders and Gmail sync ----------------------------------------')
+
+  // The mailbox above was disconnected earlier, which takes its messages off it. A fresh
+  // connection and thread give these checks a mailbox that is really holding mail.
+  const live = await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-${stamp}`,
+    refreshToken: `refresh-${stamp}`,
+    accessTokenExpiresAt: null,
+    canModify: true,
+  })
+  const threadKey = `mail-t2-${stamp}`
+  const folderMail = await ingestMessage(sales, {
+    incoming: incoming({ providerThreadId: threadKey, providerMessageId: `mail-fold-${stamp}` }),
+    ownerEmail: salesUser.email,
+    mailboxId: live.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  const thread = folderMail.stored ? folderMail.threadId : ''
+  check(thread !== '', 'a fresh mailbox stores its mail on a thread the checks can use')
+  const folderRow = async () =>
+    (
+      await owner<{ archived_at: Date | null; trashed_at: Date | null; assigned_to: string | null; state_changed_at: Date | null; gmail_synced_at: Date | null }[]>`
+        select archived_at, trashed_at, assigned_to, state_changed_at, gmail_synced_at from message_thread where id = ${thread}`
+    )[0]!
+  const inFolder = async (ctx: AccountContext, folder: 'inbox' | 'archived' | 'trash', assignedToMe = false) =>
+    (await listInboxThreads(ctx, { mailboxId: live.id, folder, assignedToMe, limit: 100 })).threads.map((row) => row.id)
+
+  await changeThread(sales, thread, { kind: 'archived', value: true })
+  let row = await folderRow()
+  check(row.archived_at !== null && row.gmail_synced_at === null, 'archiving records the change and leaves it waiting for Gmail', `${row.gmail_synced_at}`)
+  check(!(await inFolder(sales, 'inbox')).includes(thread), 'an archived thread leaves the Inbox')
+  check((await inFolder(sales, 'archived')).includes(thread), 'an archived thread shows in Archive')
+
+  await changeThread(sales, thread, { kind: 'archived', value: false })
+  check((await folderRow()).archived_at === null, 'moving back to the Inbox clears the archive')
+
+  await changeThread(sales, thread, { kind: 'trashed', value: true })
+  check((await inFolder(sales, 'trash')).includes(thread) && !(await inFolder(sales, 'inbox')).includes(thread), 'a deleted thread shows in Trash, not the Inbox')
+  await changeThread(sales, thread, { kind: 'trashed', value: false })
+  check((await folderRow()).trashed_at === null, 'restoring from Trash clears the trash mark')
+
+  await changeThread(sales, thread, { kind: 'assignee', value: salesUser.id })
+  check((await folderRow()).assigned_to === salesUser.id, 'assigning a thread records the teammate')
+  check((await inFolder(sales, 'inbox', true)).includes(thread), '“Assigned to me” lists the thread for its assignee')
+  const notMember = await refused(() => changeThread(sales, thread, { kind: 'assignee', value: '00000000-0000-4000-8000-00000000beef' }))
+  check(notMember !== null, 'a thread cannot be assigned to somebody outside the account', `${notMember ?? 'no error'}`)
+  await changeThread(sales, thread, { kind: 'assignee', value: null })
+  check((await folderRow()).assigned_to === null, 'unassigning clears the teammate')
+
+  await setMailboxVisibility(sales, { mailboxId: live.id, visibility: 'private' })
+  const hidden = await refused(() => changeThread(marketing, thread, { kind: 'archived', value: true }))
+  check(hidden !== null && (await folderRow()).archived_at === null, 'a member who cannot see a private mailbox cannot archive its thread', `${hidden ?? 'no error'}`)
+
+  await changeThread(sales, thread, { kind: 'unread', value: true })
+  const unreadRead = await readThread(sales, thread)
+  check(unreadRead?.thread.unread === true, 'marking unread shows the thread unread to its reader')
+  await markThreadRead(sales, thread)
+  const folderAfterRead = await readThread(sales, thread)
+  check(folderAfterRead?.thread.unread === false, 'reading the thread again clears the unread mark')
+
+  // Rawr's change is waiting for Gmail: a Gmail read taken before it must not win, and
+  // the same read taken after it must not win until Gmail has the change.
+  await changeThread(sales, thread, { kind: 'archived', value: true })
+  row = await folderRow()
+  const changedAt = row.state_changed_at as Date
+  await reconcileThreadFolders(sales, threadKey, { archived: false, trashed: false }, new Date(changedAt.getTime() + 1000))
+  check((await folderRow()).archived_at !== null, 'a Gmail read cannot undo an archive Rawr has not sent yet')
+
+  const plan = await threadPushPlan(sales, thread)
+  check(plan?.providerThreadId === threadKey && plan.archived && plan.version?.getTime() === changedAt.getTime(), 'the push plan carries the change it will send')
+  await acknowledgeThreadPush(sales, thread, changedAt)
+  row = await folderRow()
+  check(row.gmail_synced_at?.getTime() === changedAt.getTime(), 'a delivered change is acknowledged')
+
+  await reconcileThreadFolders(sales, threadKey, { archived: false, trashed: false }, new Date(changedAt.getTime() - 1000))
+  check((await folderRow()).archived_at !== null, 'a Gmail read older than the last change is ignored')
+  await reconcileThreadFolders(sales, threadKey, { archived: false, trashed: false }, new Date(changedAt.getTime() + 1000))
+  check((await folderRow()).archived_at === null, 'a Gmail read taken after the change, once it is delivered, is taken as Gmail’s view')
+
+  await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-${stamp}`,
+    refreshToken: `refresh-${stamp}`,
+    accessTokenExpiresAt: null,
+    canModify: false,
+  })
+  const gaps = (await readThread(sales, thread))?.gmailGaps ?? []
+  check(gaps.some((gap) => gap.id === live.id), 'a mailbox without gmail.modify is named on the thread')
+  await changeThread(sales, thread, { kind: 'archived', value: false })
+  await acknowledgeThreadPush(sales, thread, (await folderRow()).state_changed_at as Date)
+  await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-${stamp}`,
+    refreshToken: `refresh-${stamp}`,
+    accessTokenExpiresAt: null,
+    canModify: true,
+  })
+  row = await folderRow()
+  check(row.gmail_synced_at?.getTime() !== row.state_changed_at?.getTime(), 'reconnecting with gmail.modify queues the changes the mailbox missed')
+  check((await readThread(sales, thread))?.gmailGaps.every((gap) => gap.id !== live.id) === true, 'the reconnect clears the gap on the thread')
+  check((await threadPushPlan(sales, thread))?.mailboxes.some((holder) => holder.id === live.id && holder.canModify) === true, 'the push plan can reach the reconnected mailbox')
+  await markMailboxCannotModify(sales, live.id)
+  check((await threadPushPlan(sales, thread))?.mailboxes.some((holder) => holder.id === live.id && !holder.canModify) === true, 'a Google refusal turns the mailbox into one that cannot change Gmail')
+
+  const counts = await inboxCounts(sales)
+  check(typeof counts.archived === 'number' && typeof counts.trash === 'number' && typeof counts.assignedToMe === 'number', 'the inbox counts carry the folders and the assignee')
+
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from message_thread where provider_thread_id like ${`mail-%${stamp}`}`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`mail-%-${stamp}`}`
-  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id}, ${returningBox.id})`
+  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id}, ${returningBox.id}, ${live.id})`
   await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
   await owner`delete from contact where account_id = ${accountId} and email = ${returning}`
   await owner`delete from contact where account_id = ${accountId} and email like ${`%${stamp}%`}`

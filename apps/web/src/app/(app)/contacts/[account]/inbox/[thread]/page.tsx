@@ -1,14 +1,18 @@
 import { canWrite as roleCanWrite, isUuid, listMailboxes, readThread } from '@rawr/db'
-import { Card } from '@rawr/ui'
+import { Alert, Card, buttonClass } from '@rawr/ui'
 import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { MessageView } from '~/components/crm/message-view.tsx'
+import { googleConfigured } from '~/lib/env.ts'
+import { inboxPath, mailboxesPath, recordPath } from '~/lib/links.ts'
+import { pickableUsers } from '~/lib/pickable-users.ts'
+import { readLookups } from '~/server/crm.ts'
+import { contextFrom, readSession } from '~/server/session.ts'
 import { AddParticipant } from './add-participant.tsx'
 import { ReplyButton } from './reply.tsx'
+import { ThreadActions } from './thread-actions.tsx'
 import { ThreadRead } from './thread-read.tsx'
-import { inboxPath, recordPath } from '~/lib/links.ts'
-import { contextFrom, readSession } from '~/server/session.ts'
 import { filtersFrom, toParams } from '../filters.ts'
 import { InboxFrame } from '../inbox-frame.tsx'
 
@@ -30,10 +34,11 @@ const ThreadPage = async ({
 
   const ctx = contextFrom(session)
   const canWrite = roleCanWrite(ctx, 'contact')
-  const [found, mailboxes] = await Promise.all([readThread(ctx, threadId), listMailboxes(ctx)])
+  const [found, mailboxes, lookups] = await Promise.all([readThread(ctx, threadId), listMailboxes(ctx), readLookups(ctx)])
   // Not here, or every message in it belongs to a mailbox this person may not
   // read. Both answer the same way: there is no such thread for you.
   if (!found) notFound()
+  const backHref = inboxPath(account, toParams(filters))
   // A connected mailbox is a team inbox or a colleague's, never a person to add.
   const mailboxAddresses = new Set(mailboxes.map((box) => box.email.toLowerCase()))
 
@@ -75,10 +80,45 @@ const ThreadPage = async ({
             </p>
           </div>
         </div>
-        {replyTo ? (
-          <ReplyButton account={account} threadId={threadId} to={replyTo} subject={found.thread.subject} />
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <ThreadActions
+            threadId={threadId}
+            folder={filters.folder}
+            unread={found.thread.unread}
+            assignedTo={found.thread.assignedTo}
+            assignees={pickableUsers(lookups.users, found.thread.assignedTo)}
+            backHref={backHref}
+          />
+          {replyTo ? (
+            <ReplyButton account={account} threadId={threadId} to={replyTo} subject={found.thread.subject} />
+          ) : null}
+        </div>
       </div>
+
+      {found.gmailGaps.map((gap) => {
+        const own = gap.userId === session.userId
+        return (
+          <Alert
+            key={gap.id}
+            tone="warning"
+            className="mx-4 mt-4"
+            action={
+              own ? (
+                <a
+                  href={googleConfigured ? (gap.canSend ? '/api/auth/google/gmail?send=1' : '/api/auth/google/gmail') : mailboxesPath()}
+                  className={buttonClass('primary', 'no-underline')}
+                >
+                  Reconnect
+                </a>
+              ) : undefined
+            }
+          >
+            {own
+              ? `Reconnect ${gap.email} to also change Gmail. Archive, Trash and unread still apply here.`
+              : `${gap.email} cannot change Gmail yet. Its owner can reconnect it under Inbox Settings.`}
+          </Alert>
+        )
+      })}
 
       <div className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-y-auto bg-fill-thread p-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,var(--spacing-inbox-aside))]">
         <div className="flex min-w-0 flex-col gap-2">
