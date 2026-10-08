@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { pushParams, replaceParams } from './url-history.ts'
+import { hrefWith, pushParams, replaceParams } from './url-history.ts'
 
 type Call = { method: 'pushState' | 'replaceState'; url: string }
 
@@ -26,4 +26,12 @@ test('a panel opening in the address does not add a history entry', () => {
   const calls = stubWindow('?tab=groups&edit=f1')
   replaceParams({ edit: null, section: 'usage' })
   assert.deepEqual(calls, [{ method: 'replaceState', url: '/settings/properties?tab=groups&section=usage' }])
+})
+
+test('hrefWith removes the closed param and keeps the rest in order', () => {
+  assert.equal(hrefWith('/contacts/a/tasks', '?view=mine&edit=t1&q=x', { edit: null }), '/contacts/a/tasks?view=mine&q=x')
+})
+
+test('hrefWith leaves a bare path when nothing else is in the query', () => {
+  assert.equal(hrefWith('/contacts/a/tasks', '?edit=t1', { edit: null }), '/contacts/a/tasks')
 })

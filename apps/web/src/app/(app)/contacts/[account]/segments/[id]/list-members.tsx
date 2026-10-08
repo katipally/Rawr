@@ -10,7 +10,7 @@ import { RowActions, StatusDot, rowPill } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
 import { objectView, recordPath, segmentsPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { OBJECT_LABEL, SegmentBuilder, SegmentConditions } from '../segment-builder.tsx'
@@ -359,9 +359,8 @@ export const ListMembers = ({ account, list, fields, initial, pageSize, canWrite
         fieldsByObject={{ [list.objectKey]: fields }}
         onClose={() => setSegmentParam(null)}
         onSaved={() => {
-          setSegmentParam(null)
           void load(0)
-          router.refresh()
+          closeParamsAndRefresh(router, { segment: null })
         }}
       />
 

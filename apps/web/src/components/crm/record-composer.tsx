@@ -120,8 +120,8 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
       setHappenedOn('')
       toast('success', `${TYPE_LABELS[logging.type]} added.`)
       announceChange('timeline')
-      router.refresh()
       close()
+      router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {
@@ -227,8 +227,8 @@ export const RecordComposer = ({ account, object, recordId, canWrite, assignees,
                     entity={{ entityType: object, entityId: recordId }}
                     onSaved={() => {
                       announceChange('tasks')
-                      router.refresh()
                       close()
+                      router.refresh()
                     }}
                     className="flex flex-wrap items-end gap-2"
                   />

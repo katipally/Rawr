@@ -9,7 +9,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useState } from 'react'
 import { usePagedRows } from '~/components/paged.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { formPerformancePath, formsPath, submissionsPath } from '~/lib/links.ts'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { RowActions, StatusDot, rowPill } from '~/components/row-actions.tsx'
@@ -318,9 +318,9 @@ export const FormsTable = ({
               const target = moving
               if (!target) return
               const folderId = event.target.value || null
-              // Closed after the refresh starts: dropping ?move first lets that
-              // address change land last and shows the list as it was.
-              void run(() => api.forms.moveToFolder.mutate({ formId: target.id, folderId })).then(() => setMoving(null))
+              void run(() => api.forms.moveToFolder.mutate({ formId: target.id, folderId })).then(() =>
+                closeParamsAndRefresh(router, { move: null }),
+              )
             }}
           >
             <option value="">No folder</option>

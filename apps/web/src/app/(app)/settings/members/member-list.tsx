@@ -8,7 +8,7 @@ import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { pushParams, useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, pushParams, useUrlParam } from '~/lib/url-params.ts'
 import { invitePath } from '~/lib/links.ts'
 import { CRITICAL_ACTIONS, CRITICAL_LABEL, HUBS, HUBS_WITH_RECORDS, SCOPE_LABEL, type CriticalAction, type Hub, type Scope } from '~/lib/hubs.ts'
 import { useFormat } from '~/components/zone.tsx'
@@ -156,8 +156,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
     try {
       await api.account.members.setGrants.mutate({ userId, ...grants })
       toast('success', 'Permissions saved.')
-      router.refresh()
-      setEditingId(null)
+      closeParamsAndRefresh(router, { member: null })
     } catch (error) {
       setPending((current) => {
         const next = { ...current }
@@ -175,8 +174,7 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
     try {
       const { token } = await api.account.members.invite.mutate({ email, ...grants })
       toast('success', 'Invitation ready.')
-      router.refresh()
-      setInviting(null)
+      closeParamsAndRefresh(router, { invite: null })
       setLink(`${window.location.origin}${invitePath(token)}`)
     } catch (error) {
       toast('error', errorMessage(error))

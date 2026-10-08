@@ -14,7 +14,7 @@ import { useFormat } from '~/components/zone.tsx'
 import { archiveUsageCopy, dependantsCopy, purgeResultCopy } from '~/lib/field-usage-copy.ts'
 import { propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
-import { pushParams, replaceParams, useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, pushParams, replaceParams, useUrlParam } from '~/lib/url-params.ts'
 import { useQueryClient } from '@tanstack/react-query'
 import { NEEDS_OPTIONS, PropertyEditor, TYPE_LABEL, type PropertyDraft } from './property-editor.tsx'
 
@@ -68,7 +68,8 @@ export const PropertyList = ({
   const creating = canWrite && action === 'create'
   const [editId, setEditId] = useUrlParam('edit')
   const editing = canWrite ? (rows.find((field) => field.id === editId && !field.isSystem) ?? null) : null
-  const closeEditor = () => replaceParams({ action: null, edit: null, section: null })
+  const editorParams = { action: null, edit: null, section: null }
+  const closeEditor = () => replaceParams(editorParams)
   const [group, setGroup] = useUrlParam('group')
   const [typeFilter, setTypeFilter] = useUrlParam('ftype')
 
@@ -135,7 +136,7 @@ export const PropertyList = ({
             }),
       field ? 'Property saved.' : 'Property created. It is on the record editor now.',
     )
-    if (ok) closeEditor()
+    if (ok) closeParamsAndRefresh(router, editorParams)
   }
 
   const openRemove = async (field: AdminField) => {

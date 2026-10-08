@@ -11,7 +11,7 @@ import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { useFormat } from '~/components/zone.tsx'
 
 export type TemplateRow = {
@@ -91,9 +91,8 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
         bodyText: draft.bodyText,
       })
       toast('success', draft.id && !asNew ? 'Saved.' : 'Template added.')
-      close()
-      // After close(): the address change dispatches a restore that discards a refresh queued before it.
-      router.refresh()
+      setEdits(null)
+      closeParamsAndRefresh(router, { template: null })
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {

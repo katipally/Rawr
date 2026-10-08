@@ -22,7 +22,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { rowPill } from '~/components/row-actions.tsx'
 import { STEP_KIND_LABEL } from '~/components/crm/value.tsx'
 import { SequenceActions } from '../sequence-actions.tsx'
@@ -498,7 +498,7 @@ export const SequenceEditor = ({
                 void run(
                   () => api.sequences.save.mutate({ id: sequence.id, name: sequence.name, sender, settings }),
                   'Saved.',
-                ).then((ok) => ok && setSettingsOpen(false))
+                ).then((ok) => ok && closeParamsAndRefresh(router, { settings: null }))
               }
             >
               Save

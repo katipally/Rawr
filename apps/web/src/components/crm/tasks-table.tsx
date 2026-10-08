@@ -12,7 +12,7 @@ import { recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
 import { pickableUsers, type PickablePerson } from '~/lib/pickable-users.ts'
 import { emptyTaskHint } from '~/lib/task-copy.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
-import { useUrlParam } from '~/lib/url-params.ts'
+import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { TaskForm } from './task-form.tsx'
 import { TASK_PRIORITY_LABELS, TASK_TYPE_LABELS, type TaskPriority, type TaskType } from './task-labels.ts'
@@ -438,10 +438,7 @@ export const TasksTable = ({
           assignees={pickableUsers(people, editing.assigneeId)}
           queues={queues}
           task={editing}
-          onSaved={() => {
-            setEditing(null)
-            router.refresh()
-          }}
+          onSaved={() => closeParamsAndRefresh(router, { edit: null })}
         />
       ) : null}
     </div>
