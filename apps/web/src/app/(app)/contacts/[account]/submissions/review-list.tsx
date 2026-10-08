@@ -25,7 +25,7 @@ export const ReviewList = ({
   account: string
   rows: SubmissionRow[]
   canReview: boolean
-  state: string
+  state: string | undefined
   showFormName: boolean
 }) => {
   const fmt = useFormat()

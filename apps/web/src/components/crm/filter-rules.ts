@@ -18,6 +18,7 @@ export const asList = (value: unknown): string[] => {
 }
 
 const DAY_START = /^\d{4}-\d{2}-\d{2}/
+export const REVERSED = 'From is after To.'
 
 /** From after To, on a date or a datetime. A day "to" runs to its end, so a From on
  *  that same day still fits. Only dates start with a day, so numbers and text never

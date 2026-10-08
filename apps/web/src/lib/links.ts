@@ -303,7 +303,7 @@ export const formPerformancePath = (account: string, id: string): string =>
 
 export const submissionsPath = (
   account: string,
-  params: { state?: string; form?: string; before?: string } = {},
+  params: { state?: string | undefined; form?: string | undefined; before?: string | undefined } = {},
 ): string => `/${CRM_ROOT}/${account}/submissions${query(params)}`
 
 /** F4. One page view, addressed by its own id, so the screen a salesperson is

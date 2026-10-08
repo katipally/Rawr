@@ -91,6 +91,14 @@ export const ReviewDialog = ({
   const sideFor = (key: string): Side =>
     picks[key] ?? (records && isBlank(records[primary].values[key]) && !isBlank(records[other].values[key]) ? other : primary)
 
+  // The same rule the merge applies: the absorbed domain stays as an alias unless it is the primary.
+  const absorbedDomain = records?.[other].values.domain
+  const primaryDomain = sideFor('domain') === other ? absorbedDomain : records?.[primary].values.domain
+  const aliasDomain =
+    object === 'company' && typeof absorbedDomain === 'string' && absorbedDomain && absorbedDomain !== primaryDomain
+      ? absorbedDomain
+      : null
+
   const merge = async () => {
     setBusy('merge')
     const survivor = pair[primary]
@@ -265,6 +273,7 @@ export const ReviewDialog = ({
           subscriptions and its tasks. The other record is then deleted. Reject keeps the pair out of this queue for
           good.
         </Alert>
+        {aliasDomain ? <p className="text-secondary">{aliasDomain} stays on this company as an alias.</p> : null}
         <ConfirmDialog
           open={confirming}
           title={`Merge into ${pair[primary].displayName}?`}

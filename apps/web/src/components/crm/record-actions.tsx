@@ -148,6 +148,14 @@ export const RecordActions = ({
   const defaultSide = (key: string): 'survivor' | 'absorbed' =>
     absorbed && isBlank(values[key]) && !isBlank(absorbed.values[key]) ? 'absorbed' : 'survivor'
 
+  // The same rule the merge applies: the absorbed domain stays as an alias unless it is the primary.
+  const absorbedDomain = absorbed?.values.domain
+  const primaryDomain = (picks.domain ?? defaultSide('domain')) === 'absorbed' ? absorbedDomain : values.domain
+  const aliasDomain =
+    object === 'company' && typeof absorbedDomain === 'string' && absorbedDomain && absorbedDomain !== primaryDomain
+      ? absorbedDomain
+      : null
+
   if (!canWrite) return null
 
   return (
@@ -221,6 +229,7 @@ export const RecordActions = ({
             Merging cannot be undone. Everything on the other record moves here: its timeline, its
             links, its subscriptions and its tasks. The other record is then deleted.
           </Alert>
+          {aliasDomain ? <p className="text-secondary">{aliasDomain} stays on this company as an alias.</p> : null}
 
           {/* Searched rather than listed: a duplicate is almost never among the
               most recently created records, which is all a capped list could offer. */}

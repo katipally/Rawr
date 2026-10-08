@@ -19,7 +19,7 @@ export const FormHeader = ({
 }: {
   account: string
   form: { id: string; name: string; isActive: boolean }
-  current: FormTab
+  current?: FormTab | undefined
   /** Beside the tabs: the range on performance. */
   aside?: ReactNode
 }) => {

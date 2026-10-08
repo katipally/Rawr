@@ -4,7 +4,7 @@ import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
 import { Button, Select, TextInput, cn } from '@rawr/ui'
 import { useState } from 'react'
 import type { Operator } from '@rawr/db'
-import { MULTI, NULLARY, RANGE, asList, groupsComplete, isComplete, isReversed } from './filter-rules.ts'
+import { MULTI, NULLARY, RANGE, REVERSED, asList, groupsComplete, isComplete, isReversed } from './filter-rules.ts'
 
 export type FilterField = {
   key: string
@@ -41,7 +41,6 @@ const OPERATOR_LABELS: Record<string, string> = {
 }
 
 const INCOMPLETE = 'Every condition needs its values: both ends of a range, at least one of a list.'
-const REVERSED = 'From is after To.'
 
 const problem = (groups: Group[]): string | null =>
   groups.some((group) => group.conditions.some(isReversed)) ? REVERSED : groupsComplete(groups) ? null : INCOMPLETE

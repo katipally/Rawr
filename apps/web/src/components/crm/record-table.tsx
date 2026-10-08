@@ -299,7 +299,7 @@ export const RecordTable = ({
             action={
               params.q || params.filters ? (
                 <Button variant="secondary" onClick={() => goTo({ q: undefined, filters: undefined })}>
-                  Clear search and filters
+                  {params.q ? 'Clear search and filters' : 'Clear filters'}
                 </Button>
               ) : undefined
             }

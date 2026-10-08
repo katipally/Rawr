@@ -38,7 +38,7 @@ const SubmissionsPage = async ({
   if (!session) redirect('/sign-in')
 
   const raw = typeof query.state === 'string' ? query.state : undefined
-  const state: State = isState(raw) ? raw : 'quarantined'
+  const state: State | undefined = isState(raw) ? raw : undefined
   const formId = typeof query.form === 'string' ? query.form : undefined
 
   // "at|id" of the last row on the previous page. One string so the address stays
@@ -54,7 +54,7 @@ const SubmissionsPage = async ({
   // One more than a page, so "is there another page" is known without a count.
   const [found, form] = await Promise.all([
     listSubmissions(ctx, {
-      state,
+      ...(state ? { state } : {}),
       limit: PAGE + 1,
       ...(formId ? { formId } : {}),
       ...(cursor ? { cursor } : {}),
@@ -96,12 +96,20 @@ const SubmissionsPage = async ({
           <Tabs
             className="mb-4"
             label="Submission state"
-            items={STATES.map((option) => ({
-              key: option.key,
-              label: option.label,
-              href: submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) }),
-              current: option.key === state,
-            }))}
+            items={[
+              {
+                key: 'all',
+                label: 'All',
+                href: submissionsPath(account, formId ? { form: formId } : {}),
+                current: state === undefined,
+              },
+              ...STATES.map((option) => ({
+                key: option.key,
+                label: option.label,
+                href: submissionsPath(account, { state: option.key, ...(formId ? { form: formId } : {}) }),
+                current: option.key === state,
+              })),
+            ]}
           />
         </>
       )}

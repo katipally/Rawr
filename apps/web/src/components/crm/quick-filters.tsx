@@ -8,6 +8,7 @@ import { useFormat } from '~/components/zone.tsx'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import type { Choice } from './field-input.tsx'
 import type { Condition, FilterField, Group } from './filter-builder.tsx'
+import { REVERSED, isReversed } from './filter-rules.ts'
 import { summarize, valuesOf } from './quick-filter-summary.ts'
 
 /** HubSpot's row for every object: owner, create date, last activity, status.
@@ -273,6 +274,7 @@ const DateEditor = ({
 }) => {
   const rolling = condition?.operator === 'between' && isDateRange(condition.value) ? condition.value : null
   const [range, setRange] = useState(condition?.operator === 'between' && !rolling ? valuesOf(condition) : ['', ''])
+  const reversed = isReversed({ field: field.key, operator: 'between', value: range })
   return (
     <>
       {/* Stored as the range's name, not its dates, so a saved view keeps meaning
@@ -297,7 +299,7 @@ const DateEditor = ({
         className="flex flex-col gap-2 border-t border-line pt-2"
         onSubmit={(event) => {
           event.preventDefault()
-          if (range[0] && range[1]) onApply({ field: field.key, operator: 'between', value: range })
+          if (range[0] && range[1] && !reversed) onApply({ field: field.key, operator: 'between', value: range })
         }}
       >
         <span className="text-small text-secondary">Between</span>
@@ -305,6 +307,7 @@ const DateEditor = ({
           <TextInput aria-label="From" type="date" value={range[0] ?? ''} onChange={(event) => setRange([event.target.value, range[1] ?? ''])} className="min-w-0 flex-1" />
           <TextInput aria-label="To" type="date" value={range[1] ?? ''} onChange={(event) => setRange([range[0] ?? '', event.target.value])} className="min-w-0 flex-1" />
         </div>
+        {reversed ? <p role="alert" className="text-error">{REVERSED}</p> : null}
         <Button type="submit" className="self-start" disabled={!range[0] || !range[1]}>
           Apply
         </Button>

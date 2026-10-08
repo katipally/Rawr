@@ -136,19 +136,23 @@ export const ViewTabs = ({
           : []),
       ],
     },
-    {
-      key: 'danger',
-      items: [
-        {
-          key: 'delete',
-          label: 'Delete view',
-          destructive: true,
-          // Asked rather than done: a shared view is somebody else's screen too,
-          // and a menu item one row below Rename is a menu item that gets hit.
-          onSelect: () => setDeleting(view),
-        },
-      ],
-    },
+    ...(view.slug === DEFAULT_TAB
+      ? []
+      : [
+          {
+            key: 'danger',
+            items: [
+              {
+                key: 'delete',
+                label: 'Delete view',
+                destructive: true,
+                // Asked rather than done: a shared view is somebody else's screen too,
+                // and a menu item one row below Rename is a menu item that gets hit.
+                onSelect: () => setDeleting(view),
+              },
+            ],
+          },
+        ]),
     ]
   }
 
