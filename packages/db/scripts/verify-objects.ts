@@ -5,18 +5,19 @@ import { createTask, listTasks, logByHand } from '../src/dal/tasks.ts'
 import { listAttachments, recordAttachment } from '../src/dal/attachments.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
 import { resolveRecord } from '../src/dal/resolve.ts'
-import { createField, deleteField, fieldUsage, purgeField } from '../src/dal/admin-fields.ts'
+import { createField, deleteField, fieldUsage, purgeField, restoreField, updateField } from '../src/dal/admin-fields.ts'
 import { dropIndexSql, planFieldIndex, promoteFieldToHot } from '../src/dal/fields.ts'
 import { readCalendar } from '../src/dal/calendar.ts'
 import { listViews } from '../src/dal/views.ts'
-import { createRecord, getRecord, listDeletedRecords, listRecords, restoreRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
+import { createRecord, getRecord, listDeletedRecords, listRecords, mergeRecords, restoreRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
+import { searchTextFrom, searchVectorFrom } from '../src/dal/text-match.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import type { AccountContext } from '../src/dal/context.ts'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import * as s from '../src/schema/index.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
@@ -417,6 +418,101 @@ try {
       return 'names in list, record, export and the timeline sentence'
     } finally {
       await db.delete(s.userAccount).where(eq(s.userAccount.id, leaver!.id))
+    }
+  })
+
+  await check('search reads only what a live field holds: archive, restore and purge follow the field', async () => {
+    const clinic = await createCustomObject(ctx, { nameSingular: 'Clinic', namePlural: 'Clinics' })
+    try {
+      await createField(ctx, { objectKey: clinic.key, key: 'notes', label: 'Notes', type: 'long_text' })
+      forgetRegistry(ctx.accountId)
+      const fieldId = (await getRegistry(ctx)).byKey.get(clinic.key)!.byKey.get('notes')!.id
+      const made = await createRecord(ctx, clinic.key, { name: 'Harbor', notes: 'zephyrword lives here' })
+      const findable = async () =>
+        (await listRecords(ctx, { object: clinic.key, limit: 50, search: 'zephyrword' })).rows.some((row) => row.id === made.id)
+
+      expect(await findable(), 'the live field is not searchable')
+      await deleteRecord(ctx, clinic.key, made.id)
+      await deleteField(ctx, fieldId)
+      await restoreRecords(ctx, clinic.key, [made.id])
+      expect(!(await findable()), 'an archived field is still searchable, on a record that was in the trash')
+      await restoreField(ctx, fieldId)
+      expect(await findable(), 'a restored field is not searchable again')
+
+      await deleteField(ctx, fieldId)
+      // A row archived before archive rewrote the search columns still holds the text.
+      await owner`update custom_record set search_text = 'Harbor zephyrword lives here', search = to_tsvector('simple', 'Harbor zephyrword lives here') where id = ${made.id}`
+      await purgeField(ctx, fieldId)
+      expect(!(await findable()), 'a purged value is still searchable')
+      const [row] = await owner`select search_text, search::text as vector from custom_record where id = ${made.id}`
+      expect(!row!.search_text.includes('zephyrword') && !row!.vector.includes('zephyrword'), JSON.stringify(row))
+      return 'found while live, gone while archived, back on restore, gone after purge'
+    } finally {
+      await deleteCustomObject(ctx, clinic.id)
+    }
+  })
+
+  await check('renaming a choice does not rewrite stored values, so search still matches what the record holds', async () => {
+    const clinic = await createCustomObject(ctx, { nameSingular: 'Ward', namePlural: 'Wards' })
+    try {
+      await createField(ctx, { objectKey: clinic.key, key: 'stage', label: 'Stage', type: 'select', options: ['Lead', 'Won'] })
+      forgetRegistry(ctx.accountId)
+      const fieldId = (await getRegistry(ctx)).byKey.get(clinic.key)!.byKey.get('stage')!.id
+      const made = await createRecord(ctx, clinic.key, { name: 'Ward north', stage: 'Lead' })
+      await updateField(ctx, { id: fieldId, options: ['Prospect', 'Won'] })
+      const found = async (term: string) =>
+        (await listRecords(ctx, { object: clinic.key, limit: 50, search: term })).rows.some((row) => row.id === made.id)
+      expect(await found('Lead'), 'the stored choice is not searchable after the rename')
+      expect(!(await found('Prospect')), 'the new label is searchable, but no record holds it')
+      return 'the record still holds "Lead", so "Lead" is found and "Prospect" is not'
+    } finally {
+      await deleteCustomObject(ctx, clinic.id)
+    }
+  })
+
+  await check('two custom records cannot be merged, and each keeps its own text', async () => {
+    const clinic = await createCustomObject(ctx, { nameSingular: 'Unit', namePlural: 'Units' })
+    try {
+      const keep = await createRecord(ctx, clinic.key, { name: 'Keeper unit' })
+      const drop = await createRecord(ctx, clinic.key, { name: 'Dropped unit' })
+      let said = ''
+      try {
+        await mergeRecords(ctx, { objectKey: clinic.key, survivorId: keep.id, absorbedId: drop.id, picks: {} })
+      } catch (cause) {
+        said = cause instanceof Error ? cause.message : String(cause)
+      }
+      expect(said.includes('cannot be merged yet'), said || 'the merge was allowed')
+      const rows = (await listRecords(ctx, { object: clinic.key, limit: 50 })).rows
+      expect(rows.length === 2, `${rows.length} rows after the refused merge`)
+      return said
+    } finally {
+      await deleteCustomObject(ctx, clinic.id)
+    }
+  })
+
+  await check('a record written the way the seed writes one is searchable', async () => {
+    const clinic = await createCustomObject(ctx, { nameSingular: 'Loaner', namePlural: 'Loaners' })
+    try {
+      await createField(ctx, { objectKey: clinic.key, key: 'format', label: 'Format', type: 'select', options: ['Webinar'] })
+      forgetRegistry(ctx.accountId)
+      const object = (await getRegistry(ctx)).byKey.get(clinic.key)!
+      const custom = { name: 'Seeded thing', format: 'Webinar' }
+      const blob = sql`${JSON.stringify(custom)}::jsonb`
+      const [inserted] = await db
+        .insert(s.customRecord)
+        .values({
+          accountId: ws!.id,
+          objectId: object.id,
+          custom,
+          search: searchVectorFrom(object, blob),
+          searchText: searchTextFrom(object, blob),
+        })
+        .returning({ id: s.customRecord.id })
+      const found = await listRecords(ctx, { object: clinic.key, limit: 50, search: 'Webinar' })
+      expect(found.rows.some((row) => row.id === inserted!.id), 'the seeded-shape record is not found')
+      return 'found by its select value'
+    } finally {
+      await deleteCustomObject(ctx, clinic.id)
     }
   })
 

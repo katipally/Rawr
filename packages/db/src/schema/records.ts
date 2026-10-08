@@ -539,6 +539,8 @@ export const customRecord = pgTable(
     /** Written by the layer rather than generated: which field names a record is
      *  the admin's choice, and a generated expression cannot know it. */
     search: tsvector('search'),
+    /** The same words as plain text, for a substring search. Written with `search`. */
+    searchText: text('search_text'),
     ownerId: uuid('owner_id').references(() => userAccount.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

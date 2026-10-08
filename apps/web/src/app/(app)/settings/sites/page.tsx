@@ -76,7 +76,7 @@ const SitesPage = async () => {
                   {row.kind === 'pii'
                     ? `The offending properties were dropped and the rest of the event was kept. Fix it where it is fired, on ${row.siteName}.`
                     : 'Extra names were bucketed into "_overflow" so the table survives.'}{' '}
-                  {fmt.number(row.n)} time{row.n === 1 ? '' : 's'} on {row.day}, last{' '}
+                  {fmt.number(row.n)} time{row.n === 1 ? '' : 's'} on {fmt.date(row.day)}, last{' '}
                   {fmt.dateTime(row.lastAt.toISOString())}.
                 </p>
                 <pre className="mt-1 overflow-x-auto text-small text-secondary">

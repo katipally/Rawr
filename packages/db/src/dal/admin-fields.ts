@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
 import { conditionalBlocker, conditionalCycle, readConditional, type Conditional } from '../registry/conditional.ts'
 import { MAX_CHOICES } from '../registry/mapping.ts'
@@ -7,7 +7,8 @@ import { assertCanDo, type AccountContext } from './context.ts'
 import { assertUsableFieldKey, unindexableReason } from './fields.ts'
 import { mergeTokenPattern } from './sequence-rules.ts'
 import { withAccount, type Tx } from './index.ts'
-import { getRegistry, getRegistryIn, mutateRegistry, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
+import { getRegistry, getRegistryIn, mutateRegistry, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor, type RegistryObject } from './registry.ts'
+import { searchTextFrom, searchVectorFrom } from './text-match.ts'
 
 /** The write side of the metadata registry. D4's whole premise is that marketing
  *  can add a property without a deploy, and that only holds if there is somewhere
@@ -677,6 +678,24 @@ export const refreshFillRates = async (
   return { objects: registry.objects.length, fields: counted }
 }
 
+/** The search columns of a custom object's rows, rebuilt from the row's own blob so they
+ *  keep only the text of fields the object still has. A core table generates its search
+ *  column and has no search_text, so it gets nothing here. */
+const searchColumnsOf = (object: RegistryObject): SQL[] => {
+  if (!object.isCustom) return []
+  const custom = sql.raw(`"${object.key}"."custom"`)
+  return [sql`"search" = ${searchVectorFrom(object, custom)}`, sql`"search_text" = ${searchTextFrom(object, custom)}`]
+}
+
+/** A field's text is searchable only while the field is live, so every record of the
+ *  object is rewritten when one is archived or restored. One statement, no row loop. */
+const rewriteSearchOf = async (tx: Tx, objectKey: string): Promise<void> => {
+  const object = objectOrThrow(await getRegistryIn(tx), objectKey)
+  const columns = searchColumnsOf(object)
+  if (columns.length === 0) return
+  await tx.execute(sql`update ${tableFor(object)} set ${sql.join(columns, sql`, `)} where ${rowsOf(object)}`)
+}
+
 /** Phase one of two. The field disappears from every surface immediately and the
  *  data stays exactly where it was, so a misclick costs nothing. F0 §4. */
 export const deleteField = async (
@@ -711,6 +730,7 @@ export const deleteField = async (
     // restored, so the record goes and the index is rebuilt if it comes back.
     await tx.update(fieldDef).set({ isHot: false }).where(eq(fieldDef.id, fieldId))
     await tx.delete(fieldIndex).where(eq(fieldIndex.fieldId, fieldId))
+    await rewriteSearchOf(tx, found.objectKey)
 
     return {
       result: undefined,
@@ -727,13 +747,15 @@ export const deleteField = async (
 export const restoreField = async (ctx: AccountContext, fieldId: string): Promise<void> =>
   mutateRegistry(ctx, 'field_def', async (tx) => {
     const [found] = await tx
-      .select({ key: fieldDef.key })
+      .select({ objectKey: objectDef.key })
       .from(fieldDef)
+      .innerJoin(objectDef, eq(objectDef.id, fieldDef.objectId))
       .where(eq(fieldDef.id, fieldId))
       .limit(1)
     if (!found) throw new Error('That field does not exist in this account.')
 
     await tx.update(fieldDef).set({ deletedAt: null }).where(eq(fieldDef.id, fieldId))
+    await rewriteSearchOf(tx, found.objectKey)
     return {
       result: undefined,
       audit: {
@@ -823,7 +845,7 @@ export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<
     const key = sql.raw(`'${found.key}'`)
 
     const stripped = await tx.execute<{ id: string }>(
-      sql`update ${tableFor(object)} set custom = custom - ${key} where ${rowsOf(object)} and custom ? ${key} returning id`,
+      sql`update ${tableFor(object)} set ${sql.join([sql`custom = custom - ${key}`, ...searchColumnsOf(object)], sql`, `)} where ${rowsOf(object)} and custom ? ${key} returning id`,
     )
     await tx.delete(fieldDef).where(eq(fieldDef.id, fieldId))
 

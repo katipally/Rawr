@@ -17,14 +17,27 @@ export const asList = (value: unknown): string[] => {
   return [String(value)]
 }
 
+const DAY_START = /^\d{4}-\d{2}-\d{2}/
+
+/** From after To, on a date or a datetime. A day "to" runs to its end, so a From on
+ *  that same day still fits. Only dates start with a day, so numbers and text never
+ *  count as reversed. */
+export const isReversed = (condition: Condition): boolean => {
+  if (condition.operator !== RANGE || isDateRange(condition.value)) return false
+  const [from = '', to = ''] = asList(condition.value)
+  if (!DAY_START.test(from) || !DAY_START.test(to)) return false
+  return from.slice(0, 10) > to.slice(0, 10) || (from.length > 10 && to.length > 10 && from > to)
+}
+
 /** Complete means every part is filled: both ends of a range, at least one
  *  member of a list. `String([ '', '' ])` is "," which is not empty, so the old
- *  check would have waved a half-finished range through. */
+ *  check would have waved a half-finished range through. A reversed range is not
+ *  complete either: it would match nothing, so every form refuses to save it. */
 export const isComplete = (condition: Condition): boolean => {
   if (NULLARY.has(condition.operator)) return true
   if (condition.operator === RANGE && isDateRange(condition.value)) return true
   const values = asList(condition.value)
-  if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '')
+  if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '') && !isReversed(condition)
   if (MULTI.has(condition.operator)) return values.length > 0 && values.every((entry) => entry !== '')
   return values.length > 0 && values[0] !== ''
 }

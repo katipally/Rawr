@@ -9,7 +9,7 @@ import { assertCanDo, assertCanWrite } from './context.ts'
 import { scoreDeal } from './deal-score.ts'
 import { companyNameFromDomain, employerDomainFromEmail } from './domains.ts'
 import { requestEnrichment } from './enrichment.ts'
-import { isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
+import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import {
   compileFilters,
   fieldExpression,
@@ -21,6 +21,7 @@ import {
 } from './query.ts'
 import {
   assertCore,
+  coreKeyOf,
   fieldOrThrow,
   getRegistry,
   getRegistryIn,
@@ -31,6 +32,7 @@ import {
   type RegistryField,
   type RegistryObject,
 } from './registry.ts'
+import { recordTermMatch, searchTextFrom, searchVectorFrom } from './text-match.ts'
 import { coerce, formatForCsv, ValueError } from './values.ts'
 
 export type RecordValues = Record<string, unknown>
@@ -104,43 +106,6 @@ export const displayName = (object: RegistryObject, values: RecordValues): strin
   }
   return String(values.name ?? '') || 'Unnamed deal'
 }
-
-/** What a custom record is findable by.
- *
- *  Every textual value it holds, in one vector. A core table generates its own
- *  from named columns and Postgres keeps it in step; the shared table cannot,
- *  because the fields are whatever the admin made and a generated expression
- *  cannot know them. So it is written on every write.
- *
- *  Built from a jsonb expression rather than from the values in hand, which is
- *  what lets the insert and the update share it. An update merges the incoming
- *  keys into the stored blob, so the vector has to come from the merged result:
- *  computing it from the incoming keys alone would drop every word in a field
- *  this particular write did not touch.
- *
- *  'simple' rather than a stemming dictionary, matching the core tables: stemming
- *  mangles company and person names, which is most of what anybody searches. */
-const searchVectorFrom = (object: RegistryObject, blob: SQL): SQL => {
-  const parts = object.fields
-    .filter((field) => TEXTUAL_FOR_SEARCH.has(field.type))
-    .map((field) => sql`${blob} ->> ${field.key}`)
-  if (parts.length === 0) return sql`to_tsvector('simple'::regconfig, '')`
-  return sql`to_tsvector('simple'::regconfig, concat_ws(' ', ${sql.join(parts, sql`, `)}))`
-}
-
-/** The types worth putting in a search vector. A number or a date is found by
- *  filtering, not by typing it into a search box. */
-const TEXTUAL_FOR_SEARCH: ReadonlySet<string> = new Set([
-  'text',
-  'long_text',
-  'rich_text',
-  'email',
-  'phone',
-  'url',
-  'linkedin',
-  'address',
-  'select',
-])
 
 const selectExpression = (object: RegistryObject, field: RegistryField): SQL =>
   sql`${fieldExpression(object, field)} as ${sql.raw(`"${field.key}"`)}`
@@ -248,7 +213,7 @@ export const listRecords = async (
   input: ListInput,
 ): Promise<ListPage> => {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200)
-  const scope = scopeFor(ctx.actorId)
+  const scope = scopeFor(ctx.actorId, await accountZone(ctx))
 
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, input.object)
@@ -270,9 +235,8 @@ export const listRecords = async (
   const where: SQL[] = [NOT_DELETED(object)]
   const filters = compileFilters(object, input.filters ?? [], scope)
   if (filters) where.push(filters)
-  if (input.search?.trim()) {
-    where.push(sql`${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${input.search.trim()})`)
-  }
+  const matched = recordTermMatch(input.search ?? '', coreKeyOf(object) ?? 'custom', object.key)
+  if (matched) where.push(matched)
   // Counted before the cursor narrows it, so page two still says how many rows
   // the filter matches rather than how many are left. Its own transaction, so
   // it runs alongside the page instead of ahead of it.
@@ -695,8 +659,9 @@ export const createRecord = async (
     // admin's choice, and a generated expression cannot know it. So it is
     // written here, on the same statement, rather than left to drift.
     if (object.isCustom) {
-      names.push(sql.raw('"search"'))
-      values_.push(searchVectorFrom(object, sql`${JSON.stringify(prepared.custom)}::jsonb`))
+      const blob = sql`${JSON.stringify(prepared.custom)}::jsonb`
+      names.push(sql.raw('"search"'), sql.raw('"search_text"'))
+      values_.push(searchVectorFrom(object, blob), searchTextFrom(object, blob))
     }
 
     const [row] = await tx.execute<{ id: string }>(sql`
@@ -981,7 +946,8 @@ export const bulkWriteRecords = async (
         sql`"updated_at" = now()`,
       ]
       if (object.isCustom) {
-        sets.push(sql`"search" = ${searchVectorFrom(object, sql`coalesce(t."custom", '{}'::jsonb) || s."custom"`)}`)
+        const blob = sql`coalesce(t."custom", '{}'::jsonb) || s."custom"`
+        sets.push(sql`"search" = ${searchVectorFrom(object, blob)}`, sql`"search_text" = ${searchTextFrom(object, blob)}`)
       }
       const written = await tx.execute<{ id: string }>(sql`
         update ${writeTable(object)} t
@@ -1027,7 +993,7 @@ export const bulkWriteRecords = async (
         sql.raw('"custom"'),
         sql.raw('"created_at"'),
         ...touched.map((column) => sql.raw(`"${column}"`)),
-        ...(object.isCustom ? [sql.raw('"object_id"'), sql.raw('"search"')] : []),
+        ...(object.isCustom ? [sql.raw('"object_id"'), sql.raw('"search"'), sql.raw('"search_text"')] : []),
       ]
       const selected = [
         sql`s."id"`,
@@ -1038,7 +1004,7 @@ export const bulkWriteRecords = async (
           column === 'external_ids' ? sql`coalesce(s."external_ids", '{}'::jsonb)` : sql`s.${sql.raw(`"${column}"`)}`,
         ),
         ...(object.isCustom
-          ? [sql`${object.id}::uuid`, searchVectorFrom(object, sql`s."custom"`)]
+          ? [sql`${object.id}::uuid`, searchVectorFrom(object, sql`s."custom"`), searchTextFrom(object, sql`s."custom"`)]
           : []),
       ]
       // No conflict target named, so this covers every unique index the table
@@ -1193,7 +1159,7 @@ const updateRecordIn = async (
     // Rebuilt from the merged blob in the same statement, so a record cannot be
     // left findable by a name it no longer has. A core table's is generated and
     // needs nothing here.
-    if (object.isCustom) assignments.push(sql`"search" = ${searchVectorFrom(object, merged)}`)
+    if (object.isCustom) assignments.push(sql`"search" = ${searchVectorFrom(object, merged)}`, sql`"search_text" = ${searchTextFrom(object, merged)}`)
   }
   assignments.push(sql`"updated_at" = now()`)
 
@@ -1730,6 +1696,9 @@ export const mergeRecords = async (
   return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
     const object = objectOrThrow(registry, input.objectKey)
+    // Merging moves activities, associations and browsing history, none of which a
+    // custom object has yet. Refused with a sentence before anything is read or written.
+    const coreKey = assertCore(object, 'be merged')
     const [survivor, absorbed] = await Promise.all([
       readForWrite(tx, object, input.survivorId),
       readForWrite(tx, object, input.absorbedId),
@@ -1779,10 +1748,6 @@ export const mergeRecords = async (
       await keepDomainAliases(tx, ctx, input.survivorId, input.absorbedId, primary, [survivor.domain, absorbed.domain])
     }
 
-    // Merging moves activities, associations and browsing history, none of
-    // which a custom object has yet. Refused with a sentence rather than
-    // half-run.
-    const coreKey = assertCore(object, 'be merged')
     const activitiesMoved = await moveActivityLinks(
       tx,
       ctx,

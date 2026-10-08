@@ -15,7 +15,7 @@ import type { EditableField } from './field-input.tsx'
 import { EMPTY_VALUE, Value } from './value.tsx'
 import { RecordPreview } from './record-preview.tsx'
 import { ScoreRing } from './score-ring.tsx'
-import { useFormat } from '~/components/zone.tsx'
+import { useFormat, useZone } from '~/components/zone.tsx'
 
 export type TableColumn = { key: string; label: string; type: FieldType; numeric: boolean; width: number }
 
@@ -80,6 +80,7 @@ export const RecordTable = ({
   canWrite,
 }: RecordTableProps) => {
   const fmt = useFormat()
+  const zone = useZone()
   const origin = useOrigin()
   const preview = useSearchParams().get('preview')
   const { navigate } = useNavigation()
@@ -315,6 +316,9 @@ export const RecordTable = ({
           {fmt.number(totalHint ?? rows.length)}{' '}
           {((totalHint ?? rows.length) === 1 ? objectLabel : objectPlural).toLowerCase()}
         </span>
+        {shown.some((column) => column.type === 'datetime') ? (
+          <span className="text-small text-secondary">Times in {zone}</span>
+        ) : null}
         {pager}
         <a
           href={exportHref}

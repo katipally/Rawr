@@ -190,6 +190,9 @@ const CalendarPage = async ({
           />
         ) : null}
 
+        {calendar?.entries.some((entry) => entry.time) ? (
+          <p className="text-small text-secondary">Times in {session.accountTimezone}</p>
+        ) : null}
         {calendar ? (
           <CalendarGrid
             month={calendar.month}

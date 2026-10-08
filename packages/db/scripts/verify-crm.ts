@@ -43,8 +43,10 @@ import { linksForContacts, readTimeline, timelineCounts } from '../src/dal/activ
 import { createTask, deleteTask, listTasks, logByHand, updateTask } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
-import { listKpis } from '../src/dal/query.ts'
+import { compileFilters, listKpis, scopeFor, type Condition } from '../src/dal/query.ts'
+import { readCalendar } from '../src/dal/calendar.ts'
 import { hitsOf, searchAll } from '../src/dal/search.ts'
+import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
 import {
   deleteView,
@@ -887,6 +889,117 @@ try {
     }
   })
 
+  // A list search is a substring match on every word typed, ignoring case, over the text
+  // each object's list is searched by. Every fixture carries this run's tag, so a search
+  // for the tag returns exactly the live fixtures, and the cases below each name one rule.
+  await check('list search finds any fragment of a contact, case-insensitively and mid-word', async () => {
+    const tag = Date.now().toString(36)
+    const made: Record<string, string> = {}
+    const contactRow = async (label: string, values: Record<string, unknown>) => {
+      made[label] = (await createRecord(sales, 'contact', values)).id
+    }
+    const company = await createRecord(sales, 'company', { name: `Zyxwidget ${tag} Holdings`, domain: `zyx-${tag}.example` })
+    const deal = await createRecord(sales, 'deal', { name: `Plain ${tag}`, company_id: company.id })
+    await contactRow('stale', { first_name: 'Ada', last_name: 'Stalewright', email: `audit-c2-stale-${tag}@example.test` })
+    await contactRow('name', { first_name: `Bartholomew${tag}`, last_name: 'Quill' })
+    await contactRow('viaCompany', { first_name: 'Cora', last_name: `Vale${tag}`, email: `cora-${tag}@mail.example`, company_id: company.id })
+    await contactRow('domain', { first_name: 'Dee', last_name: `Dunn${tag}`, email: `dee@domain${tag}.example` })
+    await contactRow('accent', { first_name: `José${tag}`, last_name: 'Núñez' })
+    await contactRow('percent', { first_name: `Pct${tag}100%` })
+    await contactRow('plainX', { first_name: `Pct${tag}100x` })
+    await contactRow('underscore', { first_name: `Under_${tag}` })
+    await contactRow('underX', { first_name: `UnderX${tag}` })
+    await contactRow('backslash', { first_name: `Back\\slash${tag}` })
+    await contactRow('noBackslash', { first_name: `Backslash${tag}` })
+    await contactRow('gwen', { first_name: 'Gwen', last_name: `Pendragon${tag}` })
+    await contactRow('trashed', { first_name: `Trashed${tag}` })
+    await deleteRecord(admin, 'contact', made.trashed!)
+    const live = Object.entries(made).filter(([label]) => label !== 'trashed').map(([, id]) => id)
+
+    const idsFor = async (term: string, objectKey = 'contact') =>
+      new Set((await listRecords(sales, { object: objectKey, search: term, limit: 200 })).rows.map((row) => row.id))
+    const found = await idsFor(tag)
+    try {
+      expect(found.size === live.length && live.every((id) => found.has(id)), `the tag found ${found.size} contacts, expected ${live.length}`)
+      expect(!found.has(made.trashed!), 'a trashed contact was found')
+      expect((await idsFor('stale')).has(made.stale!), '"stale" did not find the audit-c2 address')
+      expect((await idsFor(`STALE-${tag.toUpperCase()}`)).has(made.stale!), 'an upper-case fragment did not match lower case')
+      expect((await idsFor(`artholomew${tag}`)).has(made.name!), 'a fragment mid-word did not match')
+      expect((await idsFor(`domain${tag}`)).has(made.domain!), 'an email domain fragment did not match')
+      expect((await idsFor('widget')).has(made.viaCompany!), "a fragment of the contact's company did not match the contact")
+      expect((await idsFor(`k\\slash${tag}`)).has(made.backslash!), 'a backslash did not match itself')
+      expect(!(await idsFor(`k\\slash${tag}`)).has(made.noBackslash!), 'a backslash matched as an escape: "kslash" found "Backslash"')
+      expect((await idsFor(`Pct${tag}100%`)).has(made.percent!), 'a percent sign did not match itself')
+      expect(!(await idsFor(`Pct${tag}100%`)).has(made.plainX!), 'a percent sign matched as a wildcard')
+      expect((await idsFor(`Under_${tag}`)).has(made.underscore!), 'an underscore did not match itself')
+      expect(!(await idsFor(`Under_${tag}`)).has(made.underX!), 'an underscore matched as a wildcard')
+      expect((await idsFor(`José${tag}`)).has(made.accent!), 'an accented fragment did not match its own text')
+      expect(!(await idsFor(`Jose${tag}`)).has(made.accent!), 'an unaccented fragment matched an accented name: accents are not folded')
+      expect((await idsFor(`${tag} gwen pendr`)).has(made.gwen!), 'the words of a search matched only in the order typed')
+      expect((await idsFor(`pendr zzqx${tag}`)).size === 0, 'a search with one word that matches nothing still found rows')
+      expect((await idsFor(`zzqx${tag}`)).size === 0, 'a search that matches nothing found rows')
+      const short = await listRecords(sales, { object: 'contact', search: tag.slice(1, 3), count: true, limit: 1 })
+      expect((short.total ?? 0) >= live.length, `a two-letter fragment counted ${short.total}, below the ${live.length} fixtures that contain it`)
+      expect(
+        (await listRecords(sales, { object: 'contact', search: `  ${tag}  `, count: true, limit: 1 })).total ===
+          (await listRecords(sales, { object: 'contact', search: tag, count: true, limit: 1 })).total,
+        'surrounding spaces changed the search',
+      )
+      const everything = await listRecords(sales, { object: 'contact', count: true, limit: 1 })
+      expect(
+        (await listRecords(sales, { object: 'contact', search: '   ', count: true, limit: 1 })).total === everything.total,
+        'a blank search filtered the list',
+      )
+      const page = await listRecords(sales, { object: 'contact', search: tag, count: true, limit: 200 })
+      expect(page.total === page.rows.length, `the count says ${page.total} and the page holds ${page.rows.length}`)
+
+      const noEmail = (await listKpis(sales, 'contact', [], tag)).find((tile) => tile.key === 'no_email')
+      expect(Boolean(noEmail), 'the no-email tile is missing')
+      const tileRows = await listRecords(sales, {
+        object: 'contact',
+        search: tag,
+        filters: noEmail!.filters,
+        count: true,
+        limit: 1,
+      })
+      expect(noEmail!.count === tileRows.total, `the KPI counts ${noEmail!.count} and the list counts ${tileRows.total} for the same search`)
+
+      const companies = await listRecords(sales, { object: 'company', search: `zyx-${tag}`, limit: 50 })
+      expect(companies.rows.some((row) => row.id === company.id), 'a company was not found by its domain fragment')
+      const byName = await listRecords(sales, { object: 'company', search: `widget ${tag}`, limit: 50 })
+      expect(byName.rows.some((row) => row.id === company.id), 'a company was not found by a name fragment')
+      const deals = await listRecords(sales, { object: 'deal', search: 'widget', limit: 50 })
+      expect(deals.rows.some((row) => row.id === deal.id), 'a deal was not found by its company name')
+      const board = await readBoard(sales, { search: `widget ${tag}` })
+      expect(board.columns.some((column) => column.cards.some((card) => card.id === deal.id)), 'the deal board did not find the deal by its company name')
+      return `${live.length} contacts, company and deal fragments, and every operator character matched literally`
+    } finally {
+      await db.delete(s.deal).where(eq(s.deal.id, deal.id))
+      await db.delete(s.contact).where(inArray(s.contact.id, Object.values(made)))
+      await db.delete(s.company).where(eq(s.company.id, company.id))
+    }
+  })
+
+  await check('list search finds a custom record by a fragment of its name', async () => {
+    const tag = Date.now().toString(36)
+    const made = await createCustomObject(admin, { nameSingular: `Probe ${tag}`, namePlural: `Probes ${tag}` })
+    forgetRegistry(admin.accountId)
+    const key = made.key
+    try {
+      const record = await createRecord(admin, key, { name: `Quartzite${tag} slab` })
+      const hits = await listRecords(admin, { object: key, search: `tzite${tag}`, count: true, limit: 20 })
+      expect(hits.rows.some((row) => row.id === record.id), 'a custom record was not found by a fragment of its name')
+      expect(hits.total === 1, `a custom search counted ${hits.total}`)
+      expect((await listRecords(admin, { object: key, search: `zzqx${tag}`, limit: 20 })).rows.length === 0, 'a custom search matched nothing and found rows')
+      await deleteRecord(admin, key, record.id)
+      expect((await listRecords(admin, { object: key, search: `tzite${tag}`, limit: 20 })).rows.length === 0, 'a trashed custom record was found')
+      return 'a mid-word fragment found it, a trashed one did not'
+    } finally {
+      await db.delete(s.customRecord).where(eq(s.customRecord.objectId, made.id))
+      await deleteCustomObject(admin, made.id)
+    }
+  })
+
   await check('a filtered list returns only matching rows and pages by keyset', async () => {
     const page = await listRecords(sales, {
       object: 'contact',
@@ -942,6 +1055,134 @@ try {
       return 'today and last 7 days split the two, a fixed range still binds its dates'
     } finally {
       await db.delete(s.contact).where(sql`${s.contact.id} in (${fresh.id}, ${older.id})`)
+    }
+  })
+
+  await check('a date filter reads its days on the account clock, whole days in any zone', async () => {
+    const tag = `zone${Date.now().toString(36)}`
+    // Each instant, read on the account clock in Kiritimati (UTC+14), Los Angeles
+    // (UTC-7 in October, UTC-8 before 8 March 2026) and UTC.
+    const at: Record<string, string> = {
+      r1: '2026-10-07T09:30:00Z', // Oct 7 23:30 Kiritimati, Oct 7 02:30 Los Angeles
+      r2: '2026-10-07T10:00:00Z', // Oct 8 00:00 Kiritimati, Oct 7 03:00 Los Angeles
+      r3: '2026-10-08T06:30:00Z', // Oct 7 23:30 Los Angeles
+      r4: '2026-10-08T07:00:00Z', // Oct 8 00:00 Los Angeles
+      r5: '2026-10-06T09:59:59Z', // Oct 6 23:59:59 Kiritimati, Oct 6 02:59 Los Angeles
+      q1: '2026-10-07T03:00:00Z', // Oct 7 17:00 Kiritimati, Oct 6 20:00 Los Angeles
+      x1: '2026-03-08T07:59:59Z', // Mar 7 23:59:59 Los Angeles, before the 23 hour day
+      x2: '2026-03-08T08:00:00Z', // Mar 8 00:00 Los Angeles
+      x3: '2026-03-09T06:59:59Z', // Mar 8 23:59:59 Los Angeles
+      x4: '2026-03-09T07:00:00Z', // Mar 9 00:00 Los Angeles
+      y1: '2028-02-29T09:00:00Z', // Feb 29 23:00 Kiritimati, leap day
+      y2: '2028-03-01T10:00:00Z', // Mar 2 00:00 Kiritimati
+      y3: '2027-01-01T23:30:00Z', // Jan 1 23:30 UTC, the year turns
+      y4: '2027-01-02T00:00:00Z', // Jan 2 00:00 UTC
+    }
+    const made: Record<string, string> = {}
+    try {
+      for (const [key, instant] of Object.entries(at)) {
+        const row = await createRecord(sales, 'contact', { first_name: 'Zone', last_name: key, email: `${key}.${tag}@verify.test` })
+        made[key] = row.id
+        await db.update(s.contact).set({ createdAt: new Date(instant) }).where(eq(s.contact.id, row.id))
+      }
+      const registry = await getRegistry(admin)
+      const contact = objectOrThrow(registry, 'contact')
+      const keysFor = async (zone: string, condition: Condition): Promise<string> => {
+        const where = compileFilters(contact, [{ conjunction: 'and', conditions: [condition] }], scopeFor(admin.actorId, zone))
+        const rows = await db.execute<{ email: string }>(sql`
+          select email from contact
+           where account_id = ${datasaur!.id} and deleted_at is null and email like ${`%.${tag}@verify.test`}
+             and ${where ?? sql`true`}`)
+        return rows.map((row) => row.email.split('.')[0]).sort().join(',')
+      }
+      const day = (zone: string, value: string, operator: Condition['operator']) =>
+        keysFor(zone, { field: 'created_at', operator, value })
+      const kiritimati = 'Pacific/Kiritimati'
+      const la = 'America/Los_Angeles'
+      const every = Object.keys(at).sort().join(',')
+
+      expect((await keysFor(kiritimati, { field: 'created_at', operator: 'between', value: ['2026-10-07', '2026-10-07'] })) === 'q1,r1', 'Kiritimati Oct 7 range lost the 23:30 record or kept the Oct 8 midnight')
+      expect((await keysFor(la, { field: 'created_at', operator: 'between', value: ['2026-10-07', '2026-10-07'] })) === 'r1,r2,r3', 'Los Angeles Oct 7 range did not hold its whole day')
+      expect((await keysFor(kiritimati, { field: 'created_at', operator: 'between', value: ['2026-10-07', ''] })) === 'q1,r1,r2,r3,r4,y1,y2,y3,y4', 'an open To did not run on')
+      expect((await keysFor(la, { field: 'created_at', operator: 'between', value: ['2026-10-08', '2026-10-07'] })) === '', 'an inverted range matched something')
+      expect((await day(kiritimati, '2026-10-07', 'is')) === 'q1,r1', 'is Oct 7 in Kiritimati did not hold just its own two records')
+      expect((await day(kiritimati, '2026-10-08', 'is')) === 'r2,r3,r4', 'is Oct 8 in Kiritimati did not start at its midnight')
+      expect((await day(kiritimati, '2026-10-07', 'is_not')) === every.split(',').filter((key) => key !== 'q1' && key !== 'r1').join(','), 'is not Oct 7 is not the exact complement of is Oct 7')
+      expect((await day(la, '2026-10-07', 'before')) === 'q1,r5,x1,x2,x3,x4', 'before Oct 7 in Los Angeles did not stop at its midnight')
+      expect((await day(kiritimati, '2026-10-07', 'before')) === 'r5,x1,x2,x3,x4', 'before Oct 7 in Kiritimati did not stop at its midnight')
+      expect((await day(kiritimati, '2026-10-07', 'after')) === 'r2,r3,r4,y1,y2,y3,y4', 'after Oct 7 in Kiritimati did not start the next day')
+      expect((await day(la, '2026-10-07', 'after')) === 'r4,y1,y2,y3,y4', 'after Oct 7 in Los Angeles did not start the next day')
+      expect((await day(la, '2026-10-07', 'on_or_before')) === 'q1,r1,r2,r3,r5,x1,x2,x3,x4', 'on or before Oct 7 in Los Angeles dropped its last day')
+      expect((await keysFor(kiritimati, { field: 'created_at', operator: 'between', value: ['2026-10-07T23:30', '2026-10-07T23:30'] })) === 'r1', 'a typed time was not an exact bound on the account clock')
+      expect((await day(la, '2026-03-08', 'is')) === 'x2,x3', 'the 23 hour day in Los Angeles did not hold exactly its own hours')
+      expect((await day(kiritimati, '2028-02-29', 'is')) === 'y1', 'the leap day did not match its own day')
+      expect((await keysFor('UTC', { field: 'created_at', operator: 'between', value: ['2026-12-31', '2027-01-01'] })) === 'y3', 'the year boundary did not hold Jan 1')
+      return 'Kiritimati and Los Angeles split the 23:30 and midnight records, the 23 hour day and leap day hold, is not is the complement'
+    } finally {
+      await db.delete(s.contact).where(sql`email like ${`%.${tag}@verify.test`}`)
+    }
+  })
+
+  await check('a date-only field matches "is" by its day in every zone, as before', async () => {
+    const [sample] = await db.execute<{ day: string }>(sql`
+      select close_date::text as day from deal
+       where account_id = ${datasaur!.id} and deleted_at is null and close_date is not null limit 1`)
+    expect(Boolean(sample), 'no deal has a close date to test with')
+    const deal = objectOrThrow(await getRegistry(admin), 'deal')
+    const countIs = async (zone: string): Promise<number> => {
+      const where = compileFilters(deal, [{ conjunction: 'and', conditions: [{ field: 'close_date', operator: 'is', value: sample!.day }] }], scopeFor(admin.actorId, zone))
+      const [row] = await db.execute<{ n: number }>(sql`
+        select count(*)::int as n from deal where account_id = ${datasaur!.id} and deleted_at is null and ${where ?? sql`true`}`)
+      return row!.n
+    }
+    const [direct] = await db.execute<{ n: number }>(sql`
+      select count(*)::int as n from deal where account_id = ${datasaur!.id} and deleted_at is null and close_date = ${sample!.day}::date`)
+    const expected = direct!.n
+    for (const zone of ['Pacific/Kiritimati', 'America/Los_Angeles', 'UTC']) {
+      expect((await countIs(zone)) === expected, `${zone} counted a different number of deals closing ${sample!.day}`)
+    }
+    return `${expected} deals close on ${sample!.day}, the same in every zone`
+  })
+
+  await check('a list, its export, its KPIs and its calendar read the same account day', async () => {
+    const tag = `acct${Date.now().toString(36)}`
+    // Kiritimati is UTC+14: 23:30 on Oct 7 there is 09:30 UTC, and midnight starting Oct 8 is 10:00 UTC.
+    const kiritimati: AccountContext = { ...sales, timezone: 'Pacific/Kiritimati' }
+    const late = { first_name: 'Account', last_name: 'Late', email: `late.${tag}@verify.test`, at: '2026-10-07T09:30:00Z' }
+    const midnight = { first_name: 'Account', last_name: 'Midnight', email: `midnight.${tag}@verify.test`, at: '2026-10-07T10:00:00Z' }
+    const made: string[] = []
+    try {
+      for (const { at, ...fields } of [late, midnight]) {
+        const row = await createRecord(sales, 'contact', fields)
+        made.push(row.id)
+        await db.update(s.contact).set({ createdAt: new Date(at) }).where(eq(s.contact.id, row.id))
+      }
+      const byEmail = { conjunction: 'and' as const, conditions: [{ field: 'email', operator: 'contains' as const, value: tag }] }
+      const onDay = (day: string) => [
+        { conjunction: 'and' as const, conditions: [{ field: 'created_at', operator: 'between' as const, value: [day, day] }] },
+        byEmail,
+      ]
+
+      const listed = await listRecords(kiritimati, { object: 'contact', columns: ['email'], filters: onDay('2026-10-07'), sorts: [], limit: 50 })
+      expect(listed.rows.map((row) => row.id).join() === made[0], `the Oct 7 list held ${listed.rows.length} rows, not the 23:30 record alone`)
+
+      let csv = ''
+      for await (const chunk of exportCsv(kiritimati, { objectKey: 'contact', columns: ['email'], filters: onDay('2026-10-07'), sorts: [] })) csv += chunk
+      const exported = csv.split('\n').filter((line) => line.includes(tag))
+      expect(exported.length === 1 && exported[0]!.includes(`late.${tag}`), 'the Oct 7 export did not hold the 23:30 record alone')
+
+      const quiet = (await listKpis(kiritimati, 'contact', onDay('2026-10-07'))).find((tile) => tile.key === 'quiet')
+      expect(quiet?.count === 1, `the quiet tile counted ${quiet?.count} on Oct 7, not 1`)
+
+      const month = await readCalendar(kiritimati, { object: 'contact', month: '2026-10-01', fieldKey: 'created_at', filters: [byEmail] })
+      const placed = new Map(month.entries.map((entry) => [entry.id, entry]))
+      expect(placed.get(made[0]!)?.day === '2026-10-07' && placed.get(made[0]!)?.time === '23:30', 'the calendar did not place the 23:30 record on Oct 7 at 23:30')
+      expect(placed.get(made[1]!)?.day === '2026-10-08', 'the calendar did not place midnight on Oct 8')
+      const oneDay = await readCalendar(kiritimati, { object: 'contact', month: '2026-10-01', fieldKey: 'created_at', filters: onDay('2026-10-07') })
+      expect(oneDay.entries.map((entry) => entry.id).join() === made[0], 'the calendar filtered to Oct 7 did not hold the 23:30 record alone')
+      return 'list, export, quiet tile and calendar all hold the 23:30 record on Oct 7 and not midnight'
+    } finally {
+      await db.delete(s.contact).where(sql`email like ${`%.${tag}@verify.test`}`)
     }
   })
 

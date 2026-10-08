@@ -1,10 +1,13 @@
 import {
+  accountZone,
+  addDays,
   armedFor,
   armedScans,
   automationEmailTemplate,
   claimAutomationRun,
   conditionsHold,
   createTask,
+  dayKey,
   enroll,
   finishAutomationRun,
   getRecord,
@@ -112,10 +115,10 @@ const runAction = async (
     case 'create_task': {
       const title = fill(text(action.config, 'title') || 'Follow up on {{name}}', name)
       const days = Number(action.config.dueInDays ?? 0)
-      const due = Number.isFinite(days) && days > 0 ? new Date(Date.now() + days * 86_400_000) : null
+      const due = Number.isFinite(days) && days > 0 ? addDays(dayKey(new Date(), await accountZone(ctx)), days) : null
       await createTask(ctx, {
         title,
-        dueDate: due ? due.toISOString().slice(0, 10) : null,
+        dueDate: due,
         entity: { entityType: event.objectKey, entityId: event.entityId },
       })
       return `created "${title}"`
@@ -560,12 +563,13 @@ export const scanAutomations = async (
   accountSlug: string,
 ): Promise<{ scanned: number; fired: number }> => {
   const rules = await armedScans(ctx)
-  const day = new Date().toISOString().slice(0, 10)
+  const zone = await accountZone(ctx)
+  const day = dayKey(new Date(), zone)
   let fired = 0
 
   for (const rule of rules) {
     try {
-      for (const entityId of await scanTargets(ctx, rule, day)) {
+      for (const entityId of await scanTargets(ctx, rule, day, zone)) {
         const runId = await openScannedRun(ctx, {
           automationId: rule.id,
           entityType: rule.objectKey,

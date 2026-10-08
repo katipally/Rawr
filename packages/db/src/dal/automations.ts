@@ -399,14 +399,15 @@ export const saveAutomation = async (
     // saved the rule, forever, which is never what somebody writing an automation
     // means. `scopeFor(null)` resolves those tokens to nothing and the save is
     // refused with the field named.
-    compileFilters(object, input.conditions, scopeFor(null))
+    const zone = await accountZone(ctx, tx)
+    compileFilters(object, input.conditions, scopeFor(null, zone))
     // A guard is the same filter language against the same object, so it is
     // checked the same way and at the same moment: a rule with an unusable guard
     // is refused here rather than three days later, parked mid-run, where the
     // person who wrote it is no longer looking.
     for (const step of all) {
       if (step.kind !== 'action' && step.kind !== 'delay') {
-        compileFilters(object, step.conditions, scopeFor(null))
+        compileFilters(object, step.conditions, scopeFor(null, zone))
       }
     }
     assertTriggerUsable(object, input.trigger, input.triggerConfig ?? {})
@@ -797,11 +798,13 @@ export const armedScans = async (ctx: AccountContext): Promise<AutomationRow[]> 
  *  fires exactly once for a given date. `no_activity` matches the day the record
  *  crosses into silence rather than every day it stays quiet: without that a
  *  thirty-day rule would make a task every morning forever. A record that has
- *  never had an activity is measured from when it was created. */
+ *  never had an activity is measured from when it was created. `day` is today on
+ *  the account's clock, `zone`, which is the clock a stored moment is read on. */
 export const scanTargets = async (
   ctx: AccountContext,
   rule: AutomationRow,
   day: string,
+  zone: string,
 ): Promise<string[]> =>
   withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
@@ -817,10 +820,11 @@ export const scanTargets = async (
       const target = configText(rule.triggerConfig, 'direction') === 'before'
         ? sql`${day}::date + ${days}::int`
         : sql`${day}::date - ${days}::int`
-      // A timestamptz cast to a date reads the session's TimeZone, so it is put on the UTC clock first.
+      // A stored moment is an instant, so it is read on the account's clock. A stored
+      // date is already a calendar day and is compared as it is.
       const landed = fieldExpression(object, field)
       const onDay = TYPE_META[field.type].jsonbCast === 'timestamptz'
-        ? sql`((${landed}) at time zone 'UTC')::date`
+        ? sql`((${landed}) at time zone ${zone})::date`
         : sql`(${landed})::date`
       match = sql`${onDay} = ${target}`
     } else {
@@ -830,8 +834,8 @@ export const scanTargets = async (
         (select max(l.occurred_at) from activity_link l
           where l.entity_type = ${object.key} and l.entity_id = ${alias}.id),
         ${alias}.created_at)`
-      // Silence that began on the UTC day `days` ago, which is the crossing day.
-      match = sql`((${last}) at time zone 'UTC')::date = ${day}::date - ${days}::int`
+      // Silence that began on the account's day `days` ago, which is the crossing day.
+      match = sql`((${last}) at time zone ${zone})::date = ${day}::date - ${days}::int`
     }
 
     const rows = await tx.execute<{ id: string }>(sql`

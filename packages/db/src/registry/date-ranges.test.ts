@@ -38,3 +38,9 @@ test('only the listed tokens are ranges, and every one resolves in order', () =>
     assert.ok(first <= last, range.token)
   }
 })
+
+test('a last-N-days preset says it leaves today out', () => {
+  const lastDaysRanges = DATE_RANGES.filter((range) => /^@last_\d+_days$/.test(range.token))
+  assert.ok(lastDaysRanges.length > 0)
+  for (const range of lastDaysRanges) assert.match(range.label, /\(before today\)$/, range.token)
+})

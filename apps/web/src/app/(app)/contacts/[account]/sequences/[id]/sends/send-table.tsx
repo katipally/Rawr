@@ -5,7 +5,7 @@ import { Badge, DataTable, EmptyState, Pagination, cn, type Column } from '@rawr
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
-import { useFormat } from '~/components/zone.tsx'
+import { useFormat, useZone } from '~/components/zone.tsx'
 import { recordPath, sequenceSendsPath, threadPath } from '~/lib/links.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { SequenceHeader } from '../sequence-header.tsx'
@@ -57,6 +57,7 @@ export const SendTable = ({
   hasMore: boolean
 }) => {
   const fmt = useFormat()
+  const zone = useZone()
   const origin = useOrigin()
   const router = useRouter()
 
@@ -174,6 +175,8 @@ export const SendTable = ({
           </Link>
         ))}
       </div>
+
+      <p className="text-small text-secondary">Times in {zone}</p>
 
       <DataTable
         columns={columns}

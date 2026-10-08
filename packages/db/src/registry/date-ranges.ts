@@ -64,13 +64,13 @@ export const DATE_RANGES = [
   { token: '@this_year_so_far', label: 'This year so far', span: period('year', 0, true) },
   { token: '@last_year', label: 'Last year', span: period('year', -1) },
   { token: '@next_year', label: 'Next year', span: period('year', 1) },
-  { token: '@last_7_days', label: 'Last 7 days', span: lastDays(7) },
-  { token: '@last_14_days', label: 'Last 14 days', span: lastDays(14) },
-  { token: '@last_30_days', label: 'Last 30 days', span: lastDays(30) },
-  { token: '@last_60_days', label: 'Last 60 days', span: lastDays(60) },
-  { token: '@last_90_days', label: 'Last 90 days', span: lastDays(90) },
-  { token: '@last_180_days', label: 'Last 180 days', span: lastDays(180) },
-  { token: '@last_365_days', label: 'Last 365 days', span: lastDays(365) },
+  { token: '@last_7_days', label: 'Last 7 days (before today)', span: lastDays(7) },
+  { token: '@last_14_days', label: 'Last 14 days (before today)', span: lastDays(14) },
+  { token: '@last_30_days', label: 'Last 30 days (before today)', span: lastDays(30) },
+  { token: '@last_60_days', label: 'Last 60 days (before today)', span: lastDays(60) },
+  { token: '@last_90_days', label: 'Last 90 days (before today)', span: lastDays(90) },
+  { token: '@last_180_days', label: 'Last 180 days (before today)', span: lastDays(180) },
+  { token: '@last_365_days', label: 'Last 365 days (before today)', span: lastDays(365) },
 ] as const
 
 export type DateRangeToken = (typeof DATE_RANGES)[number]['token']

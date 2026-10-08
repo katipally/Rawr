@@ -220,6 +220,21 @@ try {
     return `${found.total} hit(s)`
   })
 
+  // A fragment of a generated address, in the middle of one word. Full text search
+  // cannot find it: the address is one token.
+  const fragment = `scale-${stamp}-4242`
+  await timed('an address fragment finds its contacts', INTERACTIVE_MS, async () => {
+    const page = await listRecords(ctx, { object: 'contact', limit: 50, count: true, search: fragment })
+    if ((page.total ?? 0) < 1) throw new Error('no contact has that fragment')
+    return `${page.total} matched`
+  })
+
+  // Two letters match nearly every row: the worst case for a substring scan.
+  await timed('a two-letter search over a hundred thousand contacts', INTERACTIVE_MS, async () => {
+    const page = await listRecords(ctx, { object: 'contact', limit: 50, count: true, search: 'Pe' })
+    return `${page.total?.toLocaleString()} matched`
+  })
+
   await timed('the board', INTERACTIVE_MS, async () => {
     const board = await readBoard(ctx, {})
     return `${board.columns.length} columns`

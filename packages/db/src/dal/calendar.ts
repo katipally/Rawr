@@ -3,7 +3,8 @@ import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
-import { fieldOrThrow, getRegistry, objectOrThrow, rowsOf, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
+import { coreKeyOf, fieldOrThrow, getRegistry, objectOrThrow, rowsOf, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
+import { recordTermMatch } from './text-match.ts'
 
 /** What is happening this month.
  *
@@ -101,11 +102,10 @@ export const readCalendar = async (
     where.push(sql`${placed} >= ${from}`)
     where.push(sql`${placed} < ${to}`)
 
-    const filters = compileFilters(object, input.filters ?? [], scopeFor(ctx.actorId))
+    const filters = compileFilters(object, input.filters ?? [], scopeFor(ctx.actorId, zone))
     if (filters) where.push(filters)
-    if (input.search?.trim()) {
-      where.push(sql`${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${input.search.trim()})`)
-    }
+    const matched = recordTermMatch(input.search ?? '', coreKeyOf(object) ?? 'custom', object.key)
+    if (matched) where.push(matched)
 
     const rows = await tx.execute<Record<string, unknown>>(sql`
       select ${sql.raw(`"${object.key}".*`)},

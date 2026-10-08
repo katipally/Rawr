@@ -22,6 +22,9 @@ test('nothing, not a number and infinity are blank rather than "NaN"', () => {
   assert.equal(fmt.money('abc'), '')
   assert.equal(fmt.dateTime(null), '')
   assert.equal(fmt.date('not a date'), '')
+  assert.equal(fmt.date(null), '')
+  assert.equal(as('en-US', 'Pacific/Kiritimati').date('1900-01-01'), 'Jan 1, 1900')
+  assert.equal(as('en-US', 'Pacific/Kiritimati').date('9999-12-31'), 'Dec 31, 9999')
   assert.equal(fmt.ago(undefined), '')
 })
 

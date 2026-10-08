@@ -12,6 +12,7 @@ import { accountZone, withAccount } from './index.ts'
 import { dayKey } from './slots.ts'
 import { filterValue } from './values.ts'
 import {
+  coreKeyOf,
   fieldOrThrow,
   getRegistry,
   objectOrThrow,
@@ -20,6 +21,7 @@ import {
   type RegistryField,
   type RegistryObject,
 } from './registry.ts'
+import { recordTermMatch } from './text-match.ts'
 
 export type Condition = { field: string; operator: Operator; value?: unknown }
 /** One level deep, deliberately. A tree of arbitrary depth is a query builder
@@ -34,7 +36,7 @@ export type QueryScope = { userId: string | null; today: string; zone: string }
 
 /** `@today` is the day it is in the account's zone, not in UTC: a view of what is
  *  due today must not move to tomorrow at 4 PM Pacific. */
-export const scopeFor = (userId: string | null, zone = 'UTC', now = new Date()): QueryScope => ({
+export const scopeFor = (userId: string | null, zone: string, now = new Date()): QueryScope => ({
   userId,
   today: dayKey(now, zone),
   zone,
@@ -75,6 +77,37 @@ const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [v
 
 const literal = (value: unknown): SQL => sql`${value}`
 
+/** Datetimes compare on the account's clock: a day runs from its midnight to the
+ *  next one in the account zone. A typed moment is an exact instant, read in that
+ *  zone unless it names its own offset. */
+const dayStart = (day: string, zone: string): SQL => sql`((${day}::date)::timestamp at time zone ${zone})`
+const dayAfter = (day: string, zone: string): SQL => sql`((${day}::date + 1)::timestamp at time zone ${zone})`
+const instantOf = (moment: string, zone: string): SQL =>
+  /(z|[+-]\d{2}:\d{2})$/i.test(moment)
+    ? sql`${moment}::timestamptz`
+    : sql`(${moment}::timestamp at time zone ${zone})`
+
+/** A day is exactly YYYY-MM-DD, which filterValue guarantees before this runs. */
+const isDay = (text: string): boolean => text.length === 10
+
+/** Both ends inclusive. A date field compares days; a datetime treats a day "from"
+ *  as its midnight and a day "to" as the midnight after it, and a typed moment as an
+ *  exact bound. A missing end is open. */
+const between = (expr: SQL, type: 'date' | 'datetime', from: string | null, to: string | null, zone: string): SQL => {
+  const bounds: SQL[] = []
+  if (type === 'date') {
+    if (from !== null) bounds.push(sql`${expr} >= ${from}`)
+    if (to !== null) bounds.push(sql`${expr} <= ${to}`)
+  } else {
+    if (from !== null) bounds.push(sql`${expr} >= ${isDay(from) ? dayStart(from, zone) : instantOf(from, zone)}`)
+    if (to !== null) bounds.push(isDay(to) ? sql`${expr} < ${dayAfter(to, zone)}` : sql`${expr} <= ${instantOf(to, zone)}`)
+  }
+  return sql`(${sql.join(bounds, sql` and `)})`
+}
+
+/** Datetime operators that take a day and compare it on the account's clock. */
+const DAY_OPERATORS = new Set<Operator>(['is', 'is_not', 'before', 'after', 'on_or_before', 'on_or_after'])
+
 const compileCondition = (
   object: RegistryObject,
   condition: Condition,
@@ -101,11 +134,14 @@ const compileCondition = (
 
   if (operator === 'between' && isDateRange(condition.value)) {
     const [first, last] = resolveDateRange(condition.value, scope.today)
-    if (field.type !== 'datetime') return sql`${expr} between ${first}::date and ${last}::date`
-    // A moment is in the range when it falls on one of its days on the account's
-    // clock, so both ends are that zone's midnights. Half open, so the last
-    // day keeps its final second; a bare expression either side keeps it indexable.
-    return sql`(${expr} >= (${first}::date)::timestamp at time zone ${scope.zone} and ${expr} < (${last}::date + 1)::timestamp at time zone ${scope.zone})`
+    return between(expr, field.type === 'datetime' ? 'datetime' : 'date', first, last, scope.zone)
+  }
+
+  // A custom range: either end may be left open, and both empty matches nothing.
+  if (operator === 'between' && (field.type === 'date' || field.type === 'datetime')) {
+    const [from = null, to = null] = asList(condition.value).map((value) => (present(value) ? String(checked(field, value, scope)) : null))
+    if (from === null && to === null) return sql`false`
+    return between(expr, field.type, from, to, scope.zone)
   }
 
   // A token that resolved to nothing (an anonymous caller on an "@me" view) can
@@ -137,6 +173,26 @@ const compileCondition = (
   }
 
   const raw = checked(field, condition.value, scope)
+  // A datetime compared to a day means the whole day: a typed time is not kept here.
+  if (field.type === 'datetime' && DAY_OPERATORS.has(operator)) {
+    const day = String(raw).slice(0, 10)
+    const start = dayStart(day, scope.zone)
+    const next = dayAfter(day, scope.zone)
+    switch (operator) {
+      case 'is':
+        return sql`(${expr} >= ${start} and ${expr} < ${next})`
+      case 'is_not':
+        return sql`(${expr} is null or ${expr} < ${start} or ${expr} >= ${next})`
+      case 'before':
+        return sql`${expr} < ${start}`
+      case 'after':
+        return sql`${expr} >= ${next}`
+      case 'on_or_before':
+        return sql`${expr} < ${next}`
+      case 'on_or_after':
+        return sql`${expr} >= ${start}`
+    }
+  }
   switch (operator) {
     case 'is':
       return sql`${expr} = ${raw}`
@@ -336,8 +392,9 @@ export const listKpis = async (
 ): Promise<Kpi[]> => {
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, objectKey)
-  const scope = scopeFor(ctx.actorId, await accountZone(ctx))
-  const quietBefore = new Date(Date.now() - QUIET_DAYS * 86_400_000).toISOString().slice(0, 10)
+  const zone = await accountZone(ctx)
+  const scope = scopeFor(ctx.actorId, zone)
+  const quietBefore = dayKey(new Date(Date.now() - QUIET_DAYS * 86_400_000), zone)
 
   // A field an admin deleted takes its tile with it rather than throwing the
   // whole strip away.
@@ -354,10 +411,8 @@ export const listKpis = async (
     return sql`count(*) filter (where ${where ?? sql`false`})::int as ${sql.raw(`k${index}`)}`
   })
 
-  const term = search.trim()
-  const matches = term
-    ? sql` and ${sql.raw(`"${object.key}"."search"`)} @@ plainto_tsquery('simple', ${term})`
-    : sql``
+  const matched = recordTermMatch(search, coreKeyOf(object) ?? 'custom', object.key)
+  const matches = matched ? sql` and ${matched}` : sql``
   const [row] = await withAccount(ctx, (tx) =>
     tx.execute<Record<string, number>>(sql`
       select ${sql.join(aggregates, sql`, `)}

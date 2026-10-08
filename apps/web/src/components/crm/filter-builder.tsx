@@ -4,7 +4,7 @@ import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
 import { Button, Select, TextInput, cn } from '@rawr/ui'
 import { useState } from 'react'
 import type { Operator } from '@rawr/db'
-import { MULTI, NULLARY, RANGE, asList, groupsComplete, isComplete } from './filter-rules.ts'
+import { MULTI, NULLARY, RANGE, asList, groupsComplete, isComplete, isReversed } from './filter-rules.ts'
 
 export type FilterField = {
   key: string
@@ -41,6 +41,10 @@ const OPERATOR_LABELS: Record<string, string> = {
 }
 
 const INCOMPLETE = 'Every condition needs its values: both ends of a range, at least one of a list.'
+const REVERSED = 'From is after To.'
+
+const problem = (groups: Group[]): string | null =>
+  groups.some((group) => group.conditions.some(isReversed)) ? REVERSED : groupsComplete(groups) ? null : INCOMPLETE
 
 /** What an operator's value starts as when the operator changes, so a range is
  *  never half a range and a list is never a bare string. */
@@ -61,9 +65,10 @@ export const describeCondition = (fields: FilterField[], condition: Condition): 
   return `${label} ${operator} ${value}`
 }
 
+/** A datetime is picked by its day here: a time is typed in the URL or the API, and
+ *  a range is whole days (both ends inclusive) unless it carries one. */
 const inputTypeFor = (type: string): string => {
-  if (type === 'date') return 'date'
-  if (type === 'datetime') return 'datetime-local'
+  if (type === 'date' || type === 'datetime') return 'date'
   if (type === 'number' || type === 'currency' || type === 'percent' || type === 'rating') return 'number'
   return 'text'
 }
@@ -266,7 +271,13 @@ export const FilterBuilder = ({ fields, value, onChange, onApply, onClose, singl
     )
   }
 
+  const message = onChange ? problem(groups) : error
+
   const apply = () => {
+    if (groups.some((group) => group.conditions.some(isReversed))) {
+      setError(REVERSED)
+      return
+    }
     // Kept aligned with `groups` while the check runs. Dropping the empty groups
     // first and then indexing `cleaned[i]` against `groups` compares one group's
     // conditions with a different group's, so a missing value went unreported.
@@ -382,9 +393,9 @@ export const FilterBuilder = ({ fields, value, onChange, onApply, onClose, singl
         </div>
       ))}
 
-      {(onChange ? !groupsComplete(groups) : error) ? (
+      {message ? (
         <p role="alert" className="text-error">
-          {INCOMPLETE}
+          {message}
         </p>
       ) : null}
 

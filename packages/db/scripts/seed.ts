@@ -4,6 +4,7 @@ import postgres from 'postgres'
 import { channelOfSession, readAttribution, sourceFrom } from '../src/dal/attribution.ts'
 import { resolveContactCampaigns } from '../src/dal/campaigns.ts'
 import { SPAM_WEIGHTS } from '../src/dal/spam.ts'
+import { searchTextFrom, searchVectorFrom } from '../src/dal/text-match.ts'
 import { provisionAccount } from '../src/dal/provision.ts'
 import { DEFAULT_SETTINGS } from '../src/dal/form-schema.ts'
 import { encryptToken } from '../src/internal/crypto.ts'
@@ -1423,7 +1424,7 @@ try {
         { accountId: sandbox, objectId: assetObject.id, key: 'format', label: 'Format', type: 'select' as const, storage: 'jsonb' as const, options: ['Whitepaper', 'Case study', 'Webinar'], position: 1 },
         { accountId: sandbox, objectId: assetObject.id, key: 'published_on', label: 'Published on', type: 'date' as const, storage: 'jsonb' as const, position: 2 },
       ])
-      .returning({ id: s.fieldDef.id, key: s.fieldDef.key })
+      .returning({ id: s.fieldDef.id, key: s.fieldDef.key, type: s.fieldDef.type })
 
     const nameField = assetFields.find((field) => field.key === 'name')
     if (nameField) {
@@ -1432,17 +1433,23 @@ try {
 
     const FORMATS = ['Whitepaper', 'Case study', 'Webinar']
     await db.insert(s.customRecord).values(
-      Array.from({ length: 5 }, (_, i) => ({
-        accountId: sandbox,
-        objectId: assetObject.id,
-        custom: {
+      Array.from({ length: 5 }, (_, i) => {
+        const custom = {
           name: `${FORMATS[i % FORMATS.length]} ${i + 1}`,
           format: FORMATS[i % FORMATS.length]!,
           published_on: dayAgo(30 - i * 5).toISOString().slice(0, 10),
-        },
-        ownerId: marketingId,
-        createdAt: dayAgo(30 - i * 5),
-      })),
+        }
+        const blob = sql`${JSON.stringify(custom)}::jsonb`
+        return {
+          accountId: sandbox,
+          objectId: assetObject.id,
+          custom,
+          search: searchVectorFrom({ fields: assetFields }, blob),
+          searchText: searchTextFrom({ fields: assetFields }, blob),
+          ownerId: marketingId,
+          createdAt: dayAgo(30 - i * 5),
+        }
+      }),
     )
 
     // Three apps in three states, because the Connected Apps table's whole job is

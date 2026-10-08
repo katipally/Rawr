@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DATE_RANGES } from '@rawr/db/registry'
 import type { Condition } from './filter-builder.tsx'
-import { groupsComplete, isComplete } from './filter-rules.ts'
+import { groupsComplete, isComplete, isReversed } from './filter-rules.ts'
 
 const row = (operator: Condition['operator'], value?: unknown): Condition => ({ field: 'amount', operator, value })
 
@@ -27,6 +27,18 @@ test('a range needs both ends, unless it is a rolling range', () => {
   assert.equal(isComplete(row('between', ['2026-01-01', ''])), false)
   assert.equal(isComplete(row('between', ['2026-01-01', '2026-02-01'])), true)
   assert.equal(isComplete(row('between', DATE_RANGES[0]!.token)), true)
+})
+
+test('a range whose From is after its To is not finished, and says so', () => {
+  assert.equal(isReversed(row('between', ['2026-10-06', '2026-10-05'])), true)
+  assert.equal(isComplete(row('between', ['2026-10-06', '2026-10-05'])), false)
+  assert.equal(isReversed(row('between', ['2026-10-05', '2026-10-05'])), false)
+  assert.equal(isReversed(row('between', ['2026-10-05T10:00', '2026-10-05'])), false)
+  assert.equal(isReversed(row('between', ['2026-10-05', '2026-10-05T23:00'])), false)
+  assert.equal(isReversed(row('between', ['2026-10-05T12:00', '2026-10-05T09:00'])), true)
+  assert.equal(isReversed(row('between', ['2026-10-06', '2026-10-05T23:59'])), true)
+  assert.equal(isReversed(row('between', [10, 5] as unknown as string[])), false)
+  assert.equal(isReversed(row('between', DATE_RANGES[0]!.token)), false)
 })
 
 test('an operator that takes no value is finished without one', () => {

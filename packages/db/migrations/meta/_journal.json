@@ -757,6 +757,13 @@
       "when": 1792861020000,
       "tag": "0106_a_calendar_keeps_its_date_field_apart_from_a_board_grouping",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792861080000,
+      "tag": "0107_a_search_finds_a_fragment_anywhere_in_a_name_email_or_company",
+      "breakpoints": true
     }
   ]
 }

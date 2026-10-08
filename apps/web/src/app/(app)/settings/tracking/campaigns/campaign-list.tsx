@@ -162,7 +162,7 @@ export const CampaignList = ({ initial, search: initialSearch }: { initial: Page
               width: 200,
               render: (row) => (
                 <span className="text-secondary">
-                  {row.startsOn || row.endsOn ? `${row.startsOn ?? '…'} to ${row.endsOn ?? '…'}` : 'No dates set'}
+                  {row.startsOn || row.endsOn ? `${row.startsOn ? fmt.date(row.startsOn) : 'No start'} to ${row.endsOn ? fmt.date(row.endsOn) : 'no end date'}` : 'No dates set'}
                 </span>
               ),
             },

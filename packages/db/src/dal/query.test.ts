@@ -162,7 +162,7 @@ test('valid values and every operator on them compile as before', () => {
   const run = (condition: Condition) => built(compile([{ conjunction: 'and', conditions: [condition] }]))
   assert.deepEqual(run({ field: 'amount', operator: 'gte', value: ' 1e3 ' }).params, ['1e3'])
   assert.deepEqual(run({ field: 'amount', operator: 'between', value: [10, '20'] }).params, [10, '20'])
-  assert.deepEqual(run({ field: 'created_at', operator: 'on_or_before', value: '2026-09-03' }).params, ['2026-09-03'])
+  assert.deepEqual(run({ field: 'created_at', operator: 'on_or_before', value: '2026-09-03' }).params, ['2026-09-03', 'UTC'])
   assert.deepEqual(run({ field: 'owner_id', operator: 'is', value: '@me' }).params, ['user-1'])
   assert.equal(run({ field: 'amount', operator: 'is_empty', value: 'not even looked at' }).params.length, 0)
   assert.equal(run({ field: 'amount', operator: 'gt', value: '' }).text, '(false)')
@@ -174,7 +174,7 @@ test('@me resolves to the caller and an anonymous caller matches nothing', () =>
   ]
   assert.ok(compileFilters(contact, mine, scope))
   // Saying "false" beats quietly dropping the filter and showing every record.
-  assert.equal(built(compileFilters(contact, mine, scopeFor(null))).text, '(false)')
+  assert.equal(built(compileFilters(contact, mine, scopeFor(null, 'UTC'))).text, '(false)')
 })
 
 test('@today is the day in the account zone, not in UTC', () => {
@@ -198,7 +198,7 @@ test('a rolling date range resolves on the day the query runs, in the account zo
   assert.deepEqual(params, ['2026-08-01', 'America/Los_Angeles', '2026-08-31', 'America/Los_Angeles'])
   // A fixed range saved before the tokens existed is still two bound days.
   const fixed = built(compile([{ conjunction: 'and', conditions: [{ field: 'created_at', operator: 'between', value: ['2026-01-01', '2026-01-31'] }] }]))
-  assert.deepEqual(fixed.params, ['2026-01-01', '2026-01-31'])
+  assert.deepEqual(fixed.params, ['2026-01-01', 'UTC', '2026-01-31', 'UTC'])
 })
 
 test('an empty group and an empty filter set compile to nothing at all', () => {
@@ -240,9 +240,9 @@ test('a custom object filters and sorts a date through the parser, a core object
 
   const asset = run(make('asset', true))
   assert.ok(asset.filter.includes(`public.stored_date("asset"."custom" ->> 'due') >=`), asset.filter)
-  assert.ok(asset.filter.includes(`public.stored_timestamptz("asset"."custom" ->> 'seen') between`), asset.filter)
+  assert.ok(asset.filter.includes(`public.stored_timestamptz("asset"."custom" ->> 'seen') >=`), asset.filter)
   assert.ok(asset.order.startsWith(`public.stored_timestamptz("asset"."custom" ->> 'seen') desc nulls last`), asset.order)
-  assert.doesNotMatch(asset.filter + asset.order, /::date\)|::timestamptz\)/)
+  assert.doesNotMatch(asset.filter + asset.order, /\)::(date|timestamptz)\b/)
 
   const core = run(make('contact', false))
   assert.ok(core.filter.includes(`("contact"."custom" ->> 'due')::date >=`), core.filter)
@@ -284,3 +284,59 @@ test('a cursor on a null sort value pages by id, not by comparing to null', () =
   const valued = built(plan.keysetWhere({ value: 100, id: 'abc' }))
   assert.ok(valued.text.includes('is null'), 'nulls sort last, so they come after any value')
 })
+
+// ------------------------------------------------------ dates on the account clock
+
+const sqlOf = (condition: Condition, zone = 'America/Los_Angeles', object: RegistryObject = contact) =>
+  built(compileFilters(object, [{ conjunction: 'and', conditions: [condition] }], scopeFor(null, zone, new Date('2026-10-07T12:00:00Z'))))
+
+test('a datetime is a whole day in the account zone, and is not is its exact complement', () => {
+  const on = sqlOf({ field: 'created_at', operator: 'is', value: '2026-10-07' })
+  assert.deepEqual(on.params, ['2026-10-07', 'America/Los_Angeles', '2026-10-07', 'America/Los_Angeles'])
+  assert.match(on.text, />= \(\(\$\?::date\)::timestamp at time zone \$\?\) and .* < \(\(\$\?::date \+ 1\)::timestamp at time zone \$\?\)/, on.text)
+  const not = sqlOf({ field: 'created_at', operator: 'is_not', value: '2026-10-07' })
+  assert.ok(not.text.startsWith('("contact"."created_at" is null or') || not.text.startsWith('(("contact"."created_at" is null or'), not.text)
+})
+
+test('a typed time on a datetime day is read as the day, and before/after use the day boundary', () => {
+  assert.deepEqual(sqlOf({ field: 'created_at', operator: 'before', value: '2026-10-07T14:30' }).params, ['2026-10-07', 'America/Los_Angeles'])
+  assert.match(sqlOf({ field: 'created_at', operator: 'before', value: '2026-10-07' }).text, /"contact"\."created_at" < \(/)
+  assert.match(sqlOf({ field: 'created_at', operator: 'after', value: '2026-10-07' }).text, /"contact"\."created_at" >= \(/)
+  assert.match(sqlOf({ field: 'created_at', operator: 'on_or_before', value: '2026-10-07' }).text, /"contact"\."created_at" < \(/)
+  assert.match(sqlOf({ field: 'created_at', operator: 'on_or_after', value: '2026-10-07' }).text, /"contact"\."created_at" >= \(/)
+})
+
+test('a custom range on a datetime keeps both days whole: From is a midnight, To runs to the next one', () => {
+  const range = sqlOf({ field: 'created_at', operator: 'between', value: ['2026-10-01', '2026-10-07'] })
+  assert.deepEqual(range.params, ['2026-10-01', 'America/Los_Angeles', '2026-10-07', 'America/Los_Angeles'])
+  assert.match(range.text, />= \(\(\$\?::date\)::timestamp at time zone \$\?\) and .* < /, range.text)
+})
+
+test('a custom range with a typed time keeps the time as an exact bound, in the zone or its own offset', () => {
+  const typed = sqlOf({ field: 'created_at', operator: 'between', value: ['2026-10-01T09:00', '2026-10-07T23:30'] })
+  assert.deepEqual(typed.params, ['2026-10-01T09:00', 'America/Los_Angeles', '2026-10-07T23:30', 'America/Los_Angeles'])
+  assert.match(typed.text, /<= \(\$\?::timestamp at time zone \$\?\)/, typed.text)
+  const offset = sqlOf({ field: 'created_at', operator: 'between', value: ['2026-10-01', '2026-10-07T23:30Z'] })
+  assert.ok(offset.text.includes('$?::timestamptz'), offset.text)
+})
+
+test('an open custom range has one bound, and an empty one matches nothing', () => {
+  const from = sqlOf({ field: 'due_on', operator: 'between', value: ['2026-10-01', ''] }, 'UTC', dateOnly)
+  assert.equal(from.text, '(("contact"."due_on" >= $?))')
+  assert.deepEqual(from.params, ['2026-10-01'])
+  const to = sqlOf({ field: 'created_at', operator: 'between', value: ['', '2026-10-07'] })
+  assert.ok(to.text.includes('<') && !to.text.includes('>='), to.text)
+  assert.equal(sqlOf({ field: 'created_at', operator: 'between', value: ['', ''] }).text, '(false)')
+})
+
+test('a date field keeps "is" as a plain day comparison, with no zone', () => {
+  const is = sqlOf({ field: 'due_on', operator: 'is', value: '2026-10-07' }, 'America/Los_Angeles', dateOnly)
+  assert.equal(is.text, '("contact"."due_on" = $?)')
+  assert.deepEqual(is.params, ['2026-10-07'])
+})
+
+const dateOnly: RegistryObject = {
+  ...contact,
+  fields: [...FIELDS, field({ key: 'due_on', type: 'date' })],
+  byKey: new Map([...FIELDS, field({ key: 'due_on', type: 'date' })].map((f) => [f.key, f])),
+}

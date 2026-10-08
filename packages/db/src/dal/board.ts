@@ -4,6 +4,7 @@ import { accountZone, withAccount } from './index.ts'
 import { compileFilters, fieldExpression, scopeFor, type FilterGroup } from './query.ts'
 import { displayName } from './records.ts'
 import { fieldOrThrow, getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
+import { recordTermMatch } from './text-match.ts'
 
 export type BoardCard = {
   id: string
@@ -110,9 +111,8 @@ const boardShape = async (ctx: AccountContext, input: BoardInput) => {
   if (input.pipelineId) where.push(sql`"deal"."pipeline_id" = ${input.pipelineId}`)
   const filters = compileFilters(object, input.filters ?? [], scope)
   if (filters) where.push(filters)
-  if (input.search?.trim()) {
-    where.push(sql`"deal"."search" @@ plainto_tsquery('simple', ${input.search.trim()})`)
-  }
+  const matched = recordTermMatch(input.search ?? '', 'deal', 'deal')
+  if (matched) where.push(matched)
 
   return {
     object,

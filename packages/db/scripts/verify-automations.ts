@@ -16,6 +16,8 @@ import {
   scanTargets,
   setAutomationActive,
 } from '../src/dal/automations.ts'
+import { accountZone } from '../src/dal/index.ts'
+import { addDays, dayKey, zonedTimeToUtc } from '../src/dal/slots.ts'
 import { openSecret } from '../src/internal/crypto.ts'
 import { createRecord } from '../src/dal/records.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
@@ -61,12 +63,33 @@ const refuses = async (what: string, fn: () => Promise<unknown>): Promise<string
 }
 
 const stamp = Math.random().toString(36).slice(2, 8)
-const dayUtc = (offsetDays: number): string =>
-  new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10)
+const utcDayOf = (at: Date): string => at.toISOString().slice(0, 10)
 
 /** Each zone sits on the far side of UTC from the other, so a predicate that reads
  *  the session's clock fails in one of them at every hour of the day. */
 const SESSION_ZONES = ['UTC', 'America/Los_Angeles', 'Pacific/Kiritimati']
+
+/** Account zones far from UTC. `edgeMinute` is a minute of the local day whose UTC
+ *  date is the other calendar day, so a predicate that reads the UTC day puts a
+ *  moment there on the wrong day. The check asserts that premise before relying on it. */
+const ACCOUNT_ZONES = [
+  { zone: 'America/Los_Angeles', edgeMinute: 23 * 60 + 30 },
+  { zone: 'Pacific/Kiritimati', edgeMinute: 30 },
+  { zone: 'Asia/Kolkata', edgeMinute: 30 },
+]
+
+/** Sets the sandbox account's zone for `fn` and puts the seeded zone back, even when
+ *  `fn` throws. The account zone is only read by the app, so this is what the app sees. */
+const inAccountZone = async <T>(accountId: string, zone: string, fn: () => Promise<T>): Promise<T> => {
+  const [row] = await owner<{ timezone: string }[]>`select timezone from account where id = ${accountId}`
+  const saved = row!.timezone
+  await owner`update account set timezone = ${zone} where id = ${accountId}`
+  try {
+    return await fn()
+  } finally {
+    await owner`update account set timezone = ${saved} where id = ${accountId}`
+  }
+}
 
 /** Runs `fn` on connections whose session TimeZone is `zone`. The app pool opens
  *  its connections lazily from DATABASE_URL, so closing it and reopening with the
@@ -83,6 +106,13 @@ const inSessionZone = async <T>(zone: string, fn: () => Promise<T>): Promise<T> 
     await closeAppPool()
     process.env.DATABASE_URL = saved
   }
+}
+
+/** Moves a contact's creation and every activity link to `at`. Silence is measured from the
+ *  last link, so a date rule and a silence rule both read the same moment. */
+const backdateContact = async (contactId: string, at: Date): Promise<void> => {
+  await owner`update contact set created_at = ${at.toISOString()} where id = ${contactId}`
+  await owner`update activity_link set occurred_at = ${at.toISOString()} where entity_type = 'contact' and entity_id = ${contactId}`
 }
 
 const made: string[] = []
@@ -164,15 +194,7 @@ try {
     return message
   })
 
-  await check('a date rule finds the record whose date lands today, and only that one', async () => {
-    const hit = await createRecord(admin, 'deal', {
-      name: `Scan hit ${stamp}`,
-      close_date: dayUtc(3),
-    })
-    const miss = await createRecord(admin, 'deal', {
-      name: `Scan miss ${stamp}`,
-      close_date: dayUtc(9),
-    })
+  await check('a date rule finds the record whose date lands today, and only that one, in every account zone', async () => {
     const id = await save({
       name: `Three days out ${stamp}`,
       trigger: 'date_reached',
@@ -184,18 +206,24 @@ try {
     })
     const rule = (await armedScans(admin)).find((row) => row.id === id)
     expect(rule !== undefined, 'an active date rule was not armed for the scan')
-    for (const zone of SESSION_ZONES) {
-      const found = await inSessionZone(zone, () => scanTargets(admin, rule!, dayUtc(0)))
-      expect(found.includes(hit.id), `${zone}: the deal closing in three days was not found`)
-      expect(!found.includes(miss.id), `${zone}: a deal closing in nine days was found by a three-day rule`)
+    for (const { zone } of ACCOUNT_ZONES) {
+      await inAccountZone(sandbox.id, zone, async () => {
+        const accountZoneName = await accountZone(admin)
+        expect(accountZoneName === zone, `the account reads ${accountZoneName}, not ${zone}`)
+        const day = dayKey(new Date(), accountZoneName)
+        const hit = await createRecord(admin, 'deal', { name: `Scan hit ${stamp}`, close_date: addDays(day, 3) })
+        const miss = await createRecord(admin, 'deal', { name: `Scan miss ${stamp}`, close_date: addDays(day, 9) })
+        for (const session of SESSION_ZONES) {
+          const found = await inSessionZone(session, () => scanTargets(admin, rule!, day, accountZoneName))
+          expect(found.includes(hit.id), `${zone} on ${session}: the deal closing in three days was not found`)
+          expect(!found.includes(miss.id), `${zone} on ${session}: a deal closing in nine days was found by a three-day rule`)
+        }
+      })
     }
-    return 'every session zone'
+    return 'every account and session zone'
   })
 
-  await check('a date rule on a datetime property lands on its UTC day in every session zone', async () => {
-    const landed = await createRecord(admin, 'contact', { email: `landed-${stamp}@sandbox.test` })
-    // Three days back from now, so the UTC day it lands on is dayUtc(-3) whatever the hour.
-    await owner`update contact set created_at = now() - interval '3 days' where id = ${landed.id}`
+  await check('a date rule on a datetime property lands on its account day in every zone', async () => {
     const id = await save({
       name: `Created three days ago ${stamp}`,
       trigger: 'date_reached',
@@ -206,30 +234,52 @@ try {
       isActive: true,
     })
     const rule = (await armedScans(admin)).find((row) => row.id === id)!
-    for (const zone of SESSION_ZONES) {
-      const found = await inSessionZone(zone, () => scanTargets(admin, rule, dayUtc(0)))
-      expect(found.includes(landed.id), `${zone}: a datetime created three days ago was not found on its UTC day`)
+    for (const { zone } of ACCOUNT_ZONES) {
+      await inAccountZone(sandbox.id, zone, async () => {
+        const accountZoneName = await accountZone(admin)
+        const day = dayKey(new Date(), accountZoneName)
+        const landed = await createRecord(admin, 'contact', { email: `landed-${stamp}-${zone.split('/').pop()}@sandbox.test` })
+        await backdateContact(landed.id, zonedTimeToUtc(addDays(day, -3), 12 * 60, accountZoneName))
+        for (const session of SESSION_ZONES) {
+          const found = await inSessionZone(session, () => scanTargets(admin, rule, day, accountZoneName))
+          expect(found.includes(landed.id), `${zone} on ${session}: a datetime created three days ago was not found on its day`)
+        }
+      })
     }
-    return 'every session zone'
+    return 'every account and session zone'
   })
 
-  await check('a silence rule fires on the day the record goes quiet, not every day after', async () => {
-    const crossing = await createRecord(admin, 'contact', { email: `quiet-${stamp}@sandbox.test` })
-    const longGone = await createRecord(admin, 'contact', { email: `gone-${stamp}@sandbox.test` })
-    // Written through the owner pool because "twenty days ago" is not something
-    // any write path will accept.
-    await owner`update contact set created_at = now() - interval '20 days' where id = ${crossing.id}`
-    await owner`update contact set created_at = now() - interval '90 days' where id = ${longGone.id}`
-    // Creating a contact can enter it into a segment, and that writes a timeline
-    // entry dated now. Silence is measured from the last entry there, so a record
-    // whose creation is old and whose only entry is new is not quiet at all.
-    await owner`
-      update activity_link set occurred_at = now() - interval '20 days'
-       where entity_type = 'contact' and entity_id = ${crossing.id}`
-    await owner`
-      update activity_link set occurred_at = now() - interval '90 days'
-       where entity_type = 'contact' and entity_id = ${longGone.id}`
+  await check('a moment late in the evening is found on the account day, not the UTC day it falls on', async () => {
+    const id = await save({
+      name: `Late evening ${stamp}`,
+      trigger: 'date_reached',
+      objectKey: 'contact',
+      triggerConfig: { fieldKey: 'created_at', offsetDays: 3, direction: 'after' },
+      conditions: [],
+      steps: [task],
+      isActive: true,
+    })
+    const rule = (await armedScans(admin)).find((row) => row.id === id)!
+    for (const { zone, edgeMinute } of ACCOUNT_ZONES) {
+      await inAccountZone(sandbox.id, zone, async () => {
+        const accountZoneName = await accountZone(admin)
+        const day = dayKey(new Date(), accountZoneName)
+        const landedDay = addDays(day, -3)
+        const at = zonedTimeToUtc(landedDay, edgeMinute, accountZoneName)
+        expect(dayKey(at, accountZoneName) === landedDay, `${zone}: the premise is broken, the moment is not on ${landedDay} locally`)
+        expect(utcDayOf(at) !== landedDay, `${zone}: the premise is broken, the UTC day is the same`)
+        const late = await createRecord(admin, 'contact', { email: `late-${stamp}-${zone.split('/').pop()}@sandbox.test` })
+        await backdateContact(late.id, at)
+        for (const session of SESSION_ZONES) {
+          const found = await inSessionZone(session, () => scanTargets(admin, rule, day, accountZoneName))
+          expect(found.includes(late.id), `${zone} on ${session}: a moment at ${at.toISOString()} was not found on its ${landedDay} account day`)
+        }
+      })
+    }
+    return 'the account day, not the UTC day'
+  })
 
+  await check('a silence rule fires on the day the record goes quiet, not every day after, in every account zone', async () => {
     const id = await save({
       name: `Twenty days quiet ${stamp}`,
       trigger: 'no_activity',
@@ -240,12 +290,53 @@ try {
       isActive: true,
     })
     const rule = (await armedScans(admin)).find((row) => row.id === id)!
-    for (const zone of SESSION_ZONES) {
-      const found = await inSessionZone(zone, () => scanTargets(admin, rule, dayUtc(0)))
-      expect(found.includes(crossing.id), `${zone}: the contact crossing twenty days of silence was not found`)
-      expect(!found.includes(longGone.id), `${zone}: a contact quiet for ninety days fired a twenty-day rule again`)
+    for (const { zone } of ACCOUNT_ZONES) {
+      await inAccountZone(sandbox.id, zone, async () => {
+        const accountZoneName = await accountZone(admin)
+        const day = dayKey(new Date(), accountZoneName)
+        const crossing = await createRecord(admin, 'contact', { email: `quiet-${stamp}-${zone.split('/').pop()}@sandbox.test` })
+        const longGone = await createRecord(admin, 'contact', { email: `gone-${stamp}-${zone.split('/').pop()}@sandbox.test` })
+        // Silence is measured from the last activity link, and creating a record writes
+        // one dated now, so both the creation and every link are moved together.
+        await backdateContact(crossing.id, zonedTimeToUtc(addDays(day, -20), 12 * 60, accountZoneName))
+        await backdateContact(longGone.id, zonedTimeToUtc(addDays(day, -90), 12 * 60, accountZoneName))
+        for (const session of SESSION_ZONES) {
+          const found = await inSessionZone(session, () => scanTargets(admin, rule, day, accountZoneName))
+          expect(found.includes(crossing.id), `${zone} on ${session}: the contact crossing twenty days of silence was not found`)
+          expect(!found.includes(longGone.id), `${zone} on ${session}: a contact quiet for ninety days fired a twenty-day rule again`)
+        }
+      })
     }
-    return 'the crossing day only, every session zone'
+    return 'the crossing day only, every account and session zone'
+  })
+
+  await check('a silence that began late in the account evening is counted on its own account day', async () => {
+    const id = await save({
+      name: `Late silence ${stamp}`,
+      trigger: 'no_activity',
+      objectKey: 'contact',
+      triggerConfig: { days: 20 },
+      conditions: [],
+      steps: [task],
+      isActive: true,
+    })
+    const rule = (await armedScans(admin)).find((row) => row.id === id)!
+    for (const { zone, edgeMinute } of ACCOUNT_ZONES) {
+      await inAccountZone(sandbox.id, zone, async () => {
+        const accountZoneName = await accountZone(admin)
+        const day = dayKey(new Date(), accountZoneName)
+        const startedDay = addDays(day, -20)
+        const at = zonedTimeToUtc(startedDay, edgeMinute, accountZoneName)
+        expect(utcDayOf(at) !== startedDay, `${zone}: the premise is broken, the UTC day is the same`)
+        const quiet = await createRecord(admin, 'contact', { email: `edge-quiet-${stamp}-${zone.split('/').pop()}@sandbox.test` })
+        await backdateContact(quiet.id, at)
+        for (const session of SESSION_ZONES) {
+          const found = await inSessionZone(session, () => scanTargets(admin, rule, day, accountZoneName))
+          expect(found.includes(quiet.id), `${zone} on ${session}: silence that began on ${startedDay} locally was not found`)
+        }
+      })
+    }
+    return 'the account day, not the UTC day'
   })
 
   await check('a rule that is switched off is not scanned at all', async () => {
@@ -280,7 +371,7 @@ try {
       conditions: [],
       steps: [task],
     })
-    const day = dayUtc(0)
+    const day = dayKey(new Date(), await accountZone(admin))
     const first = await openScannedRun(admin, {
       automationId,
       entityType: 'contact',
@@ -299,7 +390,7 @@ try {
       automationId,
       entityType: 'contact',
       entityId: target.id,
-      scanDay: dayUtc(1),
+      scanDay: addDays(day, 1),
     })
     expect(tomorrow !== null, 'a rule could not fire again the next day')
     return 'twice in one day is once'
@@ -472,7 +563,7 @@ try {
       automationId,
       entityType: 'contact',
       entityId: target.id,
-      scanDay: dayUtc(2),
+      scanDay: addDays(dayKey(new Date(), await accountZone(admin)), 2),
     })
     expect(runId !== null, 'no run to park')
 
@@ -520,7 +611,7 @@ try {
       automationId,
       entityType: 'contact',
       entityId: target.id,
-      scanDay: dayUtc(3),
+      scanDay: addDays(dayKey(new Date(), await accountZone(admin)), 3),
     })
     await finishAutomationRun(admin, runId!, {
       state: 'skipped',

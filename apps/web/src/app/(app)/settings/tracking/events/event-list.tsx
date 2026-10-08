@@ -161,7 +161,7 @@ export const EventDefList = ({ initial, search: initialSearch }: { initial: Page
               key: 'seen',
               header: 'Last seen',
               width: 160,
-              render: (row) => <span className="text-secondary">{row.lastSeenDay ?? 'Not in the last 30 days'}</span>,
+              render: (row) => <span className="text-secondary">{row.lastSeenDay ? fmt.date(row.lastSeenDay) : 'Not in the last 30 days'}</span>,
             },
             {
               key: 'updated',

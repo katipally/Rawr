@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
 import { withAccount } from './index.ts'
 import { entityAlive, getRegistryIn, objectOrThrow, rowsOf, tableFor, type RegistryObject } from './registry.ts'
+import { everyFragment, recordTermMatch } from './text-match.ts'
 
 export type SearchHit = {
   objectKey: string
@@ -57,7 +58,11 @@ export const searchAll = async (
   const trimmed = query.trim()
   if (trimmed.length === 0) return { groups: [], total: 0 }
   const limit = Math.min(Math.max(limitPerObject, 1), 25)
-  const prefix = `${trimmed}%`
+  const contactMatch = recordTermMatch(trimmed, 'contact', 'contact')!
+  const companyMatch = recordTermMatch(trimmed, 'company', 'company')!
+  const dealMatch = recordTermMatch(trimmed, 'deal', 'deal')!
+  const customMatch = recordTermMatch(trimmed, 'custom', 'r')!
+  const taskMatch = everyFragment(trimmed, (pattern) => sql`t.title ilike ${pattern}`)!
 
   return withAccount(ctx, async (tx) => {
     const registry = await getRegistryIn(tx)
@@ -72,8 +77,7 @@ export const searchAll = async (
               null::text as parent_object, null::uuid as parent_id
          from contact
         where deleted_at is null
-          and (search @@ plainto_tsquery('simple', ${trimmed})
-               or lower(email) like lower(${prefix})
+          and (${contactMatch}
                or (coalesce(first_name,'') || ' ' || coalesce(last_name,'')) OPERATOR(extensions.%) ${trimmed})
         order by rank desc, created_at desc
         limit ${limit})
@@ -85,8 +89,7 @@ export const searchAll = async (
               ), null::text, null::uuid
          from company
         where deleted_at is null
-          and (search @@ plainto_tsquery('simple', ${trimmed})
-               or lower(domain) like lower(${prefix})
+          and (${companyMatch}
                or coalesce(name,'') OPERATOR(extensions.%) ${trimmed})
         order by 5 desc, created_at desc
         limit ${limit})
@@ -98,7 +101,7 @@ export const searchAll = async (
               ), null::text, null::uuid
          from deal
         where deleted_at is null
-          and (search @@ plainto_tsquery('simple', ${trimmed})
+          and (${dealMatch}
                or coalesce(name,'') OPERATOR(extensions.%) ${trimmed})
         order by 5 desc, created_at desc
         limit ${limit})
@@ -109,7 +112,7 @@ export const searchAll = async (
          join object_def o on o.id = r.object_id
          left join field_def f on f.id = o.label_field_id
         where r.deleted_at is null
-          and r.search @@ plainto_tsquery('simple', ${trimmed})
+          and ${customMatch}
         order by 5 desc, r.created_at desc
         limit ${limit})
       union all
@@ -120,8 +123,8 @@ export const searchAll = async (
               case when ${entityAlive(sql`t.entity_type`, sql`t.entity_id`)} then t.entity_type end,
               case when ${entityAlive(sql`t.entity_type`, sql`t.entity_id`)} then t.entity_id end
          from task t
-        where t.title OPERATOR(extensions.%) ${trimmed}
-           or lower(t.title) like lower(${prefix})
+        where (${taskMatch}
+               or t.title OPERATOR(extensions.%) ${trimmed})
         order by 5 desc, t.created_at desc
         limit ${limit})
       union all

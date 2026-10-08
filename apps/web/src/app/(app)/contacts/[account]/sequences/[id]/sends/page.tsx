@@ -1,5 +1,6 @@
 import { isUuid, listSends, readSequence, SENDS_PAGE } from '@rawr/db'
 import { notFound, redirect } from 'next/navigation'
+import { ZoneProvider } from '~/components/zone.tsx'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { SendTable } from './send-table.tsx'
 
@@ -38,15 +39,17 @@ const SequenceSendsPage = async ({
   if (!found) notFound()
 
   return (
-    <SendTable
-      account={account}
-      sequence={found.sequence}
-      state={chosen}
-      offset={offset}
-      perPage={SENDS_PAGE}
-      hasMore={page.hasMore}
-      rows={page.rows.map((row) => ({ ...row, sentAt: row.sentAt.toISOString() }))}
-    />
+    <ZoneProvider zone={session.accountTimezone}>
+      <SendTable
+        account={account}
+        sequence={found.sequence}
+        state={chosen}
+        offset={offset}
+        perPage={SENDS_PAGE}
+        hasMore={page.hasMore}
+        rows={page.rows.map((row) => ({ ...row, sentAt: row.sentAt.toISOString() }))}
+      />
+    </ZoneProvider>
   )
 }
 
