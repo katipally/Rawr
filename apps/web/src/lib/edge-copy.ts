@@ -19,6 +19,9 @@ export const FORM_COPY = {
   /** While the request is in flight. Replaces the button's own label. */
   sending: 'Sending…',
   sent: 'Thanks, that is with us.',
+  /** A held submission is received, never sent: no confirmation mail follows, so
+   *  the author's success text (which may promise one) is not shown. */
+  held: 'Thanks. This has been received and is being reviewed, so it may take a little longer than usual.',
   /** The server refused specific fields. The fields say which; this says where. */
   invalid: 'Check the highlighted answers.',
   /** The request itself failed, rather than the answers. */

@@ -111,13 +111,24 @@ test('a passed challenge clears a held submission', () => {
   assert.equal(applyChallenge(held, 'passed').state, 'clean')
 })
 
-test('an unreachable challenge fails closed to the queue, never to accepted', () => {
+test('a failed or unreachable challenge fails closed to the queue, never to accepted', () => {
   const held = scoreSubmission(submission({ raw: { [HONEYPOT_FIELD]: 'x' } }))
   for (const outcome of ['failed', 'unavailable'] as const) {
     const settled = applyChallenge(held, outcome)
     assert.equal(settled.state, 'quarantined', outcome)
     assert.equal(settled.needsChallenge, false, outcome)
     assert.ok(settled.reasons.length > held.reasons.length, 'the outcome is recorded')
+  }
+})
+
+test('a challenge outcome is recorded under its own rule and adds no points', () => {
+  const held = scoreSubmission(submission({ raw: { [HONEYPOT_FIELD]: 'x' } }))
+  const rules = { failed: 'challengeFailed', unavailable: 'challengeUnavailable' } as const
+  for (const outcome of ['failed', 'unavailable'] as const) {
+    const settled = applyChallenge(held, outcome)
+    assert.deepEqual(settled.reasons.slice(held.reasons.length).map((r) => [r.rule, r.points]),
+      [[rules[outcome], 0]], outcome)
+    assert.equal(settled.score, held.score, outcome)
   }
 })
 

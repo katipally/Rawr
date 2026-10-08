@@ -7,6 +7,7 @@ import {
   type SubmitResult,
 } from '@rawr/db'
 import type { NextRequest } from 'next/server'
+import { FORM_COPY } from '../lib/edge-copy.ts'
 import { ipHashOf } from './edge.ts'
 import { turnstileCredentials, verifyTurnstile } from './integrations/turnstile.ts'
 import { sendOptInConfirmation } from './opt-in-mail.ts'
@@ -49,6 +50,23 @@ export const answersFromFormData = (data: FormData): Record<string, unknown> => 
   }
   return body
 }
+
+export const isHeld = (state: SubmitResult['state']): boolean =>
+  state === 'quarantined' || state === 'confirmed_spam'
+
+/** What the visitor is told. A held submission gets the neutral line whatever the
+ *  author wrote, because a success text that promises a mail is a promise a held
+ *  lead never receives. */
+export const successFor = (result: Pick<SubmitResult, 'state' | 'success'>): SubmitResult['success'] =>
+  isHeld(result.state) ? { mode: 'message', value: FORM_COPY.held } : result.success
+
+/** The hosted page posts the visitor's referrer as a hidden field, because a
+ *  Server Action's own referer is the form's address. An empty value stays empty
+ *  rather than falling back to that address. */
+export const hostedAttribution = (data: FormData, path: string): { pagePath: string; referrer: string } => ({
+  pagePath: `/form/${path}`,
+  referrer: String(data.get(ATTRIBUTION_FIELDS.referrer) ?? '').slice(0, 2048),
+})
 
 const text = (body: Record<string, unknown>, key: string): string | null => {
   const value = body[key]

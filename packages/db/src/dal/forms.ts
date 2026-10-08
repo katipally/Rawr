@@ -15,10 +15,11 @@ import {
   webAddress,
   type FormField,
   type FormSettings,
+  type FormTheme,
   type PropertyRules,
 } from './form-schema.ts'
 import { emailFrom, validateAnswers, type FieldError } from './form-validate.ts'
-import { mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
+import { mappedKeyIsWritable, mapAnswersToColumns, upsertCapturedPerson, type CapturedPerson } from './people.ts'
 import { accountZone, isUuid, mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import { answersFingerprint, applyChallenge, scoreSubmission, type SpamVerdict } from './spam.ts'
 import { notify, resolveNotifications } from './notifications.ts'
@@ -662,6 +663,7 @@ export type FormSummary = {
   name: string
   slug: string
   isActive: boolean
+  theme: FormTheme | undefined
   folderId: string | null
   fieldCount: number
   submissions: number
@@ -688,12 +690,13 @@ export const listForms = async (ctx: AccountContext): Promise<FormSummary[]> =>
       is_active: boolean
       folder_id: string | null
       schema: unknown
+      settings: unknown
       submissions: string
       quarantined: string
       spam: string
       last_at: string | Date | null
     }>(sql`
-      select f.id, f.name, f.slug, f.is_active, f.folder_id, f.schema,
+      select f.id, f.name, f.slug, f.is_active, f.folder_id, f.schema, f.settings,
              count(s.id) filter (where s.spam_state in ('clean','released')) as submissions,
              count(s.id) filter (where s.spam_state = 'quarantined') as quarantined,
              count(s.id) filter (where s.spam_state = 'confirmed_spam') as spam,
@@ -718,6 +721,7 @@ export const listForms = async (ctx: AccountContext): Promise<FormSummary[]> =>
       name: row.name,
       slug: row.slug,
       isActive: row.is_active,
+      theme: readSettings(row.settings).theme,
       folderId: row.folder_id,
       fieldCount: readSchema(row.schema).length,
       submissions: Number(row.submissions),
@@ -775,6 +779,12 @@ export const saveForm = async (ctx: AccountContext, input: SaveFormInput): Promi
       )
     }
     assertSchemaIsUsable(input.fields)
+    for (const field of input.fields) {
+      const key = field.mapsTo?.split('.')[1]
+      if (key && !mappedKeyIsWritable(key)) {
+        throw new Error(`"${field.label}" cannot write to ${key}. The system or the contact's own status owns that field.`)
+      }
+    }
     const successHref = input.settings.successMode === 'redirect' ? webAddress(input.settings.successValue) : null
     if (input.settings.successMode === 'redirect' && !successHref) throw new Error(REDIRECT_BLOCKER)
 
@@ -849,6 +859,9 @@ export type SubmissionRow = {
   /** Files this submission carries. The answer in `values` is the id; this is
    *  what a person reviewing it needs to see instead. */
   uploads: { id: string; filename: string; bytes: number }[]
+  /** Field key to the label the form asked with at the time of the list. A key
+   *  missing here is no longer on the form. */
+  fieldLabels: Record<string, string>
 }
 
 /** Refused while any submission exists: those are leads, and the form's schema
@@ -938,7 +951,23 @@ export const listSubmissions = async (
       byRow.set(file.submissionId, list)
     }
 
-    return rows.map((row) => ({ ...row, uploads: byRow.get(row.id) ?? [] })) as SubmissionRow[]
+    // A form's schema is read once per form on the page, not once per row: a page of
+    // a hundred answers to one form would otherwise carry the same schema a hundred times.
+    const forms = rows.length > 0
+      ? await tx
+          .select({ id: form.id, schema: form.schema })
+          .from(form)
+          .where(inArray(form.id, [...new Set(rows.map((row) => row.formId))]))
+      : []
+    const labelsByForm = new Map(
+      forms.map((f) => [f.id, Object.fromEntries(readSchema(f.schema).map((field) => [field.key, field.label]))]),
+    )
+
+    return rows.map((row) => ({
+      ...row,
+      fieldLabels: labelsByForm.get(row.formId) ?? {},
+      uploads: byRow.get(row.id) ?? [],
+    })) as SubmissionRow[]
   })
 
 /** Releasing runs the full capture path from step 5, with the original timestamp

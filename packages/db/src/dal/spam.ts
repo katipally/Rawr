@@ -12,10 +12,12 @@ export const SPAM_WEIGHTS = {
   duplicateContent: 25,
   disposableDomain: 30,
   tooManyLinks: 20,
-  /** Not in the table: a no-JS submission cannot carry the honeypot or the timing
-   *  token, and scoring their absence would block every person with JavaScript
-   *  off. The absence is worth something, but far less than a filled honeypot. */
+  /** A submission with no timing token at all, which only a webhook sends. Its
+   *  absence is worth something, but far less than a filled honeypot. */
   noSignals: 15,
+  /** Recorded for review only: an outcome with no score of its own. */
+  challengeFailed: 0,
+  challengeUnavailable: 0,
 } as const
 
 export const QUARANTINE_AT = 30
@@ -50,8 +52,8 @@ export type SpamInput = {
   email: string | null
   /** Seconds the page was open, or null when the path carries no timing token. */
   fillSeconds: number | null
-  /** True when the submission came through the no-JS hosted page or a webhook,
-   *  where honeypot and timing checks do not apply. */
+  /** True when the submission came through a webhook, which has no page to load
+   *  a timing token on, so the timing and honeypot checks do not apply. */
   degradedSignals: boolean
   /** True when an identical set of answers landed on this form in the last 60s. */
   duplicateWithin60s: boolean
@@ -87,7 +89,7 @@ export const scoreSubmission = (input: SpamInput): SpamVerdict => {
   }
 
   if (input.degradedSignals) {
-    add('noSignals', 'Submitted without JavaScript, so timing and honeypot checks could not run.')
+    add('noSignals', 'Sent by a webhook with no page to load a timing token, so timing and honeypot checks could not run.')
   } else if (input.fillSeconds !== null) {
     if (input.fillSeconds < MIN_FILL_SECONDS) {
       add('tooFast', `Submitted ${input.fillSeconds.toFixed(1)}s after the form loaded.`)
@@ -134,11 +136,12 @@ export const applyChallenge = (
     outcome === 'failed'
       ? 'The bot challenge was failed or the token was already used.'
       : 'The bot challenge could not be reached, so this is held for review rather than accepted.'
+  const rule = outcome === 'failed' ? 'challengeFailed' : 'challengeUnavailable'
   return {
     ...verdict,
     state: 'quarantined',
     needsChallenge: false,
-    reasons: [...verdict.reasons, { rule: 'noSignals', points: 0, detail }],
+    reasons: [...verdict.reasons, { rule, points: 0, detail }],
   }
 }
 

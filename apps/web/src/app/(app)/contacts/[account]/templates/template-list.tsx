@@ -91,10 +91,9 @@ export const TemplateList = ({ rows, canWrite }: { rows: TemplateRow[]; canWrite
         bodyText: draft.bodyText,
       })
       toast('success', draft.id && !asNew ? 'Saved.' : 'Template added.')
-      // Refreshed before the address drops ?template: the other order lets the
-      // address change land last and shows the list as it was before the save.
-      router.refresh()
       close()
+      // After close(): the address change dispatches a restore that discards a refresh queued before it.
+      router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
     } finally {

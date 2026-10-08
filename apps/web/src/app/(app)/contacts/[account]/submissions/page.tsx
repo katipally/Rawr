@@ -116,7 +116,13 @@ const SubmissionsPage = async ({
           }
         />
       ) : (
-        <ReviewList account={account} rows={rows} canReview={canReview} state={state} />
+        <ReviewList
+          account={account}
+          rows={rows}
+          canReview={canReview}
+          state={state}
+          showFormName={!formId}
+        />
       )}
 
       {olderHref ? (

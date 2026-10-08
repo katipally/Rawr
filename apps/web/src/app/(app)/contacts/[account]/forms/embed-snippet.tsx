@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { Button } from '@rawr/ui'
+import type { FormTheme } from '@rawr/db/forms'
+import { themeCss } from '~/lib/embed-themes.ts'
 
 /** What a marketer takes away from this screen: the two lines that go in Webflow,
  *  the address for anywhere a script tag is not welcome, and the properties to
@@ -22,15 +24,21 @@ export const EmbedSnippet = ({
   account,
   slug,
   siteKey,
+  isActive,
+  theme,
 }: {
   baseUrl: string
   formId: string
   account: string
   slug: string
+  /** Off answers not found at both addresses, so the snippet says so up front. */
+  isActive: boolean
   /** The tracked site this page lives on. `data-rawr-site` is matched against
    *  the `site` table, not against the account, so an account slug here reads as
    *  a site nobody registered and the page views are silently never counted. */
   siteKey: string | null
+  /** The saved look. The values copied below are this form's, not the neutral defaults. */
+  theme: FormTheme | undefined
 }) => {
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -55,19 +63,9 @@ export const EmbedSnippet = ({
     {
       id: 'theme',
       label: 'Restyle it from the site',
-      hint: 'Set any of these on the container or an ancestor. No !important, no overrides.',
+      hint: 'This form’s look. Change it in the builder, or set any of these on the container or an ancestor. No !important.',
       lang: 'css',
-      value:
-        `[data-rawr-form="${formId}"] {\n` +
-        '  --rawr-embed-font: inherit;\n' +
-        '  --rawr-embed-text: #33475b;\n' +
-        '  --rawr-embed-border: #cbd6e2;\n' +
-        '  --rawr-embed-field-bg: #ffffff;\n' +
-        '  --rawr-embed-cta: #ff7a59;\n' +
-        '  --rawr-embed-cta-text: #ffffff;\n' +
-        '  --rawr-embed-radius: 3px;\n' +
-        '  --rawr-embed-gap: 1rem;\n' +
-        '}',
+      value: themeCss(theme, `[data-rawr-form="${formId}"]`),
     },
   ]
 
@@ -85,6 +83,12 @@ export const EmbedSnippet = ({
 
   return (
     <div className="flex flex-col gap-4">
+      {isActive ? null : (
+        <p className="m-0 text-small text-error">
+          This form is off. Until it is published, the snippet below shows &ldquo;not found&rdquo; and
+          submissions are refused.
+        </p>
+      )}
       {blocks.map((block) => (
         <div key={block.id} className="flex min-w-0 flex-col gap-1.5">
           <div className="flex flex-wrap items-baseline gap-x-3">

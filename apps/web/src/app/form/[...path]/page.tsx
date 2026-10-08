@@ -1,17 +1,6 @@
-import {
-  countFormView,
-  HONEYPOT_FIELD,
-  publicFormById,
-  publicFormBySlug,
-  TIMING_FIELD,
-  type FormField,
-  type PublicForm,
-} from '@rawr/db'
+import { ATTRIBUTION_FIELDS, countFormView } from '@rawr/db'
 import type { Metadata } from 'next'
-import { cookies } from 'next/headers'
-import { notFound } from 'next/navigation'
-import { cache } from 'react'
-import { PendingButton } from '~/components/pending-button.tsx'
+import { cookies, headers } from 'next/headers'
 import { inBackground } from '~/server/background.ts'
 import { FORM_COPY } from '~/lib/edge-copy.ts'
 import { EMBED_STYLES } from '~/lib/embed-styles.ts'
@@ -19,33 +8,23 @@ import { presetOf, themeCss } from '~/lib/embed-themes.ts'
 import { decodeEcho, echoCookieName } from '~/server/form-echo.ts'
 import { hopHref } from '~/server/redirect-hop.ts'
 import { submitHostedForm } from './actions.ts'
+import { activeForm, resolve } from './lookup.ts'
+import { HostedForm } from './hosted-form.tsx'
 
 /** The hosted form page. Two jobs:
  *
  *  1. Where the embed script is blocked or fails, this is what it degrades to.
- *  2. It is the JavaScript-disabled path. It is a plain server-rendered <form>
- *     that POSTs and re-renders with per-field errors. No script runs here at
- *     all, which is why the honeypot and the timing token are absent and the
- *     spam score reflects that rather than blocking a real person.
+ *  2. It is the JavaScript-disabled path. It is a plain <form> that POSTs and
+ *     re-renders with per-field errors. The honeypot and the timing token are
+ *     hidden inputs here too, so a submission scores like one from the embed.
+ *     Steps and conditions need script; without it every step shows stacked and
+ *     the server does the checking.
  *
  *  Addressed two ways, because the two callers know different things:
  *    /form/<account>/<slug>   a person following a link a marketer wrote
  *    /form/<formId>             the embed's own fallback, which has only an id */
 
 export const dynamic = 'force-dynamic'
-
-/** Keyed on the path parts rather than the array, so the metadata pass and the
- *  render below it share one lookup instead of querying the same form twice. */
-const lookup = cache(
-  async (first: string, second?: string): Promise<PublicForm | null> =>
-    second === undefined ? publicFormById(first) : publicFormBySlug(first, second),
-)
-
-const resolve = async (path: string[]): Promise<PublicForm | null> => {
-  if (path.length === 1 && path[0]) return lookup(path[0])
-  if (path.length === 2 && path[0] && path[1]) return lookup(path[0], path[1])
-  return null
-}
 
 export const generateMetadata = async ({
   params,
@@ -69,8 +48,7 @@ const HostedFormPage = async ({
 }) => {
   const { path } = await params
   const query = await searchParams
-  const form = await resolve(path)
-  if (!form || !form.isActive) notFound()
+  const form = await activeForm(path)
 
   const single = (key: string): string | null => {
     const value = query[key]
@@ -88,6 +66,9 @@ const HostedFormPage = async ({
     : {}
   const sent = single('sent') === '1'
   const held = single('held') === '1'
+  // A page reached from the form's own error redirect has the form as its
+  // Referer, so the visitor's real referrer is carried in the URL instead.
+  const referrer = single(ATTRIBUTION_FIELDS.referrer) ?? (await headers()).get('referer') ?? ''
   const hop = single('go') === '1' && form.settings.successMode === 'redirect' ? hopHref(form.settings.successValue) : null
 
   // The collector never runs here, so this is the only place a load of the
@@ -135,211 +116,29 @@ const HostedFormPage = async ({
             </div>
           ) : sent ? (
             <div className="rawr-done" role="status">
-              {held
-                ? 'Thanks. This has been received and is being reviewed, so it may take a little longer than usual.'
-                : form.settings.successValue}
+              {held ? FORM_COPY.held : form.settings.successValue}
             </div>
           ) : (
             <>
-            <form className="rawr-form" action={submitHostedForm}>
-              <input type="hidden" name="rawr_form_id" value={form.formId} />
-              <input type="hidden" name="rawr_path" value={path.join('/')} />
-              {/* Present so the two paths score identically when script does run;
-                  on a no-JS load it stays at the render time, which the server
-                  reads as a slow, human fill rather than a bot. */}
-              <input type="hidden" name={TIMING_FIELD} value={String(Date.now())} />
-              <div className="rawr-hp" aria-hidden="true">
-                <input type="text" name={HONEYPOT_FIELD} tabIndex={-1} autoComplete="off" defaultValue="" />
-              </div>
-
-              {errors.form ? (
-                <div className="rawr-status" role="alert">
-                  {errors.form}
-                </div>
-              ) : null}
-
-              <div className="rawr-step">
-                {form.fields.map((field) => (
-                  <Field key={field.key} field={field} error={errors.byKey[field.key]} previous={previous[field.key] ?? null} />
-                ))}
-              </div>
-
-              <div className="rawr-actions">
-                <PendingButton className="rawr-submit" pendingLabel={FORM_COPY.sending}>
-                  {form.settings.submitLabel}
-                </PendingButton>
-              </div>
-            </form>
-            <script dangerouslySetInnerHTML={{ __html: KEEP_TYPING }} />
+              <HostedForm
+                action={submitHostedForm}
+                formId={form.formId}
+                path={path.join('/')}
+                referrer={referrer.slice(0, 2048)}
+                timing={String(Date.now())}
+                fields={form.fields}
+                stepLabels={form.settings.steps ?? []}
+                submitLabel={form.settings.submitLabel}
+                errors={errors}
+                previous={previous}
+              />
+              <script dangerouslySetInnerHTML={{ __html: KEEP_TYPING }} />
             </>
-        )}
+          )}
       </main>
     </>
   )
 }
-
-const Field = ({
-  field,
-  error,
-  previous,
-}: {
-  field: FormField
-  error: string | undefined
-  previous: string | null
-}) => {
-  if (field.type === 'hidden') {
-    return <input type="hidden" name={field.key} defaultValue={field.defaultValue ?? ''} />
-  }
-
-  // Prefixed so a field key can never collide with the embed's own chrome. A
-  // field keyed "consent" used to render as id="rawr-consent", which the consent
-  // banner's own rule then positioned fixed across the bottom of the page.
-  const id = `rawr-f-${field.key}`
-  const describedBy = error ? `${id}-error` : field.help ? `${id}-help` : undefined
-
-  if (field.type === 'heading') {
-    return (
-      <div className="rawr-field" data-field={field.key} data-wide>
-        <p className="rawr-heading">{field.label}</p>
-        {field.help ? <small className="rawr-help">{field.help}</small> : null}
-      </div>
-    )
-  }
-
-  // A file field cannot work without script: the upload is a signed PUT the
-  // browser makes. Said plainly rather than rendered as a picker that does
-  // nothing, and the rest of the form still submits without it.
-  if (field.type === 'file') {
-    return (
-      <div className="rawr-field" data-field={field.key} data-wide>
-        <label htmlFor={id}>{field.label}</label>
-        <small className="rawr-help" id={`${id}-help`}>
-          Attaching a file needs JavaScript. Send this form without it and we will ask for the file
-          in our reply.
-        </small>
-      </div>
-    )
-  }
-
-  if (field.type === 'consent') {
-    return (
-      <div className="rawr-field" data-field={field.key} data-wide>
-        <label className="rawr-consent" htmlFor={id}>
-          <input
-            type="checkbox"
-            id={id}
-            name={field.key}
-            value="true"
-            required={field.required}
-            aria-describedby={describedBy}
-          />
-          <span>
-            {field.label}
-            {field.required ? ' *' : ''}
-          </span>
-        </label>
-        {field.help && !error ? (
-          <small className="rawr-help" id={`${id}-help`}>
-            {field.help}
-          </small>
-        ) : null}
-        {error ? (
-          <div className="rawr-error" id={`${id}-error`}>
-            {error}
-          </div>
-        ) : null}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rawr-field" data-field={field.key}>
-      <label htmlFor={id}>
-        {field.label}
-        {field.required ? ' *' : ''}
-      </label>
-
-      {field.type === 'long_text' ? (
-        <textarea
-          id={id}
-          name={field.key}
-          rows={4}
-          required={field.required}
-          placeholder={field.placeholder}
-          defaultValue={previous ?? ''}
-          aria-describedby={describedBy}
-        />
-      ) : field.type === 'select' ? (
-        <select id={id} name={field.key} required={field.required} defaultValue={previous ?? ''} aria-describedby={describedBy}>
-          <option value="">{field.placeholder ?? 'Choose one'}</option>
-          {(field.options ?? []).map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      ) : field.type === 'radio' ? (
-        <div className="rawr-choices" role="radiogroup" aria-labelledby={id}>
-          {(field.options ?? []).map((option) => (
-            <label key={option.value}>
-              <input
-                type="radio"
-                name={field.key}
-                value={option.value}
-                required={field.required}
-                defaultChecked={previous === option.value}
-              />{' '}
-              {option.label}
-            </label>
-          ))}
-        </div>
-      ) : field.type === 'multi_select' ? (
-        // The hosted page ships its own stylesheet, where a <fieldset> would need
-        // its own reset to look the same. role="group" plus aria-labelledby names
-        // the set and is announced.
-        // biome-ignore lint/a11y/useSemanticElements: see above
-        <div className="rawr-choices" role="group" aria-labelledby={id}>
-          {(field.options ?? []).map((option) => (
-            <label key={option.value}>
-              <input type="checkbox" name={field.key} value={option.value} /> {option.label}
-            </label>
-          ))}
-        </div>
-      ) : field.type === 'boolean' ? (
-        <input type="checkbox" id={id} name={field.key} value="true" aria-describedby={describedBy} />
-      ) : (
-        <input
-          id={id}
-          name={field.key}
-          type={htmlType(field.type)}
-          required={field.required}
-          placeholder={field.placeholder}
-          defaultValue={previous ?? ''}
-          aria-describedby={describedBy}
-        />
-      )}
-
-      {field.help && !error ? (
-        <small className="rawr-help" id={`${id}-help`}>
-          {field.help}
-        </small>
-      ) : null}
-      {error ? (
-        <div className="rawr-error" id={`${id}-error`}>
-          {error}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-const htmlType = (type: FormField['type']): string =>
-  type === 'email' ? 'email'
-    : type === 'phone' ? 'tel'
-      : type === 'number' ? 'number'
-        : type === 'date' ? 'date'
-          : type === 'url' ? 'url'
-            : 'text'
 
 const parseErrors = (raw: string | null): { form: string | null; byKey: Record<string, string> } => {
   if (!raw) return { form: null, byKey: {} }
@@ -443,6 +242,8 @@ const PAGE_STYLES = `
     padding: clamp(1rem, 4vw, 3rem) clamp(1rem, 4vw, 2rem);
   }
   .rawr-hosted h1 { font-size: 1.25rem; font-weight: 500; margin: 0 0 1.5rem; }
+  .rawr-step[hidden] { display: none; }
+  .rawr-step-title { grid-column: 1 / -1; margin: 0.5rem 0 0; font-weight: 500; }
 
   /* Only where the form has no look of its own. A form themed for a dark hero
      already says what it wants, and following the reader's system setting on top

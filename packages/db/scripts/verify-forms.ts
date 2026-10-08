@@ -382,6 +382,25 @@ try {
     queue.some((row) => row.id === quarantined.submissionId && row.spamReasons.length > 0),
     queue.find((r) => r.id === quarantined.submissionId)?.spamReasons[0]?.detail)
 
+  const card = queue.find((row) => row.id === quarantined.submissionId)
+  check('the review card names each answer by its question',
+    card?.fieldLabels.first_name === 'First name', card?.fieldLabels.first_name ?? 'no label')
+  check('an unreachable challenge is recorded once, under its own rule, with no points',
+    card?.spamReasons.filter((r) => r.rule === 'challengeUnavailable' && r.points === 0).length === 1 &&
+      !card.spamReasons.some((r) => r.rule === 'noSignals'),
+    card?.spamReasons.map((r) => r.rule).join(', ') ?? 'no card')
+
+  await saveForm(datasaur, {
+    name: `Dormant ${stamp}`,
+    slug: `dormant-${stamp}`,
+    isActive: false,
+    fields: [{ key: 'email', label: 'Email', type: 'email', required: true }],
+    settings: contactUs.settings,
+  })
+  const dormantForm = await publicFormBySlug(SANDBOX.slug, `dormant-${stamp}`)
+  check('a form saved as turned off is served as turned off, so every door refuses it',
+    dormantForm?.isActive === false, `published ${dormantForm?.isActive ?? 'no form'}`)
+
   const reviewer = await actorCtx(SANDBOX.slug, 'admin@sandbox.test', ['contacts', 'sales', 'marketing', 'service', 'reports', 'account'])
   const released = await releaseSubmission(reviewer, quarantined.submissionId)
   check('releasing it creates the contact', !!released.contactId, released.contactId?.slice(0, 8))
@@ -453,6 +472,41 @@ try {
     select count(*)::int as n from dead_letter where job_name = 'slack.form-submission'`)
   check('an unconnected Slack leaves no dead letter behind',
     (slackLetters[0]?.n ?? 0) === 0, `${slackLetters[0]?.n ?? 0} rows`)
+
+  // ------------------------------------------------- system fields are not targets
+  section('a form cannot write a system field or the marketing status')
+
+  const mapping = (key: string, mapsTo: `contact.${string}` | null) => ({
+    name: `Mapping ${key} ${stamp}`,
+    slug: `mapping-${key.replace(/_/g, '-')}-${stamp}`,
+    isActive: true,
+    fields: [
+      { key: 'email', label: 'Email', type: 'email' as const, required: true },
+      { key: 'answer', label: 'Answer', type: 'text' as const, required: false, mapsTo },
+    ],
+    settings: { ...contactUs.settings },
+  })
+  check('saving a form that maps to emails_sent is refused',
+    await refusesAsync(() => saveForm(admin, mapping('emails_sent', 'contact.emails_sent'))))
+  check('saving a form that maps to marketing_status is refused',
+    await refusesAsync(() => saveForm(admin, mapping('marketing_status', 'contact.marketing_status'))))
+
+  // A form saved before the guard keeps its old mapping, so the submit path has to ignore it.
+  const oldMapping = await saveForm(admin, mapping('legacy_sent', null))
+  await scoped(admin, sql`
+    update form set schema = jsonb_set(schema, '{1,mapsTo}', '"contact.emails_sent"'::jsonb)
+     where id = ${oldMapping}`)
+  const mapped = await submitForm({
+    form: (await publicFormBySlug(SANDBOX.slug, `mapping-legacy-sent-${stamp}`))!,
+    body: { email: `mapped.${stamp}@verify-corp.example`, answer: '99', rawr_t: minutesAgo(1) },
+    attribution: {}, ipHash: null, userAgent: null, visitorId: null,
+    degradedSignals: false, challenge: 'not-required',
+  })
+  const written = await scoped<{ emails_sent: number; marketing_status: string | null }>(datasaur, sql`
+    select emails_sent, marketing_status from contact where id = ${mapped.contactId}`)
+  check('an old form mapped to emails_sent still captures the contact, and the system field stays unwritten',
+    !!mapped.contactId && written[0]?.emails_sent !== 99 && written[0]?.marketing_status === null,
+    `emails_sent ${written[0]?.emails_sent}, marketing_status ${written[0]?.marketing_status}`)
 
   // ------------------------------------------------- success redirect address
   section('the success redirect is an http or https address')

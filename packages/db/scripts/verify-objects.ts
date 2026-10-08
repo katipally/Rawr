@@ -395,6 +395,16 @@ try {
     return 'one counted, one stripped, the other object untouched'
   })
 
+  await check('the system dates and counts are marked system, and marketing status is not', async () => {
+    forgetRegistry(ctx.accountId)
+    const contact = (await getRegistry(ctx)).byKey.get('contact')!
+    const system = ['created_at', 'last_contacted_at', 'last_replied_at', 'emails_sent', 'emails_received']
+    const unmarked = system.filter((key) => contact.byKey.get(key)?.isSystem !== true)
+    expect(unmarked.length === 0, `not marked system: ${unmarked.join(', ')}`)
+    expect(contact.byKey.get('marketing_status')?.isSystem === false, 'marketing status is marked system')
+    return `${system.length} system fields flagged, marketing status not`
+  })
+
   await check('a user property reads back as the member’s name in list, record and export, deactivated members included', async () => {
     const [leaver] = await db.insert(s.userAccount).values({ email: `leaver-${Date.now()}@sandbox.test`, name: 'Departed Member' }).returning()
     try {

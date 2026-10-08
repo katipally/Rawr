@@ -20,11 +20,13 @@ export const ReviewList = ({
   rows,
   canReview,
   state,
+  showFormName,
 }: {
   account: string
   rows: SubmissionRow[]
   canReview: boolean
   state: string
+  showFormName: boolean
 }) => {
   const fmt = useFormat()
   const origin = useOrigin()
@@ -72,8 +74,8 @@ export const ReviewList = ({
       {rows.map((row) => (
         <li key={row.id} className="rounded-panel border border-line bg-surface p-3">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <span className="font-medium">{row.formName}</span>
-            <span className="text-xs text-secondary">
+            {showFormName ? <span className="font-medium">{row.formName}</span> : null}
+            <span className="ml-auto text-xs text-secondary">
               {fmt.dateTime(row.at)}
               {' · score '}
               {row.spamScore}
@@ -88,7 +90,7 @@ export const ReviewList = ({
               .filter(([, value]) => !row.uploads.some((file) => file.id === value))
               .map(([key, value]) => (
                 <div key={key} className="contents">
-                  <dt className="text-xs text-secondary @lg:pt-0.5">{key}</dt>
+                  <dt className="text-xs text-secondary @lg:pt-0.5">{Object.hasOwn(row.fieldLabels, key) ? row.fieldLabels[key] : key}</dt>
                   {/* Long answers wrap rather than stretching the row, and a
                       500-character message does not break the layout. */}
                   <dd className="min-w-0 break-words whitespace-pre-wrap">

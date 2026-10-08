@@ -1,5 +1,6 @@
 'use client'
 
+import type { FormTheme } from '@rawr/db/forms'
 import type { Format } from '~/lib/format.ts'
 import { Button, DataTable, DropdownMenu, EmptyState, Field, Modal, Select, TextInput, useToast, type Column } from '@rawr/ui'
 import { ChevronDown } from 'lucide-react'
@@ -20,6 +21,7 @@ export type FormRow = {
   name: string
   slug: string
   isActive: boolean
+  theme: FormTheme | undefined
   folderId: string | null
   fieldCount: number
   submissions: number
@@ -289,7 +291,17 @@ export const FormsTable = ({
       {pager}
 
       <Modal open={embedding !== null} title={embedding ? `Embed “${embedding.name}”` : 'Embed'} onClose={() => setEmbedding(null)}>
-        {embedding ? <EmbedSnippet baseUrl={baseUrl} siteKey={siteKey} formId={embedding.id} account={account} slug={embedding.slug} /> : null}
+        {embedding ? (
+          <EmbedSnippet
+            baseUrl={baseUrl}
+            siteKey={siteKey}
+            formId={embedding.id}
+            account={account}
+            slug={embedding.slug}
+            isActive={embedding.isActive}
+            theme={embedding.theme}
+          />
+        ) : null}
       </Modal>
 
       <Modal

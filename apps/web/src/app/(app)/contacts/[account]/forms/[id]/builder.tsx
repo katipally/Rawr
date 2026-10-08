@@ -375,7 +375,15 @@ export const FormBuilder = ({
       </header>
 
       <Modal open={showEmbed} title={`Embed \u201c${form.name}\u201d`} onClose={() => setShowEmbed(false)}>
-        <EmbedSnippet baseUrl={baseUrl} siteKey={siteKey} formId={form.id} account={account} slug={slug} />
+        <EmbedSnippet
+          baseUrl={baseUrl}
+          siteKey={siteKey}
+          formId={form.id}
+          account={account}
+          slug={slug}
+          isActive={saved.isActive}
+          theme={saved.settings.theme}
+        />
       </Modal>
 
       <Modal
@@ -474,14 +482,14 @@ export const FormBuilder = ({
                 disabled={!canEdit}
                 onChange={(event) => setIsActive(event.target.checked)}
               />
-              Accepting submissions
+              Published
             </label>
             {/* A saved form that is turned off answers 404 at both addresses.
                 Correct, and baffling if nobody said so before the click. */}
             {!isActive ? (
               <p className="mt-1 text-small text-secondary">
-                Until this is ticked, the embed and the link above both answer &ldquo;not
-                found&rdquo;.
+                Off: the hosted link and the embed answer &ldquo;not found&rdquo; and submissions
+                are refused.
               </p>
             ) : null}
           </section>
@@ -603,11 +611,11 @@ export const FormBuilder = ({
                       <TextInput
                         id={`step-${index}`}
                         type="number"
-                        min={0}
-                        value={field.step ?? 0}
+                        min={1}
+                        value={(field.step ?? 0) + 1}
                         disabled={!canEdit}
                         onChange={(event) =>
-                          patch(index, { step: Math.max(0, Number(event.target.value) || 0) })
+                          patch(index, { step: Math.max(0, (Math.floor(Number(event.target.value)) || 1) - 1) })
                         }
                       />
                     </Field>

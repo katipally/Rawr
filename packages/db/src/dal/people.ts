@@ -8,6 +8,7 @@ import { requestEnrichment } from './enrichment.ts'
 import type { AssignOwner, FormField } from './form-schema.ts'
 import type { Tx } from './index.ts'
 import { companyByDomainQuery } from './records.ts'
+import { SYSTEM_FIELD_KEYS } from './registry.ts'
 
 /** The one path by which a stranger becomes a contact.
  *
@@ -242,6 +243,11 @@ const applyLifecycle = async (
   })
 }
 
+/** A stranger's answer never writes a system-maintained field, nor the contact's own
+ *  marketing status, which only the contact and the marketer may change. */
+export const mappedKeyIsWritable = (key: string): boolean =>
+  !SYSTEM_FIELD_KEYS.has(key) && key !== 'marketing_status'
+
 /** Splits answers into the contact and company columns their mapping names. An
  *  unmapped answer is not lost: it is already stored verbatim on the submission or
  *  the booking that carried it.
@@ -260,7 +266,7 @@ export const mapAnswersToColumns = (
     const value = answers[field.key]
     if (value === undefined || value === null || value === '') continue
     const target = object === 'company' ? company : object === 'contact' ? contact : null
-    if (!target || !key) continue
+    if (!target || !key || !mappedKeyIsWritable(key)) continue
     target[key] = Array.isArray(value) ? value.join('; ') : value
   }
   return { contact, company }

@@ -72,6 +72,7 @@ const FormsPage = async ({ params }: { params: Promise<{ account: string }> }) =
             name: form.name,
             slug: form.slug,
             isActive: form.isActive,
+            theme: form.theme,
             folderId: form.folderId,
             fieldCount: form.fieldCount,
             submissions: form.submissions,

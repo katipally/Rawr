@@ -76,12 +76,21 @@ const BuilderPage = async ({
   if (!form) notFound()
 
   // Only contact and company: a form fills in a person and where they work. A
-  // deal is created by a person, not by a stranger filling in a web form.
+  // deal is created by a person, not by a stranger filling in a web form. System
+  // fields are derived by the product, and marketing status is consent, so a
+  // stranger's form must not write either.
   const targets = registry.objects
     .filter((object) => object.key === 'contact' || object.key === 'company')
     .flatMap((object) =>
       object.fields
-        .filter((field) => field.type !== 'relation' && field.type !== 'user' && field.type !== 'json')
+        .filter(
+          (field) =>
+            !field.isSystem &&
+            field.key !== 'marketing_status' &&
+            field.type !== 'relation' &&
+            field.type !== 'user' &&
+            field.type !== 'json',
+        )
         .map((field) => ({
           value: `${object.key}.${field.key}`,
           label: `${object.nameSingular} · ${field.label}`,

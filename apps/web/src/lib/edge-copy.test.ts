@@ -78,3 +78,9 @@ test('the formatters shipped to the browser are the ones that were tested', () =
   // Nothing from outside itself, or it throws the moment it runs in the embed.
   assert.equal(/\bimport\b|\brequire\(/.test(source), false)
 })
+
+test('a held submission says it was received and is being reviewed, never that it was sent', () => {
+  assert.equal(FORM_COPY.held.includes('received'), true)
+  assert.equal(FORM_COPY.held.includes('reviewed'), true)
+  assert.equal(/sent/i.test(FORM_COPY.held), false)
+})

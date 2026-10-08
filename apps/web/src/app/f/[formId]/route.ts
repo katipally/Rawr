@@ -11,7 +11,7 @@ import {
   readBody,
 } from '~/server/edge.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
-import { runSubmission } from '~/server/submit.ts'
+import { isHeld, runSubmission, successFor } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
 import { recordCreated } from '~/server/record-events.ts'
 
@@ -102,8 +102,8 @@ export const POST = async (
       ok: true,
       // The caller learns whether it was accepted, never why it was held. Telling
       // a bot which rule caught it is how the next attempt gets past it.
-      held: result.state === 'quarantined' || result.state === 'confirmed_spam',
-      success: result.success,
+      held: isHeld(result.state),
+      success: successFor(result),
     },
     200,
   )

@@ -1,6 +1,7 @@
 'use server'
 
 import {
+  ATTRIBUTION_FIELDS,
   publicEdgeContext,
   publicFormById,
 } from '@rawr/db'
@@ -12,7 +13,7 @@ import { checkSubmitLimits, clientIpFrom } from '~/server/edge.ts'
 import { ECHO_MAX_AGE_SECONDS, echoCookieName, echoCookiePath, encodeEcho } from '~/server/form-echo.ts'
 import { queueSlackNotification } from '~/server/notify.ts'
 import { hopHref } from '~/server/redirect-hop.ts'
-import { answersFromFormData, runSubmission } from '~/server/submit.ts'
+import { answersFromFormData, hostedAttribution, isHeld, runSubmission, successFor } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
 import { recordCreated } from '~/server/record-events.ts'
 
@@ -61,12 +62,15 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
     },
   } as unknown as NextRequest
 
-  const result = await runSubmission(request, form, body, ip, { degradedSignals: true })
+  const attribution = hostedAttribution(data, path)
+  const result = await runSubmission(request, form, body, ip, { attributionOverride: attribution })
 
   if (result.errors?.length) {
     const byKey: Record<string, string> = {}
     for (const error of result.errors) byKey[error.key] = error.message
-    const params = new URLSearchParams({ e: JSON.stringify({ byKey }) })
+    // The referrer rides the redirect too: the page this lands on is reached from
+    // the form itself, so its own Referer would otherwise replace the real one.
+    const params = new URLSearchParams({ e: JSON.stringify({ byKey }), [ATTRIBUTION_FIELDS.referrer]: attribution.referrer })
     const echo = encodeEcho(form.fields, body)
     if (cookiePath && echo) {
       jar.set(echoCookieName(form.formId), echo, {
@@ -107,14 +111,14 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
     recordCreated(publicEdgeContext(form.accountId), { accountSlug: form.accountSlug }, 'contact', { id: result.contactId })
   }
 
-  if (result.success?.mode === 'redirect' && result.success.value) {
+  const success = successFor(result)
+  if (success?.mode === 'redirect' && success.value) {
     // A native POST answered with a cross-origin redirect is refused by
     // form-action 'self', so the page itself hops (see redirect-hop.ts).
-    redirect(hopHref(result.success.value) ? `${back}?sent=1&go=1` : result.success.value)
+    redirect(hopHref(success.value) ? `${back}?sent=1&go=1` : success.value)
   }
 
-  const held = result.state === 'quarantined' || result.state === 'confirmed_spam'
-  redirect(`${back}?sent=1${held ? '&held=1' : ''}`)
+  redirect(`${back}?sent=1${isHeld(result.state) ? '&held=1' : ''}`)
 }
 
 const errorParam = (message: string): string =>

@@ -60,16 +60,7 @@ export const FormPreview = ({
           {narrow ? 'Show wide' : 'Show at 320px'}
         </Button>
         {steps > 1 ? (
-          <span className="ml-auto text-xs text-secondary">
-            {formStep(current + 1, steps, stepLabel)}
-            <button
-              type="button"
-              className="ml-2 text-link"
-              onClick={() => setStep((value) => (value + 1) % steps)}
-            >
-              next
-            </button>
-          </span>
+          <span className="ml-auto text-xs text-secondary">{formStep(current + 1, steps, stepLabel)}</span>
         ) : null}
       </div>
 
@@ -135,19 +126,32 @@ export const FormPreview = ({
                 ))}
               </div>
               {shown === 'failed' ? <div className="rawr-status">{FORM_COPY.failed}</div> : null}
-              {/* Not disabled. A disabled button renders at 0.6 opacity, which
-                  made the preview lie about the one colour a marketer is here to
-                  choose. It does nothing when clicked because it has no action:
-                  the whole preview is outside a form element. */}
               <div className="rawr-actions">
-                <button type="button" className="rawr-submit" aria-busy={shown === 'sending'}>
-                  {shown === 'sending' ? FORM_COPY.sending : settings.submitLabel}
-                </button>
-                {shown === 'failed' ? (
-                  <button type="button" className="rawr-retry">
-                    {FORM_COPY.retry}
+                {current > 0 ? (
+                  <button type="button" onClick={() => setStep(current - 1)}>
+                    Back
                   </button>
                 ) : null}
+                {current < steps - 1 ? (
+                  <button type="button" className="rawr-next" onClick={() => setStep(current + 1)}>
+                    Next
+                  </button>
+                ) : (
+                  /* Not disabled. A disabled button renders at 0.6 opacity, which
+                     made the preview lie about the one colour a marketer is here to
+                     choose. It does nothing when clicked because it has no action:
+                     the whole preview is outside a form element. */
+                  <>
+                    <button type="button" className="rawr-submit" aria-busy={shown === 'sending'}>
+                      {shown === 'sending' ? FORM_COPY.sending : settings.submitLabel}
+                    </button>
+                    {shown === 'failed' ? (
+                      <button type="button" className="rawr-retry">
+                        {FORM_COPY.retry}
+                      </button>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           )}
