@@ -507,8 +507,26 @@ try {
   await changeThread(sales, thread, { kind: 'assignee', value: null })
   check((await folderRow()).assigned_to === null, 'unassigning clears the teammate')
 
+  // The mailbox owner, holding the Inbox view grant but no contacts edit grant.
+  const viewer: AccountContext = { ...sales, viewHubs: ['contacts'], editHubs: [] }
+  const viewOnly = 'You can read this conversation but not change it for the team. Ask someone with edit access to the Inbox.'
+  for (const change of [
+    { kind: 'archived', value: true },
+    { kind: 'trashed', value: true },
+    { kind: 'assignee', value: salesUser.id },
+  ] as const) {
+    const refusal = await refused(() => changeThread(viewer, thread, change))
+    check(refusal === viewOnly, `a view-only member cannot change a shared thread (${change.kind})`, `${refusal ?? 'no error'}`)
+  }
+  const untouched = await folderRow()
+  check(untouched.archived_at === null && untouched.trashed_at === null && untouched.assigned_to === null, 'the refused changes wrote nothing')
+  await changeThread(viewer, thread, { kind: 'unread', value: true })
+  check((await readThread(viewer, thread))?.thread.unread === true, 'a view-only member can mark a thread unread for themselves')
+  await markThreadRead(viewer, thread)
+  check((await readThread(viewer, thread))?.thread.unread === false, 'a view-only member can mark it read again')
+
   await setMailboxVisibility(sales, { mailboxId: live.id, visibility: 'private' })
-  const hidden = await refused(() => changeThread(marketing, thread, { kind: 'archived', value: true }))
+  const hidden =await refused(() => changeThread(marketing, thread, { kind: 'archived', value: true }))
   check(hidden !== null && (await folderRow()).archived_at === null, 'a member who cannot see a private mailbox cannot archive its thread', `${hidden ?? 'no error'}`)
 
   await changeThread(sales, thread, { kind: 'unread', value: true })

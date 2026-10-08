@@ -1,7 +1,7 @@
 import { and, eq, ne, sql } from 'drizzle-orm'
 import { membership } from '../schema/identity.ts'
 import { mailbox, message, messageThread, messageThreadRead } from '../schema/messaging.ts'
-import { assertCanWrite, isAdmin, type AccountContext } from './context.ts'
+import { assertCanWrite, canWrite, isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import type { MailboxState } from './messages.ts'
 
@@ -119,6 +119,9 @@ export const changeThread = async (ctx: AccountContext, threadId: string, change
     })
   }
 
+  if (!canWrite(ctx, 'contact')) {
+    throw new Error('You can read this conversation but not change it for the team. Ask someone with edit access to the Inbox.')
+  }
   await mutate(ctx, 'message_thread', async (tx) => {
     await assertVisible(tx, ctx, threadId)
     const [before] = await tx

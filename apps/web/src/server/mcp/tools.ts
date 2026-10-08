@@ -850,7 +850,7 @@ const markThreadUnreadTool: ToolDefinition = {
   writes: true,
   toolset: 'mail',
   description: () =>
-    'Undoes mail_mark_read: the conversation shows as unread for you again. Take thread_id from mail_inbox, or from mail_threads_for on a contact. Needs write access.',
+    'Undoes mail_mark_read: the conversation shows as unread for you again. Take thread_id from mail_inbox, or from mail_threads_for on a contact.',
   inputSchema: () => ({
     type: 'object',
     properties: { thread_id: { type: 'string', description: 'The conversation, from mail_inbox.' } },

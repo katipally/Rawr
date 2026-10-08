@@ -98,6 +98,7 @@ const ThreadPage = async ({
             assignedTo={found.thread.assignedTo}
             assignees={pickableUsers(lookups.users, found.thread.assignedTo)}
             backHref={backHref}
+            canWrite={canWrite}
           />
           {replyTo ? (
             <ReplyButton

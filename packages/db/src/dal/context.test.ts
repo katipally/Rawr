@@ -60,6 +60,21 @@ test('the public edge stays narrow', () => {
   }
 })
 
+/** Read state is the person's own. Archive, trash and assignment change the thread
+ *  for the whole team and go to Gmail, so they need the contacts edit grant. */
+test('a view-only member keeps their own read state but cannot change a shared thread', () => {
+  const seat = (editHubs: 'contacts'[]) => ({
+    ...systemContext('11111111-1111-1111-1111-111111111111'),
+    actorKind: 'user' as const,
+    actorId: '22222222-2222-2222-2222-222222222222',
+    viewHubs: ['contacts'] as const,
+    editHubs,
+  })
+  assert.equal(canWrite(seat([]), 'message_thread_read'), true)
+  assert.equal(canWrite(seat([]), 'message_thread'), false)
+  assert.equal(canWrite(seat(['contacts']), 'message_thread'), true)
+})
+
 test('a read needs the view or the edit grant for its hub, and the system context holds every one', () => {
   const seat = (viewHubs: ('reports' | 'sales')[], editHubs: ('reports' | 'sales')[]) => ({
     ...systemContext('11111111-1111-1111-1111-111111111111'),

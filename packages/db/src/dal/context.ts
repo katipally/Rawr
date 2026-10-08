@@ -184,6 +184,9 @@ const WRITE_HUB: Record<string, Hub> = {
    *  regulator, not to a sales target. Deliberately narrower than the grant that
    *  can delete a contact. */
   erasure: 'account',
+  /** Archive, trash and assignment are the team's and go to Gmail. Read state is
+   *  per person and stays on ANY_MEMBER. */
+  message_thread: 'contacts',
 }
 
 /** A write that is really a reader's own bookkeeping: arranging the numbers you
@@ -205,7 +208,6 @@ const ANY_MEMBER = new Set([
   'mailbox',
   'message_blocklist',
   'message_thread_read',
-  'message_thread',
 ])
 
 export const canWrite = (ctx: AccountContext, entity: string): boolean => {

@@ -18,6 +18,7 @@ export const ThreadActions = ({
   assignedTo,
   assignees,
   backHref,
+  canWrite,
 }: {
   threadId: string
   folder: 'inbox' | 'archived' | 'trash'
@@ -25,6 +26,7 @@ export const ThreadActions = ({
   assignedTo: string | null
   assignees: { id: string; label: string }[]
   backHref: string
+  canWrite: boolean
 }) => {
   const router = useRouter()
   const toast = useToast()
@@ -56,71 +58,79 @@ export const ThreadActions = ({
       >
         {unread ? 'Mark read' : 'Mark unread'}
       </Button>
-      {folder === 'trash' ? (
-        <Button
-          variant="secondary"
-          className={button}
-          busy={busy}
-          icon={<ArchiveRestore aria-hidden="true" className="size-3.5" />}
-          onClick={() => void apply({ kind: 'trashed', value: false }, 'Restored to the Inbox.', true)}
-        >
-          Restore
-        </Button>
-      ) : (
+      {canWrite ? (
         <>
-          {folder === 'archived' ? (
+          {folder === 'trash' ? (
             <Button
               variant="secondary"
               className={button}
               busy={busy}
               icon={<ArchiveRestore aria-hidden="true" className="size-3.5" />}
-              onClick={() => void apply({ kind: 'archived', value: false }, 'Moved back to the Inbox.', true)}
+              onClick={() => void apply({ kind: 'trashed', value: false }, 'Restored to the Inbox.', true)}
             >
-              Move to Inbox
+              Restore
             </Button>
           ) : (
-            <Button
-              variant="secondary"
-              className={button}
-              busy={busy}
-              icon={<Archive aria-hidden="true" className="size-3.5" />}
-              onClick={() => void apply({ kind: 'archived', value: true }, 'Archived.', true, { kind: 'archived', value: false })}
-            >
-              Archive
-            </Button>
+            <>
+              {folder === 'archived' ? (
+                <Button
+                  variant="secondary"
+                  className={button}
+                  busy={busy}
+                  icon={<ArchiveRestore aria-hidden="true" className="size-3.5" />}
+                  onClick={() => void apply({ kind: 'archived', value: false }, 'Moved back to the Inbox.', true)}
+                >
+                  Move to Inbox
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  className={button}
+                  busy={busy}
+                  icon={<Archive aria-hidden="true" className="size-3.5" />}
+                  onClick={() => void apply({ kind: 'archived', value: true }, 'Archived.', true, { kind: 'archived', value: false })}
+                >
+                  Archive
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                className={button}
+                busy={busy}
+                icon={<Trash2 aria-hidden="true" className="size-3.5" />}
+                onClick={() => void apply({ kind: 'trashed', value: true }, 'Moved to Trash.', true, { kind: 'trashed', value: false })}
+              >
+                Delete
+              </Button>
+            </>
           )}
-          <Button
-            variant="secondary"
-            className={button}
-            busy={busy}
-            icon={<Trash2 aria-hidden="true" className="size-3.5" />}
-            onClick={() => void apply({ kind: 'trashed', value: true }, 'Moved to Trash.', true, { kind: 'trashed', value: false })}
+          <Select
+            aria-label="Assign to"
+            title="Assign to a teammate"
+            className="w-auto max-w-44 truncate"
+            value={assignedTo ?? ''}
+            disabled={busy}
+            onChange={(event) =>
+              void apply(
+                { kind: 'assignee', value: event.target.value || null },
+                event.target.value ? 'Assigned.' : 'Unassigned.',
+                false,
+              )
+            }
           >
-            Delete
-          </Button>
+            <option value="">Nobody</option>
+            {assignees.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.label}
+              </option>
+            ))}
+          </Select>
         </>
+      ) : (
+        <p className="text-small text-secondary">
+          Read only for you. Ask someone with edit access to the Inbox to archive, delete or assign.
+        </p>
       )}
-      <Select
-        aria-label="Assign to"
-        title="Assign to a teammate"
-        className="w-auto max-w-44 truncate"
-        value={assignedTo ?? ''}
-        disabled={busy}
-        onChange={(event) =>
-          void apply(
-            { kind: 'assignee', value: event.target.value || null },
-            event.target.value ? 'Assigned.' : 'Unassigned.',
-            false,
-          )
-        }
-      >
-        <option value="">Nobody</option>
-        {assignees.map((person) => (
-          <option key={person.id} value={person.id}>
-            {person.label}
-          </option>
-        ))}
-      </Select>
     </div>
   )
 }
