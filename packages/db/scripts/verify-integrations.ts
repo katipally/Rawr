@@ -517,6 +517,137 @@ try {
     return 'nobody is mailed after opting out, in either direction'
   })
 
+  console.log('')
+  console.log('-- rematch writes the timeline, engagement and opt-outs ---------')
+
+  const lateEmail = `verify-late-${stamp}@partner1.example`
+  const ingestOnlyEmail = `verify-ingest-only-${stamp}@partner1.example`
+  await createRecord(admin, 'contact', { first_name: 'Ingest', last_name: 'Only', email: ingestOnlyEmail })
+  await ingestMarketingEvent(admin, {
+    source: 'brevo',
+    providerEventId: `ingest-only-unsub-${stamp}`,
+    kind: 'unsubscribe',
+    email: ingestOnlyEmail,
+    subject: 'The newsletter',
+    at: new Date(),
+    detail: {},
+  })
+  await ingestMarketingEvent(admin, {
+    source: 'apollo',
+    providerEventId: `late-open-${stamp}`,
+    kind: 'open',
+    email: lateEmail,
+    subject: 'The late pilot',
+    at: new Date(),
+    detail: {},
+  })
+  await ingestMarketingEvent(admin, {
+    source: 'apollo',
+    providerEventId: `late-sent-${stamp}`,
+    kind: 'sequence_step',
+    email: lateEmail,
+    subject: 'The late sequence',
+    at: new Date(),
+    detail: { event: 'sent', step: 1 },
+  })
+  await ingestMarketingEvent(admin, {
+    source: 'brevo',
+    providerEventId: `late-unsub-${stamp}`,
+    kind: 'unsubscribe',
+    email: lateEmail,
+    subject: 'The newsletter',
+    at: new Date(),
+    detail: {},
+  })
+  const late = await createRecord(admin, 'contact', { first_name: 'Late', last_name: 'Arrival', email: lateEmail })
+
+  const footprint = async () => {
+    const [contactRow] = await owner`select emails_sent, emails_received, last_contacted_at from contact where id = ${late.id}`
+    const [links] = await owner`select count(*)::int as n from activity_link where entity_id = ${late.id}`
+    const [audits] = await owner`select count(*)::int as n from audit_log where entity = 'subscription_state' and entity_id = ${late.id}`
+    const [ingestAudits] = await owner`select count(*)::int as n from audit_log where entity = 'subscription_state' and entity_id = (select id from contact where email = ${ingestOnlyEmail})`
+    return JSON.stringify([contactRow, links?.n, audits?.n, ingestAudits?.n])
+  }
+
+  await check('a rematch puts the tracked open on the contact timeline', async () => {
+    const result = await rematchInbound(admin)
+    expect(result.matched >= 3, `${result.matched} matched`)
+    const timeline = await readTimeline(admin, {
+      entity: { entityType: 'contact', entityId: late.id },
+      types: ['email_tracking'],
+    })
+    expect(timeline.rows.length === 1, `${timeline.rows.length} tracking entries after the rematch`)
+    expect(timeline.rows[0]!.subject === 'opened The late pilot', `subject was "${timeline.rows[0]!.subject}"`)
+    return timeline.rows[0]!.subject ?? ''
+  })
+
+  await check('a rematched sequence send reaches the timeline and refreshes the engagement counts', async () => {
+    const timeline = await readTimeline(admin, {
+      entity: { entityType: 'contact', entityId: late.id },
+      types: ['sequence_activity'],
+    })
+    expect(timeline.rows.length === 1, `${timeline.rows.length} sequence entries after the rematch`)
+    const [row] = await owner`select emails_sent from contact where id = ${late.id}`
+    expect(Number(row?.emails_sent) === 1, `emails_sent is ${row?.emails_sent}, not 1`)
+    return 'the contact card counts it as sent'
+  })
+
+  await check('a rematched unsubscribe writes the opt-out', async () => {
+    const external = (await readSubscriptions(admin, late.id)).filter((row) => !row.isInternal)
+    expect(external.length > 0, 'the account has no external subscription type to check')
+    expect(
+      external.every((row) => row.state === 'unsubscribed'),
+      external.map((row) => `${row.name}=${row.state}`).join(', '),
+    )
+    expect((await mailableContacts(admin, [late.id])).length === 0, 'somebody who opted out is still mailable')
+    return 'nobody is mailed after a rematched opt-out'
+  })
+
+  await check('an event matched at ingest is not written again by a rematch', async () => {
+    const [before] = await owner`select count(*)::int as n from audit_log where entity = 'subscription_state' and entity_id = (select id from contact where email = ${ingestOnlyEmail})`
+    expect(before?.n === 1, `${before?.n} opt-out audits before the rematch`)
+    await rematchInbound(admin)
+    const [after] = await owner`select count(*)::int as n from audit_log where entity = 'subscription_state' and entity_id = (select id from contact where email = ${ingestOnlyEmail})`
+    expect(after?.n === 1, `${after?.n} opt-out audits after the rematch`)
+    return 'the claim is the only thing that lets an event through once'
+  })
+
+  await check('the same provider event id in another account lands on that account', async () => {
+    // A free-mail address, so no company is created: company is a seeded table and cleanup leaves it alone.
+    const peerEmail = `verify-peer-${stamp}@gmail.com`
+    const peerContact = await createRecord(probeCtx, 'contact', { first_name: 'Peer', last_name: 'Person', email: peerEmail })
+    let outcome: Awaited<ReturnType<typeof ingestMarketingEvent>>
+    let timeline: Awaited<ReturnType<typeof readTimeline>>
+    try {
+      outcome = await ingestMarketingEvent(probeCtx, {
+        source: 'apollo',
+        providerEventId: `late-open-${stamp}`,
+        kind: 'open',
+        email: peerEmail,
+        subject: 'The peer pilot',
+        at: new Date(),
+        detail: {},
+      })
+      timeline = await readTimeline(probeCtx, {
+        entity: { entityType: 'contact', entityId: peerContact.id },
+        types: ['email_tracking'],
+      })
+    } finally {
+      await owner`delete from activity where id in (select activity_id from activity_link where entity_id = ${peerContact.id})`
+      await owner`delete from contact where id = ${peerContact.id}`
+    }
+    expect(outcome.stored && outcome.matched, outcome.reason ?? 'not stored')
+    expect(timeline.rows.length === 1, `${timeline.rows.length} tracking entries in the other account`)
+    return 'the timeline entry id is per account, so the sandbox event did not take it'
+  })
+
+  await check('a second rematch changes nothing', async () => {
+    const settled = await footprint()
+    await rematchInbound(admin)
+    expect((await footprint()) === settled, 'a second rematch changed the timeline, the counts or the opt-outs')
+    return 'rematching twice is the same as rematching once'
+  })
+
   let bulkSegmentId = ''
 
   await check('a push walks past the old two-hundred-row ceiling', async () => {
@@ -1790,7 +1921,7 @@ try {
       events: ['deal.stage_changed'],
     })
     endpointId = made.id
-    expect(made.secret.startsWith('whsec_'), made.secret.slice(0, 8))
+    expect(made.secret.startsWith('whsec_'), `signing key starts ${made.secret.slice(0, 6)}...`)
     const listed = await listWebhookEndpoints(admin)
     const mine = listed.find((row) => row.id === endpointId)
     expect(Boolean(mine), 'the endpoint is not in the list')

@@ -452,19 +452,24 @@ try {
     }
   })
 
-  await check('renaming a choice does not rewrite stored values, so search still matches what the record holds', async () => {
+  await check('a choice a record still holds cannot be dropped, and a rename carries the record and its search with it', async () => {
     const clinic = await createCustomObject(ctx, { nameSingular: 'Ward', namePlural: 'Wards' })
     try {
       await createField(ctx, { objectKey: clinic.key, key: 'stage', label: 'Stage', type: 'select', options: ['Lead', 'Won'] })
       forgetRegistry(ctx.accountId)
       const fieldId = (await getRegistry(ctx)).byKey.get(clinic.key)!.byKey.get('stage')!.id
       const made = await createRecord(ctx, clinic.key, { name: 'Ward north', stage: 'Lead' })
-      await updateField(ctx, { id: fieldId, options: ['Prospect', 'Won'] })
       const found = async (term: string) =>
         (await listRecords(ctx, { object: clinic.key, limit: 50, search: term })).rows.some((row) => row.id === made.id)
-      expect(await found('Lead'), 'the stored choice is not searchable after the rename')
-      expect(!(await found('Prospect')), 'the new label is searchable, but no record holds it')
-      return 'the record still holds "Lead", so "Lead" is found and "Prospect" is not'
+      let refusal = ''
+      await updateField(ctx, { id: fieldId, options: ['Prospect', 'Won'] }).catch((cause: Error) => {
+        refusal = cause.message
+      })
+      expect(refusal === '1 record still uses Lead. Change them first.', `said: ${refusal}`)
+      await updateField(ctx, { id: fieldId, options: ['Prospect', 'Won'], renames: [{ from: 'Lead', to: 'Prospect' }] })
+      expect(await found('Prospect'), 'the renamed choice is not searchable on the record')
+      expect(!(await found('Lead')), 'the old choice is still searchable')
+      return 'Lead is refused while held; renamed to Prospect, the record is found by Prospect and not by Lead'
     } finally {
       await deleteCustomObject(ctx, clinic.id)
     }

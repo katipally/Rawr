@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import { containsPattern, fragmentsOf, searchTextFrom } from './text-match.ts'
+import { containsPattern, escapeLike, fragmentsOf, searchTextFrom } from './text-match.ts'
 
 test('a blank search has no fragments, so it filters nothing', () => {
   assert.deepEqual(fragmentsOf(''), [])
@@ -22,6 +22,12 @@ test('%, _ and backslash in a fragment are escaped so they match themselves', ()
   assert.equal(containsPattern('100%'), '%100\\%%')
   assert.equal(containsPattern('a_b'), '%a\\_b%')
   assert.equal(containsPattern('c:\\d'), '%c:\\\\d%')
+})
+
+test('escapeLike escapes only the LIKE metacharacters, so a prefix pattern can be built from it', () => {
+  assert.equal(escapeLike('50%_off\\'), '50\\%\\_off\\\\')
+  assert.equal(escapeLike('Jane'), 'Jane')
+  assert.equal(`${escapeLike('10%')}%`, '10\\%%')
 })
 
 test('the search text of a custom record holds its textual fields in field order, and nothing else', () => {

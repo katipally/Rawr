@@ -230,7 +230,7 @@ export const recordOptions = async (
                where deleted_at is null and ${rowsOf(object)}
                  ${exclude ? sql`and id <> ${exclude}` : sql``}
                  and (search @@ plainto_tsquery('simple', ${trimmed})
-                      or ${match} ilike ${`%${trimmed}%`})
+                      or ${everyFragment(trimmed, (pattern) => sql`${match} ilike ${pattern}`)!})
                order by extensions.similarity(${match}, ${trimmed}) desc, created_at desc
                limit ${limit}`,
     )

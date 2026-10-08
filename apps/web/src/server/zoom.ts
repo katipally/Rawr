@@ -1,5 +1,5 @@
 import { readCredentials, recordHealth, type AccountContext } from '@rawr/db'
-import { sendWithBackoff, type ConnectionTest } from './integrations/provider.ts'
+import { providerError, sendWithBackoff, type ConnectionTest, type ProviderError } from './integrations/provider.ts'
 
 /** Nothing here throws: a Zoom outage must not lose a booking, so failure comes
  *  back as a reason and the caller confirms without a link. */
@@ -7,6 +7,24 @@ import { sendWithBackoff, type ConnectionTest } from './integrations/provider.ts
 const TOKEN_URL = 'https://zoom.us/oauth/token'
 const API = 'https://api.zoom.us/v2'
 const TIMEOUT_MS = 8_000
+
+/** Only the code with a fix a person can make gets its own sentence. Zoom's raw
+ *  body names fields and codes nobody here can act on, so it is logged, not shown. */
+export const zoomRefusalMessage = (body: string): string => {
+  let code: unknown
+  try {
+    code = (JSON.parse(body) as { error?: unknown }).error
+  } catch {
+    code = undefined
+  }
+  if (code === 'invalid_client') return 'Zoom rejected the client ID or secret.'
+  return 'Zoom refused the request. Try again, or test the connection.'
+}
+
+const refused = (status: number, body: string): string => {
+  console.warn(`[zoom] answered ${status}: ${body.slice(0, 500)}`)
+  return zoomRefusalMessage(body)
+}
 
 type ZoomCredentials = { accountId: string; clientId: string; clientSecret: string }
 
@@ -49,7 +67,7 @@ const accessToken = async (creds: ZoomCredentials): Promise<string> => {
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    throw new Error(`Zoom refused the credential: ${response.status} ${detail.slice(0, 200)}`)
+    throw providerError(refused(response.status, detail), { status: response.status, disconnected: true })
   }
 
   const payload = (await response.json()) as { access_token?: string; expires_in?: number }
@@ -86,7 +104,7 @@ export const createZoomMeeting = async (
     return {
       ok: false,
       reason:
-        'Zoom is not connected. Paste the server-to-server OAuth credentials on Settings, Integrations.',
+        'Zoom is not connected. Paste the server-to-server OAuth credentials and connect it under Connected Apps.',
     }
   }
 
@@ -119,10 +137,7 @@ export const createZoomMeeting = async (
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
-      return {
-        ok: false,
-        reason: `Zoom answered ${response.status} ${response.statusText}${detail ? `: ${detail.slice(0, 200)}` : ''}`,
-      }
+      return { ok: false, reason: refused(response.status, detail) }
     }
 
     const meeting = (await response.json()) as { id?: number | string; join_url?: string }
@@ -190,7 +205,7 @@ export const updateZoomMeeting = async (
     )
     if (!response.ok) {
       const detail = await response.text().catch(() => '')
-      return { ok: false, reason: `Zoom refused the change: ${response.status} ${detail.slice(0, 200)}` }
+      return { ok: false, reason: refused(response.status, detail) }
     }
     // A PATCH returns no body, and the join link outlives a time change.
     return { ok: true, meeting: { joinUrl: '', meetingId } }
@@ -213,8 +228,8 @@ export const testZoom = async (ctx: AccountContext): Promise<ConnectionTest> => 
     return { ok: true, detail: `Zoom issued a token for account ${creds.accountId}.` }
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause)
-    // Zoom answers a bad credential with 400, not 401, so the message decides.
-    await recordHealth(ctx, 'zoom', { ok: false, error: detail, disconnected: /refused the credential/.test(detail) })
+    // Zoom answers a bad credential with 400, not 401, so the token call marks it.
+    await recordHealth(ctx, 'zoom', { ok: false, error: detail, disconnected: cause instanceof Error && (cause as ProviderError).disconnected === true })
     return { ok: false, detail }
   }
 }

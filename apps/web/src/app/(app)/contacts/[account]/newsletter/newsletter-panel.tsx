@@ -21,7 +21,7 @@ export const NewsletterPanel = ({
   const [segmentId, setSegmentId] = useState(segments[0]?.id ?? '')
   const [listId, setListId] = useState(defaultListId)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<string | null>(null)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
 
   if (!canWrite) {
     return (
@@ -47,13 +47,13 @@ export const NewsletterPanel = ({
         segmentId,
         listId: listId === '' ? null : Number(listId),
       })
-      setResult(
-        `${outcome.pushed} pushed to list ${outcome.listId ?? listId}, ${outcome.skipped} left out: opted out, or no address on the record.`,
-      )
-      toast('success', 'Pushed to Brevo.')
+      setResult({
+        ok: true,
+        text: `${outcome.pushed} pushed to list ${outcome.listId ?? listId}, ${outcome.skipped} left out: opted out, or no address on the record.`,
+      })
     } catch (cause) {
       const message = errorMessage(cause)
-      setResult(message)
+      setResult({ ok: false, text: message })
       toast('error', message)
     } finally {
       setBusy(false)
@@ -95,8 +95,8 @@ export const NewsletterPanel = ({
       </div>
 
       {result ? (
-        <p role="status" className="text-secondary">
-          {result}
+        <p role="status" className={result.ok ? 'text-secondary' : 'text-error'}>
+          {result.text}
         </p>
       ) : null}
     </div>

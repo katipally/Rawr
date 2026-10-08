@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, withAccount } from './index.ts'
+import { MACHINE_SENDER_PATTERN } from './machine-mail.ts'
 import { addDays, dayKey, zonedTimeToUtc } from './slots.ts'
 
 /** B7. Six reports, each one question answered over a date range.
@@ -486,6 +487,8 @@ export const emailReport = async (ctx: AccountContext, range: Range): Promise<Em
             on reply.thread_id = out.thread_id
            and reply.direction = 'inbound'
            and reply.sent_at > out.sent_at
+           and not reply.is_auto_reply
+           and coalesce(reply.from_addr, '') !~* ${MACHINE_SENDER_PATTERN}
          where out.direction = 'outbound' and ${bounds(range, 'out.sent_at')}
          group by out.id, out.mailbox_id, out.sent_at
       )

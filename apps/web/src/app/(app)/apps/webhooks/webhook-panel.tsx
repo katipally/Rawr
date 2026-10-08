@@ -36,7 +36,7 @@ const health = (row: EndpointView, fmt: Format): { tone: 'ok' | 'warn' | 'error'
   if (row.lastError) {
     return {
       tone: 'error',
-      text: `failing since ${row.lastErrorAt ? fmt.dateTime(row.lastErrorAt) : 'recently'}`,
+      text: `last failed ${row.lastErrorAt ? fmt.dateTime(row.lastErrorAt) : 'recently'}`,
     }
   }
   if (row.lastOkAt) return { tone: 'ok', text: `last delivered ${fmt.dateTime(row.lastOkAt)}` }
@@ -299,7 +299,11 @@ export const WebhookPanel = ({ rows, events, canWrite }: WebhookPanelProps) => {
                 void run(
                   () => api.integrations.webhooks.remove.mutate({ id: removing!.id }),
                   'The endpoint was deleted.',
-                ).then((ok) => ok && setRemoving(null))
+                ).then((ok) => {
+                  if (!ok) return
+                  setRemoving(null)
+                  setIssued(null)
+                })
               }
             >
               Delete

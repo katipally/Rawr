@@ -140,6 +140,8 @@ export type SubmitResult = {
   state: SpamVerdict['state'] | 'released'
   contactId: string | null
   companyId: string | null
+  /** True when this submission created the contact, so the caller announces a record created. */
+  contactCreated?: boolean | undefined
   /** Present only when validation failed. Nothing is written in that case. */
   errors?: FieldError[] | undefined
   /** True when an idempotency key matched an existing row and nothing was written. */
@@ -376,7 +378,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
     const linked =
       verdict.state === 'clean'
         ? await capturePerson(tx, ctx, { fields, answers, email, attribution, settings })
-        : { contactId: null, companyId: null }
+        : { contactId: null, companyId: null, created: false }
 
     const [row] = await tx
       .insert(formSubmission)
@@ -468,6 +470,7 @@ export const submitForm = async (input: SubmitInput): Promise<SubmitResult> => {
       state: verdict.state,
       contactId: linked.contactId,
       companyId: linked.companyId,
+      contactCreated: linked.created,
       confirmations,
       success: publicSuccess(settings),
       notify:
@@ -528,7 +531,7 @@ const capturePerson = async (
   ctx: AccountContext,
   input: UpsertInput,
 ): Promise<CapturedPerson> => {
-  if (!input.email) return { contactId: null, companyId: null }
+  if (!input.email) return { contactId: null, companyId: null, created: false }
   const mapped = mapAnswersToColumns(input.fields, input.answers)
   return upsertCapturedPerson(tx, ctx, {
     email: input.email,
@@ -943,7 +946,7 @@ export const listSubmissions = async (
 export const releaseSubmission = async (
   ctx: AccountContext,
   id: string,
-): Promise<{ contactId: string | null }> => {
+): Promise<{ contactId: string | null; contactCreated: boolean }> => {
   const held = await withAccount(ctx, async (tx) => {
     const [row] = await tx
       .select({
@@ -1022,7 +1025,7 @@ export const releaseSubmission = async (
     }
 
     return {
-      result: { contactId: linked.contactId },
+      result: { contactId: linked.contactId, contactCreated: linked.created },
       audit: {
         entity: 'form_submission',
         entityId: id,

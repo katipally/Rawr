@@ -60,6 +60,8 @@ import {
 import { bulkUpdateRecords, createRecord, deleteRecord, getRecord, listRecords, restoreRecords, updateRecord } from '../src/dal/records.ts'
 import { readTimeline } from '../src/dal/activity.ts'
 import { readBoard, groupableFields } from '../src/dal/board.ts'
+import { deleteView, saveView } from '../src/dal/views.ts'
+import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
 import { recordOptions } from '../src/dal/search.ts'
 import { forgetRegistry, getRegistry, mutateRegistry, objectOrThrow } from '../src/dal/registry.ts'
 import { deleteEmailTemplate, saveEmailTemplate } from '../src/dal/sequences.ts'
@@ -203,6 +205,77 @@ try {
     expect(found?.label === 'Verify renewal risk (renamed)', 'the label did not change')
     expect(found?.key === fieldKey, 'the key changed, which would orphan every stored value')
     return 'renaming a label never touches data'
+  })
+
+  await check('a rename rewrites the view, segment and rule that name the old choice, and not another field with the same text', async () => {
+    const otherKey = `verify_other_${stamp}`
+    await createField(admin, { objectKey: 'deal', key: otherKey, label: 'Verify other risk', type: 'select', options: ['Low', 'Medium', 'High'] })
+    const onKey = (field: string, value: string) => ({ conjunction: 'and' as const, conditions: [{ field, operator: 'is' as const, value }] })
+
+    const view = await saveView(admin, {
+      objectKey: 'deal',
+      name: `Verify view ${stamp}`,
+      kind: 'table',
+      columns: ['name'],
+      sorts: [],
+      filters: [onKey(fieldKey, 'High'), onKey(otherKey, 'High')],
+      expectedUpdatedAt: null,
+    })
+    const segment = await saveSegment(admin, { objectKey: 'deal', name: `Verify segment ${stamp}`, filters: [onKey(fieldKey, 'High')] })
+    const otherSegment = await saveSegment(admin, { objectKey: 'deal', name: `Verify other segment ${stamp}`, filters: [onKey(otherKey, 'High')] })
+    const rule = await saveAutomation(admin, {
+      name: `Verify rule ${stamp}`,
+      trigger: 'record_created',
+      objectKey: 'deal',
+      conditions: [onKey(fieldKey, 'High')],
+      steps: [
+        { kind: 'action', type: 'set_field', config: { field: fieldKey, value: 'High' } },
+        { kind: 'action', type: 'set_field', config: { field: otherKey, value: 'High' } },
+      ],
+      isActive: false,
+    })
+    const [beforeView] = await owner<{ updated_at: Date }[]>`select updated_at from saved_view where id = ${view.id}::uuid`
+
+    try {
+      await updateField(admin, { id: fieldId, options: ['Low', 'Medium', 'Urgent'], renames: [{ from: 'High', to: 'Urgent' }] })
+
+      const [viewRow] = await owner<{ filters: unknown; updated_at: Date }[]>`select filters, updated_at from saved_view where id = ${view.id}::uuid`
+      const [segmentRow] = await owner<{ query: unknown }[]>`select query from segment where id = ${segment.id}::uuid`
+      const [otherSegmentRow] = await owner<{ query: unknown }[]>`select query from segment where id = ${otherSegment.id}::uuid`
+      const [ruleRow] = await owner<{ conditions: unknown; steps: unknown }[]>`select conditions, steps from automation where id = ${rule.id}::uuid`
+      const values = (node: unknown, field: string): unknown[] =>
+        Array.isArray(node)
+          ? node.flatMap((entry) => values(entry, field))
+          : node && typeof node === 'object'
+            ? (node as { field?: unknown }).field === field
+              ? [(node as { value?: unknown }).value]
+              : Object.values(node).flatMap((child) => values(child, field))
+            : []
+      const setValues = (node: unknown, field: string): unknown[] =>
+        Array.isArray(node)
+          ? node.flatMap((entry) => setValues(entry, field))
+          : node && typeof node === 'object'
+            ? (node as { type?: unknown; config?: { field?: unknown; value?: unknown } }).type === 'set_field' &&
+              (node as { config: { field?: unknown } }).config.field === field
+              ? [(node as { config: { value?: unknown } }).config.value]
+              : Object.values(node).flatMap((child) => setValues(child, field))
+            : []
+
+      expect(JSON.stringify(values(viewRow!.filters, fieldKey)) === '["Urgent"]', `view filter says ${JSON.stringify(values(viewRow!.filters, fieldKey))}`)
+      expect(JSON.stringify(values(viewRow!.filters, otherKey)) === '["High"]', 'the other field in the same view was rewritten')
+      expect(viewRow!.updated_at > beforeView!.updated_at, 'the view did not record the change')
+      expect(JSON.stringify(values(segmentRow!.query, fieldKey)) === '["Urgent"]', 'the segment still names High')
+      expect(JSON.stringify(values(otherSegmentRow!.query, otherKey)) === '["High"]', 'the other field segment was rewritten')
+      expect(JSON.stringify(values(ruleRow!.conditions, fieldKey)) === '["Urgent"]', 'the rule condition still names High')
+      expect(JSON.stringify(setValues(ruleRow!.steps, fieldKey)) === '["Urgent"]', 'the rule action still sets High')
+      expect(JSON.stringify(setValues(ruleRow!.steps, otherKey)) === '["High"]', 'the other field action was rewritten')
+    } finally {
+      await deleteView(admin, view.id!)
+      await deleteSegment(admin, segment.id)
+      await deleteSegment(admin, otherSegment.id)
+      await removeAutomation(admin, rule.id)
+    }
+    return 'view, segment, rule condition and rule action follow the rename; the same text on another field stays'
   })
 
   await check('a core field cannot be deleted', async () => {
@@ -1123,6 +1196,141 @@ try {
     expect(overlap.length === 0, `${overlap.length} records visible to both tenants`)
     return `${theirs.length} of its own, none of Datasaur's`
   })
+
+  console.log('')
+  console.log('-- renaming a choice and removing one in use --------------------')
+
+  // Values are stored as the choice's text, so a rename has to rewrite them in the
+  // same save, and a removal has to be refused while anything still holds the text.
+  // A custom object, because a rename's search text is kept only on custom records.
+  const object = await createCustomObject(admin, { nameSingular: `Verify choice ${stamp}`, namePlural: `Verify choices ${stamp}` })
+  const stageKey = `verify_stage_${stamp}`
+  const tagKey = `verify_tags_${stamp}`
+  const stage = await createField(admin, { objectKey: object.key, key: stageKey, label: 'Verify stage', type: 'select', options: ['Lead', 'Trial', 'Won'] })
+  const tags = await createField(admin, { objectKey: object.key, key: tagKey, label: 'Verify tags', type: 'multi_select', options: ['Alpha', 'Beta', 'Gamma'] })
+  const choiceNamed = (tag: string) => `Verify choice ${tag} ${stamp}`
+  const one = await createRecord(admin, object.key, { name: choiceNamed('one'), [stageKey]: 'Lead', [tagKey]: ['Alpha', 'Beta'] })
+  const two = await createRecord(admin, object.key, { name: choiceNamed('two'), [stageKey]: 'Trial', [tagKey]: ['Beta'] })
+  const three = await createRecord(admin, object.key, { name: choiceNamed('three'), [stageKey]: 'Lead', [tagKey]: ['Gamma'] })
+  const four = await createRecord(admin, object.key, { name: choiceNamed('four') })
+  const recordIds = [one!.id, two!.id, three!.id, four!.id]
+  const valuesOf = async (keys: string[]) => {
+    const rows = await db.execute<{ id: string; custom: Record<string, unknown>; search_text: string | null }>(
+      sql`select id, custom, search_text from custom_record where id in (${sql.join(recordIds.map((id) => sql`${id}::uuid`), sql`, `)})`,
+    )
+    return new Map(rows.map((row) => [row.id, { custom: row.custom, search: row.search_text, pick: keys.map((key) => row.custom[key]) }]))
+  }
+
+  await check('a rename moves every record that holds the old choice, trashed ones too', async () => {
+    await updateField(admin, { id: stage.id, options: ['Prospect', 'Trial', 'Won'], renames: [{ from: 'Lead', to: 'Prospect' }] })
+    await deleteRecord(admin, object.key, three!.id)
+    const after = await valuesOf([stageKey])
+    expect(after.get(one!.id)?.custom[stageKey] === 'Prospect', `one holds ${String(after.get(one!.id)?.custom[stageKey])}`)
+    expect(after.get(three!.id)?.custom[stageKey] === 'Prospect', `trashed three holds ${String(after.get(three!.id)?.custom[stageKey])}`)
+    expect(after.get(two!.id)?.custom[stageKey] === 'Trial', 'a record on another choice was touched')
+    return 'Lead became Prospect on two records, the trashed one included'
+  })
+
+  await check('the search text follows the rename', async () => {
+    const after = await valuesOf([stageKey])
+    expect(after.get(one!.id)?.search?.includes('Prospect') === true, `search text is ${String(after.get(one!.id)?.search)}`)
+    expect(after.get(one!.id)?.search?.includes('Lead') === false, 'the old choice is still searchable')
+    return 'found by the new name, not the old'
+  })
+
+  await check('a choice still held by a record cannot be removed, and the count includes trashed records', async () => {
+    const message = await refuses('removing a choice in use', () =>
+      updateField(admin, { id: stage.id, options: ['Trial', 'Won'] }),
+    )
+    expect(message === '2 records still use Prospect. Change them first.', `said: ${message}`)
+    return message
+  })
+
+  await check('removing a choice nothing holds is allowed', async () => {
+    await updateField(admin, { id: stage.id, options: ['Prospect', 'Trial'] })
+    await updateField(admin, { id: stage.id, options: ['Prospect', 'Trial', 'Won'] })
+    return 'Won went and came back, with nothing lost'
+  })
+
+  await check('a rename onto a choice that stays is refused, not merged', async () => {
+    const message = await refuses('a rename onto an existing choice', () =>
+      updateField(admin, { id: stage.id, options: ['Prospect', 'Won'], renames: [{ from: 'Trial', to: 'Won' }] }),
+    )
+    expect(message === 'Won is already a choice on Verify stage.', `said: ${message}`)
+    return message
+  })
+
+  await check('a swap of two names in one save moves both sets of records', async () => {
+    await updateField(admin, {
+      id: stage.id,
+      options: ['Trial', 'Prospect', 'Won'],
+      renames: [
+        { from: 'Prospect', to: 'Trial' },
+        { from: 'Trial', to: 'Prospect' },
+      ],
+    })
+    const after = await valuesOf([stageKey])
+    expect(after.get(one!.id)?.custom[stageKey] === 'Trial', 'the Prospect record did not become Trial')
+    expect(after.get(two!.id)?.custom[stageKey] === 'Prospect', 'the Trial record did not become Prospect')
+    return 'one statement, so neither rename was applied twice'
+  })
+
+  await check('a case-only rename is a rename, and an empty value is left alone', async () => {
+    await updateField(admin, { id: stage.id, options: ['Trial', 'Prospect', 'won'], renames: [{ from: 'Won', to: 'won' }] })
+    const after = await valuesOf([stageKey])
+    expect(after.get(four!.id)?.custom[stageKey] === undefined, 'a record with no value gained one')
+    expect(after.get(two!.id)?.custom[stageKey] === 'Prospect', 'a value changed that was not renamed')
+    return 'a record with no value is untouched'
+  })
+
+  await check('a multi-select rename keeps the order of the other values', async () => {
+    await updateField(admin, { id: tags.id, options: ['Alpha', 'Bravo', 'Gamma'], renames: [{ from: 'Beta', to: 'Bravo' }] })
+    const after = await valuesOf([tagKey])
+    expect(JSON.stringify(after.get(one!.id)?.custom[tagKey]) === '["Alpha","Bravo"]', `one holds ${JSON.stringify(after.get(one!.id)?.custom[tagKey])}`)
+    expect(JSON.stringify(after.get(two!.id)?.custom[tagKey]) === '["Bravo"]', `two holds ${JSON.stringify(after.get(two!.id)?.custom[tagKey])}`)
+    return 'Beta became Bravo inside each list'
+  })
+
+  await check('a multi-select choice held only by a trashed record still cannot be removed', async () => {
+    const message = await refuses('removing a multi-select choice in use', () =>
+      updateField(admin, { id: tags.id, options: ['Alpha', 'Bravo'] }),
+    )
+    expect(message === '1 record still uses Gamma. Change them first.', `said: ${message}`)
+    return message
+  })
+
+  await check('a rename of a built-in choice rewrites the column and restores cleanly', async () => {
+    const lead = (await listFields(admin, 'contact')).find((field) => field.key === 'lead_status')
+    expect(Boolean(lead), 'no lead_status property')
+    const choice = lead!.options[0]!
+    const renamed = `${choice} (verify)`
+    const person = await createRecord(admin, 'contact', {
+      first_name: 'Choice',
+      last_name: 'Verify',
+      email: `choice-${stamp}@partner1.example`,
+      lead_status: choice,
+    })
+    try {
+      const refusal = await refuses('removing a built-in choice in use', () =>
+        updateField(admin, { id: lead!.id, options: lead!.options.filter((option) => option !== choice) }),
+      )
+      expect(/^\d+ records? still uses? /.test(refusal) && refusal.endsWith(`${choice}. Change them first.`), `said: ${refusal}`)
+      await updateField(admin, { id: lead!.id, options: [renamed, ...lead!.options.slice(1)], renames: [{ from: choice, to: renamed }] })
+      const [row] = await db.execute<{ lead_status: string | null }>(sql`select lead_status from contact where id = ${person!.id}::uuid`)
+      expect(row?.lead_status === renamed, `the column holds ${String(row?.lead_status)}`)
+    } finally {
+      await updateField(admin, { id: lead!.id, options: lead!.options, renames: [{ from: renamed, to: choice }] })
+      await owner`delete from contact where id = ${person!.id}::uuid`
+    }
+    return `${choice} renamed on the column and put back`
+  })
+
+  for (const id of recordIds) await deleteRecord(admin, object.key, id).catch(() => undefined)
+  await deleteField(admin, stage.id)
+  await purgeField(admin, stage.id)
+  await deleteField(admin, tags.id)
+  await purgeField(admin, tags.id)
+  await deleteCustomObject(admin, object.id)
 
   console.log('')
   if (failures > 0) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { NextRequest } from 'next/server'
-import { bodyRefusal, clientIpFrom, MAX_BODY_BYTES, PayloadTooLarge, readBody, readRaw, UnreadableBody, unverified } from './edge.ts'
+import { bodyRefusal, clientIpFrom, corsPreflight, MAX_BODY_BYTES, PayloadTooLarge, readBody, readRaw, UnreadableBody, unverified, withCors } from './edge.ts'
 
 /** TRUSTED_PROXY_HOPS defaults to 1, which is the deployment: one reverse proxy
  *  in front of the app. */
@@ -109,4 +109,22 @@ test('every unverifiable inbound request gets the same 401 whatever the reason',
   assert.equal(a.status, 401)
   assert.equal(b.status, 401)
   assert.deepEqual(await a.json(), await b.json())
+})
+
+test('a preflight for a bearer endpoint answers 204, any origin, with the headers a browser client sends', () => {
+  const answer = corsPreflight('POST, OPTIONS')
+  assert.equal(answer.status, 204)
+  assert.equal(answer.headers.get('access-control-allow-origin'), '*')
+  assert.equal(answer.headers.get('access-control-allow-methods'), 'POST, OPTIONS')
+  for (const header of ['authorization', 'content-type', 'mcp-protocol-version']) {
+    assert.ok(answer.headers.get('access-control-allow-headers')?.includes(header), header)
+  }
+  assert.equal(answer.headers.get('access-control-allow-credentials'), null)
+})
+
+test('an answer through withCors carries the origin and exposes the headers a refusal needs, errors included', () => {
+  const refused = withCors(Response.json({ error: 'x' }, { status: 429, headers: { 'retry-after': '60' } }))
+  assert.equal(refused.status, 429)
+  assert.equal(refused.headers.get('access-control-allow-origin'), '*')
+  assert.ok(refused.headers.get('access-control-expose-headers')?.includes('retry-after'))
 })

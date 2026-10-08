@@ -26,7 +26,7 @@ export const clayDegraded = (config: ClayConfig): string | null =>
 const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'clay')
   if (!found?.secret) {
-    throw new Error('Clay is not connected. Add an API key in Settings, under Integrations.')
+    throw new Error('Clay is not connected. Add an API key and connect it under Connected Apps.')
   }
   return { ...found, config: found.config as ClayConfig }
 }

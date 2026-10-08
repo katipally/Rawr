@@ -14,7 +14,9 @@ import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
 import { sequenceEnrollment } from '../schema/sequences.ts'
 import { detectReply, isDeliveryReport } from './sequences.ts'
+import { isAutoReplyMail } from './machine-mail.ts'
 import { companyByDomainQuery, companyForDomain } from './records.ts'
+import { everyFragment } from './text-match.ts'
 import { nextSendAt, type SendWindow } from './sequence-rules.ts'
 import { resolveNotifications } from './notifications.ts'
 import { assertCanView, assertCanWrite, isAdmin, type AccountContext } from './context.ts'
@@ -428,8 +430,8 @@ export type IncomingMessage = {
   /** The body, when the fetch that read the headers also read it. Absent leaves
    *  the message `pending` for the hydrate job. */
   body?: MessageBodyInput | null | undefined
-  /** Lower-cased header names, for the checks that need more than the five fields
-   *  above: an auto-reply is not a reply, and must not stop a sequence. */
+  /** Lower-cased header names. Read once at ingest to set is_auto_reply, and kept
+   *  for the delivery-report check, which reads Content-Type. */
   headers?: Record<string, string | undefined> | undefined
   attachments?: IncomingAttachment[] | undefined
   hasAttachments: boolean
@@ -493,7 +495,7 @@ export const writeBody = async (
 }
 
 export type IngestResult =
-  | { stored: true; messageId: string; threadId: string; contactIds: string[]; created: boolean; activityId: string | null }
+  | { stored: true; messageId: string; threadId: string; contactIds: string[]; createdContactIds: string[]; created: boolean; activityId: string | null }
   | { stored: false; reason: string }
 
 /** Which sequence a stored copy of a sent step belongs to, so its timeline card
@@ -602,6 +604,7 @@ export const ingestMessage = async (
         references: input.incoming.references ?? [],
         threadId: NO_THREAD,
         subject: input.incoming.subject,
+        autoReply: true,
         ...(input.incoming.headers ? { headers: input.incoming.headers } : {}),
       }),
     )
@@ -710,6 +713,7 @@ const storeMessage = async (
   if (!thread) throw new Error('The thread could not be stored.')
 
   const direction = lower(incoming.from) === lower(input.ownerEmail) ? 'outbound' : 'inbound'
+  const autoReply = isAutoReplyMail(incoming.subject, incoming.headers)
 
   const [stored] = await tx
     .insert(message)
@@ -728,6 +732,7 @@ const storeMessage = async (
       references: incoming.references ?? [],
       bodyState: incoming.body ? 'stored' : 'pending',
       hasAttachments: incoming.hasAttachments,
+      isAutoReply: autoReply,
       mailboxId: input.mailboxId,
     })
     .onConflictDoNothing({ target: [message.accountId, message.providerMessageId] })
@@ -741,7 +746,7 @@ const storeMessage = async (
       .from(message)
       .where(eq(message.providerMessageId, incoming.providerMessageId))
       .limit(1)
-    return { stored: true, messageId: existing?.id ?? '', threadId: thread.id, contactIds: [], created: false, activityId: null }
+    return { stored: true, messageId: existing?.id ?? '', threadId: thread.id, contactIds: [], createdContactIds: [], created: false, activityId: null }
   }
 
   await tx
@@ -771,7 +776,7 @@ const storeMessage = async (
     ...incoming.cc.map((address) => ({ address: lower(address), role: 'cc' as const })),
   ].filter((entry) => entry.address !== '')
 
-  const matched = await matchParticipants(
+  const { matched, createdIds } = await matchParticipants(
     tx,
     ctx,
     participants.map((entry) => entry.address),
@@ -803,6 +808,7 @@ const storeMessage = async (
       references: incoming.references ?? [],
       threadId: thread.id,
       subject: incoming.subject,
+      autoReply,
       ...(incoming.headers ? { headers: incoming.headers } : {}),
     })
   }
@@ -825,7 +831,7 @@ const storeMessage = async (
     })
   }
 
-  return { stored: true, messageId: stored.id, threadId: thread.id, contactIds, created: true, activityId }
+  return { stored: true, messageId: stored.id, threadId: thread.id, contactIds, createdContactIds: createdIds, created: true, activityId }
 }
 
 /** An address matches a contact on lower(email). No match and the domain is known:
@@ -840,9 +846,9 @@ const matchParticipants = async (
   ctx: AccountContext,
   addresses: string[],
   internalDomain: string,
-): Promise<Map<string, string>> => {
+): Promise<{ matched: Map<string, string>; createdIds: string[] }> => {
   const unique = [...new Set(addresses)].filter(Boolean)
-  if (unique.length === 0) return new Map()
+  if (unique.length === 0) return { matched: new Map(), createdIds: [] }
 
   const found = await tx
     .select({ id: contact.id, email: contact.email })
@@ -850,6 +856,7 @@ const matchParticipants = async (
     .where(and(inArray(sql`lower(${contact.email})`, unique), isNull(contact.deletedAt)))
 
   const matched = new Map<string, string>()
+  const createdIds: string[] = []
   for (const row of found) {
     if (row.email) matched.set(lower(row.email), row.id)
   }
@@ -870,6 +877,7 @@ const matchParticipants = async (
       returning id`)
     if (created) {
       matched.set(address, created.id)
+      createdIds.push(created.id)
       await requestEnrichment(tx, ctx, 'contact', created.id)
       await writeAudit(tx, ctx, {
         entity: 'contact',
@@ -881,7 +889,7 @@ const matchParticipants = async (
     }
   }
 
-  return matched
+  return { matched, createdIds }
 }
 
 /** A matched contact links the thread to the contact, to the contact's company,
@@ -1285,6 +1293,11 @@ export const listInboxThreads = async (
     const limit = Math.min(Math.max(input.limit ?? 25, 1), 100)
     const scope = input.scope ?? 'all'
     const actor = ctx.actorId
+    // Each word must be found in the thread's subject or in one of its visible messages' sender or snippet.
+    const matchMail = input.q
+      ? everyFragment(input.q, (pattern) => sql`(t.subject ilike ${pattern} or exists (select 1 from visible v
+                          where v.thread_id = t.id and (v.from_addr ilike ${pattern} or v.snippet ilike ${pattern})))`)
+      : null
 
     const rows = await tx.execute<{
       id: string
@@ -1312,6 +1325,12 @@ export const listInboxThreads = async (
                v.thread_id, v.direction, v.from_addr, v.snippet, v.sent_at
           from visible v
          order by v.thread_id, v.sent_at desc
+      ),
+      waiting as (
+        select distinct on (v.thread_id) v.thread_id, v.direction
+          from visible v
+         where not v.is_auto_reply
+         order by v.thread_id, v.sent_at desc
       )
       select t.id, t.subject, t.last_at, t.message_count,
              n.direction as last_direction, n.from_addr as last_from, n.snippet,
@@ -1326,20 +1345,16 @@ export const listInboxThreads = async (
                 from visible vm where vm.thread_id = t.id and vm.mailbox_email is not null) as mailbox_emails
         from message_thread t
         join newest n on n.thread_id = t.id
+        left join waiting w on w.thread_id = t.id
         left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
        where exists (select 1 from visible v where v.thread_id = t.id)
          and (${scope === 'all'} or exists (
               select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))
          and (${input.mailboxId ?? null}::uuid is null or exists (
               select 1 from visible v where v.thread_id = t.id and v.mailbox_id = ${input.mailboxId ?? null}::uuid))
-         and (${input.unreplied !== true} or n.direction = 'inbound')
+         and (${input.unreplied !== true} or w.direction = 'inbound')
          and (${input.unread !== true} or r.last_read_at is null or r.last_read_at < t.last_at)
-         and (${input.q ?? null}::text is null
-              or t.subject ilike ${input.q ? `%${input.q}%` : null}
-              or exists (select 1 from visible v
-                          where v.thread_id = t.id
-                            and (v.from_addr ilike ${input.q ? `%${input.q}%` : null}
-                                 or v.snippet ilike ${input.q ? `%${input.q}%` : null})))
+         and ${matchMail ?? sql`true`}
          and (${input.cursor?.lastAt ?? null}::timestamptz is null
               or (t.last_at, t.id) < (${input.cursor?.lastAt ?? null}::timestamptz, ${input.cursor?.id ?? null}::uuid))
        order by t.last_at desc, t.id desc
@@ -1380,7 +1395,7 @@ export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
     const actor = ctx.actorId
     const [row] = await tx.execute<{ all: number; mine: number; unreplied: number; unread: number }>(sql`
       with visible as (
-        select m.thread_id, m.direction, m.sent_at, mb.user_id as mailbox_user
+        select m.thread_id, m.direction, m.sent_at, m.is_auto_reply, mb.user_id as mailbox_user
           from message m
           left join mailbox mb on mb.id = m.mailbox_id
          where m.mailbox_id is null
@@ -1392,14 +1407,21 @@ export const inboxCounts = async (ctx: AccountContext): Promise<InboxCounts> =>
         select distinct on (v.thread_id) v.thread_id, v.direction
           from visible v
          order by v.thread_id, v.sent_at desc
+      ),
+      waiting as (
+        select distinct on (v.thread_id) v.thread_id, v.direction
+          from visible v
+         where not v.is_auto_reply
+         order by v.thread_id, v.sent_at desc
       )
       select count(*)::int as all,
              count(*) filter (where exists (
                select 1 from visible v where v.thread_id = t.id and v.mailbox_user = ${actor}::uuid))::int as mine,
-             count(*) filter (where n.direction = 'inbound')::int as unreplied,
+             count(*) filter (where w.direction = 'inbound')::int as unreplied,
              count(*) filter (where r.last_read_at is null or r.last_read_at < t.last_at)::int as unread
         from message_thread t
         join newest n on n.thread_id = t.id
+        left join waiting w on w.thread_id = t.id
         left join message_thread_read r on r.thread_id = t.id and r.user_id = ${actor}::uuid
     `)
     return { all: row?.all ?? 0, mine: row?.mine ?? 0, unreplied: row?.unreplied ?? 0, unread: row?.unread ?? 0 }

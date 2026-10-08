@@ -156,12 +156,13 @@ export const applyEnrichment = async (
         before: { provider: input.provider },
         after: { written: result.written, suggested: result.suggested },
       })
+      const provider = `${input.provider.charAt(0).toUpperCase()}${input.provider.slice(1)}`
       await recordActivity(tx, ctx, {
         type: 'enrichment',
         subject:
           result.written.length > 0
-            ? `${input.provider} filled ${result.written.length} field${result.written.length === 1 ? '' : 's'}`
-            : `${input.provider} suggested ${result.suggested.length} change${result.suggested.length === 1 ? '' : 's'}`,
+            ? `${provider} filled ${result.written.length} field${result.written.length === 1 ? '' : 's'}`
+            : `${provider} suggested ${result.suggested.length} change${result.suggested.length === 1 ? '' : 's'}`,
         payload: { provider: input.provider, ...result },
         links: [{ entityType: assertCore(object, 'be enriched'), entityId: input.entityId }],
       })

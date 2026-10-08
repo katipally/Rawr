@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import type { AccountContext } from './context.ts'
 import { withAccount, type Tx } from './index.ts'
+import { MACHINE_SENDER_PATTERN } from './machine-mail.ts'
 
 /** What each rule is worth out of a hundred. HubSpot's own deal score is an AI
  *  number with no explanation; this one is six rules a rep can argue with, which
@@ -87,9 +88,12 @@ const scoreWhere = (tx: Tx, predicate: SQL) =>
           select count(*)::int as n
             from activity_link l
             join activity a on a.id = l.activity_id
+            join message reply on reply.id = (a.payload ->> 'messageId')::uuid
            where l.entity_type = 'deal' and l.entity_id = d.id and l.type = 'email'
              and l.occurred_at > now() - make_interval(days => ${INBOUND_DAYS})
              and a.payload ->> 'direction' = 'inbound'
+             and not reply.is_auto_reply
+             and coalesce(reply.from_addr, '') !~* ${MACHINE_SENDER_PATTERN}
         ) inbound on true
        where d.deleted_at is null and ${predicate}
     )

@@ -9,6 +9,7 @@ import {
   disconnectMailbox,
   failBody,
   ingestMessage,
+  inboxCounts,
   internalDomainOf,
   listInboxThreads,
   markThreadRead,
@@ -294,10 +295,56 @@ try {
     'the waiting-on-us filter shows only threads whose newest message came in',
   )
 
+  // Our reply is the last real message; an out-of-office after it must not put the thread back on us.
+  const awayBox = await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-away-${stamp}`,
+    refreshToken: `refresh-away-${stamp}`,
+    accessTokenExpiresAt: null,
+  })
+  const awayThread = `mail-away-t-${stamp}`
+  const awayAddr = `away-${stamp}@partner1.example`
+  const awayIn = (over: Partial<IncomingMessage>) =>
+    ingestMessage(sales, {
+      incoming: incoming({ providerThreadId: awayThread, subject: 'Pricing', from: awayAddr, to: [salesUser.email], ...over }),
+      ownerEmail: salesUser.email,
+      mailboxId: awayBox.id,
+      internalDomain,
+      blocked: new Set(),
+    })
+  await awayIn({ providerMessageId: `mail-away1-${stamp}`, sentAt: new Date(Date.now() - 180_000) })
+  await awayIn({
+    providerMessageId: `mail-away2-${stamp}`,
+    from: salesUser.email,
+    to: [awayAddr],
+    subject: 'Re: Pricing',
+    sentAt: new Date(Date.now() - 120_000),
+  })
+  const waitingBefore = (await inboxCounts(sales)).unreplied
+  await awayIn({
+    providerMessageId: `mail-away3-${stamp}`,
+    subject: 'Out of Office',
+    headers: { 'auto-submitted': 'auto-replied' },
+    sentAt: new Date(Date.now() - 60_000),
+  })
+  const waitingAfter = (await inboxCounts(sales)).unreplied
+  check(waitingAfter === waitingBefore, 'an out-of-office after our reply leaves the unreplied count alone', `${waitingBefore} then ${waitingAfter}`)
+  const awayWaiting = await listInboxThreads(sales, { unreplied: true, limit: 50 })
+  check(!awayWaiting.threads.some((thread) => thread.id === awayThread), 'and the waiting-on-us filter does not list that thread')
+
   const searched = await listInboxThreads(sales, { q: 'Trial questions', limit: 50 })
   check(searched.threads.some((thread) => thread.id === threadId), 'search matches a subject')
   const missing = await listInboxThreads(sales, { q: `nothing-${stamp}`, limit: 50 })
   check(missing.threads.length === 0, 'and matches nothing when nothing matches')
+  const anyOrder = await listInboxThreads(sales, { q: 'questions trial', limit: 50 })
+  check(anyOrder.threads.some((thread) => thread.id === threadId), 'the words of an inbox search match in any order')
+  const midWord = await listInboxThreads(sales, { q: 'stions tri', limit: 50 })
+  check(midWord.threads.some((thread) => thread.id === threadId), 'an inbox search fragment matches mid-word')
+  const literalPercent = await listInboxThreads(sales, { q: 'Trial%', limit: 50 })
+  check(!literalPercent.threads.some((thread) => thread.id === threadId), 'a percent sign in the inbox search matches itself, not any text')
+  const oneWordMissing = await listInboxThreads(sales, { q: `trial nothing-${stamp}`, limit: 50 })
+  check(!oneWordMissing.threads.some((thread) => thread.id === threadId), 'an inbox search with one word that matches nothing still matched')
 
   const firstPage = await listInboxThreads(sales, { limit: 1 })
   const secondPage = firstPage.cursor

@@ -26,6 +26,7 @@ import {
   type RegistryObject } from '@rawr/db'
 import { readLookups, type Lookups } from '~/server/crm.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { recordCreated, recordUpdated, type Actor } from '../record-events.ts'
 import { resolveDate, todayFor } from './dates.ts'
 import { FieldError, objectFromArg, prepareFields } from './fields.ts'
 
@@ -264,7 +265,7 @@ const listPipeline: ToolDefinition = {
 
     const lines = columns.map((column) => {
       const totals = column.totals
-        .map((total) => `${total.currency} ${total.total} (weighted ${total.weighted})`)
+        .map((total) => `${total.currency} ${Number(total.total).toFixed(2)} (weighted ${Number(total.weighted).toFixed(2)})`)
         .join(', ')
       const header = `${column.name} — ${column.count} deal${column.count === 1 ? '' : 's'}${totals ? `, ${totals}` : ''}`
       const cards = column.cards
@@ -440,6 +441,8 @@ const listTasksTool: ToolDefinition = {
 // Write
 // ---------------------------------------------------------------------------
 
+const actorOf = (caller: McpCaller): Actor => ({ accountSlug: caller.accountSlug, displayName: caller.userName })
+
 const updateRecordTool: ToolDefinition = {
   name: 'update_record',
   title: 'Update a record',
@@ -492,7 +495,8 @@ const updateRecordTool: ToolDefinition = {
     if (Number.isNaN(expected.getTime())) {
       return { text: 'expectedUpdatedAt is required: call get_record and pass the updatedAt it returns.', isError: true }
     }
-    await updateRecord(context.caller.ctx, key, found.id, prepared.values, expected)
+    const written = await updateRecord(context.caller.ctx, key, found.id, prepared.values, expected)
+    recordUpdated(context.caller.ctx, actorOf(context.caller), key, found.id, written)
     const after = await getRecord(context.caller.ctx, key, found.id)
 
     const changes = Object.keys(prepared.values).map((field) => ({
@@ -544,6 +548,7 @@ const createRecordTool: ToolDefinition = {
     )
 
     const created = await createRecord(context.caller.ctx, key, prepared.values)
+    recordCreated(context.caller.ctx, actorOf(context.caller), key, created)
     const record = await getRecord(context.caller.ctx, key, created.id)
 
     return {

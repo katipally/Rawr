@@ -114,7 +114,7 @@ export const PropertyList = ({
           ? api.admin.fields.update.mutate({
               id: field.id,
               label: draft.label,
-              ...(NEEDS_OPTIONS.has(field.type) ? { options: draft.options } : {}),
+              ...(NEEDS_OPTIONS.has(field.type) ? { options: draft.options, renames: draft.renames } : {}),
               helpText: draft.helpText,
               groupName: draft.groupName,
               conditional: draft.conditional,

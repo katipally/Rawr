@@ -20,13 +20,14 @@ export type ConnectFormProps = {
   webhookBase: string
   /** Null until a tracked site exists; the webhook URL cannot be built without one. */
   siteKey: string | null
+  accountSlug: string
   canWrite: boolean
 }
 
 /** Providers that send Rawr webhooks. The URL is generated rather than documented
  *  because it carries the account key, which a person cannot be expected to
- *  assemble by hand. */
-const WEBHOOK_SOURCES = new Set<IntegrationKind>(['brevo', 'apollo', 'clay', 'woodpecker'])
+ *  assemble by hand. Webflow names its account and form by slug instead. */
+const WEBHOOK_SOURCES = new Set<IntegrationKind>(['brevo', 'apollo', 'clay', 'woodpecker', 'webflow'])
 
 /** The two that prove themselves with a token in the URL rather than a signature,
  *  so their webhook URL cannot be shown until one has been minted. */
@@ -61,6 +62,14 @@ export const ConnectForm = (props: ConnectFormProps) => {
 
   const webhookToken = typeof props.config.webhookToken === 'string' ? props.config.webhookToken : null
   const webhookUrl = (key: string) => `${props.webhookBase}/w/${props.kind}?w=${key}${webhookToken ? `&t=${webhookToken}` : ''}`
+  const formSlug = typeof props.config.formSlug === 'string' ? props.config.formSlug : ''
+  const tokenWaiting = TOKEN_SOURCES.has(props.kind) && !webhookToken
+  const hookUrl =
+    props.kind === 'webflow'
+      ? formSlug && `${props.webhookBase}/w/webflow?account=${props.accountSlug}&form=${encodeURIComponent(formSlug)}`
+      : props.siteKey && !tokenWaiting
+        ? webhookUrl(props.siteKey)
+        : null
 
   const save = async () => {
     setBusy(true)
@@ -170,11 +179,7 @@ export const ConnectForm = (props: ConnectFormProps) => {
       ))}
 
       {WEBHOOK_SOURCES.has(props.kind) ? (
-        TOKEN_SOURCES.has(props.kind) && !webhookToken ? (
-          <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
-            Save once and the webhook URL appears here with the token {props.name} will present.
-          </p>
-        ) : props.siteKey ? (
+        hookUrl ? (
           <Field
             id={`webhook-${props.kind}`}
             label="Webhook URL to paste at the provider"
@@ -185,7 +190,7 @@ export const ConnectForm = (props: ConnectFormProps) => {
                 id={`webhook-${props.kind}`}
                 readOnly
                 className="min-w-0 flex-1"
-                value={webhookUrl(props.siteKey)}
+                value={hookUrl}
                 onFocus={(event) => event.currentTarget.select()}
               />
               <IconButton
@@ -194,13 +199,21 @@ export const ConnectForm = (props: ConnectFormProps) => {
                 tone={copied ? 'accent' : 'default'}
                 onClick={() =>
                   void navigator.clipboard
-                    .writeText(webhookUrl(props.siteKey as string))
+                    .writeText(hookUrl)
                     .then(() => setCopied(true))
                     .catch(() => toast('error', 'Could not copy. Select the field and copy it by hand.'))
                 }
               />
             </div>
           </Field>
+        ) : props.kind === 'webflow' ? (
+          <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
+            Enter the Rawr form slug and save, and the webhook URL appears here.
+          </p>
+        ) : tokenWaiting ? (
+          <p className="rounded-hs border border-line bg-fill px-3 py-2 text-secondary">
+            Save once and the webhook URL appears here with the token {props.name} will present.
+          </p>
         ) : (
           <Alert tone="warning">
             The webhook URL needs a tracked site to name this account.{' '}

@@ -5,6 +5,7 @@ import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import { recordActivity } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, writeAudit } from './index.ts'
+import { everyFragment } from './text-match.ts'
 import { endEnrollmentsForLink, onUnsubscribe, unsubscribeTarget } from './sequences.ts'
 
 export type SubscriptionState = 'subscribed' | 'unsubscribed' | 'unspecified'
@@ -280,6 +281,21 @@ export const deleteSubscriptionType = async (
       .limit(1)
     if (!found) throw new Error('That subscription type no longer exists.')
 
+    // Any state, archived included: a sequence that points at a deleted type would
+    // silently lose its opt-out check.
+    const users = await tx.execute<{ name: string; total: number }>(sql`
+      select name, count(*) over ()::int as total from sequence
+       where settings ->> 'subscriptionTypeId' = ${id}
+       order by name limit 3`)
+    if (users.length > 0) {
+      const total = users[0]!.total
+      const names = users.map((row) => row.name).join(', ')
+      const more = total > users.length ? ` and ${total - users.length} more` : ''
+      throw new Error(
+        `${found.name} is the subscription type of ${names}${more}. Point ${total === 1 ? 'it' : 'them'} at another type before deleting it.`,
+      )
+    }
+
     const [{ n = 0 } = { n: 0 }] = await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from subscription_state
            where subscription_type_id = ${id} and state = 'unsubscribed'`,
@@ -500,16 +516,16 @@ export const listConsentRecords = async (
   withAccount(ctx, async (tx) => {
     const limit = Math.min(Math.max(input.limit ?? CONSENT_PAGE, 1), 200)
     const offset = Math.max(input.offset ?? 0, 0)
-    const needle = input.search?.trim().toLowerCase()
+    const found = everyFragment(input.search ?? '', (pattern) =>
+      sql`(r.visitor_id ilike ${pattern}
+           or coalesce(c.email, '') ilike ${pattern}
+           or (coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')) ilike ${pattern})`,
+    )
     const wanted = input.category && CONSENT_FILTERS.includes(input.category) ? input.category : null
     const category = wanted
       ? sql`and (r.categories ->> ${wanted.replace('no-', '')})::boolean = ${!wanted.startsWith('no-')}`
       : sql``
-    const match = needle
-      ? sql`and (lower(r.visitor_id) like ${`%${needle}%`}
-                 or lower(coalesce(c.email, '')) like ${`%${needle}%`}
-                 or lower(coalesce(c.first_name, '') || ' ' || coalesce(c.last_name, '')) like ${`%${needle}%`})`
-      : sql``
+    const match = found ? sql`and ${found}` : sql``
 
     const rows = await tx.execute<{
       id: string

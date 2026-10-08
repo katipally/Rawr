@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, count, desc, eq, inArray, lt, or, sql } from 'drizzle-orm'
 import { activity, activityLink } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
+import { MACHINE_SENDER_PATTERN } from './machine-mail.ts'
 import type { activityTypeEnum } from '../schema/enums.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
@@ -258,8 +259,9 @@ const emailPayloadOf = (row: { type: ActivityType; payload: unknown }): EmailPay
 }
 
 /** Opens, clicks and replies for every outbound email on the page, in one
- *  statement: the send row by message id, and a reply is any inbound message in
- *  the same thread after this one went out. O(page), not O(thread). */
+ *  statement: the send row by message id, and a reply is any inbound message in the
+ *  same thread after this one went out that is neither a machine's mail nor an
+ *  auto-reply (message.is_auto_reply). O(page), not O(thread). */
 const attachEmailStats = async (tx: Tx, rows: TimelineRow[]): Promise<void> => {
   const outbound = rows.map((row) => ({ row, mail: emailPayloadOf(row) })).filter((entry) => entry.mail)
   if (outbound.length === 0) return
@@ -275,7 +277,9 @@ const attachEmailStats = async (tx: Tx, rows: TimelineRow[]): Promise<void> => {
     select m.id, s.open_count as opens, s.click_count as clicks,
            coalesce(s.state = 'bounced', false) as bounced,
            (select count(*)::int from message r
-             where r.thread_id = m.thread_id and r.direction = 'inbound' and r.sent_at > m.sent_at) as replies
+             where r.thread_id = m.thread_id and r.direction = 'inbound' and r.sent_at > m.sent_at
+               and not r.is_auto_reply
+               and coalesce(r.from_addr, '') !~* ${MACHINE_SENDER_PATTERN}) as replies
       from message m
       left join sequence_send s on s.message_id = m.id
      where m.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`)

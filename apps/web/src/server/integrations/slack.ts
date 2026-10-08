@@ -124,7 +124,7 @@ export const postToSlack = async (
   const creds = await slackCredentials(ctx)
   if (!creds) {
     throw providerError(
-      'Slack is not configured. Set a bot token or a webhook URL in Settings, under Integrations.',
+      'Slack is not configured. Set a bot token or a webhook URL, then connect it under Connected Apps.',
     )
   }
 

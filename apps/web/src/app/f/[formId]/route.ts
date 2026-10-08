@@ -13,6 +13,7 @@ import {
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
+import { recordCreated } from '~/server/record-events.ts'
 
 /** POST /f/:formId — the capture path, F3 §4.
  *
@@ -91,6 +92,9 @@ export const POST = async (
       entityId: result.contactId,
       accountSlug: form.accountSlug,
     })
+  }
+  if (result.contactCreated && result.contactId) {
+    recordCreated(publicEdgeContext(form.accountId), { accountSlug: form.accountSlug }, 'contact', { id: result.contactId })
   }
 
   return json(

@@ -20,17 +20,21 @@ import {
   piiViolations,
   publicSite,
   readPageView,
+  ingestMessage,
   readTimeline,
   refreshContactActivity,
   rollUpExpired,
   saveEventDef,
+  saveMailbox,
   setSiteActive,
   timelineCounts,
   websiteActivity,
   withAccount,
   type AccountContext,
+  type IncomingMessage,
 } from '../src/index.ts'
 import { PEER, SANDBOX, seatFor, cleanup } from './fixture.ts'
+import { readDealScore, scoreAllDeals, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
 
 /** F4's definition of done, run against the real database, exiting non-zero on
  *  failure so it can gate a build. Same shape as verify-forms.ts. */
@@ -719,6 +723,137 @@ try {
 
   const counted = await eventCountsByDay(datasaur, window_, [`step_one_${stamp}`])
   check('per-name daily counts come back grouped', counted.every((row) => row.name === `step_one_${stamp}`))
+  // -------------------------------------------------------------------------
+  section('replies on the timeline')
+
+  // A bounce is never stored, so it cannot be a reply. The real reply is the one
+  // count the timeline shows for this send.
+  const [actor] = await scoped<{ email: string }>(datasaur, sql`select email from user_account where id = ${datasaur.actorId}::uuid`)
+  const replyAddr = `reply-${stamp}@partner1.example`
+  const replyContact = await scoped<{ id: string }>(
+    datasaur,
+    sql`insert into contact (account_id, first_name, last_name, email)
+        values (${datasaur.accountId}, 'Reply', ${stamp}, ${replyAddr}) returning id`,
+  )
+  const replyBox = await saveMailbox(datasaur, {
+    userId: datasaur.actorId!,
+    email: actor!.email,
+    accessToken: `reply-access-${stamp}`,
+    refreshToken: `reply-refresh-${stamp}`,
+    accessTokenExpiresAt: null,
+    canSend: true,
+  })
+  const threadId = `reply-thread-${stamp}`
+  const inbound = (over: Partial<IncomingMessage>): IncomingMessage => ({
+    providerThreadId: threadId,
+    providerMessageId: `reply-${stamp}-${Math.random().toString(36).slice(2, 8)}`,
+    subject: 'Re: Hello',
+    from: replyAddr,
+    to: [actor!.email],
+    cc: [],
+    sentAt: new Date(Date.now() + 60_000),
+    snippet: null,
+    hasAttachments: false,
+    ...over,
+  })
+  const ingest = (incoming: IncomingMessage) =>
+    ingestMessage(datasaur, {
+      incoming,
+      ownerEmail: actor!.email,
+      mailboxId: replyBox.id,
+      internalDomain: 'datasaur.ai',
+      blocked: new Set(),
+    })
+  await ingest({
+    providerThreadId: threadId,
+    providerMessageId: `out-${stamp}`,
+    subject: 'Hello',
+    from: actor!.email,
+    to: [replyAddr],
+    cc: [],
+    sentAt: new Date(Date.now() - 60_000),
+    snippet: null,
+    hasAttachments: false,
+  })
+  const repliesOf = async () => {
+    const page = await readTimeline(datasaur, {
+      entity: { entityType: 'contact', entityId: replyContact[0]!.id },
+      types: ['email'],
+      limit: 10,
+    })
+    return page.rows.find((row) => row.payload && (row.payload as { direction?: string }).direction === 'outbound')?.stats?.replies ?? null
+  }
+  // A deal the reply contact is on, and one whose only mail will be an out-of-office.
+  const [stage] = await scoped<{ pipeline_id: string; stage_id: string }>(
+    datasaur,
+    sql`select pipeline_id, id as stage_id from pipeline_stage where account_id = ${datasaur.accountId}::uuid limit 1`,
+  )
+  const oooAddr = `ooo-${stamp}@partner2.example`
+  const oooContact = await scoped<{ id: string }>(
+    datasaur,
+    sql`insert into contact (account_id, first_name, last_name, email)
+        values (${datasaur.accountId}, 'Away', ${stamp}, ${oooAddr}) returning id`,
+  )
+  const dealWith = async (label: string, contactId: string) => {
+    const [deal] = await scoped<{ id: string }>(
+      datasaur,
+      sql`insert into deal (account_id, name, pipeline_id, stage_id)
+          values (${datasaur.accountId}, ${`reply-deal-${stamp}-${label}`}, ${stage!.pipeline_id}::uuid, ${stage!.stage_id}::uuid)
+          returning id`,
+    )
+    await scoped(
+      datasaur,
+      sql`insert into association (account_id, from_type, from_id, to_type, to_id)
+          values (${datasaur.accountId}, 'deal', ${deal!.id}::uuid, 'contact', ${contactId}::uuid)`,
+    )
+    return deal!.id
+  }
+  const replyDeal = await dealWith('reply', replyContact[0]!.id)
+  const awayDeal = await dealWith('away', oooContact[0]!.id)
+
+  await ingest(inbound({ providerMessageId: `real-${stamp}`, body: null }))
+  check('a person who answers is one reply on the timeline', (await repliesOf()) === 1, String(await repliesOf()))
+  await ingest(
+    inbound({
+      providerMessageId: `ooo-headers-${stamp}`,
+      subject: 'Re: Hello',
+      headers: { 'auto-submitted': 'auto-replied' },
+    }),
+  )
+  check('an out-of-office from the same address, with Auto-Submitted, is not a reply', (await repliesOf()) === 1, String(await repliesOf()))
+  await ingest(inbound({ providerMessageId: `ooo-subject-${stamp}`, subject: 'Out of Office until Monday', headers: undefined }))
+  check('a subject-only out-of-office is not a reply', (await repliesOf()) === 1, String(await repliesOf()))
+
+  await ingest(inbound({ providerMessageId: `away-${stamp}`, from: oooAddr, subject: 'Out of office', headers: { 'x-autoreply': 'yes' } }))
+  await scoreAllDeals(datasaur)
+  const replyScore = await readDealScore(datasaur, replyDeal)
+  const awayScore = await readDealScore(datasaur, awayDeal)
+  check('the deal score counts a real reply as They replied', replyScore?.detail.inbound === SCORE_WEIGHTS.inbound, String(replyScore?.detail.inbound))
+  check('the deal score does not count an out-of-office as They replied', awayScore?.detail.inbound === 0, String(awayScore?.detail.inbound))
+  await ingest(
+    inbound({
+      providerMessageId: `bounce-${stamp}`,
+      from: `mailer-daemon@googlemail.com`,
+      subject: 'Delivery Status Notification (Failure)',
+      headers: { 'content-type': 'multipart/report; report-type=delivery-status' },
+    }),
+  )
+  check('a bounce from the mail provider is not a reply', (await repliesOf()) === 1, String(await repliesOf()))
+  await ingest(inbound({ providerMessageId: `normal-${stamp}`, subject: 'Re: Hello', headers: { 'auto-submitted': 'no' } }))
+  check('a normal Re: message is a reply', (await repliesOf()) === 2, String(await repliesOf()))
+  const receivedOf = async (contactId: string) =>
+    (await scoped<{ n: number }>(datasaur, sql`select emails_received::int as n from contact where id = ${contactId}::uuid`))[0]?.n
+  check(
+    'the contact count of emails received skips out-of-office mail (real and normal only)',
+    (await receivedOf(replyContact[0]!.id)) === 2,
+    String(await receivedOf(replyContact[0]!.id)),
+  )
+  check(
+    'a contact whose only mail is an out-of-office has no emails received',
+    (await receivedOf(oooContact[0]!.id)) === 0,
+    String(await receivedOf(oooContact[0]!.id)),
+  )
+
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.message : cause)

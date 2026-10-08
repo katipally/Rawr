@@ -15,6 +15,7 @@ import {
 import { readDashboard } from '../src/dal/dashboard.ts'
 import { readAgenda, readCalendar } from '../src/dal/calendar.ts'
 import { campaignPerformance, listCampaigns, saveCampaign } from '../src/dal/campaigns.ts'
+import { listEventDefs, saveEventDef } from '../src/dal/custom-events.ts'
 import { trackedMessages } from '../src/dal/messages.ts'
 import { withAccount } from '../src/dal/index.ts'
 import { backfillVisitor } from '../src/dal/stitch.ts'
@@ -481,6 +482,39 @@ try {
     const listed = await listCampaigns(probeCtx, { search: utm })
     expect(listed.total === 0, `${listed.total} campaigns visible from the peer`)
     return 'row level security holds on the new table'
+  })
+
+  console.log('')
+  console.log('-- search fragments: literal wildcards, every word, mid-word -------')
+
+  await check('a campaign search with % and _ matches them literally', async () => {
+    const q = `q${stamp}`
+    const literal = await saveCampaign(admin, { name: `Spring ${q}`, utmCampaign: `spr_%_${stamp}`, spend: 0, currency: 'USD' })
+    const wild = await saveCampaign(admin, { name: `Summer ${q}`, utmCampaign: `sprXQ${stamp}`, spend: 0, currency: 'USD' })
+    const idsFor = async (search: string) =>
+      new Set((await listCampaigns(admin, { search, limit: 100 })).rows.map((row) => row.id))
+    const byPercent = await idsFor('spr_%')
+    expect(byPercent.has(literal) && !byPercent.has(wild), 'a % or _ in the search matched as a wildcard')
+    const inAnyOrder = await idsFor(`${q} spring`)
+    expect(inAnyOrder.has(literal) && !inAnyOrder.has(wild), 'the words of a campaign search matched only in the order typed')
+    expect((await idsFor(`ring ${q}`)).has(literal), 'a fragment mid-word did not match a campaign')
+    return 'a literal % and _, every word in any order, and a mid-word fragment'
+  })
+
+  await check('an event search with % and _ matches them literally', async () => {
+    const e = `e${stamp}`
+    const a = `evt_${e}_a`
+    const b = `evt_${e}_b`
+    await saveEventDef(admin, { name: a, label: `Trial 50%_off ${e}` })
+    await saveEventDef(admin, { name: b, label: `Trial 50Xoff ${e}` })
+    const namesFor = async (search: string) =>
+      new Set((await listEventDefs(admin, { search, limit: 100 })).rows.map((row) => row.name))
+    const byPercent = await namesFor('50%_off')
+    expect(byPercent.has(a) && !byPercent.has(b), 'a % or _ in the event search matched as a wildcard')
+    const inAnyOrder = await namesFor(`${e} 50%_off`)
+    expect(inAnyOrder.has(a) && !inAnyOrder.has(b), 'the words of an event search matched only in the order typed')
+    expect((await namesFor(`ial 50%_off`)).has(a), 'a fragment mid-word did not match an event')
+    return 'a literal % and _, every word in any order, and a mid-word fragment'
   })
 
   console.log('')

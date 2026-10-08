@@ -1,6 +1,7 @@
 import { listIntegrationsForAccount } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { redirect } from 'next/navigation'
+import { countPhrase } from '~/lib/count-phrase.ts'
 import { INTEGRATIONS } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { AppsTabs } from '../tabs.tsx'
@@ -18,29 +19,30 @@ const AvailableAppsPage = async () => {
 
   const rows = await listIntegrationsForAccount(contextFrom(session))
   const stateOf = new Map(rows.map((row) => [row.kind, row.state]))
-  const available = INTEGRATIONS.filter((meta) => stateOf.get(meta.kind) === 'not_configured')
-  const connectedCount = rows.length - available.length
+  const notConnected = INTEGRATIONS.filter((meta) => stateOf.get(meta.kind) === 'not_configured')
+  const connectable = notConnected.filter((meta) => !meta.importOnly)
+  const connectedCount = rows.length - notConnected.length
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Available apps"
-        lead={`${available.length} not connected yet`}
+        lead={countPhrase(connectable.length, 'app you can connect', 'apps you can connect', 'Nothing left to connect')}
         why={
           <p>
             Everything Rawr has a client for. A shared app is connected once by an account admin and
-            used by every account here; a personal one is granted by each person for themselves.
+            used by this account; a personal one is granted by each person for themselves.
           </p>
         }
       />
 
       <AppsTabs current="available" connectedCount={connectedCount} />
 
-      {available.length === 0 ? (
+      {notConnected.length === 0 ? (
         <EmptyState title="Everything is connected" description="There is nothing left for this account to connect." />
       ) : (
         <AvailableGrid
-          apps={available.map((meta) => ({
+          apps={notConnected.map((meta) => ({
             kind: meta.kind,
             name: meta.name,
             category: meta.category,

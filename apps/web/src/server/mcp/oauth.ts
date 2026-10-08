@@ -152,8 +152,8 @@ export const pkceMatches = (verifier: string, challenge: string): boolean => {
 
 /** The one place an OAuth error is shaped, so the client always gets RFC 6749
  *  codes rather than whatever an exception said. */
-export const oauthError = (error: string, description: string, status = 400) =>
-  Response.json({ error, error_description: description }, { status, headers: { 'cache-control': 'no-store' } })
+export const oauthError = (error: string, description: string, status = 400, headers: Record<string, string> = {}) =>
+  Response.json({ error, error_description: description }, { status, headers: { 'cache-control': 'no-store', ...headers } })
 
 export type AuthorizeRequest = {
   clientId: string

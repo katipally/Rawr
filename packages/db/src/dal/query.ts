@@ -21,7 +21,7 @@ import {
   type RegistryField,
   type RegistryObject,
 } from './registry.ts'
-import { recordTermMatch } from './text-match.ts'
+import { escapeLike, everyFragment, recordTermMatch } from './text-match.ts'
 
 export type Condition = { field: string; operator: Operator; value?: unknown }
 /** One level deep, deliberately. A tree of arbitrary depth is a query builder
@@ -76,6 +76,10 @@ const checked = (field: RegistryField, value: unknown, scope: QueryScope): unkno
 const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value])
 
 const literal = (value: unknown): SQL => sql`${value}`
+
+/** Every word typed must appear in the value, in any order. An empty term matches any value that is set. */
+const containsAll = (expr: SQL, term: string): SQL =>
+  everyFragment(term, (pattern) => sql`${expr}::text ilike ${pattern}`) ?? sql`${expr}::text ilike ${'%%'}`
 
 /** Datetimes compare on the account's clock: a day runs from its midnight to the
  *  next one in the account zone. A typed moment is an exact instant, read in that
@@ -200,11 +204,11 @@ const compileCondition = (
       // A null is "not X" in every reading a person expects from a filter.
       return sql`(${expr} is null or ${expr} <> ${raw})`
     case 'contains':
-      return sql`${expr}::text ilike ${'%' + String(raw) + '%'}`
+      return sql`${containsAll(expr, String(raw))}`
     case 'not_contains':
-      return sql`(${expr} is null or ${expr}::text not ilike ${'%' + String(raw) + '%'})`
+      return sql`(${expr} is null or not ${containsAll(expr, String(raw))})`
     case 'starts_with':
-      return sql`${expr}::text ilike ${String(raw) + '%'}`
+      return sql`${expr}::text ilike ${escapeLike(String(raw)) + '%'}`
     case 'gt':
     case 'after':
       return sql`${expr} > ${raw}`

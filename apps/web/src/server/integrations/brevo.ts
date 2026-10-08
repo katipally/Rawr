@@ -34,7 +34,7 @@ type BrevoConfig = { listId?: number | string; segmentId?: string; webhookToken?
 const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'brevo')
   if (!found?.secret) {
-    throw new Error('Brevo is not connected. Add an API key in Settings, under Integrations.')
+    throw new Error('Brevo is not connected. Add an API key and connect it under Connected Apps.')
   }
   return { ...found, config: found.config as BrevoConfig }
 }
@@ -94,10 +94,8 @@ export const pushSegmentToBrevo = async (
   input: { segmentId: string; listId?: number | null },
 ): Promise<PushResult> => {
   assertCanWrite(ctx, 'segment')
-  const { secret, config, id } = await credentials(ctx).catch((cause) => {
-    if (devIntegrationsEnabled) return { secret: null, config: {} as BrevoConfig, id: null }
-    throw cause
-  })
+  if (devIntegrationsEnabled) throw new Error('Brevo is the development stand-in, so nothing was pushed.')
+  const { secret, config, id } = await credentials(ctx)
   // The list the integration was configured with, unless this push names another.
   // Resolved once here rather than at the return, where it was only ever cosmetic.
   const listId = input.listId ?? readWholeConfig(config.listId, 'List id')
@@ -133,7 +131,6 @@ export const pushSegmentToBrevo = async (
       .slice(0, 32)}`
 
     await once(ctx, { key, operation: 'brevo.push_list', integrationId: id }, async () => {
-      if (devIntegrationsEnabled) return { pushed: mailable.length, processId: null }
       const accepted = await attempt(
         {
           ctx,
@@ -436,8 +433,6 @@ export const scheduleBrevoCampaign = async (
     throw new Error('Nobody in that segment can be mailed, so there is nothing to send to.')
   }
 
-  if (devIntegrationsEnabled) return { campaignId: null, ...push }
-
   const { secret, id } = await credentials(ctx)
   const key = `brevo:campaign:${input.listId}:${createHash('sha256')
     .update(`${input.name} ${input.subject} ${input.templateId} ${input.scheduledAt ?? 'draft'}`)
@@ -473,7 +468,7 @@ export const scheduleBrevoCampaign = async (
  *  decisions and belong behind different buttons. */
 export const sendBrevoCampaign = async (ctx: AccountContext, campaignId: number): Promise<void> => {
   assertCanWrite(ctx, 'segment')
-  if (devIntegrationsEnabled) return
+  if (devIntegrationsEnabled) throw new Error('Brevo is the development stand-in, so nothing was sent.')
   const { secret, id } = await credentials(ctx)
   await once(ctx, { key: `brevo:send:${campaignId}`, operation: 'brevo.send_campaign', integrationId: id }, () =>
     attempt({ ctx, kind: 'brevo', jobName: 'brevo.send_campaign', payload: { campaignId }, claimed: true }, () =>

@@ -27,7 +27,7 @@ export const refreshEmailEngagement = async (tx: Tx, _ctx: AccountContext, conta
     inbound as (
       select p.contact_id, count(*)::int as n, max(m.sent_at) as last_at
         from message_participant p join message m on m.id = p.message_id
-       where p.contact_id in (select id from wanted) and p.role = 'from' and m.direction = 'inbound'
+       where p.contact_id in (select id from wanted) and p.role = 'from' and m.direction = 'inbound' and not m.is_auto_reply
        group by p.contact_id),
     touches as (
       select l.entity_id as contact_id,

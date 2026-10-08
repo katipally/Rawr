@@ -1,9 +1,9 @@
 'use client'
 
-import { DiscardConfirm, Field, Select, TextArea, TextInput, cn, useDismiss } from '@rawr/ui'
+import { Button, DiscardConfirm, Field, Select, TextInput, cn, useDismiss } from '@rawr/ui'
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
-import type { AdminField, Conditional, FieldType } from '@rawr/db'
+import type { AdminField, Conditional, FieldType, OptionRename } from '@rawr/db'
 import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
 import { groupsComplete } from '~/components/crm/filter-rules.ts'
@@ -61,11 +61,18 @@ const keyFrom = (label: string): string =>
     .replace(/^([0-9])/, 'f_$1')
     .slice(0, 59)
 
+/** One row per choice. `origin` is the text the choice had when the editor opened,
+ *  so a row that was typed over is a rename rather than a removal plus an addition. */
+type Choice = { origin: string | null; value: string }
+
+const choicesOf = (options: string[]): Choice[] => options.map((value) => ({ origin: value, value }))
+
 export type PropertyDraft = {
   label: string
   key: string
   type: FieldType
   options: string[]
+  renames: OptionRename[]
   helpText: string | null
   groupName: string | null
   conditional: Conditional | null
@@ -113,7 +120,7 @@ export const PropertyEditor = ({
   const [label, setLabel] = useState(field?.label ?? '')
   const [key, setKey] = useState<string | null>(null)
   const [type, setType] = useState<FieldType>(field?.type ?? 'text')
-  const [options, setOptions] = useState(field?.options.join('\n') ?? '')
+  const [choices, setChoices] = useState<Choice[]>(() => choicesOf(field?.options ?? []))
   const [helpText, setHelpText] = useState(field?.helpText ?? '')
   const [groupName, setGroupName] = useState(field?.groupName ?? '')
   const [isRequired, setIsRequired] = useState(field?.isRequired ?? false)
@@ -124,13 +131,13 @@ export const PropertyEditor = ({
   const ownKey = field?.key ?? key ?? keyFrom(label)
   const dirty = field
     ? label !== field.label ||
-      options !== field.options.join('\n') ||
+      JSON.stringify(choices) !== JSON.stringify(choicesOf(field.options)) ||
       helpText !== (field.helpText ?? '') ||
       groupName !== (field.groupName ?? '') ||
       isRequired !== field.isRequired ||
       trackChanges !== field.trackChanges ||
       JSON.stringify(conditional) !== JSON.stringify(field.conditional)
-    : label !== '' || options !== '' || helpText !== '' || groupName !== '' || conditional !== null
+    : label !== '' || choices.length > 0 || helpText !== '' || groupName !== '' || conditional !== null
   const { asking, dismiss, keep, discard } = useDismiss(true, dirty, onClose)
   const conditionalComplete = groupsComplete(conditional ? [conditional] : [])
 
@@ -152,18 +159,21 @@ export const PropertyEditor = ({
       .catch((cause) => setUsage({ usedIn: [{ kind: 'error', name: errorMessage(cause) }], usedInTotal: 1 }))
   }, [field, section, usage, queryClient])
 
-  const save = () =>
+  const save = () => {
+    const kept = choices.map((choice) => ({ ...choice, value: choice.value.trim() })).filter((choice) => choice.value)
     onSave({
       label: label.trim(),
       key: ownKey,
       type,
-      options: options.split('\n').map((line) => line.trim()).filter(Boolean),
+      options: kept.map((choice) => choice.value),
+      renames: kept.flatMap((choice) => (choice.origin !== null && choice.origin !== choice.value ? [{ from: choice.origin, to: choice.value }] : [])),
       helpText: helpText || null,
       groupName: groupName || null,
       conditional,
       isRequired,
       trackChanges,
     })
+  }
 
   const title = SECTIONS.find((entry) => entry.key === section)!.title
 
@@ -257,8 +267,30 @@ export const PropertyEditor = ({
                     </Select>
                   </Field>
                   {NEEDS_OPTIONS.has(type) ? (
-                    <Field id="prop-options" label="Options" hint={field ? 'One per line. Removing a choice does not clear it from records that already hold it.' : 'One per line.'}>
-                      <TextArea id="prop-options" value={options} onChange={(event) => setOptions(event.target.value)} />
+                    <Field
+                      id="prop-options"
+                      label="Options"
+                      hint={field ? 'Renaming a choice renames it on every record. A choice that records still use cannot be removed.' : 'One choice per row.'}
+                    >
+                      <div id="prop-options" className="flex flex-col gap-2">
+                        {choices.map((choice, index) => (
+                          <div key={index} className="flex items-center gap-2">
+                            <TextInput
+                              aria-label={`Choice ${index + 1}`}
+                              value={choice.value}
+                              onChange={(event) =>
+                                setChoices(choices.map((entry, at) => (at === index ? { ...entry, value: event.target.value } : entry)))
+                              }
+                            />
+                            <Button variant="tertiary" onClick={() => setChoices(choices.filter((_, at) => at !== index))}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))}
+                        <Button variant="secondary" onClick={() => setChoices([...choices, { origin: null, value: '' }])}>
+                          Add choice
+                        </Button>
+                      </div>
                     </Field>
                   ) : null}
                 </>

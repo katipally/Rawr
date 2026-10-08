@@ -1,6 +1,7 @@
 import { recallMcpCall, rememberMcpCall, type McpCaller } from '@rawr/db'
 import { TOOLS, TOOLS_BY_NAME, toolsetOf } from './catalogue.ts'
 import { contextFor, explain, type ToolResult } from './tools.ts'
+import { idempotencyKey, negotiate, SUPPORTED, withData } from './wire.ts'
 
 /** F5 §1. JSON-RPC over one endpoint, written against two versions of the spec.
  *
@@ -18,9 +19,6 @@ import { contextFor, explain, type ToolResult } from './tools.ts'
  *  Stateless either way. Nothing is remembered between requests, no session id is
  *  issued, and the credential is the bearer token on every call, which is what the
  *  newer spec requires and the older one permits. */
-
-const SUPPORTED = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26'] as const
-const LATEST = SUPPORTED[0]
 
 /** Long enough that a client is not refetching the catalogue between tool calls,
  *  short enough that a custom field added in Settings shows up while somebody is
@@ -64,17 +62,6 @@ const SERVER_INFO = {
 
 const CAPABILITIES = { tools: { listChanged: false } }
 
-/** The version the client asked for if we speak it, ours if it did not ask, and a
- *  refusal naming what we do speak if it asked for something else. */
-const negotiate = (asked: unknown): { version: string } | { problem: string } => {
-  if (asked === undefined || asked === null) return { version: LATEST }
-  const wanted = String(asked)
-  if ((SUPPORTED as readonly string[]).includes(wanted)) return { version: wanted }
-  return {
-    problem: `This server does not speak MCP ${wanted}. It speaks ${SUPPORTED.join(', ')}.`,
-  }
-}
-
 export type Handled = { response: JsonRpcResponse | null; status: number }
 
 /** A notification (no id) is accepted and answered with nothing, per the transport:
@@ -116,21 +103,16 @@ export const handle = async (
       }
 
     // 2025-06-18 and earlier.
-    case 'initialize': {
-      const negotiated = negotiate(params.protocolVersion)
-      if ('problem' in negotiated) {
-        return { response: fail(id, INVALID_PARAMS, negotiated.problem), status: 400 }
-      }
+    case 'initialize':
       return {
         response: ok(id, {
-          protocolVersion: negotiated.version,
+          protocolVersion: negotiate(params.protocolVersion),
           capabilities: CAPABILITIES,
           serverInfo: SERVER_INFO,
           instructions: INSTRUCTIONS,
         }),
         status: 200,
       }
-    }
 
     case 'notifications/initialized':
     case 'notifications/cancelled':
@@ -185,11 +167,11 @@ export const handle = async (
       }
 
       const args = (params.arguments ?? {}) as Record<string, unknown>
-      const key = idempotencyKey(params, args)
+      const key = tool.writes ? idempotencyKey(params, args, caller.tokenId, name, Date.now()) : null
 
       // A retry after a timeout answers with what the first attempt did, rather
       // than doing it again. §Edge cases.
-      if (tool.writes && key) {
+      if (key) {
         const remembered = await recallMcpCall(caller.ctx, caller.tokenId, key)
         if (remembered) return { response: ok(id, remembered), status: 200 }
       }
@@ -203,12 +185,12 @@ export const handle = async (
 
       const result = {
         resultType: 'complete',
-        content: [{ type: 'text', text: outcome.text }],
+        content: [{ type: 'text', text: withData(outcome.text, outcome.data) }],
         ...(outcome.data === undefined ? {} : { structuredContent: outcome.data }),
         isError: outcome.isError === true,
       }
 
-      if (tool.writes && key && !outcome.isError) {
+      if (key && !outcome.isError) {
         await rememberMcpCall(caller.ctx, {
           tokenId: caller.tokenId,
           key,
@@ -239,22 +221,11 @@ export const handle = async (
   }
 }
 
-/** The client may send its own key; a client that does not gets one derived from
- *  what it asked for, so two identical writes in the same minute still collapse.
- *  Deliberately not a hash of the arguments alone: "add the same note twice" is a
- *  thing a person can legitimately mean an hour apart, which is why the ledger
- *  expires. */
-const idempotencyKey = (params: Record<string, unknown>, args: Record<string, unknown>): string | null => {
-  const meta = params._meta as Record<string, unknown> | undefined
-  const given = params.idempotencyKey ?? meta?.['io.modelcontextprotocol/idempotencyKey'] ?? args.idempotency_key
-  if (typeof given === 'string' && given.trim()) return given.trim().slice(0, 200)
-  return null
-}
-
 const INSTRUCTIONS = [
   'Rawr is the CRM. Contacts, companies and deals, with a timeline on every record.',
   '',
   'Records are addressed by name, not by id: "MGG production opportunity" resolves the way a person means it. A name matching more than one record is refused with the candidates and nothing is changed, so pass the id from the refusal on the next call rather than picking one.',
+  'Writes are deduplicated: the same write sent again within the same minute answers with the first result. To choose the key yourself, send "idempotencyKey" beside the arguments, _meta["io.modelcontextprotocol/idempotencyKey"], or "idempotency_key" inside the arguments. Use a new key for a write that is meant to happen again.',
   'Dates may be written as a person says them. Every write states the ISO date it actually set; repeat that date back rather than saying "done".',
   'Every call acts as the person whose token this is, with their role. A refusal naming their role is the real answer, not a fault to work around.',
 ].join('\n')

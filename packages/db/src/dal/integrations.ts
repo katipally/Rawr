@@ -12,6 +12,7 @@ import { assertCanWrite, type AccountContext } from './context.ts'
 import { checkIntegrationConfig } from './integration-config.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { notify, resolveNotifications } from './notifications.ts'
+import { applyMatchedEvents, MARKETING_EVENT_KINDS, type MarketingEventKind } from './marketing-events.ts'
 
 /** F6 §1, built once and used by every integration without exception.
  *
@@ -583,6 +584,7 @@ export const claimInbound = async (
     kind: string
     payload: unknown
     contactId?: string | null
+    at?: Date
   },
 ): Promise<boolean> =>
   withAccount(ctx, async (tx) => {
@@ -596,6 +598,7 @@ export const claimInbound = async (
         payload: input.payload as never,
         contactId: input.contactId ?? null,
         matched: Boolean(input.contactId),
+        at: input.at,
       })
       .onConflictDoNothing()
       .returning({ id: inboundEvent.id })
@@ -632,20 +635,53 @@ export const listUnmatchedEvents = async (
       .limit(Math.min(Math.max(limit, 1), 200)),
   )
 
+/** The payload `ingestMarketingEvent` stores: the event detail with its address, subject and
+ *  subscription types alongside. Rows from other sources carry no `email` and never match. */
+type StoredMarketingPayload = Record<string, unknown> & {
+  email: string
+  subject?: string | null
+  subscriptionTypes?: string[]
+}
+
 /** Re-runs the match for events that arrived before the contact existed. Somebody
  *  who fills in a form after an email was tracked should still get that open on
  *  their timeline. */
 export const rematchInbound = async (ctx: AccountContext): Promise<{ matched: number }> => {
   assertCanWrite(ctx, 'integration')
   return withAccount(ctx, async (tx) => {
-    const rows = await tx.execute<{ id: string }>(sql`
+    const rows = await tx.execute<{
+      contact_id: string
+      source: string
+      provider_event_id: string
+      kind: MarketingEventKind
+      payload: StoredMarketingPayload
+      at: Date
+    }>(sql`
       update inbound_event e
          set contact_id = c.id, matched = true
         from contact c
        where e.matched = false
+         and e.kind in (${sql.join(MARKETING_EVENT_KINDS.map((kind) => sql`${kind}`), sql`, `)})
          and c.deleted_at is null
          and lower(c.email) = lower(e.payload ->> 'email')
-      returning e.id`)
+      returning c.id as contact_id, e.source, e.provider_event_id, e.kind, e.payload, e.at`)
+    await applyMatchedEvents(
+      tx,
+      ctx,
+      rows.map((row) => {
+        const { email: _email, subject, subscriptionTypes, ...detail } = row.payload
+        return {
+          contactId: row.contact_id,
+          source: row.source,
+          providerEventId: row.provider_event_id,
+          kind: row.kind,
+          subject: subject ?? null,
+          detail,
+          at: new Date(row.at),
+          subscriptionTypes: subscriptionTypes ?? [],
+        }
+      }),
+    )
     return { matched: rows.length }
   })
 }

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { assertCanView, type AccountContext } from './context.ts'
 import { accountZone, mutate, withAccount, type Tx } from './index.ts'
 import { MAX_ROWS, type Range } from './reporting.ts'
+import { everyFragment } from './text-match.ts'
 
 /** P3 item 13. What a site's events are called, what they mean, and how far
  *  people get through a sequence of them.
@@ -61,10 +62,10 @@ export const listEventDefs = async (
 
     const limit = Math.min(Math.max(input.limit ?? PAGE, 1), MAX_PAGE)
     const offset = Math.max(input.offset ?? 0, 0)
-    const needle = input.search?.trim().toLowerCase()
-    const match = needle
-      ? sql`and (lower(e.name) like ${`%${needle}%`} or lower(coalesce(e.label, '')) like ${`%${needle}%`})`
-      : sql``
+    const found = everyFragment(input.search ?? '', (pattern) =>
+      sql`(e.name ilike ${pattern} or coalesce(e.label, '') ilike ${pattern})`,
+    )
+    const match = found ? sql`and ${found}` : sql``
 
     const rows = await tx.execute<{
       id: string

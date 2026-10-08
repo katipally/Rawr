@@ -7,10 +7,12 @@ export type SearchKind = ObjectKey | 'custom'
 /** The words typed, trimmed. Each one has to be found in the record; order does not matter. */
 export const fragmentsOf = (term: string): string[] => term.trim().split(/\s+/).filter(Boolean)
 
-/** A fragment as an ILIKE pattern that finds it anywhere. Postgres treats a backslash as
- *  the escape character in LIKE, so the fragment's own %, _ and \ are escaped and match
- *  themselves. */
-export const containsPattern = (fragment: string): string => `%${fragment.replace(/[\\%_]/g, '\\$&')}%`
+/** Postgres treats a backslash as the escape character in LIKE, so the text's own %, _
+ *  and \ are escaped and match themselves. */
+export const escapeLike = (text: string): string => text.replace(/[\\%_]/g, '\\$&')
+
+/** A fragment as an ILIKE pattern that finds it anywhere. */
+export const containsPattern = (fragment: string): string => `%${escapeLike(fragment)}%`
 
 const TEXTUAL_FOR_SEARCH: ReadonlySet<string> = new Set([
   'text',

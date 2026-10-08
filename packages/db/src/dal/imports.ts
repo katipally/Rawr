@@ -2205,7 +2205,8 @@ const NOTES_KEPT = 100
  *  the same position, and never finishing. */
 const CHUNK_MS = 45_000
 
-type ChunkResult = { done: boolean; processed: number; total: number }
+/** `created` is set on a chunk that ran, so the caller can announce what it created after the commit. */
+type ChunkResult = { done: boolean; processed: number; total: number; created?: { objectKey: string; ids: string[] } | undefined }
 
 /** One chunk of an import. Called repeatedly by the worker, so an interrupted run
  *  continues from processed_rows instead of restarting, and re-running the same
@@ -2271,6 +2272,7 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
   let created = 0
   let updated = 0
   let skipped = 0
+  const createdIds: string[] = []
   // Every row lands in exactly one of the four counts. A warning is said on the
   // side: the row it is about was still written.
   const refused: { position: number; reason: string }[] = []
@@ -2345,6 +2347,7 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
 
     const outcome = await bulkWriteRecords(ctx, object.key, batch)
     created += outcome.created.length
+    createdIds.push(...outcome.created.map((made) => made.id))
     updated += outcome.updated.length
     for (const note of outcome.warnings) {
       notes.push({ row: run.processedRows + note.position + 2, reason: note.reason, warning: true })
@@ -2477,7 +2480,7 @@ const importChunk = async (ctx: AccountContext, id: string): Promise<ChunkResult
   })
 
   if (done) await dropImportRows(ctx, id)
-  return { done, processed, total: run.totalRows }
+  return { done, processed, total: run.totalRows, created: { objectKey: object.key, ids: createdIds } }
 }
 
 /** The click that starts a run. Nothing but the state changes: the chunks are the

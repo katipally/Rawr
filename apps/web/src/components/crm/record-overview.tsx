@@ -1,10 +1,9 @@
-import type { AssociationGroup } from '@rawr/db'
 import { Badge, Card, EmptyState } from '@rawr/ui'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { recordPath, threadPath } from '~/lib/links.ts'
 import { getFormat } from '~/server/format.ts'
-import { EMPTY_VALUE, activityActor, activityLabel } from './value.tsx'
+import { activityActor, activityLabel } from './value.tsx'
 
 export type OverviewThread = {
   threadId: string
@@ -28,12 +27,6 @@ export type RecentActivity = {
   payload?: unknown
 }
 
-/** The line under each name in an association table, by the object it lists. */
-const DETAIL_HEADING: Record<string, string> = { contact: 'Job title', company: 'Domain', deal: 'Next step' }
-
-/** HubSpot's association tables are short; the rail beside them holds the rest. */
-const TABLE_ROWS = 5
-
 export type RecordOverviewProps = {
   account: string
   /** An object key, core or invented. */
@@ -48,7 +41,6 @@ export type RecordOverviewProps = {
   /** Newest first, a handful. */
   recent: RecentActivity[]
   addActivities: ReactNode
-  associations: AssociationGroup[]
 }
 
 /** The answer to "what is going on with this record" without reading a timeline:
@@ -66,7 +58,6 @@ export const RecordOverview = async ({
   highlights,
   recent,
   addActivities,
-  associations,
 }: RecordOverviewProps) => {
   const fmt = await getFormat()
   return (
@@ -112,50 +103,6 @@ export const RecordOverview = async ({
         </Link>
       </Card>
 
-      {associations
-        .filter((group) => group.total > 0)
-        .map((group) => (
-          <Card key={group.objectKey} title={`${group.namePlural} (${fmt.number(group.total)})`} flush>
-            <div className="overflow-x-auto px-6 pb-6">
-              <table className="w-full min-w-[24rem] table-fixed border-collapse">
-                <thead>
-                  <tr className="text-left text-secondary">
-                    <th className="h-row border-b border-line pr-4 font-normal">Name</th>
-                    {DETAIL_HEADING[group.objectKey] ? (
-                      <th className="h-row border-b border-line pr-4 font-normal">{DETAIL_HEADING[group.objectKey]}</th>
-                    ) : null}
-                    <th className="h-row border-b border-line font-normal">Create date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.records.slice(0, TABLE_ROWS).map((row) => (
-                    <tr key={row.id} className="transition-colors duration-150 ease-out hover:bg-fill-hover">
-                      <td className="h-row truncate border-b border-line pr-4">
-                        <Link href={recordPath(account, row.objectKey, row.id)} title={row.displayName}>
-                          {row.displayName}
-                        </Link>
-                      </td>
-                      {DETAIL_HEADING[group.objectKey] ? (
-                        <td className="h-row truncate border-b border-line pr-4" title={row.detail ?? undefined}>
-                          {row.detail || EMPTY_VALUE}
-                        </td>
-                      ) : null}
-                      <td className="h-row truncate border-b border-line">
-                        {row.createdAt ? fmt.date(row.createdAt) : EMPTY_VALUE}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {group.total > TABLE_ROWS ? (
-                <p className="mt-2 text-small text-secondary">
-                  {fmt.number(Math.min(TABLE_ROWS, group.records.length))} of {fmt.number(group.total)} shown. The rest are in the{' '}
-                  {group.namePlural.toLowerCase()} card beside this one.
-                </p>
-              ) : null}
-            </div>
-          </Card>
-        ))}
       {object === 'contact' ? (
         <Card title="Latest email" action={<Badge tone="neutral">{threads.length}</Badge>}>
           {threads.length === 0 ? (

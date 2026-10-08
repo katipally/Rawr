@@ -126,6 +126,9 @@ export const message = pgTable(
     bodyState: bodyStateEnum('body_state').notNull().default('pending'),
     bodyError: text('body_error'),
     hasAttachments: boolean('has_attachments').notNull().default(false),
+    /** An out-of-office or other autoresponder, judged once at ingest from its headers
+     *  and subject. Not a reply, whoever sent it. */
+    isAutoReply: boolean('is_auto_reply').notNull().default(false),
     /** The mailbox that read it. A Gmail message id only means something inside
      *  the mailbox that issued it, so fetching the body later needs this. */
     mailboxId: uuid('mailbox_id').references(() => mailbox.id, { onDelete: 'set null' }),

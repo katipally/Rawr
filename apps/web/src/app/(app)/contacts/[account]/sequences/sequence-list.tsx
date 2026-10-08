@@ -106,7 +106,18 @@ export const SequenceList = ({
     },
     { key: 'owner', header: 'Owner', width: 150, render: (row) => row.ownerName ?? EMPTY_VALUE },
     { key: 'enrolled', header: 'Enrolled', width: 120, align: 'right', render: (row) => fmt.number(row.stats.enrolled) },
-    { key: 'active', header: 'Active', width: 110, align: 'right', render: (row) => fmt.number(row.stats.active) },
+    {
+      key: 'active',
+      header: 'Active',
+      width: 110,
+      align: 'right',
+      render: (row) => (
+        <span className="inline-flex flex-col items-end">
+          <span className="tabular-nums">{fmt.number(row.stats.active)}</span>
+          {row.stats.paused > 0 ? <span className="text-small text-muted">{fmt.number(row.stats.paused)} paused</span> : null}
+        </span>
+      ),
+    },
     { key: 'open', header: 'Open rate', width: 130, align: 'right', render: (row) => rate(row.stats.opened, row.stats.sent) },
     { key: 'click', header: 'Click rate', width: 130, align: 'right', render: (row) => rate(row.stats.clicked, row.stats.sent) },
     { key: 'reply', header: 'Reply rate', width: 130, align: 'right', render: (row) => rate(row.stats.replied, row.stats.enrolled) },

@@ -19,6 +19,7 @@ import { createHash } from 'node:crypto'
 import { isTransient, RevokedError } from '../gmail.ts'
 import { describe, logError } from '../log.ts'
 import { addProspect } from '../integrations/woodpecker.ts'
+import { recordsCreated } from '../record-events.ts'
 import { canSendFrom, gmailSender } from './gmail-sender.ts'
 import { toEmailHtml, toEmailText } from './markdown-email.ts'
 import type { Sender } from './sender.ts'
@@ -250,6 +251,7 @@ export const runStep = async (ctx: AccountContext, enrollmentId: string): Promis
       threadId = stored.threadId
       messageId = stored.messageId
       activityId = stored.activityId
+      await recordsCreated(ctx, 'contact', stored.createdContactIds)
     }
   }
 

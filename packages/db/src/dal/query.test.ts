@@ -258,6 +258,13 @@ test('is_not and not_contains treat a null as "not that value"', () => {
   }
 })
 
+test('contains needs every word typed, in any order, and a % or _ matches itself', () => {
+  const words = built(compile([{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: ' doe  jane ' }] }]))
+  assert.deepEqual(words.params.filter((p) => typeof p === 'string' && p.startsWith('%')), ['%doe%', '%jane%'])
+  const literal = built(compile([{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: '100%_x' }] }]))
+  assert.ok(literal.params.includes('%100\\%\\_x%'), JSON.stringify(literal.params))
+})
+
 // --------------------------------------------------------------------- paging
 
 test('with no sort the plan is keyset on the id alone', () => {

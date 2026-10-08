@@ -9,7 +9,7 @@ import {
   PROTOCOL_VERSIONS,
   type JsonRpcRequest,
 } from '~/server/mcp/protocol.ts'
-import { byteLength, clientIp, rateLimit } from '~/server/edge.ts'
+import { byteLength, clientIp, corsPreflight, rateLimit, withCors } from '~/server/edge.ts'
 import { challengeHeader } from '~/server/mcp/oauth.ts'
 import { parseToolsets } from '~/server/mcp/toolsets.ts'
 
@@ -81,7 +81,11 @@ const headerRoutingDisagrees = (
   return null
 }
 
-export const POST = async (request: NextRequest): Promise<NextResponse> => {
+export const OPTIONS = (): Response => corsPreflight('POST, OPTIONS')
+
+export const POST = async (request: NextRequest): Promise<Response> => withCors(await answer(request))
+
+const answer = async (request: NextRequest): Promise<NextResponse> => {
   // The transport requires the client to declare which protocol it is speaking on
   // every request after the handshake. An unknown one is a 400 rather than a guess,
   // because answering in a shape the client cannot read is worse than saying no.

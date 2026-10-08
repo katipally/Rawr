@@ -28,7 +28,7 @@ const API = 'https://api.apollo.io/api/v1'
 const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'apollo')
   if (!found?.secret) {
-    throw new Error('Apollo is not connected. Add an API key in Settings, under Integrations.')
+    throw new Error('Apollo is not connected. Add an API key and connect it under Connected Apps.')
   }
   return found
 }

@@ -134,6 +134,12 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
       })
     : null
 
+  if (stored?.stored && stored.createdContactIds.length > 0) {
+    // Loaded here, not at the top: record-events reaches next/server through automations, which plain Node unit tests cannot load.
+    const { recordsCreated } = await import('../record-events.ts')
+    await recordsCreated(ctx, 'contact', stored.createdContactIds)
+  }
+
   // After the stored copy, so the row can point at it and the timeline shows the
   // opens against the message the sender can actually see.
   if (sendToken && input.contactId) {

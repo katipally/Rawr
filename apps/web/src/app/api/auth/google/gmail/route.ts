@@ -26,7 +26,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
       'error',
       devGmailEnabled
         ? 'Google is not configured, so use "Connect the development mailbox" instead.'
-        : 'Gmail sync needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and a consent screen Google has reviewed.',
+        : 'Gmail sync is not set up on this server. Ask whoever runs Rawr to add Google sign-in.',
     )
     return NextResponse.redirect(back)
   }

@@ -451,7 +451,6 @@ const RecordPage = async ({
           payload: row.payload,
         }))}
         addActivities={<AddActivityMenu email={emailAction} canWrite={canWrite} />}
-        associations={rail.groups}
         threads={threads.map((thread) => ({
           threadId: thread.id,
           subject: thread.subject,

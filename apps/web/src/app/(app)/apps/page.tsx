@@ -47,9 +47,11 @@ const AppsPage = async () => {
 
       {devIntegrationsEnabled ? (
         <Alert tone="warning">
-          Development providers are on. Connection tests pass without a key, enrichment returns a
-          fixed match, and nothing is sent to Brevo, Apollo, Clay, Slack or Google. Turn
-          RAWR_DEV_INTEGRATIONS off to talk to the real services.
+          Development providers are on. Brevo, Apollo, Lusha, Clay, Woodpecker, Slack, Google
+          Analytics and Google Calendar stand in for the real services: their tests pass without a
+          key, enrichment returns a fixed match, and nothing is sent to them. Zoom and Turnstile test
+          the real service. Webflow&apos;s test checks only the stored secret. Turn RAWR_DEV_INTEGRATIONS
+          off to talk to the real services.
         </Alert>
       ) : null}
 

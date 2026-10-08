@@ -4,6 +4,7 @@ import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { assertIdsBelong } from './records.ts'
 import { getRegistryIn, objectOrThrow, rowsOf, tableFor, type Registry, type RegistryObject } from './registry.ts'
+import { everyFragment, fragmentsOf } from './text-match.ts'
 
 export type AssociatedRecord = {
   id: string
@@ -72,7 +73,7 @@ const nameSelect = (object: RegistryObject): SQL => {
 
 /** email is selected for a contact and left off every other object's select, so
  *  it is absent rather than null on those rows. */
-type Row = { id: string; name: string | null; detail: string | null; email?: string | null; created_at: string | Date | null }
+export type Row = { id: string; name: string | null; detail: string | null; email?: string | null; created_at: string | Date | null }
 
 type Kind = 'primary' | 'own' | 'linked'
 
@@ -132,8 +133,10 @@ export const readAssociations = async (
     // Applied in SQL for the reads that are capped, so searching a company with
     // four hundred contacts looks at all of them rather than at whichever hundred
     // the cap happened to load.
-    const matching = (expression: string) =>
-      needle ? sql`and lower(${sql.raw(expression)}) like ${`%${needle}%`}` : sql``
+    const matching = (expression: string) => {
+      const every = needle && everyFragment(needle, (pattern) => sql`lower(${sql.raw(expression)}) like ${pattern}`)
+      return every ? sql`and ${every}` : sql``
+    }
     const orderedBy = (expression: string) =>
       sort === 'name' ? sql`order by lower(${sql.raw(expression)}) asc nulls last` : sql`order by created_at desc`
 
@@ -253,10 +256,10 @@ export const readAssociations = async (
     return { groups }
   })
 
-const keeps = (row: Row, needle: string | undefined): boolean =>
-  !needle ||
-  (row.name ?? '').toLowerCase().includes(needle) ||
-  (row.detail ?? '').toLowerCase().includes(needle)
+export const keeps = (row: Row, needle: string | undefined): boolean => {
+  const fields = [row.name, row.detail].map((value) => (value ?? '').toLowerCase())
+  return fragmentsOf(needle ?? '').every((fragment) => fields.some((field) => field.includes(fragment)))
+}
 
 const nameOf = async (tx: Tx, registry: Registry, ref: EntityRef): Promise<string> => {
   const object = registry.byKey.get(ref.entityType)

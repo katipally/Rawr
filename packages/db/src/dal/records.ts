@@ -32,7 +32,7 @@ import {
   type RegistryField,
   type RegistryObject,
 } from './registry.ts'
-import { recordTermMatch, searchTextFrom, searchVectorFrom } from './text-match.ts'
+import { everyFragment, recordTermMatch, searchTextFrom, searchVectorFrom } from './text-match.ts'
 import { coerce, formatForCsv, ValueError } from './values.ts'
 
 export type RecordValues = Record<string, unknown>
@@ -1571,7 +1571,7 @@ export const listDeletedRecords = async (
         ) d on true
         left join user_account u on u.id = d.actor_id
        where ${deletedAt} is not null and ${rowsOf(object)}
-         ${needle ? sql`and d.name ilike ${`%${needle.replace(/[\\%_]/g, '\\$&')}%`}` : sql``}
+         ${needle ? sql`and ${everyFragment(needle, (pattern) => sql`d.name ilike ${pattern}`)!}` : sql``}
        order by ${deletedAt} desc, ${id} desc
        limit ${limit}`)
 

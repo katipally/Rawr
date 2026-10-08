@@ -9,7 +9,9 @@ import {
   FORM_RESERVED_KEYS,
   hashIp,
   listForms,
+  listConsentRecords,
   listSubmissions,
+  recordConsent,
   publicEdgeContext,
   publicFormById,
   publicFormBySlug,
@@ -635,6 +637,26 @@ try {
   })
   check('a submission carrying its attribution is not rejected as unknown fields',
     withControls.errors.length === 0, 'control keys skipped by the allowlist')
+
+  section('consent search: literal wildcards, every word, mid-word')
+  const consentTag = `cs${Date.now().toString(36)}`
+  const choice = { necessary: true as const, analytics: true, advertisement: false }
+  for (const visitorId of [`${consentTag}_a%b`, `${consentTag}_aXb`, `${consentTag}_a_b`]) {
+    await recordConsent(datasaur.accountId, { visitorId, categories: choice, policyVersion: 'verify', ipHash: null, userAgent: null })
+  }
+  const consentFor = async (search: string) =>
+    new Set((await listConsentRecords(admin, { search, limit: 200 })).rows.map((row) => row.visitorId))
+  const percent = await consentFor(`${consentTag}_a%`)
+  check('a % in the consent search matches itself and not a wildcard',
+    percent.has(`${consentTag}_a%b`) && !percent.has(`${consentTag}_aXb`))
+  const underscore = await consentFor(`${consentTag}_a_b`)
+  check('an _ in the consent search matches itself and not a wildcard',
+    underscore.has(`${consentTag}_a_b`) && !underscore.has(`${consentTag}_aXb`))
+  const anyOrder = await consentFor(`a%b ${consentTag}`)
+  check('the words of a consent search match in any order',
+    anyOrder.has(`${consentTag}_a%b`) && !anyOrder.has(`${consentTag}_aXb`))
+  check('a consent search fragment matches mid-word',
+    (await consentFor(`${consentTag.slice(-3)}_a%`)).has(`${consentTag}_a%b`))
 } catch (cause) {
   failures++
   console.error('\nthe suite could not finish:', cause instanceof Error ? cause.message : cause)

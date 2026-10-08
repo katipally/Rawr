@@ -273,6 +273,7 @@ const AppPage = async ({
               config={row.config}
               webhookBase={publicBaseUrl}
               siteKey={siteKey}
+              accountSlug={session.accountSlug}
               canWrite={sessionIsAdmin(session)}
             />
           )}

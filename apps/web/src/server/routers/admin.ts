@@ -258,6 +258,10 @@ export const adminRouter = router({
           id: z.uuid(),
           label: name.optional(),
           options: z.array(z.string().max(MAX_OPTION_LENGTH)).max(MAX_CHOICES).optional(),
+          renames: z
+            .array(z.object({ from: z.string().max(MAX_OPTION_LENGTH), to: z.string().max(MAX_OPTION_LENGTH) }))
+            .max(MAX_CHOICES)
+            .optional(),
           helpText: z.string().max(500).nullish(),
           groupName: z.string().trim().max(80).nullish(),
           conditional: conditional.optional(),
@@ -271,6 +275,7 @@ export const adminRouter = router({
             id: input.id,
             ...(input.label !== undefined ? { label: input.label } : {}),
             ...(input.options !== undefined ? { options: input.options } : {}),
+            ...(input.renames !== undefined ? { renames: input.renames } : {}),
             ...(input.helpText !== undefined ? { helpText: input.helpText } : {}),
             ...(input.groupName !== undefined ? { groupName: input.groupName } : {}),
             ...(input.conditional !== undefined ? { conditional: input.conditional } : {}),

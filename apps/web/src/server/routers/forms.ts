@@ -18,6 +18,7 @@ import {
 } from '@rawr/db'
 import { z } from 'zod'
 import { call } from '../errors.ts'
+import { recordCreated } from '../record-events.ts'
 import { NOT_CONFIGURED, signedDownload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
@@ -137,7 +138,15 @@ export const formsRouter = router({
    *  week-old lead does not appear on the timeline as having arrived today. */
   release: protectedProcedure
     .input(z.object({ id: z.uuid() }))
-    .mutation(({ ctx, input }) => call(() => releaseSubmission(ctx.account, input.id))),
+    .mutation(({ ctx, input }) =>
+      call(async () => {
+        const result = await releaseSubmission(ctx.account, input.id)
+        if (result.contactCreated && result.contactId) {
+          recordCreated(ctx.account, ctx.session, 'contact', { id: result.contactId })
+        }
+        return result
+      }),
+    ),
 
   confirmSpam: protectedProcedure
     .input(z.object({ id: z.uuid() }))

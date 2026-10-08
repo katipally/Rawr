@@ -6,6 +6,7 @@ import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import { assertCanDo, type AccountContext } from './context.ts'
 import { assertUsableFieldKey, unindexableReason } from './fields.ts'
 import { mergeTokenPattern } from './sequence-rules.ts'
+import { renameChoicesInFormFields, renameChoicesInRules, type ChoiceRenames } from './choice-rules.ts'
 import { withAccount, type Tx } from './index.ts'
 import { getRegistry, getRegistryIn, mutateRegistry, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor, type RegistryObject } from './registry.ts'
 import { searchTextFrom, searchVectorFrom } from './text-match.ts'
@@ -338,16 +339,151 @@ export const createFields = async (
     }
   })
 
+/** A choice renamed in place. Stored values and the rules that name a choice hold its
+ *  text, so the rename is the only way to carry them across; a bare list cannot say
+ *  which choice became which. */
+export type OptionRename = { from: string; to: string }
+
 export type UpdateFieldInput = {
   id: string
   label?: string
   options?: string[]
+  renames?: OptionRename[]
   helpText?: string | null
   isRequired?: boolean
   trackChanges?: boolean
   groupName?: string | null
   /** Undefined leaves the rule alone; null clears it. */
   conditional?: Conditional | null
+}
+
+/** The choices a stored value is checked against, after a rename or a removal. A
+ *  rename moves every record that holds the old text, and the rules that name it; a
+ *  removal is refused while any record (trashed ones too: a restore would bring the
+ *  value back) still holds one. */
+const rewriteChoices = async (
+  tx: Tx,
+  field: { objectId: string; key: string; label: string; type: string; storage: string; columnName: string | null; options: unknown },
+  options: string[],
+  input: OptionRename[],
+): Promise<void> => {
+  const current = field.options as string[]
+  const renames = input.map((rename) => ({ from: rename.from.trim(), to: rename.to.trim() })).filter((rename) => rename.from !== rename.to)
+  const renamedFrom = new Set(renames.map((rename) => rename.from))
+  if (renamedFrom.size !== renames.length) throw new Error(`A choice cannot be renamed twice in one save.`)
+  for (const rename of renames) {
+    if (!current.includes(rename.from)) throw new Error(`${rename.from} is not a choice on ${field.label}.`)
+    if (!options.includes(rename.to)) throw new Error(`${rename.to} is renamed to, but it is not in the list of choices.`)
+    if (current.includes(rename.to) && !renamedFrom.has(rename.to)) {
+      throw new Error(`${rename.to} is already a choice on ${field.label}.`)
+    }
+  }
+
+  const removed = current.filter((choice) => !options.includes(choice) && !renamedFrom.has(choice))
+  const object = (await getRegistryIn(tx)).objects.find((candidate) => candidate.id === field.objectId)
+  if (!object) throw new Error(`The object for ${field.label} does not exist.`)
+  const column = field.storage === 'column' && field.columnName ? sql.raw(`"${field.columnName}"`) : null
+  const multi = field.type === 'multi_select'
+
+  if (removed.length > 0) {
+    const holds = column
+      ? sql`${column} in (${sql.join(removed.map((choice) => sql`${choice}`), sql`, `)})`
+      : multi
+        ? sql`custom -> ${field.key}::text ?| array[${sql.join(removed.map((choice) => sql`${choice}`), sql`, `)}]::text[]`
+        : sql`custom ->> ${field.key}::text in (${sql.join(removed.map((choice) => sql`${choice}`), sql`, `)})`
+    const [row] = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from ${tableFor(object)} where ${rowsOf(object)} and ${holds}`,
+    )
+    const n = Number(row?.n ?? 0)
+    if (n > 0) {
+      const names = removed.join(', ')
+      throw new Error(`${n} ${n === 1 ? 'record still uses' : 'records still use'} ${names}. Change them first.`)
+    }
+  }
+
+  if (renames.length === 0) return
+  const mapping = sql`${JSON.stringify(Object.fromEntries(renames.map((rename) => [rename.from, rename.to])))}::jsonb`
+  const froms = sql.join(renames.map((rename) => sql`${rename.from}`), sql`, `)
+  if (column) {
+    await tx.execute(sql`update ${tableFor(object)} set ${column} = (${mapping} ->> ${sql.raw(`"${field.columnName}"`)})
+      where ${rowsOf(object)} and ${column} in (${froms})`)
+  } else if (multi) {
+    await tx.execute(sql`update ${tableFor(object)} set custom = jsonb_set(custom, array[${field.key}::text], (
+        select coalesce(jsonb_agg(coalesce(${mapping} ->> v.value, v.value) order by v.ord), '[]'::jsonb)
+          from jsonb_array_elements_text(custom -> ${field.key}::text) with ordinality as v(value, ord)))
+      where ${rowsOf(object)} and jsonb_typeof(custom -> ${field.key}::text) = 'array'
+        and custom -> ${field.key}::text ?| array[${froms}]::text[]`)
+  } else {
+    await tx.execute(sql`update ${tableFor(object)} set custom = jsonb_set(custom, array[${field.key}::text], to_jsonb(${mapping} ->> (custom ->> ${field.key}::text)))
+      where ${rowsOf(object)} and custom ->> ${field.key}::text in (${froms})`)
+  }
+  await rewriteRulesNaming(tx, { objectId: object.id, objectKey: object.key, fieldKey: field.key }, renames)
+  if (object.isCustom) await rewriteSearchOf(tx, object.key)
+}
+
+/** The rules that name a choice of one property by its text, rewritten in the rename's
+ *  transaction. Each table is read only where its JSON mentions the key, and a row is
+ *  written only when its rule changed. One pass per table, so the cost is the size of
+ *  the rules that mention the key, not the number of choices renamed. */
+const rewriteRulesNaming = async (
+  tx: Tx,
+  object: { objectId: string; objectKey: string; fieldKey: string },
+  renames: OptionRename[],
+): Promise<void> => {
+  const map: ChoiceRenames = new Map(renames.map((rename) => [rename.from, rename.to]))
+  const quoted = `%"${object.fieldKey}"%`
+  const target = `%"${object.objectKey}.${object.fieldKey}"%`
+  const changed = (before: unknown, after: unknown) => JSON.stringify(before) !== JSON.stringify(after)
+
+  const views = await tx.execute<{ id: string; filters: unknown }>(sql`
+    select id, filters from saved_view where object_id = ${object.objectId}::uuid and filters::text like ${quoted}`)
+  for (const row of views) {
+    const filters = renameChoicesInRules(row.filters, object.fieldKey, map)
+    if (changed(row.filters, filters)) {
+      await tx.execute(sql`update saved_view set filters = ${JSON.stringify(filters)}::jsonb, updated_at = now() where id = ${row.id}::uuid`)
+    }
+  }
+
+  const segments = await tx.execute<{ id: string; query: unknown }>(sql`
+    select id, query from segment where object_id = ${object.objectId}::uuid and query::text like ${quoted}`)
+  for (const row of segments) {
+    const query = renameChoicesInRules(row.query, object.fieldKey, map)
+    if (changed(row.query, query)) {
+      await tx.execute(sql`update segment set query = ${JSON.stringify(query)}::jsonb where id = ${row.id}::uuid`)
+    }
+  }
+
+  const automations = await tx.execute<{ id: string; conditions: unknown; steps: unknown }>(sql`
+    select id, conditions, steps from automation
+     where trigger_config ->> 'object' = ${object.objectKey}
+       and (conditions::text like ${quoted} or steps::text like ${quoted})`)
+  for (const row of automations) {
+    const conditions = renameChoicesInRules(row.conditions, object.fieldKey, map)
+    const steps = renameChoicesInRules(row.steps, object.fieldKey, map)
+    if (changed(row.conditions, conditions) || changed(row.steps, steps)) {
+      await tx.execute(sql`update automation set conditions = ${JSON.stringify(conditions)}::jsonb, steps = ${JSON.stringify(steps)}::jsonb, updated_at = now() where id = ${row.id}::uuid`)
+    }
+  }
+
+  const properties = await tx.execute<{ id: string; conditional: unknown }>(sql`
+    select id, conditional from field_def
+     where object_id = ${object.objectId}::uuid and deleted_at is null and conditional::text like ${quoted}`)
+  for (const row of properties) {
+    const conditional = renameChoicesInRules(row.conditional, object.fieldKey, map)
+    if (changed(row.conditional, conditional)) {
+      await tx.execute(sql`update field_def set conditional = ${JSON.stringify(conditional)}::jsonb where id = ${row.id}::uuid`)
+    }
+  }
+
+  const forms = await tx.execute<{ id: string; schema: unknown }>(sql`
+    select id, schema from form where schema::text like ${target}`)
+  for (const row of forms) {
+    if (!Array.isArray(row.schema)) continue
+    const schema = renameChoicesInFormFields(row.schema, `${object.objectKey}.${object.fieldKey}`, map)
+    if (changed(row.schema, schema)) {
+      await tx.execute(sql`update form set schema = ${JSON.stringify(schema)}::jsonb, updated_at = now() where id = ${row.id}::uuid`)
+    }
+  }
 }
 
 /** Label, help text, choices and the two flags. The key and the type are not here
@@ -361,6 +497,8 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
         key: fieldDef.key,
         label: fieldDef.label,
         type: fieldDef.type,
+        storage: fieldDef.storage,
+        columnName: fieldDef.columnName,
         options: fieldDef.options,
         helpText: fieldDef.helpText,
         isRequired: fieldDef.isRequired,
@@ -384,11 +522,14 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
         ? undefined
         : await checkedConditional(tx, before.objectId, before.key, label || before.label, input.conditional)
 
+    const options = input.options ? validateOptions(before.type as FieldType, input.options) : undefined
+    if (options) await rewriteChoices(tx, before, options, input.renames ?? [])
+
     await tx
       .update(fieldDef)
       .set({
         ...(label ? { label } : {}),
-        ...(input.options ? { options: validateOptions(before.type as FieldType, input.options) } : {}),
+        ...(options ? { options } : {}),
         ...(input.helpText !== undefined ? { helpText: input.helpText?.trim() || null } : {}),
         ...(input.isRequired !== undefined ? { isRequired: input.isRequired } : {}),
         ...(input.trackChanges !== undefined ? { trackChanges: input.trackChanges } : {}),

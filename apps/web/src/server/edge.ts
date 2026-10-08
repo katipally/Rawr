@@ -195,6 +195,23 @@ export const CORS_HEADERS: Record<string, string> = {
   'access-control-max-age': '86400',
 }
 
+/** For the endpoints an MCP client or a browser-based one calls with a bearer token.
+ *  No cookie is read, so any origin may call them. */
+const BEARER_CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, mcp-method, mcp-name',
+  'access-control-expose-headers': 'www-authenticate, retry-after',
+  'access-control-max-age': '86400',
+}
+
+export const corsPreflight = (methods: string): Response =>
+  new Response(null, { status: 204, headers: { ...BEARER_CORS, 'access-control-allow-methods': methods } })
+
+export const withCors = (response: Response): Response => {
+  for (const [name, value] of Object.entries(BEARER_CORS)) response.headers.set(name, value)
+  return response
+}
+
 /** How a route that answers with its own wording should refuse a body
  *  `readBody` rejected. */
 export const bodyRefusal = (cause: unknown): { error: string; status: 400 | 413 } =>

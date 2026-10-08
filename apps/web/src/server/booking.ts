@@ -31,6 +31,7 @@ import {
 import { publicBaseUrl } from '~/lib/env.ts'
 import { bookingManagePath } from '~/lib/links.ts'
 import { inBackground } from './background.ts'
+import { recordsCreated } from './record-events.ts'
 import { sendBookingMail } from './booking-mail.ts'
 
 import { createZoomMeeting, deleteZoomMeeting, updateZoomMeeting } from './zoom.ts'
@@ -264,6 +265,11 @@ export const book = async (input: BookInput): Promise<BookOutcome> => {
         accountId: page.accountId,
         bookingId: result.bookingId,
       })
+    }
+
+    if (result.contactCreated && result.contactId) {
+      const contactId = result.contactId
+      inBackground('record created by booking', () => recordsCreated(ctx, 'contact', [contactId]))
     }
 
     // Same reason, and the same guarantee: the visitor is not waiting on Gmail,

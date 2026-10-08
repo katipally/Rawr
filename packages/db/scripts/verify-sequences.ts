@@ -6,7 +6,7 @@ import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { ingestMessage, saveMailbox, type IncomingMessage } from '../src/dal/messages.ts'
 import { createRecord, deleteRecord, mergeRecords } from '../src/dal/records.ts'
-import { createSubscriptionType, setSubscription, unsubscribeByToken } from '../src/dal/subscriptions.ts'
+import { createSubscriptionType, deleteSubscriptionType, setSubscription, unsubscribeByToken } from '../src/dal/subscriptions.ts'
 import { saveAutomation } from '../src/dal/automations.ts'
 import { setTaskStatus } from '../src/dal/tasks.ts'
 import {
@@ -388,6 +388,33 @@ try {
     (row) => row.contactId === second_person.id,
   )
   check(afterAuto?.state === 'active', 'an out-of-office does not stop it', afterAuto?.state ?? '')
+
+  // No headers, only the subject: the same out-of-office is still not a reply.
+  await ingestMessage(sales, {
+    incoming: {
+      ...reply,
+      providerThreadId: `auto-thread-${stamp}`,
+      providerMessageId: `auto-subject-${stamp}`,
+      from: `auto-${stamp}@partner1.example`,
+      internetMessageId: `<auto-subject-${stamp}@partner1.example>`,
+      inReplyTo: `<auto-out-${stamp}@sandbox.test>`,
+      references: [`<auto-out-${stamp}@sandbox.test>`],
+      subject: 'Out of Office until Monday',
+      headers: undefined,
+    },
+    ownerEmail: salesUser!.email as string,
+    mailboxId: box.id,
+    internalDomain: 'datasaur.ai',
+    blocked: new Set(),
+  })
+  const afterSubject = (await listEnrollments(sales, { sequenceId: created.id })).find(
+    (row) => row.contactId === second_person.id,
+  )
+  check(afterSubject?.state === 'active', 'a subject-only out-of-office does not stop it', afterSubject?.state ?? '')
+  const [flagged] = await owner`
+    select count(*)::int as n from message
+     where provider_message_id in (${`auto-reply-${stamp}`}, ${`auto-subject-${stamp}`}) and is_auto_reply`
+  check(Number(flagged?.n) === 2, 'both out-of-office messages are stored as auto-replies', String(flagged?.n))
 
   // Google being busy is not the enrollment's fault: the step is tried again, a
   // finite number of times, and only then does the enrollment fail. A failure
@@ -1183,6 +1210,85 @@ try {
     String(attempts?.is_nullable),
   )
 
+  console.log('-- a subscription type a sequence still uses ----------------------')
+  const inUse = await createSubscriptionType(admin, { name: `Verify unsub C8 ${stamp}` })
+  const replacement = await createSubscriptionType(admin, { name: `Verify unsub C8 next ${stamp}` })
+  const c8Sequences: { id: string; name: string }[] = []
+  for (const n of [1, 2, 3, 4]) {
+    const name = `Verify unsub C8 s${n} ${stamp}`
+    c8Sequences.push({ id: (await saveSequence(sales, { name, settings: { ...everyDay, subscriptionTypeId: inUse.id } })).id, name })
+  }
+  const whileUsed = await refused(() => deleteSubscriptionType(admin, inUse.id, 0))
+  check(
+    whileUsed?.includes(`Verify unsub C8 s1 ${stamp}, Verify unsub C8 s2 ${stamp}, Verify unsub C8 s3 ${stamp} and 1 more`) === true,
+    'a type a sequence points at cannot be deleted, and the message names three and counts the rest',
+    whileUsed ?? 'deleted',
+  )
+  await setSequenceState(admin, { id: c8Sequences[0]!.id, state: 'archived' })
+  const whileArchived = await refused(() => deleteSubscriptionType(admin, inUse.id, 0))
+  check(whileArchived?.includes('and 1 more') === true, 'an archived sequence still holds the type', whileArchived ?? 'deleted')
+  for (const sequence of c8Sequences) {
+    await saveSequence(sales, { id: sequence.id, name: sequence.name, settings: { ...everyDay, subscriptionTypeId: replacement.id } })
+  }
+  const afterRepoint = await refused(() => deleteSubscriptionType(admin, inUse.id, 0))
+  check(afterRepoint === null, 'and it can be deleted once no sequence points at it', afterRepoint ?? '')
+
+  console.log('')
+  console.log('-- the counts on the list and the editor --------------------------------')
+
+  // Active is who is running or parked on a task. Paused is counted on its own,
+  // so a paused sequence shows its people held rather than in flight.
+  const countSeq = await saveSequence(sales, {
+    name: `Verify counts ${stamp}`,
+    description: 'Made for the count checks.',
+    settings: always,
+  })
+  await saveSteps(sales, {
+    sequenceId: countSeq.id,
+    steps: [
+      { kind: 'email', delayDays: 0, delayHours: 0, subject: 'Count {{first_name|there}}', bodyText: 'One.' },
+      { kind: 'call', delayDays: 0, delayHours: 0, taskTitle: 'Ring them' },
+    ],
+  })
+  await setSequenceState(sales, { id: countSeq.id, state: 'active' })
+  const countPeople = await Promise.all(
+    ['a', 'b', 'c'].map((tag) =>
+      createRecord(admin, 'contact', { first_name: 'Count', last_name: tag.toUpperCase(), email: `count-${stamp}-${tag}@partner1.example` }),
+    ),
+  )
+  await enroll(sales, { sequenceId: countSeq.id, contactIds: countPeople.map((p) => p!.id), mailboxId: box.id })
+  const countRows = await listEnrollments(sales, { sequenceId: countSeq.id })
+  const countId = (contactId: string) => countRows.find((row) => row.contactId === contactId)!.id
+  await pauseEnrollment(sales, countId(countPeople[1]!.id))
+  const parkedC = await claimEnrollmentRun(sales, countId(countPeople[2]!.id))
+  await recordSend(sales, {
+    enrollmentId: countId(countPeople[2]!.id),
+    stepId: parkedC.claimed!.step!.id,
+    mailboxId: box.id,
+    providerMessageId: `pm-count-c-${stamp}`,
+    internetMessageId: `<count-c-${stamp}@sandbox.test>`,
+    token: `tok-count-c-${stamp}`,
+    links: [],
+    subject: 'Count',
+    contactId: countPeople[2]!.id,
+  })
+  await createStepTask(sales, {
+    enrollmentId: countId(countPeople[2]!.id),
+    contactId: countPeople[2]!.id,
+    title: 'Ring them',
+    body: null,
+    assigneeId: salesUser!.id as string,
+  })
+  const countsOf = async () => (await readSequence(sales, countSeq.id))!.sequence.stats
+  const listedCounts = async () => (await listSequences(sales)).find((row) => row.id === countSeq.id)?.stats
+  const beforePause = await countsOf()
+  check(beforePause.active === 2 && beforePause.paused === 1, 'a running person and one parked on a task are active, the one paused by hand is not', `active ${beforePause.active}, paused ${beforePause.paused}`)
+  check((await listedCounts())?.active === 2 && (await listedCounts())?.paused === 1, 'the sequence list counts the same way as the editor', `active ${(await listedCounts())?.active}, paused ${(await listedCounts())?.paused}`)
+
+  await setSequenceState(sales, { id: countSeq.id, state: 'paused' })
+  const afterPause = await countsOf()
+  check(afterPause.paused === 2 && afterPause.active === 1, 'pausing the sequence moves the running person to paused, and the parked one stays active', `active ${afterPause.active}, paused ${afterPause.paused}`)
+
   console.log('')
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {
@@ -1195,7 +1301,8 @@ try {
   await owner`delete from mailbox where id in (${box.id}, ${readOnlyBox!.id})`
   await owner`delete from automation where name like ${`Verify life%${stamp}%`}`
   await owner`delete from sequence where name like ${`Verify life%${stamp}%`}`
-  await owner`delete from contact where account_id = ${accountId} and (email like ${`life-${stamp}-%`} or email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or email like ${`orphan-${stamp}%`} or email like ${`unsub-${stamp}-%`} or email like ${`lost-${stamp}%`} or email like ${`paced-${stamp}%`} or email like ${`quiet-${stamp}%`} or email like ${`paused-%-${stamp}@%`} or (first_name = 'Lost' and last_name = 'Address') or (first_name = 'No' and last_name = 'Address') or (first_name = 'Nemo' and last_name = 'Mail'))`
+  await owner`delete from sequence where name = ${`Verify counts ${stamp}`}`
+  await owner`delete from contact where account_id = ${accountId} and (email like ${`life-${stamp}-%`} or email like ${`seq-${stamp}%`} or email like ${`auto-${stamp}%`} or email like ${`bounce-${stamp}%`} or email like ${`opt-${stamp}%`} or email like ${`record-opt-${stamp}%`} or email like ${`orphan-${stamp}%`} or email like ${`unsub-${stamp}-%`} or email like ${`lost-${stamp}%`} or email like ${`paced-${stamp}%`} or email like ${`quiet-${stamp}%`} or email like ${`paused-%-${stamp}@%`} or email like ${`count-${stamp}-%`} or (first_name = 'Lost' and last_name = 'Address') or (first_name = 'No' and last_name = 'Address') or (first_name = 'Nemo' and last_name = 'Mail'))`
   await owner`delete from company where name = ${`Verify unsub co ${stamp}`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])

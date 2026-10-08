@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto'
 import { and, eq, isNull, sql } from 'drizzle-orm'
-import { contact } from '../schema/records.ts'
+import { auditLog } from '../schema/identity.ts'
+import { activity, activityLink, contact } from '../schema/records.ts'
 import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
-import { recordActivity, type ActivityType } from './activity.ts'
+import type { ActivityType } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
-import { withAccount, writeAudit } from './index.ts'
+import { withAccount, type Tx } from './index.ts'
 import { claimInbound } from './integrations.ts'
 
 /** F6 §2 and §3. What a provider tells us happened to an email, turned into a
@@ -85,6 +87,131 @@ const SENTENCE: Record<MarketingEventKind, (subject: string, detail: Record<stri
 
 export type IngestOutcome = { stored: boolean; matched: boolean; reason: string | null }
 
+/** A matched event in the shape the post-match write needs. Built from a live event
+ *  at ingest and from a stored `inbound_event` row at rematch. */
+export type MatchedEvent = {
+  contactId: string
+  source: string
+  providerEventId: string
+  kind: MarketingEventKind
+  subject: string | null
+  detail: Record<string, unknown>
+  at: Date
+  subscriptionTypes: string[]
+}
+
+export const MARKETING_EVENT_KINDS = Object.keys(ACTIVITY_TYPE) as MarketingEventKind[]
+
+/** Rows per multi-row insert. Postgres caps one statement at 65,535 bind parameters,
+ *  and the widest row here binds about ten. */
+const WRITE_CHUNK = 1000
+
+const inChunks = async <T>(rows: T[], write: (chunk: T[]) => Promise<unknown>): Promise<void> => {
+  for (let from = 0; from < rows.length; from += WRITE_CHUNK) await write(rows.slice(from, from + WRITE_CHUNK))
+}
+
+/** Everything a matched marketing event writes: the timeline entry, the engagement
+ *  refresh for sequence mail, and the opt-out for an unsubscribe. Ingest passes the
+ *  one event it matched; rematch passes every event it matched. Set-based, so the
+ *  statement count does not grow with the number of events.
+ *
+ *  The timeline row's id is derived from (account, source, provider event id), so a
+ *  second write of the same event hits the primary key and does nothing. The opt-out
+ *  audit row is not protected that way, so each event must reach this function once:
+ *  the match that makes it visible runs in the same transaction, and only unmatched
+ *  rows match. */
+export const applyMatchedEvents = async (tx: Tx, ctx: AccountContext, events: MatchedEvent[]): Promise<void> => {
+  if (events.length === 0) return
+
+  const entries = events.map((event) => {
+    // The account is part of the key: activity ids are global, and two accounts can
+    // receive the same provider event id.
+    const id = createHash('md5').update(`event:${ctx.accountId}:${event.source}:${event.providerEventId}`).digest('hex')
+    return {
+      activity: {
+        id,
+        accountId: ctx.accountId,
+        type: ACTIVITY_TYPE[event.kind],
+        subject: SENTENCE[event.kind](event.subject ?? 'an email', event.detail),
+        occurredAt: event.at,
+        actorId: ctx.actorId,
+        actorKind: ctx.actorKind,
+        payload: { source: event.source, kind: event.kind, ...event.detail },
+      },
+      link: {
+        accountId: ctx.accountId,
+        activityId: id,
+        entityType: 'contact',
+        entityId: event.contactId,
+        type: ACTIVITY_TYPE[event.kind],
+        occurredAt: event.at,
+      },
+    }
+  })
+  await inChunks(entries, (rows) => tx.insert(activity).values(rows.map((row) => row.activity)).onConflictDoNothing())
+  await inChunks(entries, (rows) => tx.insert(activityLink).values(rows.map((row) => row.link)).onConflictDoNothing())
+
+  await refreshEmailEngagement(
+    tx,
+    ctx,
+    events.filter((event) => event.kind === 'sequence_step' || event.kind === 'sequence_reply').map((event) => event.contactId),
+  )
+
+  // An unsubscribe reported by a provider is authoritative for that provider's list,
+  // and Rawr then refuses to include the contact in any future push. The reverse never
+  // happens: a Rawr-originated opt-out is not overwritten by a provider claiming the
+  // person is subscribed. F6 §2.
+  const unsubscribes = events.filter((event) => event.kind === 'unsubscribe')
+  if (unsubscribes.length === 0) return
+
+  const types = await tx
+    .select({ id: subscriptionType.id, name: subscriptionType.name, isInternal: subscriptionType.isInternal })
+    .from(subscriptionType)
+  const now = new Date()
+  const optOuts = new Map<string, typeof subscriptionState.$inferInsert>()
+  for (const event of unsubscribes) {
+    const wanted = new Set(event.subscriptionTypes.map((name) => name.trim().toLowerCase()).filter(Boolean))
+    for (const type of types) {
+      if (wanted.size > 0 ? !wanted.has(type.name.toLowerCase()) : type.isInternal) continue
+      optOuts.set(`${event.contactId}:${type.id}`, {
+        accountId: ctx.accountId,
+        contactId: event.contactId,
+        subscriptionTypeId: type.id,
+        state: 'unsubscribed',
+        source: event.source,
+        changedAt: now,
+      })
+    }
+  }
+  await inChunks([...optOuts.values()], (rows) =>
+    tx
+      .insert(subscriptionState)
+      .values(rows)
+      .onConflictDoUpdate({
+        target: [subscriptionState.accountId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
+        set: {
+          state: 'unsubscribed',
+          changedAt: sql`excluded.changed_at`,
+          source: sql`excluded.source`,
+        },
+      }),
+  )
+  await inChunks(unsubscribes, (rows) =>
+    tx.insert(auditLog).values(
+      rows.map((event) => ({
+        accountId: ctx.accountId,
+        actorId: ctx.actorId,
+        actorKind: ctx.actorKind,
+        entity: 'subscription_state',
+        entityId: event.contactId,
+        action: 'set',
+        before: { via: event.source },
+        after: { state: 'unsubscribed', authoritative: true },
+      })),
+    ),
+  )
+}
+
 export const ingestMarketingEvent = async (
   ctx: AccountContext,
   event: MarketingEvent,
@@ -92,83 +219,49 @@ export const ingestMarketingEvent = async (
   const email = event.email.trim().toLowerCase()
   if (!email.includes('@')) return { stored: false, matched: false, reason: 'The event named no address.' }
 
-  const matchedContact = await withAccount(ctx, async (tx) => {
-    const [row] = await tx
+  return withAccount(ctx, async (tx) => {
+    const [matchedContact] = await tx
       .select({ id: contact.id })
       .from(contact)
       .where(and(sql`lower(${contact.email}) = ${email}`, isNull(contact.deletedAt)))
       .limit(1)
-    return row ?? null
-  })
 
-  // Deduplicated on the provider's own event id, so a webhook delivered twice is
-  // processed once. F6's edge-case table.
-  const claimed = await claimInbound(ctx, {
-    source: event.source,
-    providerEventId: event.providerEventId,
-    kind: event.kind,
-    payload: { ...event.detail, email, subject: event.subject },
-    contactId: matchedContact?.id ?? null,
-  })
-  if (!claimed) return { stored: false, matched: Boolean(matchedContact), reason: 'Already seen.' }
-
-  if (!matchedContact) {
-    return {
-      stored: true,
-      matched: false,
-      reason: `No contact has the address ${email}, so this is in the unmatched queue.`,
-    }
-  }
-
-  await withAccount(ctx, async (tx) => {
-    const subject = event.subject ?? 'an email'
-    await recordActivity(tx, ctx, {
-      type: ACTIVITY_TYPE[event.kind],
-      subject: SENTENCE[event.kind](subject, event.detail),
-      occurredAt: event.at,
-      payload: { source: event.source, kind: event.kind, ...event.detail },
-      links: [{ entityType: 'contact', entityId: matchedContact.id }],
+    // Deduplicated on the provider's own event id, so a webhook delivered twice is
+    // processed once. F6's edge-case table. Claim and timeline write share this
+    // transaction, so a failed write leaves the event unclaimed for the retry.
+    const subscriptionTypes = event.subscriptionTypes ?? []
+    const claimed = await claimInbound(ctx, {
+      source: event.source,
+      providerEventId: event.providerEventId,
+      kind: event.kind,
+      payload: { ...event.detail, email, subject: event.subject, subscriptionTypes },
+      contactId: matchedContact?.id ?? null,
+      at: event.at,
     })
-    if (event.kind === 'sequence_step' || event.kind === 'sequence_reply') {
-      await refreshEmailEngagement(tx, ctx, [matchedContact.id])
-    }
+    if (!claimed) return { stored: false, matched: Boolean(matchedContact), reason: 'Already seen.' }
 
-    // An unsubscribe reported by a provider is authoritative for that provider's
-    // list, and Rawr then refuses to include the contact in any future push. The
-    // reverse never happens: a Rawr-originated opt-out is not overwritten by a
-    // provider claiming the person is subscribed. F6 §2.
-    if (event.kind === 'unsubscribe') {
-      const wanted = new Set((event.subscriptionTypes ?? []).map((name) => name.trim().toLowerCase()).filter(Boolean))
-      const types = await tx
-        .select({ id: subscriptionType.id, name: subscriptionType.name, isInternal: subscriptionType.isInternal })
-        .from(subscriptionType)
-      for (const type of types) {
-        if (wanted.size > 0 ? !wanted.has(type.name.toLowerCase()) : type.isInternal) continue
-        await tx
-          .insert(subscriptionState)
-          .values({
-            accountId: ctx.accountId,
-            contactId: matchedContact.id,
-            subscriptionTypeId: type.id,
-            state: 'unsubscribed',
-            source: event.source,
-          })
-          .onConflictDoUpdate({
-            target: [subscriptionState.accountId, subscriptionState.contactId, subscriptionState.subscriptionTypeId],
-            set: { state: 'unsubscribed', changedAt: new Date(), source: event.source },
-          })
+    if (!matchedContact) {
+      return {
+        stored: true,
+        matched: false,
+        reason: `No contact has the address ${email}, so this is in the unmatched queue.`,
       }
-      await writeAudit(tx, ctx, {
-        entity: 'subscription_state',
-        entityId: matchedContact.id,
-        action: 'set',
-        before: { via: event.source },
-        after: { state: 'unsubscribed', authoritative: true },
-      })
     }
-  })
 
-  return { stored: true, matched: true, reason: null }
+    await applyMatchedEvents(tx, ctx, [
+      {
+        contactId: matchedContact.id,
+        source: event.source,
+        providerEventId: event.providerEventId,
+        kind: event.kind,
+        subject: event.subject,
+        detail: event.detail,
+        at: event.at,
+        subscriptionTypes,
+      },
+    ])
+    return { stored: true, matched: true, reason: null }
+  })
 }
 
 /** Who may be included in a list push. The one query F6 §2's promise rests on:

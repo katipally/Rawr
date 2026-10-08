@@ -2,7 +2,7 @@ import { saveMcpClient } from '@rawr/db'
 import { randomBytes } from 'node:crypto'
 import type { NextRequest } from 'next/server'
 import { oauthError, redirectAcceptable } from '~/server/mcp/oauth.ts'
-import { bodyRefusal, clientIp, rateLimit, readRaw } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, corsPreflight, rateLimit, readRaw, withCors } from '~/server/edge.ts'
 
 /** RFC 7591 dynamic client registration. Open, as the RFC allows for public
  *  clients: registering buys nothing but a name on a consent screen that a
@@ -10,9 +10,18 @@ import { bodyRefusal, clientIp, rateLimit, readRaw } from '~/server/edge.ts'
 
 export const dynamic = 'force-dynamic'
 
-export const POST = async (request: NextRequest): Promise<Response> => {
+/** A client that lists more than this is a mistake or a table being filled, and a
+ *  name no consent screen can show in full is not one a person can approve. */
+const MAX_REDIRECT_URIS = 10
+const MAX_CLIENT_NAME = 200
+
+export const OPTIONS = (): Response => corsPreflight('POST, OPTIONS')
+
+export const POST = async (request: NextRequest): Promise<Response> => withCors(await answer(request))
+
+const answer = async (request: NextRequest): Promise<Response> => {
   const limit = rateLimit(`oauth-register:${clientIp(request) ?? 'unknown'}`, 30, 60)
-  if (!limit.allowed) return oauthError('too_many_requests', 'Try again in a minute.', 429)
+  if (!limit.allowed) return oauthError('too_many_requests', 'Try again in a minute.', 429, { 'retry-after': '60' })
 
   let body: Record<string, unknown>
   try {
@@ -23,6 +32,9 @@ export const POST = async (request: NextRequest): Promise<Response> => {
   }
 
   const uris = Array.isArray(body.redirect_uris) ? body.redirect_uris : []
+  if (uris.length > MAX_REDIRECT_URIS) {
+    return oauthError('invalid_redirect_uri', `redirect_uris can list at most ${MAX_REDIRECT_URIS} URLs.`)
+  }
   const redirectUris = uris.filter((uri): uri is string => typeof uri === 'string' && redirectAcceptable(uri))
   if (redirectUris.length === 0) {
     return oauthError('invalid_redirect_uri', 'redirect_uris must list at least one https URL or a loopback http URL.')
@@ -32,7 +44,11 @@ export const POST = async (request: NextRequest): Promise<Response> => {
     return oauthError('invalid_client_metadata', 'Only public clients are registered here: token_endpoint_auth_method must be "none".')
   }
 
-  const name = typeof body.client_name === 'string' && body.client_name.trim() ? body.client_name.trim().slice(0, 120) : 'An MCP client'
+  const given = typeof body.client_name === 'string' ? body.client_name.trim() : ''
+  if (given.length > MAX_CLIENT_NAME) {
+    return oauthError('invalid_client_metadata', `client_name can be at most ${MAX_CLIENT_NAME} characters.`)
+  }
+  const name = given || 'An MCP client'
   const client = await saveMcpClient({
     id: `rawr_client_${randomBytes(16).toString('base64url')}`,
     name,

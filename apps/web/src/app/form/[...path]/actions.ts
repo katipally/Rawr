@@ -14,6 +14,7 @@ import { queueSlackNotification } from '~/server/notify.ts'
 import { hopHref } from '~/server/redirect-hop.ts'
 import { answersFromFormData, runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
+import { recordCreated } from '~/server/record-events.ts'
 
 /** The no-JS submit path.
  *
@@ -101,6 +102,9 @@ export const submitHostedForm = async (data: FormData): Promise<void> => {
       entityId: result.contactId,
       accountSlug: form.accountSlug,
     })
+  }
+  if (result.contactCreated && result.contactId) {
+    recordCreated(publicEdgeContext(form.accountId), { accountSlug: form.accountSlug }, 'contact', { id: result.contactId })
   }
 
   if (result.success?.mode === 'redirect' && result.success.value) {

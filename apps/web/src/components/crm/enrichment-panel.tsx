@@ -4,6 +4,7 @@ import { Button, Spinner, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Fragment, useCallback, useEffect, useState } from 'react'
+import { enrichmentLine } from '~/lib/count-phrase.ts'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { useQueryClient } from '@tanstack/react-query'
@@ -100,9 +101,7 @@ export const EnrichmentPanel = ({
         object === 'contact'
           ? await api.integrations.enrich.mutate({ contactId: recordId })
           : await api.integrations.enrichCompany.mutate({ companyId: recordId })
-      const wrote = outcome.written.length
-      const held = outcome.suggested.length
-      return `${outcome.detail} ${wrote ? `Filled ${wrote} blank field${wrote === 1 ? '' : 's'}.` : ''} ${held ? `${held} value${held === 1 ? '' : 's'} held for review below.` : ''}`.trim()
+      return enrichmentLine(outcome.detail, outcome.written.length, outcome.suggested.length, outcome.failed)
     })
 
   const anyUsable = usable(apollo) || usable(lusha) || usable(clay)

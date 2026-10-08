@@ -48,6 +48,9 @@ export type IntegrationMeta = {
   /** Shared: one connection the whole account uses. Personal: granted per
    *  person, so the account-wide row is folded from everyone's grant. */
   appType: 'Shared' | 'Personal'
+  /** Read from exports, never connected over an API, so it is not something an
+   *  account is missing when it has not connected it. */
+  importOnly?: true
   permissions: PermissionGroup[]
   /** What it does, in the words of the row it satisfies. */
   purpose: string
@@ -257,6 +260,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     kind: 'hubspot',
     category: 'Migration',
     appType: 'Shared',
+    importOnly: true,
     permissions: [
       {
         group: "Files",
@@ -471,15 +475,21 @@ export const INTEGRATIONS: IntegrationMeta[] = [
       },
     ],
     name: 'Webflow',
-    purpose: 'Native Webflow forms reaching Rawr without the paid bridge, F3 \u00a77.',
+    purpose: 'Native Webflow forms reach Rawr directly.',
     failureMode:
       'An unsigned or wrongly signed delivery is refused, because an unverified webhook is an open lead-injection endpoint. Replacing the native form with the Rawr embed is the better path: Webflow sends no query string, so attribution is weaker here.',
     secretLabel: 'Webhook signing secret',
-    configFields: [],
+    configFields: [
+      {
+        key: 'formSlug',
+        label: 'Rawr form slug',
+        hint: 'The slug of the Rawr form that receives these submissions. The webhook URL below is built from it.',
+      },
+    ],
     rows: ['Custom Lead Forms'],
     setup: [
       'At webflow.com/dashboard/account/apps build an app, then create the form_submission webhook through its Data API so deliveries are signed. A webhook made from the site dashboard carries no signature and is refused.',
-      'Point it at /w/webflow?account=<account slug>&form=<form slug>. Paste the app\u2019s client secret below, or, for a webhook created with a site token, the secretKey Webflow returned when the webhook was made.',
+      'Enter the Rawr form slug below, then paste the webhook URL it shows into that webhook. Paste the app\u2019s client secret, or, for a webhook created with a site token, the secretKey Webflow returned when the webhook was made.',
     ],
   },
 ]
@@ -537,6 +547,9 @@ export type EnrichmentRun = {
   detail: string
   written: string[]
   suggested: string[]
+  /** Display names of the providers whose call failed, so the result can say so
+   *  even when another provider filled something. */
+  failed: string[]
 }
 
 /** The fields an enricher is allowed to answer, and what the record page names
@@ -581,20 +594,20 @@ const absorb = async (
   provider: string,
   call: () => Promise<{ detail: string; written: string[]; suggested: string[] }>,
 ): Promise<void> => {
-  const outcome = await call().catch((cause: unknown) => ({
-    detail: `${provider}: ${cause instanceof Error ? cause.message : String(cause)}`,
-    written: [] as string[],
-    suggested: [] as string[],
-  }))
+  const outcome = await call().catch(() => {
+    run.failed.push(provider)
+    return { detail: `${provider} could not be reached.`, written: [] as string[], suggested: [] as string[] }
+  })
   run.detail = `${run.detail} ${outcome.detail}`.trim()
   run.written.push(...outcome.written)
   run.suggested.push(...outcome.suggested)
 }
 
 const NONE: EnrichmentRun = {
-  detail: 'No enricher is connected. Add Apollo, Lusha or Clay in Settings, under Integrations.',
+  detail: 'No enricher is connected. Connect Apollo, Lusha or Clay under Connected Apps.',
   written: [],
   suggested: [],
+  failed: [],
 }
 
 /** A company on its own: Apollo by domain, then Lusha, then Clay, each for what
@@ -606,11 +619,11 @@ export const enrichCompanyRecord = async (ctx: AccountContext, companyId: string
   // to enrich and nothing to retry, so take it off the queue and say so.
   if (!company) {
     await clearEnrichmentRequest(ctx, 'company', companyId)
-    return { detail: 'That company was deleted before it could be enriched.', written: [], suggested: [] }
+    return { detail: 'That company was deleted before it could be enriched.', written: [], suggested: [], failed: [] }
   }
   const domain = typeof company.values.domain === 'string' ? company.values.domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '') : ''
   if (!domain) {
-    return { detail: 'That company has no domain, which is the only thing an enricher can match a company on.', written: [], suggested: [] }
+    return { detail: 'That company has no domain, which is the only thing an enricher can match a company on.', written: [], suggested: [], failed: [] }
   }
   const connected = await connectedEnrichers(ctx)
   if (connected.size === 0) return NONE
@@ -618,7 +631,7 @@ export const enrichCompanyRecord = async (ctx: AccountContext, companyId: string
   // Off the queue however it ran: this call is the consent for this record.
   await clearEnrichmentRequest(ctx, 'company', companyId)
 
-  const run: EnrichmentRun = { detail: '', written: [], suggested: [] }
+  const run: EnrichmentRun = { detail: '', written: [], suggested: [], failed: [] }
   if (connected.has('apollo')) await absorb(run, 'Apollo', () => enrichCompany(ctx, { companyId, domain }))
   if (connected.has('lusha')) {
     const missing = stillBlank((await getRecord(ctx, 'company', companyId))?.values ?? {})
@@ -642,7 +655,7 @@ export const enrichRecord = async (
   const record = await getRecord(ctx, 'contact', contactId)
   if (!record) {
     await clearEnrichmentRequest(ctx, 'contact', contactId)
-    return { detail: 'That contact was deleted before it could be enriched.', written: [], suggested: [] }
+    return { detail: 'That contact was deleted before it could be enriched.', written: [], suggested: [], failed: [] }
   }
 
   const email = typeof record.values.email === 'string' ? record.values.email : ''
@@ -651,6 +664,7 @@ export const enrichRecord = async (
       detail: 'That contact has no email address, which is the only thing an enricher can match a person on.',
       written: [],
       suggested: [],
+      failed: [],
     }
   }
   const connected = await connectedEnrichers(ctx)
@@ -661,7 +675,7 @@ export const enrichRecord = async (
 
   await clearEnrichmentRequest(ctx, 'contact', contactId)
 
-  const run: EnrichmentRun = { detail: '', written: [], suggested: [] }
+  const run: EnrichmentRun = { detail: '', written: [], suggested: [], failed: [] }
   if (connected.has('apollo')) await absorb(run, 'Apollo', () => enrichContact(ctx, { contactId, email, companyId }))
 
   if (connected.has('lusha')) {

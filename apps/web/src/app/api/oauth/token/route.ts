@@ -1,7 +1,7 @@
 import { issueOauthToken, linkOauthCode, redeemOauthCode, refreshOauthToken, revokeOauthToken } from '@rawr/db'
 import type { NextRequest } from 'next/server'
 import { oauthError, pkceMatches, resolveClient, resource as ourResource } from '~/server/mcp/oauth.ts'
-import { bodyRefusal, clientIp, rateLimit, readBody, readRaw } from '~/server/edge.ts'
+import { bodyRefusal, clientIp, corsPreflight, rateLimit, readBody, readRaw, withCors } from '~/server/edge.ts'
 
 /** The token endpoint. Form-encoded in, JSON out, RFC 6749 error codes only:
  *  a client refreshing decides what to do next from `invalid_grant` and from
@@ -12,7 +12,11 @@ export const dynamic = 'force-dynamic'
 const NO_STORE = { 'cache-control': 'no-store', pragma: 'no-cache' }
 const REPLAYED = 'That code was already used, so the tokens it made are revoked. Connect again.'
 
-export const POST = async (request: NextRequest): Promise<Response> => {
+export const OPTIONS = (): Response => corsPreflight('POST, OPTIONS')
+
+export const POST = async (request: NextRequest): Promise<Response> => withCors(await answer(request))
+
+const answer = async (request: NextRequest): Promise<Response> => {
   const limit = rateLimit(`oauth-token:${clientIp(request) ?? 'unknown'}`, 60, 60)
   if (!limit.allowed) return oauthError('too_many_requests', 'Try again in a minute.', 429)
 

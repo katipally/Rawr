@@ -24,6 +24,7 @@ import {
   unknownMergeFields,
   type SendWindow } from './sequence-rules.ts'
 import { createTask } from './tasks.ts'
+import { isMachineSender } from './machine-mail.ts'
 
 /** Sequences: the definitions, who is in them, and every reason one stops.
  *
@@ -93,7 +94,10 @@ export type SequenceRow = {
 export type SequenceStats = {
   /** Everybody ever enrolled, whatever became of them: HubSpot's Enrolled. */
   enrolled: number
+  /** Running or waiting on a task: the people the sequence is actually doing something for. */
   active: number
+  /** Held by a pause, by hand or by the sequence being paused. Not in `active`. */
+  paused: number
   finished: number
   replied: number
   bounced: number
@@ -108,6 +112,7 @@ export type SequenceStats = {
 const emptyStats = (): SequenceStats => ({
   enrolled: 0,
   active: 0,
+  paused: 0,
   finished: 0,
   replied: 0,
   bounced: 0,
@@ -120,7 +125,8 @@ const emptyStats = (): SequenceStats => ({
 const statsSql = sql`
   json_build_object(
     'enrolled',     (select count(*) from sequence_enrollment e where e.sequence_id = s.id),
-    'active',       (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state in ('active','waiting_task','paused')),
+    'active',       (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state in ('active','waiting_task')),
+    'paused',       (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'paused'),
     'finished',     (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'finished'),
     'replied',      (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'replied'),
     'bounced',      (select count(*) from sequence_enrollment e where e.sequence_id = s.id and e.state = 'bounced'),
@@ -1603,9 +1609,6 @@ export const onTaskDone = async (tx: Tx, ctx: AccountContext, taskId: string): P
 
 // -------------------------------------------------------- how it stops itself
 
-/** Addresses that mean "this is a delivery report, not a person". */
-const DAEMONS = /^(mailer-daemon|postmaster|no-?reply|bounce[s-]?)@/i
-
 /** A delivery report says so in its own Content-Type, whatever address it came
  *  from. RFC 3464 puts the machine-readable part in a `message/delivery-status`
  *  body part of a `multipart/report`, and providers that send bounces from an
@@ -1613,17 +1616,7 @@ const DAEMONS = /^(mailer-daemon|postmaster|no-?reply|bounce[s-]?)@/i
 export const isDeliveryReport = (
   fromAddr: string,
   headers?: Record<string, string | undefined>,
-): boolean => DAEMONS.test(fromAddr) || /delivery-status|report-type=delivery/i.test(headers?.['content-type'] ?? '')
-
-/** Headers an autoresponder sets. A holiday reply is not a reply, and treating it
- *  as one stops the sequence for somebody who never read it. */
-export const isAutoReply = (headers: Record<string, string | undefined>): boolean => {
-  const submitted = headers['auto-submitted']
-  if (submitted && submitted.toLowerCase() !== 'no') return true
-  if (headers['x-autoreply'] || headers['x-autorespond']) return true
-  const precedence = headers.precedence?.toLowerCase()
-  return precedence === 'auto_reply' || precedence === 'bulk'
-}
+): boolean => isMachineSender(fromAddr) || /delivery-status|report-type=delivery/i.test(headers?.['content-type'] ?? '')
 
 export type InboundForDetection = {
   messageId: string
@@ -1633,6 +1626,9 @@ export type InboundForDetection = {
   references: string[]
   threadId: string
   subject: string | null
+  /** message.is_auto_reply. A holiday reply is not a reply, and treating it as one
+   *  stops the sequence for somebody who never read it. */
+  autoReply: boolean
   headers?: Record<string, string | undefined>
 }
 
@@ -1652,7 +1648,7 @@ export const detectReply = async (
 ): Promise<void> => {
   const from = inbound.fromAddr ?? ''
   const bounced = isDeliveryReport(from, inbound.headers)
-  if (!bounced && inbound.headers && isAutoReply(inbound.headers)) return
+  if (!bounced && inbound.autoReply) return
 
   const ids = [inbound.inReplyTo, ...inbound.references].filter((id): id is string => Boolean(id))
 

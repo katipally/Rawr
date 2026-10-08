@@ -801,6 +801,8 @@ export type ConfirmResult = {
   endsAt: Date
   contactId: string | null
   companyId: string | null
+  /** True when this booking created the contact rather than matching one. */
+  contactCreated: boolean
   /** What the attendee gave, echoed back so the mail the caller sends does not
    *  have to read the row it just wrote. */
   attendeeName: string
@@ -1089,6 +1091,7 @@ export const confirmBooking = async (
       endsAt,
       contactId: linked.contactId,
       companyId: linked.companyId,
+      contactCreated: linked.created,
       attendeeName: name,
       attendeeEmail: email,
       attendeeTimezone: input.attendeeTimezone,
@@ -1112,6 +1115,7 @@ const emptyResult = (input: ConfirmInput): ConfirmResult => ({
   endsAt: new Date(input.startsAt.getTime() + input.page.durationMinutes * 60_000),
   contactId: null,
   companyId: null,
+  contactCreated: false,
   attendeeName: '',
   attendeeEmail: '',
   attendeeTimezone: input.attendeeTimezone,

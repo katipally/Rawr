@@ -298,6 +298,7 @@ const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
     inReplyTo: messageIds(headerValue(headers, 'In-Reply-To'))[0] ?? null,
     references: messageIds(headerValue(headers, 'References')),
     body,
+    headers: Object.fromEntries(headers.map((header) => [header.name?.toLowerCase() ?? '', header.value])),
     attachments: attachmentsOf(raw.payload).filter((file) => !file.inline),
     hasAttachments: hasAttachment(raw.payload),
   }
@@ -449,6 +450,11 @@ const store = async (
   if (!result.stored) tally.skipped += 1
   else if (result.created) tally.stored += 1
   else tally.alreadyHad += 1
+  if (result.stored && result.createdContactIds.length > 0) {
+    // Loaded here, not at the top: record-events reaches next/server through automations, which plain Node unit tests cannot load.
+    const { recordsCreated } = await import('./record-events.ts')
+    await recordsCreated(ctx, 'contact', result.createdContactIds)
+  }
 }
 
 /** Bulk mail that never touches a record. Left out of the list so a large mailbox

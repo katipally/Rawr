@@ -74,17 +74,14 @@ import {
   updateTask,
   withAccount,
   schema,
-  type UpdateResult,
-  type AccountContext,
 } from '@rawr/db'
-import { reportEvent } from '../automations.ts'
 import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
 import { anyObject, recordUpdateInput, recordValues } from './crm-input.ts'
 import { discardUpload, sealUpload, startUpload } from '../import-upload.ts'
-import { announceStageChange } from '../stage-alerts.ts'
+import { recordCreated, recordUpdated } from '../record-events.ts'
 import { NOT_CONFIGURED, removeObject, signedDownload, storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
@@ -117,28 +114,6 @@ const listInput = z.object({
   limit: z.number().int().min(1).max(200).optional(),
   cursor: cursorSchema.nullish(),
 })
-
-/** A stage move and a lifecycle move are two triggers on one write, so both are
- *  read off the same result rather than from two separate calls. `updateRecord`
- *  reports exactly one of them per write, because they are different columns. */
-const fireChangeAutomations = (
-  ctx: { account: AccountContext; session: { accountSlug: string } },
-  // Any object: a custom one has no stage or lifecycle, so `trigger` below is
-  // null for it and this returns before reportEvent is reached at all.
-  object: string,
-  id: string,
-  result: UpdateResult,
-): void => {
-  const trigger = result.stageChange ? 'stage_changed' : result.lifecycleChanged ? 'lifecycle_changed' : null
-  if (!trigger) return
-  reportEvent(ctx.account, {
-    trigger,
-    objectKey: object,
-    entityId: id,
-    displayName: result.displayName,
-    accountSlug: ctx.session.accountSlug,
-  })
-}
 
 export const crmRouter = router({
   registry: protectedProcedure.query(({ ctx }) =>
@@ -243,13 +218,7 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) =>
         call(async () => {
           const result = await createRecord(ctx.account, input.object, input.values)
-          reportEvent(ctx.account, {
-            trigger: 'record_created',
-            objectKey: input.object,
-            entityId: result.id,
-            displayName: result.displayName,
-            accountSlug: ctx.session.accountSlug,
-          })
+          recordCreated(ctx.account, ctx.session, input.object, result)
           return result
         }),
       ),
@@ -266,8 +235,7 @@ export const crmRouter = router({
             input.expectedUpdatedAt ?? null,
             { expectedValues: input.expectedValues },
           )
-          announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
-          fireChangeAutomations(ctx, input.object, input.id, result)
+          recordUpdated(ctx.account, ctx.session, input.object, input.id, result)
           return result
         }),
       ),
@@ -507,8 +475,7 @@ export const crmRouter = router({
             { [input.field]: input.value },
             input.expectedUpdatedAt,
           )
-          announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
-          fireChangeAutomations(ctx, 'deal', input.dealId, result)
+          recordUpdated(ctx.account, ctx.session, 'deal', input.dealId, result)
           return result
         }),
       ),

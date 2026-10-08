@@ -178,9 +178,7 @@ export const TokenList = ({
             <dt className="text-secondary">A client that cannot open a browser</dt>
             <dd>
               Create a token above and send it as{' '}
-              <code>Authorization: Bearer YOUR_TOKEN</code>. A stdio-only client can run{' '}
-              <code>node apps/web/scripts/mcp-stdio.ts</code> with <code>RAWR_MCP_URL</code> and{' '}
-              <code>RAWR_MCP_TOKEN</code> set.
+              <code>Authorization: Bearer YOUR_TOKEN</code> to the address shown above.
             </dd>
           </dl>
         </details>

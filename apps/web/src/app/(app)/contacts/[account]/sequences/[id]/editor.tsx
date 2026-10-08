@@ -235,7 +235,7 @@ export const SequenceEditor = ({
 
       <dl className="grid grid-cols-2 gap-y-4 rounded-panel border border-line p-4 @lg:grid-cols-3 @6xl:grid-cols-6">
         {[
-          { label: 'In flight', value: sequence.stats.active },
+          { label: 'In flight', value: sequence.stats.active, note: sequence.stats.paused > 0 ? `${sequence.stats.paused} paused` : null },
           { label: 'Sent', value: sequence.stats.sent },
           { label: 'Opened', value: sequence.stats.opened },
           { label: 'Clicked', value: sequence.stats.clicked },
@@ -245,6 +245,7 @@ export const SequenceEditor = ({
           <div key={tile.label} className="flex min-w-0 flex-col items-center gap-1 text-center">
             <dt className="text-small font-semibold uppercase">{tile.label}</dt>
             <dd className="text-xl font-medium tabular-nums">{tile.value}</dd>
+            {tile.note ? <span className="text-small text-muted">{tile.note}</span> : null}
           </div>
         ))}
       </dl>

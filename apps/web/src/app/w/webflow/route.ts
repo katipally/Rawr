@@ -8,6 +8,7 @@ import { webflowSecret, webflowSignatureMatches } from '~/server/integrations/we
 import { queueSlackNotification } from '~/server/notify.ts'
 import { runSubmission } from '~/server/submit.ts'
 import { reportEvent } from '~/server/automations.ts'
+import { recordCreated } from '~/server/record-events.ts'
 
 /** POST /w/webflow — F3 §7's fallback for native Webflow forms. Attribution is
  *  weaker than the embed's: Webflow sends no query string. An unsigned delivery is
@@ -113,6 +114,9 @@ export const POST = async (request: NextRequest): Promise<Response> => {
       entityId: result.contactId,
       accountSlug: form.accountSlug,
     })
+  }
+  if (result.contactCreated && result.contactId) {
+    recordCreated(publicEdgeContext(form.accountId), { accountSlug: form.accountSlug }, 'contact', { id: result.contactId })
   }
 
   return NextResponse.json({ ok: true, duplicate: result.duplicate ?? false }, { status: 200 })

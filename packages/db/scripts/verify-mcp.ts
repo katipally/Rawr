@@ -2,6 +2,7 @@ import { createHash, createHmac } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { INTEGRATION_KINDS } from '../src/dal/integrations.ts'
 import { randomToken } from '../src/internal/crypto.ts'
+import { createWebhookEndpoint, listWebhookEndpoints } from '../src/dal/webhooks.ts'
 import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import {
   createMcpToken,
@@ -31,6 +32,9 @@ const ENDPOINT = `${BASE}/api/mcp`
 let failures = 0
 let checks = 0
 
+/** A token in a report shows that one was issued, never the credential itself. */
+const masked = (token: string): string => `${token.slice(0, 6)}...`
+
 const pass = (what: string, detail?: string) => {
   checks++
   console.log(`PASS  ${what}${detail ? `  ${detail}` : ''}`)
@@ -46,6 +50,8 @@ const check = (what: string, condition: boolean, detail?: string) => {
   if (condition) pass(what, detail)
   else fail(what, detail ?? 'condition was false')
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const section = (title: string) =>
   console.log(`\n-- ${title} ${'-'.repeat(Math.max(0, 60 - title.length))}`)
@@ -333,12 +339,14 @@ try {
     (discovered.body?.result?.protocolVersions ?? []).join(', '),
   )
 
-  const wrongVersion = await rpc(salesToken, 'initialize', { protocolVersion: '1999-01-01' })
-  check(
-    'a version this server does not speak is refused, not guessed at',
-    wrongVersion.status === 400 && String(wrongVersion.body?.error?.message).includes('2026-07-28'),
-    wrongVersion.body?.error?.message ?? '',
-  )
+  for (const asked of ['1999-01-01', '2024-11-05']) {
+    const unknownVersion = await rpc(salesToken, 'initialize', { protocolVersion: asked })
+    check(
+      `a version this server does not speak (${asked}) is answered with the newest one`,
+      unknownVersion.status === 200 && unknownVersion.body?.result?.protocolVersion === '2026-07-28',
+      `HTTP ${unknownVersion.status}, ${unknownVersion.body?.result?.protocolVersion ?? unknownVersion.body?.error?.message}`,
+    )
+  }
 
   const badHeader = await fetch(ENDPOINT, {
     method: 'POST',
@@ -481,6 +489,11 @@ try {
       generated.data.rows.length === INTEGRATION_KINDS.length,
     generated.text,
   )
+  check(
+    'and its text carries the rows as well as the sentence',
+    generated.text.includes('"rows"'),
+    generated.text.slice(0, 80),
+  )
   const generatedRefusal = await call(viewerToken, 'crm_records_remove', { object: 'deal', id: mggId })
   // A viewer holds neither the delete grant nor the sales hub, and the grant is the
   // one asked first, so the sentence relayed to the assistant names the act that is
@@ -489,6 +502,43 @@ try {
     'and a generated write is refused by grant in the layer, in a sentence',
     generatedRefusal.isError && /delete records/i.test(generatedRefusal.text),
     generatedRefusal.text,
+  )
+
+  // -----------------------------------------------------------------------
+  section('browser clients: CORS on every endpoint a client calls')
+
+  const origin = 'https://client.example'
+  for (const path of ['/api/mcp', '/api/oauth/token', '/api/oauth/register']) {
+    const preflight = await fetch(`${BASE}${path}`, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'authorization, content-type, mcp-protocol-version',
+      },
+    })
+    const allowed = preflight.headers.get('access-control-allow-headers') ?? ''
+    check(
+      `a preflight to ${path} is answered 204 for any origin`,
+      preflight.status === 204 && preflight.headers.get('access-control-allow-origin') === '*',
+      `HTTP ${preflight.status}`,
+    )
+    check(
+      `and names the headers a browser client sends`,
+      ['authorization', 'content-type', 'mcp-protocol-version'].every((header) => allowed.includes(header)),
+      allowed,
+    )
+  }
+
+  const refusedWithOrigin = await fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+  })
+  check(
+    'a refusal carries the origin too, so the browser shows the 401 rather than a CORS error',
+    refusedWithOrigin.status === 401 && refusedWithOrigin.headers.get('access-control-allow-origin') === '*',
+    `HTTP ${refusedWithOrigin.status}`,
   )
 
   // -----------------------------------------------------------------------
@@ -608,6 +658,35 @@ try {
     body: JSON.stringify({ client_name: 'x', redirect_uris: ['http://evil.example/cb'] }),
   })
   check('a plain-http redirect off the loopback is refused', badRegistration.status === 400)
+
+  const register = (body: unknown) =>
+    fetch(`${BASE}/api/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const tooManyUris = await register({ client_name: 'x', redirect_uris: Array.from({ length: 11 }, (_, i) => `https://client.example/cb${i}`) })
+  const tooManyBody = (await tooManyUris.json()) as { error_description?: string }
+  check(
+    'a registration with more than ten redirect URIs is refused in words',
+    tooManyUris.status === 400 && tooManyBody.error_description === 'redirect_uris can list at most 10 URLs.',
+    tooManyBody.error_description ?? '',
+  )
+  const longName = await register({ client_name: 'n'.repeat(201), redirect_uris: ['http://localhost/callback'] })
+  const longNameBody = (await longName.json()) as { error_description?: string }
+  check(
+    'a client name over 200 characters is refused, not cut short',
+    longName.status === 400 && longNameBody.error_description === 'client_name can be at most 200 characters.',
+    longNameBody.error_description ?? '',
+  )
+  // Refusals spend the same allowance as registrations, so this runs last in the
+  // block: it stops at the first 429 and must not starve the registrations above.
+  let throttled: Response | null = null
+  for (let attempt = 0; attempt < 35 && !throttled; attempt++) {
+    const answer = await register({ redirect_uris: [] })
+    if (answer.status === 429) throttled = answer
+  }
+  check(
+    'registration past its rate limit answers 429 with Retry-After 60',
+    throttled?.headers.get('retry-after') === '60',
+    `Retry-After ${throttled?.headers.get('retry-after') ?? 'absent'}`,
+  )
 
   const cookie = sessionCookie(sales.actorId, sales.accountId)
   if (!cookie) {
@@ -752,7 +831,12 @@ try {
       }).then((r) => r.json() as Promise<Partial<IssuedTokens> & OAuthFailure>)
     const replayCode = await approveCode()
     const first = await exchange(replayCode)
-    check('a fresh code gets its own token for the replay check', typeof first.access_token === 'string', JSON.stringify(first))
+    const issuedFirst = typeof first.access_token === 'string' && typeof first.refresh_token === 'string'
+    check(
+      'a fresh code gets its own token for the replay check',
+      issuedFirst,
+      issuedFirst ? `access ${masked(first.access_token!)}, refresh ${masked(first.refresh_token!)}` : JSON.stringify(first),
+    )
     const reused = await exchange(replayCode)
     check('a code presented twice is refused', reused.error === 'invalid_grant')
     const firstUseDead = await rpc(first.access_token ?? '', 'ping')
@@ -987,6 +1071,12 @@ try {
     !pipeline.isError && Array.isArray(pipeline.data?.stages) && pipeline.data.stages.length > 0,
     `${pipeline.data?.stages?.length} stages`,
   )
+  const weighted = [...pipeline.text.matchAll(/\(weighted ([^)]*)\)/g)].map((match) => match[1] ?? '')
+  check(
+    'weighted totals print with two decimals',
+    weighted.length > 0 && weighted.every((value) => /^-?\d+\.\d{2}$/.test(value)),
+    weighted.join(', ') || 'no totals in the sandbox',
+  )
   check(
     'and totals are per currency, never summed across them',
     pipeline.data.stages.every((s: Record<string, unknown>) => Array.isArray(s.totals)),
@@ -1049,6 +1139,69 @@ try {
   })
   check('a contact can be created', !madeContact.isError, madeContact.text.split('\n')[0] ?? '')
   if (madeContact.data?.id) created.contacts.push(madeContact.data.id)
+
+  // -----------------------------------------------------------------------
+  section('writes from an agent: events, repeats and the text it reads')
+
+  check(
+    'a write answers with the record it made, in the text as well as the data',
+    madeContact.text.includes(String(madeContact.data?.id)),
+  )
+
+  const stamp = Date.now()
+  const hook = await createWebhookEndpoint(admin, {
+    name: `${MARK} hook ${stamp}`,
+    url: 'https://example.com/f5-verify-hook',
+    events: ['contact.created'],
+  })
+  const hookRow = async () => (await listWebhookEndpoints(admin)).find((row) => row.id === hook.id)
+  const hooked = await call(salesToken, 'create_record', {
+    object: 'contact',
+    fields: { first_name: 'F5', last_name: `Hook ${stamp}`, email: `f5-verify-hook-${stamp}@northwind-labs.test` },
+  })
+  // A delivery that cannot reach the receiver still records its attempt, which is
+  // what this checks. A new endpoint has no attempt on it until one is made.
+  let attempted: Awaited<ReturnType<typeof hookRow>> = undefined
+  for (let waited = 0; waited < 45 && !attempted?.lastOkAt && !attempted?.lastErrorAt; waited++) {
+    await sleep(1000)
+    attempted = await hookRow()
+  }
+  check(
+    'a contact created through MCP sends contact.created to an enabled endpoint',
+    !hooked.isError && Boolean(attempted?.lastOkAt || attempted?.lastErrorAt),
+    attempted?.lastError ?? `HTTP ${attempted?.lastStatus ?? 'none'}, no delivery attempt in 45 seconds`,
+  )
+
+  // A write sent twice in one minute is recorded once; the same write in the next
+  // minute is a new one. Starting early in the minute keeps both sends inside it.
+  const note = `${MARK} repeated note ${stamp}`
+  const noteArgs = { object: 'deal', id: mggId, body: note }
+  const repeatedNotes = async (): Promise<number> =>
+    (await scoped<{ n: number }>(admin, sql`select count(*)::int as n from activity where body = ${note}`))[0]?.n ?? 0
+  const intoMinute = Date.now() % 60_000
+  if (intoMinute > 50_000) await sleep(60_000 - intoMinute + 1_000)
+  const firstNote = await call(salesToken, 'create_note', noteArgs)
+  const repeatNote = await call(salesToken, 'create_note', noteArgs)
+  check(
+    'the same write sent twice in one minute is recorded once',
+    !firstNote.isError && !repeatNote.isError && (await repeatedNotes()) === 1,
+    `${await repeatedNotes()} notes`,
+  )
+  await sleep(60_000 - (Date.now() % 60_000) + 1_000)
+  const laterNote = await call(salesToken, 'create_note', noteArgs)
+  check(
+    'and the same write in the next minute is a new note',
+    !laterNote.isError && (await repeatedNotes()) === 2,
+    `${await repeatedNotes()} notes`,
+  )
+
+  const removableTask = await call(salesToken, 'create_task', { object: 'deal', id: mggId, title: `${MARK} remove me` })
+  const removed = await call(salesToken, 'crm_tasks_remove', { id: removableTask.data?.id })
+  check(
+    'a generated write with nothing to return says it was removed, never null',
+    !removed.isError && removed.text.startsWith('crm.tasks.remove removed') && !removed.text.includes('null'),
+    removed.text,
+  )
 
   const rowCap = await call(salesToken, 'list_activities', { object: 'deal', id: mggId, limit: 10_000 })
   check(
@@ -1242,7 +1395,8 @@ try {
       await tx.execute(sql`delete from activity where subject like ${`${MARK}%`} or body like ${`${MARK}%`}`)
       await tx.execute(sql`delete from task where title like ${`${MARK}%`}`)
       await tx.execute(sql`delete from deal where name like ${`${MARK}%`}`)
-      await tx.execute(sql`delete from contact where email = 'f5-verify@northwind-labs.test'`)
+      await tx.execute(sql`delete from contact where email like 'f5-verify%@northwind-labs.test'`)
+      await tx.execute(sql`delete from webhook_endpoint where name like ${`${MARK}%`}`)
       await tx.execute(sql`delete from mcp_call where token_id in (
         select id from mcp_token where name like ${`${MARK}%`})`)
       await tx.execute(sql`delete from mcp_token where name like ${`${MARK}%`}`)

@@ -13,6 +13,7 @@ import {
   getRecord,
   listRecords,
   mergeRecords,
+  listDeletedRecords,
   restoreRecords,
   updateRecord } from '../src/dal/records.ts'
 import { createField, deleteField, purgeField } from '../src/dal/admin-fields.ts'
@@ -45,7 +46,7 @@ import { readBoard } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
 import { compileFilters, listKpis, scopeFor, type Condition } from '../src/dal/query.ts'
 import { readCalendar } from '../src/dal/calendar.ts'
-import { hitsOf, searchAll } from '../src/dal/search.ts'
+import { hitsOf, recordOptions, searchAll } from '../src/dal/search.ts'
 import { createCustomObject, deleteCustomObject } from '../src/dal/objects.ts'
 import { readSubscriptions, sentenceFor } from '../src/dal/subscriptions.ts'
 import {
@@ -980,6 +981,32 @@ try {
     }
   })
 
+  await check('a starts-with filter escapes % and _ and keeps prefix semantics', async () => {
+    const tag = Date.now().toString(36)
+    const percent = await createRecord(admin, 'contact', { first_name: `Pct${tag}100%` })
+    const plain = await createRecord(admin, 'contact', { first_name: `Pct${tag}100x` })
+    const under = await createRecord(admin, 'contact', { first_name: `Under_${tag}` })
+    const underX = await createRecord(admin, 'contact', { first_name: `UnderX${tag}` })
+    try {
+      const startsWith = async (value: string) =>
+        new Set(
+          (await listRecords(admin, {
+            object: 'contact',
+            filters: [{ conjunction: 'and', conditions: [{ field: 'first_name', operator: 'starts_with', value }] }],
+            limit: 200,
+          })).rows.map((row) => row.id),
+        )
+      const pct = await startsWith(`Pct${tag}100%`)
+      expect(pct.has(percent.id) && !pct.has(plain.id), 'a % in a starts-with value matched as a wildcard')
+      const und = await startsWith(`Under_${tag}`)
+      expect(und.has(under.id) && !und.has(underX.id), 'an _ in a starts-with value matched as a wildcard')
+      expect((await startsWith(`Pct${tag}`)).has(plain.id), 'a plain prefix stopped matching')
+      return 'a literal % and _ match themselves, and a prefix still matches'
+    } finally {
+      for (const row of [percent, plain, under, underX]) await deleteRecord(admin, 'contact', row.id)
+    }
+  })
+
   await check('list search finds a custom record by a fragment of its name', async () => {
     const tag = Date.now().toString(36)
     const made = await createCustomObject(admin, { nameSingular: `Probe ${tag}`, namePlural: `Probes ${tag}` })
@@ -1334,21 +1361,23 @@ try {
       first_name: 'Mine',
       email: `mine.bulk.${listStamp}@partner9.example`,
     })
-    const refused = await refuses('a bulk delete carrying a peer id', () =>
-      startBulkOperation(sales, { objectKey: 'contact', ids: [mine.id, theirs.id], action: { type: 'delete' } }),
-    )
-    expect(refused.includes('not in this account'), refused)
+    try {
+      const refused = await refuses('a bulk delete carrying a peer id', () =>
+        startBulkOperation(sales, { objectKey: 'contact', ids: [mine.id, theirs.id], action: { type: 'delete' } }),
+      )
+      expect(refused.includes('not in this account'), refused)
 
-    const still = await getRecord(sales, 'contact', mine.id)
-    expect(still !== null, 'the refusal still deleted the record it could see')
-
-    // The peer row exists only to be refused, and its address stands a company up
-    // beside it. Left behind, that company is a second row in a tenant the
-    // one-row check further down reads as having exactly one.
-    await db.execute(sql`delete from contact where id = ${theirs.id}::uuid`)
-    await db.execute(sql`
-      delete from company where account_id = ${probe.id}::uuid and domain = 'peer9.example'`)
-    return refused
+      const still = await getRecord(sales, 'contact', mine.id)
+      expect(still !== null, 'the refusal still deleted the record it could see')
+      return refused
+    } finally {
+      // The peer row exists only to be refused. It is removed whatever the checks
+      // above found, so a failed expect cannot leave it in the probe tenant for the
+      // one-row check further down.
+      await db.execute(sql`delete from contact where id = ${theirs.id}::uuid`)
+      await db.execute(sql`
+        delete from company where account_id = ${probe.id}::uuid and domain = 'peer9.example'`)
+    }
   })
 
   await check('a small selection runs in the call; an owner lands on all of it', async () => {
@@ -2537,6 +2566,90 @@ try {
     if (!custom) return 'no custom object seeded; core objects all have tiles'
     expect((await listKpis(admin, custom.key)).length === 0, 'a custom object was given tiles nobody defined')
     return `${custom.key} has no tiles, so the strip does not render`
+  })
+
+  console.log('\n-- creation door and search terms (B03-F06, C1 to C4) ----------------')
+
+  await check('a capture reports whether it created the contact or matched one', async () => {
+    const email = `door.${Date.now()}@gmail.com`
+    const capture = () =>
+      withAccount(sales, (tx) =>
+        upsertCapturedPerson(tx, sales, { email, contact: { first_name: 'Door' }, company: {}, attribution: NO_ATTRIBUTION, source: 'form' }),
+      )
+    const first = await capture()
+    const second = await capture()
+    await deleteRecord(admin, 'contact', first.contactId!)
+    expect(first.created === true, 'the first capture of a new address did not report created')
+    expect(second.created === false && second.contactId === first.contactId, 'a second capture of the same address reported created, or another contact')
+    return 'created on the first capture, matched on the second'
+  })
+
+  await check('a segment "contains" takes % and _ literally, needs every word, and matches mid-word', async () => {
+    const stamp = Date.now()
+    const literal = await createRecord(sales, 'contact', { first_name: 'Seg', last_name: `Vale${stamp} 100%`, email: `seg.a.${stamp}@mail.example` })
+    const wildcard = await createRecord(sales, 'contact', { first_name: 'Seg', last_name: `Vale${stamp} 100x`, email: `seg.b.${stamp}@mail.example` })
+    const lastNameContains = async (value: string) =>
+      new Set(
+        (
+          await listRecords(sales, {
+            object: 'contact',
+            filters: [{ conjunction: 'and', conditions: [{ field: 'last_name', operator: 'contains', value }] }],
+            limit: 200,
+          })
+        ).rows.map((row) => row.id),
+      )
+    expect((await lastNameContains('100%')).has(literal.id), 'a percent sign did not match itself')
+    expect(!(await lastNameContains('100%')).has(wildcard.id), 'a percent sign matched as a wildcard')
+    expect((await lastNameContains(`100% vale${stamp}`)).has(literal.id), 'the words of a segment matched only in the order typed')
+    expect(!(await lastNameContains(`100% zzqx${stamp}`)).has(literal.id), 'a segment with one word that matches nothing still matched')
+    expect((await lastNameContains(`ale${stamp}`)).has(wildcard.id), 'a fragment mid-word did not match')
+    await deleteRecord(admin, 'contact', literal.id)
+    await deleteRecord(admin, 'contact', wildcard.id)
+    return 'literal %, any word order, mid-word fragment'
+  })
+
+  await check('the association rail search needs every word, takes % literally, and matches mid-word', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Rail ${stamp}`, domain: `rail${stamp}.example` })
+    const person = await createRecord(sales, 'contact', {
+      first_name: 'Rita',
+      last_name: `Mosk${stamp} 100%`,
+      email: `rita.${stamp}@mail.example`,
+      company_id: company.id,
+    })
+    const linkedContacts = async (q: string) =>
+      groupFor(await readAssociations(sales, { entityType: 'company', entityId: company.id }, { q }), 'contact')?.records.map((record) => record.id) ?? []
+    expect((await linkedContacts('100% rita')).includes(person.id), 'the words of a rail search matched only in the order typed')
+    expect((await linkedContacts(`osk${stamp}`)).includes(person.id), 'a fragment mid-word did not match')
+    expect(!(await linkedContacts('rita 100x')).includes(person.id), 'a percent sign in the rail search matched as a wildcard')
+    expect(!(await linkedContacts('rita zzqx')).includes(person.id), 'a rail search with one word that matches nothing still matched')
+    await deleteRecord(admin, 'contact', person.id)
+    await deleteRecord(admin, 'company', company.id)
+    return 'every word, any order, literal %, mid-word'
+  })
+
+  await check('the trash search needs every word, takes % literally, and matches mid-word', async () => {
+    const stamp = Date.now()
+    const gone = await createRecord(sales, 'contact', { first_name: `Trash${stamp} 100%`, last_name: 'Rowe', email: `trash.${stamp}@mail.example` })
+    await deleteRecord(admin, 'contact', gone.id)
+    const trashed = async (search: string) =>
+      (await listDeletedRecords(admin, 'contact', { search, limit: 200 })).rows.map((row) => row.id)
+    expect((await trashed(`trash${stamp} 100%`)).includes(gone.id), 'a percent sign did not match itself in the trash')
+    expect((await trashed(`rowe trash${stamp}`)).includes(gone.id), 'the words of a trash search matched only in the order typed')
+    expect((await trashed(`ash${stamp}`)).includes(gone.id), 'a fragment mid-word did not match in the trash')
+    expect(!(await trashed(`trash${stamp} 100x`)).includes(gone.id), 'a percent sign in the trash search matched as a wildcard')
+    return 'every word, any order, literal %, mid-word'
+  })
+
+  await check('the record picker needs every word, takes % literally, and matches mid-word', async () => {
+    const stamp = Date.now()
+    const pick = await createRecord(sales, 'contact', { first_name: `Pick${stamp} 100%`, last_name: 'Dyer', email: `pick.${stamp}@mail.example` })
+    const picked = async (query: string) => (await recordOptions(sales, { object: 'contact', query, limit: 50 })).map((option) => option.id)
+    expect((await picked(`dyer pick${stamp}`)).includes(pick.id), 'the words of a picker search matched only in the order typed')
+    expect((await picked(`ick${stamp} 100%`)).includes(pick.id), 'a picker fragment mid-word, or a percent sign, did not match')
+    expect(!(await picked(`pick${stamp} 100x`)).includes(pick.id), 'a percent sign in the picker matched as a wildcard')
+    await deleteRecord(admin, 'contact', pick.id)
+    return 'every word, any order, literal %, mid-word'
   })
 
   console.log('')

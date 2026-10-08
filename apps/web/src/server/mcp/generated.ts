@@ -64,12 +64,15 @@ const plain = (value: unknown): unknown =>
   )
 
 const summarise = (path: string, type: string, data: unknown): string => {
+  if (data === null || data === undefined) {
+    return type === 'query' ? `${path}: no content.` : `${path} ${DESTRUCTIVE.test(path) ? 'removed' : 'done'}.`
+  }
   if (Array.isArray(data)) return `${path}: ${data.length} row${data.length === 1 ? '' : 's'}.`
-  if (data && typeof data === 'object') {
+  if (typeof data === 'object') {
     const record = data as Record<string, unknown>
     const rows = Array.isArray(record.rows) ? record.rows.length : Array.isArray(record.items) ? record.items.length : null
     if (rows !== null) return `${path}: ${rows} row${rows === 1 ? '' : 's'}${record.nextCursor || record.cursor ? ', more available with the cursor' : ''}.`
-    return `${path} ${type === 'query' ? 'answered' : 'done'}. See structuredContent.`
+    return `${path} ${type === 'query' ? 'answered' : 'done'}.`
   }
   return `${path}: ${String(data)}`
 }

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import { assertCanView, type AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { MAX_ROWS, type Range } from './reporting.ts'
+import { everyFragment } from './text-match.ts'
 
 /** P3 item 14. The SEM container, and the cost-per numbers it exists for.
  *
@@ -41,10 +42,8 @@ export const listCampaigns = async (
     assertCanView(ctx, ['marketing', 'reports'], 'campaigns')
     const limit = Math.min(Math.max(input.limit ?? PAGE, 1), MAX_PAGE)
     const offset = Math.max(input.offset ?? 0, 0)
-    const needle = input.search?.trim().toLowerCase()
-    const match = needle
-      ? sql`and (lower(k.name) like ${`%${needle}%`} or lower(k.utm_campaign) like ${`%${needle}%`})`
-      : sql``
+    const found = everyFragment(input.search ?? '', (pattern) => sql`(k.name ilike ${pattern} or k.utm_campaign ilike ${pattern})`)
+    const match = found ? sql`and ${found}` : sql``
 
     const rows = await tx.execute<{
       id: string

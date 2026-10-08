@@ -50,6 +50,6 @@ export const testWebflow = async (ctx: AccountContext): Promise<ConnectionTest> 
   return {
     ok: true,
     detail:
-      'The secret is stored and verifies a signature. Whether it is the right one shows on the first delivery: a mismatch is refused and named here.',
+      'The stored secret reads back and signs a test payload. Rawr cannot call Webflow to check it against the app, so only the first signed delivery from Webflow proves it is the right secret.',
   }
 }

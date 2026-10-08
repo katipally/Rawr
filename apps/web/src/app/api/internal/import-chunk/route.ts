@@ -2,6 +2,7 @@ import { runImportChunk, systemContext } from '@rawr/db'
 import { NextResponse, type NextRequest } from 'next/server'
 import { env } from '~/lib/env.ts'
 import { internalRequestIsAuthentic } from '~/server/internal.ts'
+import { recordsCreated } from '~/server/record-events.ts'
 
 /** The worker asking the app to import one chunk of a file.
  *
@@ -26,7 +27,10 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
   try {
     // A job's context: no actor, marketing's ceiling. The rows were accepted from
     // a person who could write them; running the file needs nothing more.
-    return NextResponse.json(await runImportChunk(systemContext(body.accountId), body.runId))
+    const ctx = systemContext(body.accountId)
+    const { created, ...chunk } = await runImportChunk(ctx, body.runId)
+    if (created) await recordsCreated(ctx, created.objectKey, created.ids)
+    return NextResponse.json(chunk)
   } catch (cause) {
     return NextResponse.json(
       { error: cause instanceof Error ? cause.message : String(cause) },

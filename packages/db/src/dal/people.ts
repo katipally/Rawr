@@ -35,14 +35,14 @@ export type PersonCapture = {
   assignOwner?: AssignOwner | null | undefined
 }
 
-export type CapturedPerson = { contactId: string | null; companyId: string | null }
+export type CapturedPerson = { contactId: string | null; companyId: string | null; created: boolean }
 
 export const upsertCapturedPerson = async (
   tx: Tx,
   ctx: AccountContext,
   input: PersonCapture,
 ): Promise<CapturedPerson> => {
-  if (!input.email) return { contactId: null, companyId: null }
+  if (!input.email) return { contactId: null, companyId: null, created: false }
 
   const contactValues = { ...input.contact, email: input.email }
 
@@ -92,7 +92,7 @@ export const upsertCapturedPerson = async (
     if (input.lifecycleStage) {
       await applyLifecycle(tx, ctx, existing.id, input.lifecycleStage, input.source)
     }
-    return { contactId: existing.id, companyId: companyId ?? (existing.company_live ? existing.company_id : null) }
+    return { contactId: existing.id, companyId: companyId ?? (existing.company_live ? existing.company_id : null), created: false }
   }
 
   const columns: Record<string, unknown> = {
@@ -121,7 +121,7 @@ export const upsertCapturedPerson = async (
     const [raced] = await tx.execute<{ id: string }>(
       sql`select id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
     )
-    return { contactId: raced?.id ?? null, companyId }
+    return { contactId: raced?.id ?? null, companyId, created: false }
   }
 
   await resolveContactCampaigns(tx, ctx, [created.id])
@@ -130,7 +130,7 @@ export const upsertCapturedPerson = async (
   if (input.lifecycleStage) {
     await applyLifecycle(tx, ctx, created.id, input.lifecycleStage, input.source)
   }
-  return { contactId: created.id, companyId }
+  return { contactId: created.id, companyId, created: true }
 }
 
 /** Picks the owner a capture asked for and writes it, with the same timeline
