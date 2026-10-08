@@ -5,6 +5,7 @@ import {
   ForbiddenError,
   UnknownFieldError,
   ValueError,
+  changeThread,
   logByHand,
   createRecord,
   createTask,
@@ -837,6 +838,37 @@ const putBackDuplicateTool: ToolDefinition = {
   },
 }
 
+// ---------------------------------------------------------------------------
+// Mail
+// ---------------------------------------------------------------------------
+
+/** Only the unread change is built here. Archive, trash and assignment take the same
+ *  procedure, and they are not offered to an assistant. */
+const markThreadUnreadTool: ToolDefinition = {
+  name: 'mail_mark_unread',
+  title: 'Mark a conversation unread',
+  writes: true,
+  toolset: 'mail',
+  description: () =>
+    'Undoes mail_mark_read: the conversation shows as unread for you again. Take thread_id from mail_inbox, or from mail_threads_for on a contact. Needs write access.',
+  inputSchema: () => ({
+    type: 'object',
+    properties: { thread_id: { type: 'string', description: 'The conversation, from mail_inbox.' } },
+    required: ['thread_id'],
+    additionalProperties: false,
+  }),
+  run: async (context, args) => {
+    const threadId = z.uuid().safeParse(args.thread_id)
+    if (!threadId.success) return { text: 'Give the thread_id from mail_inbox.', isError: true }
+
+    const changed = await changeThread(context.caller.ctx, threadId.data, { kind: 'unread', value: true })
+    return {
+      text: changed ? `Marked unread: ${threadId.data}.` : `${threadId.data} was already unread. Nothing changed.`,
+      data: { threadId: threadId.data, unread: true, changed },
+    }
+  },
+}
+
 /** The ten that talk the way a person does, first, then the hand-written pairs
  *  that need their own sentence, then one tool per procedure so nothing the
  *  screens can do is out of an assistant's reach. */
@@ -853,6 +885,7 @@ export const CURATED_TOOLS: ToolDefinition[] = [
   logActivityTool,
   listSetAsideDuplicates,
   putBackDuplicateTool,
+  markThreadUnreadTool,
 ]
 
 // ---------------------------------------------------------------------------

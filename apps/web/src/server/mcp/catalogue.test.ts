@@ -13,6 +13,7 @@ const REVERSES: [string, string][] = [
   ['admin_fields_remove', 'admin_fields_restore'],
   ['mail_blocklist_add', 'mail_blocklist_remove'],
   ['sequences_enrollments_pause', 'sequences_enrollments_resume'],
+  ['mail_mark_read', 'mail_mark_unread'],
 ]
 
 test('every tool name is listed once', () => {
@@ -45,6 +46,12 @@ test('a reverse is listed on a connection whose toolsets include its forward', (
 test('put back is a write and the set-aside list is a read', () => {
   assert.equal(TOOLS_BY_NAME.get('put_back_duplicate')?.writes, true)
   assert.equal(TOOLS_BY_NAME.get('list_set_aside_duplicates')?.writes, false)
+})
+
+test('mark unread is a write, and only the unread change is offered', () => {
+  assert.equal(TOOLS_BY_NAME.get('mail_mark_unread')?.writes, true)
+  assert.equal(TOOLS_BY_NAME.get('mail_mark_read')?.writes, true)
+  assert.equal(TOOLS_BY_NAME.has('mail_change_thread'), false)
 })
 
 test('only contacts and companies have a duplicates queue', () => {

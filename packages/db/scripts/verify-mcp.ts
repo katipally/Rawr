@@ -1296,6 +1296,28 @@ try {
   check('and the pair is no longer set aside', afterPut.data?.pairs?.some(sameTwo) === false, afterPut.text)
 
   // -----------------------------------------------------------------------
+  section('mark unread: undoes mark read over MCP')
+
+  const inbox = await call(salesToken, 'mail_inbox', {})
+  const thread = inbox.data?.threads?.[0]?.id as string | undefined
+  check('there is a conversation to mark', typeof thread === 'string', inbox.text)
+
+  const read = await call(salesToken, 'mail_mark_read', { threadId: thread })
+  check('a conversation is marked read over MCP', !read.isError, read.text)
+
+  const unread = await call(salesToken, 'mail_mark_unread', { thread_id: thread })
+  check('and marked unread again', !unread.isError && unread.text.startsWith('Marked unread'), unread.text)
+  const unreadAgain = await call(salesToken, 'mail_mark_unread', { thread_id: thread })
+  check(
+    'marking it unread a second time is a no-op sentence',
+    !unreadAgain.isError && unreadAgain.data?.changed === false,
+    unreadAgain.text,
+  )
+
+  const viewerUnread = await call(viewerToken, 'mail_mark_unread', { thread_id: thread })
+  check('a read-only token cannot mark a conversation unread', viewerUnread.isError, viewerUnread.text)
+
+  // -----------------------------------------------------------------------
   section('tenancy')
 
   const crossRead = await call(probeToken, 'get_record', { object: 'deal', id: mggId })

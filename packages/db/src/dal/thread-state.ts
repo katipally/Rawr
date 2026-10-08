@@ -67,11 +67,25 @@ const assertVisible = async (tx: Tx, ctx: AccountContext, threadId: string): Pro
  *  The epoch is a sentinel, not a date anybody reads. */
 const UNREAD_SENTINEL = new Date(0)
 
-export const changeThread = async (ctx: AccountContext, threadId: string, change: ThreadChange): Promise<void> => {
+/** Resolves to false only when an unread change found the thread already in that state.
+ *  Every other kind of change answers true. */
+export const changeThread = async (ctx: AccountContext, threadId: string, change: ThreadChange): Promise<boolean> => {
   if (change.kind === 'unread') {
     if (!ctx.actorId) throw new Error('Only a person can mark a conversation read or unread.')
-    await mutate(ctx, 'message_thread_read', async (tx) => {
+    return mutate(ctx, 'message_thread_read', async (tx) => {
       await assertVisible(tx, ctx, threadId)
+      const [read] = await tx
+        .select({ lastReadAt: messageThreadRead.lastReadAt })
+        .from(messageThreadRead)
+        .where(and(eq(messageThreadRead.threadId, threadId), eq(messageThreadRead.userId, ctx.actorId as string)))
+        .limit(1)
+      const [thread] = await tx
+        .select({ lastAt: messageThread.lastAt })
+        .from(messageThread)
+        .where(eq(messageThread.id, threadId))
+        .limit(1)
+      const lastAt = thread?.lastAt ?? null
+      const wasUnread = !read || (lastAt !== null && read.lastReadAt < lastAt)
       const now = new Date()
       await tx
         .insert(messageThreadRead)
@@ -87,11 +101,10 @@ export const changeThread = async (ctx: AccountContext, threadId: string, change
           set: { lastReadAt: change.value ? UNREAD_SENTINEL : now, gmailUnread: change.value },
         })
       return {
-        result: undefined,
+        result: wasUnread !== change.value,
         audit: { entity: 'message_thread_read', entityId: threadId, action: change.value ? 'unread' : 'read', before: null, after: null },
       }
     })
-    return
   }
 
   await mutate(ctx, 'message_thread', async (tx) => {
@@ -142,6 +155,7 @@ export const changeThread = async (ctx: AccountContext, threadId: string, change
       },
     }
   })
+  return true
 }
 
 /** Gmail said what the folders are. Applied only when nothing is waiting, and only
