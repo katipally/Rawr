@@ -1,8 +1,8 @@
 import { and, eq, ne, sql } from 'drizzle-orm'
 import { membership } from '../schema/identity.ts'
 import { mailbox, message, messageThread, messageThreadRead } from '../schema/messaging.ts'
-import { isAdmin, type AccountContext } from './context.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
+import { assertCanWrite, isAdmin, type AccountContext } from './context.ts'
+import { mutate, withAccount, writeAudit, type Tx } from './index.ts'
 import type { MailboxState } from './messages.ts'
 
 /** Inbox folders and the Gmail changes that follow them. Rawr records a change at
@@ -64,15 +64,24 @@ const assertVisible = async (tx: Tx, ctx: AccountContext, threadId: string): Pro
 }
 
 /** Unread is the person's own read row set back to before the thread's last message.
- *  The epoch is a sentinel, not a date anybody reads. */
+ *  The epoch is a sentinel, not a date anybody reads, and it stays unread even if the
+ *  thread has no last message to compare with. */
 const UNREAD_SENTINEL = new Date(0)
 
-/** Resolves to false only when an unread change found the thread already in that state.
- *  Every other kind of change answers true. */
+/** Whether the person sees the thread as unread: no read row, a read row set back to
+ *  the sentinel, or a last message newer than the last time they read. */
+export const isUnread = (lastReadAt: Date | null, lastAt: Date | null): boolean =>
+  lastReadAt === null ||
+  lastReadAt.getTime() === UNREAD_SENTINEL.getTime() ||
+  (lastAt !== null && lastReadAt < lastAt)
+
+/** Resolves to false only when an unread change found the thread already in that state,
+ *  and then writes nothing. Every other kind of change answers true. */
 export const changeThread = async (ctx: AccountContext, threadId: string, change: ThreadChange): Promise<boolean> => {
   if (change.kind === 'unread') {
     if (!ctx.actorId) throw new Error('Only a person can mark a conversation read or unread.')
-    return mutate(ctx, 'message_thread_read', async (tx) => {
+    assertCanWrite(ctx, 'message_thread_read')
+    return withAccount(ctx, async (tx) => {
       await assertVisible(tx, ctx, threadId)
       const [read] = await tx
         .select({ lastReadAt: messageThreadRead.lastReadAt })
@@ -84,8 +93,7 @@ export const changeThread = async (ctx: AccountContext, threadId: string, change
         .from(messageThread)
         .where(eq(messageThread.id, threadId))
         .limit(1)
-      const lastAt = thread?.lastAt ?? null
-      const wasUnread = !read || (lastAt !== null && read.lastReadAt < lastAt)
+      if (isUnread(read?.lastReadAt ?? null, thread?.lastAt ?? null) === change.value) return false
       const now = new Date()
       await tx
         .insert(messageThreadRead)
@@ -100,10 +108,14 @@ export const changeThread = async (ctx: AccountContext, threadId: string, change
           target: [messageThreadRead.accountId, messageThreadRead.threadId, messageThreadRead.userId],
           set: { lastReadAt: change.value ? UNREAD_SENTINEL : now, gmailUnread: change.value },
         })
-      return {
-        result: wasUnread !== change.value,
-        audit: { entity: 'message_thread_read', entityId: threadId, action: change.value ? 'unread' : 'read', before: null, after: null },
-      }
+      await writeAudit(tx, ctx, {
+        entity: 'message_thread_read',
+        entityId: threadId,
+        action: change.value ? 'unread' : 'read',
+        before: null,
+        after: null,
+      })
+      return true
     })
   }
 

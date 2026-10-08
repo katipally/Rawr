@@ -1,6 +1,34 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { folderChanges, gmailLabelsFor, labelsOfThread, threadStateFromLabels } from './thread-state.ts'
+import { folderChanges, gmailLabelsFor, isUnread, labelsOfThread, threadStateFromLabels } from './thread-state.ts'
+
+const SENTINEL = new Date(0)
+const LAST = new Date('2026-10-08T12:00:00Z')
+const EARLIER = new Date('2026-10-08T11:00:00Z')
+const LATER = new Date('2026-10-08T13:00:00Z')
+
+test('a thread with no read row is unread, whether or not it has a last message', () => {
+  assert.equal(isUnread(null, LAST), true)
+  assert.equal(isUnread(null, null), true)
+})
+
+test('a read row set to the sentinel is unread, even when the thread has no last message', () => {
+  assert.equal(isUnread(SENTINEL, LAST), true)
+  assert.equal(isUnread(SENTINEL, null), true)
+})
+
+test('a read row later than the last message is read', () => {
+  assert.equal(isUnread(LATER, LAST), false)
+  assert.equal(isUnread(LAST, LAST), false)
+})
+
+test('a read row earlier than the last message is unread', () => {
+  assert.equal(isUnread(EARLIER, LAST), true)
+})
+
+test('a read row with no last message to compare with is read', () => {
+  assert.equal(isUnread(LATER, null), false)
+})
 
 test('a thread with a message in the Inbox is not archived, whatever else it carries', () => {
   assert.deepEqual(threadStateFromLabels([['SENT'], ['INBOX', 'UNREAD']]), { archived: false, trashed: false })

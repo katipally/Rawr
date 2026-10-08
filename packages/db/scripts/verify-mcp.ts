@@ -1307,15 +1307,26 @@ try {
 
   const unread = await call(salesToken, 'mail_mark_unread', { thread_id: thread })
   check('and marked unread again', !unread.isError && unread.text.startsWith('Marked unread'), unread.text)
-  const unreadAgain = await call(salesToken, 'mail_mark_unread', { thread_id: thread })
+  // Writes with identical arguments within a minute replay the first answer, so the
+  // repeat carries its own key to reach the layer.
+  const unreadAgain = await call(
+    salesToken,
+    'mail_mark_unread',
+    { thread_id: thread },
+    { idempotencyKey: `f5-verify-unread-again-${Date.now()}` },
+  )
   check(
     'marking it unread a second time is a no-op sentence',
     !unreadAgain.isError && unreadAgain.data?.changed === false,
     unreadAgain.text,
   )
 
+  // Read state is the person's own, not a record, so a member with no edit grant
+  // may read and unread a conversation they can see. Record writes stay refused above.
+  const viewerMarkRead = await call(viewerToken, 'mail_mark_read', { threadId: thread })
+  check('a viewer with no edit grant can mark their own read state', !viewerMarkRead.isError, viewerMarkRead.text)
   const viewerUnread = await call(viewerToken, 'mail_mark_unread', { thread_id: thread })
-  check('a read-only token cannot mark a conversation unread', viewerUnread.isError, viewerUnread.text)
+  check('and mark it unread again', !viewerUnread.isError && viewerUnread.data?.changed === true, viewerUnread.text)
 
   // -----------------------------------------------------------------------
   section('tenancy')
