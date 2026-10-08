@@ -9,10 +9,13 @@ import {
   listMailboxes,
   listSequences,
   getRegistry,
+  isSettableField,
+  MAX_DELAY_MINUTES,
   type AutomationStep,
 } from '@rawr/db'
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { AutomationList, type StepView } from './automation-list.tsx'
+import { delayFrom } from './wait-input.ts'
 import { toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
@@ -20,7 +23,7 @@ import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
  *  an input. The server coerces on the way back in. Recursive, because a branch
  *  holds two arms of exactly these steps. */
 const asStepView = (step: AutomationStep): StepView => {
-  if (step.kind === 'delay') return { kind: 'delay', minutes: step.minutes }
+  if (step.kind === 'delay') return { kind: 'delay', ...delayFrom(step.minutes) }
   if (step.kind === 'guard') return { kind: 'guard', conditions: step.conditions }
   if (step.kind === 'branch') {
     return {
@@ -71,10 +74,14 @@ const AutomationsPage = async () => {
   // created" happens to an object an admin invented exactly as it does to a
   // contact.
   const objects = registry.objects.map((object) => ({ key: object.key, label: object.nameSingular }))
+  // Only the fields a set-field step can write. A relation, a user field or a
+  // rating needs an id or a shape a text box cannot give, so it is not offered.
   const fieldsByObject = Object.fromEntries(
     registry.objects.map((object) => [
       object.key,
-      fields.filter((field) => field.objectKey === object.key).map((field) => ({ key: field.key, label: field.label })),
+      fields
+        .filter((field) => field.objectKey === object.key && isSettableField(field))
+        .map((field) => ({ key: field.key, label: field.label, type: field.type, options: field.options })),
     ]),
   )
   // Only the date fields, for the trigger that waits for one to arrive. A rule
@@ -109,7 +116,8 @@ const AutomationsPage = async () => {
             <p>
               Conditions use the same filter language segments do. Steps run in order and a
               failure stops the rest, because a rule half-applied leaves a record in a state no rule
-              describes. Every firing is logged, including the ones whose conditions were false.
+              describes. An event rule logs every firing, including the ones whose conditions were
+              false. A date or silence rule logs only the records it fires on.
             </p>
             <p>
               A rule can wait. A step that waits parks the record and the worker picks it up when
@@ -122,6 +130,8 @@ const AutomationsPage = async () => {
       />
 
       <AutomationList
+        accountSlug={session.accountSlug}
+        maxWaitMinutes={MAX_DELAY_MINUTES}
         rows={rows.map((row) => ({
           ...row,
           triggerConfig: Object.fromEntries(

@@ -961,6 +961,28 @@ try {
     )
   })
 
+  await check('an internal type cannot also need confirming, on create or on update, and each flag alone is fine', async () => {
+    const message = await refuses('an internal type with confirmed opt-in on create', () =>
+      createSubscriptionType(marketing, { name: `Both ${stamp}`, isInternal: true, doubleOptIn: true }),
+    )
+    expect(message.includes('never offered on a form'), message)
+    const internal = await createSubscriptionType(marketing, { name: `Internal ${stamp}`, isInternal: true })
+    const confirmed = await createSubscriptionType(marketing, { name: `Confirmed ${stamp}`, doubleOptIn: true })
+    const turnedOn = await refuses('turning confirmed opt-in on for an internal type', () =>
+      updateSubscriptionType(marketing, { id: internal.id, doubleOptIn: true }),
+    )
+    expect(turnedOn.includes('never offered on a form'), turnedOn)
+    const turnedOnInternal = await refuses('turning internal on for a confirmed type', () =>
+      updateSubscriptionType(marketing, { id: confirmed.id, isInternal: true }),
+    )
+    expect(turnedOnInternal.includes('never offered on a form'), turnedOnInternal)
+    await updateSubscriptionType(marketing, { id: internal.id, name: `Internal renamed ${stamp}` })
+    await updateSubscriptionType(marketing, { id: internal.id, isInternal: false, doubleOptIn: true })
+    await deleteSubscriptionType(marketing, internal.id, 0)
+    await deleteSubscriptionType(marketing, confirmed.id, 0)
+    return message
+  })
+
   await check('a viewer cannot manage subscription types', async () =>
     refuses('a viewer creating a subscription type', () =>
       createSubscriptionType(viewer, { name: 'Nope' }),

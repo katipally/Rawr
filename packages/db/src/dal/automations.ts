@@ -17,6 +17,7 @@ import {
   tableFor,
   type RegistryObject,
 } from './registry.ts'
+import { coerce } from './values.ts'
 
 /** B11. When this happens, do that.
  *
@@ -307,6 +308,40 @@ const assertTriggerUsable = (
   }
 }
 
+/** The field types a rule's single value can fill. Relation, user, rating, json,
+ *  address, rich_text and multi_select need an id, a shape or a list a text box
+ *  cannot give. */
+export const SETTABLE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  'text',
+  'long_text',
+  'email',
+  'phone',
+  'url',
+  'linkedin',
+  'number',
+  'currency',
+  'percent',
+  'date',
+  'datetime',
+  'boolean',
+  'select',
+])
+
+/** Marketing status is owned by the consent flow, not by a rule. */
+export const isSettableField = (field: { key: string; type: string; isSystem: boolean }): boolean =>
+  !field.isSystem && field.key !== 'marketing_status' && SETTABLE_FIELD_TYPES.has(field.type)
+
+/** The value is checked by the same `coerce` a write runs, so a value refused here
+ *  is one the run would have refused, and the refusal is said at Save. */
+const assertSetFieldUsable = (object: RegistryObject, config: Record<string, unknown>): void => {
+  const key = configText(config, 'field')
+  if (!key) throw new Error('That step names no field.')
+  const field = object.byKey.get(key)
+  if (!field) throw new Error(`"${key}" is not a field on a ${object.key}.`)
+  if (!isSettableField(field)) throw new Error(`${field.label} cannot be set by a rule.`)
+  coerce(field, config.value ?? null)
+}
+
 const assertActionUsable = (
   step: { type: ActionType; config: Record<string, unknown> },
   objectKey: string,
@@ -409,6 +444,7 @@ export const saveAutomation = async (
       if (step.kind !== 'action' && step.kind !== 'delay') {
         compileFilters(object, step.conditions, scopeFor(null, zone))
       }
+      if (step.kind === 'action' && step.type === 'set_field') assertSetFieldUsable(object, step.config)
     }
     assertTriggerUsable(object, input.trigger, input.triggerConfig ?? {})
 
@@ -598,6 +634,19 @@ export const openScannedRun = async (
       .returning({ id: automationRun.id })
     return row?.id ?? null
   })
+
+/** The scan's one question per record. Null means skip: the record does not match
+ *  the rule's conditions, or it already fired today. Asked before the run row is
+ *  written, so a record that does not match leaves no row behind. */
+export const openScanRun = async (
+  ctx: AccountContext,
+  rule: AutomationRow,
+  entityId: string,
+  day: string,
+): Promise<string | null> => {
+  if (!(await conditionsHold(ctx, rule.objectKey, entityId, rule.conditions))) return null
+  return openScannedRun(ctx, { automationId: rule.id, entityType: rule.objectKey, entityId, scanDay: day })
+}
 
 /** Parks a run at a step, to be picked up by the dispatcher. */
 export const parkAutomationRun = async (

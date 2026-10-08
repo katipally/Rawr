@@ -101,7 +101,7 @@ export const RunLog = ({
           description={
             state
               ? 'Other runs may be here under another state.'
-              : 'Every firing lands here, including the ones whose conditions were false.'
+              : 'Every firing lands here. Event rules also log firings whose conditions were false.'
           }
         />
       ) : (

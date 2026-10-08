@@ -77,7 +77,12 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
                     key: 'type',
                     items: [
                       { key: 'rename', label: 'Rename', disabled: busy, onSelect: () => setRenaming(row) },
-                      { key: 'confirm', label: row.doubleOptIn ? 'Turn off confirmed opt-in' : 'Turn on confirmed opt-in', disabled: busy, onSelect: () => toggleConfirm(row) },
+                      {
+                        key: 'confirm',
+                        label: row.doubleOptIn ? 'Turn off confirmed opt-in' : 'Turn on confirmed opt-in',
+                        disabled: busy || (row.isInternal && !row.doubleOptIn),
+                        onSelect: () => toggleConfirm(row),
+                      },
                     ],
                   },
                   { key: 'danger', items: [{ key: 'delete', label: 'Delete', destructive: true, onSelect: () => setRemoving(row) }] },
@@ -95,8 +100,11 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
       width: 140,
       align: 'right',
       render: (row) => (
-        <span title={row.awaitingConfirmation > 0 ? `${fmt.number(row.awaitingConfirmation)} waiting to confirm` : undefined} className="font-light tabular-nums">
-          {fmt.number(row.subscribed)}
+        <span className="flex flex-col items-end font-light tabular-nums">
+          <span>{fmt.number(row.subscribed)}</span>
+          {row.doubleOptIn && row.awaitingConfirmation > 0 ? (
+            <span className="text-small text-secondary">{fmt.number(row.awaitingConfirmation)} awaiting confirmation</span>
+          ) : null}
         </span>
       ),
     },
@@ -169,14 +177,26 @@ export const SubscriptionTypes = ({ rows, canWrite, hub }: SubscriptionTypesProp
             <TextInput id="sub-description" value={description} onChange={(event) => setDescription(event.target.value)} />
           </Field>
           <label className="flex items-start gap-2">
-            <input type="checkbox" className="mt-1" checked={isInternal} onChange={(event) => setIsInternal(event.target.checked)} />
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={isInternal}
+              disabled={doubleOptIn}
+              onChange={(event) => setIsInternal(event.target.checked)}
+            />
             <span>
               Internal
               <span className="block text-small text-secondary">Never offered on a public form.</span>
             </span>
           </label>
           <label className="flex items-start gap-2">
-            <input type="checkbox" className="mt-1" checked={doubleOptIn} onChange={(event) => setDoubleOptIn(event.target.checked)} />
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={doubleOptIn}
+              disabled={isInternal}
+              onChange={(event) => setDoubleOptIn(event.target.checked)}
+            />
             <span>
               Confirmed opt-in
               <span className="block text-small text-secondary">

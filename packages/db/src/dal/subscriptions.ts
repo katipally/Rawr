@@ -190,6 +190,15 @@ export const listSubscriptionTypes = async (ctx: AccountContext): Promise<Subscr
     }))
   })
 
+/** An internal type is never on a form, so there is nothing for it to confirm. */
+const assertNotInternalAndConfirmed = (isInternal: boolean, doubleOptIn: boolean): void => {
+  if (isInternal && doubleOptIn) {
+    throw new Error(
+      'An internal type is never offered on a form, so it cannot need confirming. Turn one of them off.',
+    )
+  }
+}
+
 export const createSubscriptionType = async (
   ctx: AccountContext,
   input: { name: string; description?: string | null; isInternal?: boolean; doubleOptIn?: boolean },
@@ -197,6 +206,7 @@ export const createSubscriptionType = async (
   mutate(ctx, 'subscription_type', async (tx) => {
     const name = input.name.trim()
     if (!name) throw new Error('A subscription type needs a name.')
+    assertNotInternalAndConfirmed(input.isInternal ?? false, input.doubleOptIn ?? false)
 
     const [clash] = await tx
       .select({ id: subscriptionType.id })
@@ -248,6 +258,14 @@ export const updateSubscriptionType = async (
 
     const name = input.name?.trim()
     if (input.name !== undefined && !name) throw new Error('A subscription type needs a name.')
+    // Only a save that turns a flag on is judged, so a type stored before this rule
+    // can still be renamed.
+    if (input.isInternal || input.doubleOptIn) {
+      assertNotInternalAndConfirmed(
+        input.isInternal ?? before.isInternal,
+        input.doubleOptIn ?? before.doubleOptIn,
+      )
+    }
 
     await tx
       .update(subscriptionType)

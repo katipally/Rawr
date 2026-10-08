@@ -3,6 +3,7 @@
 import { STATE_TONE } from './run-state.ts'
 import { type ObjectScope, scopeRule } from './object-scope.ts'
 import { stepsComplete } from './steps-complete.ts'
+import { DELAY_UNITS, type DelayUnit, delayText, describeWait, waitFits, waitMinutes } from './wait-input.ts'
 import { Alert, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
@@ -16,8 +17,7 @@ import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
-import { automationRunsPath } from '~/lib/links.ts'
-import { inSentence } from '~/lib/label-case.ts'
+import { automationRunsPath, recordPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -44,9 +44,24 @@ type ActionType =
  *  either way. */
 export type StepView =
   | { kind: 'action'; type: ActionType; config: Record<string, string> }
-  | { kind: 'delay'; minutes: number }
+  | { kind: 'delay'; amount: string; unit: DelayUnit }
   | { kind: 'guard'; conditions: Group[] }
   | { kind: 'branch'; conditions: Group[]; matched: StepView[]; otherwise: StepView[] }
+
+/** The shape the layer takes: a wait is minutes. Only ever built from steps that
+ *  `stepsComplete` has passed, so every wait has a whole, in-range number. */
+type SavedStep =
+  | { kind: 'action'; type: ActionType; config: Record<string, string> }
+  | { kind: 'delay'; minutes: number }
+  | { kind: 'guard'; conditions: Group[] }
+  | { kind: 'branch'; conditions: Group[]; matched: SavedStep[]; otherwise: SavedStep[] }
+
+const savedSteps = (steps: StepView[]): SavedStep[] =>
+  steps.map((step) => {
+    if (step.kind === 'delay') return { kind: 'delay', minutes: waitMinutes(step.amount, step.unit) }
+    if (step.kind === 'branch') return { ...step, matched: savedSteps(step.matched), otherwise: savedSteps(step.otherwise) }
+    return step
+  })
 
 export type AutomationRowView = {
   id: string
@@ -69,9 +84,12 @@ export type AutomationRowView = {
 
 export type RunView = {
   id: string
+  automationId: string
   automationName: string
   entityType: string
   entityId: string
+  /** Null once the record is gone. */
+  entityName: string | null
   state: 'waiting' | 'done' | 'skipped' | 'failed'
   detail: string | null
   /** Set only while it is parked, which is what the list leads with. */
@@ -79,15 +97,23 @@ export type RunView = {
   at: string
 }
 
+/** A field a set-field step can write, with what its value control needs. */
+export type SettableField = { key: string; label: string; type: string; options: string[] }
+
 export type AutomationListProps = {
   rows: AutomationRowView[]
   runs: RunView[]
+  accountSlug: string
   people: { id: string; name: string }[]
   stages: string[]
   /** Every object in the account, named. A rule can watch one an admin
    *  invented, so this cannot be written out here. */
   objects: { key: string; label: string }[]
-  fieldsByObject: Record<string, { key: string; label: string }[]>
+  /** Only the fields a set-field step can write. */
+  fieldsByObject: Record<string, SettableField[]>
+  /** The longest wait a rule may hold, in minutes. Passed in so this file never
+   *  imports the database package. */
+  maxWaitMinutes: number
   /** Only the date fields, for the trigger that waits for one to arrive. */
   dateFieldsByObject: Record<string, { key: string; label: string }[]>
   /** The same shape segments pass their builder. Keyed by object because a rule
@@ -129,30 +155,24 @@ const ACTIONS: { key: ActionType; label: string }[] = [
  *  offer them: only a contact has an inbox. */
 const CONTACT_ONLY: ActionType[] = ['send_email', 'enroll_in_sequence']
 
-/** The delays a person actually reaches for, so the common case is one click and
- *  the odd one is still typeable in minutes. */
-const DELAYS: { minutes: number; label: string }[] = [
-  { minutes: 15, label: '15 minutes' },
-  { minutes: 60, label: '1 hour' },
-  { minutes: 60 * 4, label: '4 hours' },
-  { minutes: 60 * 24, label: '1 day' },
-  { minutes: 60 * 24 * 3, label: '3 days' },
-  { minutes: 60 * 24 * 7, label: '1 week' },
-  { minutes: 60 * 24 * 14, label: '2 weeks' },
-  { minutes: 60 * 24 * 30, label: '30 days' },
-]
-
-const describeDelay = (minutes: number): string =>
-  DELAYS.find((entry) => entry.minutes === minutes)?.label ??
-  (minutes % 1440 === 0
-    ? `${minutes / 1440} days`
-    : minutes % 60 === 0
-      ? `${minutes / 60} hours`
-      : `${minutes} minutes`)
+/** The trigger in words, with what it needs: the date and which side of it, or the
+ *  days of silence. The object is in its own column, so it is not repeated here. */
+const describeTrigger = (row: AutomationRowView, dates: { key: string; label: string }[]): string => {
+  const count = (n: number, word: string) => `${n} ${n === 1 ? word : `${word}s`}`
+  if (row.trigger === 'date_reached') {
+    const date = dates.find((entry) => entry.key === row.triggerConfig.fieldKey)?.label ?? 'a date'
+    const days = Number(row.triggerConfig.offsetDays) || 0
+    const when =
+      days === 0 ? 'on the day' : `${count(days, 'day')} ${row.triggerConfig.direction === 'after' ? 'after' : 'before'}`
+    return `${date} is ${when}`
+  }
+  if (row.trigger === 'no_activity') return `no activity for ${count(Number(row.triggerConfig.days) || 0, 'day')}`
+  return TRIGGERS.find((entry) => entry.key === row.trigger)?.label ?? row.trigger
+}
 
 /** One line per step, for the row in the list. */
 const summarise = (step: StepView): string => {
-  if (step.kind === 'delay') return `wait ${describeDelay(step.minutes)}`
+  if (step.kind === 'delay') return `wait ${delayText(step.amount, step.unit)}`
   if (step.kind === 'guard') return 'check it still matches'
   if (step.kind === 'branch') {
     const arm = (steps: StepView[]) => steps.map(summarise).join(', then ') || 'nothing'
@@ -172,7 +192,7 @@ const swap = (steps: StepView[], a: number, b: number): StepView[] =>
  *  kind and then a step. */
 const kindFrom = (value: string): StepView =>
   value === 'delay'
-    ? { kind: 'delay', minutes: 60 * 24 }
+    ? { kind: 'delay', amount: '1', unit: 'days' }
     : value === 'guard'
       ? { kind: 'guard', conditions: [] }
       : value === 'branch'
@@ -196,12 +216,16 @@ type EditorContext = {
   object: string
   people: { id: string; name: string }[]
   stages: string[]
-  fieldsByObject: Record<string, { key: string; label: string }[]>
+  fieldsByObject: Record<string, SettableField[]>
+  maxWaitMinutes: number
   filterFields: FilterField[]
   templates: { id: string; name: string }[]
   mailboxes: { id: string; email: string }[]
   sequences: { id: string; name: string }[]
 }
+
+/** Field types whose value is a number, so the keyboard offers digits. */
+const NUMERIC_FIELD_TYPES = new Set(['number', 'currency', 'percent'])
 
 const ActionFields = ({
   path,
@@ -223,20 +247,50 @@ const ActionFields = ({
   const set = (key: string, value: string) => onChange({ ...config, [key]: value })
 
   if (type === 'set_field') {
+    const offered = fieldsByObject[object] ?? []
+    const picked = offered.find((field) => field.key === config.field)
+    // A rule saved before a field stopped being settable keeps its key. Showing it
+    // as this option says why it cannot stay, where "Pick one" would hide it.
+    const choices =
+      picked?.type === 'select'
+        ? picked.options.map((option) => ({ value: option, label: option }))
+        : picked?.type === 'boolean'
+          ? [
+              { value: 'true', label: 'Yes' },
+              { value: 'false', label: 'No' },
+            ]
+          : null
     return (
       <div className="grid gap-2 @md:grid-cols-2">
         <Field id={id('field')} label="Field">
-          <Select id={id('field')} value={config.field ?? ''} onChange={(e) => set('field', e.target.value)}>
+          <Select id={id('field')} value={config.field ?? ''} onChange={(e) => onChange({ ...config, field: e.target.value, value: '' })}>
             <option value="">Pick one</option>
-            {(fieldsByObject[object] ?? []).map((field) => (
+            {offered.map((field) => (
               <option key={field.key} value={field.key}>
                 {field.label}
               </option>
             ))}
+            {config.field && !picked ? <option value={config.field}>Not settable any more. Pick another.</option> : null}
           </Select>
         </Field>
         <Field id={id('value')} label="To">
-          <TextInput id={id('value')} value={config.value ?? ''} onChange={(e) => set('value', e.target.value)} />
+          {choices ? (
+            <Select id={id('value')} value={config.value ?? ''} onChange={(e) => set('value', e.target.value)}>
+              <option value="">Pick one</option>
+              {choices.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <TextInput
+              id={id('value')}
+              inputMode={picked && NUMERIC_FIELD_TYPES.has(picked.type) ? 'decimal' : undefined}
+              value={config.value ?? ''}
+              onChange={(e) => set('value', e.target.value)}
+            />
+          )}
         </Field>
       </div>
     )
@@ -391,6 +445,55 @@ const ActionFields = ({
   )
 }
 
+/** A wait is a typed whole amount and a unit. Digits only, so a half-typed value
+ *  stays on screen and the error sentence names the range it has to fit. */
+const WaitFields = ({
+  label,
+  amount,
+  unit,
+  maxWaitMinutes,
+  onChange,
+}: {
+  label: string
+  amount: string
+  unit: DelayUnit
+  maxWaitMinutes: number
+  onChange: (next: { amount: string; unit: DelayUnit }) => void
+}) => {
+  const fits = waitFits(waitMinutes(amount, unit), maxWaitMinutes)
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <TextInput
+          aria-label={`How long ${label} waits`}
+          aria-invalid={!fits}
+          inputMode="numeric"
+          className="w-24"
+          value={amount}
+          onChange={(event) => onChange({ amount: event.target.value.replace(/\D/g, ''), unit })}
+        />
+        <Select
+          aria-label={`Unit for how long ${label} waits`}
+          className="w-auto"
+          value={unit}
+          onChange={(event) => onChange({ amount, unit: event.target.value as DelayUnit })}
+        >
+          {DELAY_UNITS.map((entry) => (
+            <option key={entry} value={entry}>
+              {entry}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {fits ? null : (
+        <p role="alert" className="text-small text-error">
+          Wait between {describeWait(1)} and {describeWait(maxWaitMinutes)}.
+        </p>
+      )}
+    </div>
+  )
+}
+
 /** One list of steps, and the arms of any branch inside it.
  *
  *  Recursive because a branch holds two lists of exactly these steps. `path`
@@ -400,12 +503,15 @@ const StepList = ({
   steps,
   onChange,
   path,
+  label,
   depth,
   ctx,
 }: {
   steps: StepView[]
   onChange: (steps: StepView[]) => void
   path: string
+  /** Names the arm to a screen reader, so "Step 1" is not heard five times. */
+  label: string
   depth: number
   ctx: EditorContext
 }) => {
@@ -422,7 +528,7 @@ const StepList = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-small text-secondary tabular-nums">{index + 1}</span>
               <Select
-                aria-label={`Step ${index + 1}`}
+                aria-label={`${label} ${index + 1}`}
                 className="w-auto"
                 value={step.kind === 'action' ? step.type : step.kind}
                 onChange={(event) => onChange(replace(steps, index, kindFrom(event.target.value)))}
@@ -442,37 +548,30 @@ const StepList = ({
               </Select>
 
               {step.kind === 'delay' ? (
-                <Select
-                  aria-label={`How long step ${index + 1} waits`}
-                  className="w-auto"
-                  value={String(step.minutes)}
-                  onChange={(event) =>
-                    onChange(replace(steps, index, { kind: 'delay', minutes: Number(event.target.value) }))
-                  }
-                >
-                  {DELAYS.map((entry) => (
-                    <option key={entry.minutes} value={entry.minutes}>
-                      {entry.label}
-                    </option>
-                  ))}
-                </Select>
+                <WaitFields
+                  label={`${label} ${index + 1}`}
+                  amount={step.amount}
+                  unit={step.unit}
+                  maxWaitMinutes={ctx.maxWaitMinutes}
+                  onChange={(next) => onChange(replace(steps, index, { kind: 'delay', ...next }))}
+                />
               ) : null}
 
               <span className="ml-auto flex items-center gap-0.5">
                 <IconButton
-                  label={`Move step ${index + 1} up`}
+                  label={`Move ${label} ${index + 1} up`}
                   icon={<ACTION_ICONS.moveUp size={16} />}
                   disabled={index === 0}
                   onClick={() => onChange(swap(steps, index, index - 1))}
                 />
                 <IconButton
-                  label={`Move step ${index + 1} down`}
+                  label={`Move ${label} ${index + 1} down`}
                   icon={<ACTION_ICONS.moveDown size={16} />}
                   disabled={index === steps.length - 1}
                   onClick={() => onChange(swap(steps, index, index + 1))}
                 />
                 <IconButton
-                  label={`Remove step ${index + 1}`}
+                  label={`Remove ${label} ${index + 1}`}
                   tone="destructive"
                   icon={<ACTION_ICONS.delete size={16} />}
                   // An arm is allowed to be empty while it is being written. The
@@ -519,6 +618,7 @@ const StepList = ({
                     steps={step.matched}
                     onChange={(next) => onChange(replace(steps, index, { ...step, matched: next }))}
                     path={`${path}-${index}t`}
+                    label="Step in the if-branch"
                     depth={depth + 1}
                     ctx={ctx}
                   />
@@ -529,6 +629,7 @@ const StepList = ({
                     steps={step.otherwise}
                     onChange={(next) => onChange(replace(steps, index, { ...step, otherwise: next }))}
                     path={`${path}-${index}e`}
+                    label="Step in the otherwise arm"
                     depth={depth + 1}
                     ctx={ctx}
                   />
@@ -553,7 +654,7 @@ const StepList = ({
         <Button onClick={() => onChange([...steps, { kind: 'action', type: 'create_task', config: {} }])}>
           Add an action
         </Button>
-        <Button onClick={() => onChange([...steps, { kind: 'delay', minutes: 60 * 24 }])}>Add a wait</Button>
+        <Button onClick={() => onChange([...steps, { kind: 'delay', amount: '1', unit: 'days' }])}>Add a wait</Button>
         <Button onClick={() => onChange([...steps, { kind: 'guard', conditions: [] }])}>Add a check</Button>
         {canBranch ? (
           <Button onClick={() => onChange([...steps, { kind: 'branch', conditions: [], matched: [], otherwise: [] }])}>
@@ -568,10 +669,12 @@ const StepList = ({
 export const AutomationList = ({
   rows,
   runs,
+  accountSlug,
   people,
   stages,
   objects,
   fieldsByObject,
+  maxWaitMinutes,
   dateFieldsByObject,
   filterFieldsByObject,
   templates,
@@ -633,6 +736,7 @@ export const AutomationList = ({
     people,
     stages,
     fieldsByObject,
+    maxWaitMinutes,
     filterFields: filterFieldsByObject[object] ?? [],
     templates,
     mailboxes,
@@ -670,7 +774,7 @@ export const AutomationList = ({
     }
   }
 
-  const complete = groupsComplete(conditions) && stepsComplete(steps) && (trigger !== 'date_reached' || Boolean(triggerConfig.fieldKey))
+  const complete = groupsComplete(conditions) && stepsComplete(steps, maxWaitMinutes) && (trigger !== 'date_reached' || Boolean(triggerConfig.fieldKey))
 
   const save = () =>
     complete &&
@@ -684,9 +788,8 @@ export const AutomationList = ({
           triggerConfig,
           conditions,
           // A guard with no conditions of its own re-checks the rule's, which is
-          // the reading somebody means by "and if it still matches". The shape
-          // the editor holds is already the shape the layer parses.
-          steps,
+          // the reading somebody means by "and if it still matches".
+          steps: savedSteps(steps),
         }),
       editing === 'new' ? 'Saved. Turn it on when you are ready.' : 'Saved.',
     )
@@ -711,7 +814,7 @@ export const AutomationList = ({
       header: 'Name',
       width: 420,
       render: (row) => {
-        const when = `When ${TRIGGERS.find((entry) => entry.key === row.trigger)?.label} on a ${inSentence(labelOf(row.objectKey))}: ${row.steps.map(summarise).join(', then ')}`
+        const when = `When ${describeTrigger(row, dateFieldsByObject[row.objectKey] ?? [])}: ${row.steps.map(summarise).join(', then ')}`
         return (
           <span className="flex min-w-0 items-center gap-2 py-1">
             <span className="flex min-w-0 flex-1 flex-col">
@@ -768,7 +871,26 @@ export const AutomationList = ({
 
   const runColumns: Column<RunView>[] = [
     { key: 'state', header: 'Status', width: 120, render: (entry) => <Badge tone={STATE_TONE[entry.state]}>{entry.state}</Badge> },
-    { key: 'name', header: 'Automation', width: 260, render: (entry) => <span title={entry.automationName} className="block truncate font-semibold">{entry.automationName}</span> },
+    {
+      key: 'name',
+      header: 'Automation',
+      width: 260,
+      render: (entry) => (
+        <Link href={automationRunsPath(entry.automationId)} title={entry.automationName} className="block truncate font-semibold">
+          {entry.automationName}
+        </Link>
+      ),
+    },
+    {
+      key: 'record',
+      header: 'Record',
+      width: 240,
+      render: (entry) => (
+        <Link href={recordPath(accountSlug, entry.entityType, entry.entityId)} title={entry.entityName ?? undefined} className="block truncate font-semibold">
+          {entry.entityName ?? `This ${entry.entityType}`}
+        </Link>
+      ),
+    },
     { key: 'detail', header: 'Detail', width: 420, render: (entry) => <span title={entry.detail ?? undefined} className="block truncate font-light">{entry.detail || EMPTY_VALUE}</span> },
     {
       key: 'at',
@@ -979,7 +1101,7 @@ export const AutomationList = ({
 
           <div className="flex flex-col gap-2">
             <p className="font-medium">Then, in order</p>
-            <StepList steps={steps} onChange={setSteps} path="s" depth={0} ctx={editor} />
+            <StepList steps={steps} onChange={setSteps} path="s" label="Step" depth={0} ctx={editor} />
           </div>
 
           <Alert tone="info">
@@ -1015,7 +1137,7 @@ export const AutomationList = ({
         <p>
           The rule stops. The work it did stays: the tasks it created, the fields it set, and the
           timeline entries it wrote. Its log of when it fired goes with it, so take what you need
-          from &ldquo;What they did&rdquo; first.
+          from &ldquo;What it did&rdquo; first.
         </p>
       </Modal>
     </div>

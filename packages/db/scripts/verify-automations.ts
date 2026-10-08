@@ -9,6 +9,7 @@ import {
   claimAutomationRun,
   finishAutomationRun,
   listAutomationRuns,
+  openScanRun,
   openScannedRun,
   parkAutomationRun,
   readAutomation,
@@ -20,7 +21,7 @@ import {
 import { accountZone } from '../src/dal/index.ts'
 import { addDays, dayKey, zonedTimeToUtc } from '../src/dal/slots.ts'
 import { openSecret } from '../src/internal/crypto.ts'
-import { createRecord } from '../src/dal/records.ts'
+import { createRecord, updateRecord } from '../src/dal/records.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup, seatFor } from './fixture.ts'
 
@@ -397,6 +398,32 @@ try {
     return 'twice in one day is once'
   })
 
+  await check('a scanned rule writes no run for a record that does not match, and fires once when it starts to match the same day', async () => {
+    const automationId = await save({
+      name: `Gate ${stamp}`,
+      trigger: 'no_activity',
+      objectKey: 'contact',
+      triggerConfig: { days: 60 },
+      conditions: [{ conjunction: 'and', conditions: [{ field: 'first_name', operator: 'is', value: `Gate ${stamp}` }] }],
+      steps: [task],
+      isActive: true,
+    })
+    const rule = (await armedScans(admin)).find((row) => row.id === automationId)!
+    const day = dayKey(new Date(), await accountZone(admin))
+    const other = await createRecord(admin, 'contact', { email: `gate-other-${stamp}@sandbox.test`, first_name: 'Someone else' })
+    const match = await createRecord(admin, 'contact', { email: `gate-match-${stamp}@sandbox.test`, first_name: `Gate ${stamp}` })
+    const runCount = async () => (await listAutomationRuns(admin, { automationId })).length
+
+    expect((await openScanRun(admin, rule, other.id, day)) === null, 'a record that does not match opened a run')
+    expect((await runCount()) === 0, 'a record that does not match left a row in the log')
+    expect((await openScanRun(admin, rule, match.id, day)) !== null, 'a matching record opened no run')
+    expect((await openScanRun(admin, rule, match.id, day)) === null, 'the same record fired twice in one day')
+    await updateRecord(admin, 'contact', other.id, { first_name: `Gate ${stamp}` })
+    expect((await openScanRun(admin, rule, other.id, day)) !== null, 'a record that started to match the same day did not fire')
+    expect((await runCount()) === 2, `${await runCount()} runs, expected 2`)
+    return 'matches only, one run each per day'
+  })
+
   // --------------------------------------------------------------- actions
 
   await check('the two actions that write to a person are refused on a deal', async () => {
@@ -411,6 +438,30 @@ try {
     )
     expect(message.includes('"Send an email" only works on a contact'), message)
     return message
+  })
+
+  const setField = (field: string, value: unknown) => ({ kind: 'action' as const, type: 'set_field' as const, config: { field, value } })
+  const saveSetField = (objectKey: 'deal' | 'contact', field: string, value: unknown) =>
+    save({ name: `Set ${field} ${stamp}`, trigger: 'record_created', objectKey, conditions: [], steps: [setField(field, value)] })
+
+  await check('a set-field step refuses a system field, a relation and marketing status, naming the field', async () => {
+    const system = await refuses('set a system field', () => saveSetField('deal', 'created_at', '2026-01-01'))
+    expect(system.includes('Create date cannot be set by a rule'), system)
+    const relation = await refuses('set a relation', () => saveSetField('deal', 'company_id', 'x'))
+    expect(relation.includes('Associated company cannot be set by a rule'), relation)
+    const consent = await refuses('set marketing status', () => saveSetField('contact', 'marketing_status', 'Subscribed'))
+    expect(consent.includes('Marketing contact status cannot be set by a rule'), consent)
+    return system
+  })
+
+  await check('a set-field value is checked against its field type at save', async () => {
+    const word = await refuses('a currency field given a word', () => saveSetField('deal', 'amount', 'abc'))
+    expect(word.includes('is not a number'), word)
+    const choice = await refuses('a select given a value that is not a choice', () => saveSetField('contact', 'tracking_consent', 'Maybe'))
+    expect(choice.includes('is not one of its choices'), choice)
+    await saveSetField('deal', 'amount', '42')
+    await saveSetField('contact', 'tracking_consent', 'Never')
+    return word
   })
 
   await check('an automation task goes to the record owner while they are a member, on the event path and the scan path alike', async () => {

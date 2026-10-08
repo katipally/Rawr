@@ -9,11 +9,14 @@ import {
   createTask,
   dayKey,
   enroll,
+  fieldOrThrow,
   finishAutomationRun,
   getRecord,
+  getRegistry,
   listLifecycleStages,
+  objectOrThrow,
   openAutomationRun,
-  openScannedRun,
+  openScanRun,
   openSecret,
   ownerForTask,
   readAutomation,
@@ -37,6 +40,7 @@ import { hostOf, outboundRequest } from './outbound.ts'
 import { signPayload } from './webhook-delivery.ts'
 import { notifySubscribers } from './webhooks.ts'
 import { queueHostAlert } from './notify.ts'
+import { slackCredentials } from './integrations/slack.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
 
 /** B11. The half of an automation that actually does something.
@@ -94,8 +98,9 @@ const runAction = async (
       const key = text(action.config, 'field')
       if (!key) throw new Error('That action names no field.')
       const value = action.config.value ?? null
+      const label = fieldOrThrow(objectOrThrow(await getRegistry(ctx), event.objectKey), key).label
       await updateRecord(ctx, event.objectKey, event.entityId, { [key]: value })
-      return `set ${key}`
+      return `set ${label} to ${value === null || value === '' ? 'nothing' : String(value)}`
     }
 
     case 'set_lifecycle': {
@@ -128,6 +133,9 @@ const runAction = async (
     }
 
     case 'notify_slack': {
+      // Checked here because the queue drops a message for an account with no
+      // Slack, and a run that says "posted" would be reporting a post that never happened.
+      if (!(await slackCredentials(ctx))) throw new Error('Slack is not connected, so nothing was posted.')
       const message = fill(text(action.config, 'message') || '{{name}}', name)
       const link = `/contacts/${event.accountSlug}/record/${event.objectKey}/${event.entityId}`
       queueHostAlert({
@@ -142,7 +150,7 @@ const runAction = async (
         text: `${message}\n<${publicBaseUrl}${link}|Open in Rawr>`,
         ...(text(action.config, 'channel') ? { channel: text(action.config, 'channel') } : {}),
       })
-      return 'posted to Slack'
+      return 'queued a Slack message'
     }
 
     case 'send_email': {
@@ -320,7 +328,7 @@ const walkList = async (
           state: 'skipped',
           stepPath: here,
           trail: done,
-          detail: [...done, 'stopped: the record no longer matches'].join(', '),
+          detail: 'stopped: the record no longer matches',
         })
         return 'stopped'
       }
@@ -367,7 +375,7 @@ const walkList = async (
  *  and the dispatcher runs it from wherever a delay left it. A run that never
  *  waits does the whole tree in one pass, which is exactly what a rule did before
  *  delays existed. */
-const walkSteps = async (
+export const walkSteps = async (
   ctx: AccountContext,
   event: AutomationEvent,
   rule: AutomationRow,
@@ -409,8 +417,8 @@ const describeDelay = (minutes: number): string => {
   return `${minutes} minute${minutes === 1 ? '' : 's'}`
 }
 
-/** One firing, from an already-opened run. The scan opens its runs differently
- *  from the trigger path, and everything after that is the same. */
+/** One event firing, from an already-opened run. The scan asks its conditions
+ *  before it opens a run, so it walks the steps itself. */
 const runFrom = async (
   ctx: AccountContext,
   event: AutomationEvent,
@@ -471,7 +479,7 @@ export const resumeAutomation = async (
       state: 'skipped',
       stepPath: claimed.stepPath,
       trail: claimed.trail,
-      detail: [...claimed.trail, rule ? 'stopped: the rule was switched off' : 'stopped: the rule was deleted'].join(', '),
+      detail: rule ? 'stopped: the rule was switched off' : 'stopped: the rule was deleted',
     })
     return { resumed: false, reason: 'the rule is no longer running' }
   }
@@ -482,7 +490,7 @@ export const resumeAutomation = async (
       state: 'skipped',
       stepPath: claimed.stepPath,
       trail: claimed.trail,
-      detail: [...claimed.trail, 'stopped: the record was deleted while it waited'].join(', '),
+      detail: 'stopped: the record was deleted while it waited',
     })
     return { resumed: false, reason: 'the record is gone' }
   }
@@ -573,19 +581,22 @@ export const scanAutomations = async (
   for (const rule of rules) {
     try {
       for (const entityId of await scanTargets(ctx, rule, day, zone)) {
-        const runId = await openScannedRun(ctx, {
-          automationId: rule.id,
-          entityType: rule.objectKey,
-          entityId,
-          scanDay: day,
-        })
-        // Already fired for this record today. The unique index said so, which is
-        // the only answer two workers scanning the same hour can both trust.
+        // Null when the record does not match or already fired today. The unique
+        // index is the only answer two workers scanning the same hour can both trust.
+        const runId = await openScanRun(ctx, rule, entityId, day)
         if (!runId) continue
         const record = await getRecord(ctx, rule.objectKey, entityId)
-        if (!record) continue
+        if (!record) {
+          await finishAutomationRun(ctx, runId, {
+            state: 'skipped',
+            stepPath: [],
+            trail: [],
+            detail: 'stopped: the record was deleted before it could run',
+          })
+          continue
+        }
         fired += 1
-        await runFrom(
+        await walkSteps(
           ctx,
           {
             trigger: rule.trigger,
@@ -596,6 +607,8 @@ export const scanAutomations = async (
           },
           rule,
           runId,
+          [],
+          [],
           record.displayName,
         )
       }

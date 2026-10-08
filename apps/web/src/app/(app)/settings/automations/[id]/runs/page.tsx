@@ -60,9 +60,10 @@ const AutomationRunsPage = async ({
         why={
           <>
             <p>
-              A firing is logged whether it did anything or not, because &ldquo;it did not
+              An event rule logs a firing whether it did anything or not, because &ldquo;it did not
               run&rdquo; and &ldquo;it ran and the conditions were false&rdquo; are different
-              answers to the only question anybody asks about a rule.
+              answers to the only question anybody asks about a rule. A date or silence rule logs
+              only the records its conditions hold for.
             </p>
             <p>
               A run still waiting is one record parked partway through, and it shows above the

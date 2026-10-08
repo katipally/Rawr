@@ -95,7 +95,7 @@ test('a date trigger on a date the new object has is kept', () => {
 })
 
 test('a rule with nothing to drop comes back unchanged', () => {
-  const steps: StepView[] = [task, { kind: 'delay', minutes: 60 }, setField('name')]
+  const steps: StepView[] = [task, { kind: 'delay', amount: '1', unit: 'hours' }, setField('name')]
   assert.deepEqual(scopeRule({ conditions: [group('name')], steps, triggerConfig: noTrigger }, contactScope, contactScope), {
     conditions: [group('name')],
     steps,
