@@ -6,6 +6,7 @@ import { notFound, redirect } from 'next/navigation'
 import { MessageView } from '~/components/crm/message-view.tsx'
 import { googleConfigured } from '~/lib/env.ts'
 import { inboxPath, mailboxesPath, recordPath } from '~/lib/links.ts'
+import { replyAllRecipients } from '~/lib/mail-compose.ts'
 import { pickableUsers } from '~/lib/pickable-users.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -62,6 +63,15 @@ const ThreadPage = async ({
   const newest = found.messages[found.messages.length - 1]
   const replyTo =
     newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : (newest?.toAddrs[0] ?? null)
+  const everyone = replyAllRecipients(
+    {
+      from: newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : null,
+      to: newest?.toAddrs ?? [],
+      cc: newest?.ccAddrs ?? [],
+    },
+    mailboxes.map((box) => box.email),
+  )
+  const replyPerson = replyTo ? (byEmail.get(replyTo.toLowerCase())?.id ?? null) : null
 
   return (
     <InboxFrame account={account} session={session} filters={filters} selected={threadId}>
@@ -90,7 +100,14 @@ const ThreadPage = async ({
             backHref={backHref}
           />
           {replyTo ? (
-            <ReplyButton account={account} threadId={threadId} to={replyTo} subject={found.thread.subject} />
+            <ReplyButton
+              account={account}
+              threadId={threadId}
+              subject={found.thread.subject}
+              sender={replyTo}
+              everyone={{ to: everyone.to.join(', '), cc: everyone.cc.join(', ') }}
+              personId={replyPerson}
+            />
           ) : null}
         </div>
       </div>

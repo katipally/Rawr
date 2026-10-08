@@ -91,8 +91,9 @@ const emailOf = (entry: TimelineEntry): EmailPayload | null => {
  *  named when one sent it, so a rep can tell outreach from correspondence. */
 const emailWho = (entry: TimelineEntry, mail: EmailPayload): string => {
   const other = mail.counterpart?.join(', ') ?? ''
+  const copies = mail.cc?.length ? ` · cc ${mail.cc.join(', ')}` : ''
   const by = entry.actorName && mail.direction === 'outbound' && mail.source !== 'sequence' ? ` by ${entry.actorName}` : ''
-  return `${mail.direction === 'outbound' ? 'sent to' : 'received from'} ${other}${mail.sequenceName ? ` · ${mail.sequenceName}` : ''}${by}`
+  return `${mail.direction === 'outbound' ? 'sent to' : 'received from'} ${other}${copies}${mail.sequenceName ? ` · ${mail.sequenceName}` : ''}${by}`
 }
 
 const EmailStatsLine = ({ stats }: { stats: EmailStats }) => (
@@ -495,6 +496,9 @@ export const Timeline = ({
                   {fmt.dateTime(entry.occurredAt)}
                 </time>
               </p>
+              {mail?.attachments?.length ? (
+                <p className="break-words text-small text-secondary">Attached: {mail.attachments.join(', ')}</p>
+              ) : null}
               {folded ? null : editing?.id === entry.id ? (
                 <form
                   className="mt-2 flex flex-col gap-2"
