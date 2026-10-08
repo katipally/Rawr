@@ -19,7 +19,8 @@ export type PipelineEditorProps = {
 
 type Extra = { probability: number | null; isClosedWon: boolean; isClosedLost: boolean }
 
-const PROBABILITIES = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+/** 0 and 100 are left out: Lost (0%) and Won (100%) already cover them. */
+const PROBABILITIES = [10, 20, 30, 40, 50, 60, 70, 80, 90]
 
 /** HubSpot's one probability control: a percentage, or Won or Lost, which close
  *  the deal at 100% and 0%. */
@@ -226,6 +227,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
         value={creating ? '' : null}
         title="Create pipeline"
         label="Pipeline name"
+        confirmLabel="Create"
         busy={busy}
         onCancel={() => setCreating(false)}
         onRename={(name) => {
@@ -256,7 +258,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
                       id: removing.stage.id,
                       destinationStageId: destination || null,
                     })
-                    if (result.moved > 0) toast('info', `${result.moved} deals moved.`)
+                    if (result.moved > 0) toast('info', `${result.moved} deal${result.moved === 1 ? '' : 's'} moved.`)
                   }, 'Stage deleted.').then((ok) => ok && setRemoving(null))
                 }
               >
@@ -274,7 +276,7 @@ export const PipelineEditor = ({ pipelines, canWrite, hub }: PipelineEditorProps
               <>
                 <p>
                   {fmt.number(removing.stage.dealCount)} deal
-                  {removing.stage.dealCount === 1 ? '' : 's'} sit here. Every one of them moves to
+                  {removing.stage.dealCount === 1 ? '' : 's'} {removing.stage.dealCount === 1 ? 'sits' : 'sit'} here. Every one of them moves to
                   the stage you pick, and each move is written to its timeline as a stage change,
                   so nobody opens a deal later and finds its history rewritten.
                 </p>

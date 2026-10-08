@@ -1,4 +1,5 @@
 import { and, asc, eq, ne, sql } from 'drizzle-orm'
+import { SALES_STAGES } from '../registry/core.ts'
 import { deal, lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
 import { recordActivity, recordActivityFanout } from './activity.ts'
 import type { AccountContext } from './context.ts'
@@ -84,6 +85,22 @@ const nextPosition = async (tx: Tx, table: 'pipeline' | 'pipeline_stage' | 'life
   return Number(row?.next ?? 0)
 }
 
+/** The stages a pipeline starts with: the set a new account gets. A pipeline with no
+ *  stage cannot hold a deal. Stages stay editable after this. */
+export const seedDefaultStages = async (tx: Tx, accountId: string, pipelineId: string): Promise<void> => {
+  await tx.insert(pipelineStage).values(
+    SALES_STAGES.map((stage, index) => ({
+      accountId,
+      pipelineId,
+      name: stage.name,
+      probability: stage.probability,
+      position: index,
+      isClosedWon: 'isClosedWon' in stage,
+      isClosedLost: 'isClosedLost' in stage,
+    })),
+  )
+}
+
 export const createPipeline = async (ctx: AccountContext, name: string): Promise<{ id: string }> =>
   mutate(ctx, 'pipeline', async (tx) => {
     const clean = name.trim()
@@ -98,6 +115,7 @@ export const createPipeline = async (ctx: AccountContext, name: string): Promise
       })
       .returning({ id: pipeline.id })
     if (!created) throw new Error('The pipeline could not be created.')
+    await seedDefaultStages(tx, ctx.accountId, created.id)
 
     return {
       result: { id: created.id },
@@ -159,7 +177,7 @@ export const deletePipeline = async (ctx: AccountContext, id: string): Promise<v
     }
 
     const target = all.find((row) => row.id !== id)
-    if (!target) throw new Error('A account needs at least one pipeline.')
+    if (!target) throw new Error('An account needs at least one pipeline.')
 
     if (Number(hidden) > 0) {
       const [stage] = await tx

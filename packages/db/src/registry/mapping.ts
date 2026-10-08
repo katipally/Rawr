@@ -18,6 +18,8 @@ export type NewProperty = {
  *  that the settings screen would refuse to save. */
 export const MAX_OPTION_LENGTH = 120
 export const MAX_CHOICES = 200
+/** The raw list a person may paste. Blanks and repeats drop out before MAX_CHOICES applies. */
+export const MAX_OPTIONS_INPUT = 1000
 
 export const isNewProperty =(target: unknown): target is NewProperty =>
   typeof target === 'object' && target !== null && (target as NewProperty).create === true

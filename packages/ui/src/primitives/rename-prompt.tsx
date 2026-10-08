@@ -12,6 +12,8 @@ export type RenamePromptProps = {
   label: string
   title: string
   busy?: boolean
+  /** The primary button text. The button names the action, so a create says Create. */
+  confirmLabel?: string
   onCancel: () => void
   onRename: (name: string) => void
 }
@@ -29,6 +31,7 @@ export const RenamePrompt = ({
   label,
   title,
   busy = false,
+  confirmLabel = 'Rename',
   onCancel,
   onRename,
 }: RenamePromptProps) => {
@@ -63,7 +66,7 @@ export const RenamePrompt = ({
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} busy={busy} disabled={!trimmed || unchanged}>
-            Rename
+            {confirmLabel}
           </Button>
         </>
       }

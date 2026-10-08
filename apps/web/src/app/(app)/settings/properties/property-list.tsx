@@ -227,6 +227,7 @@ export const PropertyList = ({
               ) : (
                 <span title={field.label} className="truncate font-semibold">{field.label}</span>
               )}
+              <span title={field.key} className="truncate font-mono text-small text-secondary">{field.key}</span>
               <span title={notes.join(' · ')} className="truncate text-small font-light text-secondary">{notes.join(' · ')}</span>
             </span>
             {canWrite ? (
@@ -295,7 +296,7 @@ export const PropertyList = ({
           title={field.filledAt ? `${fmt.number(field.filledCount ?? 0)} of ${fmt.number(recordCount)}, as of ${fmt.date(field.filledAt)}` : 'Not measured yet'}
           className="font-light tabular-nums"
         >
-          {field.filledCount === null || recordCount === 0 ? EMPTY_VALUE : fmt.percent(field.filledCount / recordCount)}
+          {recordCount === 0 ? EMPTY_VALUE : field.filledCount === null ? 'Not measured yet' : fmt.percent(field.filledCount / recordCount)}
         </span>
       ),
     },

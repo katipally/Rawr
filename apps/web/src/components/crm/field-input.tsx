@@ -1,7 +1,8 @@
 'use client'
 
-import { Select, TextArea, TextInput } from '@rawr/ui'
+import { Checkbox, Select, TextArea, TextInput, cn } from '@rawr/ui'
 import type { Conditional, FieldType, ObjectKey } from '@rawr/db'
+import { Star } from 'lucide-react'
 import { useState } from 'react'
 import { emptyOption, pickable } from './pickable.ts'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
@@ -41,7 +42,7 @@ export type EditableField = {
   identity?: number
 }
 
-const numericTypes = new Set(['number', 'currency', 'percent', 'rating'])
+const numericTypes = new Set(['number', 'currency', 'percent'])
 
 export type FieldInputProps = {
   field: EditableField
@@ -147,16 +148,35 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
 
     case 'boolean':
       return (
-        <Select
+        <Checkbox
           {...common}
-          value={value === true ? 'true' : value === false ? 'false' : ''}
-          onChange={(event) => onChange(event.target.value === '' ? null : event.target.value === 'true')}
-        >
-          <option value="">Not set</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </Select>
+          label={field.label}
+          hideLabel
+          checked={value === true}
+          onChange={(event) => onChange(event.target.checked)}
+        />
       )
+
+    case 'rating': {
+      const current = typeof value === 'number' ? value : 0
+      return (
+        // biome-ignore lint/a11y/useSemanticElements: a row of toggle buttons, not a form group
+        <div id={id} role="group" aria-label={field.label} className="flex gap-1">
+          {[1, 2, 3, 4, 5].map((stars) => (
+            <button
+              key={stars}
+              type="button"
+              aria-label={stars === 1 ? '1 star' : `${stars} stars`}
+              aria-pressed={current === stars}
+              onClick={() => onChange(current === stars ? null : stars)}
+              className="rounded-hs p-0.5 text-accent focus-visible:ring-2 focus-visible:ring-line-interactive"
+            >
+              <Star aria-hidden="true" className={cn('size-5', current >= stars && 'fill-current')} />
+            </button>
+          ))}
+        </div>
+      )
+    }
 
     case 'select':
       return (

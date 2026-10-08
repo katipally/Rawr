@@ -23,6 +23,7 @@ import {
   isNewProperty,
   MAX_CHOICES,
   MAX_OPTION_LENGTH,
+  MAX_OPTIONS_INPUT,
   type Mapping,
   type NewProperty,
 } from '../registry/mapping.ts'
@@ -46,7 +47,7 @@ const NO_ENRICH = { enrich: false } as const
 
 export type ImportRow = Record<string, string>
 
-export { isNewProperty, MAX_CHOICES, MAX_OPTION_LENGTH, type Mapping, type NewProperty }
+export { isNewProperty, MAX_CHOICES, MAX_OPTION_LENGTH, MAX_OPTIONS_INPUT, type Mapping, type NewProperty }
 
 export type RowError = { row: number; reason: string; values: ImportRow }
 

@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm'
-import { CORE_OBJECTS, CORE_VIEWS, LIFECYCLE_STAGES, SALES_STAGES } from '../registry/core.ts'
+import { CORE_OBJECTS, CORE_VIEWS, LIFECYCLE_STAGES } from '../registry/core.ts'
 import { savedView, subscriptionType } from '../schema/marketing.ts'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
-import { lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
+import { lifecycleStage, pipeline } from '../schema/records.ts'
+import { seedDefaultStages } from './pipelines.ts'
 import type { Tx } from './index.ts'
 
 /** What an account needs before anybody can use it: the object and field
@@ -90,16 +91,5 @@ export const provisionAccount = async (tx: Tx, accountId: string): Promise<void>
     .values({ accountId, name: 'Sales Pipeline', position: 0 })
     .returning({ id: pipeline.id })
   if (!sales) throw new Error('the pipeline was not created')
-
-  await tx.insert(pipelineStage).values(
-    SALES_STAGES.map((stage, index) => ({
-      accountId,
-      pipelineId: sales.id,
-      name: stage.name,
-      probability: stage.probability,
-      position: index,
-      isClosedWon: 'isClosedWon' in stage,
-      isClosedLost: 'isClosedLost' in stage,
-    })),
-  )
+  await seedDefaultStages(tx, accountId, sales.id)
 }

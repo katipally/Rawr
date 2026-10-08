@@ -31,7 +31,7 @@ export const TYPE_LABEL: Record<FieldType, string> = {
   date: 'Date picker',
   datetime: 'Date and time picker',
   user: 'User',
-  relation: 'Record',
+  relation: 'Link to a record',
   json: 'JSON',
 }
 
@@ -243,7 +243,7 @@ export const PropertyEditor = ({
                     ))}
                   </datalist>
                   <Field id="prop-group" label="Group" hint="Optional. Properties with the same group are shown together.">
-                    <TextInput id="prop-group" list="property-groups" value={groupName} placeholder="Contact information" onChange={(event) => setGroupName(event.target.value)} />
+                    <TextInput id="prop-group" list="property-groups" value={groupName} placeholder="Group name" onChange={(event) => setGroupName(event.target.value)} />
                   </Field>
                   <Field id="prop-help" label="Description" hint="Optional. Shown under the input.">
                     <TextInput id="prop-help" value={helpText} onChange={(event) => setHelpText(event.target.value)} />

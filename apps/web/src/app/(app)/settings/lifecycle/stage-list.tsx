@@ -116,9 +116,10 @@ export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean
             ) : (
               <>
                 <p>
-                  {fmt.number(removing.usedBy)} record{removing.usedBy === 1 ? '' : 's'} are set
-                  to this. Leaving them pointing at nothing would read as "never had one", which is
-                  a different thing, so pick where they go.
+                  {fmt.number(removing.usedBy)} record{removing.usedBy === 1 ? '' : 's'}{' '}
+                  {removing.usedBy === 1 ? 'is' : 'are'} set to this. Leaving them pointing at
+                  nothing would read as "never had one", which is a different thing, so pick
+                  where they go.
                 </p>
                 <Field id="stage-destination" label="Move them to">
                   <Select

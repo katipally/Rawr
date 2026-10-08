@@ -6,6 +6,7 @@ import {
   hashToken,
   invite,
   listInvitations,
+  provisionNewAccount,
   reactivateMember,
   readAccount,
   revokeInvitation,
@@ -16,6 +17,7 @@ import { closeAppPool } from '../src/internal/pool.ts'
 import { ROLE_TEMPLATES, addMember, copyMemberGrants, listMembers, setMemberGrants } from '../src/dal/members.ts'
 import { membershipsForUser, signInWithGoogle } from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
+import { SALES_STAGES } from '../src/registry/core.ts'
 import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
 
 /** The account layer: seats, invitations, grants, teams and the history of those
@@ -387,6 +389,21 @@ try {
   const [made] = await owner`select id from account where google_hosted_domain = ${strangerDomain}`
   const [owned] = await membershipsForUser(strangerId)
   check(made !== undefined && owned?.isSuperAdmin === true, 'and opens one they own when it is on')
+  check(await provisionNewAccount(made!.id as string, strangerId), 'a freshly opened account gets provisioned')
+  const seeded = await owner`
+    select s.name, s.is_closed_won as won, s.is_closed_lost as lost
+      from pipeline_stage s join pipeline p on p.id = s.pipeline_id
+     where p.account_id = ${made!.id as string} and p.name = 'Sales Pipeline'
+     order by s.position`
+  check(
+    seeded.map((s) => s.name).join('|') === SALES_STAGES.map((s) => s.name).join('|'),
+    'a new account starts its pipeline with the seven standard stages, in order',
+    seeded.map((s) => s.name).join(', '),
+  )
+  check(
+    seeded.find((s) => s.won)?.name === 'Closed Won' && seeded.find((s) => s.lost)?.name === 'Closed Lost',
+    'and Closed Won and Closed Lost are marked as the closing stages',
+  )
   await signInWithGoogle({ ...stranger, mayOpenAccount: false })
   check((await membershipsForUser(strangerId)).length === 1, 'somebody who already has a seat signs in either way')
 

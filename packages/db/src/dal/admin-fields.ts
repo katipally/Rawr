@@ -120,9 +120,9 @@ export const listFields = async (ctx: AccountContext, objectKey?: string): Promi
     }))
   })
 
-const objectRow = async (tx: Tx, objectKey: string): Promise<{ id: string; key: string; isCustom: boolean }> => {
+const objectRow = async (tx: Tx, objectKey: string): Promise<{ id: string; key: string; nameSingular: string; isCustom: boolean }> => {
   const [found] = await tx
-    .select({ id: objectDef.id, key: objectDef.key, isCustom: objectDef.isCustom })
+    .select({ id: objectDef.id, key: objectDef.key, nameSingular: objectDef.nameSingular, isCustom: objectDef.isCustom })
     .from(objectDef)
     .where(eq(objectDef.key, objectKey))
     .limit(1)
@@ -217,8 +217,8 @@ const insertField = async (
   if (clash) {
     throw new Error(
       clash.deletedAt
-        ? `${object.key} had a field called "${key}" that was deleted but not purged. Purge it first, or pick another name.`
-        : `${object.key} already has a field called "${key}".`,
+        ? `"${label}" is archived on ${object.nameSingular}, and its data is still stored. Restore it from Archived, or purge it there to free the name.`
+        : `${object.nameSingular} already has a property called "${label}".`,
     )
   }
 

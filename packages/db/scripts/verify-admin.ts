@@ -19,6 +19,7 @@ import {
   restoreField,
   updateField,
 } from '../src/dal/admin-fields.ts'
+import { SALES_STAGES } from '../src/registry/core.ts'
 import { matchesConditional } from '../src/registry/conditional.ts'
 import { promoteFieldToHot } from '../src/dal/fields.ts'
 import {
@@ -343,6 +344,61 @@ try {
       createField(admin, { objectKey: 'deal', key: 'select', label: 'Select', type: 'text' }),
     ),
   )
+
+  await check('a second property with the same key is refused, naming the object and the label', async () => {
+    const key = `clash_live_${stamp}`
+    const first = await createField(admin, { objectKey: 'deal', key, label: 'Verify live clash', type: 'text' })
+    try {
+      const message = await refuses('a duplicate live key', () =>
+        createField(admin, { objectKey: 'deal', key, label: 'Verify live clash again', type: 'text' }),
+      )
+      expect(message.includes('already has a property called "Verify live clash again"'), `unexpected refusal: "${message}"`)
+      expect(!message.includes(key), 'the internal key is in the refusal')
+      return message
+    } finally {
+      await deleteField(admin, first.id)
+      await purgeField(admin, first.id)
+    }
+  })
+
+  await check('a key held by an archived property is refused, with the way out', async () => {
+    const key = `clash_arch_${stamp}`
+    const first = await createField(admin, { objectKey: 'deal', key, label: 'Verify archived clash', type: 'text' })
+    await deleteField(admin, first.id)
+    try {
+      const message = await refuses('a key held by an archived property', () =>
+        createField(admin, { objectKey: 'deal', key, label: 'Verify archived again', type: 'text' }),
+      )
+      expect(message.includes('"Verify archived again" is archived on '), `unexpected refusal: "${message}"`)
+      expect(message.includes('Restore it from Archived'), `no way out in: "${message}"`)
+      expect(!message.includes('deleted but not purged'), 'the old copy is still in the refusal')
+      return message
+    } finally {
+      await purgeField(admin, first.id)
+    }
+  })
+
+  await check('a paste of 201 distinct choices is refused with the limit sentence', async () => {
+    const choices = Array.from({ length: 201 }, (_, n) => `Choice ${n}`)
+    const message = await refuses('201 choices', () =>
+      createField(admin, { objectKey: 'deal', key: `many_${stamp}`, label: 'Verify many', type: 'select', options: choices }),
+    )
+    expect(message.includes('200 is the limit'), `unexpected refusal: "${message}"`)
+    expect(!message.includes('too_big') && !message.includes('['), `a raw validation error leaked: "${message}"`)
+    return message
+  })
+
+  await check('blank and repeated lines do not count toward the choice limit', async () => {
+    const choices = [...Array.from({ length: 200 }, (_, n) => `Choice ${n}`), '', '   ', 'Choice 1', 'Choice 1']
+    const created = await createField(admin, { objectKey: 'deal', key: `many_ok_${stamp}`, label: 'Verify many ok', type: 'select', options: choices })
+    try {
+      expect(created.options.length === 200, `${created.options.length} choices kept`)
+      return '200 choices kept'
+    } finally {
+      await deleteField(admin, created.id)
+      await purgeField(admin, created.id)
+    }
+  })
 
   await check('reordering fields is a real edit', async () => {
     const before = await listFields(admin, 'company')
@@ -679,8 +735,20 @@ try {
     stageB = (await createStage(admin, { pipelineId, name: 'Second', probability: 60 })).id
     const pipelines = await listPipelines(admin)
     const found = pipelines.find((row) => row.id === pipelineId)
-    expect(found?.stages.length === 2, `${found?.stages.length} stages`)
-    return '2 stages, with probabilities'
+    expect(found?.stages.length === SALES_STAGES.length + 2, `${found?.stages.length} stages`)
+    return `${SALES_STAGES.length + 2} stages, with probabilities`
+  })
+
+  await check("a new pipeline starts with the account's seven stages, in order", async () => {
+    const found = (await listPipelines(admin)).find((row) => row.id === pipelineId)
+    const seeded = found!.stages.slice(0, SALES_STAGES.length)
+    expect(
+      seeded.map((stage) => stage.name).join('|') === SALES_STAGES.map((stage) => stage.name).join('|'),
+      'the seeded stage names are out of order',
+    )
+    expect(seeded[5]!.isClosedWon && !seeded[5]!.isClosedLost, 'Closed Won is not a closed won stage')
+    expect(seeded[6]!.isClosedLost && !seeded[6]!.isClosedWon, 'Closed Lost is not a closed lost stage')
+    return `${seeded.length} stages, Closed Won and Closed Lost flagged`
   })
 
   await check('a stage cannot be both closed won and closed lost', async () =>
@@ -780,7 +848,8 @@ try {
 
   await check('a stage holding only deleted deals deletes, and they land in its first other stage', async () => {
     const holder = await createPipeline(admin, `Verify trash stage ${stamp}`)
-    const x = (await createStage(admin, { pipelineId: holder.id, name: 'X' })).id
+    await db.execute(sql`delete from pipeline_stage where pipeline_id = ${holder.id}`)
+    const x =(await createStage(admin, { pipelineId: holder.id, name: 'X' })).id
     const y = (await createStage(admin, { pipelineId: holder.id, name: 'Y' })).id
     const created = await createRecord(admin, 'deal', { name: `Verify trashed stage ${stamp}`, pipeline_id: holder.id, stage_id: x })
     await deleteRecord(admin, 'deal', created.id)
@@ -804,6 +873,7 @@ try {
     await deleteRecord(admin, 'deal', created.id)
     const bare = await createPipeline(admin, `Verify bare ${stamp}`)
     try {
+      await db.execute(sql`delete from pipeline_stage where pipeline_id = ${bare.id}`)
       await db.execute(sql`update pipeline set position = -1 where id = ${bare.id}`)
       const refusal = await refuses('deleting into a pipeline with no stage', () => deletePipeline(admin, trashed.id))
       expect(refusal.includes(`Add a stage to Verify bare ${stamp}`), `unexpected refusal: "${refusal}"`)
