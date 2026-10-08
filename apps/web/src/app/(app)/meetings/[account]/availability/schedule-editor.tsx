@@ -13,7 +13,7 @@ import { useFormat, useZone } from '~/components/zone.tsx'
 import { bookingPagesPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { LeaveGuard } from '~/components/leave-guard.tsx'
-import { DAY_GROUPS, toWeekly, toWindows, windowsChanged, type DayGroup, type Ranges, type Window } from './windows.ts'
+import { DAY_GROUPS, toWeekly, toWindows, weeklyHours, windowsChanged, type DayGroup, type Ranges, type Window } from './windows.ts'
 
 /** Weekly hours as HubSpot's availability window rows, plus one-off overrides.
  *
@@ -93,17 +93,7 @@ export const ScheduleEditor = ({
   // is rendered on its own below, so the select is correct before this arrives.
   const [zoneList, setZoneList] = useState<string[]>([])
   useEffect(() => setZoneList(zones()), [])
-  const totalHours = useMemo(() => {
-    let minutes = 0
-    for (const ranges of Object.values(weekly)) {
-      for (const [from, to] of ranges) {
-        const [fh = 0, fm = 0] = from.split(':').map(Number)
-        const [th = 0, tm = 0] = to.split(':').map(Number)
-        minutes += Math.max(0, th * 60 + tm - (fh * 60 + fm))
-      }
-    }
-    return Math.round((minutes / 60) * 10) / 10
-  }, [weekly])
+  const totalHours = useMemo(() => weeklyHours(weekly), [weekly])
 
   const setRow = (key: string, change: Partial<Window>) =>
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { daysChanged, toWeekly, toWindows, windowsChanged, type Ranges, type Window } from './windows.ts'
+import { daysChanged, toWeekly, toWindows, weeklyHours, windowsChanged, type Ranges, type Window } from './windows.ts'
 
 let n = 0
 const key = () => String(n++)
@@ -58,4 +58,21 @@ test('a window added or removed counts once, and removing the first does not cou
   assert.equal(windowsChanged(saved.slice(1), saved), 1)
   assert.equal(windowsChanged([...saved, { key: 'd', days: '4', from: '09:00', to: '10:00' }], saved), 1)
   assert.equal(windowsChanged([], saved), 3)
+})
+
+test('hours that overlap are counted once', () => {
+  assert.equal(weeklyHours({ '1': [['09:00', '13:00'], ['09:00', '17:00']] }), 8)
+  assert.equal(weeklyHours({ '1': [['09:00', '17:00'], ['10:00', '11:00']] }), 8)
+  assert.equal(weeklyHours({ '1': [['13:00', '17:00'], ['09:00', '14:00']] }), 8)
+})
+
+test('hours that touch are one block, and disjoint hours add up', () => {
+  assert.equal(weeklyHours({ '1': [['09:00', '12:00'], ['12:00', '17:00']] }), 8)
+  assert.equal(weeklyHours({ '1': [['09:00', '12:00'], ['13:00', '17:00']] }), 7)
+})
+
+test('a week sums each day on its own, so the same hours on two days are both counted', () => {
+  assert.equal(weeklyHours({ '1': [['09:00', '17:00']], '2': [['09:00', '17:00']], '6': [['10:00', '14:00']] }), 20)
+  assert.equal(weeklyHours({ '1': [['09:00', '13:00'], ['09:00', '17:00']], '6': [['10:00', '14:00']] }), 12)
+  assert.equal(weeklyHours({}), 0)
 })

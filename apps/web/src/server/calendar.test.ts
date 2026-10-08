@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
-import { insertEvent, type EventDraft } from './calendar.ts'
+import { insertEvent, knownUnusable, type EventDraft } from './calendar.ts'
 
 const draft: EventDraft = {
   userId: 'host-1',
@@ -65,4 +65,17 @@ test('an event that did not ask for a room sends no conference data and reads no
   assert.equal(requests[0]?.url.searchParams.has('conferenceDataVersion'), false)
   assert.equal(written.conferenceUrl, null)
   mock.restoreAll()
+})
+
+test('a host whose calendar can never be read is known unusable, and one whose read may pass is not', () => {
+  const on = { devEnabled: true, googleConfigured: true }
+  const off = { devEnabled: false, googleConfigured: false }
+  const google = { provider: 'google', unavailableReason: null } as const
+  const dev = { provider: 'dev', unavailableReason: null } as const
+
+  assert.equal(knownUnusable(google, on), false)
+  assert.equal(knownUnusable(google, off), true)
+  assert.equal(knownUnusable(dev, on), false)
+  assert.equal(knownUnusable(dev, { devEnabled: false, googleConfigured: true }), true)
+  assert.equal(knownUnusable({ provider: 'google', unavailableReason: 'x has not connected a calendar.' }, on), true)
 })

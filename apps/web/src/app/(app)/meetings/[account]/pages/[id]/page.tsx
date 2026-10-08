@@ -101,6 +101,7 @@ const BookingPageEditorScreen = async ({
         stats={stats}
         editable={editable}
         canPublishShared={sessionIsAdmin(session)}
+        canDelete={sessionIsAdmin(session) || mine}
       />
     </div>
   )

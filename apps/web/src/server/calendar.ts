@@ -141,6 +141,14 @@ const remember = (key: string, busy: Interval[]): void => {
   cache.set(key, { at: Date.now(), busy })
 }
 
+/** A host no read can succeed for, as opposed to a read that failed and may pass in a
+ *  minute. Mirrors the two throws in busyForHost. */
+export const knownUnusable = (
+  host: Pick<HostAvailability, 'provider' | 'unavailableReason'>,
+  calendars: { devEnabled: boolean; googleConfigured: boolean },
+): boolean =>
+  host.unavailableReason !== null || (host.provider === 'dev' ? !calendars.devEnabled : !calendars.googleConfigured)
+
 export type Window = { from: Date; to: Date }
 
 export type BusyResult = {

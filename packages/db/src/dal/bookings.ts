@@ -1516,6 +1516,8 @@ export type BookingPageStats = {
    *  per cent and "nobody has looked yet" are different answers. */
   conversion: number | null
   sinceDays: number
+  /** Any booking row, in any state, ever. Not windowed: a page with one cannot be deleted. */
+  hasBookings: boolean
 }
 
 /** What one link is worth over a window. Two indexed counts, no scan of a view
@@ -1528,7 +1530,7 @@ export const bookingPageStats = async (
   withAccount(ctx, async (tx) => {
     assertCanView(ctx, 'sales', 'meetings')
     const days = Math.min(Math.max(Math.trunc(sinceDays) || 30, 1), 365)
-    const [row] = await tx.execute<{ views: string; booked: string; cancelled: string }>(sql`
+    const [row] = await tx.execute<{ views: string; booked: string; cancelled: string; has_bookings: boolean }>(sql`
       select
         coalesce((select sum(v.views) from booking_page_view v
                    where v.booking_page_id = ${pageId}
@@ -1540,7 +1542,8 @@ export const bookingPageStats = async (
         (select count(*) from booking b
           where b.booking_page_id = ${pageId}
             and b.state = 'cancelled'
-            and b.created_at >= now() - ${`${days} days`}::interval) as cancelled`)
+            and b.created_at >= now() - ${`${days} days`}::interval) as cancelled,
+        exists (select 1 from booking b where b.booking_page_id = ${pageId}) as has_bookings`)
 
     const views = Number(row?.views ?? 0)
     const booked = Number(row?.booked ?? 0)
@@ -1550,6 +1553,7 @@ export const bookingPageStats = async (
       cancelled: Number(row?.cancelled ?? 0),
       conversion: views > 0 ? Math.round((booked / views) * 1000) / 10 : null,
       sinceDays: days,
+      hasBookings: row?.has_bookings ?? false,
     }
   })
 

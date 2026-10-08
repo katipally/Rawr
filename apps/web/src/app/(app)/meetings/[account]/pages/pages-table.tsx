@@ -126,20 +126,6 @@ export const PagesTable = ({
     }
   }
 
-  const remove = async (row: PageRow) => {
-    setPending(row.id)
-    try {
-      await api.booking.deletePage.mutate({ id: row.id })
-      toast('success', `“${row.name}” is deleted.`)
-      router.refresh()
-    } catch (cause) {
-      toast('error', errorMessage(cause))
-    } finally {
-      setPending(null)
-      setDeleting(null)
-    }
-  }
-
   const columns: Column<PageRow>[] = [
     {
       key: 'name',
@@ -372,16 +358,56 @@ export const PagesTable = ({
       />
       {pager}
       <EmbedDialog baseUrl={baseUrl} account={account} page={embedding} onClose={() => setEmbedding(null)} />
-      <ConfirmDialog
-        open={deleting !== null}
-        title={`Delete ${deleting?.name ?? 'this page'}?`}
-        confirm="Delete page"
-        busy={pending === deleting?.id}
+      <DeletePageDialog
+        page={deleting}
         onCancel={() => setDeleting(null)}
-        onConfirm={() => deleting && void remove(deleting)}
-      >
-        <p>The link stops working and the page is gone. Nothing else is affected, and it cannot be undone.</p>
-      </ConfirmDialog>
+        onDeleted={() => {
+          setDeleting(null)
+          router.refresh()
+        }}
+      />
     </div>
+  )
+}
+
+/** Shared by the list and the editor. The server refuses a page with meetings on
+ *  it, so the menu item being disabled is the explanation, not the guard. */
+export const DeletePageDialog = ({
+  page,
+  onCancel,
+  onDeleted,
+}: {
+  page: { id: string; name: string } | null
+  onCancel: () => void
+  onDeleted: () => void
+}) => {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  const remove = async () => {
+    if (!page) return
+    setBusy(true)
+    try {
+      await api.booking.deletePage.mutate({ id: page.id })
+      toast('success', `“${page.name}” is deleted.`)
+      onDeleted()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ConfirmDialog
+      open={page !== null}
+      title={`Delete ${page?.name ?? 'this page'}?`}
+      confirm="Delete page"
+      busy={busy}
+      onCancel={onCancel}
+      onConfirm={() => void remove()}
+    >
+      <p>The link stops working and the page is gone. Nothing else is affected, and it cannot be undone.</p>
+    </ConfirmDialog>
   )
 }

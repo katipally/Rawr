@@ -26,9 +26,10 @@ import {
   busyForHosts,
   createCalendarEvent,
   deleteCalendarEvent,
+  knownUnusable,
   patchCalendarEvent,
 } from './calendar.ts'
-import { publicBaseUrl } from '~/lib/env.ts'
+import { devCalendarEnabled, googleCalendarConfigured, publicBaseUrl } from '~/lib/env.ts'
 import { bookingManagePath } from '~/lib/links.ts'
 import { inBackground } from './background.ts'
 import { recordsCreated } from './record-events.ts'
@@ -117,7 +118,8 @@ export const loadOffer = async (
   // that is not ready: telling somebody to try again in a minute sends them back
   // to the same empty calendar all afternoon. A free-busy call that failed really
   // may work in a minute. §Edge cases, free-busy call fails.
-  const everyHostIsKnownUnusable = hosts.every((host) => host.unavailableReason !== null)
+  const calendars = { devEnabled: devCalendarEnabled, googleConfigured: googleCalendarConfigured }
+  const everyHostIsKnownUnusable = hosts.every((host) => knownUnusable(host, calendars))
 
   return {
     slots: offer.slots,

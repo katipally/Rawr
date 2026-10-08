@@ -36,7 +36,7 @@ import { availabilityPath, bookedPath, bookingPagesPath, calendarsPath } from '~
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { LeaveGuard } from '~/components/leave-guard.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
-import { KINDS } from '../pages-table.tsx'
+import { DeletePageDialog, KINDS } from '../pages-table.tsx'
 import { EmbedDialog, hostedBookingUrl, useCopy } from '../snippet.tsx'
 import { QuestionList, type MappingTarget } from './questions.tsx'
 import { TemplatePreview } from './template-preview.tsx'
@@ -184,6 +184,7 @@ export const PageEditor = ({
   stats,
   editable,
   canPublishShared,
+  canDelete,
 }: {
   account: string
   accountSlug: string
@@ -196,6 +197,8 @@ export const PageEditor = ({
   stats: BookingPageStats
   editable: boolean
   canPublishShared: boolean
+  /** The same rule as the list: an admin, or the person the page belongs to. */
+  canDelete: boolean
 }) => {
   const show = useToast()
   const fmt = useFormat()
@@ -216,6 +219,7 @@ export const PageEditor = ({
   const [saving, setSaving] = useState(false)
   const [embedding, setEmbedding] = useState(false)
   const [leaving, setLeaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const draft: Draft = { form, questions, hosts: hostRows, reminders }
   const changes = countChanges(draft, saved)
@@ -856,6 +860,23 @@ export const PageEditor = ({
                     { key: 'calendars', label: 'Calendar connections', href: calendarsPath(account) },
                   ],
                 },
+                ...(canDelete
+                  ? [
+                      {
+                        key: 'remove',
+                        items: [
+                          {
+                            key: 'delete',
+                            label: 'Delete',
+                            destructive: true,
+                            disabled: stats.hasBookings,
+                            description: stats.hasBookings ? 'Meetings are booked on it, so turn it off instead.' : undefined,
+                            onSelect: () => setDeleting(true),
+                          },
+                        ],
+                      },
+                    ]
+                  : []),
               ]}
               trigger={(props) => (
                 <button {...props} type="button" className={buttonClass('secondary', 'gap-1')}>
@@ -914,6 +935,11 @@ export const PageEditor = ({
         onClose={() => setEmbedding(false)}
       />
       {leaving ? <DiscardConfirm onKeep={() => setLeaving(false)} onDiscard={leave} /> : null}
+      <DeletePageDialog
+        page={deleting ? { id: saved.form.bookingPageId, name: saved.form.name } : null}
+        onCancel={() => setDeleting(false)}
+        onDeleted={() => router.push(bookingPagesPath(account))}
+      />
     </form>
     {/* Outside the form: its dialog's submit would otherwise bubble up to the save. */}
     <LeaveGuard dirty={changes > 0} />

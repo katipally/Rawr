@@ -80,6 +80,34 @@ export const windowsChanged = (rows: Window[], saved: Window[]): number => {
   return changed
 }
 
+const minuteOf = (clock: string): number => {
+  const [hours = 0, minutes = 0] = clock.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
+/** Hours a week across every day. Ranges that overlap or touch are merged first, so
+ *  nine to one and nine to five is eight hours, not twelve. O(n log n) per day. */
+export const weeklyHours = (weekly: Ranges): number => {
+  let minutes = 0
+  for (const ranges of Object.values(weekly)) {
+    const spans = ranges.map(([from, to]) => [minuteOf(from), minuteOf(to)] as const).sort((a, b) => a[0] - b[0])
+    let start = -1
+    let end = -1
+    for (const [from, to] of spans) {
+      if (to <= from) continue
+      if (from > end) {
+        minutes += end - start
+        start = from
+        end = to
+      } else {
+        end = Math.max(end, to)
+      }
+    }
+    minutes += end - start
+  }
+  return Math.round((minutes / 60) * 10) / 10
+}
+
 /** Days whose hours differ between two maps, an absent day reading as none. */
 export const daysChanged = (a: Ranges, b: Ranges): number =>
   DAY_GROUPS[0]!.days.filter((day) => JSON.stringify(a[day] ?? []) !== JSON.stringify(b[day] ?? [])).length
