@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
-import { bySlug, defineJob } from './registry.ts'
+import { bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** The clock behind sequences.
  *
@@ -26,6 +26,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  audience: `select distinct account_id from sequence where state = 'active'`,
   handle: async () => {
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
       select e.id, e.account_id, a.slug from sequence_enrollment e
@@ -39,16 +40,16 @@ const dispatch = defineJob({
        order by e.next_run_at
        limit ${BATCH}`
 
-    for (const row of rows) {
-      await boss().send(
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send(
         'sequence.run',
         { accountId: row.account_id, enrollmentId: row.id },
         // One in flight per enrollment. Without this, a tick landing while the
         // previous run is still going would queue the same step twice, and the
         // lease would only turn that into a wasted job rather than a duplicate.
         { singletonKey: String(row.id) },
-      )
-    }
+      ),
+    )
 
     if (rows.length > 0) console.log(`[sequence] ${rows.length} due: ${bySlug(rows)}`)
   },
@@ -59,6 +60,7 @@ const run = defineJob({
   schema: z.object({ accountId: z.uuid(), enrollmentId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
   handle: async ({ accountId, enrollmentId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/sequence-step`, {
       method: 'POST',

@@ -33,7 +33,8 @@ import {
 import { inBackground } from './background.ts'
 import { compose } from './sequences/compose.ts'
 import { hostOf, outboundRequest } from './outbound.ts'
-import { notifySubscribers, signPayload } from './webhooks.ts'
+import { signPayload } from './webhook-delivery.ts'
+import { notifySubscribers } from './webhooks.ts'
 import { queueHostAlert } from './notify.ts'
 import { publicBaseUrl } from '~/lib/env.ts'
 

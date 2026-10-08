@@ -1,7 +1,7 @@
 import { refreshFillRates, type AccountContext } from '@rawr/db'
 import { z } from 'zod'
 import { owner } from '../db.ts'
-import { defineJob } from './registry.ts'
+import { defineJob, eachAccount } from './registry.ts'
 
 /** The fill rate of every property, once a night.
  *
@@ -25,12 +25,14 @@ export const fillFieldRates = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
+  audience: 'select id as account_id from account',
   handle: async () => {
     // Per account, so one tenant's three hundred properties cannot stall another's.
     const accounts = await owner<{ id: string; slug: string }[]>`select id, slug from account`
-    for (const row of accounts) {
+    await eachAccount(accounts, (row) => row.id, async (row) => {
       const { objects, fields } = await refreshFillRates(jobContext(row.id))
       console.log(`[fields.fillrate] ${row.slug}: ${fields} propert(ies) across ${objects} object(s).`)
-    }
+    })
   },
 })

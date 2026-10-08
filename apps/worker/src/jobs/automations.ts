@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
-import { bySlug, defineJob } from './registry.ts'
+import { bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** The clock behind a rule that waits.
  *
@@ -24,6 +24,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  audience: `select distinct account_id from automation_run where state = 'waiting'`,
   handle: async () => {
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
       select r.id, r.account_id, a.slug from automation_run r
@@ -35,16 +36,16 @@ const dispatch = defineJob({
        order by r.resume_at
        limit ${BATCH}`
 
-    for (const row of rows) {
-      await boss().send(
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send(
         'automation.resume',
         { accountId: row.account_id, runId: row.id },
         // One in flight per run. Without it a tick landing while the previous
         // resume is still going would queue the same step twice, and the lease
         // would only turn that into a wasted job rather than a duplicate.
         { singletonKey: String(row.id) },
-      )
-    }
+      ),
+    )
 
     if (rows.length > 0) console.log(`[automation] ${rows.length} due: ${bySlug(rows)}`)
   },
@@ -55,6 +56,7 @@ const resume = defineJob({
   schema: z.object({ accountId: z.uuid(), runId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
   handle: async ({ accountId, runId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/automation-step`, {
       method: 'POST',
@@ -91,15 +93,16 @@ const scan = defineJob({
   schema: z.object({}),
   retryLimit: 2,
   retryDelaySeconds: 300,
+  audience: `select distinct account_id from automation where is_active and trigger in ('date_reached', 'no_activity')`,
   handle: async () => {
     const rows = await owner<{ account_id: string; slug: string }[]>`
       select distinct a.account_id, ac.slug from automation a
         join account ac on ac.id = a.account_id
        where a.is_active and a.trigger in ('date_reached', 'no_activity')`
 
-    for (const row of rows) {
-      await boss().send('automation.scan.account', { accountId: row.account_id }, { singletonKey: row.account_id })
-    }
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send('automation.scan.account', { accountId: row.account_id }, { singletonKey: row.account_id }),
+    )
 
     if (rows.length > 0) console.log(`[automation] scanning ${bySlug(rows)}`)
   },
@@ -110,6 +113,7 @@ const scanAccount = defineJob({
   schema: z.object({ accountId: z.uuid() }),
   retryLimit: 2,
   retryDelaySeconds: 600,
+  policy: 'exclusive',
   handle: async ({ accountId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/automation-step`, {
       method: 'POST',

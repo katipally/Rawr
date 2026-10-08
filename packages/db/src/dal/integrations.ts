@@ -11,7 +11,7 @@ import { decryptToken, encryptToken, randomToken } from '../internal/crypto.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
 import { checkIntegrationConfig } from './integration-config.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
-import { resolveNotifications } from './notifications.ts'
+import { notify, resolveNotifications } from './notifications.ts'
 
 /** F6 §1, built once and used by every integration without exception.
  *
@@ -383,6 +383,8 @@ export const saveIntegration = async (
       })
       .returning({ id: integration.id })
     if (!saved) throw new Error('The integration could not be saved.')
+    // Saving sets the state to connected, so an outage notice for the old state is stale.
+    await resolveNotifications(tx, ctx, integrationErrorKey(input.kind))
 
     return {
       result: { id: saved.id },
@@ -414,6 +416,31 @@ export const readCredentials = async (
     }
   })
 
+/** What the bell calls each kind. Kept beside the notice that uses it; the names
+ *  match the catalogue on the Connected apps page. */
+const INTEGRATION_NAMES: Record<IntegrationKind, string> = {
+  brevo: 'Brevo',
+  apollo: 'Apollo',
+  clay: 'Clay',
+  slack: 'Slack',
+  ga4: 'Google Analytics 4',
+  zoom: 'Zoom',
+  google_calendar: 'Google Calendar',
+  lusha: 'Lusha',
+  woodpecker: 'Woodpecker',
+  hubspot: 'HubSpot',
+  turnstile: 'Cloudflare Turnstile',
+  webflow: 'Webflow',
+  gmail: 'Gmail',
+}
+
+/** The states the health function writes on a failure. */
+const RED_STATES = new Set(['degraded', 'revoked'])
+
+/** The notice for one integration's outage. One per account per kind: the key has
+ *  no day in it, so repeated failures count on this notice rather than adding more. */
+const integrationErrorKey = (kind: IntegrationKind): string => `integration_error:${kind}`
+
 export const recordHealth = async (
   ctx: AccountContext,
   kind: IntegrationKind,
@@ -427,7 +454,19 @@ export const recordHealth = async (
   // A rejected credential is not a blip: it becomes 'revoked' rather than
   // 'degraded', so retries stop burning attempts against a decision already made
   // at the provider. F6's edge cases.
+  //
+  // The notice follows the state change, not the result. The row lock makes two
+  // results for one integration land in turn: the second reads the red the first
+  // left and raises nothing, so a run of failures is one notice and a recovery
+  // resolves it once. Every caller goes through here, so none needs its own rule.
   await withAccount(ctx, async (tx) => {
+    const [before] = await tx
+      .select({ id: integration.id, state: integration.state })
+      .from(integration)
+      .where(eq(integration.kind, kind))
+      .for('update')
+    if (!before) return
+
     await tx.execute(sql`
       select rawr.record_integration_health(
         ${kind},
@@ -435,6 +474,21 @@ export const recordHealth = async (
         ${outcome.ok ? null : outcome.error.slice(0, 2000)},
         ${outcome.ok ? false : (outcome.disconnected ?? false)}
       )`)
+
+    const wasRed = RED_STATES.has(before.state)
+    if (!outcome.ok && !wasRed) {
+      await notify(tx, ctx, {
+        kind: 'integration_error',
+        dedupeKey: integrationErrorKey(kind),
+        title: 'An integration needs attention',
+        body: `${INTEGRATION_NAMES[kind]}: ${outcome.error.slice(0, 200)}`,
+        entity: 'integration',
+        entityId: before.id,
+        to: { hubs: ['account'] },
+      })
+    } else if (outcome.ok && wasRed) {
+      await resolveNotifications(tx, ctx, integrationErrorKey(kind))
+    }
   })
 }
 
@@ -453,6 +507,7 @@ export const disconnectIntegration = async (
     if (!found) throw new Error(`${kind} is not connected in this account.`)
 
     await tx.delete(integration).where(eq(integration.id, found.id))
+    await resolveNotifications(tx, ctx, integrationErrorKey(kind))
     return {
       result: undefined,
       audit: { entity: 'integration', entityId: found.id, action: 'disconnect', before: { kind }, after: null },
@@ -691,14 +746,14 @@ export const claimForReplay = async (ctx: AccountContext, id: string): Promise<R
     // Somebody is dealing with the queue. The day's notice stops being unread
     // rather than sitting there until the retention sweep takes it.
     await resolveNotifications(tx, ctx, 'dead_letter:')
+    // The update is the guard: two presses that both read the row as open cannot
+    // both match it, because the second waits on the first and then finds it closed.
     const [row] = await tx
-      .select({ jobName: deadLetter.jobName, payload: deadLetter.payload })
-      .from(deadLetter)
+      .update(deadLetter)
+      .set({ replayedAt: new Date() })
       .where(and(eq(deadLetter.id, id), isNull(deadLetter.replayedAt)))
-      .limit(1)
+      .returning({ jobName: deadLetter.jobName, payload: deadLetter.payload })
     if (!row) throw new Error('That failure has already been replayed, or it does not exist.')
-
-    await tx.update(deadLetter).set({ replayedAt: new Date() }).where(eq(deadLetter.id, id))
 
     return {
       result: { jobName: row.jobName, payload: row.payload, accountId: ctx.accountId },
@@ -708,6 +763,26 @@ export const claimForReplay = async (ctx: AccountContext, id: string): Promise<R
         action: 'replay',
         before: { replayedAt: null },
         after: { replayedAt: 'now', jobName: row.jobName },
+      },
+    }
+  })
+
+/** A replay that ran and failed again: the failure is open once more, carrying the
+ *  newest reason and one more attempt. The same row, so nothing is duplicated. */
+export const reopenForReplay = async (ctx: AccountContext, id: string, reason: string): Promise<void> =>
+  mutate(ctx, 'dead_letter', async (tx) => {
+    await tx
+      .update(deadLetter)
+      .set({ replayedAt: null, error: reason.slice(0, 2000), attempts: sql`coalesce(${deadLetter.attempts}, 0) + 1` })
+      .where(eq(deadLetter.id, id))
+    return {
+      result: undefined,
+      audit: {
+        entity: 'dead_letter',
+        entityId: id,
+        action: 'replay_failed',
+        before: { replayedAt: 'now' },
+        after: { replayedAt: null, error: reason },
       },
     }
   })

@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { pk, accountId } from './columns.ts'
 import { notificationKindEnum } from './enums.ts'
@@ -44,9 +45,15 @@ export const notification = pgTable(
     uniqueIndex('notification_dedupe_key').on(t.accountId, t.userId, t.dedupeKey),
     // Each tab is one partial index whose own predicate implies the tab's, so the
     // read is a backward index scan with no sort node.
-    index('notification_unread_idx').on(t.accountId, t.userId, t.at.desc()),
-    index('notification_all_idx').on(t.accountId, t.userId, t.at.desc()),
-    index('notification_trash_idx').on(t.accountId, t.userId, t.trashedAt.desc()),
+    index('notification_unread_idx')
+      .on(t.accountId, t.userId, t.at.desc())
+      .where(sql`read_at is null and trashed_at is null`),
+    index('notification_all_idx')
+      .on(t.accountId, t.userId, t.at.desc())
+      .where(sql`trashed_at is null`),
+    index('notification_trash_idx')
+      .on(t.accountId, t.userId, t.trashedAt.desc())
+      .where(sql`trashed_at is not null`),
     index('notification_actor_id_idx').on(t.actorId),
     index('notification_user_id_idx').on(t.userId),
   ],

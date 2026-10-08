@@ -22,7 +22,13 @@ const READ_DAYS = 90
 /** Telling somebody at seven is telling them before they start rather than during. */
 const MORNING_HOUR = 7
 /** An unread notice about a task from six months ago is noise, and leaving it
- *  makes the badge permanently non-zero, which is how a badge stops being read. */
+ *  makes the badge permanently non-zero, which is how a badge stops being read.
+ *
+ *  The sweep deletes an unread notice this old, so the overdue notifier only
+ *  notices tasks due within this many days. Past that, the next morning would
+ *  notice the same task again and the deleted notice would come back. Inclusive:
+ *  a task due exactly this many days ago is still noticed on the last day of the
+ *  window, and its first notice is only swept the day after. */
 const UNREAD_DAYS = 180
 /** The backstop that actually holds if a dedupe key is ever composed wrong. */
 const KEEP_PER_PERSON = 500
@@ -41,6 +47,7 @@ export const notificationOverdue = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  audience: 'select id as account_id from account',
   handle: async () => {
     const [made] = await owner`
       insert into notification (account_id, user_id, kind, dedupe_key, title, body, entity, entity_id)
@@ -55,6 +62,7 @@ export const notificationOverdue = defineJob({
          and t.assignee_id is not null
          and t.due_date is not null
          and t.due_date < (now() at time zone a.timezone)::date
+         and t.due_date >= (now() at time zone a.timezone)::date - ${UNREAD_DAYS}::int
          and extract(hour from now() at time zone a.timezone) >= ${MORNING_HOUR}::int
       on conflict (account_id, user_id, dedupe_key) do nothing
       returning 1`.then((rows) => [rows.length])
@@ -68,6 +76,8 @@ export const notificationSweep = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
+  audience: 'select id as account_id from account',
   handle: async () => {
     let removed = 0
     for (const rule of [
@@ -108,6 +118,7 @@ export const notificationReminders = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  audience: 'select id as account_id from account',
   handle: async () => {
     const sent = await owner`
       insert into notification (account_id, user_id, kind, dedupe_key, title, body, entity, entity_id)

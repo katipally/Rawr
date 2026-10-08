@@ -278,6 +278,7 @@ export const entityAlive = (type: SQL | Column, id: SQL | Column): SQL<boolean> 
   when ${type} = 'contact' then exists (select 1 from contact x where x.id = ${id} and x.deleted_at is null)
   when ${type} = 'company' then exists (select 1 from company x where x.id = ${id} and x.deleted_at is null)
   when ${type} = 'deal' then exists (select 1 from deal x where x.id = ${id} and x.deleted_at is null)
+  when ${type} = 'integration' then exists (select 1 from integration x where x.id = ${id})
   when ${type} is null then false
   else exists (select 1 from custom_record x join object_def o on o.id = x.object_id
                 where x.id = ${id} and o.key = ${type} and x.deleted_at is null)

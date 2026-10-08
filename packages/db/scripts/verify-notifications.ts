@@ -12,6 +12,9 @@ import {
   unreadCount,
 } from '../src/dal/notifications.ts'
 import { createTask, deleteTask } from '../src/dal/tasks.ts'
+import { addDays, dayKey } from '../src/dal/slots.ts'
+import { owner as workerOwner } from '../../../apps/worker/src/db.ts'
+import { notificationOverdue, notificationSweep } from '../../../apps/worker/src/jobs/notification-sweep.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
@@ -295,6 +298,61 @@ try {
     gone?.n === 0 && kept?.n === 1,
     'the trash purge takes what is past the bound and spares what is inside it',
   )
+
+  // ------------------------------------------------------------ overdue window
+
+  // The real notifications.overdue and notifications.sweep jobs, run against this
+  // account. The overdue job only notices from seven in the account's morning, so
+  // the account's clock is moved to noon for this section and put back after.
+  const [zone] = await owner`select timezone from account where id = ${accountId}`
+  const utcHour = new Date().getUTCHours()
+  const offset = (((12 - utcHour) % 24) + 24) % 24
+  const noonZone = offset === 0 ? 'UTC' : offset > 12 ? `Etc/GMT+${24 - offset}` : `Etc/GMT-${offset}`
+  await owner`update account set timezone = ${noonZone} where id = ${accountId}`
+  try {
+    const today = dayKey(new Date(), noonZone)
+    const due = (daysAgo: number) => addDays(today, -daysAgo)
+    const inside = await createTask(ctx, { title: 'Verify: due 179 days ago', assigneeId: alice, dueDate: due(179) })
+    const edge = await createTask(ctx, { title: 'Verify: due 180 days ago', assigneeId: alice, dueDate: due(180) })
+    const outside = await createTask(ctx, { title: 'Verify: due 181 days ago', assigneeId: alice, dueDate: due(181) })
+    const overdueKey = (id: string, daysAgo: number) => `task:overdue:${id}:${due(daysAgo)}`
+    const told = async (id: string) => {
+      const [row] = await owner`
+        select count(*)::int as n from notification
+         where kind = 'task_overdue' and entity_id = ${id}`
+      return (row?.n ?? 0) > 0
+    }
+
+    // A notice the sweep would have had to delete: unread, 200 days old.
+    await owner`
+      insert into notification (account_id, user_id, kind, dedupe_key, title, at, entity, entity_id)
+      values (${accountId}, ${alice}, 'task_overdue', ${overdueKey(outside.id, 181)},
+              'Verify: due 181 days ago is overdue', now() - interval '200 days', 'task', ${outside.id})`
+
+    await notificationOverdue.handle({})
+    await notificationSweep.handle({})
+    const [swept] = await owner`
+      select count(*)::int as n from notification where dedupe_key = ${overdueKey(outside.id, 181)}`
+    check(swept?.n === 0, 'the sweep removes the old unread overdue notice, as it does in production', 'precondition for the next check')
+
+    await notificationOverdue.handle({})
+
+    check(await told(inside.id), 'a task due 179 days ago is noticed')
+    check(await told(edge.id), 'a task due exactly 180 days ago is still noticed on the last day of the window')
+    check(
+      !(await told(outside.id)),
+      'a task due 181 days ago is not noticed again after the sweep removed its notice',
+      'without the window the next morning brings the deleted notice back',
+    )
+  } finally {
+    await owner`delete from notification where kind = 'task_overdue' and entity_id in (
+                  select id from task where account_id = ${accountId} and title like 'Verify: due %')`
+    for (const row of await owner`select id from task where account_id = ${accountId} and title like 'Verify: due %'`) {
+      await deleteTask(ctx, row.id as string)
+    }
+    await owner`update account set timezone = ${zone?.timezone ?? 'UTC'} where id = ${accountId}`
+    await workerOwner.end()
+  }
 
   // ------------------------------------------------------------ the plan
 

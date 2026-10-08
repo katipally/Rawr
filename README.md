@@ -155,7 +155,8 @@ read as logic errors:
 
 Not in `pnpm verify`, run on purpose: `pnpm db:verify:scale` builds 100,000
 contacts (`SCALE_CONTACTS` to change it) and measures the queries against them.
-`pnpm db:reclaim` gives the disk back afterwards.
+`pnpm db:reclaim` gives the disk back afterwards. `pnpm --filter @rawr/worker verify:queue`
+proves keyed queues dedupe on the right pg-boss policy; it refuses any database but rawr_verify.
 
 The suites run inside the two fixture accounts and leave records behind. Nothing
 reseeds on its own: `pnpm db:seed` drops `sandbox` and `peer` and everything

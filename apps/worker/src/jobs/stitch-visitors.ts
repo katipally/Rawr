@@ -7,7 +7,7 @@ import {
 import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
-import { basePayload, defineJob } from './registry.ts'
+import { basePayload, defineJob, eachAccount } from './registry.ts'
 
 /** F4 §3, T2. The back-fill that turns a month of anonymous browsing into a new
  *  contact's timeline.
@@ -34,6 +34,7 @@ export const dispatchStitches = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 30,
+  audience: 'select distinct account_id from visitor_alias where resolved_at is null',
   handle: async () => {
     // A plain read, and the de-duplication happens on the queue instead. The
     // alias row cannot carry the claim: it stays unresolved until the back-fill
@@ -49,8 +50,8 @@ export const dispatchStitches = defineJob({
     if (claimed.length === 0) return
     console.log(`[activity.stitch.dispatch] queueing ${claimed.length} back-fill(s).`)
 
-    for (const row of claimed) {
-      await boss().send(
+    await eachAccount(claimed, (row) => row.account_id, (row) =>
+      boss().send(
         'activity.stitch',
         {
           accountId: row.account_id,
@@ -63,8 +64,8 @@ export const dispatchStitches = defineJob({
         // again on every tick while the first attempt was still running. One
         // outstanding job per alias is all that is ever useful.
         { singletonKey: row.id as string },
-      )
-    }
+      ),
+    )
   },
 })
 
@@ -87,6 +88,7 @@ export const stitchVisitor = defineJob({
   schema: payload,
   retryLimit: 5,
   retryDelaySeconds: 60,
+  policy: 'exclusive',
   handle: async ({ accountId, aliasId, visitorId, contactId }) => {
     const ctx = jobContext(accountId)
 

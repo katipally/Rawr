@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
-import { bySlug, defineJob } from './registry.ts'
+import { bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** The clock behind pre-meeting reminders.
  *
@@ -30,6 +30,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 120,
+  audience: `select distinct account_id from booking where state = 'confirmed' and starts_at > now()`,
   handle: async () => {
     const rows = await owner<
       { booking_id: string; reminder_id: string; account_id: string; slug: string }[]
@@ -47,15 +48,15 @@ const dispatch = defineJob({
        order by b.starts_at
        limit ${BATCH}`
 
-    for (const row of rows) {
-      await boss().send(
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send(
         send.name,
         { accountId: row.account_id, bookingId: row.booking_id, reminderId: row.reminder_id },
         // One in flight per reminder per meeting. The ledger row is the real
         // guarantee; this stops the queue filling with work that will find it.
         { singletonKey: `booking:${row.booking_id}:${row.reminder_id}` },
-      )
-    }
+      ),
+    )
 
     if (rows.length > 0) console.log(`[booking] ${rows.length} reminder(s) due: ${bySlug(rows)}`)
   },
@@ -66,6 +67,7 @@ const send = defineJob({
   schema: z.object({ accountId: z.uuid(), bookingId: z.uuid(), reminderId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
   handle: async (payload) => {
     const response = await fetch(`${APP_BASE}/api/internal/booking-reminder`, {
       method: 'POST',

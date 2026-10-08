@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { AccountContext } from '../src/dal/context.ts'
+import { systemContext, type AccountContext } from '../src/dal/context.ts'
 import { withAccount } from '../src/dal/index.ts'
 import {
   claimForReplay,
@@ -18,6 +18,7 @@ import {
   readCredentials,
   recordHealth,
   rematchInbound,
+  reopenForReplay,
   saveIntegration,
 } from '../src/dal/integrations.ts'
 import {
@@ -37,7 +38,9 @@ import {
   readSegmentContactPage,
   setExternalId,
 } from '../src/dal/marketing-events.ts'
-import { evaluateSegment, listSegments, saveSegment } from '../src/dal/segments.ts'
+import { evaluateAllSegments, evaluateSegment, listSegments, saveSegment } from '../src/dal/segments.ts'
+import { createServer, type IncomingMessage as HealthRequest, type ServerResponse } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import {
   addBlocklistEntry,
   blockedPatterns,
@@ -58,7 +61,7 @@ import { createImportRun, readImportRun, runImportChunk, setImportMapping } from
 import { readTimeline } from '../src/dal/activity.ts'
 import { listFields } from '../src/dal/admin-fields.ts'
 import { readSubscriptions } from '../src/dal/subscriptions.ts'
-import { recordDeadLetter } from '../src/dal/jobs.ts'
+import { deadLetterNotice, notifyFamilyFailure, recordDeadLetter, syncSegmentFailures } from '../src/dal/jobs.ts'
 import { openSecret } from '../src/internal/crypto.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
@@ -1412,6 +1415,297 @@ try {
     return await refuses('a sales user replaying', () => claimForReplay(sales, row!.id))
   })
 
+  const today = new Date().toISOString().slice(0, 10)
+  const noticeRows = (key: string) =>
+    db.execute<{ accountId: string; n: number }>(
+      sql`select account_id as "accountId", count as n from notification where dedupe_key = ${key}`,
+    )
+
+  await check('a repeated failure of one job raises one notice a day, counting up', async () => {
+    const job = `verify.notice.${stamp}`
+    const key = `dead_letter:${job}:${today}`
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await recordDeadLetter(systemContext(datasaur.id), { jobName: job, payload: { verify: stamp }, error: 'Verify failure.', attempts: attempt })
+    }
+    const rows = await noticeRows(key)
+    expect(rows.length > 0, 'nobody was told')
+    expect(
+      rows.every((row) => row.n === 3),
+      `a notice counted ${rows.map((row) => row.n).join(', ')} where three failures were recorded`,
+    )
+    return `${rows.length} recipient(s), each counting 3`
+  })
+
+  await check('a failure of another job the same day gets its own notice', async () => {
+    const other = `verify.other.${stamp}`
+    await recordDeadLetter(systemContext(datasaur.id), { jobName: other, payload: { verify: stamp }, error: 'Verify failure.', attempts: 1 })
+    const rows = await noticeRows(`dead_letter:${other}:${today}`)
+    expect(rows.length > 0, 'the second job was not announced')
+    return undefined
+  })
+
+  await check('a whole-run failure notifies its audience once a day and no one outside it', async () => {
+    const family = `verify.family.${stamp}`
+    const key = `dead_letter:${family}:${today}`
+    const audience = `select '${datasaur.id}'::uuid as account_id`
+    await notifyFamilyFailure(owner, family, audience, 'Verify failure.')
+    await notifyFamilyFailure(owner, family, audience, 'Verify failure.')
+    const rows = await noticeRows(key)
+    expect(rows.length > 0, 'the audience was not notified')
+    expect(rows.every((row) => row.accountId === datasaur.id), 'a notice reached another account')
+    expect(rows.every((row) => row.n === 2), 'a repeat did not count up on the same notice')
+    return `${rows.length} recipient(s), one notice each`
+  })
+
+  console.log('')
+  console.log('-- webhook replay: a failure that fails again stays open -------')
+
+  await check('two replays of one failure in flight deliver once', async () => {
+    const tag = `${stamp}-race`
+    await recordDeadLetter(admin, { jobName: 'verify.job', payload: { verify: tag }, error: 'Verify failure.', attempts: 1 })
+    const [row] = await db.execute<{ id: string }>(sql`select id from dead_letter where payload ->> 'verify' = ${tag}`)
+    const results = await Promise.allSettled([claimForReplay(admin, row!.id), claimForReplay(admin, row!.id)])
+    const won = results.filter((result) => result.status === 'fulfilled').length
+    expect(won === 1, `${won} of two concurrent replays claimed the failure`)
+    return undefined
+  })
+
+  await check('a replay that fails again reopens the same failure with one more attempt', async () => {
+    const tag = `${stamp}-reopen`
+    const reason = 'Still failing: verify.example answered 405.'
+    await recordDeadLetter(admin, { jobName: 'verify.job', payload: { verify: tag }, error: 'Verify failure.', attempts: 1 })
+    const [row] = await db.execute<{ id: string }>(sql`select id from dead_letter where payload ->> 'verify' = ${tag}`)
+    await claimForReplay(admin, row!.id)
+    await reopenForReplay(admin, row!.id, reason)
+    const [after] = await db.execute<{ open: boolean; attempts: number; error: string; rows: number }>(sql`
+      select replayed_at is null as open, attempts, error,
+        (select count(*)::int from dead_letter where payload ->> 'verify' = ${tag}) as rows
+      from dead_letter where id = ${row!.id}`)
+    expect(after!.open === true, 'the failure was not left open')
+    expect(after!.attempts === 2, `attempts is ${after!.attempts}, expected 2`)
+    expect(after!.error === reason, `the last error is "${after!.error}"`)
+    expect(after!.rows === 1, `${after!.rows} rows exist for one failure`)
+    await claimForReplay(admin, row!.id)
+    return 'open after one failed replay, same row, attempts 2'
+  })
+
+  console.log('')
+  console.log('-- integration health job --------------------------------------')
+
+  // The job asks the app over HTTP, so a local stub answers for the app. The worker
+  // reads its base URL when its env module loads, so the worker is imported here,
+  // after the stub's address is known.
+  type StubMode = 'ok' | 'refuse' | 'drop' | 'broken'
+  const stub = { mode: 'ok' as StubMode, asked: [] as string[], brokenKind: 'brevo' }
+  const healthStub = createServer((request: HealthRequest, response: ServerResponse) => {
+    const chunks: Buffer[] = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as { accountId: string; kind: string }
+      stub.asked.push(`${body.accountId}:${body.kind}`)
+      if (stub.mode === 'drop') return request.socket.destroy()
+      if (stub.mode === 'refuse') {
+        response.writeHead(404, { 'content-type': 'application/json' })
+        return response.end('{"error":"Not for you."}')
+      }
+      if (stub.mode === 'broken' && body.kind === stub.brokenKind) {
+        response.writeHead(500, { 'content-type': 'text/html' })
+        return response.end('<html>Internal Server Error</html>')
+      }
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end('{"ok":true,"detail":"fine"}')
+    })
+  })
+  await new Promise<void>((resolve) => healthStub.listen(0, '127.0.0.1', resolve))
+  process.env.RAWR_INTERNAL_URL = `http://127.0.0.1:${(healthStub.address() as AddressInfo).port}`
+  const { checkIntegrations } = await import('../../../apps/worker/src/jobs/check-integrations.ts')
+  const { AccountFailures } = await import('../../../apps/worker/src/jobs/registry.ts')
+  const { owner: workerOwner } = await import('../../../apps/worker/src/db.ts')
+
+  await saveIntegration(accountAdmin, { kind: 'brevo', config: { listId: 42 }, secret: `health-${stamp}` })
+  await saveIntegration(accountAdmin, { kind: 'apollo', secret: `health-${stamp}` })
+  const brevoHealth = async () => {
+    const [row] = await owner<{ state: string; last_error: string | null }[]>`
+      select i.state, i.last_error from integration i
+        join account a on a.id = i.account_id
+       where a.id = ${datasaur.id} and i.kind = 'brevo'`
+    return row
+  }
+  const runHealth = async () => {
+    try {
+      await checkIntegrations.handle({})
+      return null
+    } catch (cause) {
+      if (cause instanceof AccountFailures) return cause
+      throw cause
+    }
+  }
+
+  await check('a healthy run asks every configured integration and fails nothing', async () => {
+    stub.mode = 'ok'
+    stub.asked = []
+    const failed = await runHealth()
+    expect(failed === null, `the job failed: ${failed?.message}`)
+    expect(stub.asked.includes(`${datasaur.id}:brevo`), 'brevo was not asked')
+    expect(stub.asked.includes(`${datasaur.id}:apollo`), 'apollo was not asked')
+    return `${stub.asked.length} asked`
+  })
+
+  await check('an integration that answers with a crash is marked red, the rest are still asked, and the run fails with its reason', async () => {
+    stub.mode = 'broken'
+    stub.asked = []
+    try {
+      const failed = await runHealth()
+      expect(failed instanceof AccountFailures, 'a crashed check left the run looking successful')
+      const reason = failed?.failures.get(datasaur.id) ?? ''
+      expect(reason.startsWith('brevo: '), `the reason did not name brevo: ${reason}`)
+      expect(!reason.includes('apollo'), `apollo was reported as failing: ${reason}`)
+      expect(stub.asked.includes(`${datasaur.id}:apollo`), 'the run stopped before apollo')
+      const row = await brevoHealth()
+      expect(row?.state === 'degraded', `brevo reads as ${row?.state}, not degraded`)
+      expect(row?.last_error?.includes('without a result') === true, `brevo last error is ${row?.last_error}`)
+      return reason
+    } finally {
+      await recordHealth(accountAdmin, 'brevo', { ok: true })
+    }
+  })
+
+  await check('a refused call fails the run and marks nothing red', async () => {
+    await recordHealth(accountAdmin, 'brevo', { ok: true })
+    stub.mode = 'refuse'
+    const failed = await runHealth()
+    expect(failed instanceof AccountFailures, 'a refused call passed silently')
+    const reason = failed?.failures.get(datasaur.id) ?? ''
+    expect(reason.includes('the health check was refused: wrong or missing secret'), `the reason was: ${reason}`)
+    const row = await brevoHealth()
+    expect(row?.state === 'connected', `a refusal turned brevo ${row?.state}`)
+    expect(row?.last_error === null, 'a refusal wrote an error onto brevo')
+    return undefined
+  })
+
+  await check('an app that cannot be reached fails the run and marks the integration red', async () => {
+    stub.mode = 'drop'
+    try {
+      const failed = await runHealth()
+      expect(failed instanceof AccountFailures, 'an unreachable app passed silently')
+      const reason = failed?.failures.get(datasaur.id) ?? ''
+      expect(reason.includes('the app could not be reached.'), `the reason was: ${reason}`)
+      expect(!/fetch failed|ECONN|other side closed/i.test(reason), `node's own text reached the reason: ${reason}`)
+      const row = await brevoHealth()
+      expect(row?.state === 'degraded', `brevo reads as ${row?.state}, not degraded`)
+      expect(row?.last_error === 'the app could not be reached.', `brevo last error is ${row?.last_error}`)
+      return undefined
+    } finally {
+      await recordHealth(accountAdmin, 'brevo', { ok: true })
+    }
+  })
+
+  stub.mode = 'ok'
+  await disconnectIntegration(accountAdmin, 'apollo')
+  await new Promise<void>((resolve) => healthStub.close(() => resolve()))
+  await workerOwner.end()
+
+  console.log('')
+  console.log('-- segments that cannot evaluate ------------------------------')
+
+  const brokenSegment = await saveSegment(admin, {
+    objectKey: 'contact',
+    name: `Verify broken ${stamp}`,
+    filters: [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: `seg-${stamp}` }] }],
+  })
+  const setQuery = (query: unknown[]) =>
+    owner`update segment set query = ${JSON.stringify(query)}::jsonb where id = ${brokenSegment.id}`
+  const brokenQuery = [{ conjunction: 'and', conditions: [{ field: `no_such_field_${stamp}`, operator: 'contains', value: 'x' }] }]
+  const healthyQuery = [{ conjunction: 'and', conditions: [{ field: 'email', operator: 'contains', value: `seg-${stamp}` }] }]
+  const segmentCtx = systemContext(datasaur.id)
+  const pass = async () => syncSegmentFailures(segmentCtx, await evaluateAllSegments(segmentCtx))
+  const openRowsFor = (segmentId: string) =>
+    owner<{ id: string; attempts: number | null; error: string }[]>`
+      select id, attempts, error from dead_letter
+       where account_id = ${datasaur.id} and job_name = 'segments.evaluate'
+         and replayed_at is null and payload ->> 'segmentId' = ${segmentId}`
+  const allRowsFor = (segmentId: string) =>
+    owner<{ id: string; replayed_at: Date | null }[]>`
+      select id, replayed_at from dead_letter
+       where account_id = ${datasaur.id} and job_name = 'segments.evaluate'
+         and payload ->> 'segmentId' = ${segmentId}`
+
+  await check('a segment that cannot evaluate keeps one open dead letter however many passes fail', async () => {
+    await setQuery(brokenQuery)
+    await pass()
+    await pass()
+    await pass()
+    const open = await openRowsFor(brokenSegment.id)
+    expect(open.length === 1, `${open.length} open rows after three failing passes`)
+    expect(open[0]?.attempts === 3, `the row counts ${open[0]?.attempts} attempts, not three`)
+    expect((open[0]?.error.length ?? 0) > 0, 'the row carries no error')
+    return `one row, ${open[0]?.attempts} attempts`
+  })
+
+  await check('the day’s notice is one notice counting up, not one a pass', async () => {
+    await setQuery(brokenQuery)
+    const key = deadLetterNotice('segments.evaluate', 'x').dedupeKey
+    const before = await noticeRows(key)
+    await pass()
+    const after = await noticeRows(key)
+    expect(after.length === before.length, `the notices went from ${before.length} rows to ${after.length}`)
+    expect(after.every((row) => row.n > 0), 'a recipient has no count')
+    return `${after.length} recipient(s)`
+  })
+
+  await check('the row closes the first pass the segment evaluates again', async () => {
+    await setQuery(healthyQuery)
+    await pass()
+    expect((await openRowsFor(brokenSegment.id)).length === 0, 'the row is still open after a clean pass')
+    const closed = await allRowsFor(brokenSegment.id)
+    expect(closed.every((row) => row.replayed_at !== null), 'a closed row was not stamped')
+    return undefined
+  })
+
+  await check('a segment that breaks again gets a new open row, not the closed one back', async () => {
+    await setQuery(brokenQuery)
+    await pass()
+    const open = await openRowsFor(brokenSegment.id)
+    const all = await allRowsFor(brokenSegment.id)
+    expect(open.length === 1, `${open.length} open rows after breaking again`)
+    expect(all.length === 2, `${all.length} rows in all, not two`)
+    return undefined
+  })
+
+  await check('passes running at once still leave one open row', async () => {
+    await setQuery(healthyQuery)
+    await pass()
+    await setQuery(brokenQuery)
+    const results = await evaluateAllSegments(segmentCtx)
+    await Promise.all([1, 2, 3, 4].map(() => syncSegmentFailures(segmentCtx, results)))
+    const open = await openRowsFor(brokenSegment.id)
+    expect(open.length === 1, `${open.length} open rows after four passes at once`)
+    return undefined
+  })
+
+  await check('a row from before segments carried an id is closed by the next pass', async () => {
+    await setQuery(brokenQuery)
+    await owner`
+      insert into dead_letter (account_id, job_name, payload, error, attempts)
+      values (${datasaur.id}, 'segments.evaluate', ${JSON.stringify({ segment: 'Old name', accountSlug: 'sandbox' })}::jsonb, 'an old failure', 1)`
+    await pass()
+    const legacy = await owner`
+      select count(*)::int as n from dead_letter
+       where account_id = ${datasaur.id} and job_name = 'segments.evaluate'
+         and replayed_at is null and payload ->> 'segmentId' is null`
+    expect(legacy[0]?.n === 0, `${legacy[0]?.n} legacy rows are still open`)
+    expect((await openRowsFor(brokenSegment.id)).length === 1, 'the current row is not open')
+    return undefined
+  })
+
+  await check('a deleted segment closes its open row', async () => {
+    await owner`delete from segment where id = ${brokenSegment.id}`
+    await pass()
+    const open = await openRowsFor(brokenSegment.id)
+    expect(open.length === 0, `${open.length} rows still open for a segment that no longer exists`)
+    return undefined
+  })
+
   console.log('')
   console.log('-- tenancy -----------------------------------------------------')
 
@@ -1793,6 +2087,89 @@ try {
     }
     return `${[...PERSONAL_KINDS].join(', ')} fold from their own tables`
   })
+
+  console.log('')
+  console.log('-- integration outage notices ----------------------------------')
+
+  // The worker records health with the system context, so the audience is every
+  // member with the account hub, the same people the bell shows it to.
+  const outage = systemContext(datasaur.id)
+  const outageKey = 'integration_error:apollo'
+  const outageRows = () =>
+    owner<{ user_id: string; count: number; read_at: Date | null; body: string | null }[]>`
+      select user_id, count, read_at, body from notification
+       where account_id = ${datasaur.id} and dedupe_key = ${outageKey}`
+  const accountHubUsers = async () =>
+    (
+      await owner<{ user_id: string }[]>`
+        select m.user_id from membership m
+         where m.account_id = ${datasaur.id} and m.state = 'active'
+           and (m.is_super_admin or 'account'::rawr_hub = any(m.edit_hubs))`
+    )
+      .map((row) => row.user_id)
+      .sort()
+  const notifiedUsers = async () => (await outageRows()).map((row) => row.user_id).sort()
+  let expectedUsers: string[] = []
+
+  await owner`delete from notification where account_id = ${datasaur.id} and dedupe_key = ${outageKey}`
+  await saveIntegration(accountAdmin, { kind: 'apollo', secret: `outage-${stamp}` })
+
+  await check('an integration that turns red raises one notice to the account hub, and nobody else', async () => {
+    expectedUsers = await accountHubUsers()
+    await recordHealth(outage, 'apollo', { ok: false, error: 'Apollo said 403.' })
+    const rows = await outageRows()
+    expect(expectedUsers.length > 0, 'no member holds the account hub')
+    expect((await notifiedUsers()).join() === expectedUsers.join(), `notified ${rows.length}, expected ${expectedUsers.length}`)
+    expect(rows.every((row) => row.count === 1 && row.read_at === null), 'a notice is not one open notice counting one')
+    expect(rows.every((row) => row.body === 'Apollo: Apollo said 403.'), `the body was "${rows[0]?.body}"`)
+    return `${rows.length} notified, named after the integration`
+  })
+
+  await check('a second failing check while it is still red raises nothing new', async () => {
+    await recordHealth(outage, 'apollo', { ok: false, error: 'Apollo said 500.' })
+    const rows = await outageRows()
+    expect((await notifiedUsers()).join() === expectedUsers.join(), 'a repeat added or removed a recipient')
+    expect(rows.every((row) => row.count === 1 && row.read_at === null), 'a repeat counted up or reopened the notice')
+    return 'still one notice each'
+  })
+
+  await check('turning green resolves the notice, so the bell clears', async () => {
+    await recordHealth(outage, 'apollo', { ok: true })
+    const rows = await outageRows()
+    expect(rows.length > 0 && rows.every((row) => row.read_at !== null), 'a notice is still open after recovery')
+    return 'every notice read'
+  })
+
+  await check('red again after a recovery raises the same notice open again, with the new error', async () => {
+    await recordHealth(outage, 'apollo', { ok: false, error: 'Apollo said 403 again.' })
+    const rows = await outageRows()
+    expect((await notifiedUsers()).join() === expectedUsers.join(), 'the second outage did not reach the same people')
+    expect(rows.every((row) => row.read_at === null), 'the second outage did not reopen the notice')
+    expect(rows.every((row) => row.count === 2), `counts are ${rows.map((row) => row.count).join(', ')}, expected 2`)
+    expect(rows.every((row) => row.body === 'Apollo: Apollo said 403 again.'), `the body is "${rows[0]?.body}"`)
+    return 'open, counting 2, naming the new error'
+  })
+
+  await check('two failures racing on a green integration raise one notice, not two', async () => {
+    await recordHealth(outage, 'apollo', { ok: true })
+    await Promise.all([
+      recordHealth(outage, 'apollo', { ok: false, error: 'Apollo timed out.' }),
+      recordHealth(outage, 'apollo', { ok: false, error: 'Apollo timed out.' }),
+    ])
+    const rows = await outageRows()
+    expect(rows.length > 0 && (await notifiedUsers()).join() === expectedUsers.join(), 'nobody was told of the race')
+    expect(rows.every((row) => row.count === 3), `counts are ${rows.map((row) => row.count).join(', ')}, expected 3 (one more raise)`)
+    return 'one raise from the race'
+  })
+
+  await check('disconnecting an integration resolves its notice', async () => {
+    await disconnectIntegration(accountAdmin, 'apollo')
+    const rows = await outageRows()
+    expect(rows.length > 0 && rows.every((row) => row.read_at !== null), 'a notice about a removed integration is still open')
+    return 'the notice is read once the integration is gone'
+  })
+
+  await owner`delete from notification where account_id = ${datasaur.id} and dedupe_key = ${outageKey}`
 
   // Leave the account as it was found: every row saved above was created here,
   // and one left behind reads as a real connection on the Connected apps page.

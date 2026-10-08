@@ -1,7 +1,8 @@
 import type { JobWithMetadata } from 'pg-boss'
 import { startBoss, stopBoss } from './boss.ts'
 import { SCHEDULE_OVERRIDES } from './env.ts'
-import { owner, recordDeadLetter } from './db.ts'
+import { owner, recordJobFailure } from './db.ts'
+import { ensureQueue } from './queue-policy.ts'
 import { automationJobs, dispatchAutomations, scanAutomationRules } from './jobs/automations.ts'
 import { bookingReminderJobs, dispatchBookingReminders } from './jobs/booking-reminders.ts'
 import { bulkJobs, dispatchBulk } from './jobs/bulk.ts'
@@ -19,7 +20,7 @@ import { syncApollo } from './jobs/sync-apollo.ts'
 import { dispatchMailboxBodies, dispatchMailboxes, mailJobs } from './jobs/sync-mailboxes.ts'
 import { dispatchSequences, sequenceJobs, sweepSequenceLeases } from './jobs/sequences.ts'
 import { dispatchStitches, stitchVisitor } from './jobs/stitch-visitors.ts'
-import { accountIdOf, type Job } from './jobs/registry.ts'
+import type { Job } from './jobs/registry.ts'
 import { cronFor, dayKeyUtc, isOverdue, lastOccurrence, type DailyAt } from './catch-up.ts'
 
 const JOBS: Job[] = [
@@ -47,11 +48,17 @@ const JOBS: Job[] = [
 
 const boss = await startBoss()
 
+// Same grant as bootstrap.sql, which only lands when the pgboss schema already
+// existed at migrate time. Read only, on job_common alone: the Failed Jobs page
+// reads the dispatcher's last finished job and the waiting count from it.
+await owner`grant usage on schema pgboss to rawr_app`
+await owner`grant select on pgboss.job_common to rawr_app`
+
 for (const job of JOBS) {
-  await boss.createQueue(job.name, {
+  await ensureQueue(boss, owner, job.name, {
+    policy: job.policy ?? 'standard',
     retryLimit: job.retryLimit,
     retryDelay: job.retryDelaySeconds,
-    retryBackoff: true,
   })
 
   // includeMetadata is what exposes retryCount, which is how the runner knows an
@@ -67,28 +74,14 @@ for (const job of JOBS) {
       if (!parsed.ok) {
         // A malformed payload will never succeed, so it goes straight to the dead
         // letter table instead of burning every retry first.
-        await recordDeadLetter({
-          accountId: accountIdOf(message.data),
-          jobName: job.name,
-          payload: message.data,
-          error: `Payload rejected: ${parsed.error}`,
-          attempts: message.retryCount,
-        })
+        await recordJobFailure(job, message.data, new Error(`Payload rejected: ${parsed.error}`), message.retryCount)
         return
       }
 
       try {
         await job.handle(parsed.value)
       } catch (cause) {
-        if (message.retryCount >= job.retryLimit) {
-          await recordDeadLetter({
-            accountId: accountIdOf(parsed.value),
-            jobName: job.name,
-            payload: message.data,
-            error: cause instanceof Error ? cause.message : String(cause),
-            attempts: message.retryCount,
-          })
-        }
+        if (message.retryCount >= job.retryLimit) await recordJobFailure(job, message.data, cause, message.retryCount)
         throw cause
       }
     },

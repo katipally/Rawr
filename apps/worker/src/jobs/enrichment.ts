@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
-import { defineJob } from './registry.ts'
+import { defineJob, eachAccount } from './registry.ts'
 
 /** The clock behind automatic enrichment.
  *
@@ -26,6 +26,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 30,
+  audience: `select distinct account_id from enrichment_request`,
   handle: async () => {
     // A request nobody answered or could serve for a month is stale: the record
     // has been edited, merged or deleted since, and a fresh write asks again.
@@ -64,13 +65,13 @@ const dispatch = defineJob({
        where r.account_id = due.account_id and r.entity = due.entity and r.entity_id = due.entity_id
       returning r.account_id, r.entity, r.entity_id`
 
-    for (const row of claimed) {
-      await boss().send(
+    await eachAccount(claimed, (row) => row.account_id, (row) =>
+      boss().send(
         'enrichment.run',
         { accountId: row.account_id, entity: row.entity, entityId: row.entity_id },
         { singletonKey: `${row.entity}:${row.entity_id}` },
-      )
-    }
+      ),
+    )
     if (claimed.length > 0) console.log(`[enrichment] ${claimed.length} queued`)
   },
 })
@@ -80,6 +81,7 @@ const run = defineJob({
   schema: z.object({ accountId: z.uuid(), entity: z.enum(['contact', 'company']), entityId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
   handle: async ({ accountId, entity, entityId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/enrich`, {
       method: 'POST',

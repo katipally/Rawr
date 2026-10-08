@@ -36,7 +36,7 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
     setBusyId(id)
     try {
       const result = await api.integrations.replay.mutate({ id })
-      toast('success', result.detail)
+      toast(result.replayed ? 'success' : 'error', result.detail)
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -57,9 +57,14 @@ export const DeadLetterTable = ({ rows }: { rows: DeadLetter[] }) => {
       key: 'jobName',
       header: 'Job',
       width: 300,
+      render: (row) => <span title={row.jobName} className="block truncate py-1 font-semibold">{row.jobName}</span>,
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      width: 210,
       render: (row) => (
-        <span className="flex min-w-0 items-center gap-2 py-1">
-          <span title={row.jobName} className="min-w-0 flex-1 truncate font-semibold">{row.jobName}</span>
+        <span className="flex py-1">
           <RowActions>
             <button type="button" className={rowPill} disabled={busyId !== null} onClick={() => void replay(row.id)}>
               {busyId === row.id ? 'Replaying' : 'Replay'}

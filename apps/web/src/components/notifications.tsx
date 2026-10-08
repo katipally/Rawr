@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button, Drawer, EmptyState, IconButton, Spinner, cn } from '@rawr/ui'
 import type { NotificationCursor, NotificationRow, NotificationTab } from '@rawr/db'
-import { failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
+import { appsPath, failedJobsPath, mailboxesPath, recordPath, submissionsPath, tasksPath } from '~/lib/links.ts'
 import { plainError } from '~/lib/provider-errors.ts'
 import { pollWhileVisible } from '~/lib/poll.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
@@ -31,6 +31,8 @@ type Row = Omit<NotificationRow, 'readAt' | 'trashedAt' | 'at'> & {
 /** Where a notice takes you. Built here rather than stored, so a route that
  *  changes does not leave a table full of dead links. */
 const hrefFor = (row: Row, account: string): string | null => {
+  // An integration's health is read on the Connected apps page, not a record page.
+  if (row.entity === 'integration' && row.entityId) return appsPath()
   if (row.entity && row.entityId) return recordPath(account, row.entity, row.entityId)
   // A task is not a record page, so `entity` never resolves for these three and
   // the list is where all of them lead.

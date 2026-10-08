@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterEach, test } from 'node:test'
-import { hostOf, outboundRequest } from './outbound.ts'
+import { hostOf, outboundRequest, reachFailure } from './outbound.ts'
 
 /** Only loopback is ever connected to here. A name is pointed at it through the
  *  injected resolver, which is how a name that resolves somewhere is simulated
@@ -230,4 +230,56 @@ test('an error names the host and never the path or query', async () => {
   assert.doesNotMatch(message, /hunter2|hooks\/abc/)
   assert.equal(hostOf('https://a.example.test/p?q=1'), 'a.example.test')
   assert.equal(hostOf('not a url'), 'that address')
+})
+
+/** The two shapes Node gives: the code on the error itself (net, dns), and on
+ *  `cause` (fetch and undici wrap the socket error). */
+const coded = (code: string, message: string) => Object.assign(new Error(message), { code })
+const wrapped = (code: string, message: string) => new TypeError('fetch failed', { cause: coded(code, message) })
+
+test('a transport failure reads as one plain sentence for each code, on the error or its cause', () => {
+  const host = 'hooks.example.test'
+  const cases: [string, string, unknown][] = [
+    ['refused', `${host} refused the connection.`, coded('ECONNREFUSED', 'connect ECONNREFUSED 93.184.216.34:443')],
+    ['refused, wrapped', `${host} refused the connection.`, wrapped('ECONNREFUSED', 'connect ECONNREFUSED 93.184.216.34:443')],
+    ['no DNS', `${host} was not found (DNS).`, coded('ENOTFOUND', 'getaddrinfo ENOTFOUND hooks.example.test')],
+    ['no DNS, wrapped', `${host} was not found (DNS).`, wrapped('ENOTFOUND', 'getaddrinfo ENOTFOUND hooks.example.test')],
+    ['temporary DNS', `${host} was not found (DNS).`, coded('EAI_AGAIN', 'getaddrinfo EAI_AGAIN hooks.example.test')],
+    ['timeout', `${host} did not answer in time.`, coded('ETIMEDOUT', 'connect ETIMEDOUT 93.184.216.34:443')],
+    ['connect timeout', `${host} did not answer in time.`, wrapped('UND_ERR_CONNECT_TIMEOUT', 'Connect Timeout Error')],
+    ['reset', `the connection to ${host} was reset.`, coded('ECONNRESET', 'read ECONNRESET')],
+    ['reset, wrapped', `the connection to ${host} was reset.`, wrapped('EPIPE', 'write EPIPE')],
+    ['expired certificate', `the certificate of ${host} could not be verified.`, wrapped('CERT_HAS_EXPIRED', 'certificate has expired')],
+    ['untrusted certificate', `the certificate of ${host} could not be verified.`, coded('UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'unable to verify the first certificate')],
+    ['unknown code', `${host} could not be reached.`, coded('EPROTO', 'wrong version number 10.0.0.1:443')],
+    ['no code at all', `${host} could not be reached.`, new Error('socket hang up')],
+  ]
+  for (const [name, sentence, cause] of cases) {
+    const reason = reachFailure(host, cause)
+    assert.equal(reason, sentence, name)
+    assert.doesNotMatch(reason, /ECONN|ENOTFOUND|EAI_|ETIMEDOUT|93\.184|hang up|version number|getaddrinfo|connect /, name)
+  }
+})
+
+test('a closed port reads as refused, with no socket detail', async () => {
+  mode('development', '1')
+  const port = await listen((_req, res) => res.end('ok'))
+  await new Promise<void>((done) => servers.pop()!.close(() => done()))
+  const message = await call(`http://127.0.0.1:${port}/`).then(
+    () => '',
+    (error: Error) => error.message,
+  )
+  assert.equal(message, `127.0.0.1:${port} refused the connection.`)
+})
+
+test('a name that does not resolve reads as not found, and the resolver error text is not shown', async () => {
+  mode('production', undefined)
+  const missing = async () => {
+    throw coded('ENOTFOUND', 'getaddrinfo ENOTFOUND nowhere.example.test')
+  }
+  const message = await call('https://nowhere.example.test/', missing).then(
+    () => '',
+    (error: Error) => error.message,
+  )
+  assert.equal(message, 'nowhere.example.test was not found (DNS).')
 })

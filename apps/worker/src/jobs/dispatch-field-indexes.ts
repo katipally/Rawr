@@ -18,6 +18,7 @@ export const dispatchFieldIndexes = defineJob({
   name: 'field-index.dispatch',
   schema: z.object({}),
   retryLimit: 3,
+  audience: 'select distinct account_id from field_index',
   retryDelaySeconds: 30,
   handle: async () => {
     // Claiming and reading in one statement is what stops two dispatch runs from

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { z } from 'zod'
-import { accountIdOf, bySlug, defineJob } from './registry.ts'
+import { AccountFailures, accountIdOf, bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** What the runner does before it runs anything: refuse a payload that can never
  *  succeed, and name the field that was wrong, because a dead letter reading
@@ -48,4 +48,38 @@ test('the account is read off a rejected payload, so the dead letter can be scop
 test('a cross-tenant sweep is counted by slug', () => {
   assert.equal(bySlug([{ slug: 'datasaur' }, { slug: 'sandbox' }, { slug: 'datasaur' }]), 'datasaur 2, sandbox 1')
   assert.equal(bySlug([]), '')
+})
+
+test('a step that fails for one account does not stop the others, and the run fails naming only that account', async () => {
+  const ran: string[] = []
+  const error = await eachAccount(
+    ['a', 'b', 'c'],
+    (id) => id,
+    async (id) => {
+      ran.push(id)
+      if (id === 'b') throw new Error('boom')
+    },
+  ).catch((cause: unknown) => cause)
+  assert.deepEqual(ran, ['a', 'b', 'c'])
+  assert.ok(error instanceof AccountFailures)
+  assert.deepEqual([...error.failures], [['b', 'boom']])
+})
+
+test('a run where every account succeeds does not fail', async () => {
+  await eachAccount(['a', 'b'], (id) => id, async () => {})
+})
+
+test('a policy and an audience survive definition', () => {
+  const keyed = defineJob({
+    name: 'test.keyed',
+    schema: z.object({}),
+    retryLimit: 1,
+    retryDelaySeconds: 1,
+    policy: 'exclusive',
+    audience: 'select id as account_id from account',
+    handle: async () => {},
+  })
+  assert.equal(keyed.policy, 'exclusive')
+  assert.equal(keyed.audience, 'select id as account_id from account')
+  assert.equal(job.policy, undefined)
 })

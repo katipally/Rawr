@@ -14,6 +14,7 @@ import {
   readFieldSources,
   rematchInbound,
   releaseReplay,
+  reopenForReplay,
   removeWebhookEndpoint,
   rollWebhookSecret,
   saveIntegration,
@@ -256,7 +257,9 @@ export const integrationsRouter = router({
       call(async () => {
         const claimed = await claimForReplay(ctx.account, input.id)
         try {
-          return await replayJob(ctx.account, claimed)
+          const outcome = await replayJob(ctx.account, claimed)
+          if (!outcome.replayed) await reopenForReplay(ctx.account, input.id, outcome.detail)
+          return outcome
         } catch (cause) {
           // The claim is undone so a replay that never ran does not read as one
           // that already did.

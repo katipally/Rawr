@@ -11,7 +11,7 @@ import { enrichRecord, enrichCompanyRecord } from './index.ts'
 import { postToSlack } from './slack.ts'
 import { BLOCKLIST_JOB, propagateSubscriptionToBrevo } from './brevo.ts'
 import { addProspect } from './woodpecker.ts'
-import { deliverWebhook, WEBHOOK_JOB } from '../webhooks.ts'
+import { deliverWebhook, WEBHOOK_JOB } from '../webhook-delivery.ts'
 
 /** F6 §1 and its edge case: "a dead-lettered item is replayed twice → the
  *  idempotency key makes the second a no-op."
@@ -25,7 +25,8 @@ import { deliverWebhook, WEBHOOK_JOB } from '../webhooks.ts'
  *  Replaying is safe to do twice because the work underneath is keyed, not because
  *  this function remembers. */
 
-export type ReplayOutcome = { replayed: true; detail: string }
+/** `replayed` is false when the job ran and failed again: the failure stays open. */
+export type ReplayOutcome = { replayed: boolean; detail: string }
 
 export const replayJob = async (
   ctx: AccountContext,
@@ -69,7 +70,7 @@ export const replayJob = async (
       const [job] = await endpointsFor(ctx, event).then((rows) => rows.filter((row) => row.id === endpointId))
       if (!job) throw new Error(`${endpoint.name} no longer subscribes to ${event}.`)
 
-      await deliverWebhook({
+      const delivery = await deliverWebhook({
         accountId: ctx.accountId,
         endpointId,
         url: job.url,
@@ -77,7 +78,8 @@ export const replayJob = async (
         event,
         body,
       })
-      return { replayed: true, detail: `Re-sent ${event} to ${endpoint.name}.` }
+      if (!delivery.ok) return { replayed: false, detail: `Still failing: ${delivery.reason}` }
+      return { replayed: true, detail: `Re-sent ${event} to ${endpoint.name}. The failure is closed.` }
     }
 
     case 'slack.booking-no-conference':

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET } from '../env.ts'
 import { boss } from '../boss.ts'
-import { defineJob } from './registry.ts'
+import { defineJob, eachAccount } from './registry.ts'
 
 /** F1 phase B, the schedule.
  *
@@ -21,6 +21,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 120,
+  audience: `select distinct account_id from mailbox where state in ('connected', 'backfilling', 'error')`,
   handle: async () => {
     // An errored mailbox is asked again once its pause is over: five minutes,
     // doubling with each failure in a row, up to six hours. A transient fault (a
@@ -31,16 +32,13 @@ const dispatch = defineJob({
           or (state = 'error'
               and last_error_at + least(360, 5 * power(2, least(greatest(failures, 1) - 1, 10))) * interval '1 minute' < now())`
 
-    for (const row of rows) {
-      // One pass in flight per mailbox. A ten-minute tick landing while the
-      // previous sync is still reading history would otherwise queue the same
-      // mailbox again, and Gmail would be asked for the same page twice.
-      await boss().send(
-        'mail.sync',
-        { accountId: row.account_id, mailboxId: row.id },
-        { singletonKey: String(row.id) },
-      )
-    }
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      // At most one queued pass per mailbox. A ten-minute tick landing while the
+      // previous sync is still reading history does not queue a second copy. A pass
+      // that outlives a tick can still overlap the queued one, because a running
+      // pass does not block the next one on a short queue.
+      boss().send('mail.sync', { accountId: row.account_id, mailboxId: row.id }, { singletonKey: String(row.id) }),
+    )
   },
 })
 
@@ -49,6 +47,7 @@ const sync = defineJob({
   schema: z.object({ accountId: z.uuid(), mailboxId: z.uuid() }),
   retryLimit: 4,
   retryDelaySeconds: 300,
+  policy: 'short',
   handle: async ({ accountId, mailboxId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/mail-sync`, {
       method: 'POST',
@@ -101,6 +100,7 @@ const hydrateDispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 120,
+  audience: `select distinct account_id from message where body_state = 'pending'`,
   handle: async () => {
     const rows = await owner`
       select distinct m.mailbox_id as id, m.account_id
@@ -108,13 +108,9 @@ const hydrateDispatch = defineJob({
         join mailbox b on b.id = m.mailbox_id
        where m.body_state = 'pending' and b.state in ('connected', 'backfilling')`
 
-    for (const row of rows) {
-      await boss().send(
-        'mail.hydrate',
-        { accountId: row.account_id, mailboxId: row.id },
-        { singletonKey: String(row.id) },
-      )
-    }
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      boss().send('mail.hydrate', { accountId: row.account_id, mailboxId: row.id }, { singletonKey: String(row.id) }),
+    )
   },
 })
 
@@ -123,6 +119,7 @@ const hydrate = defineJob({
   schema: z.object({ accountId: z.uuid(), mailboxId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'short',
   handle: async ({ accountId, mailboxId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/mail-hydrate`, {
       method: 'POST',

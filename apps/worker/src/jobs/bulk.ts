@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET, SKIPS_FIXTURES } from '../env.ts'
-import { bySlug, defineJob } from './registry.ts'
+import { bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** A bulk bar action that outlives the browser tab.
  *
@@ -17,6 +17,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  audience: `select distinct account_id from bulk_operation where state = 'running'`,
   handle: async () => {
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
       select o.id, o.account_id, a.slug
@@ -25,15 +26,11 @@ const dispatch = defineJob({
        where o.state = 'running'
          ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
 
-    for (const row of rows) {
-      // One chunk in flight per operation. Without it the tick that lands while a
-      // chunk is still writing would hand the same slice to two workers.
-      await boss().send(
-        'bulk.run',
-        { accountId: row.account_id, operationId: row.id },
-        { singletonKey: String(row.id) },
-      )
-    }
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      // At most one queued chunk per operation, so a tick that lands while a chunk
+      // is still queued does not add another. A running chunk does not block it.
+      boss().send('bulk.run', { accountId: row.account_id, operationId: row.id }, { singletonKey: String(row.id) }),
+    )
 
     if (rows.length > 0) console.log(`[bulk] ${rows.length} running: ${bySlug(rows)}`)
   },
@@ -44,6 +41,7 @@ const run = defineJob({
   schema: z.object({ accountId: z.uuid(), operationId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 120,
+  policy: 'short',
   handle: async ({ accountId, operationId }) => {
     const response = await fetch(`${APP_BASE}/api/internal/bulk-chunk`, {
       method: 'POST',

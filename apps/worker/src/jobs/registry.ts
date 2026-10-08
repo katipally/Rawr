@@ -14,8 +14,27 @@ export type Job = {
    *  the real error land in dead_letter, where they can be replayed. */
   retryLimit: number
   retryDelaySeconds: number
+  /** The pg-boss policy the queue is created with, for a queue sent with a
+   *  singletonKey. `short`: one queued job per key, and a running one does not block
+   *  the next (a job that re-sends itself needs this). `exclusive`: one queued or
+   *  running job per key. Boot converges an existing queue to it once the queue is empty. */
+  policy?: 'short' | 'exclusive' | undefined
+  /** Who a whole-run failure belongs to, for a job whose payload names no account.
+   *  SQL returning one `account_id` column. */
+  audience?: string | undefined
   parse: (data: unknown) => ParseResult
   handle: (value: unknown) => Promise<void>
+}
+
+/** A run that failed for some accounts and carried on with the rest. The runner
+ *  records one dead letter per account, so the failure lands on the account it hit. */
+export class AccountFailures extends Error {
+  readonly failures: Map<string, string>
+
+  constructor(failures: Map<string, string>) {
+    super(`${failures.size} account(s) failed`)
+    this.failures = failures
+  }
 }
 
 export const defineJob = <Schema extends z.ZodType>(definition: {
@@ -23,11 +42,15 @@ export const defineJob = <Schema extends z.ZodType>(definition: {
   schema: Schema
   retryLimit: number
   retryDelaySeconds: number
+  policy?: 'short' | 'exclusive' | undefined
+  audience?: string | undefined
   handle: (payload: z.output<Schema>) => Promise<void>
 }): Job => ({
   name: definition.name,
   retryLimit: definition.retryLimit,
   retryDelaySeconds: definition.retryDelaySeconds,
+  policy: definition.policy,
+  audience: definition.audience,
   parse: (data) => {
     const result = definition.schema.safeParse(data)
     return result.success
@@ -41,6 +64,25 @@ export const defineJob = <Schema extends z.ZodType>(definition: {
   },
   handle: (value) => definition.handle(value as z.output<Schema>),
 })
+
+/** One step per account. A step that throws is recorded against its account and the
+ *  rest still run; the run then fails with the list, so the retry covers only the
+ *  accounts that need it and the dead letter lands on each one. */
+export const eachAccount = async <T>(
+  rows: readonly T[],
+  accountOf: (row: T) => string,
+  step: (row: T) => Promise<unknown>,
+): Promise<void> => {
+  const failures = new Map<string, string>()
+  for (const row of rows) {
+    try {
+      await step(row)
+    } catch (cause) {
+      failures.set(accountOf(row), cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+  if (failures.size > 0) throw new AccountFailures(failures)
+}
 
 export const accountIdOf = (value: unknown): string | null => {
   const candidate = (value as { accountId?: unknown } | null)?.accountId

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { boss } from '../boss.ts'
 import { owner } from '../db.ts'
 import { APP_BASE, INTERNAL_SECRET, SKIPS_FIXTURES } from '../env.ts'
-import { bySlug, defineJob } from './registry.ts'
+import { bySlug, defineJob, eachAccount } from './registry.ts'
 
 /** An import that outlives the browser tab.
  *
@@ -53,6 +53,7 @@ const dispatch = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  audience: `select distinct account_id from import_run where state in ('uploading', 'parsing', 'running')`,
   handle: async () => {
     // An upload nobody came back to. A day, not an hour: the parts that did land
     // are resumable now, so a closed tab is something to keep rather than to
@@ -78,9 +79,9 @@ const dispatch = defineJob({
         join account a on a.id = r.account_id
        where r.state = 'parsing'
          ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
-    for (const row of reading) {
-      await boss().send('import.parse', { accountId: row.account_id, runId: row.id }, { singletonKey: String(row.id) })
-    }
+    await eachAccount(reading, (row) => row.account_id, (row) =>
+      boss().send('import.parse', { accountId: row.account_id, runId: row.id }, { singletonKey: String(row.id) }),
+    )
     if (reading.length > 0) console.log(`[import] ${reading.length} reading: ${bySlug(reading)}`)
 
     const rows = await owner<{ id: string; account_id: string; slug: string }[]>`
@@ -90,18 +91,13 @@ const dispatch = defineJob({
        where r.state = 'running'
          ${SKIPS_FIXTURES ? owner`and not a.is_fixture` : owner``}`
 
-    for (const row of rows) {
-      // Not this key: a queue created without a policy is `standard`, and pg-boss
-      // enforces singletonKey only on the policies that carry a unique index for
-      // it. What keeps two workers off the same chunk is the lock `runImportChunk`
-      // takes on the run, so a second worker waits and then reads the position the
-      // first one left.
-      await boss().send(
-        'import.run',
-        { accountId: row.account_id, runId: row.id },
-        { singletonKey: String(row.id) },
-      )
-    }
+    await eachAccount(rows, (row) => row.account_id, (row) =>
+      // A chunk can be queued while one is still running, so a run is never left
+      // without its next chunk. What keeps two workers off the same chunk is the lock
+      // `runImportChunk` takes on the run, so a second worker waits and then reads
+      // the position the first one left.
+      boss().send('import.run', { accountId: row.account_id, runId: row.id }, { singletonKey: String(row.id) }),
+    )
 
     if (rows.length > 0) console.log(`[import] ${rows.length} running: ${bySlug(rows)}`)
   },
@@ -112,6 +108,7 @@ const run = defineJob({
   schema: z.object({ accountId: z.uuid(), runId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 120,
+  policy: 'short',
   handle: async ({ accountId, runId }) => {
     // The timeout is comfortably past the app's own chunk budget, which is what
     // decides how long a chunk takes. Cut too fine, every chunk of a slow file
@@ -145,6 +142,7 @@ const parse = defineJob({
   schema: z.object({ accountId: z.uuid(), runId: z.uuid() }),
   retryLimit: 3,
   retryDelaySeconds: 60,
+  policy: 'exclusive',
   handle: async ({ accountId, runId }) => {
     const body = await ask('import-parse', { accountId, runId })
     console.log(`[import] ${runId}: read ${(body as { rows?: number }).rows ?? 0} rows`)

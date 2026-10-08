@@ -72,6 +72,23 @@ export const hostOf = (url: string): string => {
   }
 }
 
+/** A plain sentence for a transport failure. The cause's own text is never shown:
+ *  it names internal addresses and ports, and the code is what says what happened. */
+export const reachFailure = (host: string, cause: unknown): string => {
+  const error = cause as { code?: unknown; cause?: { code?: unknown } } | null
+  const id = [error?.code, error?.cause?.code].find((value): value is string => typeof value === 'string') ?? ''
+  if (id === 'ECONNREFUSED') return `${host} refused the connection.`
+  if (id === 'ENOTFOUND' || id === 'EAI_AGAIN') return `${host} was not found (DNS).`
+  if (id === 'ETIMEDOUT' || id === 'UND_ERR_CONNECT_TIMEOUT' || id === 'ESOCKETTIMEDOUT') {
+    return `${host} did not answer in time.`
+  }
+  if (id === 'ECONNRESET' || id === 'EPIPE') return `the connection to ${host} was reset.`
+  if (id.includes('CERT') || id === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+    return `the certificate of ${host} could not be verified.`
+  }
+  return `${host} could not be reached.`
+}
+
 /** `resolve` is only there so a test can say what a name resolves to. */
 export const outboundRequest = (request: OutboundRequest, resolve: Resolve = system): Promise<OutboundResponse> => {
   let url: URL
@@ -134,12 +151,12 @@ export const outboundRequest = (request: OutboundRequest, resolve: Resolve = sys
           }
         })
         response.on('end', () => finish(false))
-        response.on('error', (cause) => fail(new Error(`${host} dropped the connection: ${cause.message}`)))
+        response.on('error', (cause) => fail(new Error(reachFailure(host, cause))))
         response.on('close', () => fail(new Error(`${host} closed the connection before it finished answering.`)))
       },
     )
     req.on('error', (cause) =>
-      fail(cause instanceof Refused ? cause : new Error(`${host} could not be reached: ${cause.message}`)),
+      fail(cause instanceof Refused ? cause : new Error(reachFailure(host, cause))),
     )
     req.end(payload)
   })

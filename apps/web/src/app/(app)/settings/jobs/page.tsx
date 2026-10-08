@@ -55,8 +55,9 @@ const JobsPage = async () => {
           waiting is the one that is actually wrong. */}
       {!queue.readable ? (
         <Alert tone="warning">
-          The queue cannot be read from here, so whether the worker is running is unknown. Run the
-          migration that grants it, then reload.
+          {queue.notSetUp
+            ? 'Queue health is not available yet, so whether the worker is running is unknown. The worker sets up that access when it starts, and this clears by itself once it has. Failed jobs still appear below.'
+            : 'Queue health could not be read just now, so whether the worker is running is unknown. Failed jobs still appear below. Reload to try again.'}
         </Alert>
       ) : worrying ? (
         <Alert tone="warning">

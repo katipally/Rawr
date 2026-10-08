@@ -1,7 +1,7 @@
 import { scoreAllDeals, type AccountContext } from '@rawr/db'
 import { z } from 'zod'
 import { owner } from '../db.ts'
-import { defineJob } from './registry.ts'
+import { defineJob, eachAccount } from './registry.ts'
 
 /** Every deal's score, once a night.
  *
@@ -25,11 +25,13 @@ export const scoreDeals = defineJob({
   schema: z.object({}),
   retryLimit: 3,
   retryDelaySeconds: 300,
+  policy: 'exclusive',
+  audience: 'select id as account_id from account',
   handle: async () => {
     const accounts = await owner<{ id: string; slug: string }[]>`select id, slug from account`
-    for (const row of accounts) {
+    await eachAccount(accounts, (row) => row.id, async (row) => {
       const scored = await scoreAllDeals(jobContext(row.id))
       console.log(`[deals.score] ${row.slug}: ${scored} deal(s) rescored.`)
-    }
+    })
   },
 })
