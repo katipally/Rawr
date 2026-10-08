@@ -13,6 +13,7 @@ import {
   Switch,
   TextArea,
   TextInput,
+  TimeField,
   cn,
   useToast,
 } from '@rawr/ui'
@@ -21,6 +22,7 @@ import { useRouter } from 'next/navigation'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { MergeFieldPicker } from '~/components/crm/merge-fields.tsx'
 import { RichTextInput } from '~/components/crm/rich-text-input.tsx'
+import { useFormat } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { closeParamsAndRefresh, useUrlParam } from '~/lib/url-params.ts'
 import { rowPill } from '~/components/row-actions.tsx'
@@ -81,6 +83,7 @@ export const SequenceEditor = ({
 }) => {
   const router = useRouter()
   const toast = useToast()
+  const { locale } = useFormat()
   const [steps, setSteps] = useState<Draft[]>(initial.map((step) => ({ ...step, key: step.id })))
   /** A stable key for a step that has no id yet, so React does not remount the row
    *  a person is typing into every time the list re-renders. Per editor, so server and
@@ -586,25 +589,21 @@ export const SequenceEditor = ({
             </div>
             <div className="flex flex-wrap gap-3">
               <Field label="From" id="window-start">
-                <TextInput
+                <TimeField
                   id="window-start"
-                  type="time"
+                  locale={locale}
                   disabled={!canWrite}
                   value={settings.sendWindow.start}
-                  onChange={(event) =>
-                    setSettings({ ...settings, sendWindow: { ...settings.sendWindow, start: event.target.value } })
-                  }
+                  onChange={(value) => setSettings({ ...settings, sendWindow: { ...settings.sendWindow, start: value } })}
                 />
               </Field>
               <Field label="Until" id="window-end">
-                <TextInput
+                <TimeField
                   id="window-end"
-                  type="time"
+                  locale={locale}
                   disabled={!canWrite}
                   value={settings.sendWindow.end}
-                  onChange={(event) =>
-                    setSettings({ ...settings, sendWindow: { ...settings.sendWindow, end: event.target.value } })
-                  }
+                  onChange={(value) => setSettings({ ...settings, sendWindow: { ...settings.sendWindow, end: value } })}
                 />
               </Field>
               <Field label="Timezone" id="window-tz">

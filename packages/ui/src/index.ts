@@ -12,6 +12,7 @@ export { EmptyState, NOTHING_MATCHED, type EmptyStateProps } from './primitives/
 export { Kbd, type KbdProps } from './primitives/kbd.tsx'
 export { PageHeader, type PageHeaderProps } from './primitives/page-header.tsx'
 export { Field, Select, TextArea, TextInput, type FieldProps } from './primitives/field.tsx'
+export { TimeField, type TimeFieldProps } from './primitives/time-field.tsx'
 export { IconButton, type IconButtonProps } from './primitives/icon-button.tsx'
 export { ConfirmDialog, type ConfirmDialogProps } from './primitives/confirm-dialog.tsx'
 export { Modal, type ModalProps } from './primitives/modal.tsx'

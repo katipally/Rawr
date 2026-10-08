@@ -2,7 +2,7 @@
 
 import type { Schedule } from '@rawr/db'
 import { scheduleProblem, windowProblem } from '@rawr/db/slots'
-import { Button, Field, IconButton, Select, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, IconButton, Select, TextInput, TimeField, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
@@ -203,22 +203,24 @@ export const ScheduleEditor = ({
                     ))}
                   </Select>
                   <span>from</span>
-                  <TextInput
-                    type="time"
+                  <TimeField
+                    id={`row-${row.key}-from`}
                     aria-label={`${label} start`}
+                    locale={fmt.locale}
                     value={row.from}
                     disabled={!editable}
                     className="w-auto"
-                    onChange={(event) => setRow(row.key, { from: event.target.value })}
+                    onChange={(value) => setRow(row.key, { from: value })}
                   />
                   <span>to</span>
-                  <TextInput
-                    type="time"
+                  <TimeField
+                    id={`row-${row.key}-to`}
                     aria-label={`${label} end`}
+                    locale={fmt.locale}
                     value={row.to}
                     disabled={!editable}
                     className="w-auto"
-                    onChange={(event) => setRow(row.key, { to: event.target.value })}
+                    onChange={(value) => setRow(row.key, { to: value })}
                   />
                   <IconButton
                     label={`Remove ${label} ${row.from} to ${row.to}`}
@@ -312,28 +314,24 @@ export const ScheduleEditor = ({
                   // can briefly have on screen.
                   <div key={index} className="flex items-end gap-2">
                     <Field id={`override-from-${index}`} label={index === 0 ? 'From' : ''}>
-                      <TextInput
+                      <TimeField
                         id={`override-from-${index}`}
-                        type="time"
+                        locale={fmt.locale}
                         value={from}
                         className="w-auto"
-                        onChange={(event) =>
-                          setOverrideBlocks((all) =>
-                            all.map((block, at) => (at === index ? [event.target.value, block[1]] : block)),
-                          )
+                        onChange={(value) =>
+                          setOverrideBlocks((all) => all.map((block, at) => (at === index ? [value, block[1]] : block)))
                         }
                       />
                     </Field>
                     <Field id={`override-to-${index}`} label={index === 0 ? 'To' : ''}>
-                      <TextInput
+                      <TimeField
                         id={`override-to-${index}`}
-                        type="time"
+                        locale={fmt.locale}
                         value={to}
                         className="w-auto"
-                        onChange={(event) =>
-                          setOverrideBlocks((all) =>
-                            all.map((block, at) => (at === index ? [block[0], event.target.value] : block)),
-                          )
+                        onChange={(value) =>
+                          setOverrideBlocks((all) => all.map((block, at) => (at === index ? [block[0], value] : block)))
                         }
                       />
                     </Field>

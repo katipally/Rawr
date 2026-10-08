@@ -1,10 +1,10 @@
 'use client'
 
-import { Button, Field, Modal, TextArea, TextInput, useToast } from '@rawr/ui'
+import { Button, Field, Modal, TextArea, TextInput, TimeField, useToast } from '@rawr/ui'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
-import { useZone } from '~/components/zone.tsx'
+import { useFormat, useZone } from '~/components/zone.tsx'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 /** What can be done to one booked meeting, as the pills after its attendee on
@@ -32,16 +32,22 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
   const [busy, setBusy] = useState(false)
 
   const zone = useZone()
+  const { locale } = useFormat()
   const end = new Date(booking.endsAt)
 
   const [asking, setAsking] = useState<'cancel' | 'reschedule' | null>(null)
   const [reason, setReason] = useState('')
-  const [moveTo, setMoveTo] = useState('')
+  const [moveDate, setMoveDate] = useState('')
+  const [moveTime, setMoveTime] = useState('')
+
+  const parsedMove = new Date(`${moveDate}T${moveTime}`)
+  const movedAt = moveDate && moveTime && !Number.isNaN(parsedMove.getTime()) ? parsedMove : null
 
   const close = () => {
     setAsking(null)
     setReason('')
-    setMoveTo('')
+    setMoveDate('')
+    setMoveTime('')
   }
 
   const cancel = async () => {
@@ -69,11 +75,12 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
   }
 
   const reschedule = async () => {
+    if (!movedAt) return
     setBusy(true)
     try {
-      // datetime-local has no zone, so it means the reader's own clock, which is
-      // the clock the rest of this row is rendered in.
-      await api.booking.reschedule.mutate({ id: booking.id, startsAt: new Date(moveTo) })
+      // The date and the time carry no zone, so they mean the reader's own clock,
+      // which is the clock the rest of this row is rendered in.
+      await api.booking.reschedule.mutate({ id: booking.id, startsAt: movedAt })
       show('success', 'Moved. The attendee has the new time and the old slot is free.')
       close()
       router.refresh()
@@ -157,7 +164,7 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
               type="submit"
               variant="primary"
               busy={busy}
-              disabled={moveTo === '' || Number.isNaN(Date.parse(moveTo))}
+              disabled={movedAt === null}
             >
               Move it
             </Button>
@@ -168,16 +175,24 @@ export const BookedActions = ({ booking, editable }: { booking: BookedRowData; e
         }
       >
         <div className="flex flex-col gap-3">
+          <Field id={`move-date-${booking.id}`} label="New date">
+            <TextInput
+              id={`move-date-${booking.id}`}
+              type="date"
+              value={moveDate}
+              onChange={(event) => setMoveDate(event.target.value)}
+            />
+          </Field>
           <Field
-            id={`move-${booking.id}`}
+            id={`move-time-${booking.id}`}
             label="New start"
             hint={`Times are in your browser's time zone, not ${zone}. A time the host is not free for is refused.`}
           >
-            <TextInput
-              id={`move-${booking.id}`}
-              type="datetime-local"
-              value={moveTo}
-              onChange={(event) => setMoveTo(event.target.value)}
+            <TimeField
+              id={`move-time-${booking.id}`}
+              locale={locale}
+              value={moveTime}
+              onChange={setMoveTime}
             />
           </Field>
         </div>
