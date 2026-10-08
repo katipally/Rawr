@@ -8,7 +8,6 @@ const IRREGULAR: Record<string, string> = {
   read: 'read',
   set: 'set',
   submit: 'submitted',
-  status: 'changed the status of',
   run: 'ran',
 }
 
@@ -36,6 +35,10 @@ const PHRASE: Record<string, string> = {
   task: 'added a task',
   booking: 'booked',
   form_submission: 'submitted a form',
+  read: 'marked read',
+  unread: 'marked unread',
+  status: 'changed the status',
+  set_members: 'changed the members',
   stage_change: 'changed the stage',
   lifecycle_change: 'changed the lifecycle stage',
   subscription_change: 'changed a subscription',
@@ -59,8 +62,11 @@ export const actionOf = (action: string): string => {
 /** Words that are not plain English in a category name. */
 const TERM: Record<string, string> = { mcp: 'MCP', oauth: 'OAuth', def: 'definition' }
 
+/** Whole categories whose name read word by word is not what the entity is. */
+const CATEGORY: Record<string, string> = { message_thread_read: 'Read state' }
+
 export const categoryOf = (entity: string): string =>
-  sentence(entity.split('_').map((word) => TERM[word] ?? word).join(' '))
+  CATEGORY[entity] ?? sentence(entity.split('_').map((word) => TERM[word] ?? word).join(' '))
 
 /** A changed field's key as a reader would say it: `reassignedTo` is "reassigned to". */
 export const fieldOf = (key: string): string =>

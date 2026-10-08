@@ -104,7 +104,7 @@ export const AuditTable = ({
         </span>
       ),
     },
-    { key: 'category', header: 'Category', width: 200, render: (row) => <span className="block truncate">{categoryOf(row.entity)}</span> },
+    { key: 'category', header: 'Category', width: 200, render: (row) => <span title={categoryOf(row.entity)} className="block truncate">{categoryOf(row.entity)}</span> },
     {
       key: 'target',
       header: 'Target',
