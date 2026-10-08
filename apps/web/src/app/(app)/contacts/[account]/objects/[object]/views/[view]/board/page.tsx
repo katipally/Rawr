@@ -1,4 +1,4 @@
-import { calendarFields, groupableFields, isObjectKey, isUuid, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
+import { calendarFields, groupableFields, groupingToSave, isObjectKey, isUuid, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
@@ -180,7 +180,7 @@ const BoardPage = async ({
           openCreate={search.new === '1'}
           openView={search.view === 'new'}
           allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
-          groupByKey={query.groupBy === 'stage_id' ? null : query.groupBy}
+          groupByKey={groupingToSave(query.groupBy, boardError !== null)}
           trailing={
             byStage && lookups.pipelines.length > 1 ? (
               <PipelinePicker

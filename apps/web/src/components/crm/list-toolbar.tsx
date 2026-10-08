@@ -49,8 +49,9 @@ export type ListToolbarProps = {
    *  orders them, which is the order a person sees on the record page. */
   allColumns: { key: string; label: string }[]
   /** Board only: the grouping on screen, which a save stores. Null is stage. Left
-   *  out by every other layout, so a save keeps the stored one. */
-  groupByKey?: string | null
+   *  out by every other layout, and by a board showing a fallback, so a save keeps
+   *  the stored one. */
+  groupByKey?: string | null | undefined
   /** Calendar only: the place-on field on screen, which a save stores. Left out by
    *  every other layout, so a save keeps the stored one. */
   calendarKey?: string | null

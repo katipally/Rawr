@@ -91,6 +91,11 @@ export const groupableField = (object: RegistryObject, key: string): RegistryFie
   throw new Error(`A board cannot be grouped by "${key}". Try one of: ${names}.`)
 }
 
+/** The grouping a board's toolbar saves. A grouping the board had to fall back from
+ *  was not the person's choice, so it is left out and the view keeps what it stores. */
+export const groupingToSave = (groupBy: string, fellBack: boolean): string | null | undefined =>
+  fellBack ? undefined : groupBy === 'stage_id' ? null : groupBy
+
 type BoardInput = {
   pipelineId?: string | null
   filters?: FilterGroup[]
