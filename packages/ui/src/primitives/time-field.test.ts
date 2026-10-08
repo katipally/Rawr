@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { clockLabel, minutesOf, parseClock, suggestedTimes } from './time-field.ts'
+import { clockLabel, committedOnBlur, minutesOf, parseClock, suggestedTimes } from './time-field.ts'
 
 test('a quarter-hour list covers the whole day in order', () => {
   const times = suggestedTimes(15)
@@ -60,4 +60,35 @@ test('text that is not a time is refused, not guessed at', () => {
   assert.equal(parseClock('9:60'), null)
   assert.equal(parseClock('noon'), null)
   assert.equal(parseClock('9'.repeat(10_000)), null)
+})
+
+test('out-of-range and partial readings are refused, never rounded into a time', () => {
+  assert.equal(parseClock('25:00'), null)
+  assert.equal(parseClock('24:01'), null)
+  assert.equal(parseClock('12:60'), null)
+  assert.equal(parseClock('99'), null)
+  assert.equal(parseClock('0:0:0'), null)
+  assert.equal(parseClock('2:5'), null)
+  assert.equal(parseClock('25:0'), null)
+  assert.equal(parseClock('9:30 pm pm'), null)
+})
+
+test('blur keeps a typed time, clears on blank, and reverts anything that is not a time', () => {
+  assert.equal(committedOnBlur('14:30', undefined, false, '09:00'), '14:30')
+  assert.equal(committedOnBlur('25:00', undefined, false, '09:00'), '09:00')
+  assert.equal(committedOnBlur('2:5', undefined, false, '09:00'), '09:00')
+  assert.equal(committedOnBlur('', undefined, false, '09:00'), '')
+  assert.equal(committedOnBlur(null, undefined, false, '09:00'), '09:00')
+})
+
+test('blur never commits a suggestion the user only passed over', () => {
+  assert.equal(committedOnBlur('25:00', '07:30', false, '09:00'), '09:00')
+  assert.equal(committedOnBlur('2', '12:00', false, '09:00'), '02:00')
+  assert.equal(committedOnBlur(null, '07:30', false, '09:00'), '09:00')
+})
+
+test('blur commits the highlighted suggestion only after the arrow keys moved onto it', () => {
+  assert.equal(committedOnBlur('25:00', '07:30', true, '09:00'), '07:30')
+  assert.equal(committedOnBlur(null, '06:00', true, '09:00'), '06:00')
+  assert.equal(committedOnBlur('14:30', undefined, true, '09:00'), '14:30')
 })

@@ -58,3 +58,19 @@ export const parseClock = (typed: string): string | null => {
   }
   return clock(hours * 60 + minutes)
 }
+
+/** The value a field keeps when it loses focus. A suggestion wins only when the user
+ *  moved onto it with the arrow keys, since a row passed over by the mouse or left
+ *  highlighted by typing is not a choice. Otherwise the typed text is kept if it is
+ *  a time, and anything else reverts to the last value. */
+export const committedOnBlur = (
+  typed: string | null,
+  suggestion: string | undefined,
+  touched: boolean,
+  last: string,
+): string => {
+  if (touched && suggestion !== undefined) return suggestion
+  if (typed === null) return last
+  if (typed.trim() === '') return ''
+  return parseClock(typed) ?? last
+}

@@ -3,7 +3,7 @@
 import { type KeyboardEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from './field.tsx'
 import { Popover } from './popover.tsx'
-import { clockLabel, parseClock, suggestedTimes } from './time-field.ts'
+import { clockLabel, committedOnBlur, parseClock, suggestedTimes } from './time-field.ts'
 
 /** Every quarter hour is offered: most meetings and send windows start on one. */
 const STEP_MINUTES = 15
@@ -45,6 +45,8 @@ export const TimeField = ({
   /** What is typed, or null while the field shows the stored time. */
   const [typed, setTyped] = useState<string | null>(null)
   const [active, setActive] = useState(-1)
+  /** Whether the arrow keys moved the highlight since the list last opened or typed. */
+  const [touched, setTouched] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const highlighted = useRef<HTMLDivElement>(null)
 
@@ -65,10 +67,15 @@ export const TimeField = ({
     setActive(options.findIndex((option) => option.value === value))
   }
 
+  const close = () => {
+    setOpen(false)
+    setTouched(false)
+  }
+
   /** null keeps the stored time; '' clears it; text that is not a time keeps it. */
   const commit = (text: string | null) => {
     setTyped(null)
-    setOpen(false)
+    close()
     if (text === null) return
     const next = text.trim() === '' ? '' : parseClock(text)
     if (next !== null && next !== value) onChange(next)
@@ -77,6 +84,7 @@ export const TimeField = ({
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
+      setTouched(true)
       if (!open) {
         openList()
         return
@@ -112,15 +120,16 @@ export const TimeField = ({
           setTyped(event.target.value)
           setOpen(true)
           setActive(0)
+          setTouched(false)
         }}
         onClick={openList}
-        onBlur={() => commit(typed)}
+        onBlur={() => commit(committedOnBlur(typed, shown[active]?.value, touched, value))}
         onKeyDown={onKeyDown}
         {...described}
       />
       <Popover
         open={open && !disabled}
-        onClose={() => setOpen(false)}
+        onClose={close}
         anchorRef={box}
         autoFocus={false}
         side="bottom"
