@@ -14,7 +14,7 @@ const SHORTCUTS: { keys: string[]; what: string }[] = [
   { keys: ['cmd', 'k'], what: 'Search, or jump to a page or an action' },
   { keys: ['esc'], what: 'Close a dialog, a menu or a flyout' },
   { keys: ['enter'], what: 'Open the highlighted search result' },
-  { keys: ['/'], what: 'Search the list on screen' },
+  { keys: ['/'], what: 'Search the list on screen (list pages only)' },
   { keys: ['?'], what: 'Open this list' },
 ]
 

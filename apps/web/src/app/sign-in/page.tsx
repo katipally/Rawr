@@ -1,7 +1,9 @@
 import { Alert } from '@rawr/ui'
+import { redirect } from 'next/navigation'
 import { calendarAtSignIn, env, googleConfigured, hostedDomainRequired, visitorAccessOpen } from '~/lib/env.ts'
 import { safePath } from '~/lib/links.ts'
 import { noticeFor } from '~/lib/notices.ts'
+import { readSession } from '~/server/session.ts'
 
 type Props = { searchParams: Promise<{ notice?: string; next?: string }> }
 
@@ -10,6 +12,10 @@ type Props = { searchParams: Promise<{ notice?: string; next?: string }> }
  *  magic links, and nothing that takes an address on trust. */
 const SignIn = async ({ searchParams }: Props) => {
   const { notice, next } = await searchParams
+  if (await readSession()) {
+    const back = safePath(next, '/')
+    redirect(back.startsWith('/sign-in') ? '/' : back)
+  }
   const message = noticeFor(notice)
   // Signing out everywhere succeeded; only the other notices are failures.
   const tone = notice === 'signed_out_everywhere' ? 'info' : 'error'
@@ -54,8 +60,7 @@ const SignIn = async ({ searchParams }: Props) => {
               ) : (
                 'Sign in with the address you were invited on. '
               )}
-              You arrive able to read everything and change nothing; an admin raises what you can
-              reach under Settings, Users &amp; Teams.
+              An admin sets what you can reach under Settings, Users &amp; Teams.
             </p>
             {calendarAtSignIn ? (
               /* Google blocks the whole authorisation when a Account admin has

@@ -35,7 +35,7 @@ import {
   agentAccessPath,
 } from '~/lib/links.ts'
 import { settingsGroups } from '~/lib/settings-nav.ts'
-import { contextFrom, memberships, readSession } from '~/server/session.ts'
+import { contextFrom, memberships, readSession, signInPath } from '~/server/session.ts'
 import type { Hub } from '~/lib/hubs.ts'
 import { inSentence } from '~/lib/label-case.ts'
 import { getFormat } from '~/server/format.ts'
@@ -47,7 +47,7 @@ type HubSection = Omit<NavSection, 'groups'> & { hub: Hub; groups: (NavGroup & {
 
 const AppLayout = async ({ children }: { children: React.ReactNode }) => {
   const session = await readSession()
-  if (!session) redirect('/sign-in')
+  if (!session) redirect(await signInPath())
 
   const account = session.accountSlug
   const ctx = contextFrom(session)
@@ -94,7 +94,7 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           items: [
             { href: newsletterPath(account), label: 'Newsletter', match: `/contacts/${account}/newsletter` },
             { href: formsPath(account), label: 'Forms', match: `/contacts/${account}/forms` },
-            { href: submissionsPath(account, { state: 'quarantined' }), label: 'Form submissions', match: `/contacts/${account}/submissions` },
+            { href: submissionsPath(account), label: 'Form submissions', match: `/contacts/${account}/submissions` },
           ],
         },
         {
@@ -151,9 +151,9 @@ const AppLayout = async ({ children }: { children: React.ReactNode }) => {
           label: 'Configure',
           hub: 'account',
           items: [
-            { href: objectsPath(), label: 'Data Model' },
+            { href: objectsPath(), label: 'Objects' },
             { href: propertiesPath(), label: 'Properties' },
-            { href: sitesPath(), label: 'Event Management' },
+            { href: sitesPath(), label: 'Tracked Sites' },
             { href: appsPath(), label: 'Connected Apps' },
           ],
         },

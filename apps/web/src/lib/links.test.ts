@@ -176,6 +176,15 @@ test('a HubSpot segment, form or marketing email link opens the screen that hold
   assert.equal(fromHubspotPath('/contacts/datasaur/segments/abc'), null)
 })
 
+test('a bare email, submissions or form address opens the screen that holds it', () => {
+  assert.equal(fromHubspotPath('/email/datasaur'), '/contacts/datasaur/newsletter')
+  assert.equal(fromHubspotPath('/email/datasaur/'), '/contacts/datasaur/newsletter')
+  assert.equal(fromHubspotPath('/submissions/datasaur'), '/contacts/datasaur/submissions')
+  assert.equal(fromHubspotPath('/forms/datasaur/af8f'), '/contacts/datasaur/forms/af8f')
+  assert.equal(fromHubspotPath('/forms/datasaur/views'), '/contacts/datasaur/forms')
+  assert.equal(fromHubspotPath('/forms/datasaur/editor'), null)
+})
+
 test('a HubSpot sequence or template link opens the screen that holds it', () => {
   assert.equal(fromHubspotPath('/sequences/datasaur'), '/contacts/datasaur/sequences')
   assert.equal(fromHubspotPath('/sequences/datasaur/manage'), '/contacts/datasaur/sequences')

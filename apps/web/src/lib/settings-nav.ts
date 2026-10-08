@@ -55,7 +55,7 @@ export const settingsGroups = (): SettingsGroup[] => [
   {
     label: 'Account Management',
     sections: [
-      { href: defaultsPath(), label: 'Account Defaults', keywords: ['currency', 'timezone', 'locale', 'joining'] },
+      { href: defaultsPath(), label: 'Account Defaults', keywords: ['currency', 'timezone', 'time zone', 'locale', 'joining'] },
       {
         href: membersPath(),
         label: 'Users & Teams',

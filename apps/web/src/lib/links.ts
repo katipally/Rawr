@@ -66,10 +66,13 @@ const HUBSPOT_MARKETING_PATHS: [RegExp, (account: string, id: string) => string]
   [/^\/contacts\/([^/?#]+)\/objectLists\/([^/?#]+)(?:\/[^/?#]+)?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/segments/${id}`],
   [/^\/forms\/([^/?#]+)(?:\/views(?:\/[^/?#]+)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/forms`],
   [/^\/forms\/([^/?#]+)\/(?:new-)?editor\/([^/?#]+)(?:\/[^?#]*)?$/, (account, id) => `/${CRM_ROOT}/${account}/forms/${id}`],
+  [/^\/forms\/([^/?#]+)\/(?!(?:views|editor|new-editor)(?:\/|$))([^/?#]+)\/?$/, (account, id) => `/${CRM_ROOT}/${account}/forms/${id}`],
   [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)(?:\/performance)?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/forms/${id}/performance`],
   [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/submissions\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=clean`],
   [/^\/submissions\/([^/?#]+)\/form\/([^/?#]+)\/spam\/?$/, (account, id) => `/${CRM_ROOT}/${account}/submissions?form=${id}&state=confirmed_spam`],
+  [/^\/submissions\/([^/?#]+)\/?$/, (account) => submissionsPath(account)],
   [/^\/email\/([^/?#]+)\/manage(?:\/[^?#]*)?$/, (account) => `/${CRM_ROOT}/${account}/newsletter`],
+  [/^\/email\/([^/?#]+)\/?$/, (account) => newsletterPath(account)],
   [/^\/sequences\/([^/?#]+)(?:\/manage(?:\/[^?#]*)?)?\/?$/, (account) => `/${CRM_ROOT}/${account}/sequences`],
   [/^\/sequences\/([^/?#]+)\/sequence\/([^/?#]+)\/enrollments?\/?$/, (account, id) => `/${CRM_ROOT}/${account}/sequences/${id}/enrollments`],
   [/^\/sequences\/([^/?#]+)\/sequence\/([^/?#]+)\/settings\/?$/, (account, id) => `/${CRM_ROOT}/${account}/sequences/${id}?settings=open`],
@@ -226,6 +229,10 @@ export const recordPath = (
  *  being honoured rather than growing without bound. */
 const MAX_FROM_LENGTH = 2048
 const PARSE_BASE = 'http://rawr.invalid'
+
+/** Set by the proxy on every routed app request to the address asked for, so the
+ *  layouts can send a signed-out visitor back to it after sign-in. */
+export const NEXT_HEADER = 'x-rawr-next'
 
 /** A path somebody typed into an address, cookie or form, as a path on this site,
  *  or `fallback` when the browser would take it anywhere else.

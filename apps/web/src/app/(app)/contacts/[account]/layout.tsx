@@ -2,7 +2,7 @@ import { EmptyState } from '@rawr/ui'
 import { LinkButton } from '~/components/link-button.tsx'
 import { redirect } from 'next/navigation'
 import { accountHome } from '~/lib/links.ts'
-import { readSession } from '~/server/session.ts'
+import { readSession, signInPath } from '~/server/session.ts'
 
 /** The proxy already redirects a link into another account through the
  *  switch handler. This is the second gate: if the slug still does not match, the
@@ -15,7 +15,7 @@ const AccountLayout = async ({
   params: Promise<{ account: string }>
 }) => {
   const session = await readSession()
-  if (!session) redirect('/sign-in')
+  if (!session) redirect(await signInPath())
 
   const { account } = await params
   if (account !== session.accountSlug) {

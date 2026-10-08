@@ -116,3 +116,21 @@ test('a rejected input is answered with its first sentence, never the issue list
   const { error } = (await response.json()) as { error: { json: { message: string } } }
   assert.equal(error.json.message, 'Invalid input: expected date, received Date')
 })
+
+const counted = t.router({
+  seats: t.procedure.input(z.object({ seats: z.coerce.number() })).query(() => 'ok'),
+})
+
+test('a number field that does not parse says so in plain words', async () => {
+  const input = encodeURIComponent(JSON.stringify({ json: { seats: 'many' } }))
+  const response = await fetchRequestHandler({
+    endpoint: '/t',
+    req: new Request(`http://localhost/t/seats?input=${input}`),
+    router: counted,
+    createContext: async () => ({ session: null, account: null }),
+    onError: () => {},
+  })
+  assert.equal(response.status, 400)
+  const { error } = (await response.json()) as { error: { json: { message: string } } }
+  assert.equal(error.json.message, 'That needs to be a number.')
+})

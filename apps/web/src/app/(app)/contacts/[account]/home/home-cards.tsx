@@ -31,13 +31,13 @@ const arrange = (cards: HomeCard[], saved: string[]): HomeCard[] => {
 
 /** Home's cards in HubSpot's tile, which a person rearranges for themselves by
  *  dragging one by its grip onto another, or from its More actions menu. */
-export const HomeCards = ({ cards }: { cards: HomeCard[] }) => {
+export const HomeCards = ({ cards, savedOrder }: { cards: HomeCard[]; savedOrder: string[] }) => {
   const ready = useUiReady()
   const saved = useUi((state) => state.homeCards)
   const setHomeCards = useUi((state) => state.setHomeCards)
   const [dragging, setDragging] = useState<string | null>(null)
-  // The server draws the default order; a saved one replaces it once it is known.
-  const shown = ready ? arrange(cards, saved) : cards
+  // The server renders the order it read with the page; the store takes over once it has synced.
+  const shown = arrange(cards, ready ? saved : savedOrder)
 
   /** Saves the visible order, keeping the place of cards this person cannot see
    *  today (a hub they lost) so it comes back if the hub does. */
@@ -97,8 +97,8 @@ export const HomeCards = ({ cards }: { cards: HomeCard[] }) => {
                 {
                   key: 'move',
                   items: [
-                    { key: 'up', label: 'Move up', disabled: index === 0, onSelect: () => moveTo(card.key, index - 1) },
-                    { key: 'down', label: 'Move down', disabled: index === shown.length - 1, onSelect: () => moveTo(card.key, index + 1) },
+                    { key: 'up', label: 'Move earlier', disabled: index === 0, onSelect: () => moveTo(card.key, index - 1) },
+                    { key: 'down', label: 'Move later', disabled: index === shown.length - 1, onSelect: () => moveTo(card.key, index + 1) },
                   ],
                 },
               ]}

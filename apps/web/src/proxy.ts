@@ -1,6 +1,6 @@
 import { decodeJwt } from 'jose'
 import { NextResponse, type NextRequest } from 'next/server'
-import { fromHubspotPath } from '~/lib/links.ts'
+import { fromHubspotPath, NEXT_HEADER } from '~/lib/links.ts'
 
 /** A CRM or meetings link carries its account in the path, so opening someone else's link
  *  while signed in to a different account has to offer the switch rather than
@@ -17,6 +17,14 @@ import { fromHubspotPath } from '~/lib/links.ts'
 // refused an account by that name.
 const ACCOUNT_PATH = /^\/(?:contacts|meetings)\/([^/?#]+)([/?#]|$)/
 
+/** Passes the request on with the address it asked for, read by the layouts when
+ *  the visitor is signed out. */
+const passOn = (request: NextRequest): NextResponse => {
+  const headers = new Headers(request.headers)
+  headers.set(NEXT_HEADER, `${request.nextUrl.pathname}${request.nextUrl.search}`)
+  return NextResponse.next({ request: { headers } })
+}
+
 export const proxy = (request: NextRequest): NextResponse => {
   const readable = fromHubspotPath(request.nextUrl.pathname)
   if (readable) {
@@ -30,20 +38,20 @@ export const proxy = (request: NextRequest): NextResponse => {
   }
 
   const match = ACCOUNT_PATH.exec(request.nextUrl.pathname)
-  if (!match) return NextResponse.next()
+  if (!match) return passOn(request)
 
   const wanted = match[1]
   const token = request.cookies.get('rawr_session')?.value
-  if (!wanted || !token) return NextResponse.next()
+  if (!wanted || !token) return passOn(request)
 
   let current: string | undefined
   try {
     current = decodeJwt<{ accountSlug?: string }>(token).accountSlug
   } catch {
-    return NextResponse.next()
+    return passOn(request)
   }
 
-  if (!current || current === wanted) return NextResponse.next()
+  if (!current || current === wanted) return passOn(request)
 
   const switchTo = new URL('/switch', request.nextUrl.origin)
   switchTo.searchParams.set('to', wanted)
@@ -79,6 +87,7 @@ export const config = {
     '/marketplace/:path*',
     '/ecosystem/:path*',
     '/user-home/:path*',
+    '/apps/:path*',
     '/settings/:path*',
     '/account-and-billing/:path*',
     '/service-keys/:path*',

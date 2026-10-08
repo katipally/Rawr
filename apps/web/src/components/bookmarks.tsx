@@ -5,9 +5,10 @@ import { Bookmark, BookmarkCheck, X } from 'lucide-react'
 import Link from 'next/link'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 
-/** What the page calls itself: its heading, since the tab title is the app's
- *  name on every screen. */
-const titleOf = (): string => document.querySelector('main h1')?.textContent?.trim() || document.title.trim() || 'This page'
+/** What the page calls itself: its declared name, else its heading, since the tab
+ *  title is the app's name on every screen. */
+const titleOf = (): string =>
+  document.querySelector('main [data-page-name]')?.getAttribute('data-page-name') || document.querySelector('main h1')?.textContent?.trim() || document.title.trim() || 'This page'
 
 /** HubSpot's bookmarks flyout: the pages this person pinned, and a way to pin
  *  the one they are on. Kept in this browser, in the store the rest of the

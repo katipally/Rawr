@@ -1,5 +1,6 @@
 import {
   canView,
+  getPrefs,
   listForms,
   listGrants,
   listImportRuns,
@@ -43,7 +44,7 @@ import { HomeCards } from './home-cards.tsx'
  *  is that view, opened first. Every number on it is a link to the list that
  *  produced it, so nothing here is a dead end. */
 
-type Tile = { label: string; value: string; href: string; tone?: 'error' | 'warning' }
+type Tile = { label: string; value: string; detail?: string; href: string; tone?: 'error' | 'warning' }
 
 const TILE_TONES = {
   error: 'text-error',
@@ -69,6 +70,7 @@ const Tiles = ({ tiles }: { tiles: Tile[] }) => (
           >
             {tile.value}
           </span>
+          {tile.detail ? <span className="break-words text-small text-secondary tabular-nums">{tile.detail}</span> : null}
         </Link>
       </li>
     ))}
@@ -148,7 +150,7 @@ const HomePage = async ({
   const people = canView(ctx, 'contacts')
   const marketing = canView(ctx, 'marketing')
 
-  const [board, overdue, myTasks, recent, members, setup] = await withAccountReads(ctx, () =>
+  const [board, overdue, myTasks, recent, members, setup, prefs] = await withAccountReads(ctx, () =>
     Promise.all([
       readDashboard(viewerContext(session)),
       sales ? overdueNextSteps(ctx) : [],
@@ -160,8 +162,10 @@ const HomePage = async ({
       isAdmin
         ? Promise.all([listIntegrations(ctx), listGrants(ctx), marketing ? listForms(ctx) : [], listImportRuns(ctx, { states: ['done'], limit: 1 }), listSites(ctx), listPipelines(ctx)])
         : null,
+      getPrefs(ctx),
     ]),
   )
+  const savedOrder = Array.isArray(prefs.homeCards) && prefs.homeCards.every((key) => typeof key === 'string') ? (prefs.homeCards as string[]) : []
 
   const admins = members.filter((m) => m.isSuperAdmin && m.userId !== session.userId)
   const checklist = setup
@@ -216,7 +220,7 @@ const HomePage = async ({
   const tiles: Tile[] = [
     ...(sales
       ? [
-          { label: 'Open deals', value: `${fmt.number(openCount)} · ${money((m) => m.total)}`, href: objectView(account, 'deal', 'all', 'board') },
+          { label: 'Open deals', value: fmt.number(openCount), detail: money((m) => m.total), href: objectView(account, 'deal', 'all', 'board') },
           { label: 'Weighted pipeline', value: money((m) => m.weighted), href: objectView(account, 'deal', 'all', 'board') },
           { label: 'Next step overdue', value: fmt.number(overdue.length), href: objectView(account, 'deal', 'overdue-next-step', 'board'), ...(overdue.length ? { tone: 'error' as const } : {}) },
         ]
@@ -235,7 +239,7 @@ const HomePage = async ({
   return (
     <div className="flex flex-col gap-4">
       <div className="border-b border-line bg-surface px-6 py-4">
-        <h1 className="text-xl font-medium break-words">{greeting}</h1>
+        <h1 data-page-name="Home" className="text-xl font-medium break-words">{greeting}</h1>
         <p className="text-secondary">
           {fmt.at(now, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}, {session.accountName}
         </p>
@@ -354,23 +358,30 @@ const HomePage = async ({
                     {overdue.length === 0 ? (
                       <p className="py-6 text-center">Nothing is overdue. Every open deal has a next step in the future, or none set.</p>
                     ) : (
-                      <ul className="flex flex-col divide-y divide-divider">
-                        {overdue.slice(0, 8).map((deal) => (
-                          <li key={deal.id} className="flex flex-col gap-0.5 py-2">
-                            <div className="flex min-w-0 items-baseline justify-between gap-2">
-                              <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
-                                {deal.name ?? 'Unnamed deal'}
-                              </Link>
-                              <span className="shrink-0 text-small text-error">{fmt.date(deal.nextStepDate)}</span>
-                            </div>
-                            <p className="truncate text-small text-secondary">
-                              {deal.nextStep ?? 'No next step written'}
-                              {deal.ownerName ? ` · ${deal.ownerName}` : ''}
-                              {deal.stageName ? ` · ${deal.stageName}` : ''}
-                            </p>
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        <ul className="flex flex-col divide-y divide-divider">
+                          {overdue.slice(0, 8).map((deal) => (
+                            <li key={deal.id} className="flex flex-col gap-0.5 py-2">
+                              <div className="flex min-w-0 items-baseline justify-between gap-2">
+                                <Link href={recordPath(account, 'deal', deal.id, { from: accountHome(account) })} className="min-w-0 truncate font-medium">
+                                  {deal.name ?? 'Unnamed deal'}
+                                </Link>
+                                <span className="shrink-0 text-small text-error">{fmt.date(deal.nextStepDate)}</span>
+                              </div>
+                              <p className="truncate text-small text-secondary">
+                                {deal.nextStep ?? 'No next step written'}
+                                {deal.ownerName ? ` · ${deal.ownerName}` : ''}
+                                {deal.stageName ? ` · ${deal.stageName}` : ''}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                        {overdue.length > 8 ? (
+                          <Link href={objectView(account, 'deal', 'overdue-next-step', 'board')} className="block pt-2 text-small">
+                            See all {fmt.number(overdue.length)}
+                          </Link>
+                        ) : null}
+                      </>
                     )}
                   </>
                 ),
@@ -528,6 +539,7 @@ const HomePage = async ({
                 ),
               },
         ]}
+        savedOrder={savedOrder}
       />
       </div>
     </div>

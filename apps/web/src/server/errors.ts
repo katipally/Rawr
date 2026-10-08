@@ -88,7 +88,9 @@ export const formatError = ({
   // tRPC writes a rejected input as the JSON of every zod issue. The first issue is the sentence a person reads.
   // Only a request's own input is BAD_REQUEST here, so a zod failure inside the data layer never reaches this line.
   if (error.code === 'BAD_REQUEST' && error.cause instanceof ZodError) {
-    return { ...shape, message: error.cause.issues[0]?.message ?? 'That value was not valid.' }
+    const first = error.cause.issues[0]
+    if (first?.code === 'invalid_type' && 'received' in first && first.received === 'NaN') return { ...shape, message: 'That needs to be a number.' }
+    return { ...shape, message: first?.message ?? 'That value was not valid.' }
   }
   return shape
 }

@@ -7,9 +7,10 @@ import {
   type Membership,
 } from '@rawr/db'
 import { jwtVerify, SignJWT } from 'jose'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { cache } from 'react'
 import { env } from '~/lib/env.ts'
+import { NEXT_HEADER, safePath } from '~/lib/links.ts'
 
 const COOKIE = 'rawr_session'
 const ISSUER = 'rawr'
@@ -91,6 +92,12 @@ export const writeSessionCookie = async (session: Session): Promise<void> => {
 export const clearSessionCookie = async (): Promise<void> => {
   const jar = await cookies()
   jar.delete(COOKIE)
+}
+
+/** Where a signed-out visitor goes: sign-in, carrying the address they asked for. */
+export const signInPath = async (): Promise<string> => {
+  const next = safePath((await headers()).get(NEXT_HEADER), '')
+  return next ? `/sign-in?next=${encodeURIComponent(next)}` : '/sign-in'
 }
 
 /** The cookie is a claim, not proof. Every read re-checks that the membership still
