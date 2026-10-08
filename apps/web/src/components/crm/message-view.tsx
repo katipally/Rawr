@@ -1,7 +1,7 @@
 'use client'
 
 import type { MessageEngagement, ThreadMessage } from '@rawr/db'
-import { Badge, Button } from '@rawr/ui'
+import { Badge, Button, useMounted } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormat } from '~/components/zone.tsx'
@@ -65,7 +65,10 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
   const [height, setHeight] = useState(120)
 
   const html = message.html
-  const gated = useMemo(() => (html === null ? null : blockRemoteLoads(html)), [html])
+  // The gate parses with DOMParser, which only exists in the browser. Until mounted
+  // the frame has no document, so the server render carries no mail markup at all.
+  const mounted = useMounted()
+  const gated = useMemo(() => (html === null || !mounted ? null : blockRemoteLoads(html)), [html, mounted])
   const hasRemote = gated !== null && gated.blocked > 0
 
   // Remote loads are stripped from the markup until asked for. Doing it on the
