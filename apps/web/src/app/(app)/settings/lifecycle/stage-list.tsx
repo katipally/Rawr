@@ -22,11 +22,11 @@ export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean
 
   const routes = api.admin.lifecycle
 
-  const run = async (fn: () => Promise<unknown>, done: string) => {
+  const run = async <T,>(fn: () => Promise<T>, done: string | ((result: T) => string)) => {
     setBusy(true)
     try {
-      await fn()
-      toast('success', done)
+      const result = await fn()
+      toast('success', typeof done === 'string' ? done : done(result))
       router.refresh()
       return true
     } catch (cause) {
@@ -96,7 +96,10 @@ export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean
                 onClick={() =>
                   void run(
                     () => routes.remove.mutate({ id: removing.id, destinationId: destination || null }),
-                    'Deleted.',
+                    ({ moved, movedTo }) =>
+                      movedTo && moved > 0
+                        ? `Deleted. ${fmt.number(moved)} record${moved === 1 ? '' : 's'} moved to ${movedTo}.`
+                        : 'Deleted.',
                   ).then((ok) => ok && setRemoving(null))
                 }
               >
@@ -133,6 +136,12 @@ export const StageList = ({ rows, canWrite }: { rows: Stage[]; canWrite: boolean
                       ))}
                   </Select>
                 </Field>
+                {destination ? (
+                  <p>
+                    {fmt.number(removing.usedBy)} record{removing.usedBy === 1 ? '' : 's'} will move to{' '}
+                    {rows.find((row) => row.id === destination)?.name}.
+                  </p>
+                ) : null}
               </>
             )}
           </div>

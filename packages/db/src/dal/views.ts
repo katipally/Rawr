@@ -1,12 +1,13 @@
 import { and, asc, desc, eq, inArray, or, isNull, sql } from 'drizzle-orm'
-import { fieldDef } from '../schema/metadata.ts'
 import { savedView } from '../schema/marketing.ts'
 import { CORE_VIEWS } from '../registry/core.ts'
+import { groupableField } from './board.ts'
+import { placeableField } from './calendar.ts'
 import { isAdmin, type AccountContext } from './context.ts'
 import { mutate, withAccount } from './index.ts'
 import { parseFilters, parseSorts, type FilterGroup, type Sort } from './query.ts'
 import { ConflictError } from './records.ts'
-import { getRegistry, objectOrThrow, type RegistryObject } from './registry.ts'
+import { getRegistry, objectOrThrow, type RegistryField, type RegistryObject } from './registry.ts'
 
 export type ViewDefinition = {
   id: string | null
@@ -24,6 +25,8 @@ export type ViewDefinition = {
   pinned: boolean
   /** Board views only: the field whose values become columns. Null means stage. */
   groupByKey: string | null
+  /** Calendar views only: the date field that places each record on a day. */
+  calendarKey: string | null
   /** What a save has to carry back. Null for a view that is not stored yet. */
   updatedAt: Date | null
 }
@@ -50,40 +53,49 @@ export const fallbackView = (object: RegistryObject, slug: string): ViewDefiniti
     position: seeded?.position ?? 0,
     pinned: true,
     groupByKey: seeded?.groupBy ?? null,
+    calendarKey: null,
     updatedAt: null,
   }
 }
 
-const toDefinition = (row: {
-  id: string
-  slug: string
-  name: string
-  kind: 'table' | 'board' | 'calendar'
-  columns: unknown
-  filters: unknown
-  sorts: unknown
-  isShared: boolean
-  ownerId: string | null
-  position: number
-  pinned: boolean
-  /** Board views only: the field whose values become columns. Null means stage. */
-  groupByKey: string | null
-  updatedAt: Date
-}): ViewDefinition => ({
-  id: row.id,
-  slug: row.slug,
-  name: row.name,
-  kind: row.kind,
-  columns: Array.isArray(row.columns) ? (row.columns as string[]) : [],
-  filters: parseFilters(row.filters),
-  sorts: parseSorts(row.sorts),
-  isShared: row.isShared,
-  ownerId: row.ownerId,
-  position: row.position,
-  pinned: row.pinned,
-  groupByKey: row.groupByKey,
-  updatedAt: row.updatedAt,
-})
+/** The stored field ids are read back as keys by looking them up in `fields`. */
+const toDefinition = (
+  fields: RegistryField[],
+  row: {
+    id: string
+    slug: string
+    name: string
+    kind: 'table' | 'board' | 'calendar'
+    columns: unknown
+    filters: unknown
+    sorts: unknown
+    isShared: boolean
+    ownerId: string | null
+    position: number
+    pinned: boolean
+    groupByFieldId: string | null
+    calendarFieldId: string | null
+    updatedAt: Date
+  },
+): ViewDefinition => {
+  const keyOf = (id: string | null) => fields.find((field) => field.id === id)?.key ?? null
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    kind: row.kind,
+    columns: Array.isArray(row.columns) ? (row.columns as string[]) : [],
+    filters: parseFilters(row.filters),
+    sorts: parseSorts(row.sorts),
+    isShared: row.isShared,
+    ownerId: row.ownerId,
+    position: row.position,
+    pinned: row.pinned,
+    groupByKey: keyOf(row.groupByFieldId),
+    calendarKey: keyOf(row.calendarFieldId),
+    updatedAt: row.updatedAt,
+  }
+}
 
 /** The view tabs a person can see: the shared ones plus their own. */
 export const listViews = async (
@@ -107,11 +119,11 @@ export const listViews = async (
         ownerId: savedView.ownerId,
         position: savedView.position,
         pinned: savedView.pinned,
-        groupByKey: fieldDef.key,
+        groupByFieldId: savedView.groupByFieldId,
+        calendarFieldId: savedView.calendarFieldId,
         updatedAt: savedView.updatedAt,
       })
       .from(savedView)
-      .leftJoin(fieldDef, eq(fieldDef.id, savedView.groupByFieldId))
       .where(
         and(
           eq(savedView.objectId, object.id),
@@ -123,7 +135,7 @@ export const listViews = async (
       .orderBy(desc(savedView.pinned), asc(savedView.position), asc(savedView.name)),
   )
 
-  const views = rows.map(toDefinition)
+  const views = rows.map((row) => toDefinition(object.fields, row))
   return views.length > 0 ? views : [fallbackView(object, DEFAULT_VIEW_SLUG)]
 }
 
@@ -158,7 +170,12 @@ export type SaveViewInput = {
   columns: string[]
   filters: FilterGroup[]
   sorts: Sort[]
-  isShared: boolean
+  /** Read when the view is created. A save never changes who owns or shares a view. */
+  isShared?: boolean | undefined
+  /** Board views. Null is stage. Absent keeps what is stored. */
+  groupByKey?: string | null | undefined
+  /** Calendar views. Null clears the date field. Absent keeps what is stored. */
+  calendarKey?: string | null | undefined
   /** What the editor last read of the view it is overwriting; null when it is
    *  creating one. */
   expectedUpdatedAt: Date | null
@@ -176,6 +193,13 @@ export const saveView = async (
       throw new Error(`${object.namePlural} has no field called ${unknown.join(', ')}.`)
     }
 
+    const groupField = input.groupByKey ? groupableField(object, input.groupByKey) : null
+    const calendarField = input.calendarKey ? placeableField(object, input.calendarKey) : null
+    const placement = {
+      ...(input.groupByKey === undefined ? {} : { groupByFieldId: groupField?.id ?? null }),
+      ...(input.calendarKey === undefined ? {} : { calendarFieldId: calendarField?.id ?? null }),
+    }
+
     const base = slugify(input.name)
     const values = {
       accountId: ctx.accountId,
@@ -185,28 +209,28 @@ export const saveView = async (
       columns: input.columns,
       filters: input.filters,
       sorts: input.sorts,
-      isShared: input.isShared,
-      ownerId: ctx.actorId,
     }
 
     if (input.id) {
       const [current] = await tx
-        .select({ updatedAt: savedView.updatedAt })
+        .select({ ownerId: savedView.ownerId, updatedAt: savedView.updatedAt })
         .from(savedView)
         .where(eq(savedView.id, input.id))
         .for('update')
-      if (current && current.updatedAt.getTime() !== input.expectedUpdatedAt?.getTime()) {
+      if (!current) throw new Error('That view no longer exists.')
+      assertMine(current, ctx, 'edit')
+      if (current.updatedAt.getTime() !== input.expectedUpdatedAt?.getTime()) {
         throw new ConflictError(current.updatedAt)
       }
       const [updated] = await tx
         .update(savedView)
-        .set({ ...values, updatedAt: new Date() })
+        .set({ ...values, ...placement, updatedAt: new Date() })
         .where(eq(savedView.id, input.id))
         .returning()
       if (!updated) throw new Error('That view no longer exists.')
       return {
-        result: toDefinition(updated as never),
-        audit: { entity: 'saved_view', entityId: updated.id, action: 'update', before: null, after: values },
+        result: toDefinition(object.fields, updated),
+        audit: { entity: 'saved_view', entityId: updated.id, action: 'update', before: null, after: { ...values, ...placement } },
       }
     }
 
@@ -222,15 +246,16 @@ export const saveView = async (
     let slug = base
     for (let n = 2; taken.has(slug); n += 1) slug = `${base}-${n}`
 
+    const owned = { isShared: input.isShared ?? false, ownerId: ctx.actorId }
     const [created] = await tx
       .insert(savedView)
-      .values({ ...values, slug, position: taken.size, pinned: true })
+      .values({ ...values, ...placement, ...owned, slug, position: taken.size, pinned: true })
       .returning()
     if (!created) throw new Error('The view could not be saved.')
 
     return {
-      result: toDefinition(created as never),
-      audit: { entity: 'saved_view', entityId: created.id, action: 'create', before: null, after: { ...values, slug } },
+      result: toDefinition(object.fields, created),
+      audit: { entity: 'saved_view', entityId: created.id, action: 'create', before: null, after: { ...values, ...placement, ...owned, slug } },
     }
   })
 
@@ -295,6 +320,7 @@ export const duplicateView = async (ctx: AccountContext, id: string): Promise<Vi
       filters: row.filters,
       sorts: row.sorts,
       groupByFieldId: row.groupByFieldId,
+      calendarFieldId: row.calendarFieldId,
       isShared: false,
       ownerId: ctx.actorId,
       slug,
@@ -305,13 +331,7 @@ export const duplicateView = async (ctx: AccountContext, id: string): Promise<Vi
     if (!created) throw new Error('The view could not be copied.')
 
     return {
-      result: toDefinition({
-        ...created,
-        groupByKey:
-          registry.objects
-            .flatMap((object) => object.fields)
-            .find((field) => field.id === created.groupByFieldId)?.key ?? null,
-      }),
+      result: toDefinition(registry.objects.flatMap((object) => object.fields), created),
       audit: { entity: 'saved_view', entityId: created.id, action: 'create', before: null, after: values },
     }
   })
@@ -332,6 +352,7 @@ export const renameView = async (
     const [row] = await tx.select().from(savedView).where(eq(savedView.id, id))
     if (!row) throw new Error('That view no longer exists.')
     assertMine(row, ctx, 'rename')
+    const registry = await getRegistry(ctx)
 
     const trimmed = name.trim()
     if (!trimmed) throw new Error('A view needs a name.')
@@ -344,7 +365,7 @@ export const renameView = async (
     if (!updated) throw new Error('That view no longer exists.')
 
     return {
-      result: toDefinition({ ...updated, groupByKey: null }),
+      result: toDefinition(registry.objects.flatMap((object) => object.fields), updated),
       audit: { entity: 'saved_view', entityId: id, action: 'update', before: { name: row.name }, after: { name: trimmed } },
     }
   })

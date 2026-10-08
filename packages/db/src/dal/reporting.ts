@@ -336,7 +336,8 @@ export const formsReport = async (ctx: AccountContext, range: Range): Promise<Fo
              count(distinct d.id)::int as deals
         from form f
         join form_submission s on s.form_id = f.id and ${bounds(range, 's.at')}
-        left join deal d on d.company_id = s.company_id and d.deleted_at is null
+        left join company sc on sc.id = s.company_id and sc.deleted_at is null
+        left join deal d on d.company_id = sc.id and d.deleted_at is null
                         and d.created_at >= s.at and ${bounds(range, 'd.created_at')}
        group by f.id, f.name
        order by 2 desc
@@ -614,8 +615,9 @@ export const attributionReport = async (ctx: AccountContext, range: Range): Prom
         won_amounts: { currency: string; amount: string }[]
       }>(sql`
         with touched as (
-          select coalesce(${source(column)} ->> 'channel', 'Not attributed') as channel, c.id, c.company_id
+          select coalesce(${source(column)} ->> 'channel', 'Not attributed') as channel, c.id, co.id as company_id
             from contact c
+            left join company co on co.id = c.company_id and co.deleted_at is null
            where c.deleted_at is null and ${bounds(range, 'c.created_at')}
         ),
         -- One row per channel and deal: every contact at a company is joined to its

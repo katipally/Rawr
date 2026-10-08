@@ -22,7 +22,8 @@ import type { TableColumn } from '~/components/crm/record-table.tsx'
 export type Choice = { id: string; label: string }
 
 export type Lookups = {
-  users: Choice[]
+  /** Deactivated members stay in the list so a record pointing at one still names them. */
+  users: (Choice & { deactivated: boolean })[]
   pipelines: Choice[]
   stages: { id: string; label: string; pipelineId: string }[]
   lifecycleStages: Choice[]
@@ -32,7 +33,7 @@ export const readLookups = async (ctx: AccountContext): Promise<Lookups> =>
   withAccount(ctx, async (tx) => {
     const [users, pipelines, stages, lifecycles] = await Promise.all([
       tx
-        .select({ id: schema.userAccount.id, name: schema.userAccount.name })
+        .select({ id: schema.userAccount.id, name: schema.userAccount.name, state: schema.membership.state })
         .from(schema.membership)
         .innerJoin(schema.userAccount, eq(schema.userAccount.id, schema.membership.userId))
         .orderBy(asc(schema.userAccount.name)),
@@ -48,7 +49,7 @@ export const readLookups = async (ctx: AccountContext): Promise<Lookups> =>
     ])
 
     return {
-      users: users.map((user) => ({ id: user.id, label: user.name })),
+      users: users.map((user) => ({ id: user.id, label: user.name, deactivated: user.state === 'deactivated' })),
       pipelines: pipelines.map((pipeline) => ({ id: pipeline.id, label: pipeline.name })),
       stages: stages.map((stage) => ({ id: stage.id, label: stage.name, pipelineId: stage.pipelineId })),
       lifecycleStages: lifecycles.map((stage) => ({ id: stage.id, label: stage.name })),
@@ -60,7 +61,7 @@ export const readLookups = async (ctx: AccountContext): Promise<Lookups> =>
  *  is right. Companies are records, counted in tens of thousands, so they are
  *  searched instead: see PICK_OBJECT below. */
 const choicesFor = (field: RegistryField, lookups: Lookups): Choice[] | undefined => {
-  if (field.key === 'owner_id') return lookups.users
+  if (field.type === 'user') return lookups.users
   if (field.key === 'pipeline_id') return lookups.pipelines
   if (field.key === 'stage_id') return lookups.stages
   if (field.key === 'lifecycle_stage_id') return lookups.lifecycleStages
@@ -144,25 +145,28 @@ export const toEditableFields = (
   { includeReadOnly = false } = {},
 ): EditableField[] => {
   const identity = IDENTITY[object.key] ?? (object.labelFieldKey ? [object.labelFieldKey] : [])
-  return object.fields
-    .filter((field) => includeReadOnly || !isReadOnly(field))
-    .map((field) => {
-      const choices = choicesFor(field, lookups)
-      const pickObject = PICK_OBJECT[field.key]
-      return {
+  return object.fields.flatMap((field) => {
+    const choices = choicesFor(field, lookups)
+    const pickObject = PICK_OBJECT[field.key]
+    // A relation with nothing to pick from cannot be given a value, so it is shown read-only.
+    const unpickable = field.type === 'relation' && !choices && !pickObject
+    if (!includeReadOnly && (isReadOnly(field) || unpickable)) return []
+    return [
+      {
         key: field.key,
         label: field.label,
         type: field.type,
         isRequired: field.isRequired,
         helpText: field.helpText,
         options: field.options,
-        readOnly: isReadOnly(field),
+        readOnly: isReadOnly(field) || unpickable,
         conditional: field.conditional,
         ...(identity.includes(field.key) ? { identity: identity.indexOf(field.key) } : {}),
         ...(choices ? { choices } : {}),
         ...(pickObject ? { pickObject } : {}),
-      }
-    })
+      },
+    ]
+  })
 }
 
 export const isReadOnly = (field: RegistryField): boolean =>

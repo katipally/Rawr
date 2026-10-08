@@ -1,6 +1,6 @@
 import { and, asc, eq, ne, sql } from 'drizzle-orm'
 import { deal, lifecycleStage, pipeline, pipelineStage } from '../schema/records.ts'
-import { recordActivity } from './activity.ts'
+import { recordActivity, recordActivityFanout } from './activity.ts'
 import type { AccountContext } from './context.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 
@@ -486,7 +486,7 @@ export const deleteLifecycleStage = async (
   ctx: AccountContext,
   id: string,
   destinationId: string | null,
-): Promise<{ moved: number }> =>
+): Promise<{ moved: number; movedTo: string | null }> =>
   mutate(ctx, 'lifecycle_stage', async (tx) => {
     const [found] = await tx
       .select({ name: lifecycleStage.name })
@@ -501,6 +501,8 @@ export const deleteLifecycleStage = async (
         (select count(*) from company where lifecycle_stage_id = ${id} and deleted_at is null)
       )::int as n`)
     const used = Number(n)
+    let moved = 0
+    let movedTo: string | null = null
 
     if (used > 0) {
       if (!destinationId) {
@@ -509,21 +511,43 @@ export const deleteLifecycleStage = async (
         )
       }
       const [destination] = await tx
-        .select({ id: lifecycleStage.id })
+        .select({ id: lifecycleStage.id, name: lifecycleStage.name })
         .from(lifecycleStage)
         .where(eq(lifecycleStage.id, destinationId))
         .limit(1)
       if (!destination) throw new Error('That destination stage no longer exists.')
       if (destination.id === id) throw new Error('A stage cannot be its own destination.')
 
-      await tx.execute(sql`update contact set lifecycle_stage_id = ${destinationId}, updated_at = now() where lifecycle_stage_id = ${id}`)
-      await tx.execute(sql`update company set lifecycle_stage_id = ${destinationId}, updated_at = now() where lifecycle_stage_id = ${id}`)
+      const contacts = await tx.execute<{ id: string; live: boolean }>(sql`
+        update contact set lifecycle_stage_id = ${destinationId}, updated_at = now()
+         where lifecycle_stage_id = ${id}
+        returning id, deleted_at is null as live`)
+      const companies = await tx.execute<{ id: string; live: boolean }>(sql`
+        update company set lifecycle_stage_id = ${destinationId}, updated_at = now()
+         where lifecycle_stage_id = ${id}
+        returning id, deleted_at is null as live`)
+
+      // Trashed records move with the rest, but as in deleteStage they get no
+      // timeline entry: nobody sees them until they are restored.
+      const entry = {
+        type: 'lifecycle_change' as const,
+        subject: `moved to ${destination.name} when ${found.name} was deleted`,
+        payload: { from: id, fromLabel: found.name, to: destination.id, toLabel: destination.name, reason: 'stage_deleted' },
+      }
+      const liveIds = (rows: { id: string; live: boolean }[]) => rows.filter((row) => row.live).map((row) => row.id)
+      const contactIds = liveIds(contacts)
+      const companyIds = liveIds(companies)
+      await recordActivityFanout(tx, ctx, { ...entry, entityType: 'contact', entityIds: contactIds })
+      await recordActivityFanout(tx, ctx, { ...entry, entityType: 'company', entityIds: companyIds })
+
+      moved = contactIds.length + companyIds.length
+      movedTo = destination.name
     }
 
     await tx.delete(lifecycleStage).where(eq(lifecycleStage.id, id))
 
     return {
-      result: { moved: used },
+      result: { moved, movedTo },
       audit: {
         entity: 'lifecycle_stage',
         entityId: id,

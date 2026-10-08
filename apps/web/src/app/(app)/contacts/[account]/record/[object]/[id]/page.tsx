@@ -58,6 +58,7 @@ import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { railInitial } from '~/lib/rail-initial.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
 
@@ -147,7 +148,10 @@ const RecordPage = async ({
       listTaskQueues(ctx),
     ])
     if (!record) return null
-    return { object, lookups, canWrite, registry, record, counts, rail, queues }
+    // getRecord hides a trashed company, so only a live one is pre-linked.
+    const primaryCompany = typeof record.values.company_id === 'string' ? await getRecord(ctx, 'company', record.values.company_id) : null
+    const company = objectParam === 'company' ? id : (primaryCompany?.id ?? null)
+    return { object, lookups, canWrite, registry, record, counts, rail, queues, company }
   })
 
   if (!screen) {
@@ -161,7 +165,7 @@ const RecordPage = async ({
     )
   }
 
-  const { object, lookups, canWrite, registry, record, counts, rail, queues } = screen
+  const { object, lookups, canWrite, registry, record, counts, rail, queues, company } = screen
 
   const email = typeof record.values.email === 'string' && record.values.email ? record.values.email : null
   // A company and a deal have no address of their own. The rail is already
@@ -241,7 +245,10 @@ const RecordPage = async ({
       return target ? [[key, toEditableFields(target, lookups)]] : []
     }),
   )
-  const createInitial = objectParam === 'company' ? { company_id: id } : {}
+  const createInitial = railInitial(
+    linkable.map((key) => ({ key, hasCompanyLink: registry.byKey.get(key)?.byKey.get('company_id')?.type === 'relation' })),
+    company,
+  )
 
   // Back goes to the screen the person came from, with its filters, when the link
   // names one on this account; otherwise to the object's default list.

@@ -210,7 +210,8 @@ export const CreateRecordPanel = ({
       <div className="flex flex-col gap-3">
         {lead.map((field, index) => renderField(field, index === 0))}
 
-        {object === 'deal' && !initial.company_id ? (
+        {/* A rail-created deal is already linked to the record it was opened from. */}
+        {object === 'deal' && !onCreated ? (
           <Field id={`${prefix}-contact`} label="Associated contact">
             <RecordPicker
               id={`${prefix}-contact`}

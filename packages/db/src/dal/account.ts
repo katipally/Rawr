@@ -178,6 +178,9 @@ export const listInvitations = async (ctx: AccountContext): Promise<PendingInvit
  *  a forwarded mail from last quarter is not a way in. */
 const INVITE_DAYS = 14
 
+/** The name the members screen shows for a hub. */
+const hubLabel = (hub: Hub): string => hub.charAt(0).toUpperCase() + hub.slice(1)
+
 const seatsUsed = async (tx: Tx): Promise<{ used: number; limit: number | null }> => {
   const [row] = await tx.execute<{ used: number; seat_limit: number | null }>(sql`
     select (select count(*) from membership where state <> 'deactivated')::int as used,
@@ -208,6 +211,26 @@ export const invite = async (
     assertSuperAdmin(ctx, 'invite somebody')
     const email = input.email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('That is not an email address.')
+
+    const [seated] = await tx
+      .select({
+        state: membership.state,
+        isSuperAdmin: membership.isSuperAdmin,
+        viewHubs: membership.viewHubs,
+        editHubs: membership.editHubs,
+      })
+      .from(membership)
+      .innerJoin(userAccount, eq(userAccount.id, membership.userId))
+      .where(eq(userAccount.email, email))
+    if (seated?.state === 'deactivated') {
+      throw new Error(`${email} was removed from this account. Reactivate them from the member list instead.`)
+    }
+    if (seated) {
+      const access = seated.isSuperAdmin
+        ? 'super admin'
+        : `view ${seated.viewHubs.map(hubLabel).join(', ') || 'no hubs'}, edit ${seated.editHubs.map(hubLabel).join(', ') || 'no hubs'}`
+      throw new Error(`${email} is already in this account (${access}). Change their access from the member list instead.`)
+    }
 
     const seats = await seatsUsed(tx)
     if (seats.limit !== null && seats.used >= seats.limit) {

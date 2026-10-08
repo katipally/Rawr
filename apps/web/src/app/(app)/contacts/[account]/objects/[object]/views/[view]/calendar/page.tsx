@@ -26,7 +26,7 @@ const USABLE_OBJECT_KEY = /^[a-z][a-z0-9_]{1,58}$/
 const USABLE_MONTH = /^[1-9]\d{3}-(0[1-9]|1[0-2])/
 
 type Params = { account: string; object: string; view: string }
-type Search = { q?: string; filters?: string; month?: string; group?: string; new?: string; view?: string }
+type Search = { q?: string; filters?: string; pipeline?: string; month?: string; group?: string; new?: string; view?: string }
 
 /** Which shapes this object can be looked at in. A board needs a pipeline, which
  *  only a deal has; a calendar needs a date field, which the registry knows. */
@@ -71,12 +71,9 @@ const CalendarPage = async ({
   const today = todayIn(session.accountTimezone)
   const filters = search.filters ? parseFilters(decodeFilters(search.filters)) : resolved.view.filters
   const month = search.month && USABLE_MONTH.test(search.month) ? search.month : today.slice(0, 7)
-  // A saved view's group is a board's grouping, which is a stage, not a date.
-  // Honoured only when it happens to name a field a calendar can use, so opening
-  // the calendar on a view saved as a board is a calendar rather than an error
-  // about stage_id. Asking for one by hand in the URL still says why it failed.
-  const stored = placeable.some((field) => field.key === resolved.view.groupByKey)
-    ? resolved.view.groupByKey
+  // Asking for a field the calendar cannot use in the URL still says why it failed.
+  const stored = placeable.some((field) => field.key === resolved.view.calendarKey)
+    ? resolved.view.calendarKey
     : null
   const unusable = search.group !== undefined && !placeable.some((field) => field.key === search.group)
   const chosen = unusable ? placeable[0]!.key : (search.group ?? stored ?? placeable[0]!.key)
@@ -104,6 +101,7 @@ const CalendarPage = async ({
     ...(search.q ? { q: search.q } : {}),
     ...(search.filters ? { filters: search.filters } : {}),
     ...(search.group ? { group: search.group } : {}),
+    ...(search.pipeline ? { pipeline: search.pipeline } : {}),
   }
 
   return (
@@ -172,6 +170,7 @@ const CalendarPage = async ({
           openCreate={search.new === '1'}
           openView={search.view === 'new'}
           allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
+          calendarKey={chosen}
         />
 
         {placeable.length > 1 ? (

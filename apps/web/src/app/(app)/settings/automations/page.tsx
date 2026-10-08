@@ -74,7 +74,7 @@ const AutomationsPage = async () => {
   const fieldsByObject = Object.fromEntries(
     registry.objects.map((object) => [
       object.key,
-      fields.filter((field) => field.objectKey === object.key).map((field) => field.key),
+      fields.filter((field) => field.objectKey === object.key).map((field) => ({ key: field.key, label: field.label })),
     ]),
   )
   // Only the date fields, for the trigger that waits for one to arrive. A rule

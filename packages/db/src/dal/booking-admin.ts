@@ -11,7 +11,16 @@ import {
   type BookingPageConfig,
   type ReminderUnit,
 } from './bookings.ts'
-import { DEFAULT_WEEKLY, isKnownTimezone, readRanges, readWeekly, type TimeRange, type WeeklyRules } from './slots.ts'
+import {
+  DEFAULT_WEEKLY,
+  isKnownTimezone,
+  readRanges,
+  readWeekly,
+  scheduleProblem,
+  windowProblem,
+  type TimeRange,
+  type WeeklyRules,
+} from './slots.ts'
 
 /** The admin half of F2: pages, who hosts them, working hours, and the calendar
  *  connections everything else depends on.
@@ -590,13 +599,8 @@ export const saveSchedule = async (
   }
 
   const weekly = readWeekly(input.weekly)
-  for (const [weekday, ranges] of Object.entries(weekly)) {
-    for (const [from, to] of ranges) {
-      if (from === to) {
-        throw new Error(`A window on weekday ${weekday} starts and ends at ${from}.`)
-      }
-    }
-  }
+  const problem = scheduleProblem(weekly)
+  if (problem) throw new Error(problem)
 
   await mutate(ctx, 'availability', async (tx) => {
     const [before] = await tx.execute<{ timezone: string; weekly: unknown }>(
@@ -640,6 +644,8 @@ export const saveOverride = async (
   if (!input.isUnavailable && blocks.length === 0) {
     throw new Error('A working-hours override needs at least one window, or mark the day unavailable.')
   }
+  const problem = windowProblem(`The override for ${input.day}`, blocks)
+  if (problem) throw new Error(problem)
 
   await mutate(ctx, 'availability', async (tx) => {
     await tx.execute(sql`

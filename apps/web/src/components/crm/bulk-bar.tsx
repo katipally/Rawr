@@ -240,7 +240,7 @@ export const BulkBar = ({ object, objectLabel, objectPlural, ids, versions, fiel
     setOwnerId(null)
     try {
       const lookups = await queryClient.fetchQuery(trpc.crm.lookups.queryOptions())
-      setOwners(lookups.users.map((user) => ({ id: user.id, name: user.name })))
+      setOwners(lookups.users.filter((user) => user.state !== 'deactivated').map((user) => ({ id: user.id, name: user.name })))
     } catch (cause) {
       toast('error', errorMessage(cause))
     }

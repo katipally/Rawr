@@ -79,6 +79,14 @@ const GROUPABLE = (field: RegistryField): boolean =>
 export const groupableFields = (object: RegistryObject): { key: string; label: string }[] =>
   object.fields.filter(GROUPABLE).map((field) => ({ key: field.key, label: field.label }))
 
+/** The field a board groups by, or the sentence saying why the key cannot be one. */
+export const groupableField = (object: RegistryObject, key: string): RegistryField => {
+  const candidate = object.byKey.get(key)
+  if (candidate && GROUPABLE(candidate)) return candidate
+  const names = groupableFields(object).map((field) => field.label).join(', ')
+  throw new Error(`A board cannot be grouped by "${key}". Try one of: ${names}.`)
+}
+
 type BoardInput = {
   pipelineId?: string | null
   filters?: FilterGroup[]
@@ -95,12 +103,7 @@ const boardShape = async (ctx: AccountContext, input: BoardInput) => {
   const registry = await getRegistry(ctx)
   const object = objectOrThrow(registry, 'deal')
 
-  const requested = input.groupBy ?? 'stage_id'
-  const candidate = object.byKey.get(requested)
-  if (!candidate || !GROUPABLE(candidate)) {
-    const names = groupableFields(object).map((field) => field.label).join(', ')
-    throw new Error(`A board cannot be grouped by "${requested}". Try one of: ${names}.`)
-  }
+  const candidate = groupableField(object, input.groupBy ?? 'stage_id')
   const groupBy = fieldOrThrow(object, candidate.key)
 
   const where: SQL[] = [sql.raw(`"deal"."deleted_at" is null`)]
@@ -177,7 +180,7 @@ const readCards = (ctx: AccountContext, groupExpr: SQL, predicate: SQL, after: n
              ) as rank
         from "deal"
         left join user_account u on u.id = "deal"."owner_id"
-        left join company c on c.id = "deal"."company_id"
+        left join company c on c.id = "deal"."company_id" and c.deleted_at is null
        where ${predicate}
     ),
     visible as (select * from ranked where rank > ${after} and rank <= ${upTo})

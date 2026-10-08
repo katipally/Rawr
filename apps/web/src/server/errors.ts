@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { ConflictError, DuplicateError, ForbiddenError, UnknownFieldError, ValueError } from '@rawr/db'
 import { FormSchemaError } from '@rawr/db/forms'
 import { TRPCError, type TRPCDefaultErrorShape } from '@trpc/server'
+import { ZodError } from 'zod'
 import { CalendarUnavailable } from './calendar.ts'
 import { RevokedError } from './gmail.ts'
 
@@ -83,6 +84,11 @@ export const formatError = ({
   if (error.code === 'INTERNAL_SERVER_ERROR') {
     const { stack: _stack, ...data } = shape.data
     return { ...shape, message: serverFaultMessage(digestOf(error)), data }
+  }
+  // tRPC writes a rejected input as the JSON of every zod issue. The first issue is the sentence a person reads.
+  // Only a request's own input is BAD_REQUEST here, so a zod failure inside the data layer never reaches this line.
+  if (error.code === 'BAD_REQUEST' && error.cause instanceof ZodError) {
+    return { ...shape, message: error.cause.issues[0]?.message ?? 'That value was not valid.' }
   }
   return shape
 }

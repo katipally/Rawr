@@ -9,3 +9,8 @@ export const archiveUsageCopy = (count: number, shown: string): string =>
 
 export const purgeResultCopy = (count: number, shown: string): string =>
   `${recordsOf(count, shown)} had the value stripped.`
+
+/** What archiving a property that something else reads leaves behind. `shown` is the
+ *  count already formatted for the viewer's locale, as in the record copy above. */
+export const dependantsCopy = (count: number, shown: string): string =>
+  `${shown} ${count === 1 ? 'place reads' : 'places read'} this property. Archiving it leaves ${count === 1 ? 'that place' : 'those places'} pointing at nothing.`

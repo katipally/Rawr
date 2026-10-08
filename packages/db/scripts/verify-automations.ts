@@ -64,6 +64,27 @@ const stamp = Math.random().toString(36).slice(2, 8)
 const dayUtc = (offsetDays: number): string =>
   new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10)
 
+/** Each zone sits on the far side of UTC from the other, so a predicate that reads
+ *  the session's clock fails in one of them at every hour of the day. */
+const SESSION_ZONES = ['UTC', 'America/Los_Angeles', 'Pacific/Kiritimati']
+
+/** Runs `fn` on connections whose session TimeZone is `zone`. The app pool opens
+ *  its connections lazily from DATABASE_URL, so closing it and reopening with the
+ *  zone as a startup parameter puts every connection it opens inside `fn` there. */
+const inSessionZone = async <T>(zone: string, fn: () => Promise<T>): Promise<T> => {
+  const saved = process.env.DATABASE_URL!
+  const url = new URL(saved)
+  url.searchParams.set('TimeZone', zone)
+  await closeAppPool()
+  process.env.DATABASE_URL = url.toString()
+  try {
+    return await fn()
+  } finally {
+    await closeAppPool()
+    process.env.DATABASE_URL = saved
+  }
+}
+
 const made: string[] = []
 /** Held outside the try so the cleanup below can reach it whatever failed. */
 let adminCtx: AccountContext | null = null
@@ -163,10 +184,33 @@ try {
     })
     const rule = (await armedScans(admin)).find((row) => row.id === id)
     expect(rule !== undefined, 'an active date rule was not armed for the scan')
-    const found = await scanTargets(admin, rule!, dayUtc(0))
-    expect(found.includes(hit.id), 'the deal closing in three days was not found')
-    expect(!found.includes(miss.id), 'a deal closing in nine days was found by a three-day rule')
-    return `${found.length} matched`
+    for (const zone of SESSION_ZONES) {
+      const found = await inSessionZone(zone, () => scanTargets(admin, rule!, dayUtc(0)))
+      expect(found.includes(hit.id), `${zone}: the deal closing in three days was not found`)
+      expect(!found.includes(miss.id), `${zone}: a deal closing in nine days was found by a three-day rule`)
+    }
+    return 'every session zone'
+  })
+
+  await check('a date rule on a datetime property lands on its UTC day in every session zone', async () => {
+    const landed = await createRecord(admin, 'contact', { email: `landed-${stamp}@sandbox.test` })
+    // Three days back from now, so the UTC day it lands on is dayUtc(-3) whatever the hour.
+    await owner`update contact set created_at = now() - interval '3 days' where id = ${landed.id}`
+    const id = await save({
+      name: `Created three days ago ${stamp}`,
+      trigger: 'date_reached',
+      objectKey: 'contact',
+      triggerConfig: { fieldKey: 'created_at', offsetDays: 3, direction: 'after' },
+      conditions: [],
+      steps: [task],
+      isActive: true,
+    })
+    const rule = (await armedScans(admin)).find((row) => row.id === id)!
+    for (const zone of SESSION_ZONES) {
+      const found = await inSessionZone(zone, () => scanTargets(admin, rule, dayUtc(0)))
+      expect(found.includes(landed.id), `${zone}: a datetime created three days ago was not found on its UTC day`)
+    }
+    return 'every session zone'
   })
 
   await check('a silence rule fires on the day the record goes quiet, not every day after', async () => {
@@ -196,10 +240,12 @@ try {
       isActive: true,
     })
     const rule = (await armedScans(admin)).find((row) => row.id === id)!
-    const found = await scanTargets(admin, rule, dayUtc(0))
-    expect(found.includes(crossing.id), 'the contact crossing twenty days of silence was not found')
-    expect(!found.includes(longGone.id), 'a contact quiet for ninety days fired a twenty-day rule again')
-    return 'the crossing day only'
+    for (const zone of SESSION_ZONES) {
+      const found = await inSessionZone(zone, () => scanTargets(admin, rule, dayUtc(0)))
+      expect(found.includes(crossing.id), `${zone}: the contact crossing twenty days of silence was not found`)
+      expect(!found.includes(longGone.id), `${zone}: a contact quiet for ninety days fired a twenty-day rule again`)
+    }
+    return 'the crossing day only, every session zone'
   })
 
   await check('a rule that is switched off is not scanned at all', async () => {
@@ -271,7 +317,7 @@ try {
         steps: [{ kind: 'action', type: 'send_email', config: { templateId: 'x', mailboxId: 'y' } }],
       }),
     )
-    expect(message.includes('Only a contact'), message)
+    expect(message.includes('"Send an email" only works on a contact'), message)
     return message
   })
 

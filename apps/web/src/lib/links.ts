@@ -187,6 +187,21 @@ export const objectView = (
 ): string =>
   `/${CRM_ROOT}/${account}/objects/${object}/views/${view}/${kind}${query(params)}`
 
+/** A saved view stores no pipeline, so the one on screen is kept across tabs and
+ *  layouts. Filters, sort, columns, grouping and the page belong to the screen
+ *  being left, so a tab carries only the search text and the pipeline. */
+export const tabParams = ({ q, pipeline }: ListParams): ListParams => ({ q, pipeline })
+
+/** `group` is a board's field and a calendar's place-on field, and `month` only
+ *  the calendar reads. A switch drops all three so the destination applies the
+ *  view's saved value for its own kind. */
+export const layoutParams = (params: ListParams): ListParams => ({
+  ...params,
+  group: undefined,
+  month: undefined,
+  page: undefined,
+})
+
 /** `tab` is Overview or Activities, `type` filters the timeline, and the next
  *  two are the quick-action row asking a panel that is already on the page to
  *  open: log an activity of this kind or start a task, start an email. They are in

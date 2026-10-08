@@ -1,8 +1,8 @@
 import { eq, sql } from 'drizzle-orm'
 import { fieldDef, objectDef } from '../schema/metadata.ts'
 import type { AccountContext } from './context.ts'
-import { forgetRegistry, OBJECT_KEYS } from './registry.ts'
-import { mutate, withAccount } from './index.ts'
+import { mutateRegistry, OBJECT_KEYS } from './registry.ts'
+import { withAccount } from './index.ts'
 
 /** Objects an admin invents.
  *
@@ -103,7 +103,7 @@ export const createCustomObject = async (
   ctx: AccountContext,
   input: CreateObjectInput,
 ): Promise<{ id: string; key: string }> =>
-  mutate(ctx, 'object_def', async (tx) => {
+  mutateRegistry(ctx, 'object_def', async (tx) => {
     const nameSingular = input.nameSingular.trim()
     const namePlural = input.namePlural.trim()
     if (!nameSingular || !namePlural) throw new Error('An object needs a singular and a plural name.')
@@ -148,7 +148,6 @@ export const createCustomObject = async (
       await tx.update(objectDef).set({ labelFieldId: labelField.id }).where(eq(objectDef.id, created.id))
     }
 
-    forgetRegistry(ctx.accountId)
     return {
       result: { id: created.id, key },
       audit: { entity: 'object_def', entityId: created.id, action: 'create', before: null, after: { key, nameSingular, namePlural } },
@@ -162,7 +161,7 @@ export const createCustomObject = async (
  *  is most of the cost of having it with none of the use. The records go by
  *  cascade, the way dropping a table would have taken them. */
 export const deleteCustomObject = async (ctx: AccountContext, id: string): Promise<void> =>
-  mutate(ctx, 'object_def', async (tx) => {
+  mutateRegistry(ctx, 'object_def', async (tx) => {
     const [before] = await tx
       .select({ key: objectDef.key, nameSingular: objectDef.nameSingular, isCustom: objectDef.isCustom })
       .from(objectDef)
@@ -206,7 +205,6 @@ export const deleteCustomObject = async (ctx: AccountContext, id: string): Promi
     }
 
     await tx.delete(objectDef).where(eq(objectDef.id, id))
-    forgetRegistry(ctx.accountId)
     return {
       result: undefined,
       audit: {
@@ -224,7 +222,7 @@ export const renameCustomObject = async (
   id: string,
   input: { nameSingular: string; namePlural: string },
 ): Promise<void> =>
-  mutate(ctx, 'object_def', async (tx) => {
+  mutateRegistry(ctx, 'object_def', async (tx) => {
     const [before] = await tx
       .select({ nameSingular: objectDef.nameSingular, namePlural: objectDef.namePlural, isCustom: objectDef.isCustom })
       .from(objectDef)
@@ -240,7 +238,6 @@ export const renameCustomObject = async (
     // The key is untouched on purpose: it is in every saved view's address and in
     // every stored filter, and renaming a label must never move stored data.
     await tx.update(objectDef).set({ nameSingular, namePlural }).where(eq(objectDef.id, id))
-    forgetRegistry(ctx.accountId)
     return {
       result: undefined,
       audit: { entity: 'object_def', entityId: id, action: 'rename', before, after: { nameSingular, namePlural } },

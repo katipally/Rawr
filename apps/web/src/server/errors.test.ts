@@ -8,6 +8,7 @@ import { DrizzleQueryError } from 'drizzle-orm'
 import { RevokedError } from './gmail.ts'
 import { asTrpcError, call, digestOf, formatError, isReadable, serverFaultMessage } from './errors.ts'
 import superjson from 'superjson'
+import { z } from 'zod'
 
 /** A person sees a sentence they can act on for what they did, and a reference
  *  for what the server did. Nothing the driver wrote reaches the response. */
@@ -96,4 +97,22 @@ test('the response to a sentence is a 400 that says it', async () => {
   const { status, body } = await ask('sentence')
   assert.equal(status, 400)
   assert.match(body, /That file is empty\./)
+})
+
+const dated = t.router({
+  when: t.procedure.input(z.object({ at: z.coerce.date() })).query(() => 'ok'),
+})
+
+test('a rejected input is answered with its first sentence, never the issue list', async () => {
+  const input = encodeURIComponent(JSON.stringify({ json: { at: 'garbage' } }))
+  const response = await fetchRequestHandler({
+    endpoint: '/t',
+    req: new Request(`http://localhost/t/when?input=${input}`),
+    router: dated,
+    createContext: async () => ({ session: null, account: null }),
+    onError: () => {},
+  })
+  assert.equal(response.status, 400)
+  const { error } = (await response.json()) as { error: { json: { message: string } } }
+  assert.equal(error.json.message, 'Invalid input: expected date, received Date')
 })

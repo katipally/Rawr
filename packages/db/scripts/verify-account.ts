@@ -140,6 +140,23 @@ try {
     'a second invitation to the same address is refused',
   )
 
+  const seatedInvite = await refused(() => invite(superAdmin, { email: '  ADMIN@sandbox.test ' }))
+  check(
+    seatedInvite?.includes('already in this account (super admin)') === true,
+    'inviting an active member, in any letter case, is refused and names their access',
+    seatedInvite ?? 'accepted',
+  )
+  const goneEmail = `gone-${Date.now()}@sandbox.test`
+  const { userId: goneId } = await addMember(superAdmin, { email: goneEmail })
+  await deactivateMember(superAdmin, goneId, null)
+  const goneInvite = await refused(() => invite(superAdmin, { email: goneEmail }))
+  check(
+    goneInvite?.includes('Reactivate') === true,
+    'inviting a deactivated member is refused and points to Reactivate',
+    goneInvite ?? 'accepted',
+  )
+  await owner`delete from user_account where id = ${goneId}`
+
   const wrongPerson = await acceptInvitation(token, adminId)
   check(wrongPerson === null, 'a link is refused to anybody but the address it names')
 
@@ -160,6 +177,20 @@ try {
   const seated = (await listMembers(superAdmin)).find((m) => m.userId === probeId)
   check(seated?.editHubs.join() === 'contacts', 'a new seat holds exactly what it was given', seated?.editHubs.join())
   check(seated?.isSuperAdmin === false, 'and is not a super admin by default')
+  const probeInvite = await refused(() => invite(superAdmin, { email: probeEmail }))
+  check(
+    probeInvite?.includes('(view no hubs, edit Contacts)') === true,
+    'inviting a seated member names their hubs as the members screen labels them',
+    probeInvite ?? 'accepted',
+  )
+
+  const ownGrants = await refused(() => setMemberGrants(superAdmin, { userId: adminId, isSuperAdmin: false }))
+  const [ownAfter] = await owner`select is_super_admin from membership where user_id = ${adminId} and account_id = ${accountId}`
+  check(
+    ownGrants?.includes('your own access') === true && ownAfter?.is_super_admin === true,
+    'a super admin cannot change their own access, and the refusal leaves it as it was',
+    ownGrants ?? 'accepted',
+  )
 
   await setMemberGrants(superAdmin, { userId: probeId, viewHubs: ['reports'], editHubs: ['contacts', 'marketing'] })
   const raised = (await listMembers(superAdmin)).find((m) => m.userId === probeId)

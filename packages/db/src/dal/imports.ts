@@ -32,7 +32,7 @@ import { isUuid, mutate, withAccount, type Tx } from './index.ts'
 import { linksForContacts } from './activity.ts'
 import { createField, createFields, updateField } from './admin-fields.ts'
 import { orderedPair } from './associations.ts'
-import { bulkWriteRecords, createRecord, updateRecord, DuplicateError, type BulkRow } from './records.ts'
+import { bulkWriteRecords, companyByDomainQuery, createRecord, updateRecord, DuplicateError, type BulkRow } from './records.ts'
 import { getRegistry, objectOrThrow, tableFor, type RegistryField, type RegistryObject } from './registry.ts'
 import { assertUsableFieldKey } from './fields.ts'
 import { choiceOf, coerce, csvUncell, ValueError } from './values.ts'
@@ -620,7 +620,7 @@ const dedupeLookup = async (
       key === 'email'
         ? sql`select id from contact where lower(email) = lower(${value}) and deleted_at is null limit 1`
         : key === 'domain'
-          ? sql`select id from company where domain = ${value} and deleted_at is null limit 1`
+          ? companyByDomainQuery(value)
           : sql`select id from deal where lower(name) = lower(${value}) and deleted_at is null
                  order by created_at limit 1`,
     )
@@ -793,7 +793,7 @@ const recordResolver = (ctx: AccountContext) => {
       }
       if (domain) {
         const [company] = await tx.execute<{ id: string }>(
-          sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
+          companyByDomainQuery(domain),
         )
         if (company) return { type: 'company' as const, id: company.id }
       }
@@ -2035,7 +2035,7 @@ const writeAssociation = async (deps: ShapeDeps, values: Record<string, unknown>
       deps,
       'company',
       domain,
-      sql`select id from company where deleted_at is null and domain = ${domain} limit 1`,
+      companyByDomainQuery(domain),
     )
     if (companyId) targets.push({ entityType: 'company', entityId: companyId })
   }

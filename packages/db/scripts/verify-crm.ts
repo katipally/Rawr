@@ -1,5 +1,6 @@
+import { readFile } from 'node:fs/promises'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import type { AccountContext } from '../src/dal/context.ts'
@@ -12,6 +13,7 @@ import {
   getRecord,
   listRecords,
   mergeRecords,
+  restoreRecords,
   updateRecord } from '../src/dal/records.ts'
 import { createField, deleteField, purgeField } from '../src/dal/admin-fields.ts'
 import { dismissDuplicate, findDuplicates } from '../src/dal/duplicates.ts'
@@ -37,7 +39,7 @@ import {
   recordAttachment,
   removeAttachment,
   storageKeyFor } from '../src/dal/attachments.ts'
-import { readTimeline, timelineCounts } from '../src/dal/activity.ts'
+import { linksForContacts, readTimeline, timelineCounts } from '../src/dal/activity.ts'
 import { createTask, deleteTask, listTasks, logByHand, updateTask } from '../src/dal/tasks.ts'
 import { readBoard } from '../src/dal/board.ts'
 import { readDealScore, scoreAllDeals, scoreBand, SCORE_COMPONENTS, SCORE_WEIGHTS } from '../src/dal/deal-score.ts'
@@ -54,6 +56,7 @@ import {
   saveView,
   setViewPinned } from '../src/dal/views.ts'
 import { associate, associateMany, readAssociations, groupFor } from '../src/dal/associations.ts'
+import { upsertCapturedPerson } from '../src/dal/people.ts'
 import { exportCsv } from '../src/dal/export.ts'
 import { readBulkOperation, runBulkChunk, startBulkOperation } from '../src/dal/bulk.ts'
 import {
@@ -67,6 +70,7 @@ import {
 import { createImportRun, runImportChunk, dryRun, suggestMapping, assertMappingIsUsable } from '../src/dal/imports.ts'
 import { getRegistry, objectOrThrow, forgetRegistry } from '../src/dal/registry.ts'
 import { registrableDomain, isFreeMailDomain } from '../src/dal/domains.ts'
+import { withAccount } from '../src/dal/index.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
@@ -289,7 +293,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.accountId, datasaur.id))
+      .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
       .limit(1)
     const before = await getRecord(sales, 'deal', deal!.id)
     await updateRecord(sales, 'deal', deal!.id, { next_step: 'Someone else got there first' })
@@ -305,7 +309,7 @@ try {
   })
 
   await check('an association needs both records to exist in this account', async () => {
-    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt))).limit(1)
     const ghost = { entityType: 'contact', entityId: crypto.randomUUID() } as const
     const refused = async (run: () => Promise<unknown>) => {
       try {
@@ -322,7 +326,7 @@ try {
   })
 
   await check('two writes holding the same version cannot both land', async () => {
-    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt))).limit(1)
     const held = await getRecord(sales, 'deal', deal!.id)
     const settled = await Promise.allSettled([
       updateRecord(sales, 'deal', deal!.id, { next_step: 'Race A' }, held!.updatedAt),
@@ -331,6 +335,23 @@ try {
     const refused = settled.filter((outcome) => outcome.status === 'rejected' && outcome.reason instanceof ConflictError)
     expect(settled.filter((outcome) => outcome.status === 'fulfilled').length === 1 && refused.length === 1, 'both writes were accepted, or neither')
     return 'one landed, the other was told it was stale'
+  })
+
+  await check('a per-field edit is refused only when that field changed since it was read', async () => {
+    const created = await createRecord(sales, 'contact', { first_name: 'Field', title: 'Before' })
+    const held = await getRecord(sales, 'contact', created.id)
+    await updateRecord(sales, 'contact', created.id, { title: 'Set elsewhere' })
+    await updateRecord(sales, 'contact', created.id, { first_name: 'Edited' }, null, {
+      expectedValues: { first_name: held!.values.first_name },
+    })
+    const reason = await refuses('an edit to a field another writer changed', () =>
+      updateRecord(sales, 'contact', created.id, { title: 'Mine' }, null, { expectedValues: { title: held!.values.title } }),
+    )
+    expect(reason.includes('Job title') && reason.includes('Set elsewhere'), `refusal was: ${reason}`)
+    const after = await getRecord(sales, 'contact', created.id)
+    expect(after?.values.title === 'Set elsewhere', 'the refused edit landed anyway')
+    await deleteRecord(admin, 'contact', created.id)
+    return 'other field saved; same field refused and names the current value'
   })
 
   await check('a 500-character name is stored, not rejected', async () => {
@@ -360,7 +381,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id, stageId: s.deal.stageId, pipelineId: s.deal.pipelineId })
       .from(s.deal)
-      .where(eq(s.deal.accountId, datasaur.id))
+      .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
       .limit(1)
     const stages = await db
       .select({ id: s.pipelineStage.id, name: s.pipelineStage.name })
@@ -382,10 +403,10 @@ try {
   })
 
   await check('the timeline narrows to the people who wrote it', async () => {
-    const [deal] = await db.select({ id: s.deal.id, name: s.deal.name }).from(s.deal).where(eq(s.deal.accountId, datasaur.id)).limit(1)
+    const [deal] = await db.select({ id: s.deal.id }).from(s.deal).where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt))).limit(1)
     const entity = { entityType: 'deal', entityId: deal!.id } as const
-    await updateRecord(sales, 'deal', deal!.id, { name: `Author probe ${crypto.randomUUID()}` })
-    await updateRecord(sales, 'deal', deal!.id, { name: deal!.name })
+    // A rename of a deal writes no timeline row, so the author has to be written here.
+    await logByHand(sales, { type: 'note', body: `Author probe ${crypto.randomUUID()}`, entity })
     const author = (await readTimeline(sales, { entity, limit: 50 })).rows.find((row) => row.actorId)?.actorId
     expect(author !== undefined, 'nothing on the deal has an author')
     const mine = await readTimeline(sales, { entity, actorIds: [author!], limit: 50 })
@@ -496,7 +517,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.accountId, datasaur.id))
+      .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
       .orderBy(s.deal.createdAt)
       .limit(1)
 
@@ -526,7 +547,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.accountId, datasaur.id))
+      .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
       .orderBy(s.deal.createdAt)
       .limit(1)
     const entity = { entityType: 'deal' as const, entityId: deal!.id }
@@ -578,6 +599,202 @@ try {
 
     await deleteRecord(admin, 'contact', keep.id)
     return `${beforeTotal} activities moved intact, zero orphans, picked field applied`
+  })
+
+  console.log('\n-- company trash, domain aliases and primary company -------------------')
+
+  await check('a trashed company is not shown as a contact primary company until it is restored', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Trashed ${stamp}`, domain: `trashed${stamp}.example` })
+    const contact = await createRecord(sales, 'contact', { first_name: `Primary ${stamp}`, company_id: company.id })
+    const labelOf = async () => (await getRecord(sales, 'contact', contact.id))?.labels.company_id
+
+    expect((await labelOf()) === `Trashed ${stamp}`, 'the live company was not shown')
+    await deleteRecord(admin, 'company', company.id)
+    expect((await labelOf()) === undefined, `the trashed company still shows as ${String(await labelOf())}`)
+    const onList = await listRecords(sales, { object: 'contact', columns: ['company_id'], search: `Primary ${stamp}` })
+    expect(onList.rows[0]?.labels.company_id === undefined, 'the list still shows the trashed company')
+    const trashedRow = await getRecord(sales, 'contact', contact.id)
+    expect(trashedRow?.values.company_id === null, `the trashed company still reads as ${String(trashedRow?.values.company_id)}`)
+    const stored = await db.execute<{ company_id: string | null }>(sql`select company_id from contact where id = ${contact.id}`)
+    expect(stored[0]?.company_id === company.id, 'the link was cleared in storage, so restoring cannot bring it back')
+    await updateRecord(sales, 'contact', contact.id, { first_name: `Primary edited ${stamp}` }, null, { expectedValues: { first_name: `Primary ${stamp}` } })
+    const edited = await db.execute<{ company_id: string | null }>(sql`select company_id from contact where id = ${contact.id}`)
+    expect(edited[0]?.company_id === company.id, 'editing another field of the contact touched the trashed company link')
+    const other = await createRecord(sales, 'company', { name: `Replacement ${stamp}`, domain: `replacement${stamp}.example` })
+    const second = await createRecord(sales, 'contact', { first_name: `Second ${stamp}`, company_id: company.id })
+    await updateRecord(sales, 'contact', second.id, { company_id: other.id }, null, { expectedValues: { company_id: null } })
+    expect((await getRecord(sales, 'contact', second.id))?.values.company_id === other.id, 'a choice made from a trashed-company read was refused as a conflict')
+
+    await restoreRecords(admin, 'company', [company.id])
+    expect((await labelOf()) === `Trashed ${stamp}`, 'restoring the company did not bring the link back')
+    await deleteRecord(admin, 'contact', second.id)
+    await deleteRecord(admin, 'company', other.id)
+    await deleteRecord(admin, 'contact', contact.id)
+    await deleteRecord(admin, 'company', company.id)
+    return 'reads empty while trashed, edits of other fields leave the link, restored after restore'
+  })
+
+  await check('a merged company keeps its absorbed domain as an alias, and matching finds the survivor', async () => {
+    const stamp = Date.now()
+    const survivor = await createRecord(sales, 'company', { name: `Kept ${stamp}`, domain: `kept${stamp}.example` })
+    const absorbed = await createRecord(sales, 'company', { name: `Absorbed ${stamp}`, domain: `absorbed${stamp}.example` })
+    await mergeRecords(sales, { objectKey: 'company', survivorId: survivor.id, absorbedId: absorbed.id, picks: {} })
+
+    const person = await createRecord(sales, 'contact', { first_name: `Alias ${stamp}`, email: `new.${stamp}@absorbed${stamp}.example` })
+    const filed = await getRecord(sales, 'contact', person.id)
+    expect(filed?.values.company_id === survivor.id, `filed under ${String(filed?.values.company_id)}, not the survivor`)
+
+    let refusal: unknown = null
+    try {
+      await createRecord(sales, 'company', { name: `Clash ${stamp}`, domain: `absorbed${stamp}.example` })
+    } catch (cause) {
+      refusal = cause
+    }
+    expect(refusal instanceof DuplicateError && refusal.existingId === survivor.id, `a company was created on the alias: ${String(refusal)}`)
+
+    await db.delete(s.contact).where(eq(s.contact.id, person.id))
+    await db.delete(s.company).where(eq(s.company.id, survivor.id))
+    const left = await db.select({ id: s.companyDomain.id }).from(s.companyDomain).where(eq(s.companyDomain.companyId, survivor.id))
+    expect(left.length === 0, `${left.length} aliases outlived their company`)
+    return 'alias matched on email, duplicate alias refused, aliases removed with the company'
+  })
+
+  await check('a bulk association sets the primary company only on contacts that have none', async () => {
+    const stamp = Date.now()
+    const kept = await createRecord(sales, 'company', { name: `Kept primary ${stamp}`, domain: `keptp${stamp}.example` })
+    const target = await createRecord(sales, 'company', { name: `Bulk target ${stamp}`, domain: `bulkt${stamp}.example` })
+    const empty = await createRecord(sales, 'contact', { first_name: `Empty ${stamp}` })
+    const held = await createRecord(sales, 'contact', { first_name: `Held ${stamp}`, company_id: kept.id })
+
+    await associateMany(sales, 'contact', [empty.id, held.id], { entityType: 'company', entityId: target.id })
+    expect((await getRecord(sales, 'contact', empty.id))?.values.company_id === target.id, 'the contact with no company was not given one')
+    expect((await getRecord(sales, 'contact', held.id))?.values.company_id === kept.id, 'a real primary company was overwritten')
+
+    for (const id of [empty.id, held.id]) await deleteRecord(admin, 'contact', id)
+    for (const id of [kept.id, target.id]) await deleteRecord(admin, 'company', id)
+    return 'empty primary set, existing primary kept'
+  })
+
+  await check('a single association sets the primary company only on a contact or deal that has none', async () => {
+    const stamp = Date.now()
+    const kept = await createRecord(sales, 'company', { name: `Single kept ${stamp}`, domain: `singlek${stamp}.example` })
+    const target = await createRecord(sales, 'company', { name: `Single target ${stamp}`, domain: `singlet${stamp}.example` })
+    const empty = await createRecord(sales, 'contact', { first_name: `Single empty ${stamp}` })
+    const held = await createRecord(sales, 'contact', { first_name: `Single held ${stamp}`, company_id: kept.id })
+    const deal = await createRecord(sales, 'deal', { name: `Single deal ${stamp}` })
+
+    await associate(sales, { entityType: 'contact', entityId: empty.id }, { entityType: 'company', entityId: target.id })
+    expect((await getRecord(sales, 'contact', empty.id))?.values.company_id === target.id, 'a contact with no company was not given the one it was linked to')
+    await associate(sales, { entityType: 'company', entityId: target.id }, { entityType: 'deal', entityId: deal.id })
+    expect((await getRecord(sales, 'deal', deal.id))?.values.company_id === target.id, 'a deal with no company was not given the one it was linked to')
+    await associate(sales, { entityType: 'company', entityId: target.id }, { entityType: 'contact', entityId: held.id })
+    expect((await getRecord(sales, 'contact', held.id))?.values.company_id === kept.id, 'a real primary company was overwritten by a single link')
+
+    await deleteRecord(admin, 'contact', empty.id)
+    await deleteRecord(admin, 'contact', held.id)
+    await deleteRecord(admin, 'deal', deal.id)
+    for (const id of [kept.id, target.id]) await deleteRecord(admin, 'company', id)
+    return 'empty contact and deal take the company, either argument order, and a real primary stays'
+  })
+
+  await check('a trashed company is not shown on a deal card, and the card links it again once restored', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Card co ${stamp}`, domain: `cardco${stamp}.example` })
+    const deal = await createRecord(sales, 'deal', { name: `Card deal ${stamp}`, company_id: company.id })
+    const cardOf = async () =>
+      (await readBoard(sales, {})).columns.flatMap((column) => column.cards).find((card) => card.id === deal.id)
+
+    expect((await cardOf())?.companyId === company.id, 'the live company was not linked on the card')
+    await deleteRecord(admin, 'company', company.id)
+    const hidden = await cardOf()
+    expect(hidden?.companyId === null && hidden?.companyName === null, `the trashed company is still on the card as ${String(hidden?.companyName)}`)
+    await restoreRecords(admin, 'company', [company.id])
+    expect((await cardOf())?.companyId === company.id, 'restoring the company did not link it on the card again')
+
+    await deleteRecord(admin, 'deal', deal.id)
+    await deleteRecord(admin, 'company', company.id)
+    return 'hidden while trashed, linked again after restore'
+  })
+
+  await check('a rail count is the number of linked records it can draw, and a trashed record on either side is not counted', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Rail co ${stamp}`, domain: `railco${stamp}.example` })
+    const contact = await createRecord(sales, 'contact', { first_name: `Rail ${stamp}`, company_id: company.id })
+    const deal = await createRecord(sales, 'deal', { name: `Rail deal ${stamp}` })
+    await associate(sales, { entityType: 'contact', entityId: contact.id }, { entityType: 'company', entityId: company.id })
+    await associate(sales, { entityType: 'company', entityId: company.id }, { entityType: 'deal', entityId: deal.id })
+    type Entity = Parameters<typeof readAssociations>[1]
+    const ofCompany: Entity = { entityType: 'company', entityId: company.id }
+    const ofContact: Entity = { entityType: 'contact', entityId: contact.id }
+    const card = async (entity: Entity, objectKey: string, q?: string) =>
+      groupFor(await readAssociations(sales, entity, { q }), objectKey)
+
+    const full = await card(ofCompany, 'contact')
+    expect(full?.total === 1 && full.records.length === 1, `the company's contact card reads ${full?.total} with ${full?.records.length} rows`)
+    const narrowed = await card(ofCompany, 'contact', 'no such name')
+    expect(narrowed?.total === 1 && narrowed.records.length === 0, `a search that matches nothing counts ${narrowed?.total} contacts`)
+    expect((await card(ofContact, 'company', 'no such name'))?.total === 1, 'a contact linked to its primary company counts the company twice')
+    expect((await card(ofCompany, 'deal'))?.total === 1, 'a deal linked to the company is not counted once')
+
+    await deleteRecord(admin, 'company', company.id)
+    expect((await card(ofContact, 'company'))?.total === 0, `a trashed company is still counted on the contact as ${String((await card(ofContact, 'company'))?.total)}`)
+    await restoreRecords(admin, 'company', [company.id])
+    await deleteRecord(admin, 'deal', deal.id)
+    expect((await card(ofCompany, 'deal'))?.total === 0, 'a trashed deal is still counted on the company')
+
+    await deleteRecord(admin, 'contact', contact.id)
+    await deleteRecord(admin, 'company', company.id)
+    return 'one count per record, narrowed searches keep the total, trashed records on either side drop out'
+  })
+
+  await check('a contact’s activity is linked to its live company and not to a trashed one', async () => {
+    const stamp = Date.now()
+    const company = await createRecord(sales, 'company', { name: `Link co ${stamp}`, domain: `linkco${stamp}.example` })
+    const contact = await createRecord(sales, 'contact', { first_name: `Link ${stamp}`, company_id: company.id })
+    const linkedCompanies = async () =>
+      (await withAccount(sales, (tx) => linksForContacts(tx, [contact.id])))
+        .filter((link) => link.entityType === 'company')
+        .map((link) => link.entityId)
+
+    expect((await linkedCompanies()).includes(company.id), 'the live company was not linked')
+    await deleteRecord(admin, 'company', company.id)
+    expect(!(await linkedCompanies()).includes(company.id), 'the trashed company still receives the contact’s activity')
+
+    await deleteRecord(admin, 'contact', contact.id)
+    await restoreRecords(admin, 'company', [company.id])
+    await deleteRecord(admin, 'company', company.id)
+    return 'linked while live, dropped while trashed'
+  })
+
+  const NO_ATTRIBUTION = {
+    rawQuery: null, referrer: null, landingPage: null, pagePath: null, userAgent: null,
+    utm: { source: null, medium: null, campaign: null, term: null, content: null },
+    firstSeenAt: new Date().toISOString(),
+  }
+
+  await check('a captured lead already on a trashed company is returned with no company', async () => {
+    const stamp = Date.now()
+    const email = `captured.${stamp}@gmail.com`
+    const company = await createRecord(sales, 'company', { name: `Captured co ${stamp}`, domain: `capturedco${stamp}.example` })
+    const contact = await createRecord(sales, 'contact', { first_name: `Captured ${stamp}`, email, company_id: company.id })
+    const capture = () =>
+      withAccount(sales, (tx) =>
+        upsertCapturedPerson(tx, sales, { email, contact: {}, company: {}, attribution: NO_ATTRIBUTION, source: 'form' }),
+      )
+
+    expect((await capture()).companyId === company.id, 'the live company was not returned for the lead')
+    await deleteRecord(admin, 'company', company.id)
+    const trashed = await capture()
+    expect(trashed.contactId === contact.id, 'the lead was filed as a different contact')
+    expect(trashed.companyId === null, `the trashed company was returned as ${String(trashed.companyId)}`)
+    expect((await db.execute<{ company_id: string | null }>(sql`select company_id from contact where id = ${contact.id}`))[0]?.company_id === company.id, 'the stored link was dropped, so a restore cannot bring it back')
+
+    await restoreRecords(admin, 'company', [company.id])
+    expect((await capture()).companyId === company.id, 'restoring the company did not return it for the lead')
+    await deleteRecord(admin, 'contact', contact.id)
+    await deleteRecord(admin, 'company', company.id)
+    return 'returned while live, null while trashed, stored link kept'
   })
 
   console.log('\n-- board -------------------------------------------------------------')
@@ -1180,7 +1397,7 @@ try {
     const [deal] = await db
       .select({ id: s.deal.id })
       .from(s.deal)
-      .where(eq(s.deal.accountId, datasaur.id))
+      .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
       .limit(1)
     const stolen = await getRecord(probeCtx, 'deal', deal!.id)
     expect(stolen === null, 'a Datasaur deal was readable by id from the probe tenant')
@@ -1305,6 +1522,147 @@ try {
     }
     await deleteView(admin, mine.id!)
     return 'rename, pin and reorder all refuse a view owned by someone else'
+  })
+
+  await check('a save changes a view only in what it was given: owner, sharing and grouping stay', async () => {
+    const salesView = await saveView(sales, {
+      objectKey: 'deal', name: 'B04 sales private', expectedUpdatedAt: null, kind: 'table', columns: ['name'], filters: [], sorts: [], isShared: false,
+    })
+    expect(salesView.ownerId === sales.actorId && salesView.isShared === false, 'a private create was not owned by its maker')
+
+    const adminEdit = await saveView(admin, {
+      objectKey: 'deal', id: salesView.id, name: 'B04 sales private', kind: 'table', columns: ['name', 'amount'], filters: [], sorts: [], expectedUpdatedAt: salesView.updatedAt,
+    })
+    expect(adminEdit.ownerId === sales.actorId, `an admin update re-owned the view to ${adminEdit.ownerId}`)
+    expect(adminEdit.isShared === false, 'an update without isShared made the view shared')
+
+    const salesEdit = await saveView(sales, {
+      objectKey: 'deal', id: salesView.id, name: 'B04 sales private', kind: 'table', columns: ['name'], filters: [], sorts: [], expectedUpdatedAt: adminEdit.updatedAt,
+    })
+    expect(salesEdit.ownerId === sales.actorId, 'the owner could not edit their own view')
+
+    const adminView = await saveView(admin, {
+      objectKey: 'deal', name: 'B04 admin shared', expectedUpdatedAt: null, kind: 'table', columns: ['name'], filters: [], sorts: [], isShared: true,
+    })
+    const refusedEdit = await refuses('a non-owner editing a shared view', () =>
+      saveView(sales, { objectKey: 'deal', id: adminView.id, name: 'B04 admin shared', kind: 'table', columns: ['amount'], filters: [], sorts: [], expectedUpdatedAt: adminView.updatedAt }),
+    )
+    expect(refusedEdit.includes('belongs to somebody else') && refusedEdit.includes('edit'), refusedEdit)
+    const adminRename = await saveView(admin, {
+      objectKey: 'deal', id: adminView.id, name: 'B04 admin shared', kind: 'table', columns: ['name', 'amount'], filters: [], sorts: [], expectedUpdatedAt: adminView.updatedAt,
+    })
+    expect(adminRename.isShared === true && adminRename.ownerId === admin.actorId, 'an admin update changed the sharing or owner of a shared view')
+
+    await deleteView(admin, salesView.id!)
+    await deleteView(admin, adminView.id!)
+    return 'owner and sharing survive an update; a non-owner edit of a shared view is refused'
+  })
+
+  await check('a board and a calendar on one view keep their own field, and a save changes only the one it names', async () => {
+    const made = await saveView(admin, {
+      objectKey: 'deal', name: 'B05 layouts', expectedUpdatedAt: null, kind: 'board', columns: ['name'], filters: [], sorts: [], isShared: true, groupByKey: 'deal_type',
+    })
+    const stored = async () => (await listViews(admin, 'deal')).find((view) => view.id === made.id)!
+    const save = async (patch: { kind: 'board' | 'calendar'; groupByKey?: string | null; calendarKey?: string | null }) =>
+      saveView(admin, {
+        objectKey: 'deal', id: made.id, name: 'B05 layouts', columns: ['name'], filters: [], sorts: [], expectedUpdatedAt: (await stored()).updatedAt, ...patch,
+      })
+    const expectStored = async (groupByKey: string | null, calendarKey: string | null, when: string) => {
+      const view = await stored()
+      expect(view.groupByKey === groupByKey, `${when}: board grouping was ${view.groupByKey}, expected ${groupByKey}`)
+      expect(view.calendarKey === calendarKey, `${when}: calendar field was ${view.calendarKey}, expected ${calendarKey}`)
+    }
+
+    await save({ kind: 'calendar', calendarKey: 'close_date' })
+    await expectStored('deal_type', 'close_date', 'a calendar save on a board')
+    await save({ kind: 'board', groupByKey: null })
+    await expectStored(null, 'close_date', 'a board save that cleared the grouping')
+    await save({ kind: 'board', groupByKey: 'deal_type' })
+    await expectStored('deal_type', 'close_date', 'a board save that set the grouping again')
+    await save({ kind: 'calendar', calendarKey: null })
+    await expectStored('deal_type', null, 'a calendar save that cleared the date field')
+
+    await deleteView(admin, made.id!)
+    return 'each layout reads back its own field after the other layout saves'
+  })
+
+  await check('a calendar refuses a field that is not a date, and a board one that is not groupable', async () => {
+    const onText = await refuses('laying a calendar on a select field', () =>
+      saveView(admin, { objectKey: 'deal', name: 'B05 bad calendar', expectedUpdatedAt: null, kind: 'calendar', columns: ['name'], filters: [], sorts: [], calendarKey: 'deal_type' }),
+    )
+    expect(onText.includes('cannot be laid out on "deal_type"') && onText.includes('Try one of'), onText)
+    const onUnknown = await refuses('laying a calendar on a field the deal does not have', () =>
+      saveView(admin, { objectKey: 'deal', name: 'B05 bad calendar', expectedUpdatedAt: null, kind: 'calendar', columns: ['name'], filters: [], sorts: [], calendarKey: 'no_such_field' }),
+    )
+    expect(onUnknown.includes('cannot be laid out on "no_such_field"'), onUnknown)
+    const byAmount = await refuses('grouping a board by a currency field', () =>
+      saveView(admin, { objectKey: 'deal', name: 'B05 bad board', expectedUpdatedAt: null, kind: 'board', columns: ['name'], filters: [], sorts: [], groupByKey: 'amount' }),
+    )
+    expect(byAmount.includes('cannot be grouped by "amount"') && byAmount.includes('Try one of'), byAmount)
+    return 'both refusals name the field and list what would have worked'
+  })
+
+  await check('a board grouping and a calendar field saved before 0106 are moved to the right column, once', async () => {
+    const legacySlugs = ['b05-legacy-calendar', 'b05-legacy-board']
+    const clearLegacy = () =>
+      db.delete(s.savedView).where(and(eq(s.savedView.accountId, datasaur.id), inArray(s.savedView.slug, legacySlugs)))
+    await clearLegacy()
+    try {
+      const object = objectOrThrow(await getRegistry(admin), 'deal')
+      const closeDate = object.byKey.get('close_date')!.id
+      const dealType = object.byKey.get('deal_type')!.id
+      const legacy = await db
+        .insert(s.savedView)
+        .values([
+          { accountId: datasaur.id, objectId: object.id, name: 'B05 legacy calendar', slug: 'b05-legacy-calendar', kind: 'calendar', columns: ['name'], isShared: true, groupByFieldId: closeDate },
+          { accountId: datasaur.id, objectId: object.id, name: 'B05 legacy board', slug: 'b05-legacy-board', kind: 'board', columns: ['name'], isShared: true, groupByFieldId: dealType },
+        ])
+        .returning({ id: s.savedView.id })
+      const [calendarId, boardId] = legacy.map((row) => row.id)
+
+      const migration = await readFile(
+        new URL('../migrations/0106_a_calendar_keeps_its_date_field_apart_from_a_board_grouping.sql', import.meta.url),
+        'utf8',
+      )
+      const dataStep = migration.split('--> statement-breakpoint').at(-1)!
+      await db.execute(sql.raw(dataStep))
+      const afterFirst = (await listViews(admin, 'deal')).filter((view) => view.id === calendarId || view.id === boardId)
+      const movedAt = afterFirst.find((view) => view.id === calendarId)!.updatedAt
+      expect(afterFirst.find((view) => view.id === calendarId)!.calendarKey === 'close_date', 'the legacy calendar did not get its date field')
+      expect(afterFirst.find((view) => view.id === calendarId)!.groupByKey === null, 'the legacy calendar kept a board grouping')
+      expect(afterFirst.find((view) => view.id === boardId)!.groupByKey === 'deal_type', 'the legacy board lost its grouping')
+      expect(afterFirst.find((view) => view.id === boardId)!.calendarKey === null, 'the legacy board gained a calendar field')
+
+      await db.execute(sql.raw(dataStep))
+      const afterSecond = (await listViews(admin, 'deal')).find((view) => view.id === calendarId)!
+      expect(afterSecond.calendarKey === 'close_date' && afterSecond.groupByKey === null, 'a second run changed the moved view')
+      expect(afterSecond.updatedAt?.getTime() === movedAt?.getTime(), 'a second run touched the moved view again')
+
+      return 'the legacy date moved, the legacy grouping stayed, and a rerun changed nothing'
+    } finally {
+      await clearLegacy()
+    }
+  })
+
+  await check('a board or calendar view keeps its grouping, and a save can change or clear it', async () => {
+    const made = await saveView(admin, {
+      objectKey: 'deal', name: 'B05 grouped', expectedUpdatedAt: null, kind: 'board', columns: ['name'], filters: [], sorts: [], isShared: true, groupByKey: 'deal_type',
+    })
+    const groupOf = async (id: string) => (await listViews(admin, 'deal')).find((view) => view.id === id)?.groupByKey
+    expect((await groupOf(made.id!)) === 'deal_type', 'a board saved with a group did not read it back')
+
+    const renamed = await saveView(admin, {
+      objectKey: 'deal', id: made.id, name: 'B05 grouped', kind: 'board', columns: ['name', 'amount'], filters: [], sorts: [], expectedUpdatedAt: made.updatedAt,
+    })
+    expect((await groupOf(made.id!)) === 'deal_type', 'a save without groupByKey cleared the grouping')
+
+    await saveView(admin, {
+      objectKey: 'deal', id: made.id, name: 'B05 grouped', kind: 'board', columns: ['name', 'amount'], filters: [], sorts: [], expectedUpdatedAt: renamed.updatedAt, groupByKey: null,
+    })
+    expect((await groupOf(made.id!)) === null, 'a save with groupByKey null did not clear the grouping')
+
+    await deleteView(admin, made.id!)
+    return 'grouping is read back, kept when absent, and cleared on null'
   })
 
   await check('B8. the association rail searches, sorts and counts', async () => {
@@ -1626,7 +1984,7 @@ try {
   const [anyDeal] = await db
     .select({ id: s.deal.id })
     .from(s.deal)
-    .where(eq(s.deal.accountId, datasaur.id))
+    .where(and(eq(s.deal.accountId, datasaur.id), isNull(s.deal.deletedAt)))
     .limit(1)
   const dealId = anyDeal!.id
 

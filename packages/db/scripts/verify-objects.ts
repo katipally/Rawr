@@ -10,6 +10,7 @@ import { dropIndexSql, planFieldIndex, promoteFieldToHot } from '../src/dal/fiel
 import { readCalendar } from '../src/dal/calendar.ts'
 import { listViews } from '../src/dal/views.ts'
 import { createRecord, getRecord, listDeletedRecords, listRecords, restoreRecords, updateRecord, deleteRecord } from '../src/dal/records.ts'
+import { exportCsv } from '../src/dal/export.ts'
 import { forgetRegistry, getRegistry } from '../src/dal/registry.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import type { AccountContext } from '../src/dal/context.ts'
@@ -391,6 +392,32 @@ try {
     expect(n === 1, `${n} of the other object's values survived`)
     await deleteCustomObject(ctx, other.id)
     return 'one counted, one stripped, the other object untouched'
+  })
+
+  await check('a user property reads back as the member’s name in list, record and export, deactivated members included', async () => {
+    const [leaver] = await db.insert(s.userAccount).values({ email: `leaver-${Date.now()}@sandbox.test`, name: 'Departed Member' }).returning()
+    try {
+      await db.insert(s.membership).values({ accountId: ws!.id, userId: leaver!.id, state: 'deactivated', deactivatedAt: new Date() })
+      await createField(ctx, { objectKey: key, key: 'handled_by', label: 'Handled by', type: 'user', trackChanges: true })
+      forgetRegistry(ctx.accountId)
+      const handover = await createRecord(ctx, key, { name: 'Handover', handled_by: leaver!.id })
+      const mine = await createRecord(ctx, key, { name: 'Mine', handled_by: me!.id })
+      const columns = ['name', 'handled_by']
+      const listed = (await listRecords(ctx, { object: key, columns, limit: 50 })).rows
+      expect(listed.find((row) => row.id === handover.id)?.labels.handled_by === 'Departed Member', JSON.stringify(listed))
+      expect(listed.find((row) => row.id === mine.id)?.labels.handled_by === me!.name, JSON.stringify(listed))
+      const record = await getRecord(ctx, key, handover.id)
+      expect(record?.labels.handled_by === 'Departed Member', JSON.stringify(record?.labels))
+      let csv = ''
+      for await (const chunk of exportCsv(ctx, { objectKey: key, columns, filters: [], sorts: [] })) csv += chunk
+      expect(csv.includes('Departed Member') && csv.includes(me!.name), csv)
+      await updateRecord(ctx, key, mine.id, { handled_by: leaver!.id })
+      const timeline = await readTimeline(ctx, { entity: { entityType: key, entityId: mine.id }, types: ['field_change'], limit: 10 })
+      expect(timeline.rows.some((row) => row.subject?.includes('from ' + me!.name + ' to Departed Member')), JSON.stringify(timeline.rows))
+      return 'names in list, record, export and the timeline sentence'
+    } finally {
+      await db.delete(s.userAccount).where(eq(s.userAccount.id, leaver!.id))
+    }
   })
 
   await check('deleting the object takes its records', async () => {

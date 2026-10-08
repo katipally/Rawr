@@ -493,6 +493,11 @@ try {
     name: `Verify sequence ${stamp}`,
     settings: { subscriptionTypeId: type!.id as string },
   })
+  const [kept] = await owner`select description from sequence where id = ${created.id}`
+  check(kept?.description === 'Made by the verify suite.', 'saving settings keeps the description', kept?.description ?? 'null')
+  await saveSequence(sales, { id: created.id, name: `Verify sequence ${stamp}`, description: '  ' })
+  const [cleared] = await owner`select description from sequence where id = ${created.id}`
+  check(cleared?.description === null, 'a blank description clears it', String(cleared?.description))
   const fifth = await createRecord(admin, 'contact', {
     first_name: 'Record',
     last_name: 'OptOut',
@@ -593,6 +598,19 @@ try {
     'a contact whose address was cleared stops the enrollment by name',
     noAddress.claimed === null ? noAddress.reason.slice(0, 60) : '',
   )
+
+  const trashedCompany = await createRecord(sales, 'company', { name: `Trashed ${stamp}` })
+  await createRecord(sales, 'contact', {
+    first_name: 'In',
+    last_name: 'Trash',
+    email: `trash-${stamp}@partner1.example`,
+    company_id: trashedCompany.id,
+  })
+  await deleteRecord(sales, 'company', trashedCompany.id)
+  const inTrash = await refused(() =>
+    enroll(sales, { sequenceId: created.id, companyId: trashedCompany.id, mailboxId: box.id }),
+  )
+  check(inTrash?.includes('is in the trash') === true, 'enrolling a company in the trash says so', inTrash ?? 'accepted')
 
   // Depends on migration 0063: fails until it has been applied.
   const [stillOrphaned] = await owner`

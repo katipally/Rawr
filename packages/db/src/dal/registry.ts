@@ -4,7 +4,7 @@ import { readConditional, type Conditional } from '../registry/conditional.ts'
 import { TYPE_META, type FieldType, type Operator } from '../registry/types.ts'
 import type { ObjectKey } from '../registry/core.ts'
 import type { AccountContext } from './context.ts'
-import { withAccount, type Tx } from './index.ts'
+import { inOpenTransaction, mutate, withAccount, type AuditEntry, type Tx } from './index.ts'
 import { assertUsableFieldKey } from './fields.ts'
 
 export const OBJECT_KEYS = ['contact', 'company', 'deal'] as const
@@ -90,17 +90,33 @@ export const isCoreObject = (object: RegistryObject): object is RegistryObject &
 
 /** Per account, short lived. The registry changes only when an admin edits a
  *  field, which is rare, but a stale cache would show the wrong columns, so the
- *  entry is dropped on any field write rather than left to expire. */
-const cache = new Map<string, { at: number; registry: Registry }>()
+ *  entry is dropped on any field write rather than left to expire. Next loads this
+ *  package once per server layer, so the cache lives on globalThis: a module-level
+ *  Map would clear only the API's copy and leave the settings page on the old one. */
+type RegistryState = { cache: Map<string, { at: number; registry: Registry }>; generation: number }
+const shared = globalThis as { __rawrRegistry?: RegistryState }
+shared.__rawrRegistry ??= { cache: new Map(), generation: 0 }
+const state = shared.__rawrRegistry
 const TTL_MS = 30_000
 
-/** Bumped by every field or object write, which is what lets the per-transaction
- *  memo below expire without each of those writers having to know it exists. */
-let generation = 0
-
 export const forgetRegistry = (accountId: string): void => {
-  cache.delete(accountId)
-  generation += 1
+  state.cache.delete(accountId)
+  // Bumped by every field or object write, which is what lets the per-transaction
+  // memo below expire without each of those writers having to know it exists.
+  state.generation += 1
+}
+
+/** A field or object write, with the registry dropped only once it has committed.
+ *  Dropped inside the transaction, a reader could load the old registry from the
+ *  uncommitted database and keep it for the whole TTL. */
+export const mutateRegistry = async <T>(
+  ctx: AccountContext,
+  entity: string,
+  fn: (tx: Tx) => Promise<{ result: T; audit: AuditEntry }>,
+): Promise<T> => {
+  const result = await mutate(ctx, entity, fn)
+  forgetRegistry(ctx.accountId)
+  return result
 }
 
 const load = async (tx: Tx): Promise<Registry> => {
@@ -212,10 +228,13 @@ const load = async (tx: Tx): Promise<Registry> => {
 }
 
 export const getRegistry = async (ctx: AccountContext): Promise<Registry> => {
-  const hit = cache.get(ctx.accountId)
+  const hit = state.cache.get(ctx.accountId)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.registry
+  const loadedAt = state.generation
+  const joined = inOpenTransaction(ctx)
   const registry = await withAccount(ctx, load)
-  cache.set(ctx.accountId, { at: Date.now(), registry })
+  // Uncommitted, or loaded before a write that committed since, so it is not kept.
+  if (!joined && loadedAt === state.generation) state.cache.set(ctx.accountId, { at: Date.now(), registry })
   return registry
 }
 
@@ -232,9 +251,9 @@ const perTransaction = new WeakMap<Tx, { generation: number; registry: Registry 
 
 export const getRegistryIn = async (tx: Tx): Promise<Registry> => {
   const hit = perTransaction.get(tx)
-  if (hit && hit.generation === generation) return hit.registry
+  if (hit && hit.generation === state.generation) return hit.registry
   const registry = await load(tx)
-  perTransaction.set(tx, { generation, registry })
+  perTransaction.set(tx, { generation: state.generation, registry })
   return registry
 }
 

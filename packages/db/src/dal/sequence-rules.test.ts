@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { capReached, inWindow, mergeFields, nextSendAt, renderMergeFields, type SendWindow } from './sequence-rules.ts'
+import { capReached, inWindow, mergeFields, mergeTokenPattern, nextSendAt, renderMergeFields, type SendWindow } from './sequence-rules.ts'
 
 /** The arithmetic that decides when somebody's prospect gets an email. Getting it
  *  wrong sends at three in the morning, or on a Sunday, or twice. */
@@ -148,4 +148,21 @@ test('narrowing it keeps the wait between steps rather than pulling the send for
     nextSendAt({ after: sentAt, delayDays: 2, delayHours: 0, window: utcOffice }).toISOString(),
     '2026-09-14T09:00:00.000Z',
   )
+})
+
+test('a merge token matches its key with or without spaces and a fallback', () => {
+  const pattern = (name: string) => new RegExp(mergeTokenPattern(name), 'i')
+  assert.ok(pattern('title').test('Hi {{title}}'))
+  assert.ok(pattern('title').test('Hi {{ TITLE }}'))
+  assert.ok(pattern('title').test('Hi {{title|there}}'))
+})
+
+test('a merge token does not match a longer key, bare prose, or a dot-separated key', () => {
+  const pattern = (name: string) => new RegExp(mergeTokenPattern(name), 'i')
+  assert.ok(!pattern('title').test('Hi {{job_title}}'))
+  assert.ok(!pattern('title').test('Hi {{title_2}}'))
+  assert.ok(!pattern('title').test('the title is here'))
+  assert.ok(!pattern('title').test('"title"'))
+  assert.ok(!pattern('contact.title').test('{{contactXtitle}}'))
+  assert.ok(pattern('contact.title').test('{{contact.title}}'))
 })

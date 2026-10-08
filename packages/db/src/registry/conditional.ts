@@ -125,3 +125,30 @@ export const conditionalBlocker = (
   }
   return null
 }
+
+/** The loop a new rule would close, as the keys from its own property back to it,
+ *  or null. Two properties that show each other are never on the record, so the
+ *  save refuses the loop the same way it refuses a rule on the property itself.
+ *  `rules` holds every sibling's rule, and the one being saved replaces its own. */
+export const conditionalCycle = (
+  ownKey: string,
+  rule: Conditional,
+  rules: ReadonlyMap<string, Conditional | null>,
+): string[] | null => {
+  const seen = new Set<string>()
+  const visit = (key: string, path: string[]): string[] | null => {
+    if (key === ownKey) return path
+    if (seen.has(key)) return null
+    seen.add(key)
+    for (const condition of rules.get(key)?.conditions ?? []) {
+      const found = visit(condition.field, [...path, condition.field])
+      if (found) return found
+    }
+    return null
+  }
+  for (const condition of rule.conditions) {
+    const found = visit(condition.field, [ownKey, condition.field])
+    if (found) return found
+  }
+  return null
+}

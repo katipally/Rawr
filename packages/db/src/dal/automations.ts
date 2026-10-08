@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import type { AutomationRunState } from '../enums.ts'
 import { automation, automationRun } from '../schema/automation.ts'
 import type { ObjectKey } from '../registry/core.ts'
+import { TYPE_META } from '../registry/types.ts'
 import type { AccountContext } from './context.ts'
 import { sealSecret } from '../internal/crypto.ts'
 import { accountZone, isUuid, mutate, withAccount } from './index.ts'
@@ -73,10 +74,13 @@ export const ACTION_TYPES: ActionType[] = [
   'webhook',
 ]
 
-/** The three that write to a person rather than to a record. Only a contact has
+/** The two that write to a person rather than to a record. Only a contact has
  *  an inbox, so a rule watching a company or a deal is refused at save with the
  *  action named rather than failing on the first record that matches it. */
-export const CONTACT_ONLY_ACTIONS: ActionType[] = ['send_email', 'enroll_in_sequence']
+export const CONTACT_ONLY_ACTIONS: Partial<Record<ActionType, string>> = {
+  send_email: 'Send an email',
+  enroll_in_sequence: 'Enrol in a sequence',
+}
 
 export type AutomationAction = { type: ActionType; config: Record<string, unknown> }
 
@@ -307,8 +311,9 @@ const assertActionUsable = (
   step: { type: ActionType; config: Record<string, unknown> },
   objectKey: string,
 ): void => {
-  if (CONTACT_ONLY_ACTIONS.includes(step.type) && objectKey !== 'contact') {
-    throw new Error(`Only a contact can be written to, and this rule watches a ${objectKey}.`)
+  const contactOnly = CONTACT_ONLY_ACTIONS[step.type]
+  if (contactOnly && objectKey !== 'contact') {
+    throw new Error(`"${contactOnly}" only works on a contact, and this rule watches a ${objectKey}.`)
   }
   if (step.type === 'send_email' && !configText(step.config, 'templateId')) {
     throw new Error('That email step names no template.')
@@ -812,7 +817,12 @@ export const scanTargets = async (
       const target = configText(rule.triggerConfig, 'direction') === 'before'
         ? sql`${day}::date + ${days}::int`
         : sql`${day}::date - ${days}::int`
-      match = sql`(${fieldExpression(object, field)})::date = ${target}`
+      // A timestamptz cast to a date reads the session's TimeZone, so it is put on the UTC clock first.
+      const landed = fieldExpression(object, field)
+      const onDay = TYPE_META[field.type].jsonbCast === 'timestamptz'
+        ? sql`((${landed}) at time zone 'UTC')::date`
+        : sql`(${landed})::date`
+      match = sql`${onDay} = ${target}`
     } else {
       if (!isObjectKey(object.key)) return []
       const days = Math.max(1, Math.min(configInt(rule.triggerConfig, 'days') || 1, MAX_TRIGGER_DAYS))
@@ -820,7 +830,8 @@ export const scanTargets = async (
         (select max(l.occurred_at) from activity_link l
           where l.entity_type = ${object.key} and l.entity_id = ${alias}.id),
         ${alias}.created_at)`
-      match = sql`${last} < ${day}::date - ${days - 1}::int and ${last} >= ${day}::date - ${days}::int`
+      // Silence that began on the UTC day `days` ago, which is the crossing day.
+      match = sql`((${last}) at time zone 'UTC')::date = ${day}::date - ${days}::int`
     }
 
     const rows = await tx.execute<{ id: string }>(sql`

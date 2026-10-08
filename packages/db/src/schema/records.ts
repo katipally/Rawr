@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   integer,
@@ -86,6 +87,27 @@ export const company = pgTable(
     uniqueIndex('company_hubspot_id_key')
       .on(t.accountId, sql`(external_ids ->> 'hubspot')`)
       .where(sql`external_ids ->> 'hubspot' is not null and deleted_at is null`),
+  ],
+)
+
+/** A domain a merged-away company owned, kept so mail and people on it still reach
+ *  the company that now stands for it. Unique per account, as a primary domain is
+ *  among live companies; a merge refuses a domain another company already holds. */
+export const companyDomain = pgTable(
+  'company_domain',
+  {
+    id: pk(),
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => company.id, { onDelete: 'cascade' }),
+    domain: text('domain').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('company_domain_account_key').on(t.accountId, t.domain),
+    index('company_domain_company_idx').on(t.companyId),
+    check('company_domain_lower', sql`${t.domain} = lower(${t.domain})`),
   ],
 )
 

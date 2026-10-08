@@ -113,6 +113,12 @@ export const renderMergeFields = (template: string, values: Record<string, strin
   return { text, missing }
 }
 
+/** One `{{name}}` or `{{name|fallback}}` token, case-insensitively. The same string
+ *  is a JavaScript and a Postgres regular expression, so usage search can match in
+ *  SQL. The name is escaped, so `contact.title` cannot match `contactXtitle`. */
+export const mergeTokenPattern = (name: string): string =>
+  `\\{\\{\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(\\|[^}]*)?\\}\\}`
+
 /** Which merge fields a template uses, for the editor's preview and for refusing
  *  to activate a sequence whose fields nobody can fill. */
 export const mergeFields = (template: string): string[] => [

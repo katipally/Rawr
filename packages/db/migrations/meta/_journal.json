@@ -736,6 +736,27 @@
       "when": 1792860834179,
       "tag": "0103_a_replayed_oauth_code_or_refresh_token_revokes_its_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1792860900000,
+      "tag": "0104_a_merged_company_keeps_its_domains_as_aliases",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1792860960000,
+      "tag": "0105_a_dismissed_suggestion_stays_dismissed_until_the_value_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792861020000,
+      "tag": "0106_a_calendar_keeps_its_date_field_apart_from_a_board_grouping",
+      "breakpoints": true
     }
   ]
 }

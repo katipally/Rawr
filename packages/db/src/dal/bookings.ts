@@ -1132,7 +1132,7 @@ const resolveCompanyName = async (
 ): Promise<string | null> => {
   if (companyId) {
     const [row] = await tx.execute<{ name: string | null }>(
-      sql`select name from company where id = ${companyId} limit 1`,
+      sql`select name from company where id = ${companyId} and deleted_at is null limit 1`,
     )
     if (row?.name) return row.name
   }
@@ -1600,7 +1600,7 @@ export const readReminderTarget = async (
         from booking b
         join user_account u on u.id = b.host_user_id
         join booking_reminder r on r.id = ${input.reminderId}
-        left join company co on co.id = b.company_id
+        left join company co on co.id = b.company_id and co.deleted_at is null
        where b.id = ${input.bookingId}
          and b.state = 'confirmed'
          and r.booking_page_id = b.booking_page_id

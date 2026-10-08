@@ -21,7 +21,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.woodpecker.co/rest/v1'
 
-type WoodpeckerConfig = { campaignId?: number; webhookToken?: string }
+type WoodpeckerConfig = { webhookToken?: string }
 
 const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'woodpecker')

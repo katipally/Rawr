@@ -224,8 +224,9 @@ export const linksForContacts = async (tx: Tx, contactIds: string[]): Promise<En
   const list = sql.join(ids.map((id) => sql`${id}`), sql`, `)
 
   const companies = await tx.execute<{ company_id: string }>(sql`
-    select distinct company_id from contact
-     where id in (${list}) and company_id is not null`)
+    select distinct c.company_id from contact c
+      join company co on co.id = c.company_id and co.deleted_at is null
+     where c.id in (${list})`)
   for (const row of companies) links.push({ entityType: 'company', entityId: row.company_id })
 
   const deals = await tx.execute<{ deal_id: string }>(sql`

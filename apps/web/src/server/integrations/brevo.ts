@@ -6,6 +6,7 @@ import {
   once,
   readCredentials,
   readSegmentContactPage,
+  readWholeConfig,
   recordHealth,
   type MarketingEvent,
   type AccountContext,
@@ -28,7 +29,7 @@ import { attempt, json, type ConnectionTest } from './provider.ts'
 
 const API = 'https://api.brevo.com/v3'
 
-type BrevoConfig = { listId?: number; segmentId?: string; webhookToken?: string; subscriptionType?: string }
+type BrevoConfig = { listId?: number | string; segmentId?: string; webhookToken?: string; subscriptionType?: string }
 
 const credentials = async (ctx: AccountContext) => {
   const found = await readCredentials(ctx, 'brevo')
@@ -99,7 +100,7 @@ export const pushSegmentToBrevo = async (
   })
   // The list the integration was configured with, unless this push names another.
   // Resolved once here rather than at the return, where it was only ever cosmetic.
-  const listId = input.listId ?? config.listId ?? null
+  const listId = input.listId ?? readWholeConfig(config.listId, 'List id')
   if (listId === null) {
     throw new Error(
       'No Brevo list to push into. Give one here, or set a list id on the Brevo integration.',

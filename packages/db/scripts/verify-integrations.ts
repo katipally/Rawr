@@ -7,7 +7,9 @@ import { withAccount } from '../src/dal/index.ts'
 import {
   claimForReplay,
   claimInbound,
+  dismissSuggestion,
   INTEGRATION_KINDS,
+  type IntegrationKind,
   PERSONAL_KINDS,
   disconnectIntegration,
   listIntegrations,
@@ -216,6 +218,51 @@ try {
       saveIntegration(accountMember, { kind: 'apollo', secret: 'nope' }),
     ),
   )
+
+  await check('a bad config is refused with a sentence that names the field, and nothing is stored', async () => {
+    const before = (await readCredentials(admin, 'brevo'))?.config.listId
+    const reason = await refuses('a Brevo list id of abc', () =>
+      saveIntegration(accountAdmin, { kind: 'brevo', config: { listId: 'abc' } }),
+    )
+    expect(reason === 'List id has to be a whole number, such as 12.', `the refusal was: ${reason}`)
+    expect((await readCredentials(admin, 'brevo'))?.config.listId === before, 'the refused list id was stored anyway')
+    return reason
+  })
+
+  await check('a required key left blank or in the wrong shape is refused before anything is saved', async () => {
+    const cases: [IntegrationKind, Record<string, unknown>, string][] = [
+      ['clay', { webhookUrl: 'not a url' }, 'Table webhook URL has to be a full web address that starts with https://.'],
+      ['clay', { webhookUrl: 'https://api.clay.com/x', tier: 'enterprise' }, 'Plan tier has to be one of: launch, growth.'],
+      ['ga4', { measurementId: 'NOT-A-GA4-ID' }, 'Measurement id has to look like G-XXXXXXX.'],
+      ['zoom', { accountId: '', clientId: 'verify-client' }, 'Account id is required.'],
+      ['turnstile', {}, 'Site key is required.'],
+    ]
+    for (const [kind, config, sentence] of cases) {
+      const reason = await refuses(`${kind} with ${JSON.stringify(config)}`, () => saveIntegration(accountAdmin, { kind, config }))
+      expect(reason === sentence, `${kind}: ${reason}`)
+    }
+    return `${cases.length} refusals, each naming its field`
+  })
+
+  await check('a list id sent as text is stored as the number the integration reads', async () => {
+    await saveIntegration(accountAdmin, { kind: 'brevo', config: { listId: '43' } })
+    const creds = await readCredentials(admin, 'brevo')
+    expect(creds?.config.listId === 43, `stored as ${JSON.stringify(creds?.config.listId)}`)
+    return 'a string from the form becomes the number Brevo takes'
+  })
+
+  await check('an empty secret clears the stored key and keeps the config', async () => {
+    const config = { accountId: 'verify-acct', clientId: 'verify-client' }
+    await saveIntegration(accountAdmin, { kind: 'zoom', config, secret: `zoom-${stamp}` })
+    await saveIntegration(accountAdmin, { kind: 'zoom', config, secret: '' })
+    const creds = await readCredentials(admin, 'zoom')
+    expect(!creds?.secret, 'the key is still stored after it was cleared')
+    expect(creds?.config.accountId === 'verify-acct', 'the config was lost with the key')
+    const row = (await listIntegrations(admin)).find((found) => found.kind === 'zoom')
+    expect(row?.hasSecret === false, 'the list still reports a stored key')
+    await disconnectIntegration(accountAdmin, 'zoom')
+    return 'the key is gone, the account id stays'
+  })
 
   await check('an account admin who is not a super admin can connect and disconnect', async () => {
     const hubOnly: AccountContext = { ...accountAdmin, isSuperAdmin: false }
@@ -540,7 +587,7 @@ try {
   console.log('-- woodpecker, whose events are its own ------------------------')
 
   await check('saving Woodpecker mints a webhook token, and keeps it', async () => {
-    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: { campaignId: 101 }, secret: `wp-${stamp}` })
+    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: {}, secret: `wp-${stamp}` })
     const [first] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
            where account_id = ${datasaur.id} and kind = 'woodpecker'`,
@@ -548,7 +595,7 @@ try {
     expect(typeof first?.token === 'string' && first.token.length >= 24, 'no token was minted')
 
     // A second save must not roll it: the URL is already pasted at Woodpecker.
-    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: { campaignId: 102 } })
+    await saveIntegration(accountAdmin, { kind: 'woodpecker', config: {} })
     const [second] = await db.execute<{ token: string | null }>(
       sql`select config ->> 'webhookToken' as token from integration
            where account_id = ${datasaur.id} and kind = 'woodpecker'`,
@@ -802,6 +849,34 @@ try {
     })
     expect(result.written.length === 0, 'enrichment overwrote what somebody typed into a form')
     return 'form, import and booking all count as a person'
+  })
+
+  await check('a dismissed suggestion stays dismissed until the provider gives a different value', async () => {
+    const created = await createRecord(admin, 'contact', {
+      first_name: 'Verify',
+      last_name: 'Dismiss',
+      email: `verify-dismiss-${stamp}@partner2.example`,
+      title: 'Typed By A Person',
+    })
+    const offer = (value: string) =>
+      applyEnrichment(admin, { objectKey: 'contact', entityId: created.id, provider: 'verify', values: { title: value } })
+    const held = async () => (await listSuggestions(admin, 'contact', created.id)).find((row) => row.fieldKey === 'title')
+
+    expect((await offer('Provider One')).suggested.includes('title'), 'the first answer was not suggested')
+    await dismissSuggestion(admin, (await held())!.id)
+    expect(!(await held()), 'the dismissal left the suggestion on the record')
+
+    const again = await offer('Provider One')
+    expect(!again.suggested.includes('title') && !(await held()), 'the same provider value came back after dismissal')
+
+    expect((await offer('Provider Two')).suggested.includes('title'), 'a changed provider value was not suggested')
+    await dismissSuggestion(admin, (await held())!.id)
+    expect((await offer('Provider Two')).suggested.includes('title') === false, 'the second dismissal did not hold')
+    expect((await offer('Provider One')).suggested.includes('title'), 'going back to an earlier value was still held')
+
+    const record = await getRecord(admin, 'contact', created.id)
+    expect(record?.values.title === 'Typed By A Person', `the title is now ${String(record?.values.title)}`)
+    return 'held while unchanged, released when the provider changes, and never written over a person'
   })
 
   console.log('')
@@ -1637,12 +1712,18 @@ try {
   // happened to have checks, so a provider added to the catalogue is covered the
   // day it is added. O(kinds) round trips, one connect and one disconnect each.
   const shared = INTEGRATION_KINDS.filter((kind) => !PERSONAL_KINDS.has(kind))
+  const REQUIRED_PROBE: Partial<Record<IntegrationKind, Record<string, string>>> = {
+    clay: { webhookUrl: 'https://hooks.clay.example/v3/probe' },
+    ga4: { measurementId: 'G-PROBE01' },
+    zoom: { accountId: 'probe-account', clientId: 'probe-client' },
+    turnstile: { siteKey: 'probe-site' },
+  }
   for (const kind of shared) {
     await check(`${kind} connects, records health both ways and disconnects clean`, async () => {
       // From nothing, so the row carries no earlier success: a kind an earlier
       // section already proved would otherwise start this one green.
       await disconnectIntegration(accountAdmin, kind).catch(() => undefined)
-      await saveIntegration(accountAdmin, { kind, secret: `verify-${kind}-${stamp}`, config: { probe: stamp } })
+      await saveIntegration(accountAdmin, { kind, secret: `verify-${kind}-${stamp}`, config: { probe: stamp, ...REQUIRED_PROBE[kind] } })
 
       const connected = (await listIntegrations(accountAdmin)).find((row) => row.kind === kind)
       expect(connected?.hasSecret === true, `${kind} did not report holding a secret`)
@@ -1684,7 +1765,7 @@ try {
     process.env.RAWR_DEV_INTEGRATIONS = '1'
     try {
       await disconnectIntegration(accountAdmin, 'clay').catch(() => undefined)
-      await saveIntegration(accountAdmin, { kind: 'clay', config: { tier: 'growth' } })
+      await saveIntegration(accountAdmin, { kind: 'clay', config: { tier: 'growth', ...REQUIRED_PROBE.clay } })
 
       const saved = (await listIntegrations(accountAdmin)).find((row) => row.kind === 'clay')
       expect(saved?.hasSecret === true, 'a development connect stored no credential at all')

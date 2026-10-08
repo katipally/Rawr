@@ -31,27 +31,39 @@ import {
   type RegistryField,
   type RegistryObject,
 } from './registry.ts'
-import { coerce, ValueError } from './values.ts'
+import { coerce, formatForCsv, ValueError } from './values.ts'
 
 export type RecordValues = Record<string, unknown>
 
+type LabelTarget = { table: string; label: string; liveOnly?: true }
+
+/** A user field holds a member id, whatever the field is called, so its type alone
+ *  decides the target. A member who was deactivated keeps their name. */
+const USER_TARGET: LabelTarget = { table: 'user_account', label: 'name' }
+
 /** A relation field points at exactly one table, and its label comes from exactly
- *  one column. Kept here rather than in the registry because these five are core
+ *  one column. Kept here rather than in the registry because these four are core
  *  fields on core objects; a custom relation would need a target on field_def. */
-const RELATION_TARGETS: Record<string, { table: string; label: string }> = {
-  owner_id: { table: 'user_account', label: 'name' },
+const RELATION_TARGETS: Record<string, LabelTarget> = {
   // Many companies in the real portal have a blank name, so the domain stands in
-  // rather than leaving a row labelled with nothing.
-  company_id: { table: 'company', label: `coalesce("name", "domain")` },
+  // rather than leaving a row labelled with nothing. A trashed company keeps its id
+  // on the records that point at it, and its label is withheld until it is restored.
+  company_id: { table: 'company', label: `coalesce("name", "domain")`, liveOnly: true },
   stage_id: { table: 'pipeline_stage', label: 'name' },
   pipeline_id: { table: 'pipeline', label: 'name' },
   lifecycle_stage_id: { table: 'lifecycle_stage', label: 'name' },
 }
 
+const labelTargetOf = (field: RegistryField): LabelTarget | undefined =>
+  field.type === 'user' ? USER_TARGET : RELATION_TARGETS[field.key]
+
 export class ConflictError extends Error {
   readonly currentUpdatedAt: Date
-  constructor(currentUpdatedAt: Date) {
-    super('Someone else changed this record while you were editing it. Reload to see their change, then re-apply yours.')
+  constructor(
+    currentUpdatedAt: Date,
+    message = 'Someone else changed this record while you were editing it. Reload to see their change, then re-apply yours.',
+  ) {
+    super(message)
     this.name = 'ConflictError'
     this.currentUpdatedAt = currentUpdatedAt
   }
@@ -142,6 +154,12 @@ const selectExpression = (object: RegistryObject, field: RegistryField): SQL =>
 const NOT_DELETED = (object: RegistryObject): SQL =>
   sql`${sql.raw(`"${object.key}"."deleted_at" is null`)} and ${rowsOf(object)}`
 
+const liveOnly = (target: { liveOnly?: true } | undefined): SQL => (target?.liveOnly ? sql` and "deleted_at" is null` : sql``)
+
+// The label expression comes from the target table above, never from a request.
+const labelSql = (target: LabelTarget): SQL =>
+  sql.raw(target.label.includes('(') ? target.label : `"${target.label}"`)
+
 /** Resolves relation and user ids to the names a person reads, one query per
  *  referenced table for the whole page rather than one per row. */
 const resolveLabels = async (
@@ -149,31 +167,38 @@ const resolveLabels = async (
   fields: RegistryField[],
   rows: RecordValues[],
 ): Promise<Map<string, string>> => {
-  const wanted = new Map<string, Set<string>>()
+  const wanted = new Map<string, { target: LabelTarget; ids: Set<string> }>()
   for (const field of fields) {
-    const target = RELATION_TARGETS[field.key]
+    const target = labelTargetOf(field)
     if (!target) continue
     for (const row of rows) {
       const id = row[field.key]
       if (typeof id !== 'string') continue
-      const bucket = wanted.get(target.table) ?? new Set<string>()
-      bucket.add(id)
+      const bucket = wanted.get(target.table) ?? { target, ids: new Set<string>() }
+      bucket.ids.add(id)
       wanted.set(target.table, bucket)
     }
   }
 
   const labels = new Map<string, string>()
-  for (const [table, ids] of wanted) {
-    if (ids.size === 0) continue
-    // The label expression comes from the table above, never from a request.
-    const column = Object.values(RELATION_TARGETS).find((t) => t.table === table)?.label ?? 'name'
-    const expression = column.includes('(') ? column : `"${column}"`
+  for (const { target, ids } of wanted.values()) {
     const found = await tx.execute<{ id: string; label: string | null }>(
-      sql`select id, ${sql.raw(expression)} as label from ${sql.raw(`"${table}"`)} where id in (${sql.join([...ids].map((id) => sql`${id}`), sql`, `)})`,
+      sql`select id, ${labelSql(target)} as label from ${sql.raw(`"${target.table}"`)} where id in (${sql.join([...ids].map((id) => sql`${id}`), sql`, `)})${liveOnly(target)}`,
     )
     for (const row of found) labels.set(row.id, row.label ?? '')
   }
   return labels
+}
+
+/** A relation into the trash reads as empty, the same as one never set. The id stays
+ *  stored on the record, so restoring the target brings the link back. */
+const clearTrashedTargets = (fields: RegistryField[], row: RecordValues, labels: Map<string, string>): RecordValues => {
+  const readable = { ...row }
+  for (const field of fields) {
+    const id = row[field.key]
+    if (labelTargetOf(field)?.liveOnly && typeof id === 'string' && !labels.has(id)) readable[field.key] = null
+  }
+  return readable
 }
 
 export type ListInput = {
@@ -294,17 +319,20 @@ export const listRecords = async (
               id: String(page.at(-1)!.id),
             }
           : null,
-      rows: page.map(({ __version, ...row }) => ({
-        id: String(row.id),
-        displayName: displayName(object, row),
-        values: row,
-        version: asDate(__version).toISOString(),
-        labels: Object.fromEntries(
-          columns
-            .filter((field) => RELATION_TARGETS[field.key] && typeof row[field.key] === 'string')
-            .map((field) => [field.key, labels.get(String(row[field.key])) ?? '']),
-        ),
-      })),
+      rows: page.map(({ __version, ...stored }) => {
+        const row = clearTrashedTargets(columns, stored, labels)
+        return {
+          id: String(row.id),
+          displayName: displayName(object, row),
+          values: row,
+          version: asDate(__version).toISOString(),
+          labels: Object.fromEntries(
+            columns
+              .filter((field) => labelTargetOf(field) && typeof row[field.key] === 'string')
+              .map((field) => [field.key, labels.get(String(row[field.key])) ?? '']),
+          ),
+        }
+      }),
     }
   }
 }
@@ -366,18 +394,19 @@ export const getRecord = async (
 
     if (!row) return null
     const labels = await resolveLabels(tx, fields, [row])
+    const values = clearTrashedTargets(fields, row, labels)
 
     return {
       id: String(row.id),
       objectKey: object.key,
       displayName: displayName(object, row),
-      values: row,
+      values,
       updatedAt: asDate(row.updated_at),
       createdAt: asDate(row.created_at),
       labels: Object.fromEntries(
         fields
-          .filter((field) => RELATION_TARGETS[field.key] && typeof row[field.key] === 'string')
-          .map((field) => [field.key, labels.get(String(row[field.key])) ?? '']),
+          .filter((field) => labelTargetOf(field) && typeof values[field.key] === 'string')
+          .map((field) => [field.key, labels.get(String(values[field.key])) ?? '']),
       ),
     }
   })
@@ -446,7 +475,31 @@ const findDuplicate = async (
        limit 1`)
     if (found) return { id: found.id, what: check.what }
   }
+  // A domain a merge kept as an alias belongs to that company as much as a primary does.
+  if (object.key === 'company' && typeof columns.domain === 'string') {
+    const [alias] = await tx.execute<{ company_id: string }>(sql`
+      select company_id from company_domain
+       where domain = ${columns.domain}
+         ${excludeId ? sql`and company_id <> ${excludeId}` : sql``}
+       limit 1`)
+    if (alias) return { id: alias.company_id, what: `The domain ${columns.domain}` }
+  }
   return null
+}
+
+/** The live company a domain belongs to: its primary domain, or an alias a merge kept.
+ *  A primary wins when both would match, so a company created on a domain is not
+ *  shadowed by an alias that somebody else's merge left behind. */
+export const companyByDomainQuery = (domain: string): SQL => sql`
+  select c.id from company c
+   where c.deleted_at is null
+     and (c.domain = ${domain} or exists (select 1 from company_domain d where d.company_id = c.id and d.domain = ${domain}))
+   order by (c.domain = ${domain}) desc
+   limit 1`
+
+export const companyForDomain = async (tx: Tx, domain: string): Promise<string | null> => {
+  const [row] = await tx.execute<{ id: string }>(companyByDomainQuery(domain))
+  return row?.id ?? null
 }
 
 /** The domains this transaction has already placed. An import writes two hundred
@@ -475,12 +528,10 @@ const autoAssociateCompany = async (
   const remembered = placed.get(domain)
   if (remembered) return { companyId: remembered, created: false }
 
-  const [existing] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
+  const existing = await companyForDomain(tx, domain)
   if (existing) {
-    placed.set(domain, existing.id)
-    return { companyId: existing.id, created: false }
+    placed.set(domain, existing)
+    return { companyId: existing, created: false }
   }
 
   const [created] = await tx.execute<{ id: string }>(sql`
@@ -495,11 +546,9 @@ const autoAssociateCompany = async (
   }
 
   // Lost a race with a concurrent insert; the winner's row is the answer.
-  const [raced] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
-  if (raced) placed.set(domain, raced.id)
-  return raced ? { companyId: raced.id, created: false } : null
+  const raced = await companyForDomain(tx, domain)
+  if (raced) placed.set(domain, raced)
+  return raced ? { companyId: raced, created: false } : null
 }
 
 /** A deal's stage and pipeline are one fact told twice, and the stage is the
@@ -560,6 +609,10 @@ export type CreateResult = {
  *  at a time from the record itself. Every other path asks. */
 export type WriteOptions = {
   enrich?: boolean
+  /** The value each field held when the caller read it. When given, the write is
+   *  refused only if one of these fields has changed since, so an edit to one field
+   *  never conflicts with a change to another. Replaces the record stamp check. */
+  expectedValues?: RecordValues | undefined
   /** When the record really began, for a migration that carries it. Create
    *  date is Rawr's to keep everywhere else, so only a new record takes one. */
   createdAt?: Date
@@ -758,11 +811,16 @@ const companiesForDomains = async (
     insert into company (account_id, name, domain)
     select ${ctx.accountId}::uuid, d.name, d.domain
       from ${recordset(wanted, [['domain', 'text'], ['name', 'text']], 'd')}
+     where not exists (select 1 from company_domain x where x.domain = d.domain)
     on conflict do nothing`)
   const rows = await tx.execute<{ id: string; domain: string }>(sql`
     select id, domain from company
      where deleted_at is null
-       and domain in (select jsonb_array_elements_text(${JSON.stringify(domains)}::jsonb))`)
+       and domain in (select jsonb_array_elements_text(${JSON.stringify(domains)}::jsonb))
+    union all
+    select d.company_id as id, d.domain from company_domain d
+      join company c on c.id = d.company_id and c.deleted_at is null
+     where d.domain in (select jsonb_array_elements_text(${JSON.stringify(domains)}::jsonb))`)
   return new Map(rows.map((row) => [row.domain, row.id]))
 }
 
@@ -1095,7 +1153,21 @@ const updateRecordIn = async (
 
   const before = await readForWrite(tx, object, id, false, true)
   if (!before) throw new Error('That record no longer exists.')
-  if (expectedUpdatedAt && before.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
+  if (options.expectedValues) {
+    const expected = options.expectedValues
+    const expectedFields = Object.keys(expected).map((key) => fieldOrThrow(object, key))
+    // Compared as the editor read it: a trashed target was shown as empty, so it is empty here too.
+    const seen = clearTrashedTargets(expectedFields, before, await resolveLabels(tx, expectedFields, [before]))
+    const changed = Object.keys(expected).find((key) => JSON.stringify(seen[key] ?? null) !== JSON.stringify(expected[key] ?? null))
+    if (changed) {
+      const field = fieldOrThrow(object, changed)
+      const now = formatForCsv(field.type, seen[changed]) || 'empty'
+      throw new ConflictError(
+        before.updated_at,
+        `${field.label} was changed to “${now}” while you were editing it. Reload to see it, then apply your change again.`,
+      )
+    }
+  } else if (expectedUpdatedAt && before.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
     throw new ConflictError(before.updated_at)
   }
 
@@ -1300,8 +1372,8 @@ const writeChangeActivities = async (
     if (sameValue(previous, next)) continue
 
     const [fromLabel, toLabel] = await Promise.all([
-      labelOf(tx, key, previous),
-      labelOf(tx, key, next),
+      labelOf(tx, field, previous),
+      labelOf(tx, field, next),
     ])
 
     const type =
@@ -1356,15 +1428,14 @@ const writeChangeActivities = async (
   return { stageChange, lifecycleChanged }
 }
 
-const labelOf = async (tx: Tx, fieldKey: string, value: unknown): Promise<string> => {
+const labelOf = async (tx: Tx, field: RegistryField, value: unknown): Promise<string> => {
   if (value === null || value === undefined || value === '') return ''
-  const target = RELATION_TARGETS[fieldKey]
+  const target = labelTargetOf(field)
   if (!target || typeof value !== 'string') {
     return value instanceof Date ? value.toISOString().slice(0, 10) : String(value)
   }
-  const expression = target.label.includes('(') ? target.label : `"${target.label}"`
   const [row] = await tx.execute<{ label: string | null }>(
-    sql`select ${sql.raw(expression)} as label from ${sql.raw(`"${target.table}"`)} where id = ${value} limit 1`,
+    sql`select ${labelSql(target)} as label from ${sql.raw(`"${target.table}"`)} where id = ${value}${liveOnly(target)} limit 1`,
   )
   return row?.label ?? ''
 }
@@ -1703,6 +1774,10 @@ export const mergeRecords = async (
       update ${tableFor(object)}
          set ${sql.join(assignments, sql`, `)}
        where id = ${input.survivorId}`)
+    if (object.key === 'company') {
+      const primary = 'domain' in chosen ? chosen.domain : survivor.domain
+      await keepDomainAliases(tx, ctx, input.survivorId, input.absorbedId, primary, [survivor.domain, absorbed.domain])
+    }
 
     // Merging moves activities, associations and browsing history, none of
     // which a custom object has yet. Refused with a sentence rather than
@@ -1738,6 +1813,41 @@ export const mergeRecords = async (
 
     return { id: input.survivorId, activitiesMoved }
   })
+}
+
+/** A merged company's domains keep answering for the survivor. The one that is not
+ *  the primary becomes an alias, and any alias the absorbed company held moves over.
+ *  A domain another company already holds refuses the whole merge, by the throw. */
+const keepDomainAliases = async (
+  tx: Tx,
+  ctx: AccountContext,
+  survivorId: string,
+  absorbedId: string,
+  primary: unknown,
+  domains: unknown[],
+): Promise<void> => {
+  await tx.execute(sql`
+    update company_domain set company_id = ${survivorId}
+     where company_id = ${absorbedId} and domain is distinct from ${primary}`)
+  await tx.execute(sql`delete from company_domain where company_id = ${absorbedId}`)
+  for (const value of new Set(domains)) {
+    if (typeof value !== 'string' || value === primary) continue
+    const domain = value.toLowerCase()
+    const [holder] = await tx.execute<{ name: string }>(sql`
+      select coalesce(c.name, c.domain) as name from company c
+       where c.domain = ${domain} and c.deleted_at is null and c.id <> ${survivorId}
+      union all
+      select coalesce(c.name, c.domain) as name from company_domain d
+        join company c on c.id = d.company_id
+       where d.domain = ${domain} and d.company_id <> ${survivorId}
+       limit 1`)
+    if (holder) {
+      throw new Error(`${domain} already belongs to ${holder.name}, so this company cannot keep it as an alias. Remove it from that company first.`)
+    }
+    await tx.execute(sql`
+      insert into company_domain (account_id, company_id, domain) values (${ctx.accountId}, ${survivorId}, ${domain})
+      on conflict do nothing`)
+  }
 }
 
 /** Associations, tasks, subscriptions and segment memberships follow the survivor.

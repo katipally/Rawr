@@ -39,6 +39,7 @@ type Search = {
   error?: string
   cols?: string
   limit?: string
+  pipeline?: string
   /** The + in the top bar and "Add view" on the tab bar link here rather than
    *  carrying their own dialogs. */
   new?: string
@@ -169,6 +170,7 @@ const ListPage = async ({
     ...(search.page ? { page: search.page } : {}),
     ...(search.cols ? { cols: search.cols } : {}),
     ...(search.limit ? { limit: search.limit } : {}),
+    ...(search.pipeline ? { pipeline: search.pipeline } : {}),
   }
 
   const exportHref = exportCsvPath(account, {

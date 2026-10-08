@@ -53,7 +53,7 @@ const QUERIES: Record<ObjectKey, (needle: string) => SQL> = {
            extensions.similarity(coalesce(d.name, ''), ${needle}) as score
       from deal d
       join pipeline_stage s on s.id = d.stage_id
-      left join company c on c.id = d.company_id
+      left join company c on c.id = d.company_id and c.deleted_at is null
      where d.deleted_at is null`,
 
   contact: (needle) => sql`
@@ -65,7 +65,7 @@ const QUERIES: Record<ObjectKey, (needle: string) => SQL> = {
              extensions.similarity(coalesce(k.email, ''), ${needle})
            ) as score
       from contact k
-      left join company c on c.id = k.company_id
+      left join company c on c.id = k.company_id and c.deleted_at is null
      where k.deleted_at is null`,
 
   company: (needle) => sql`

@@ -8,7 +8,7 @@ import { useNavigation } from '~/components/navigation.tsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FILTERS_DOCK } from '~/lib/docks.ts'
-import { encodeFilters, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { encodeFilters, layoutParams, objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUi, useUiReady } from '~/lib/store/ui.ts'
 import { typingInto } from '~/lib/typing-into.ts'
@@ -46,6 +46,12 @@ export type ListToolbarProps = {
   /** Every field the object has, for the column chooser. Ordered as the registry
    *  orders them, which is the order a person sees on the record page. */
   allColumns: { key: string; label: string }[]
+  /** Board only: the grouping on screen, which a save stores. Null is stage. Left
+   *  out by every other layout, so a save keeps the stored one. */
+  groupByKey?: string | null
+  /** Calendar only: the place-on field on screen, which a save stores. Left out by
+   *  every other layout, so a save keeps the stored one. */
+  calendarKey?: string | null
   /** Sits at the right of the row, before the column and view controls: the
    *  board's pipeline picker. */
   trailing?: ReactNode
@@ -80,6 +86,8 @@ export const ListToolbar = ({
   openView = false,
   viewLabel,
   allColumns,
+  groupByKey,
+  calendarKey,
   trailing,
 }: ListToolbarProps) => {
   const { navigate } = useNavigation()
@@ -183,7 +191,10 @@ export const ListToolbar = ({
         columns: nextColumns,
         filters: filters as never,
         sorts,
-        isShared: shared,
+        // Sharing is chosen when a view is created. Updating one never changes it.
+        isShared: into ? undefined : shared,
+        groupByKey,
+        calendarKey,
         expectedUpdatedAt: into ? viewVersion : null,
       })
       setSavePicked(false)
@@ -209,6 +220,8 @@ export const ListToolbar = ({
     // Drop ?view=new so a refresh, or a step back, does not reopen it.
     if (askedForView) navigate(objectView(account, object, view, kind, params))
   }
+
+  const placement = groupByKey !== undefined ? ' and grouping' : calendarKey !== undefined ? ' and date field' : ''
 
   const labelOf = (key: string): string =>
     allColumns.find((field) => field.key === key)?.label ?? key
@@ -344,7 +357,7 @@ export const ListToolbar = ({
                 return (
                   <Link
                     key={option}
-                    href={objectView(account, object, view, option, { ...params, page: undefined })}
+                    href={objectView(account, object, view, option, layoutParams(params))}
                     aria-current={kind === option ? 'true' : undefined}
                     aria-label={KIND_LABEL[option]}
                     title={KIND_LABEL[option]}
@@ -462,8 +475,8 @@ export const ListToolbar = ({
           {viewId ? (
             <div className="flex flex-col gap-2 border-b border-divider pb-4">
               <p className="text-secondary">
-                Overwrite “{viewLabel}” with the columns, filters and sort on screen. Everyone
-                who uses that tab sees the change.
+                Overwrite “{viewLabel}” with the columns, filters, sort{placement} on screen.
+                Everyone who uses that tab sees the change.
               </p>
               <div>
                 <Button busy={saving} onClick={() => void writeView(viewId, viewLabel)}>

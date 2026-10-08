@@ -112,7 +112,7 @@ const CONTACT_RULES: { rule: DuplicateRule; query: (limit: number) => ReturnType
       select 'same_name_and_company' as rule,
              ${CONTACT_NAME} || ' at ' || coalesce(co.name, 'no company') as because,
              min(c.id::text) as a_id, max(c.id::text) as b_id
-        from contact c left join company co on co.id = c.company_id
+        from contact c left join company co on co.id = c.company_id and co.deleted_at is null
        where c.deleted_at is null
          and ${CONTACT_NAME} <> ''
          and c.company_id is not null

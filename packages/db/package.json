@@ -10,6 +10,7 @@
     "./registry": "./src/registry/index.ts",
     "./forms": "./src/dal/form-schema.ts",
     "./templates": "./src/dal/templates.ts",
+    "./slots": "./src/dal/slots.ts",
     "./sequence-rules": "./src/dal/sequence-rules.ts"
   },
   "scripts": {

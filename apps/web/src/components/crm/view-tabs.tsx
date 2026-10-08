@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { useNavigation } from '~/components/navigation.tsx'
-import { objectView, type ListParams, type ViewKind } from '~/lib/links.ts'
+import { objectView, tabParams, type ListParams, type ViewKind } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 
 const TAB_ICON: Record<ViewTab['kind'], typeof Table2> = { table: Table2, board: Columns3, calendar: CalendarDays }
@@ -28,17 +28,8 @@ export type ViewTabsProps = {
   views: ViewTab[]
   current: string
   currentKind: ViewKind
-  /** Carried onto every tab so switching views keeps the search a person typed. */
   params: ListParams
   canWrite: boolean
-}
-
-/** Switching tabs starts the list again, so the page number is dropped rather
- *  than carried onto a different result set. */
-const withoutPage = (params: ListParams): ListParams => {
-  const next = { ...params }
-  delete next.page
-  return next
 }
 
 /** HubSpot's view tabs. The slug is the address, so a tab is a link, not state:
@@ -64,7 +55,7 @@ export const ViewTabs = ({
   const [dragging, setDragging] = useState<string | null>(null)
 
   const href = (view: { slug: string }, kind: ViewKind = currentKind): string =>
-    objectView(account, object, view.slug, kind, withoutPage(params))
+    objectView(account, object, view.slug, kind, tabParams(params))
 
   // The open tab always shows, even when it is not pinned, so a link into an
   // unpinned view does not land on a bar that has no tab for where you are.
@@ -304,7 +295,7 @@ export const ViewTabs = ({
                   setDeleting(null)
                   // The records are still there; only the arrangement went. Land
                   // on the tab every link falls back to rather than on a dead one.
-                  navigate(objectView(account, object, 'all', currentKind, withoutPage(params)))
+                  navigate(objectView(account, object, 'all', currentKind, tabParams(params)))
                 })
               }}
             >

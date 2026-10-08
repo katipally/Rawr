@@ -20,9 +20,11 @@ import {
   storeBody,
   TEXT_LIMIT_BYTES,
   updateMailboxCursor,
+  attachContactToMail,
   threadsForContact,
   type IncomingMessage,
 } from '../src/dal/messages.ts'
+import { createRecord, mergeRecords } from '../src/dal/records.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
 /** What B3 added: bodies kept here rather than fetched from somebody's mailbox,
@@ -331,13 +333,87 @@ try {
   await recordMailboxFailure(sales, brokenBox.id, 'Access withdrawn', true)
   check((await standing()).state === 'revoked', 'a withdrawal is still stopped, not retried')
 
+  console.log('-- a re-created contact takes its mail -------------------------------')
+
+  const returning = `returning-${stamp}@partner2.example`
+  const original = await createRecord(sales, 'contact', { first_name: 'Old', last_name: 'Contact', email: returning })
+  const returningBox = await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-returning-${stamp}`,
+    refreshToken: `refresh-returning-${stamp}`,
+    accessTokenExpiresAt: null,
+  })
+  const mailed = await ingestMessage(sales, {
+    incoming: incoming({
+      providerThreadId: `mail-r-${stamp}`,
+      providerMessageId: `mail-r-${stamp}`,
+      from: returning,
+      internetMessageId: `<mail-r-${stamp}@partner2.example>`,
+    }),
+    ownerEmail: salesUser.email,
+    mailboxId: returningBox.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  check(mailed.stored && mailed.contactIds.includes(original.id), 'mail from a contact is stored on that contact')
+  await owner`update contact set deleted_at = now() where id = ${original.id}`
+  const replacement = await createRecord(sales, 'contact', { first_name: 'New', last_name: 'Contact', email: returning })
+  const attached = await attachContactToMail(sales, replacement.id)
+  const [rows] = await owner<{ total: number; pointing: number }[]>`
+    select count(*)::int as total, count(*) filter (where contact_id = ${replacement.id})::int as pointing
+      from message_participant where address = ${returning}`
+  check(attached.messages === 1, 'the re-created contact gets the one message it was sent', `${attached.messages} messages`)
+  check(rows?.total === 1 && rows.pointing === 1, 'the address row now points at the new contact', `${rows?.pointing ?? 0} of ${rows?.total ?? 0}`)
+
+  console.log('-- mail finds a company by its alias ----------------------------------')
+
+  const makeCompany = (name: string, domain: string) => createRecord(sales, 'company', { name: `${name} ${stamp}`, domain })
+  const filedUnder = async (from: string, tag: string): Promise<string | null> => {
+    const result = await ingestMessage(sales, {
+      incoming: incoming({
+        providerThreadId: `mail-${tag}-${stamp}`,
+        providerMessageId: `mail-${tag}-${stamp}`,
+        from,
+        internetMessageId: `<mail-${tag}-${stamp}@mail.example>`,
+      }),
+      ownerEmail: salesUser.email,
+      mailboxId: returningBox.id,
+      internalDomain,
+      blocked: new Set(),
+    })
+    if (!result.stored) return null
+    const [row] = await owner<{ company_id: string | null }[]>`select company_id from contact where email = ${from}`
+    return row?.company_id ?? null
+  }
+
+  const survivor = await makeCompany('Mail merge', `mergekept${stamp}.example`)
+  const absorbed = await makeCompany('Mail merge absorbed', `mergegone${stamp}.example`)
+  await mergeRecords(sales, { objectKey: 'company', survivorId: survivor.id, absorbedId: absorbed.id, picks: {} })
+  const aliasFiled = await filedUnder(`old.${stamp}@mergegone${stamp}.example`, 'alias')
+  check(aliasFiled === survivor.id, 'mail from an absorbed company’s old domain is filed under the survivor', `${aliasFiled ?? 'nothing'}`)
+
+  const trashed = await makeCompany('Mail trashed', `mailtrash${stamp}.example`)
+  await owner`update company set deleted_at = now() where id = ${trashed.id}`
+  const trashedFiled = await filedUnder(`gone.${stamp}@mailtrash${stamp}.example`, 'trashed')
+  check(trashedFiled === null, 'mail from a trashed company’s domain is not filed under it', `${trashedFiled ?? 'nothing'}`)
+
+  const primary = await makeCompany('Mail primary', `mailwon${stamp}.example`)
+  const holder = await makeCompany('Mail alias holder', `mailheld${stamp}.example`)
+  await owner`insert into company_domain (account_id, company_id, domain) values (${accountId}, ${holder.id}, ${`mailwon${stamp}.example`})`
+  const primaryFiled = await filedUnder(`win.${stamp}@mailwon${stamp}.example`, 'primary')
+  check(primaryFiled === primary.id, 'a primary domain beats an alias on the same domain', `${primaryFiled ?? 'nothing'}`)
+
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from message_thread where provider_thread_id like ${`mail-%${stamp}`}`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`mail-%-${stamp}`}`
-  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id})`
+  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id}, ${returningBox.id})`
   await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
+  await owner`delete from contact where account_id = ${accountId} and email = ${returning}`
+  await owner`delete from contact where account_id = ${accountId} and email like ${`%${stamp}%`}`
+  await owner`delete from company where account_id = ${accountId} and name like ${`%${stamp}%`}`
 } finally {
   await Promise.all([owner.end(), closeAppPool()])
   await cleanup()

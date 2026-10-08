@@ -1,12 +1,13 @@
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { fieldDef, fieldIndex, objectDef } from '../schema/metadata.ts'
-import { conditionalBlocker, readConditional, type Conditional } from '../registry/conditional.ts'
+import { conditionalBlocker, conditionalCycle, readConditional, type Conditional } from '../registry/conditional.ts'
 import { MAX_CHOICES } from '../registry/mapping.ts'
 import { FIELD_TYPES, type FieldType } from '../registry/types.ts'
 import { assertCanDo, type AccountContext } from './context.ts'
 import { assertUsableFieldKey, unindexableReason } from './fields.ts'
-import { mutate, withAccount, type Tx } from './index.ts'
-import { forgetRegistry, getRegistry, getRegistryIn, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
+import { mergeTokenPattern } from './sequence-rules.ts'
+import { withAccount, type Tx } from './index.ts'
+import { getRegistry, getRegistryIn, mutateRegistry, objectOrThrow, rowsOf, SYSTEM_FIELD_KEYS, tableFor } from './registry.ts'
 
 /** The write side of the metadata registry. D4's whole premise is that marketing
  *  can add a property without a deploy, and that only holds if there is somewhere
@@ -163,16 +164,24 @@ const checkedConditional = async (
   tx: Tx,
   objectId: string,
   ownKey: string,
+  ownLabel: string,
   raw: Conditional | null | undefined,
 ): Promise<Conditional | null> => {
   const rule = readConditional(raw)
   if (!rule) return null
-  const keys = await tx
-    .select({ key: fieldDef.key })
+  const siblings = await tx
+    .select({ key: fieldDef.key, label: fieldDef.label, conditional: fieldDef.conditional })
     .from(fieldDef)
     .where(and(eq(fieldDef.objectId, objectId), isNull(fieldDef.deletedAt)))
-  const blocker = conditionalBlocker(rule, ownKey, new Set(keys.map((row) => row.key)))
+  const blocker = conditionalBlocker(rule, ownKey, new Set(siblings.map((row) => row.key)))
   if (blocker) throw new Error(blocker)
+  const loop = conditionalCycle(ownKey, rule, new Map(siblings.map((row) => [row.key, readConditional(row.conditional)])))
+  if (loop) {
+    const labels = new Map([...siblings.map((row) => [row.key, row.label] as const), [ownKey, ownLabel]])
+    throw new Error(
+      `${loop.map((key) => `"${labels.get(key) ?? key}"`).join(' -> ')} would hide each other, so none of them could ever appear. Change one of those rules.`,
+    )
+  }
   return rule
 }
 
@@ -211,7 +220,7 @@ const insertField = async (
     )
   }
 
-  const conditional = await checkedConditional(tx, object.id, key, input.conditional)
+  const conditional = await checkedConditional(tx, object.id, key, label, input.conditional)
 
   const [{ next = 0 } = { next: 0 }] = await tx.execute<{ next: number }>(
     sql`select coalesce(max(position), -1) + 1 as next from field_def where object_id = ${object.id}`,
@@ -270,9 +279,8 @@ const insertField = async (
 /** A new field is always jsonb-stored and always custom. The key is generated once
  *  and never changes, because renaming a label must never touch data. F0 §4. */
 export const createField = async (ctx: AccountContext, input: CreateFieldInput): Promise<AdminField> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const result = await insertField(tx, ctx, input)
-    forgetRegistry(ctx.accountId)
     return {
       result,
       audit: {
@@ -294,7 +302,7 @@ export const createFields = async (
   ctx: AccountContext,
   inputs: CreateFieldInput[],
 ): Promise<{ created: AdminField[]; alreadyThere: string[] }> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const created: AdminField[] = []
     const alreadyThere: string[] = []
     for (const input of inputs) {
@@ -311,8 +319,6 @@ export const createFields = async (
       }
       created.push(await insertField(tx, ctx, input))
     }
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: { created, alreadyThere },
@@ -347,7 +353,7 @@ export type UpdateFieldInput = {
  *  on purpose: both would change what stored values mean, and a field whose meaning
  *  changed under the data is worse than a second field. */
 export const updateField = async (ctx: AccountContext, input: UpdateFieldInput): Promise<void> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const [before] = await tx
       .select({
         objectId: fieldDef.objectId,
@@ -375,7 +381,7 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
     const conditional =
       input.conditional === undefined
         ? undefined
-        : await checkedConditional(tx, before.objectId, before.key, input.conditional)
+        : await checkedConditional(tx, before.objectId, before.key, label || before.label, input.conditional)
 
     await tx
       .update(fieldDef)
@@ -389,8 +395,6 @@ export const updateField = async (ctx: AccountContext, input: UpdateFieldInput):
         ...(conditional !== undefined ? { conditional } : {}),
       })
       .where(eq(fieldDef.id, input.id))
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -412,7 +416,7 @@ export const reorderFields = async (
   objectKey: string,
   orderedIds: string[],
 ): Promise<void> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const object = await objectRow(tx, objectKey)
     const rows = await tx
       .select({ id: fieldDef.id })
@@ -433,8 +437,6 @@ export const reorderFields = async (
       await tx.update(fieldDef).set({ position: position++ }).where(eq(fieldDef.id, id))
     }
 
-    forgetRegistry(ctx.accountId)
-
     return {
       result: undefined,
       audit: {
@@ -449,7 +451,10 @@ export const reorderFields = async (
 
 /** Where a property is spoken for. HubSpot calls this "Used in", and it is the
  *  difference between deleting a property and breaking a form nobody remembered. */
-export type FieldUse = { kind: 'form' | 'segment' | 'view' | 'automation'; name: string }
+export type FieldUse = {
+  kind: 'form' | 'segment' | 'view' | 'automation' | 'property' | 'sequence' | 'template' | 'booking'
+  name: string
+}
 
 export type FieldUsage = {
   filled: number
@@ -457,7 +462,68 @@ export type FieldUsage = {
   key: string
   objectKey: string
   usedIn: FieldUse[]
+  /** Every use, where `usedIn` holds the first fifty by kind and name. */
+  usedInTotal: number
 }
+
+/** Every place that reads a property by its key. The "Used in" list and the delete
+ *  refusal are both built from this, so the warning and the dialog cannot disagree. */
+const usesOf = async (
+  tx: Tx,
+  field: { id: string; key: string; objectKey: string },
+): Promise<{ usedIn: FieldUse[]; total: number }> => {
+  const { key, objectKey } = field
+  // Forms store "contact.email" and everything else the bare key. A quoted key in
+  // serialised jsonb cannot match part of a longer one, because the key alphabet is
+  // [a-z0-9_] and the closing quote ends it.
+  const quoted = `%"${key}"%`
+  const mapped = `%"${objectKey}.${key}"%`
+  // Merge tokens are prose, so they match as whole `{{key}}` tokens. Sequences and
+  // templates are sent to contacts, so a plain key only names a contact property.
+  const token = mergeTokenPattern(key)
+  const dotted = mergeTokenPattern(`${objectKey}.${key}`)
+  const contactOnly = objectKey === 'contact'
+  const rows = await tx.execute<FieldUse & { total: number }>(sql`
+    select kind, name, count(*) over () as total from (
+        select 'form' as kind, name from form where schema::text like ${mapped}
+        union all
+        select 'segment', s.name from segment s join object_def o on o.id = s.object_id
+         where o.key = ${objectKey} and s.query::text like ${quoted}
+        union all
+        select 'view', v.name from saved_view v join object_def o on o.id = v.object_id
+         where o.key = ${objectKey}
+           and (v.filters::text like ${quoted} or v.sorts::text like ${quoted} or v.columns::text like ${quoted})
+        union all
+        select 'automation', name from automation
+         where trigger_config->>'object' = ${objectKey}
+           and (conditions::text like ${quoted} or steps::text like ${quoted})
+        union all
+        select 'property', f.label from field_def f join object_def o on o.id = f.object_id
+         where o.key = ${objectKey} and f.id <> ${field.id}::uuid and f.deleted_at is null
+           and f.conditional->'conditions' @> jsonb_build_array(jsonb_build_object('field', ${key}::text))
+        union all
+        select 'sequence', s.name from sequence_step st join sequence s on s.id = st.sequence_id
+         where ${contactOnly} and (st.subject ~* ${token} or st.subject_b ~* ${token}
+            or st.body_html ~* ${token} or st.body_text ~* ${token}
+            or st.task_title ~* ${token} or st.task_body ~* ${token})
+        union all
+        select 'template', t.name from email_template t
+         where ${contactOnly} and (t.subject ~* ${token} or t.body_text ~* ${token})
+        union all
+        select 'booking', b.name from booking_page b
+         where b.title_tpl ~* ${dotted} or b.description_tpl ~* ${dotted}
+            or (${contactOnly} and b.questions @> jsonb_build_array(jsonb_build_object('key', ${key}::text)))
+      ) uses
+     order by kind, name
+     limit 50`)
+
+  return { usedIn: rows.map(({ kind, name }) => ({ kind, name })), total: Number(rows[0]?.total ?? 0) }
+}
+
+/** What archiving a property that something reads says, and what the server refuses
+ *  with until the archive is confirmed. */
+export const dependantsWarning = (label: string, total: number): string =>
+  `${label} is used in ${total} ${total === 1 ? 'place' : 'places'}. Archiving it leaves ${total === 1 ? 'that place' : 'those places'} pointing at nothing, so confirm the archive to go ahead.`
 
 /** How many records hold a value and what refers to it, so a delete confirmation
  *  can say what is at stake rather than asking somebody to guess. */
@@ -488,33 +554,15 @@ export const fieldUsage = async (ctx: AccountContext, fieldId: string): Promise<
     const [row] = await tx.execute<{ n: number }>(
       sql`select count(*)::int as n from ${tableFor(object)} where ${rowsOf(object)} and deleted_at is null and ${predicate}`,
     )
-
-    // A form stores the field as "contact.email" and everything else as the bare
-    // key. Both are matched against the serialised jsonb: the key alphabet is
-    // [a-z0-9_], so a quoted key cannot match half of a longer one, and these
-    // four tables hold tens of rows rather than tens of thousands.
-    const quoted = `%"${found.key}"%`
-    const mapped = `%"${found.objectKey}.${found.key}"%`
-    const usedIn = await tx.execute<{ kind: FieldUse['kind']; name: string }>(sql`
-        select 'form' as kind, name from form where schema::text like ${mapped}
-        union all
-        select 'segment', s.name from segment s join object_def o on o.id = s.object_id
-         where o.key = ${found.objectKey} and s.query::text like ${quoted}
-        union all
-        select 'view', v.name from saved_view v join object_def o on o.id = v.object_id
-         where o.key = ${found.objectKey}
-           and (v.filters::text like ${quoted} or v.sorts::text like ${quoted} or v.columns::text like ${quoted})
-        union all
-        select 'automation', name from automation
-         where conditions::text like ${quoted} or steps::text like ${quoted}
-        limit 50`)
+    const uses = await usesOf(tx, { id: fieldId, key: found.key, objectKey: found.objectKey })
 
     return {
       filled: Number(row?.n ?? 0),
       key: found.key,
       label: found.label,
       objectKey: found.objectKey,
-      usedIn: usedIn.map((use) => ({ kind: use.kind, name: use.name })),
+      usedIn: uses.usedIn,
+      usedInTotal: uses.total,
     }
   })
 
@@ -527,7 +575,7 @@ export const renameFieldGroup = async (
   from: string,
   to: string,
 ): Promise<{ moved: number }> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const object = await objectRow(tx, objectKey)
     const name = to.trim()
     if (!name) throw new Error('A group needs a name.')
@@ -536,8 +584,6 @@ export const renameFieldGroup = async (
       .set({ groupName: name })
       .where(and(eq(fieldDef.objectId, object.id), eq(fieldDef.groupName, from)))
       .returning({ id: fieldDef.id })
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: { moved: moved.length },
@@ -559,7 +605,7 @@ export const moveFieldsToGroup = async (
   fieldIds: string[],
   groupName: string | null,
 ): Promise<{ moved: number }> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const object = await objectRow(tx, objectKey)
     if (fieldIds.length === 0) throw new Error('Pick at least one property to move.')
     const name = groupName?.trim() || null
@@ -571,8 +617,6 @@ export const moveFieldsToGroup = async (
     if (moved.length !== fieldIds.length) {
       throw new Error(`${fieldIds.length - moved.length} of those properties are not on ${object.key}.`)
     }
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: { moved: moved.length },
@@ -635,11 +679,22 @@ export const refreshFillRates = async (
 
 /** Phase one of two. The field disappears from every surface immediately and the
  *  data stays exactly where it was, so a misclick costs nothing. F0 §4. */
-export const deleteField = async (ctx: AccountContext, fieldId: string): Promise<void> =>
-  mutate(ctx, 'field_def', async (tx) => {
+export const deleteField = async (
+  ctx: AccountContext,
+  fieldId: string,
+  options: { acknowledgeUses?: boolean } = {},
+): Promise<void> =>
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const [found] = await tx
-      .select({ key: fieldDef.key, label: fieldDef.label, isCustom: fieldDef.isCustom, storage: fieldDef.storage })
+      .select({
+        key: fieldDef.key,
+        label: fieldDef.label,
+        isCustom: fieldDef.isCustom,
+        storage: fieldDef.storage,
+        objectKey: objectDef.key,
+      })
       .from(fieldDef)
+      .innerJoin(objectDef, eq(objectDef.id, fieldDef.objectId))
       .where(and(eq(fieldDef.id, fieldId), isNull(fieldDef.deletedAt)))
       .limit(1)
     if (!found) throw new Error('That field does not exist, or it has already been deleted.')
@@ -648,14 +703,14 @@ export const deleteField = async (ctx: AccountContext, fieldId: string): Promise
         `${found.label} is a core field. Core fields have their own column and their own meaning across the product, so they cannot be deleted.`,
       )
     }
+    const uses = await usesOf(tx, { id: fieldId, key: found.key, objectKey: found.objectKey })
+    if (uses.total > 0 && !options.acknowledgeUses) throw new Error(dependantsWarning(found.label, uses.total))
 
     await tx.update(fieldDef).set({ deletedAt: new Date() }).where(eq(fieldDef.id, fieldId))
     // A hot index on a field nobody can see is dead weight, and the field may be
     // restored, so the record goes and the index is rebuilt if it comes back.
     await tx.update(fieldDef).set({ isHot: false }).where(eq(fieldDef.id, fieldId))
     await tx.delete(fieldIndex).where(eq(fieldIndex.fieldId, fieldId))
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: undefined,
@@ -664,13 +719,13 @@ export const deleteField = async (ctx: AccountContext, fieldId: string): Promise
         entityId: fieldId,
         action: 'delete',
         before: { key: found.key, deletedAt: null },
-        after: { deletedAt: 'now', purged: false },
+        after: { deletedAt: 'now', purged: false, uses: uses.total },
       },
     }
   })
 
 export const restoreField = async (ctx: AccountContext, fieldId: string): Promise<void> =>
-  mutate(ctx, 'field_def', async (tx) => {
+  mutateRegistry(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({ key: fieldDef.key })
       .from(fieldDef)
@@ -679,8 +734,6 @@ export const restoreField = async (ctx: AccountContext, fieldId: string): Promis
     if (!found) throw new Error('That field does not exist in this account.')
 
     await tx.update(fieldDef).set({ deletedAt: null }).where(eq(fieldDef.id, fieldId))
-    forgetRegistry(ctx.accountId)
-
     return {
       result: undefined,
       audit: {
@@ -743,7 +796,7 @@ export type PurgeResult = { stripped: number }
  *  that reason. F0 §4. */
 export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<PurgeResult> => {
   assertCanDo(ctx, 'purge')
-  return mutate(ctx, 'field_def', async (tx) => {
+  return mutateRegistry(ctx, 'field_def', async (tx) => {
     const [found] = await tx
       .select({
         key: fieldDef.key,
@@ -773,8 +826,6 @@ export const purgeField = async (ctx: AccountContext, fieldId: string): Promise<
       sql`update ${tableFor(object)} set custom = custom - ${key} where ${rowsOf(object)} and custom ? ${key} returning id`,
     )
     await tx.delete(fieldDef).where(eq(fieldDef.id, fieldId))
-
-    forgetRegistry(ctx.accountId)
 
     return {
       result: { stripped: stripped.length },

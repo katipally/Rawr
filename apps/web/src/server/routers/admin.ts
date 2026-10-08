@@ -310,8 +310,10 @@ export const adminRouter = router({
       .query(({ ctx, input }) => call(() => fieldUsage(ctx.account, input.id))),
 
     remove: adminProcedure
-      .input(z.object({ id: z.uuid() }))
-      .mutation(({ ctx, input }) => call(() => deleteField(ctx.account, input.id))),
+      .input(z.object({ id: z.uuid(), acknowledgeUses: z.boolean().optional() }))
+      .mutation(({ ctx, input }) =>
+        call(() => deleteField(ctx.account, input.id, { acknowledgeUses: input.acknowledgeUses ?? false })),
+      ),
 
     restore: adminProcedure
       .input(z.object({ id: z.uuid() }))

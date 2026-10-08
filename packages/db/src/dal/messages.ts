@@ -9,11 +9,12 @@ import {
   messageThread,
   messageThreadRead,
 } from '../schema/messaging.ts'
-import { company, contact } from '../schema/records.ts'
+import { contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EmailPayload } from './activity.ts'
 import { sequenceEnrollment } from '../schema/sequences.ts'
 import { detectReply, isDeliveryReport } from './sequences.ts'
+import { companyByDomainQuery, companyForDomain } from './records.ts'
 import { nextSendAt, type SendWindow } from './sequence-rules.ts'
 import { resolveNotifications } from './notifications.ts'
 import { assertCanView, assertCanWrite, isAdmin, type AccountContext } from './context.ts'
@@ -662,12 +663,10 @@ const touchesARecord = async (
   ]
   if (domains.length === 0) return false
 
-  const [matched] = await tx
-    .select({ id: company.id })
-    .from(company)
-    .where(and(inArray(company.domain, domains), isNull(company.deletedAt)))
-    .limit(1)
-  return Boolean(matched)
+  for (const domain of domains) {
+    if (await companyForDomain(tx, domain)) return true
+  }
+  return false
 }
 
 /** A uuid that can never be a thread id, so the thread arm of the reply match is
@@ -861,9 +860,7 @@ const matchParticipants = async (
     // employerDomainFromEmail already refuses free and disposable providers.
     if (!domain || domain === internalDomain) continue
 
-    const [company] = await tx.execute<{ id: string }>(
-      sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-    )
+    const [company] = await tx.execute<{ id: string }>(companyByDomainQuery(domain))
     if (!company) continue
 
     const [created] = await tx.execute<{ id: string }>(sql`
@@ -1635,11 +1632,14 @@ export const attachContactToMail = async (
     if (!person?.email) return { messages: 0, threads: 0 }
     const address = lower(person.email)
 
+    // Rows still pointing at a deleted contact are taken too, so a re-created contact
+    // gets the history. A live contact's rows are never taken.
     const linked = await tx.execute<{ message_id: string }>(sql`
       update message_participant p
          set contact_id = ${contactId}::uuid
-       where p.contact_id is null
-         and p.address = ${address}
+       where p.address = ${address}
+         and (p.contact_id is null
+              or exists (select 1 from contact old where old.id = p.contact_id and old.deleted_at is not null))
       returning p.message_id`)
     if (linked.length === 0) return { messages: 0, threads: 0 }
 

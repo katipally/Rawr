@@ -1,6 +1,7 @@
 'use client'
 
 import type { Schedule } from '@rawr/db'
+import { scheduleProblem, windowProblem } from '@rawr/db/slots'
 import { Button, Field, IconButton, Select, TextInput, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -63,6 +64,7 @@ export const ScheduleEditor = ({
   const [rows, setRows] = useState<Window[]>(() => toWindows(saved.weekly, newKey))
   const [saving, setSaving] = useState(false)
   const weekly = useMemo(() => toWeekly(rows), [rows])
+  const problem = useMemo(() => scheduleProblem(weekly), [weekly])
   const changes = Number(timezone !== saved.timezone) + daysChanged(weekly, saved.weekly)
 
   const [overrideDay, setOverrideDay] = useState(() => todayIn(zone))
@@ -72,6 +74,8 @@ export const ScheduleEditor = ({
   // was storable and displayable but not enterable.
   const [overrideBlocks, setOverrideBlocks] = useState<[string, string][]>([['09:00', '13:00']])
   const [overrideNote, setOverrideNote] = useState('')
+  const overrideProblem =
+    overrideKind === 'hours' ? windowProblem(`The override for ${overrideDay}`, overrideBlocks) : null
 
   // Empty on the server: enumerating zones there produced a different list from
   // the browser's, and React discards the tree over the mismatch. The stored value
@@ -94,6 +98,7 @@ export const ScheduleEditor = ({
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)))
 
   const save = async () => {
+    if (problem) return
     setSaving(true)
     try {
       await api.booking.saveSchedule.mutate({
@@ -114,6 +119,7 @@ export const ScheduleEditor = ({
   }
 
   const addOverride = async () => {
+    if (overrideProblem) return
     try {
       await api.booking.saveOverride.mutate({
         ...(isSelf ? {} : { userId: schedule.userId }),
@@ -237,6 +243,7 @@ export const ScheduleEditor = ({
           <p className="text-small text-secondary">
             {totalHours === 0 ? 'No hours set, so nothing is offered.' : `${totalHours} hours a week`}
           </p>
+          {problem ? <p role="alert" className="text-small text-error">{problem}</p> : null}
         </div>
         <SaveBar form={FORM_ID} changes={editable ? changes : 0} busy={saving} onCancel={() => {
           setTimezone(saved.timezone)
@@ -349,6 +356,7 @@ export const ScheduleEditor = ({
                 Add another window
               </Button>
             ) : null}
+            {overrideProblem ? <p role="alert" className="w-full text-small text-error">{overrideProblem}</p> : null}
             <Field id="override-note" label="Note" hint="For your own team. Nobody booking sees it.">
               <TextInput
                 id="override-note"

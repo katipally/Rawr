@@ -6,6 +6,7 @@ import * as s from '../src/schema/index.ts'
 import { canEdit, type AccountContext } from '../src/dal/context.ts'
 import {
   createField,
+  dependantsWarning,
   deleteField,
   fieldUsage,
   moveFieldsToGroup,
@@ -60,7 +61,8 @@ import { bulkUpdateRecords, createRecord, deleteRecord, getRecord, listRecords, 
 import { readTimeline } from '../src/dal/activity.ts'
 import { readBoard, groupableFields } from '../src/dal/board.ts'
 import { recordOptions } from '../src/dal/search.ts'
-import { forgetRegistry, getRegistry, objectOrThrow } from '../src/dal/registry.ts'
+import { forgetRegistry, getRegistry, mutateRegistry, objectOrThrow } from '../src/dal/registry.ts'
+import { deleteEmailTemplate, saveEmailTemplate } from '../src/dal/sequences.ts'
 import { closeAppPool } from '../src/internal/pool.ts'
 import { SANDBOX, PEER, cleanup } from './fixture.ts'
 
@@ -407,6 +409,190 @@ try {
   })
 
   console.log('')
+  console.log('-- what reads a property ---------------------------------------')
+
+  await check('a rule on another property is a use, and archiving it needs confirming', async () => {
+    const parent = await createField(admin, { objectKey: 'contact', key: `dep_p_${stamp}`, label: `Dep parent ${stamp}`, type: 'text' })
+    const child = await createField(admin, {
+      objectKey: 'contact',
+      key: `dep_c_${stamp}`,
+      label: `Dep child ${stamp}`,
+      type: 'text',
+      conditional: { conjunction: 'and', conditions: [{ field: `dep_p_${stamp}`, operator: 'is_not_empty' }] },
+    })
+    const usage = await fieldUsage(admin, parent.id)
+    expect(
+      usage.usedIn.some((use) => use.kind === 'property' && use.name === `Dep child ${stamp}`),
+      'the rule on the child is not listed as a use',
+    )
+    expect(usage.usedInTotal === 1, `total ${usage.usedInTotal}, expected 1`)
+    const message = await refuses('archiving a property a rule reads, unconfirmed', () => deleteField(admin, parent.id))
+    expect(message === dependantsWarning(`Dep parent ${stamp}`, 1), `wrong refusal: ${message}`)
+    expect((await listFields(admin, 'contact')).some((field) => field.id === parent.id), 'the refused archive still hid it')
+    await deleteField(admin, parent.id, { acknowledgeUses: true })
+    await deleteField(admin, child.id)
+    await purgeField(admin, child.id)
+    await purgeField(admin, parent.id)
+    return message
+  })
+
+  await check('a rule that makes two properties show each other is refused at save', async () => {
+    const left = await createField(admin, { objectKey: 'contact', key: `loop_a_${stamp}`, label: `Loop A ${stamp}`, type: 'text' })
+    const right = await createField(admin, {
+      objectKey: 'contact',
+      key: `loop_b_${stamp}`,
+      label: `Loop B ${stamp}`,
+      type: 'text',
+      conditional: { conjunction: 'and', conditions: [{ field: `loop_a_${stamp}`, operator: 'is_not_empty' }] },
+    })
+    const message = await refuses('closing a loop between two rules', () =>
+      updateField(admin, {
+        id: left.id,
+        conditional: { conjunction: 'and', conditions: [{ field: `loop_b_${stamp}`, operator: 'is_not_empty' }] },
+      }),
+    )
+    expect(message.includes('would hide each other'), `wrong refusal: ${message}`)
+    expect(message.includes(`"Loop A ${stamp}" -> "Loop B ${stamp}"`), `the refusal did not name the labels: ${message}`)
+    expect(!message.includes(`loop_a_${stamp}`), `the refusal named an internal key: ${message}`)
+    await deleteField(admin, right.id)
+    await purgeField(admin, right.id)
+    await deleteField(admin, left.id)
+    await purgeField(admin, left.id)
+    return message
+  })
+
+  await check('a property created through the admin path is in the registry a second copy of the package reads', async () => {
+    // Next loads this package once per server layer, so the page and the API each hold their own copy.
+    const copy = '../src/dal/registry.ts?copy=page'
+    const page = (await import(copy)) as typeof import('../src/dal/registry.ts')
+    const key = `copy_${stamp}`
+    const hasKey = async () => (await page.getRegistry(admin)).byKey.get('contact')?.byKey.has(key) === true
+    expect(!(await hasKey()), 'the key was already in the registry before it was created')
+    const field = await createField(admin, { objectKey: 'contact', key, label: `Copy ${stamp}`, type: 'text' })
+    expect(await hasKey(), 'the second copy still served the registry from before the create')
+    await deleteField(admin, field.id)
+    await purgeField(admin, field.id)
+    return 'visible to the second copy straight after the create'
+  })
+
+  await check('a template, sequence or booking page that spells a property key is a use', async () => {
+    const tokenKey = `tok_${stamp}`
+    const token = await createField(admin, { objectKey: 'contact', key: tokenKey, label: `Token ${stamp}`, type: 'text' })
+    const named = await saveEmailTemplate(admin, { name: `Verify named ${stamp}`, subject: '', bodyText: `Hi {{ ${tokenKey} | there }}` })
+    const longer = await saveEmailTemplate(admin, {
+      name: `Verify longer ${stamp}`,
+      subject: '',
+      bodyText: `Hi {{${tokenKey}_more}}, the word ${tokenKey} in prose`,
+    })
+    const [sequence] = await db
+      .insert(s.sequence)
+      .values({
+        accountId: datasaur.id,
+        name: `Verify seq ${stamp}`,
+        settings: {
+          sendWindow: { days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00', timezone: 'UTC' },
+          stopOnReply: true,
+          stopOnBounce: true,
+          stopOnUnsubscribe: true,
+          trackOpens: false,
+          trackClicks: false,
+          subscriptionTypeId: null,
+          replyInThread: false,
+          woodpeckerCampaignId: null,
+        },
+      })
+      .returning({ id: s.sequence.id })
+    await db.insert(s.sequenceStep).values({
+      accountId: datasaur.id,
+      sequenceId: sequence!.id,
+      position: 1,
+      bodyText: `Hello {{${tokenKey}|there}}`,
+    })
+    const [page] = await db
+      .insert(s.bookingPage)
+      .values({
+        accountId: datasaur.id,
+        slug: `verify-${stamp}`,
+        name: `Verify booking ${stamp}`,
+        titleTpl: `Call {{contact.${tokenKey}}}`,
+        descriptionTpl: '',
+      })
+      .returning({ id: s.bookingPage.id })
+
+    const usage = await fieldUsage(admin, token.id)
+    const kinds = usage.usedIn.map((use) => `${use.kind}:${use.name}`)
+    expect(kinds.includes(`template:Verify named ${stamp}`), `template not listed: ${kinds.join(', ')}`)
+    expect(kinds.includes(`sequence:Verify seq ${stamp}`), `sequence not listed: ${kinds.join(', ')}`)
+    expect(kinds.includes(`booking:Verify booking ${stamp}`), `booking page not listed: ${kinds.join(', ')}`)
+    expect(!kinds.includes(`template:Verify longer ${stamp}`), 'a longer key or prose matched the token')
+
+    await deleteEmailTemplate(admin, named.id)
+    await deleteEmailTemplate(admin, longer.id)
+    await db.delete(s.sequence).where(eq(s.sequence.id, sequence!.id))
+    await db.delete(s.bookingPage).where(eq(s.bookingPage.id, page!.id))
+    await deleteField(admin, token.id, { acknowledgeUses: true })
+    await purgeField(admin, token.id)
+    return 'a template, a sequence step and a booking title each name the key'
+  })
+
+  await check('an automation on another object does not count for a contact property', async () => {
+    const tokenKey = `scope_${stamp}`
+    const field = await createField(admin, { objectKey: 'contact', key: tokenKey, label: `Scope ${stamp}`, type: 'text' })
+    const rule = (object: string, name: string) => ({
+      accountId: datasaur.id,
+      name,
+      trigger: 'record_created' as const,
+      triggerConfig: { object },
+      conditions: [{ conjunction: 'and', conditions: [{ field: tokenKey, operator: 'is_not_empty' }] }],
+      steps: [],
+    })
+    const [company, contactRule] = await db
+      .insert(s.automation)
+      .values([rule('company', `Verify company rule ${stamp}`), rule('contact', `Verify contact rule ${stamp}`)])
+      .returning({ id: s.automation.id })
+    const kinds = (await fieldUsage(admin, field.id)).usedIn.map((use) => use.name)
+    expect(kinds.includes(`Verify contact rule ${stamp}`), 'the contact rule is not listed')
+    expect(!kinds.includes(`Verify company rule ${stamp}`), 'a company rule counted for a contact property')
+    await db.delete(s.automation).where(eq(s.automation.id, company!.id))
+    await db.delete(s.automation).where(eq(s.automation.id, contactRule!.id))
+    await deleteField(admin, field.id, { acknowledgeUses: true })
+    await purgeField(admin, field.id)
+    return 'only the rule on the same object reads the property'
+  })
+
+  await check('a committed property change is in the registry the moment the write returns', async () => {
+    const key = `reg_${stamp}`
+    const field = await createField(admin, { objectKey: 'deal', key, label: 'Registry probe', type: 'text' })
+    expect(objectOrThrow(await getRegistry(admin), 'deal').byKey.get(key)?.label === 'Registry probe', 'the cache did not load the new property')
+    await mutateRegistry(admin, 'field_def', async (tx) => {
+      await tx.update(s.fieldDef).set({ label: 'Registry probe renamed' }).where(eq(s.fieldDef.id, field.id))
+      return { result: undefined, audit: { entity: 'field_def', entityId: field.id, action: 'update', before: null, after: null } }
+    })
+    const after = await getRegistry(admin)
+    expect(objectOrThrow(after, 'deal').byKey.get(key)?.label === 'Registry probe renamed', 'a read after the commit still has the old label')
+    await deleteField(admin, field.id)
+    await purgeField(admin, field.id)
+    return 'the cache is dropped after the commit'
+  })
+
+  await check('a write that fails after reading the registry leaves no trace in it', async () => {
+    const key = `reg_roll_${stamp}`
+    const field = await createField(admin, { objectKey: 'deal', key, label: 'Rolled back probe', type: 'text' })
+    const message = await refuses('a write that fails after it renamed a property', () =>
+      mutateRegistry(admin, 'field_def', async (tx) => {
+        await tx.update(s.fieldDef).set({ label: 'Rolled back renamed' }).where(eq(s.fieldDef.id, field.id))
+        await getRegistry(admin)
+        throw new Error('stopped after the read')
+      }),
+    )
+    expect(message === 'stopped after the read', `wrong failure: ${message}`)
+    const after = await getRegistry(admin)
+    expect(objectOrThrow(after, 'deal').byKey.get(key)?.label === 'Rolled back probe', 'the rolled back rename is served from the cache')
+    await deleteField(admin, field.id)
+    await purgeField(admin, field.id)
+    return 'nothing uncommitted is cached'
+  })
+
   console.log('-- pipelines and stages ----------------------------------------')
 
   let pipelineId = ''
@@ -586,6 +772,30 @@ try {
     return await refuses('deleting a lifecycle stage in use', () =>
       deleteLifecycleStage(admin, used.id, null),
     )
+  })
+
+  await check('deleting a lifecycle stage writes one timeline entry per live record it moves, and names the count', async () => {
+    const from = await createLifecycleStage(admin, `Verify from ${stamp}`)
+    const toName = `Verify to ${stamp}`
+    const to = await createLifecycleStage(admin, toName)
+    const person = await createRecord(admin, 'contact', { email: `lifecycle-${stamp}@sandbox.test` })
+    const company = await createRecord(admin, 'company', { name: `Verify lifecycle ${stamp}` })
+    await db.update(s.contact).set({ lifecycleStageId: from.id }).where(eq(s.contact.id, person.id))
+    await db.update(s.company).set({ lifecycleStageId: from.id }).where(eq(s.company.id, company.id))
+
+    const result = await deleteLifecycleStage(admin, from.id, to.id)
+    expect(result.moved === 2 && result.movedTo === toName, `moved ${result.moved} to ${result.movedTo}`)
+
+    const contactTimeline = await readTimeline(admin, { entity: { entityType: 'contact', entityId: person.id } })
+    const companyTimeline = await readTimeline(admin, { entity: { entityType: 'company', entityId: company.id } })
+    const moves = (rows: { type: string }[]) => rows.filter((row) => row.type === 'lifecycle_change')
+    expect(moves(contactTimeline.rows).length === 1, `contact has ${moves(contactTimeline.rows).length} lifecycle entries`)
+    expect(moves(companyTimeline.rows).length === 1, `company has ${moves(companyTimeline.rows).length} lifecycle entries`)
+
+    await db.update(s.contact).set({ lifecycleStageId: null }).where(eq(s.contact.id, person.id))
+    await db.update(s.company).set({ lifecycleStageId: null }).where(eq(s.company.id, company.id))
+    await deleteLifecycleStage(admin, to.id, null)
+    return `${result.moved} moved to ${result.movedTo}, one entry each`
   })
 
   await check('a subscription type can be created', async () => {

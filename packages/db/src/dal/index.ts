@@ -55,6 +55,10 @@ const assertUsable = (ctx: AccountContext): void => {
   }
 }
 
+/** True when a read for this account would join a transaction that is still open,
+ *  so what it sees may be written and not yet committed. */
+export const inOpenTransaction = (ctx: AccountContext): boolean => ambient.getStore()?.key === keyOf(ctx)
+
 /** The only way into the database. Pins the account for the transaction's
  *  lifetime, then hands the caller a scoped handle. A query that escapes this and
  *  forgets its filter returns zero rows, because the row level security policy has

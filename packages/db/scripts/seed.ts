@@ -788,7 +788,7 @@ try {
         .from(s.contact)
         .where(eq(s.contact.accountId, ws))
         .limit(4)
-      await db.insert(s.booking).values(
+      const meetings = await db.insert(s.booking).values(
         booked.map((contact, i) => {
           // Relative to the real clock rather than to the seed's own anchor,
           // because "upcoming" has to still be upcoming whenever the seed is run.
@@ -820,6 +820,27 @@ try {
             conferenceUrl: 'https://meet.google.com/seed-demo',
           }
         }),
+      ).returning({
+        id: s.booking.id,
+        hostUserId: s.booking.hostUserId,
+        startsAt: s.booking.startsAt,
+        endsAt: s.booking.endsAt,
+        state: s.booking.state,
+      })
+
+      // The host's time is busy only through a participant row, which the confirm
+      // path writes for every confirmed meeting, so a seeded one must hold it too.
+      await db.insert(s.bookingParticipant).values(
+        meetings
+          .filter((meeting) => meeting.state === 'confirmed')
+          .map((meeting) => ({
+            accountId: ws,
+            bookingId: meeting.id,
+            userId: meeting.hostUserId,
+            startsAt: meeting.startsAt,
+            endsAt: meeting.endsAt,
+            isOrganiser: true,
+          })),
       )
     }
   }

@@ -137,6 +137,9 @@ export const setMemberGrants = async (
 ): Promise<void> =>
   mutate(ctx, 'membership', async (tx) => {
     assertSuperAdmin(ctx, "change somebody's access")
+    if (input.userId === ctx.actorId) {
+      throw new Error('You cannot change your own access. Ask another super admin to do it.')
+    }
     const grants = toGrants(input)
     const [current] = await tx
       .select({

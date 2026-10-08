@@ -58,6 +58,7 @@ const SEEDED_TABLES = new Set([
   'availability',
   'booking',
   'booking_host',
+  'booking_participant',
   'booking_page',
   'booking_page_view',
   'booking_reminder',

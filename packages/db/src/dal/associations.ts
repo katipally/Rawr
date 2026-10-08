@@ -117,6 +117,10 @@ export const readAssociations = async (
     const sort = options.sort ?? 'recent'
 
     const totals = new Map<string, number>()
+    // Records already counted through a company column, so an association row for
+    // the same record is not counted twice. Kept apart from what is drawn: a search
+    // can hide a record from the rows without taking it out of the count.
+    const columnLinked = new Set<string>()
     const own = new Map<string, AssociatedRecord[]>()
     const linked = new Map<string, AssociatedRecord[]>()
     const push = (map: Map<string, AssociatedRecord[]>, key: string, record: AssociatedRecord) =>
@@ -131,7 +135,7 @@ export const readAssociations = async (
     const matching = (expression: string) =>
       needle ? sql`and lower(${sql.raw(expression)}) like ${`%${needle}%`}` : sql``
     const orderedBy = (expression: string) =>
-      sort === 'name' ? sql`order by ${sql.raw(expression)} asc nulls last` : sql`order by created_at desc`
+      sort === 'name' ? sql`order by lower(${sql.raw(expression)}) asc nulls last` : sql`order by created_at desc`
 
     // The relationship a record stores on itself. Only the core three have one:
     // a custom record's every value is in its blob, and none of them is a
@@ -142,11 +146,15 @@ export const readAssociations = async (
       )
       const companyObject = objectFor('company')
       if (row?.company_id && companyObject) {
-        add('company', 1)
         const company = (await fetchByIds(tx, companyObject, [row.company_id])).get(row.company_id)
-        // No label: isPrimary already renders the "Primary" badge, and setting both
-        // printed the word twice on the same row.
-        if (company && keeps(company, needle)) push(own, 'company', toRecord(companyObject, company, 'primary', null))
+        // A trashed company has no row, so it is not counted either.
+        if (company) {
+          columnLinked.add(company.id)
+          add('company', 1)
+          // No label: isPrimary already renders the "Primary" badge, and setting both
+          // printed the word twice on the same row.
+          if (keeps(company, needle)) push(own, 'company', toRecord(companyObject, company, 'primary', null))
+        }
       }
     }
 
@@ -196,12 +204,16 @@ export const readAssociations = async (
       // there is nothing to name, so it is not counted rather than drawn blank.
       const object = objectFor(objectKey)
       if (!object) continue
+      if (entityType === 'company' && (objectKey === 'contact' || objectKey === 'deal')) {
+        const owned = await tx.execute<{ id: string }>(sql`
+          select id from ${sql.raw(`"${objectKey}"`)}
+           where company_id = ${entityId} and id = any(${`{${ids.join(',')}}`}::uuid[])`)
+        for (const row of owned) columnLinked.add(row.id)
+      }
       const found = await fetchByIds(tx, object, ids)
-      const seen = new Set((own.get(objectKey) ?? []).map((record) => record.id))
       for (const id of ids) {
         const row = found.get(id)
-        if (!row || seen.has(id)) continue
-        seen.add(id)
+        if (!row || columnLinked.has(id)) continue
         add(objectKey, 1)
         if (!keeps(row, needle)) continue
         const label = links.find((link) => link.other_id === id)?.label ?? null
@@ -221,7 +233,11 @@ export const readAssociations = async (
     const groups = registry.objects.flatMap((object): AssociationGroup[] => {
       // What the record holds itself comes first: a contact's own company is the
       // primary one, and a company's own contacts are the ones that belong to it.
-      const records = [...(own.get(object.key) ?? []), ...order(linked.get(object.key) ?? [])]
+      // A name sort is one A-to-Z run across both, so it is the only sort that
+      // reorders them together.
+      const ownRecords = own.get(object.key) ?? []
+      const linkedRecords = linked.get(object.key) ?? []
+      const records = sort === 'name' ? order([...ownRecords, ...linkedRecords]) : [...ownRecords, ...order(linkedRecords)]
       if (object.key === self.key && records.length === 0) return []
       return [
         {
@@ -258,6 +274,17 @@ const nameOf = async (tx: Tx, registry: Registry, ref: EntityRef): Promise<strin
 export const orderedPair = (a: EntityRef, b: EntityRef): [EntityRef, EntityRef] =>
   a.entityType < b.entityType || (a.entityType === b.entityType && a.entityId < b.entityId) ? [a, b] : [b, a]
 
+/** A contact or deal stores one company of its own, the Primary company column. Only
+ *  a record with none takes the company; a real primary stays. Both `associate` and
+ *  `associateMany` go through here so they cannot disagree about what a primary is. */
+const fillPrimaryCompany = async (tx: Tx, objectKey: string, ids: string[], companyId: string): Promise<void> => {
+  if (objectKey !== 'contact' && objectKey !== 'deal') return
+  await tx.execute(sql`
+    update ${sql.raw(`"${objectKey}"`)}
+       set company_id = ${companyId}::uuid, updated_at = now()
+     where id = any(${`{${ids.join(',')}}`}::uuid[]) and company_id is null and deleted_at is null`)
+}
+
 export const associate = async (
   ctx: AccountContext,
   a: EntityRef,
@@ -281,6 +308,10 @@ export const associate = async (
       insert into association (account_id, from_type, from_id, to_type, to_id, label)
       values (${ctx.accountId}, ${from.entityType}, ${from.entityId}, ${to.entityType}, ${to.entityId}, ${label ?? null})
       on conflict (account_id, from_type, from_id, to_type, to_id) do update set label = excluded.label`)
+
+    const company = [a, b].find((ref) => ref.entityType === 'company')
+    const other = [a, b].find((ref) => ref.entityType !== 'company')
+    if (company && other) await fillPrimaryCompany(tx, other.entityType, [other.entityId], company.entityId)
 
     const [fromName, toName] = await Promise.all([nameOf(tx, registry, from), nameOf(tx, registry, to)])
     await recordActivity(tx, ctx, {
@@ -373,6 +404,8 @@ export const associateMany = async (
         from unnest(${idArray}::uuid[]) as each_id
       on conflict (account_id, from_type, from_id, to_type, to_id) do update set label = excluded.label
       returning to_id`)
+
+    if (target.entityType === 'company') await fillPrimaryCompany(tx, objectKey, others, target.entityId)
 
     const targetName = await nameOf(tx, registry, target)
     await recordActivityFanout(tx, ctx, {

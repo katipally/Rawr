@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { AdminField, Conditional, FieldType } from '@rawr/db'
 import { darkPill, lightPill } from '~/components/editor-bar.ts'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
+import { groupsComplete } from '~/components/crm/filter-rules.ts'
 import { useFormat } from '~/components/zone.tsx'
 import { errorMessage, trpc } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
@@ -43,6 +44,10 @@ const TYPE_GROUPS: { label: string; types: FieldType[] }[] = [
   { label: 'Dates', types: ['date', 'datetime'] },
   { label: 'Other', types: ['user', 'relation', 'json'] },
 ]
+
+/** A relation has no target to pick from yet, so a new one could never hold a value.
+ *  An existing one keeps the option, or its type would read as the first choice. */
+const offered = (type: FieldType, field: AdminField | null): boolean => type !== 'relation' || field?.type === 'relation'
 
 export const NEEDS_OPTIONS = new Set<FieldType>(['select', 'multi_select'])
 
@@ -114,7 +119,7 @@ export const PropertyEditor = ({
   const [isRequired, setIsRequired] = useState(field?.isRequired ?? false)
   const [trackChanges, setTrackChanges] = useState(field?.trackChanges ?? false)
   const [conditional, setConditional] = useState<Conditional | null>(field?.conditional ?? null)
-  const [usedIn, setUsedIn] = useState<{ kind: string; name: string }[] | null>(null)
+  const [usage, setUsage] = useState<{ usedIn: { kind: string; name: string }[]; usedInTotal: number } | null>(null)
 
   const ownKey = field?.key ?? key ?? keyFrom(label)
   const dirty = field
@@ -127,6 +132,7 @@ export const PropertyEditor = ({
       JSON.stringify(conditional) !== JSON.stringify(field.conditional)
     : label !== '' || options !== '' || helpText !== '' || groupName !== '' || conditional !== null
   const { asking, dismiss, keep, discard } = useDismiss(true, dirty, onClose)
+  const conditionalComplete = groupsComplete(conditional ? [conditional] : [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -139,12 +145,12 @@ export const PropertyEditor = ({
   // What uses the property is a query per property, so it is asked for when the
   // section that shows it is opened rather than for every row of the list.
   useEffect(() => {
-    if (!field || section !== 'usage' || usedIn) return
+    if (!field || section !== 'usage' || usage) return
     queryClient
       .fetchQuery({ ...trpc.admin.fields.usage.queryOptions({ id: field.id }), staleTime: 0 })
-      .then((found) => setUsedIn(found.usedIn))
-      .catch((cause) => setUsedIn([{ kind: 'error', name: errorMessage(cause) }]))
-  }, [field, section, usedIn, queryClient])
+      .then((found) => setUsage(found))
+      .catch((cause) => setUsage({ usedIn: [{ kind: 'error', name: errorMessage(cause) }], usedInTotal: 1 }))
+  }, [field, section, usage, queryClient])
 
   const save = () =>
     onSave({
@@ -172,7 +178,7 @@ export const PropertyEditor = ({
           </div>
           <div className="flex items-center gap-2 justify-self-end">
             <button type="button" onClick={dismiss} className={darkPill}>Cancel</button>
-            <button type="button" disabled={busy || !label.trim() || !dirty} onClick={save} className={lightPill}>
+            <button type="button" disabled={busy || !label.trim() || !dirty || !conditionalComplete} onClick={save} className={lightPill}>
               {busy ? 'Saving' : field ? 'Save' : 'Create'}
             </button>
           </div>
@@ -241,7 +247,7 @@ export const PropertyEditor = ({
                     <Select id="prop-type" value={type} disabled={field !== null} onChange={(event) => setType(event.target.value as FieldType)}>
                       {TYPE_GROUPS.map((group) => (
                         <optgroup key={group.label} label={group.label}>
-                          {group.types.map((candidate) => (
+                          {group.types.filter((candidate) => offered(candidate, field)).map((candidate) => (
                             <option key={candidate} value={candidate}>
                               {TYPE_LABEL[candidate]}
                             </option>
@@ -289,19 +295,24 @@ export const PropertyEditor = ({
                     </p>
                     {field.filledAt ? <p className="text-small text-secondary">As of {fmt.date(field.filledAt)}</p> : null}
                   </Rule>
-                  <Rule title={`Used in (${usedIn === null ? '...' : fmt.number(usedIn.length)})`}>
-                    {usedIn === null ? (
+                  <Rule title={`Used in (${usage === null ? '...' : fmt.number(usage.usedInTotal)})`}>
+                    {usage === null ? (
                       <p className="text-secondary">Looking...</p>
-                    ) : usedIn.length === 0 ? (
+                    ) : usage.usedInTotal === 0 ? (
                       <p className="text-secondary">Nothing uses this property.</p>
                     ) : (
-                      <ul className="flex flex-col gap-1">
-                        {usedIn.map((use) => (
-                          <li key={`${use.kind}:${use.name}`} className="break-words">
-                            {use.name} <span className="text-secondary">({use.kind})</span>
-                          </li>
-                        ))}
-                      </ul>
+                      <>
+                        <ul className="flex flex-col gap-1">
+                          {usage.usedIn.map((use) => (
+                            <li key={`${use.kind}:${use.name}`} className="break-words">
+                              {use.name} <span className="text-secondary">({use.kind})</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {usage.usedInTotal > usage.usedIn.length ? (
+                          <p className="text-secondary">and {fmt.number(usage.usedInTotal - usage.usedIn.length)} more</p>
+                        ) : null}
+                      </>
                     )}
                   </Rule>
                 </>
@@ -377,10 +388,8 @@ const ConditionalEditor = ({
         <FilterBuilder
           fields={others}
           value={value ? [{ conjunction: value.conjunction, conditions: value.conditions as Group['conditions'] }] : []}
-          onApply={(groups) => {
-            const [first] = groups
-            onChange(first ? { conjunction: first.conjunction, conditions: first.conditions } : null)
-          }}
+          singleGroup
+          onChange={(groups) => onChange(groups[0] ?? null)}
         />
       ) : null}
     </div>

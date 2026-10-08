@@ -22,6 +22,18 @@ const PLACEABLE = (field: RegistryField): boolean => field.type === 'date' || fi
 export const calendarFields = (object: RegistryObject): { key: string; label: string }[] =>
   object.fields.filter(PLACEABLE).map((field) => ({ key: field.key, label: field.label }))
 
+/** The field a calendar lays out on, or the sentence saying why the key cannot be one. */
+export const placeableField = (object: RegistryObject, key: string): RegistryField => {
+  const candidate = object.byKey.get(key)
+  if (candidate && PLACEABLE(candidate)) return candidate
+  const names = calendarFields(object).map((field) => field.label).join(', ')
+  throw new Error(
+    names
+      ? `A calendar cannot be laid out on "${key}". Try one of: ${names}.`
+      : `A ${object.nameSingular.toLowerCase()} has no date field to lay a calendar out on.`,
+  )
+}
+
 export type CalendarEntry = {
   id: string
   displayName: string
@@ -69,15 +81,7 @@ export const readCalendar = async (
     const registry = await getRegistry(ctx)
     const object = objectOrThrow(registry, input.object)
 
-    const candidate = object.byKey.get(input.fieldKey)
-    if (!candidate || !PLACEABLE(candidate)) {
-      const names = calendarFields(object).map((field) => field.label).join(', ')
-      throw new Error(
-        names
-          ? `A calendar cannot be laid out on "${input.fieldKey}". Try one of: ${names}.`
-          : `A ${object.nameSingular.toLowerCase()} has no date field to lay a calendar out on.`,
-      )
-    }
+    const candidate = placeableField(object, input.fieldKey)
     const field = fieldOrThrow(object, candidate.key)
     const placed = fieldExpression(object, field)
     const start = monthStart(input.month)

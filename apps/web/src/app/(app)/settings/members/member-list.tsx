@@ -98,7 +98,8 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
   const [needle, setNeedle] = useState('')
   const [editingId, setEditingId] = useUrlParam('member')
   const [invitingParam, setInviting] = useUrlParam('invite')
-  const editingRow = isSuperAdmin ? rows.find((row) => row.userId === editingId) : undefined
+  const editingRow = isSuperAdmin ? rows.find((row) => row.userId === editingId && row.userId !== selfId) : undefined
+  const editingSelf = isSuperAdmin && editingId === selfId
   const inviting = isSuperAdmin && invitingParam !== null
   const [copying, setCopying] = useState<{ toUserId: string; name: string; fromUserId: string } | null>(null)
   const [link, setLink] = useState<string | null>(null)
@@ -383,6 +384,8 @@ export const MemberList = ({ rows, invitations, templates, selfId, isSuperAdmin 
           onSave={(grants, email) => void invite(email, grants)}
           onClose={() => setInviting(null)}
         />
+      ) : editingSelf ? (
+        <p className="min-w-0">You cannot change your own access. Ask another super admin to do it.</p>
       ) : null}
 
       <Modal

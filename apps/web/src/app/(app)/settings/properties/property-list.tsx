@@ -11,7 +11,7 @@ import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useFormat } from '~/components/zone.tsx'
-import { archiveUsageCopy, purgeResultCopy } from '~/lib/field-usage-copy.ts'
+import { archiveUsageCopy, dependantsCopy, purgeResultCopy } from '~/lib/field-usage-copy.ts'
 import { propertiesPath } from '~/lib/links.ts'
 import { api, errorMessage, trpc } from '~/lib/rpc.ts'
 import { replaceParams, useUrlParam } from '~/lib/url-params.ts'
@@ -73,7 +73,7 @@ export const PropertyList = ({
   const [typeFilter, setTypeFilter] = useUrlParam('ftype')
 
   const [removing, setRemoving] = useState<AdminField | null>(null)
-  const [usage, setUsage] = useState<{ filled: number } | null>(null)
+  const [usage, setUsage] = useState<{ filled: number; usedIn: { kind: string; name: string }[]; usedInTotal: number } | null>(null)
   const [grouping, setGrouping] = useState<{ name: string; rename: boolean } | null>(null)
   const [groupDraft, setGroupDraft] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
@@ -588,10 +588,14 @@ export const PropertyList = ({
             <Button
               variant="destructive"
               busy={busy}
+              disabled={usage === null}
               onClick={() => {
                 const field = removing
                 if (!field) return
-                void run(() => api.admin.fields.remove.mutate({ id: field.id }), 'Archived. The data is still there.').then(
+                void run(
+                  () => api.admin.fields.remove.mutate({ id: field.id, acknowledgeUses: true }),
+                  'Archived. The data is still there.',
+                ).then(
                   (ok) => ok && setRemoving(null),
                 )
               }}
@@ -608,6 +612,21 @@ export const PropertyList = ({
               ? 'Counting how many records hold a value...'
               : archiveUsageCopy(usage.filled, fmt.number(usage.filled))}
           </p>
+          {usage && usage.usedInTotal > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p>{dependantsCopy(usage.usedInTotal, fmt.number(usage.usedInTotal))}</p>
+              <ul className="flex flex-col gap-1">
+                {usage.usedIn.map((use) => (
+                  <li key={`${use.kind}:${use.name}`} className="break-words">
+                    {use.name} <span className="text-secondary">({use.kind})</span>
+                  </li>
+                ))}
+              </ul>
+              {usage.usedInTotal > usage.usedIn.length ? (
+                <p className="text-secondary">and {fmt.number(usage.usedInTotal - usage.usedIn.length)} more</p>
+              ) : null}
+            </div>
+          ) : null}
           <p className="text-secondary">
             Nothing is lost here. Restoring it from Archived puts it back. Purging, which is a separate action, is
             what actually removes the data.

@@ -9,6 +9,7 @@ import { api, errorCode, errorMessage } from '~/lib/rpc.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { FieldInput, scoped, type EditableField } from './field-input.tsx'
 import { PropertySearch } from './property-search.tsx'
+import { type PanelSync, readArrived, reloadRequested } from './property-sync.ts'
 import { EMPTY_VALUE, Value } from './value.tsx'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -49,23 +50,27 @@ export const PropertyPanel = ({
   const [local, setLocal] = useState(values)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState<unknown>(null)
-  const [errors, setErrors] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
   const [showAll, setShowAll] = useState(false)
   const [needle, setNeedle] = useState('')
-  const [stamp, setStamp] = useState(updatedAt)
+  // A save is refused only if the field being edited has changed on the server
+  // since its base was read, not the whole record.
+  const [sync, setSync] = useState<PanelSync>({ base: null, reloading: null, errors: {} })
   const [seen, setSeen] = useState(updatedAt)
+  const [seenValues, setSeenValues] = useState(values)
 
   /** The panel edits a copy so a field can show its new value before the server
-   *  answers. That copy has to give way when the record changes underneath it —
-   *  a merge, an accepted enrichment, a bulk edit — or the panel shows values
-   *  that are no longer stored, and `stamp` goes stale enough that the next
-   *  inline edit is refused as a conflict with a change this panel made itself. */
+   *  answers. That copy has to give way when the record changes underneath it:
+   *  a merge, an accepted enrichment, a bulk edit. Otherwise the panel shows values
+   *  that are no longer stored. */
   if (updatedAt !== seen) {
     setSeen(updatedAt)
     setLocal(values)
-    setStamp(updatedAt)
+  }
+  if (values !== seenValues) {
+    setSeenValues(values)
+    setSync((current) => readArrived(current, values, labels))
   }
 
   const byKey = new Map(fields.map((field) => [field.key, field]))
@@ -80,9 +85,9 @@ export const PropertyPanel = ({
 
     setSaving(field.key)
     setLocal((current) => ({ ...current, [field.key]: next }))
-    setErrors((current) => {
-      const { [field.key]: _dropped, ...rest } = current
-      return rest
+    setSync((current) => {
+      const { [field.key]: _dropped, ...errors } = current.errors
+      return { ...current, errors }
     })
 
     try {
@@ -90,23 +95,25 @@ export const PropertyPanel = ({
         object,
         id: recordId,
         values: { [field.key]: next === '' ? null : next },
-        expectedUpdatedAt: new Date(stamp),
+        expectedValues: { [field.key]: sync.base },
       })
       for (const warning of result.warnings) toast('info', warning)
-      setStamp(result.updatedAt.toISOString())
       setEditing(null)
       // The timeline and the rail read from the server, so a saved change has to
       // reach them too.
       router.refresh()
     } catch (cause) {
+      const conflict = errorCode(cause) === 'CONFLICT'
       setLocal((current) => ({ ...current, [field.key]: previous }))
-      const message = errorMessage(cause)
-      setErrors((current) => ({
+      setSync((current) => ({
         ...current,
-        [field.key]:
-          errorCode(cause) === 'CONFLICT'
-            ? `${message} What you typed was “${String(next ?? '')}”.`
-            : message,
+        errors: {
+          ...current.errors,
+          [field.key]: {
+            message: conflict ? `${errorMessage(cause)} What you typed was “${String(next ?? '')}”.` : errorMessage(cause),
+            conflict,
+          },
+        },
       }))
     } finally {
       setSaving(null)
@@ -170,7 +177,7 @@ export const PropertyPanel = ({
           <dl className="flex flex-col gap-4 px-6 pb-6">
             {sectionFields.map((field) => {
               const isEditing = editing === field.key
-              const error = errors[field.key]
+              const error = sync.errors[field.key]
               const editable = canWrite && !field.readOnly
 
               // A note is written to be read, and the value column of a
@@ -205,9 +212,9 @@ export const PropertyPanel = ({
                             variant="tertiary"
                             onClick={() => {
                               setEditing(null)
-                              setErrors((current) => {
-                                const { [field.key]: _dropped, ...rest } = current
-                                return rest
+                              setSync((current) => {
+                                const { [field.key]: _dropped, ...errors } = current.errors
+                                return { ...current, errors }
                               })
                             }}
                           >
@@ -236,6 +243,7 @@ export const PropertyPanel = ({
                             icon={<ACTION_ICONS.edit size={16} />}
                             onClick={() => {
                               setEditing(field.key)
+                              setSync((current) => ({ ...current, base: local[field.key] }))
                               setDraft(local[field.key] ?? '')
                             }}
                           />
@@ -248,6 +256,7 @@ export const PropertyPanel = ({
                         aria-label={editable ? `Edit ${field.label}` : field.label}
                         onClick={() => {
                           setEditing(field.key)
+                          setSync((current) => ({ ...current, base: local[field.key] }))
                           setDraft(local[field.key] ?? '')
                         }}
                         className={cn(
@@ -275,9 +284,22 @@ export const PropertyPanel = ({
                     )}
 
                     {error ? (
-                      <p role="alert" className="text-error">
-                        {error}
-                      </p>
+                      <div className="flex min-w-0 flex-col items-start gap-2">
+                        <p role="alert" className="min-w-0 break-words text-error">
+                          {error.message}
+                        </p>
+                        {error.conflict ? (
+                          <Button
+                            variant="secondary"
+                            onClick={() => {
+                              setSync((current) => reloadRequested(current, field.key))
+                              router.refresh()
+                            }}
+                          >
+                            Reload
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : null}
                   </dd>
                 </div>

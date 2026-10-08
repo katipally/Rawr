@@ -7,6 +7,7 @@ import { employerDomainFromEmail } from './domains.ts'
 import { requestEnrichment } from './enrichment.ts'
 import type { AssignOwner, FormField } from './form-schema.ts'
 import type { Tx } from './index.ts'
+import { companyByDomainQuery } from './records.ts'
 
 /** The one path by which a stranger becomes a contact.
  *
@@ -45,8 +46,11 @@ export const upsertCapturedPerson = async (
 
   const contactValues = { ...input.contact, email: input.email }
 
-  const [existing] = await tx.execute<{ id: string; company_id: string | null; owner_id: string | null }>(
-    sql`select id, company_id, owner_id from contact where lower(email) = lower(${input.email}) and deleted_at is null limit 1`,
+  const [existing] = await tx.execute<{ id: string; company_id: string | null; company_live: boolean; owner_id: string | null }>(
+    sql`select k.id, k.company_id, (co.id is not null) as company_live, k.owner_id
+          from contact k
+          left join company co on co.id = k.company_id and co.deleted_at is null
+         where lower(k.email) = lower(${input.email}) and k.deleted_at is null limit 1`,
   )
 
   const source = sourceFrom(input.attribution)
@@ -88,7 +92,7 @@ export const upsertCapturedPerson = async (
     if (input.lifecycleStage) {
       await applyLifecycle(tx, ctx, existing.id, input.lifecycleStage, input.source)
     }
-    return { contactId: existing.id, companyId: companyId ?? existing.company_id }
+    return { contactId: existing.id, companyId: companyId ?? (existing.company_live ? existing.company_id : null) }
   }
 
   const columns: Record<string, unknown> = {
@@ -186,9 +190,7 @@ const upsertCompany = async (
   values: Record<string, unknown>,
   source: { channel: string; detail: Attribution },
 ): Promise<string | null> => {
-  const [existing] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
+  const [existing] = await tx.execute<{ id: string }>(companyByDomainQuery(domain))
   if (existing) return existing.id
 
   const name = typeof values.name === 'string' && values.name ? values.name : null
@@ -206,9 +208,7 @@ const upsertCompany = async (
     return created.id
   }
 
-  const [raced] = await tx.execute<{ id: string }>(
-    sql`select id from company where domain = ${domain} and deleted_at is null limit 1`,
-  )
+  const [raced] = await tx.execute<{ id: string }>(companyByDomainQuery(domain))
   return raced?.id ?? null
 }
 

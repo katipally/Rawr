@@ -144,8 +144,8 @@ export const trackingConsentEnum = pgEnum('rawr_tracking_consent', ['Allowed', '
 export const viewKindEnum = pgEnum('rawr_view_kind', [
   'table',
   'board',
-  /** Placed on days by a date field, which `group_by_field_id` names: a board
-   *  points that at a stage, a calendar points it at a date. */
+  /** Placed on days by a date field, which `calendar_field_id` names. A board
+   *  groups by `group_by_field_id` instead, so the two never share a column. */
   'calendar',
 ])
 

@@ -245,13 +245,7 @@ export const INTEGRATIONS: IntegrationMeta[] = [
     failureMode:
       'A refused prospect is reported by name rather than forced through: Woodpecker rejects anybody who already replied, bounced or opted out, and that refusal is the protection working.',
     secretLabel: 'API key',
-    configFields: [
-      {
-        key: 'campaignId',
-        label: 'Default campaign',
-        hint: 'The campaign a sequence enrolls into when it names none, by its Woodpecker id.',
-      },
-    ],
+    configFields: [],
     rows: ['Email Sequences'],
     setup: [
       'In Woodpecker, open Marketplace, then Integrations, then API keys. This needs the API keys & integrations add-on.',
@@ -661,7 +655,9 @@ export const enrichRecord = async (
   }
   const connected = await connectedEnrichers(ctx)
   if (connected.size === 0) return NONE
-  const companyId = typeof record.values.company_id === 'string' ? record.values.company_id : null
+  // getRecord hides a trashed company, so no enricher is sent one the contact no longer shows.
+  const linkedCompany = typeof record.values.company_id === 'string' ? await getRecord(ctx, 'company', record.values.company_id) : null
+  const companyId = linkedCompany?.id ?? null
 
   await clearEnrichmentRequest(ctx, 'contact', contactId)
 

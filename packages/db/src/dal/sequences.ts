@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { appDb } from '../internal/pool.ts'
 import { randomToken } from '../internal/crypto.ts'
 import { mailbox } from '../schema/messaging.ts'
-import { contact } from '../schema/records.ts'
+import { company, contact } from '../schema/records.ts'
 import { userAccount } from '../schema/identity.ts'
 import {
   emailTemplate,
@@ -285,6 +285,7 @@ export const saveSequence = async (
   mutate(ctx, 'sequence', async (tx) => {
     const name = input.name.trim()
     if (name === '') throw new Error('A sequence needs a name.')
+    const description = input.description?.trim() || null
 
     if (input.id) {
       const [before] = await tx.select().from(sequence).where(eq(sequence.id, input.id))
@@ -297,7 +298,7 @@ export const saveSequence = async (
         .update(sequence)
         .set({
           name,
-          description: input.description ?? null,
+          ...(input.description === undefined ? {} : { description }),
           ...(input.sender ? { sender: input.sender } : {}),
           settings,
           updatedAt: new Date(),
@@ -317,7 +318,7 @@ export const saveSequence = async (
       .values({
         accountId: ctx.accountId,
         name,
-        description: input.description ?? null,
+        description,
         sender: input.sender ?? 'gmail',
         settings,
         ownerId: ctx.actorId,
@@ -618,18 +619,24 @@ export const enroll = async (
     const contactIds = input.companyId
       ? (
           await tx.execute<{ id: string }>(sql`
-            select id from contact
-             where company_id = ${input.companyId}::uuid
-               and deleted_at is null
-               and coalesce(email, '') <> ''
-             order by created_at`)
+            select c.id from contact c
+              join company co on co.id = c.company_id and co.deleted_at is null
+             where c.company_id = ${input.companyId}::uuid
+               and c.deleted_at is null
+               and coalesce(c.email, '') <> ''
+             order by c.created_at`)
         ).map((row) => row.id)
       : (input.contactIds ?? [])
     if (contactIds.length === 0) {
+      if (!input.companyId) throw new Error('Nobody was named to enrol.')
+      const [target] = await tx
+        .select({ deletedAt: company.deletedAt })
+        .from(company)
+        .where(eq(company.id, input.companyId))
       throw new Error(
-        input.companyId
-          ? 'Nobody at that company has an email address to write to.'
-          : 'Nobody was named to enrol.',
+        target?.deletedAt
+          ? 'That company is in the trash, so nobody at it can be enrolled.'
+          : 'Nobody at that company has an email address to write to.',
       )
     }
 
@@ -1102,7 +1109,7 @@ export const claimEnrollmentRun = async (
         from sequence_enrollment e
         join sequence s on s.id = e.sequence_id
         join contact c on c.id = e.contact_id and c.deleted_at is null
-        left join company co on co.id = c.company_id
+        left join company co on co.id = c.company_id and co.deleted_at is null
         left join mailbox m on m.id = e.mailbox_id
         left join message_thread t on t.id = e.thread_id
         cross join lateral (

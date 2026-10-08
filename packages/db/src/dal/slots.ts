@@ -391,6 +391,40 @@ export const readRanges = (value: unknown): TimeRange[] => {
   return out
 }
 
+const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+/** The first thing wrong with one set of windows, as a sentence for the person who
+ *  set them, or null when they can be stored. Windows that touch (9-12, 12-17) are
+ *  fine; an end not after its start, or two windows sharing a minute, are not.
+ *  O(n log n) on the sort. */
+export const windowProblem = (subject: string, ranges: TimeRange[]): string | null => {
+  const spans: { range: TimeRange; start: number; end: number }[] = []
+  for (const range of ranges) {
+    const start = minutesOfDay(range[0])
+    const end = minutesOfDay(range[1])
+    if (start === null || end === null) return `${subject} has a window with no time set.`
+    if (end <= start) return `${subject} has a window from ${range[0]} to ${range[1]}. It has to end after it starts.`
+    spans.push({ range, start, end })
+  }
+  spans.sort((a, b) => a.start - b.start)
+  for (let i = 1; i < spans.length; i++) {
+    const before = spans[i - 1]!
+    const after = spans[i]!
+    if (after.start < before.end) {
+      return `${subject} has ${before.range[0]}-${before.range[1]} and ${after.range[0]}-${after.range[1]} overlapping. Merge them into one window.`
+    }
+  }
+  return null
+}
+
+export const scheduleProblem = (weekly: WeeklyRules): string | null => {
+  for (const [weekday, ranges] of Object.entries(weekly)) {
+    const problem = windowProblem(WEEKDAY_NAMES[Number(weekday) - 1] ?? weekday, ranges)
+    if (problem) return problem
+  }
+  return null
+}
+
 /** Nine to five, Monday to Friday. What a new host gets before they have opened
  *  the availability screen, so a page is bookable the day it is created. */
 export const DEFAULT_WEEKLY: WeeklyRules = {

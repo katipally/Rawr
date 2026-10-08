@@ -1,12 +1,15 @@
 'use client'
 
 import { STATE_TONE } from './run-state.ts'
+import { type ObjectScope, scopeRule } from './object-scope.ts'
+import { stepsComplete } from './steps-complete.ts'
 import { Alert, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { FilterBuilder, type FilterField, type Group } from '~/components/crm/filter-builder.tsx'
+import { groupsComplete } from '~/components/crm/filter-rules.ts'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { ghostFilter } from '~/components/filter-chip.tsx'
@@ -84,7 +87,7 @@ export type AutomationListProps = {
   /** Every object in the account, named. A rule can watch one an admin
    *  invented, so this cannot be written out here. */
   objects: { key: string; label: string }[]
-  fieldsByObject: Record<string, string[]>
+  fieldsByObject: Record<string, { key: string; label: string }[]>
   /** Only the date fields, for the trigger that waits for one to arrive. */
   dateFieldsByObject: Record<string, { key: string; label: string }[]>
   /** The same shape segments pass their builder. Keyed by object because a rule
@@ -193,7 +196,7 @@ type EditorContext = {
   object: string
   people: { id: string; name: string }[]
   stages: string[]
-  fieldsByObject: Record<string, string[]>
+  fieldsByObject: Record<string, { key: string; label: string }[]>
   filterFields: FilterField[]
   templates: { id: string; name: string }[]
   mailboxes: { id: string; email: string }[]
@@ -225,9 +228,9 @@ const ActionFields = ({
         <Field id={id('field')} label="Field">
           <Select id={id('field')} value={config.field ?? ''} onChange={(e) => set('field', e.target.value)}>
             <option value="">Pick one</option>
-            {(fieldsByObject[object] ?? []).map((key) => (
-              <option key={key} value={key}>
-                {key}
+            {(fieldsByObject[object] ?? []).map((field) => (
+              <option key={field.key} value={field.key}>
+                {field.label}
               </option>
             ))}
           </Select>
@@ -407,7 +410,6 @@ const StepList = ({
   ctx: EditorContext
 }) => {
   const canBranch = depth < MAX_BRANCH_DEPTH - 1
-  const actions = ACTIONS.filter((entry) => ctx.object === 'contact' || !CONTACT_ONLY.includes(entry.key))
 
   return (
     <div className="flex flex-col gap-2">
@@ -426,7 +428,7 @@ const StepList = ({
                 onChange={(event) => onChange(replace(steps, index, kindFrom(event.target.value)))}
               >
                 <optgroup label="Do">
-                  {actions.map((entry) => (
+                  {ACTIONS.filter((entry) => ctx.object === 'contact' || !CONTACT_ONLY.includes(entry.key) || (step.kind === 'action' && step.type === entry.key)).map((entry) => (
                     <option key={entry.key} value={entry.key}>
                       {entry.label}
                     </option>
@@ -493,7 +495,7 @@ const StepList = ({
                   fields={ctx.filterFields}
                   relativeDates
                   value={step.conditions}
-                  onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
+                  onChange={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
                 />
               </div>
             ) : null}
@@ -509,7 +511,7 @@ const StepList = ({
                   fields={ctx.filterFields}
                   relativeDates
                   value={step.conditions}
-                  onApply={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
+                  onChange={(next) => onChange(replace(steps, index, { ...step, conditions: next }))}
                 />
                 <div className="flex flex-col gap-2 border-l-2 border-divider pl-3">
                   <p className="font-medium">If it matches</p>
@@ -603,11 +605,28 @@ export const AutomationList = ({
   const [steps, setSteps] = useState<StepView[]>([])
   const [conditions, setConditions] = useState<Group[]>([])
   const [triggerConfig, setTriggerConfig] = useState<Record<string, string>>({})
+  /** What the last object change removed from the rule, by the label it had. */
+  const [dropped, setDropped] = useState<string[]>([])
 
   const only = TRIGGERS.find((entry) => entry.key === trigger)?.objects ?? null
   const allowedObjects = only ? objects.filter((entry) => only.includes(entry.key)) : objects
   const labelOf = (key: string): string => objects.find((entry) => entry.key === key)?.label ?? key
   const setTrigger_ = (key: string, value: string) => setTriggerConfig({ ...triggerConfig, [key]: value })
+
+  const scopeOf = (key: string): ObjectScope => ({
+    filterFields: filterFieldsByObject[key] ?? [],
+    settable: (fieldsByObject[key] ?? []).map((field) => field.key),
+    dates: dateFieldsByObject[key] ?? [],
+  })
+
+  const changeObject = (next: string) => {
+    const scoped = scopeRule({ conditions, steps, triggerConfig }, scopeOf(next), scopeOf(object))
+    setObject(next)
+    setConditions(scoped.conditions)
+    setSteps(scoped.steps)
+    setTriggerConfig(scoped.triggerConfig)
+    setDropped(scoped.removed)
+  }
 
   const editor: EditorContext = {
     object,
@@ -629,6 +648,7 @@ export const AutomationList = ({
     setName(seed?.name ?? '')
     setTrigger(seed?.trigger ?? 'record_created')
     setObject(seed?.objectKey ?? 'contact')
+    setDropped([])
     setConditions(seed?.conditions ?? [])
     setTriggerConfig({ direction: 'before', offsetDays: '3', days: '30', ...seed?.triggerConfig })
     setSteps(seed && seed.steps.length > 0 ? seed.steps : [{ kind: 'action', type: 'create_task', config: {} }])
@@ -650,7 +670,10 @@ export const AutomationList = ({
     }
   }
 
+  const complete = groupsComplete(conditions) && stepsComplete(steps) && (trigger !== 'date_reached' || Boolean(triggerConfig.fieldKey))
+
   const save = () =>
+    complete &&
     run(
       () =>
         api.admin.automations.save.mutate({
@@ -830,7 +853,7 @@ export const AutomationList = ({
             <Button variant="tertiary" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim()}>
+            <Button type="submit" variant="primary" busy={busy} disabled={!name.trim() || !complete}>
               Save
             </Button>
           </>
@@ -849,7 +872,7 @@ export const AutomationList = ({
                 const next = event.target.value as Trigger
                 setTrigger(next)
                 const allowed = TRIGGERS.find((entry) => entry.key === next)?.objects ?? null
-                if (allowed && !allowed.includes(object)) setObject(allowed[0]!)
+                if (allowed && !allowed.includes(object)) changeObject(allowed[0]!)
               }}
             >
               {TRIGGERS.map((entry) => (
@@ -864,7 +887,7 @@ export const AutomationList = ({
             <Select
               id="automation-object"
               value={object}
-              onChange={(event) => setObject(event.target.value)}
+              onChange={(event) => changeObject(event.target.value)}
             >
               {allowedObjects.map((entry) => (
                 <option key={entry.key} value={entry.key}>
@@ -872,6 +895,11 @@ export const AutomationList = ({
                 </option>
               ))}
             </Select>
+            {dropped.length > 0 ? (
+              <Alert tone="info">
+                Removed because {labelOf(object)} has no {[...new Set(dropped)].join(', ')}.
+              </Alert>
+            ) : null}
           </Field>
 
           {trigger === 'date_reached' ? (
@@ -945,7 +973,7 @@ export const AutomationList = ({
               fields={filterFieldsByObject[object] ?? []}
               relativeDates
               value={conditions}
-              onApply={setConditions}
+              onChange={setConditions}
             />
           </div>
 

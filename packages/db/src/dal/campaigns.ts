@@ -285,7 +285,8 @@ export const campaignPerformance = async (
           from (
             select distinct c.first_campaign_id as cid, d.id, d.amount, coalesce(st.is_closed_won, false) as won
               from contact c
-              join deal d on d.company_id = c.company_id and d.deleted_at is null
+              join company co on co.id = c.company_id and co.deleted_at is null
+              join deal d on d.company_id = co.id and d.deleted_at is null
               left join pipeline_stage st on st.id = d.stage_id
              where c.account_id = ${ctx.accountId}
                and c.deleted_at is null

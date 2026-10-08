@@ -64,9 +64,10 @@ export type AssociationRailProps = {
   /** The create form for each linkable object, so a deal's new contact is made
    *  here and linked in one step rather than created elsewhere and searched for. */
   createFields: Record<string, CreateField[]>
-  /** Prefilled onto a record created from here: a contact or deal made from a
-   *  company page starts with that company as its primary. */
-  createInitial: Record<string, unknown>
+  /** Prefilled per object onto a record created from here: a contact or deal made
+   *  from a company page, or from a contact or deal with a live company, starts
+   *  with that company as its primary. */
+  createInitial: Record<string, Record<string, unknown>>
   canWrite: boolean
 }
 
@@ -397,13 +398,13 @@ export const AssociationRail = ({
           object={creating.objectKey}
           objectLabel={creating.nameSingular}
           fields={createFields[creating.objectKey] ?? []}
-          // A contact or deal made from a company already points at it through
-          // company_id, so the link exists without an association row.
-          initial={createInitial}
+          // A record made from a company already points at it through company_id,
+          // so the link exists without an association row.
+          initial={createInitial[creating.objectKey] ?? {}}
           onClose={() => setCreating(null)}
           onCreated={async (id) => {
             const target = creating.objectKey
-            const already = object === 'company' && (target === 'contact' || target === 'deal')
+            const already = object === 'company' && Boolean(createInitial[target]?.company_id)
             if (!already) {
               await api.crm.associations.add.mutate({
                 a: { entityType: object, entityId: recordId },

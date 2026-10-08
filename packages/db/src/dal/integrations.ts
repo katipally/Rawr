@@ -9,6 +9,7 @@ import {
 } from '../schema/platform.ts'
 import { decryptToken, encryptToken, randomToken } from '../internal/crypto.ts'
 import { assertCanWrite, type AccountContext } from './context.ts'
+import { checkIntegrationConfig } from './integration-config.ts'
 import { mutate, withAccount, type Tx } from './index.ts'
 import { resolveNotifications } from './notifications.ts'
 
@@ -327,6 +328,7 @@ export const saveIntegration = async (
   input: SaveIntegrationInput,
 ): Promise<{ id: string }> =>
   mutate(ctx, 'integration', async (tx) => {
+    let config = input.config === undefined ? undefined : checkIntegrationConfig(input.kind, input.config)
     let secretRef = input.secret === undefined ? undefined : input.secret ? encryptToken(input.secret) : null
     if (secretRef === undefined && devIntegrations() && !KEYLESS_KINDS.has(input.kind)) {
       const [held] = await tx
@@ -344,7 +346,6 @@ export const saveIntegration = async (
     // Taking it from the input would let whoever saves the integration choose the
     // value, and would rotate it to a new one every time somebody edited a config
     // field, silently breaking the URL already pasted at the provider.
-    let config = input.config
     if (config !== undefined && (input.kind === 'brevo' || input.kind === 'woodpecker')) {
       const [existing] = await tx
         .select({ config: integration.config })
@@ -665,6 +666,11 @@ export const dismissSuggestion = async (ctx: AccountContext, id: string): Promis
   // Dismissing is a decision about the record, so it takes the record's write role.
   assertCanWrite(ctx, 'contact')
   await withAccount(ctx, async (tx) => {
+    await tx.execute(sql`
+      insert into enrichment_dismissal (account_id, entity, entity_id, field_key, dismissed_value)
+      select account_id, entity, entity_id, field_key, suggested from enrichment_suggestion where id = ${id}
+      on conflict (account_id, entity, entity_id, field_key)
+      do update set dismissed_value = excluded.dismissed_value, dismissed_at = now()`)
     await tx.delete(enrichmentSuggestion).where(eq(enrichmentSuggestion.id, id))
   })
 }

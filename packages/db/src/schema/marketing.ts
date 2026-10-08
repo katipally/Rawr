@@ -133,7 +133,12 @@ export const savedView = pgTable(
     filters: jsonb('filters').notNull().default([]),
     sorts: jsonb('sorts').notNull().default([]),
     columns: jsonb('columns').notNull().default([]),
+    /** A board's grouping: the field whose values become its columns. */
     groupByFieldId: uuid('group_by_field_id').references(() => fieldDef.id, {
+      onDelete: 'set null',
+    }),
+    /** A calendar's place-on field: the date that puts a record on a day. */
+    calendarFieldId: uuid('calendar_field_id').references(() => fieldDef.id, {
       onDelete: 'set null',
     }),
     createdAt: createdAt(),
@@ -143,6 +148,7 @@ export const savedView = pgTable(
     index('saved_view_object_idx').on(t.accountId, t.objectId, t.pinned.desc(), t.position),
     uniqueIndex('saved_view_slug_key').on(t.accountId, t.objectId, t.slug),
     index('saved_view_group_by_field_id_idx').on(t.groupByFieldId),
+    index('saved_view_calendar_field_id_idx').on(t.calendarFieldId),
     index('saved_view_object_id_idx').on(t.objectId),
     index('saved_view_owner_id_idx').on(t.ownerId),
   ],

@@ -82,6 +82,7 @@ import { propagateSubscriptionToBrevo } from '../integrations/brevo.ts'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { call } from '../errors.ts'
+import { anyObject, recordUpdateInput, recordValues } from './crm-input.ts'
 import { discardUpload, sealUpload, startUpload } from '../import-upload.ts'
 import { announceStageChange } from '../stage-alerts.ts'
 import { NOT_CONFIGURED, removeObject, signedDownload, storageConfigured } from '../storage.ts'
@@ -93,10 +94,6 @@ import { protectedProcedure, router } from '../trpc.ts'
  *  `anyObject` and asks the registry. */
 const objectKey = z.enum(['contact', 'company', 'deal'])
 
-/** Any object in the account, including one an admin invented. The registry is
- *  what decides whether it exists — this only proves the string is shaped like a
- *  key, because it reaches SQL as an alias and appears in a URL. */
-const anyObject = z.string().regex(/^[a-z][a-z0-9_]{1,58}$/, 'That is not an object.')
 const entityRef = z.object({ entityType: anyObject, entityId: z.uuid() })
 
 const condition = z.object({
@@ -110,10 +107,6 @@ const filterGroup = z.object({
 })
 const sortSchema = z.object({ key: z.string().min(1).max(64), direction: z.enum(['asc', 'desc']) })
 const cursorSchema = z.object({ value: z.union([z.string(), z.number(), z.null()]), id: z.uuid() })
-
-/** Values arrive as whatever a form produced. The registry decides what each one
- *  has to be, so there is nothing to validate here beyond the shape and the size. */
-const recordValues = z.record(z.string().max(64), z.unknown())
 
 const listInput = z.object({
   object: anyObject,
@@ -182,7 +175,12 @@ export const crmRouter = router({
       withAccount(ctx.account, async (tx) => {
         const [users, pipelines, stages, lifecycles] = await Promise.all([
           tx
-            .select({ id: schema.userAccount.id, name: schema.userAccount.name, email: schema.userAccount.email })
+            .select({
+              id: schema.userAccount.id,
+              name: schema.userAccount.name,
+              email: schema.userAccount.email,
+              state: schema.membership.state,
+            })
             .from(schema.membership)
             .innerJoin(schema.userAccount, eq(schema.userAccount.id, schema.membership.userId))
             .orderBy(asc(schema.userAccount.name)),
@@ -257,16 +255,7 @@ export const crmRouter = router({
       ),
 
     update: protectedProcedure
-      .input(
-        z.object({
-          object: anyObject,
-          id: z.uuid(),
-          values: recordValues,
-          /** What the editor last read. A stale write is refused rather than
-           *  silently overwriting whoever saved in between. */
-          expectedUpdatedAt: z.coerce.date(),
-        }),
-      )
+      .input(recordUpdateInput)
       .mutation(({ ctx, input }) =>
         call(async () => {
           const result = await updateRecord(
@@ -274,7 +263,8 @@ export const crmRouter = router({
             input.object,
             input.id,
             input.values,
-            input.expectedUpdatedAt,
+            input.expectedUpdatedAt ?? null,
+            { expectedValues: input.expectedValues },
           )
           announceStageChange(ctx.account, ctx.session.accountSlug, result.stageChange, ctx.session.displayName)
           fireChangeAutomations(ctx, input.object, input.id, result)
@@ -383,7 +373,12 @@ export const crmRouter = router({
           columns: z.array(z.string().max(64)).min(1).max(60),
           filters: z.array(filterGroup).max(5),
           sorts: z.array(sortSchema).max(3),
-          isShared: z.boolean(),
+          /** Only read when creating. */
+          isShared: z.boolean().optional(),
+          /** Board views. Null is stage; absent keeps what is stored. */
+          groupByKey: z.string().max(64).nullish(),
+          /** Calendar views. Null clears the date field; absent keeps what is stored. */
+          calendarKey: z.string().max(64).nullish(),
           /** The version of the view being overwritten; absent only when creating. */
           expectedUpdatedAt: z.coerce.date().nullable(),
         }),
@@ -400,6 +395,8 @@ export const crmRouter = router({
             filters: input.filters as never,
             sorts: input.sorts,
             isShared: input.isShared,
+            groupByKey: input.groupByKey,
+            calendarKey: input.calendarKey,
           }),
         ),
       ),

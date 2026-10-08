@@ -55,6 +55,12 @@ export const applyEnrichment = async (
     )
     const sourceOf = new Map(sources.map((row) => [row.field_key, row.source]))
 
+    const dismissals = await tx.execute<{ field_key: string; dismissed_value: string }>(
+      sql`select field_key, dismissed_value from enrichment_dismissal
+           where entity = ${object.key} and entity_id = ${input.entityId}`,
+    )
+    const dismissedOf = new Map(dismissals.map((row) => [row.field_key, row.dismissed_value]))
+
     const result: EnrichmentResult = { written: [], suggested: [], unchanged: [], unknown: [] }
     const custom = (current.custom ?? {}) as Record<string, unknown>
 
@@ -85,6 +91,17 @@ export const applyEnrichment = async (
       // from" is "somebody typed it".
       const provenance = sourceOf.get(key) ?? (filled ? 'human' : null)
       if (filled && provenance !== 'enrichment') {
+        const dismissed = dismissedOf.get(key)
+        if (dismissed === String(value)) {
+          result.unchanged.push(key)
+          continue
+        }
+        // The provider now says something else, so the old dismissal no longer applies.
+        if (dismissed !== undefined) {
+          await tx.execute(sql`
+            delete from enrichment_dismissal
+             where entity = ${object.key} and entity_id = ${input.entityId} and field_key = ${key}`)
+        }
         await tx
           .insert(enrichmentSuggestion)
           .values({

@@ -41,6 +41,10 @@ export const ConnectForm = (props: ConnectFormProps) => {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const [secret, setSecret] = useState('')
+  // Distinct from an empty field, which means "keep the stored key": this one
+  // sends an empty secret, which the server takes as a request to remove it.
+  const [clearSecret, setClearSecret] = useState(false)
+  const [problem, setProblem] = useState<string | null>(null)
   const [config, setConfig] = useState<Record<string, string>>(
     Object.fromEntries(Object.entries(props.config).map(([key, value]) => [key, String(value ?? '')])),
   )
@@ -60,13 +64,14 @@ export const ConnectForm = (props: ConnectFormProps) => {
 
   const save = async () => {
     setBusy(true)
+    setProblem(null)
     try {
       await api.integrations.save.mutate({
         kind: props.kind,
         config: Object.fromEntries(Object.entries(config).filter(([, value]) => value !== '')),
         // Left blank means "leave the stored key alone", so saving a config change
         // does not require re-typing a credential nobody can read back.
-        ...(secret ? { secret } : {}),
+        ...(clearSecret ? { secret: '' } : secret ? { secret } : {}),
       })
       const test = await api.integrations.test.mutate({ kind: props.kind }).catch((cause: unknown) => ({
         ok: false,
@@ -74,9 +79,10 @@ export const ConnectForm = (props: ConnectFormProps) => {
       }))
       setResult(test)
       setSecret('')
+      setClearSecret(false)
       router.refresh()
     } catch (cause) {
-      toast('error', errorMessage(cause))
+      setProblem(errorMessage(cause))
     } finally {
       setBusy(false)
     }
@@ -101,7 +107,9 @@ export const ConnectForm = (props: ConnectFormProps) => {
           id={`secret-${props.kind}`}
           label={props.secretLabel}
           hint={
-            props.hasSecret
+            clearSecret
+              ? 'The stored key is removed when you save.'
+              : props.hasSecret
               ? 'A key is stored. Leave this blank to keep it, or paste a new one to replace it. It is never shown again.'
               : 'Encrypted with a key held outside this database, and never shown again after saving.'
           }
@@ -111,10 +119,27 @@ export const ConnectForm = (props: ConnectFormProps) => {
             type="password"
             autoComplete="off"
             value={secret}
-            disabled={!props.canWrite}
-            onChange={(event) => setSecret(event.target.value)}
+            disabled={!props.canWrite || clearSecret}
+            onChange={(event) => {
+              setSecret(event.target.value)
+              setClearSecret(false)
+            }}
           />
         </Field>
+      ) : null}
+
+      {props.secretLabel && props.hasSecret && props.canWrite ? (
+        <div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setSecret('')
+              setClearSecret((current) => !current)
+            }}
+          >
+            {clearSecret ? 'Keep the stored key' : 'Remove the stored key'}
+          </Button>
+        </div>
       ) : null}
 
       {props.configFields.map((field) => (
@@ -183,6 +208,8 @@ export const ConnectForm = (props: ConnectFormProps) => {
           </Alert>
         )
       ) : null}
+
+      {problem ? <Alert tone="error">{problem}</Alert> : null}
 
       {props.canWrite ? (
         <div>

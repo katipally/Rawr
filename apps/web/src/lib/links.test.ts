@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { exportCsvPath, exportPath, fromHubspotPath, objectView, recordPath, accountInPath, safeFrom, safePath } from './links.ts'
+import { exportCsvPath, exportPath, fromHubspotPath, layoutParams, objectView, recordPath, accountInPath, safeFrom, safePath, tabParams } from './links.ts'
 
 /** Read by the proxy on every CRM navigation and by the Google callback when it
  *  chooses which account to land in, so a wrong answer here is either a
@@ -276,4 +276,34 @@ test('a path with no HubSpot object id is left alone', () => {
   assert.equal(fromHubspotPath('/contacts/datasaur/record/contact/abc'), null)
   assert.equal(fromHubspotPath('/contacts/datasaur/record/0-14/abc'), null)
   assert.equal(fromHubspotPath('/contacts/0-1/home'), null)
+})
+
+test('a view tab keeps the search text and the pipeline, and drops the rest of the screen', () => {
+  const url = objectView('datasaur', 'deal', 'all', 'board', tabParams({
+    q: 'acme',
+    pipeline: 'p1',
+    filters: '[]',
+    sort: '-amount',
+    group: 'stage_id',
+    month: '2026-10',
+    page: '2',
+  }))
+  assert.equal(url, '/contacts/datasaur/objects/deal/views/all/board?q=acme&pipeline=p1')
+})
+
+test('a layout switch keeps the search, pipeline, sort and filters but drops the grouping, month and page', () => {
+  const url = objectView('datasaur', 'deal', 'all', 'list', layoutParams({
+    q: 'acme',
+    pipeline: 'p1',
+    sort: '-amount',
+    group: 'close_date',
+    month: '2026-10',
+    page: '3',
+  }))
+  assert.equal(url, '/contacts/datasaur/objects/deal/views/all/list?q=acme&pipeline=p1&sort=-amount')
+})
+
+test('a layout switch from a calendar with nothing else set lands on the bare layout', () => {
+  const url = objectView('datasaur', 'deal', 'all', 'board', layoutParams({ group: 'close_date', month: '2026-10' }))
+  assert.equal(url, '/contacts/datasaur/objects/deal/views/all/board')
 })

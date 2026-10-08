@@ -598,6 +598,30 @@ try {
   )
   check((await readDashboard(screenCtx('admin'))).stages.length > 0, 'and every card for a seat that holds them')
 
+  // ------------------------------------------------------ company domains
+  // An alias has no owner of its own and is read through the company it names,
+  // so it answers to the contacts hub the company does. The company is unowned,
+  // so the record scope is not what hides it from a seat without the hub.
+  const aliasStamp = Date.now()
+  const [aliased] = await owner<{ id: string }[]>`
+    insert into company (account_id, name, domain)
+    values (${accountId}, ${`Alias probe ${aliasStamp}`}, ${`primary.${aliasStamp}.guard.test`}) returning id`
+  const aliasDomain = `alias.${aliasStamp}.guard.test`
+  await owner`insert into company_domain (account_id, company_id, domain)
+    values (${accountId}, ${aliased!.id}, ${aliasDomain})`
+  const aliasSeen = (userId: string, hubs: Hub[]) =>
+    withAccount({ accountId, actorId: userId, actorKind: 'user', isSuperAdmin: false, viewHubs: hubs, editHubs: [] }, (tx) =>
+      tx.execute(sql`select c.id from company_domain d join company c on c.id = d.company_id
+                      where d.domain = ${aliasDomain}`))
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: ['contacts'], editHubs: [] })
+  const aliasWithHub = (await aliasSeen(salesSeat.id, ['contacts'])).length
+  await setMemberGrants(superAdmin, { userId: salesSeat.id, viewHubs: ['sales'], editHubs: [] })
+  const aliasWithoutHub = (await aliasSeen(salesSeat.id, ['sales'])).length
+  check(aliasWithHub === 1, 'a seat with the contacts hub reads the alias domain of a company', `${aliasWithHub}`)
+  check(aliasWithoutHub === 0, 'a seat without the contacts hub reads no alias domain of a company',
+    `${aliasWithoutHub}`)
+  await owner`delete from company where id = ${aliased!.id}`
+
   for (const seat of [salesSeat, marketingSeat]) {
     await setMemberGrants(superAdmin, {
       userId: seat.id,

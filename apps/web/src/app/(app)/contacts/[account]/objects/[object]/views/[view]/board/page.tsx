@@ -1,4 +1,4 @@
-import { calendarFields, isObjectKey, isUuid, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
+import { calendarFields, groupableFields, isObjectKey, isUuid, listViews, parseFilters, readBoard, resolveView } from '@rawr/db'
 import { Alert, FilterRow } from '@rawr/ui'
 import { notFound, redirect } from 'next/navigation'
 import { DealBoard, PipelinePicker } from '~/components/crm/deal-board.tsx'
@@ -58,7 +58,10 @@ const BoardPage = async ({
 
   // A board grouped by something other than stage spans every pipeline, because a
   // deal type or a product of interest is not a property of one pipeline.
-  const groupBy = search.group ?? resolved.view.groupByKey ?? 'stage_id'
+  const storedGroup = groupableFields(object).some((field) => field.key === resolved.view.groupByKey)
+    ? resolved.view.groupByKey
+    : null
+  const groupBy = search.group ?? storedGroup ?? 'stage_id'
   const byStage = groupBy === 'stage_id'
 
   let board: Awaited<ReturnType<typeof readBoard>> | null = null
@@ -177,6 +180,7 @@ const BoardPage = async ({
           openCreate={search.new === '1'}
           openView={search.view === 'new'}
           allColumns={object.fields.map((field) => ({ key: field.key, label: field.label }))}
+          groupByKey={query.groupBy === 'stage_id' ? null : query.groupBy}
           trailing={
             byStage && lookups.pipelines.length > 1 ? (
               <PipelinePicker

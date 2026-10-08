@@ -3,10 +3,11 @@
 import { Select, TextArea, TextInput } from '@rawr/ui'
 import type { Conditional, FieldType, ObjectKey } from '@rawr/db'
 import { useState } from 'react'
+import { pickable } from './pickable.ts'
 import { RecordPicker, type PickedRecord } from './record-picker.tsx'
 import { RichTextInput } from './rich-text-input.tsx'
 
-export type Choice = { id: string; label: string; pipelineId?: string }
+export type Choice = { id: string; label: string; pipelineId?: string; deactivated?: boolean }
 
 /** A deal stage belongs to one pipeline, so the stage list is cut to the
  *  pipeline the form holds. Every other field is itself. */
@@ -117,7 +118,7 @@ export const FieldInput = ({ field, value, onChange, id, autoFocus, valueLabel }
     return (
       <Select {...common} value={String(value ?? '')} onChange={(event) => onChange(event.target.value || null)}>
         <option value="">Not set</option>
-        {field.choices.map((choice) => (
+        {pickable(field.choices, value).map((choice) => (
           <option key={choice.id} value={choice.id}>
             {choice.label}
           </option>

@@ -142,6 +142,21 @@ export const enrichmentSuggestion = pgTable(
   ],
 )
 
+/** A value a person dismissed as a suggestion. Kept until the provider gives a
+ *  different value for the field, so the same answer is not offered again. */
+export const enrichmentDismissal = pgTable(
+  'enrichment_dismissal',
+  {
+    accountId: accountId().references(() => account.id, { onDelete: 'cascade' }),
+    entity: text('entity').notNull(),
+    entityId: uuid('entity_id').notNull(),
+    fieldKey: text('field_key').notNull(),
+    dismissedValue: text('dismissed_value').notNull(),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.entity, t.entityId, t.fieldKey] })],
+)
+
 /** A record that has just gained a match key, waiting for the worker to ask the
  *  app to enrich it. One row per record, deleted as it is claimed, so the table
  *  holds only what has not run yet. Written by the data layer on every path that

@@ -4,6 +4,7 @@ import { DATE_RANGES, dateRangeLabel, isDateRange } from '@rawr/db/registry'
 import { Button, Select, TextInput, cn } from '@rawr/ui'
 import { useState } from 'react'
 import type { Operator } from '@rawr/db'
+import { MULTI, NULLARY, RANGE, asList, groupsComplete, isComplete } from './filter-rules.ts'
 
 export type FilterField = {
   key: string
@@ -39,38 +40,12 @@ const OPERATOR_LABELS: Record<string, string> = {
   on_or_after: 'is on or after',
 }
 
-const NULLARY = new Set(['is_empty', 'is_not_empty'])
-/** Operators whose value is a list rather than a scalar. The compiler has always
- *  read these as arrays (dal/query.ts, LIST_OPERATORS); the builder only ever
- *  produced one value, so "is between" reached Postgres missing its upper bound
- *  and threw, and "is any of" could only ever name one option. */
-const RANGE = 'between'
-const MULTI = new Set(['in', 'not_in'])
-
-/** A condition's value as the list the compiler expects, whatever shape it is in
- *  now: a saved view predates this and holds a scalar. */
-const asList = (value: unknown): string[] => {
-  if (Array.isArray(value)) return value.map((entry) => (entry === null || entry === undefined ? '' : String(entry)))
-  if (value === null || value === undefined || value === '') return []
-  return [String(value)]
-}
+const INCOMPLETE = 'Every condition needs its values: both ends of a range, at least one of a list.'
 
 /** What an operator's value starts as when the operator changes, so a range is
  *  never half a range and a list is never a bare string. */
 const emptyValueFor = (operator: string): unknown =>
   operator === RANGE ? ['', ''] : MULTI.has(operator) ? [] : ''
-
-/** Complete means every part is filled: both ends of a range, at least one
- *  member of a list. `String([ '', '' ])` is "," which is not empty, so the old
- *  check would have waved a half-finished range through. */
-const isComplete = (condition: Condition): boolean => {
-  if (NULLARY.has(condition.operator)) return true
-  if (condition.operator === RANGE && isDateRange(condition.value)) return true
-  const values = asList(condition.value)
-  if (condition.operator === RANGE) return values.length === 2 && values.every((entry) => entry !== '')
-  if (MULTI.has(condition.operator)) return values.length > 0 && values.every((entry) => entry !== '')
-  return values.length > 0 && values[0] !== ''
-}
 
 /** One condition as a sentence, "Lifecycle stage is any of Lead, MQL", for a
  *  page that shows a segment's rule without opening the builder. */
@@ -96,10 +71,17 @@ const inputTypeFor = (type: string): string => {
 export type FilterBuilderProps = {
   fields: FilterField[]
   value: Group[]
-  onApply: (groups: Group[]) => void
+  /** Set where the builder is part of a form: every edit is reported at once and
+   *  there is no Apply. An unfinished row is reported too, so the form checks
+   *  `groupsComplete` before it saves. */
+  onChange?: (groups: Group[]) => void
+  /** Set where the builder is a popover that commits its draft on Apply. */
+  onApply?: (groups: Group[]) => void
   /** Omitted where the builder is part of a form rather than a popover: there is
    *  nothing to close, and a Close button that does nothing is worse than none. */
   onClose?: () => void
+  /** A property's rule is one group, so the builder offers no second one. */
+  singleGroup?: boolean
   /** Offers HubSpot's rolling ranges on a date "is between". Only where the
    *  filter compiles to SQL, which is what resolves them on the day it runs. */
   relativeDates?: boolean
@@ -232,7 +214,7 @@ const ValueControl = ({
 
 /** AND/OR groups, one level deep. A5 draws the line there on purpose: a tree of
  *  arbitrary depth is a query builder nobody can read on screen. */
-export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates = false, className }: FilterBuilderProps) => {
+export const FilterBuilder = ({ fields, value, onChange, onApply, onClose, singleGroup = false, relativeDates = false, className }: FilterBuilderProps) => {
   const [groups, setGroups] = useState<Group[]>(
     value.length > 0 ? value : [{ conjunction: 'and', conditions: [] }],
   )
@@ -240,12 +222,17 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates =
 
   const fieldFor = (key: string) => fields.find((field) => field.key === key)
 
+  const edit = (next: Group[]) => {
+    setGroups(next)
+    onChange?.(next.filter((group) => group.conditions.length > 0))
+  }
+
   const patch = (groupIndex: number, next: Partial<Group>) =>
-    setGroups((current) => current.map((group, i) => (i === groupIndex ? { ...group, ...next } : group)))
+    edit(groups.map((group, i) => (i === groupIndex ? { ...group, ...next } : group)))
 
   const patchCondition = (groupIndex: number, conditionIndex: number, next: Partial<Condition>) =>
-    setGroups((current) =>
-      current.map((group, i) =>
+    edit(
+      groups.map((group, i) =>
         i === groupIndex
           ? {
               ...group,
@@ -260,10 +247,8 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates =
   const addCondition = (groupIndex: number) => {
     const first = fields[0]
     if (!first) return
-    // Read from the updater's own argument rather than the render's `groups`, so
-    // two quick clicks add two conditions instead of one overwriting the other.
-    setGroups((current) =>
-      current.map((group, i) =>
+    edit(
+      groups.map((group, i) =>
         i === groupIndex
           ? {
               ...group,
@@ -294,11 +279,13 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates =
       (group, i) => group.conditions.length < (groups[i]?.conditions.length ?? 0),
     )
     if (incomplete) {
-      setError('Every condition needs its values: both ends of a range, at least one of a list.')
+      setError(INCOMPLETE)
       return
     }
-    onApply(trimmed.filter((group) => group.conditions.length > 0))
+    onApply?.(trimmed.filter((group) => group.conditions.length > 0))
   }
+
+  const clearAll = () => (onApply ? onApply([]) : edit([{ conjunction: 'and', conditions: [] }]))
 
   return (
     <div className={cn('flex flex-col gap-3 rounded-panel border border-line bg-surface p-3 shadow-panel', className)}>
@@ -386,7 +373,7 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates =
             {groups.length > 1 ? (
               <Button
                 variant="tertiary"
-                onClick={() => setGroups((current) => current.filter((_, i) => i !== groupIndex))}
+                onClick={() => edit(groups.filter((_, i) => i !== groupIndex))}
               >
                 Remove group
               </Button>
@@ -395,20 +382,22 @@ export const FilterBuilder = ({ fields, value, onApply, onClose, relativeDates =
         </div>
       ))}
 
-      {error ? (
+      {(onChange ? !groupsComplete(groups) : error) ? (
         <p role="alert" className="text-error">
-          {error}
+          {INCOMPLETE}
         </p>
       ) : null}
 
       <div className={cn('flex flex-wrap gap-2')}>
-        <Button variant="primary" onClick={apply}>
-          Apply
-        </Button>
-        <Button onClick={() => setGroups([...groups, { conjunction: 'and', conditions: [] }])}>
-          Add group
-        </Button>
-        <Button variant="tertiary" onClick={() => onApply([])}>
+        {onApply ? (
+          <Button variant="primary" onClick={apply}>
+            Apply
+          </Button>
+        ) : null}
+        {singleGroup ? null : (
+          <Button onClick={() => edit([...groups, { conjunction: 'and', conditions: [] }])}>Add group</Button>
+        )}
+        <Button variant="tertiary" onClick={clearAll}>
           Clear all
         </Button>
         {onClose ? (

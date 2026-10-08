@@ -37,6 +37,7 @@ import {
   readSchedule,
   renderTemplate,
   saveBookingPage,
+  clearOverride,
   saveOverride,
   saveSchedule,
   setPageActive,
@@ -1597,6 +1598,81 @@ try {
     saveSchedule(datasaur, { userId: hosts[0]!.userId, timezone: 'Mars/Olympus', weekly: {} }),
   )
   check('a timezone that does not exist is refused', badZone)
+
+  // -----------------------------------------------------------------------
+  section('windows that overlap')
+
+  const outcomeOf = (fn: () => Promise<unknown>) => fn().then(() => 'saved', (cause: Error) => cause.message)
+  const hostId = hosts[0]!.userId
+  const weeklyBeforeClash = JSON.stringify((await readSchedule(datasaur, hostId)).weekly)
+
+  const doubledMessage = await outcomeOf(() =>
+    saveSchedule(datasaur, { userId: hostId, timezone: 'UTC', weekly: { '1': [['09:00', '12:00'], ['11:00', '17:00']] } }),
+  )
+  check(
+    'two windows on one weekday that overlap are refused, naming the day and both windows',
+    doubledMessage === 'Monday has 09:00-12:00 and 11:00-17:00 overlapping. Merge them into one window.',
+    doubledMessage,
+  )
+  const backwards = await outcomeOf(() =>
+    saveSchedule(datasaur, { userId: hostId, timezone: 'UTC', weekly: { '2': [['17:00', '09:00']] } }),
+  )
+  check(
+    'a window that ends before it starts is refused',
+    backwards === 'Tuesday has a window from 17:00 to 09:00. It has to end after it starts.',
+    backwards,
+  )
+  check(
+    'and a refused schedule leaves the stored hours as they were',
+    JSON.stringify((await readSchedule(datasaur, hostId)).weekly) === weeklyBeforeClash,
+  )
+
+  const overlapDay = '2026-12-24'
+  const overrideClash = await outcomeOf(() =>
+    saveOverride(datasaur, {
+      userId: hostId,
+      day: overlapDay,
+      isUnavailable: false,
+      blocks: [['09:00', '13:00'], ['12:00', '15:00']],
+    }),
+  )
+  check(
+    'an override with overlapping hours is refused, naming its date',
+    overrideClash === 'The override for 2026-12-24 has 09:00-13:00 and 12:00-15:00 overlapping. Merge them into one window.',
+    overrideClash,
+  )
+  check(
+    'and no override is stored for that date',
+    !(await readSchedule(datasaur, hostId)).overrides.some((row) => row.day === overlapDay),
+  )
+
+  const touching = await outcomeOf(() =>
+    saveOverride(datasaur, {
+      userId: hostId,
+      day: overlapDay,
+      isUnavailable: false,
+      blocks: [['09:00', '12:00'], ['12:00', '15:00']],
+    }),
+  )
+  check('windows that only touch are saved', touching === 'saved', touching)
+  await clearOverride(datasaur, { userId: hostId, day: overlapDay })
+
+  // -----------------------------------------------------------------------
+  section('seeded meetings hold their host time')
+
+  const seededHolds = await withAccount(datasaur, (tx) =>
+    tx.execute<{ id: string; holds: boolean }>(sql`
+      select b.id, exists (
+        select 1 from booking_participant p
+         where p.booking_id = b.id and p.user_id = b.host_user_id and p.is_organiser
+      ) as holds
+        from booking b where b.state = 'confirmed'`),
+  )
+  check(
+    'every confirmed meeting in the sandbox has its host as a participant',
+    seededHolds.length > 0 && seededHolds.every((row) => row.holds),
+    `${seededHolds.filter((row) => row.holds).length} of ${seededHolds.length}`,
+  )
 
   // -----------------------------------------------------------------------
   section('extremes')
