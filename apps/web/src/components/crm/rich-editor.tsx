@@ -2,7 +2,7 @@
 
 import { Button, IconButton, TextInput, cn } from '@rawr/ui'
 import { Bold, Italic, Link2, List, ListOrdered } from 'lucide-react'
-import { type ClipboardEvent, type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { type ClipboardEvent, type KeyboardEvent, type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { linkTarget } from '~/lib/mail-compose.ts'
 
 /** The body of an email, written with the marks put in for you.
@@ -80,26 +80,29 @@ export const RichEditor = ({
     if (autoFocus) surface.current?.focus()
   }, [autoFocus])
 
-  // Kept current from the document, not from the surface's own events: a toolbar
-  // press moves the selection and the focus without the surface seeing either.
-  useEffect(() => {
-    const follow = () => {
-      const caret = surface.current && selectionIn(surface.current)
-      if (!caret) return
-      lastCaret.current = caret
-      setMarks({
-        bold: document.queryCommandState('bold'),
-        italic: document.queryCommandState('italic'),
-        insertUnorderedList: document.queryCommandState('insertUnorderedList'),
-        insertOrderedList: document.queryCommandState('insertOrderedList'),
-      })
-    }
-    document.addEventListener('selectionchange', follow)
-    return () => document.removeEventListener('selectionchange', follow)
+  /** Reads the marks at the caret. selectionchange does not fire when a command changes
+   *  the text but not the selection, so every command and edit reads them too. */
+  const refreshMarks = useCallback(() => {
+    const caret = surface.current && selectionIn(surface.current)
+    if (!caret) return
+    lastCaret.current = caret
+    setMarks({
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      insertUnorderedList: document.queryCommandState('insertUnorderedList'),
+      insertOrderedList: document.queryCommandState('insertOrderedList'),
+    })
   }, [])
 
+  useEffect(() => {
+    document.addEventListener('selectionchange', refreshMarks)
+    return () => document.removeEventListener('selectionchange', refreshMarks)
+  }, [refreshMarks])
+
   const emit = () => {
-    if (surface.current) onChange(surface.current.innerHTML)
+    if (!surface.current) return
+    onChange(surface.current.innerHTML)
+    refreshMarks()
   }
 
   /** Focus back in the surface, with the caret where it was. Needed when a toolbar
@@ -286,6 +289,8 @@ export const RichEditor = ({
         tabIndex={0}
         data-placeholder="Write your message"
         onInput={emit}
+        onKeyUp={refreshMarks}
+        onMouseUp={refreshMarks}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         className={cn(
