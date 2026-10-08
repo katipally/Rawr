@@ -799,7 +799,8 @@ export const listAutomationRuns = async (
        -- Runs still waiting first, whatever their age: what a rule is about to do
        -- is more use than what it did last week, and a run parked three days ago
        -- would otherwise sink below a hundred finished ones.
-       order by (r.resume_at is not null) desc, coalesce(r.resume_at, r.at) desc
+       -- The id breaks ties, so a page boundary cannot shuffle two runs with one timestamp.
+       order by (r.resume_at is not null) desc, coalesce(r.resume_at, r.at) desc, r.id desc
        limit ${limit} offset ${offset}`)
 
     const when = (value: unknown): Date | null =>

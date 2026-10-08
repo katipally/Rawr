@@ -3,9 +3,9 @@
 import type { MessageEngagement, ThreadMessage } from '@rawr/db'
 import { Badge, Button } from '@rawr/ui'
 import { Paperclip } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFormat } from '~/components/zone.tsx'
-import { messageFrameSandbox, openMailLink } from './message-frame.ts'
+import { blockRemoteLoads, messageFrameSandbox, openMailLink } from './message-frame.ts'
 
 /** Item 16. What this mail did after it left, for the ones that carried tracking.
  *
@@ -65,19 +65,21 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
   const [height, setHeight] = useState(120)
 
   const html = message.html
-  const hasImages = html !== null && /<img\b/i.test(html)
+  const gated = useMemo(() => (html === null ? null : blockRemoteLoads(html)), [html])
+  const hasRemote = gated !== null && gated.blocked > 0
 
-  // The frame carries no network permission for images until asked; stripping the
-  // src is what actually stops the request, since a CSP inside a sandboxed
-  // srcdoc frame is not something we can rely on across browsers.
+  // Remote loads are stripped from the markup until asked for. Doing it on the
+  // parsed document, not by pattern, is what catches every form a load can take;
+  // a CSP inside a sandboxed srcdoc frame is not something we can rely on across
+  // browsers.
   const document_ =
-    html === null
+    html === null || gated === null
       ? null
       : `<!doctype html><meta charset="utf-8"><base target="_blank">` +
         `<style>html,body{margin:0;font:14px/1.5 system-ui,sans-serif;color:#33475b;word-break:break-word}` +
         `img{max-width:100%;height:auto}blockquote{margin:0 0 0 1em;padding-left:.75em;border-left:2px solid #cbd6e2;color:#516f90}` +
         `a{color:#007d96}table{max-width:100%}</style>` +
-        (loadImages ? html : html.replace(/(<img\b[^>]*?)\ssrc\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '$1'))
+        (loadImages ? html : gated.html)
 
   // The frame has no layout of its own, so it is measured once its document
   // exists and then watched: a table reflowing on a resize, or an image arriving
@@ -165,12 +167,12 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
             {showHtml ? 'Show plain text' : 'Show formatted'}
           </Button>
         ) : null}
-        {hasImages && showHtml && !loadImages ? (
+        {hasRemote && showHtml && !loadImages ? (
           <Button variant="tertiary" onClick={() => setLoadImages(true)}>
             Load images
           </Button>
         ) : null}
-        {hasImages && loadImages ? <span className="text-secondary">Images loaded from the sender.</span> : null}
+        {hasRemote && loadImages ? <span className="text-secondary">Images loaded from the sender.</span> : null}
         {message.attachments.length > 0 ? (
           <span className="flex flex-wrap items-center gap-1.5">
             <Paperclip aria-hidden="true" className="size-3.5 text-secondary" />

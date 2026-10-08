@@ -1,10 +1,10 @@
 'use client'
 
-import { STATE_TONE } from './run-state.ts'
+import { RunActivity, type RunView } from './run-activity.tsx'
 import { type ObjectScope, scopeRule } from './object-scope.ts'
 import { stepsComplete } from './steps-complete.ts'
 import { DELAY_UNITS, type DelayUnit, delayText, describeWait, waitFits, waitMinutes } from './wait-input.ts'
-import { Alert, Badge, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
+import { Alert, Button, DataTable, DropdownMenu, EmptyState, Field, IconButton, Modal, Select, Switch, TextInput, cn, useToast, type Column } from '@rawr/ui'
 import { ChevronDown, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -17,7 +17,7 @@ import { ghostFilter } from '~/components/filter-chip.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, rowPill } from '~/components/row-actions.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
-import { automationRunsPath, recordPath } from '~/lib/links.ts'
+import { automationRunsPath, automationsRunsPath } from '~/lib/links.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -82,27 +82,14 @@ export type AutomationRowView = {
   createdAt: string
 }
 
-export type RunView = {
-  id: string
-  automationId: string
-  automationName: string
-  entityType: string
-  entityId: string
-  /** Null once the record is gone. */
-  entityName: string | null
-  state: 'waiting' | 'done' | 'skipped' | 'failed'
-  detail: string | null
-  /** Set only while it is parked, which is what the list leads with. */
-  resumeAt: string | null
-  at: string
-}
-
 /** A field a set-field step can write, with what its value control needs. */
 export type SettableField = { key: string; label: string; type: string; options: string[] }
 
 export type AutomationListProps = {
   rows: AutomationRowView[]
   runs: RunView[]
+  /** Whether the log holds more runs than the card shows. */
+  moreRuns: boolean
   accountSlug: string
   people: { id: string; name: string }[]
   stages: string[]
@@ -669,6 +656,7 @@ const StepList = ({
 export const AutomationList = ({
   rows,
   runs,
+  moreRuns,
   accountSlug,
   people,
   stages,
@@ -869,39 +857,6 @@ export const AutomationList = ({
     },
   ]
 
-  const runColumns: Column<RunView>[] = [
-    { key: 'state', header: 'Status', width: 120, render: (entry) => <Badge tone={STATE_TONE[entry.state]}>{entry.state}</Badge> },
-    {
-      key: 'name',
-      header: 'Automation',
-      width: 260,
-      render: (entry) => (
-        <Link href={automationRunsPath(entry.automationId)} title={entry.automationName} className="block truncate font-semibold">
-          {entry.automationName}
-        </Link>
-      ),
-    },
-    {
-      key: 'record',
-      header: 'Record',
-      width: 240,
-      render: (entry) => (
-        <Link href={recordPath(accountSlug, entry.entityType, entry.entityId)} title={entry.entityName ?? undefined} className="block truncate font-semibold">
-          {entry.entityName ?? `This ${entry.entityType}`}
-        </Link>
-      ),
-    },
-    { key: 'detail', header: 'Detail', width: 420, render: (entry) => <span title={entry.detail ?? undefined} className="block truncate font-light">{entry.detail || EMPTY_VALUE}</span> },
-    {
-      key: 'at',
-      header: 'When',
-      width: 220,
-      // A waiting run's useful time is when it wakes, not when it started:
-      // "fired an hour ago" says nothing about a rule that has two more days to sit.
-      render: (entry) => <span className="font-light">{entry.resumeAt ? `Continues ${fmt.dateTime(entry.resumeAt)}` : fmt.dateTime(entry.at)}</span>,
-    },
-  ]
-
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -959,8 +914,13 @@ export const AutomationList = ({
         {runs.length === 0 ? (
           <p className="text-secondary">Nothing has fired yet.</p>
         ) : (
-          <DataTable columns={runColumns} rows={runs.slice(0, 50)} rowKey={(entry) => entry.id} caption="Recent automation runs" storageKey="settings.automation-activity" />
+          <RunActivity runs={runs} accountSlug={accountSlug} caption="Recent automation runs" storageKey="settings.automation-activity" />
         )}
+        {moreRuns ? (
+          <Link href={automationsRunsPath()} className="self-start font-semibold">
+            View all
+          </Link>
+        ) : null}
       </section>
 
       <Modal

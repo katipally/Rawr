@@ -15,7 +15,7 @@ import { GOOGLE_CALLBACK_PATH, decodeIdToken, googleClient, identityFromIdToken,
 import { safeNext } from '~/server/auth/next.ts'
 import { INVITE_COOKIE } from '~/server/invite.ts'
 import { CALENDAR_SCOPES } from '~/server/calendar.ts'
-import { contextFrom, sessionFromMembership, writeSessionCookie, type Session } from '~/server/session.ts'
+import { contextFrom, startSession, type Session } from '~/server/session.ts'
 
 /** Marks a sign-in that has already been sent back to Google for explicit consent,
  *  so it is sent back at most once. */
@@ -104,8 +104,7 @@ export const GET = async (request: NextRequest): Promise<NextResponse> => {
     return denied(identity.hostedDomain ? 'no_account_for_domain' : 'no_seat')
   }
 
-  const session = sessionFromMembership(membership)
-  await writeSessionCookie(session)
+  const session = await startSession(membership)
 
   // The calendar half of the same consent. Written after the session because it is
   // an account-scoped write and the session is what names the account.

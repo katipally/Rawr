@@ -51,6 +51,9 @@ const problem = (groups: Group[]): string | null =>
 const emptyValueFor = (operator: string): unknown =>
   operator === RANGE ? ['', ''] : MULTI.has(operator) ? [] : ''
 
+/** A boolean is stored as "true" or "false" and read as Yes or No. */
+const YES_NO: Record<string, string> = { true: 'Yes', false: 'No' }
+
 /** One condition as a sentence, "Lifecycle stage is any of Lead, MQL", for a
  *  page that shows a segment's rule without opening the builder. */
 export const describeCondition = (fields: FilterField[], condition: Condition): string => {
@@ -60,7 +63,10 @@ export const describeCondition = (fields: FilterField[], condition: Condition): 
   if (NULLARY.has(condition.operator)) return `${label} ${operator}`
   if (isDateRange(condition.value)) return `${label} is ${dateRangeLabel(condition.value).toLowerCase()}`
   const names = new Map(field?.choices?.map((choice) => [choice.id, choice.label]))
-  const values = asList(condition.value).map((entry) => (entry === '@me' ? 'me' : entry === '@open_stage' ? 'open' : (names.get(entry) ?? entry)))
+  const values = asList(condition.value).map((entry) => {
+    if (field?.type === 'boolean') return YES_NO[String(entry)] ?? entry
+    return entry === '@me' ? 'me' : entry === '@open_stage' ? 'open' : (names.get(entry) ?? entry)
+  })
   const value = condition.operator === RANGE ? values.join(' and ') : values.join(', ')
   return `${label} ${operator} ${value}`
 }
@@ -185,6 +191,21 @@ const ValueControl = ({
         }
         className="w-auto min-w-40 flex-1"
       />
+    )
+  }
+
+  if (field?.type === 'boolean') {
+    return (
+      <Select
+        aria-label="Value"
+        value={String(values[0] ?? '')}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-auto min-w-40 flex-1"
+      >
+        <option value="">Pick one</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </Select>
     )
   }
 

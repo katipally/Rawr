@@ -1,4 +1,4 @@
-import { listGrants, listMailboxes, listMcpTokens, listMembers, readSchedule } from '@rawr/db'
+import { listGrants, listMailboxes, listMcpTokens, listMembers, listSessions, readSchedule } from '@rawr/db'
 import { devCalendarEnabled, devGmailEnabled, googleCalendarConfigured, googleConfigured } from '~/lib/env.ts'
 import { accountPath, agentAccessPath, availabilityPath, calendarsPath, mailboxesPath } from '~/lib/links.ts'
 import { plainError } from '~/lib/provider-errors.ts'
@@ -15,13 +15,14 @@ const AccountPage = async () => {
   if (!session) return null
 
   const ctx = contextFrom(session)
-  const [mine, members, schedule, mailboxes, grants, tokens] = await Promise.all([
+  const [mine, members, schedule, mailboxes, grants, tokens, sessions] = await Promise.all([
     memberships(session.userId),
     listMembers(ctx),
     readSchedule(ctx, session.userId),
     listMailboxes(ctx),
     listGrants(ctx),
     listMcpTokens(ctx),
+    listSessions(session.userId),
   ])
 
   const mailbox = mailboxes.find((row) => row.userId === session.userId) ?? null
@@ -63,6 +64,14 @@ const AccountPage = async () => {
         managePath: calendarsPath(account),
       }}
       tokens={tokens.filter((t) => t.userId === session.userId && !t.revokedAt).length}
+      sessions={sessions.map((s) => ({
+        id: s.id,
+        device: s.device,
+        createdAt: s.createdAt.toISOString(),
+        lastSeenAt: s.lastSeenAt.toISOString(),
+        current: s.id === session.sessionId,
+      }))}
+      earlierSignIn={session.sessionId === null}
       links={{ agent: agentAccessPath(), availability: availabilityPath(account) }}
     />
   )

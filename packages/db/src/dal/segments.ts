@@ -37,11 +37,13 @@ export type SegmentRow = {
   lastEvaluatedAt: Date | null
 }
 
+const SEGMENT_OBJECT_KEYS: string[] = ['contact', 'company', 'deal']
+
 const toObjectKey = (value: string): ObjectKey => {
-  if (value !== 'contact' && value !== 'company' && value !== 'deal') {
+  if (!SEGMENT_OBJECT_KEYS.includes(value)) {
     throw new Error(`"${value}" is not an object a segment can be built on.`)
   }
-  return value
+  return value as ObjectKey
 }
 
 export const listSegments = async (ctx: AccountContext, objectKey?: string): Promise<SegmentRow[]> =>
@@ -61,11 +63,18 @@ export const listSegments = async (ctx: AccountContext, objectKey?: string): Pro
       .from(segment)
       .orderBy(asc(segment.name))
 
-    const counts = await tx.execute<{ segment_id: string; n: number }>(
-      sql`select segment_id, count(*)::int as n from segment_membership
-           where exited_at is null group by segment_id`,
-    )
-    const byId = new Map(counts.map((row) => [row.segment_id, Number(row.n)]))
+    const byId = new Map<string, number>()
+    for (const object of registry.objects) {
+      if (!SEGMENT_OBJECT_KEYS.includes(object.key)) continue
+      const counts = await tx.execute<{ segment_id: string; n: number }>(sql`
+        select m.segment_id, count(*)::int as n
+          from segment_membership m
+          join segment s on s.id = m.segment_id
+          join ${sql.raw(`"${object.key}"`)} r on r.id = m.entity_id
+         where s.object_id = ${object.id} and m.exited_at is null and r.deleted_at is null
+         group by m.segment_id`)
+      for (const row of counts) byId.set(row.segment_id, Number(row.n))
+    }
     const objectById = new Map(registry.objects.map((object) => [object.id, object.key]))
 
     return rows

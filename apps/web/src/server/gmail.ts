@@ -19,6 +19,7 @@ import {
 import { devGmailEnabled, googleConfigured } from '~/lib/env.ts'
 import { googleRefresher, OAuth2RequestError } from './auth/google.ts'
 import { isRateLimited, sendWithBackoff } from './integrations/provider.ts'
+import { sanitiseHtml } from './mail-html.ts'
 
 /** Reading is what every mailbox is connected for. Nothing about the CRM needs
  *  more than this, and every extra scope widens the blast radius of a leaked
@@ -336,28 +337,6 @@ export const htmlToText = (html: string): string =>
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/\n{3,}/g, '\n\n')
-    .trim()
-
-/** An allow-nothing-dangerous pass over sender HTML, run before storage.
- *
- *  Deliberately not a general-purpose sanitiser: the rendering side puts this in
- *  an iframe with an empty sandbox and no network for images until asked, so this
- *  is the second of two defences rather than the only one. What it removes is what
- *  is dangerous even inside a sandbox or if the sandbox is ever weakened: script
- *  and style elements, event handlers, javascript: and data: URLs, forms, frames,
- *  and anything that navigates the parent. */
-export const sanitiseHtml = (html: string): string =>
-  html
-    .replace(/<\s*(script|style|iframe|frame|frameset|object|embed|applet|form|base|meta|link)\b[\s\S]*?<\/\s*\1\s*>/gi, '')
-    .replace(/<\s*(script|style|iframe|frame|frameset|object|embed|applet|form|base|meta|link)\b[^>]*\/?>/gi, '')
-    // on* handlers, quoted or bare.
-    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '')
-    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '')
-    // Anything that would run or smuggle code through an attribute value.
-    .replace(/(href|src|action|formaction|xlink:href)\s*=\s*"(?:\s*)(javascript|vbscript|data):[^"]*"/gi, '$1="#"')
-    .replace(/(href|src|action|formaction|xlink:href)\s*=\s*'(?:\s*)(javascript|vbscript|data):[^']*'/gi, "$1='#'")
-    .replace(/\ssrcdoc\s*=\s*("[^"]*"|'[^']*')/gi, '')
     .trim()
 
 // ------------------------------------------------------------------ sync

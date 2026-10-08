@@ -66,8 +66,9 @@ export const ToolsetPicker = ({
       <h2 className="font-medium">What an agent can reach</h2>
       <p className="text-secondary">
         Every screen in Rawr has a tool behind it, which is more tools than most clients accept. A connection
-        lists the CRM by default and turns the rest on from the address below. A group left off is hidden, not
-        forbidden: your role is what decides what any of them may do.
+        lists the CRM by default and turns the rest on from the address below. A group left off is off for this
+        connection: its tools are not listed and calls to them are refused. Your role still decides what any of
+        them may do.
       </p>
 
       <ul className="mt-4 flex flex-col">

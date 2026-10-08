@@ -1,8 +1,9 @@
-import { canWrite, findDuplicates, findJunkCompanies, getRegistry, objectOrThrow } from '@rawr/db'
+import { canWrite, findDuplicates, findJunkCompanies, getRegistry, listDismissedDuplicates, objectOrThrow } from '@rawr/db'
 import { EmptyState, PageHeader, Tabs } from '@rawr/ui'
 import { redirect } from 'next/navigation'
 import { DuplicateList } from './duplicate-list.tsx'
 import { JunkCompanies } from './junk-companies.tsx'
+import { SetAsideList } from './set-aside-list.tsx'
 import { duplicatesPath } from '~/lib/links.ts'
 import { isReadOnly } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -19,14 +20,15 @@ const DuplicatesPage = async ({
   searchParams,
 }: {
   params: Promise<{ account: string }>
-  searchParams: Promise<{ object?: string }>
+  searchParams: Promise<{ object?: string; view?: string }>
 }) => {
   const session = await readSession()
   if (!session) redirect('/sign-in')
 
   const { account } = await params
-  const { object: raw } = await searchParams
+  const { object: raw, view: rawView } = await searchParams
   const object = raw === 'company' ? 'company' : 'contact'
+  const view = rawView === 'set-aside' ? 'set-aside' : 'queue'
 
   if (!canWrite(contextFrom(session), object)) {
     return (
@@ -38,12 +40,17 @@ const DuplicatesPage = async ({
   }
 
   const LIMIT = 50
-  const pairs = await findDuplicates(contextFrom(session), object, { limit: LIMIT })
+  const pairs =
+    view === 'queue' ? await findDuplicates(contextFrom(session), object, { limit: LIMIT }) : []
+  const setAside =
+    view === 'set-aside' ? await listDismissedDuplicates(contextFrom(session), object, { limit: LIMIT }) : []
   const fields = objectOrThrow(await getRegistry(contextFrom(session)), object)
     .fields.filter((field) => !isReadOnly(field))
     .map((field) => ({ key: field.key, label: field.label, type: field.type }))
   const junk =
-    object === 'company' ? await findJunkCompanies(contextFrom(session), { limit: LIMIT }) : { rows: [], total: 0 }
+    view === 'queue' && object === 'company'
+      ? await findJunkCompanies(contextFrom(session), { limit: LIMIT })
+      : { rows: [], total: 0 }
 
   return (
     <div className="flex flex-col gap-4">
@@ -63,6 +70,10 @@ const DuplicatesPage = async ({
               the same company name once its legal form is set aside. Two companies with different
               domains are never proposed, because a domain is the thing that tells them apart.
             </p>
+            <p>
+              Reject sets a pair aside and it stays out of the queue. Set aside lists them, and Put
+              back returns one to the queue.
+            </p>
           </>
         }
       />
@@ -73,31 +84,62 @@ const DuplicatesPage = async ({
           {
             key: 'contact',
             label: 'Contacts',
-            href: duplicatesPath(account, 'contact'),
+            href: duplicatesPath(account, 'contact', view === 'set-aside' ? 'set-aside' : undefined),
             current: object === 'contact',
           },
           {
             key: 'company',
             label: 'Companies',
-            href: duplicatesPath(account, 'company'),
+            href: duplicatesPath(account, 'company', view === 'set-aside' ? 'set-aside' : undefined),
             current: object === 'company',
           },
         ]}
       />
 
-      <DuplicateList
-        account={account}
-        object={object}
-        limit={LIMIT}
-        fields={fields}
-        pairs={pairs.map((pair) => ({
-          ...pair,
-          keep: { ...pair.keep, createdAt: pair.keep.createdAt.toISOString() },
-          absorb: { ...pair.absorb, createdAt: pair.absorb.createdAt.toISOString() },
-        }))}
+      <Tabs
+        label="Queue or set aside"
+        items={[
+          {
+            key: 'queue',
+            label: 'Queue',
+            href: duplicatesPath(account, object),
+            current: view === 'queue',
+          },
+          {
+            key: 'set-aside',
+            label: 'Set aside',
+            href: duplicatesPath(account, object, 'set-aside'),
+            current: view === 'set-aside',
+          },
+        ]}
       />
 
-      {object === 'company' ? (
+      {view === 'set-aside' ? (
+        <SetAsideList
+          account={account}
+          object={object}
+          limit={LIMIT}
+          pairs={setAside.map((pair) => ({
+            keep: { ...pair.keep, createdAt: pair.keep.createdAt.toISOString() },
+            absorb: { ...pair.absorb, createdAt: pair.absorb.createdAt.toISOString() },
+            setAsideAt: pair.setAsideAt.toISOString(),
+          }))}
+        />
+      ) : (
+        <DuplicateList
+          account={account}
+          object={object}
+          limit={LIMIT}
+          fields={fields}
+          pairs={pairs.map((pair) => ({
+            ...pair,
+            keep: { ...pair.keep, createdAt: pair.keep.createdAt.toISOString() },
+            absorb: { ...pair.absorb, createdAt: pair.absorb.createdAt.toISOString() },
+          }))}
+        />
+      )}
+
+      {view === 'queue' && object === 'company' ? (
         <JunkCompanies
           account={account}
           limit={LIMIT}

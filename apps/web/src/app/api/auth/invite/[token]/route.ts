@@ -41,7 +41,7 @@ export const GET = async (
       home.searchParams.set(NOTICE_PARAM, 'invite_not_accepted')
       return NextResponse.redirect(home)
     }
-    await writeSessionCookie(sessionFromMembership(seated))
+    await writeSessionCookie(sessionFromMembership(seated, session.sessionId))
     return NextResponse.redirect(new URL('/', env.AUTH_URL))
   }
 

@@ -1,6 +1,8 @@
 import {
   displayTimezone,
   membershipsForUser,
+  openSession,
+  touchSession,
   type AccountContext,
   type CriticalAction,
   type Hub,
@@ -10,6 +12,7 @@ import { jwtVerify, SignJWT } from 'jose'
 import { cookies, headers } from 'next/headers'
 import { cache } from 'react'
 import { env } from '~/lib/env.ts'
+import { deviceLabel } from '~/lib/device.ts'
 import { NEXT_HEADER, safePath } from '~/lib/links.ts'
 
 const COOKIE = 'rawr_session'
@@ -24,6 +27,10 @@ export const memberships = cache(membershipsForUser)
 
 export type Session = {
   userId: string
+  /** The user_session row this cookie was issued for. Null for a cookie minted before
+   *  sessions were recorded: it works until it expires or everything is signed out,
+   *  and it is not listed. Absent for a caller with no cookie at all. */
+  sessionId?: string | null
   email: string
   displayName: string
   avatarUrl: string | null
@@ -51,8 +58,9 @@ export type Session = {
   accountCurrency: string
 }
 
-export const sessionFromMembership = (m: Membership): Session => ({
+export const sessionFromMembership = (m: Membership, sessionId: string | null = null): Session => ({
   userId: m.userId,
+  sessionId,
   email: m.email,
   displayName: m.displayName,
   avatarUrl: m.avatarUrl,
@@ -70,6 +78,15 @@ export const sessionFromMembership = (m: Membership): Session => ({
   accountTimezone: m.accountTimezone,
   accountCurrency: m.accountCurrency,
 })
+
+/** A new sign-in in this browser: records it, then writes its cookie. */
+export const startSession = async (membership: Membership): Promise<Session> => {
+  const expiresAt = new Date(Date.now() + MAX_AGE_SECONDS * 1000)
+  const sessionId = await openSession(membership.userId, deviceLabel((await headers()).get('user-agent')), expiresAt)
+  const session = sessionFromMembership(membership, sessionId)
+  await writeSessionCookie(session)
+  return session
+}
 
 export const writeSessionCookie = async (session: Session): Promise<void> => {
   const token = await new SignJWT({ ...session })
@@ -129,8 +146,11 @@ export const readSession = cache(async (): Promise<Session | null> => {
   // watermark is given the whole second: a sign-in right after signing out
   // everywhere must not be refused by its own rounding.
   if (current.sessionsValidAfter && ((claims.iat ?? 0) + 1) * 1000 <= current.sessionsValidAfter.getTime()) return null
+  // A session that was ended on its own is refused here, on its next request.
+  const sessionId = claims.sessionId ?? null
+  if (sessionId && !(await touchSession(claims.userId, sessionId))) return null
 
-  const session = sessionFromMembership(current)
+  const session = sessionFromMembership(current, sessionId)
   return { ...session, timezone: await displayTimezone(contextFrom(session), session.userId) }
 })
 

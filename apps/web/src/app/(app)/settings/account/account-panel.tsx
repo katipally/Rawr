@@ -31,6 +31,9 @@ export type AccountPanelProps = {
   gmail: Service
   calendar: Service
   tokens: number
+  sessions: { id: string; device: string; createdAt: string; lastSeenAt: string; current: boolean }[]
+  /** This browser's sign-in predates the session list, so it has no row to end on its own. */
+  earlierSignIn: boolean
   links: { agent: string; availability: string }
 }
 
@@ -103,7 +106,7 @@ const ServiceRow = ({
   )
 }
 
-export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, links }: AccountPanelProps) => {
+export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: initialTimezone, weekly, gmail, calendar, tokens, sessions, earlierSignIn, links }: AccountPanelProps) => {
   const fmt = useFormat()
   const router = useRouter()
   const toast = useToast()
@@ -113,6 +116,8 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
   const [savingZone, setSavingZone] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
+  /** The id of the session being ended, or 'others' for every other one. */
+  const [ending, setEnding] = useState<string | null>(null)
   // The server renders the saved zone alone and the full list arrives after mount,
   // because enumerating zones on both sides produced two different lists and React
   // threw out the whole tree over the mismatch.
@@ -154,6 +159,24 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
     } catch (cause) {
       toast('error', errorMessage(cause))
       setSigningOut(false)
+    }
+  }
+
+  const endSession = async (id: string | null) => {
+    setEnding(id ?? 'others')
+    try {
+      if (id) {
+        await api.session.revoke.mutate({ id })
+        toast('success', `Signed out ${sessions.find((s) => s.id === id)?.device ?? 'that session'}.`)
+      } else {
+        await api.session.revokeOthers.mutate()
+        toast('success', 'Signed out your other sessions.')
+      }
+      router.refresh()
+    } catch (cause) {
+      toast('error', errorMessage(cause))
+    } finally {
+      setEnding(null)
     }
   }
 
@@ -273,13 +296,50 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
         />
       </Panel>
       ) : (
-      <Panel title="Assistants and sessions">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p>
-            <span className="font-medium">{tokens}</span> active agent token{tokens === 1 ? '' : 's'} act as you.
-          </p>
-          <Link href={links.agent}>Manage agent access</Link>
-        </div>
+      <>
+      <Panel title="Sessions">
+        <p className="text-secondary">
+          Each browser or device you are signed in on. Signing one out takes effect on its next request.
+          Sign-ins from before this list are not shown; signing out everywhere ends them too.
+        </p>
+        <ul className="flex flex-col divide-y divide-divider">
+          {sessions.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2 first:pt-0 last:pb-0">
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-medium">{s.device}</span>
+                  {s.current ? <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">This one</span> : null}
+                </p>
+                <p className="text-small text-secondary">
+                  Signed in {fmt.dateTime(s.createdAt)}. Last active {fmt.dateTime(s.lastSeenAt)}.
+                </p>
+              </div>
+              {s.current ? null : (
+                <Button busy={ending === s.id} disabled={ending !== null} onClick={() => void endSession(s.id)}>
+                  Sign out
+                </Button>
+              )}
+            </li>
+          ))}
+          {earlierSignIn ? (
+            <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2 first:pt-0 last:pb-0">
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-medium">Earlier sign-in</span>
+                  <span className="rounded-hs bg-fill px-1.5 py-0.5 text-small text-secondary">This one</span>
+                </p>
+                <p className="text-small text-secondary">Started before sessions were listed, so it ends only with sign out everywhere.</p>
+              </div>
+            </li>
+          ) : null}
+        </ul>
+        {sessions.some((s) => !s.current) ? (
+          <div>
+            <Button busy={ending === 'others'} disabled={ending !== null} onClick={() => void endSession(null)}>
+              Sign out all other sessions
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2 border-t border-divider pt-3">
           <p className="text-secondary">
             Signing out everywhere ends every Rawr session you hold on every device, this one
@@ -301,6 +361,15 @@ export const AccountPanel = ({ me, accounts, isSuperAdmin, admins, timezone: ini
           )}
         </div>
       </Panel>
+      <Panel title="Assistants">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p>
+            <span className="font-medium">{tokens}</span> active agent token{tokens === 1 ? '' : 's'} act as you.
+          </p>
+          <Link href={links.agent}>Manage agent access</Link>
+        </div>
+      </Panel>
+      </>
       )}
       </div>
     </div>

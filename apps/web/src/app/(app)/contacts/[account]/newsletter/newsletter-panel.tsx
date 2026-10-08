@@ -2,6 +2,7 @@
 
 import { Button, Field, Select, TextInput, useToast } from '@rawr/ui'
 import { useState } from 'react'
+import { brevoListLine, type BrevoListSize } from '~/lib/brevo-list-size.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -10,11 +11,13 @@ import { useFormat } from '~/components/zone.tsx'
 export const NewsletterPanel = ({
   segments,
   defaultListId,
+  listSize,
   canWrite,
   hub,
 }: {
-  segments: { id: string; name: string; memberCount: number }[]
+  segments: { id: string; name: string; memberCount: number; mailable: number }[]
   defaultListId: string
+  listSize: BrevoListSize | null
   canWrite: boolean
   hub: string
 }) => {
@@ -75,7 +78,7 @@ export const NewsletterPanel = ({
             <Select id="newsletter-segment" value={segmentId} onChange={(event) => setSegmentId(event.target.value)}>
               {segments.map((segment) => (
                 <option key={segment.id} value={segment.id}>
-                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'})`}
+                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'}, ${fmt.number(segment.mailable)} will be mailed)`}
                 </option>
               ))}
             </Select>
@@ -95,6 +98,10 @@ export const NewsletterPanel = ({
           Push to Brevo
         </Button>
       </div>
+
+      {listSize && listId === defaultListId ? (
+        <p className="text-small text-secondary">{brevoListLine(listId, listSize, fmt.number)}</p>
+      ) : null}
 
       {result ? (
         <p role="status" className={result.ok ? 'text-secondary' : 'text-error'}>

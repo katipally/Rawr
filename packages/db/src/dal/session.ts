@@ -108,3 +108,57 @@ export const signInWithGoogle = async (identity: GoogleSignIn): Promise<string> 
 export const signOutEverywhere = async (userId: string): Promise<void> => {
   await appDb.execute(sql`select rawr.sign_out_everywhere(${userId})`)
 }
+
+/** A used session writes its last use at most this often. A write on every page view
+ *  would make the session table the busiest in the database. */
+export const SESSION_TOUCH_MINUTES = 5
+
+export type SignedInSession = {
+  id: string
+  device: string
+  createdAt: Date
+  lastSeenAt: Date
+}
+
+/** Records a sign-in and returns its id, which the cookie carries. */
+export const openSession = async (userId: string, device: string, expiresAt: Date): Promise<string> => {
+  const [row] = await appDb.execute<{ id: string }>(
+    sql`select rawr.open_user_session(${userId}, ${device}, ${expiresAt.toISOString()}) as id`,
+  )
+  if (!row) throw new Error('Sign-in did not open a session.')
+  return row.id
+}
+
+/** False when the session has been ended, has expired, or is not this person's. The
+ *  cookie is refused on that request, so an ended session stops on its next use. */
+export const touchSession = async (userId: string, sessionId: string): Promise<boolean> => {
+  const [row] = await appDb.execute<{ live: boolean }>(
+    sql`select rawr.touch_user_session(${userId}, ${sessionId}, make_interval(mins => ${SESSION_TOUCH_MINUTES})) as live`,
+  )
+  return row?.live === true
+}
+
+export const listSessions = async (userId: string): Promise<SignedInSession[]> => {
+  const rows = await appDb.execute<{ id: string; device: string; created_at: Date | string; last_seen_at: Date | string }>(
+    sql`select * from rawr.sessions_for_user(${userId})`,
+  )
+  return rows.map((r) => ({
+    id: r.id,
+    device: r.device,
+    createdAt: new Date(r.created_at),
+    lastSeenAt: new Date(r.last_seen_at),
+  }))
+}
+
+/** False when that session is not one of this person's live sessions. */
+export const revokeSession = async (userId: string, sessionId: string): Promise<boolean> => {
+  const [row] = await appDb.execute<{ revoke_user_session: boolean }>(
+    sql`select rawr.revoke_user_session(${userId}, ${sessionId})`,
+  )
+  return row?.revoke_user_session === true
+}
+
+/** Ends every live session of the person except `keepId`. Null keeps none. */
+export const revokeOtherSessions = async (userId: string, keepId: string | null): Promise<void> => {
+  await appDb.execute(sql`select rawr.revoke_other_user_sessions(${userId}, ${keepId})`)
+}

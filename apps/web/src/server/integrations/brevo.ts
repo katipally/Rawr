@@ -13,6 +13,7 @@ import {
 } from '@rawr/db'
 import { createHash } from 'node:crypto'
 import { devIntegrationsEnabled } from '~/lib/env.ts'
+import type { BrevoListSize } from '~/lib/brevo-list-size.ts'
 import { attempt, json, type ConnectionTest } from './provider.ts'
 
 /** F6 §2. Newsletter, bought rather than built. ~1,800 recipients, roughly monthly.
@@ -67,6 +68,27 @@ export const testBrevo = async (ctx: AccountContext): Promise<ConnectionTest> =>
       disconnected: (cause as { disconnected?: boolean }).disconnected === true,
     })
     return { ok: false, detail: message }
+  }
+}
+
+/** Brevo's own count for one list, read when a picker renders. Null when Brevo is
+ *  not connected, unreachable, or does not know the list: the picker then shows
+ *  Rawr's counts alone. No health row is written, because a page view is not a
+ *  check of the connection. */
+export const readBrevoListSize = async (ctx: AccountContext, listId: string): Promise<BrevoListSize | null> => {
+  const id = Number(listId)
+  if (devIntegrationsEnabled || !Number.isSafeInteger(id) || id <= 0) return null
+  try {
+    const { secret } = await credentials(ctx)
+    const list = await json<{ totalSubscribers?: number; totalBlacklisted?: number }>({
+      url: `${API}/contacts/lists/${id}`,
+      headers: headers(secret!),
+      // A page read: a slow Brevo drops the list line rather than holding the page.
+      timeoutMs: 3_000,
+    })
+    return { subscribers: list.totalSubscribers ?? 0, blacklisted: list.totalBlacklisted ?? 0 }
+  } catch {
+    return null
   }
 }
 

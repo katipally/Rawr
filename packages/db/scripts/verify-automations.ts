@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
 import { systemContext, type AccountContext } from '../src/dal/context.ts'
@@ -18,7 +18,7 @@ import {
   scanTargets,
   setAutomationActive,
 } from '../src/dal/automations.ts'
-import { accountZone } from '../src/dal/index.ts'
+import { accountZone, withAccount } from '../src/dal/index.ts'
 import { addDays, dayKey, zonedTimeToUtc } from '../src/dal/slots.ts'
 import { openSecret } from '../src/internal/crypto.ts'
 import { createRecord, updateRecord } from '../src/dal/records.ts'
@@ -737,6 +737,54 @@ try {
       'the second page repeated the first',
     )
     return 'limit and offset both apply'
+  })
+
+  await check('the all-runs read pages in one order across every rule, with no repeats or gaps', async () => {
+    const pagedRule = await save({
+      name: `Paged ${stamp}`,
+      trigger: 'record_created',
+      objectKey: 'contact',
+      conditions: [],
+      steps: [task],
+    })
+    const zone = await accountZone(admin)
+    for (let index = 0; index < 8; index += 1) {
+      const target = await createRecord(admin, 'contact', {
+        email: `paged-${stamp}-${index}@sandbox.test`,
+        first_name: 'Paged',
+        last_name: String(index),
+      })
+      await openScannedRun(admin, {
+        automationId: pagedRule,
+        entityType: 'contact',
+        entityId: target.id,
+        scanDay: addDays(dayKey(new Date(), zone), 3 + index),
+      })
+    }
+
+    const whole = await listAutomationRuns(admin, { limit: 60 })
+    expect(whole.length > 7, `${whole.length} runs, too few to page`)
+    expect(new Set(whole.map((run) => run.automationId)).size > 1, 'every run belongs to one rule')
+
+    // Two runs with one timestamp: the order must still hold across a page boundary.
+    const [first, second] = whole
+    await withAccount(admin, (tx) =>
+      tx.execute(sql`update automation_run set at = ${first!.at.toISOString()}::timestamptz where id = ${second!.id}::uuid`),
+    )
+
+    const paged: typeof whole = []
+    for (let offset = 0; paged.length < 60; offset += 7) {
+      const page = await listAutomationRuns(admin, { limit: 7, offset })
+      paged.push(...page)
+      if (page.length < 7) break
+    }
+    const ids = paged.slice(0, 60).map((run) => run.id)
+    expect(new Set(ids).size === ids.length, 'a run repeated across pages')
+    expect(
+      ids.join() === (await listAutomationRuns(admin, { limit: 60 })).map((run) => run.id).join(),
+      'the pages did not add up to the whole list',
+    )
+    return `${whole.length} runs across ${new Set(whole.map((run) => run.automationId)).size} rules, paged seven at a time`
   })
 
   await check('another tenant sees none of this', async () => {

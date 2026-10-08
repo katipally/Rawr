@@ -1,11 +1,12 @@
-import { canView, canWrite, listSegments, recentActivity } from '@rawr/db'
+import { canView, canWrite, countMailableBySegment, listSegments, recentActivity } from '@rawr/db'
 import { Badge, Card, EmptyState, PageHeader } from '@rawr/ui'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { CampaignPanel } from './campaign-panel.tsx'
 import { NewsletterPanel } from './newsletter-panel.tsx'
 import { integrationsPath, recordPath } from '~/lib/links.ts'
-import { readIntegrations } from '~/server/integrations/index.ts'
+import { readBrevoListSize } from '~/server/integrations/brevo.ts'
+import { readIntegrations, type IntegrationView } from '~/server/integrations/index.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
 
@@ -17,6 +18,11 @@ import { getFormat } from '~/server/format.ts'
 
 const TONE = { connected: 'ok', degraded: 'warn', disconnected: 'error', not_configured: 'neutral' } as const
 
+const brevoListId = (rows: IntegrationView[]) => {
+  const id = rows.find((row) => row.kind === 'brevo')?.config.listId
+  return typeof id === 'string' ? id : ''
+}
+
 const NewsletterPage = async ({ params }: { params: Promise<{ account: string }> }) => {
   const fmt = await getFormat()
   const session = await readSession()
@@ -25,15 +31,25 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
   const { account } = await params
   const ctx = contextFrom(session)
 
-  const [integrations, segments, events] = await Promise.all([
-    readIntegrations(ctx),
-    canView(ctx, 'contacts') ? listSegments(ctx, 'contact') : [],
+  const integrationsRead = readIntegrations(ctx)
+  const contactsVisible = canView(ctx, 'contacts')
+  const [integrations, segments, mailable, events, listSize] = await Promise.all([
+    integrationsRead,
+    contactsVisible ? listSegments(ctx, 'contact') : [],
+    contactsVisible ? countMailableBySegment(ctx) : new Map<string, number>(),
     recentActivity(ctx, 25, ['marketing_email']),
+    integrationsRead.then((rows) => readBrevoListSize(ctx, brevoListId(rows))),
   ])
 
   const brevo = integrations.find((row) => row.kind === 'brevo')
-  const listId = typeof brevo?.config.listId === 'string' ? brevo.config.listId : ''
+  const listId = brevoListId(integrations)
   const allowed = canWrite(contextFrom(session), 'segment')
+  const pickers = segments.map((segment) => ({
+    id: segment.id,
+    name: segment.name,
+    memberCount: segment.memberCount,
+    mailable: mailable.get(segment.id) ?? 0,
+  }))
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -78,8 +94,9 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
 
       <Card title="Push an audience across">
         <NewsletterPanel
-          segments={segments.map((segment) => ({ id: segment.id, name: segment.name, memberCount: segment.memberCount }))}
+          segments={pickers}
           defaultListId={listId}
+          listSize={listSize}
           canWrite={allowed}
           hub="marketing"
         />
@@ -87,8 +104,9 @@ const NewsletterPage = async ({ params }: { params: Promise<{ account: string }>
 
       <Card title="Campaigns">
         <CampaignPanel
-          segments={segments.map((segment) => ({ id: segment.id, name: segment.name, memberCount: segment.memberCount }))}
+          segments={pickers}
           defaultListId={listId}
+          listSize={listSize}
           canWrite={allowed}
           hub="marketing"
         />

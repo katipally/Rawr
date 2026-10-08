@@ -153,7 +153,9 @@ const call = async (
   args: Record<string, unknown>,
   extra: Record<string, unknown> = {},
 ): Promise<ToolAnswer> => {
-  const answer = await rpc(token, 'tools/call', { name, arguments: args, ...extra })
+  // Every toolset: which groups a connection lists is checked in its own section,
+  // and the rest of the suite is about what a tool does and who may do it.
+  const answer = await rpc(token, 'tools/call', { name, arguments: args, ...extra }, 'all')
   const result = answer.body?.result
   return {
     text: String(result?.content?.[0]?.text ?? ''),
@@ -597,20 +599,28 @@ try {
     `${nonsense.length} and ${empty.length}`,
   )
 
-  // The whole point of filtering the list rather than the call: two clients on one
-  // token disagree about which tools exist, and that disagreement must not look
-  // like a permission error.
-  const hidden = await call(salesToken, 'crm_registry', {})
+  // A tool the connection does not list is refused exactly as a name that does not
+  // exist, so the answer reveals nothing about groups the client did not ask for.
+  const unlisted = await rpc(salesToken, 'tools/call', { name: 'mail_inbox', arguments: {} })
+  const unlistedError = unlisted.body?.error?.message ?? ''
+  const unknownByDefault = await rpc(salesToken, 'tools/call', { name: 'destroy_everything', arguments: {} })
   check(
-    'a tool the connection does not list still runs, because listing is not a grant',
-    !hidden.isError && hidden.rpcError === null,
-    hidden.rpcError ?? hidden.text,
+    'a tool the connection does not list is refused the way a missing name is',
+    unlistedError !== '' && unlistedError.replace('mail_inbox', 'NAME') === (unknownByDefault.body?.error?.message ?? '').replace('destroy_everything', 'NAME'),
+    unlistedError,
   )
-  const hiddenAndRefused = await call(salesToken, 'admin_audit_entities', {})
+  const asked = await rpc(salesToken, 'tools/call', { name: 'mail_inbox', arguments: {} }, 'mail')
   check(
-    'and the role is still what refuses it, unchanged by any of this',
-    hiddenAndRefused.isError && /account access/i.test(hiddenAndRefused.text),
-    hiddenAndRefused.text,
+    'and the same tool runs once its group is asked for',
+    asked.body?.error === undefined && asked.body?.result !== undefined,
+    asked.body?.error?.message ?? '',
+  )
+  const adminCall = await rpc(salesToken, 'tools/call', { name: 'admin_audit_entities', arguments: {} }, 'admin')
+  const adminText = String(adminCall.body?.result?.content?.[0]?.text ?? adminCall.body?.error?.message ?? '')
+  check(
+    'and the role is still what refuses it once its group is asked for',
+    adminCall.body?.result?.isError === true && /account access/i.test(adminText),
+    adminText,
   )
 
   // -----------------------------------------------------------------------

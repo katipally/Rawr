@@ -272,8 +272,13 @@ export const createRecordPath = (account: string, object: string): string =>
 export const exportPath = (account: string, object?: string): string =>
   `/${CRM_ROOT}/${account}/export${query({ object })}`
 
-export const duplicatesPath = (account: string, object?: 'contact' | 'company'): string =>
-  `/${CRM_ROOT}/${account}/duplicates${object && object !== 'contact' ? `?object=${object}` : ''}`
+export const duplicatesPath = (account: string, object?: 'contact' | 'company', view?: 'set-aside'): string => {
+  const query = new URLSearchParams()
+  if (object && object !== 'contact') query.set('object', object)
+  if (view) query.set('view', view)
+  const text = query.toString()
+  return `/${CRM_ROOT}/${account}/duplicates${text ? `?${text}` : ''}`
+}
 
 export const restorePath = (account: string, object?: string): string =>
   `/${CRM_ROOT}/${account}/restore${object && object !== 'contact' ? `?object=${object}` : ''}`
@@ -327,6 +332,8 @@ export const mailboxesPath = (): string => '/settings/mailboxes'
 export const lifecyclePath = (): string => '/settings/lifecycle'
 
 export const automationsPath = (): string => '/settings/automations'
+
+export const automationsRunsPath = (): string => '/settings/automations/runs'
 
 export const automationRunsPath = (automationId: string): string =>
   `/settings/automations/${automationId}/runs`

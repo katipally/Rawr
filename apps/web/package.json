@@ -24,6 +24,7 @@
     "jose": "catalog:",
     "lucide-react": "catalog:",
     "next": "catalog:",
+    "parse5": "8.0.1",
     "react": "catalog:",
     "react-dom": "catalog:",
     "superjson": "catalog:",

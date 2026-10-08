@@ -17,7 +17,7 @@ import {
   restoreRecords,
   updateRecord } from '../src/dal/records.ts'
 import { createField, deleteField, purgeField } from '../src/dal/admin-fields.ts'
-import { dismissDuplicate, findDuplicates } from '../src/dal/duplicates.ts'
+import { dismissDuplicate, findDuplicates, listDismissedDuplicates, putBackDuplicate } from '../src/dal/duplicates.ts'
 import {
   armedFor,
   conditionsHold,
@@ -2306,6 +2306,49 @@ try {
     expect(Number(rows[0]!.n) === 1, `${rows[0]!.n} rows for one dismissed pair`)
     return 'dismissed once, from either side, and gone from the queue for good'
   })
+
+  await check('a set-aside pair is listed by name, and putting it back returns it to the queue', async () => {
+    const domain = `undo-${stamp}.example.test`
+    await db.execute(sql`
+      insert into contact (account_id, email, first_name, last_name)
+      values (${datasaur!.id}, ${'u.ndo@' + domain}, 'Undo', 'One'),
+             (${datasaur!.id}, ${'undo@' + domain}, 'Undo', 'Two')`)
+
+    const queued = async () => (await findDuplicates(admin, 'contact')).find((pair) => pair.because.includes(domain))
+    const mine = await queued()
+    expect(Boolean(mine), 'the pair was not proposed')
+    await dismissDuplicate(admin, 'contact', { leftId: mine!.keep.id, rightId: mine!.absorb.id })
+    expect(!(await queued()), 'the set-aside pair is still in the queue')
+
+    const sameIds = (pair: { keep: { id: string }; absorb: { id: string } }) =>
+      [pair.keep.id, pair.absorb.id].sort().join() === [mine!.keep.id, mine!.absorb.id].sort().join()
+    const listed = (await listDismissedDuplicates(admin, 'contact')).find(sameIds)
+    expect(Boolean(listed), 'the set-aside pair is not listed')
+    expect(
+      [listed!.keep.displayName, listed!.absorb.displayName].sort().join() === 'Undo One,Undo Two',
+      `named ${listed!.keep.displayName} and ${listed!.absorb.displayName}`,
+    )
+
+    await putBackDuplicate(admin, 'contact', { leftId: mine!.absorb.id, rightId: mine!.keep.id })
+    expect(!(await listDismissedDuplicates(admin, 'contact')).some(sameIds), 'the pair is still set aside after a put back')
+    expect(Boolean(await queued()), 'a pair put back did not return to the queue')
+
+    await putBackDuplicate(admin, 'contact', { leftId: mine!.keep.id, rightId: mine!.absorb.id })
+    return 'set aside, listed by name, put back from either side, and back in the queue'
+  })
+
+  await check('a viewer cannot read the set-aside list', async () =>
+    refuses('a viewer reading set-aside pairs', () => listDismissedDuplicates(viewer, 'contact')),
+  )
+
+  await check('a viewer cannot put a set-aside pair back', async () =>
+    refuses('a viewer putting a pair back', () =>
+      putBackDuplicate(viewer, 'contact', {
+        leftId: '00000000-0000-4000-8000-000000000001',
+        rightId: '00000000-0000-4000-8000-000000000002',
+      }),
+    ),
+  )
 
   await check('a viewer cannot open the queue at all', async () =>
     refuses('a viewer reading likely duplicates', () => findDuplicates(viewer, 'contact')),

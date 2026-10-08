@@ -10,6 +10,7 @@ import { EMPTY_VALUE } from '~/components/crm/value.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
 import { RowActions, StatusDot, rowPill, type StatusTone } from '~/components/row-actions.tsx'
 import { useUrlParam } from '~/lib/url-params.ts'
+import { brevoListLine, type BrevoListSize } from '~/lib/brevo-list-size.ts'
 import { useQueryClient } from '@tanstack/react-query'
 
 type Template = { id: number; name: string; subject: string | null; isActive: boolean }
@@ -35,8 +36,9 @@ type Campaign = {
 }
 
 export type CampaignPanelProps = {
-  segments: { id: string; name: string; memberCount: number }[]
+  segments: { id: string; name: string; memberCount: number; mailable: number }[]
   defaultListId: string
+  listSize: BrevoListSize | null
   canWrite: boolean
   hub: string
 }
@@ -79,7 +81,7 @@ const TONE: Record<Exclude<View, 'all'>, StatusTone> = { sent: 'live', scheduled
  *  Templates and campaigns are fetched on demand rather than server-rendered: both
  *  are calls to Brevo, and a marketing page that will not load because a third
  *  party is slow is worse than one that says it is loading. */
-export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: CampaignPanelProps) => {
+export const CampaignPanel = ({ segments, defaultListId, listSize, canWrite, hub }: CampaignPanelProps) => {
   const queryClient = useQueryClient()
   const fmt = useFormat()
   const router = useRouter()
@@ -345,7 +347,7 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
             >
               {segments.map((segment) => (
                 <option key={segment.id} value={segment.id}>
-                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'})`}
+                  {`${segment.name} (${fmt.number(segment.memberCount)} ${segment.memberCount === 1 ? 'person' : 'people'}, ${fmt.number(segment.mailable)} will be mailed)`}
                 </option>
               ))}
             </Select>
@@ -363,6 +365,9 @@ export const CampaignPanel = ({ segments, defaultListId, canWrite, hub }: Campai
               onChange={(event) => setListId(event.target.value)}
             />
           </Field>
+          {listSize && listId === defaultListId ? (
+            <p className="text-small text-secondary">{brevoListLine(listId, listSize, fmt.number)}</p>
+          ) : null}
 
           <Field id="campaign-name" label="Campaign name" hint="What it is called in Brevo.">
             <TextInput id="campaign-name" value={name} onChange={(event) => setName(event.target.value)} />

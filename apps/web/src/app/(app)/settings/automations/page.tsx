@@ -16,6 +16,9 @@ import {
 import { EmptyState, PageHeader } from '@rawr/ui'
 import { AutomationList, type StepView } from './automation-list.tsx'
 import { delayFrom } from './wait-input.ts'
+
+/** How many runs the Recent activity card shows. One more is read, to know whether the all-runs page has more. */
+const RECENT_RUNS = 50
 import { toFilterFields } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 
@@ -52,7 +55,7 @@ const AutomationsPage = async () => {
     return (
       <EmptyState
         title="Automations are admin only"
-        description={`You need account access, which you do not have. can change records one at a time. A rule changes every record that matches it.`}
+        description="You need account admin access to see these. You can still change records one at a time. A rule changes every record that matches it."
       />
     )
   }
@@ -60,7 +63,7 @@ const AutomationsPage = async () => {
   const ctx = contextFrom(session)
   const [rows, runs, people, stages, fields, registry, templates, mailboxes, sequences] = await Promise.all([
     listAutomations(ctx),
-    listAutomationRuns(ctx, { limit: 50 }),
+    listAutomationRuns(ctx, { limit: RECENT_RUNS + 1 }),
     listAssignable(ctx),
     listLifecycleStages(ctx),
     listFields(ctx),
@@ -141,11 +144,12 @@ const AutomationsPage = async () => {
           createdAt: row.createdAt.toISOString(),
           lastRunAt: row.lastRunAt?.toISOString() ?? null,
         }))}
-        runs={runs.map((run) => ({
+        runs={runs.slice(0, RECENT_RUNS).map((run) => ({
           ...run,
           resumeAt: run.resumeAt?.toISOString() ?? null,
           at: run.at.toISOString(),
         }))}
+        moreRuns={runs.length > RECENT_RUNS}
         people={people.map((person) => ({ id: person.userId, name: person.name }))}
         stages={stages.map((stage) => stage.name)}
         objects={objects}

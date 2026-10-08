@@ -62,6 +62,25 @@ export const userAccount = pgTable('user_account', {
   createdAt: createdAt(),
 })
 
+/** One row per sign-in, read and ended only through the security-definer functions in
+ *  migration 0110. Not tenant data, so it carries no account_id. */
+export const userSession = pgTable(
+  'user_session',
+  {
+    id: pk(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => userAccount.id, { onDelete: 'cascade' }),
+    device: text('device').notNull(),
+    createdAt: createdAt(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    /** When the cookie stops being accepted, whether or not it was used. */
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('user_session_user_id_idx').on(t.userId)],
+)
+
 /** Who is in the account and what they hold, as HubSpot grants it: a set of hubs
  *  they may read and a set they may write, rather than one role off a fixed list.
  *  Edit does not imply view in the columns; `canRead` unions the two, so a grant

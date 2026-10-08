@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { DEFAULT_TOOLSETS, TOOLSETS, parseToolsets } from './toolsets.ts'
+import { DEFAULT_TOOLSETS, onConnection, TOOLSETS, parseToolsets } from './toolsets.ts'
 
 const sorted = (set: ReadonlySet<string>) => [...set].sort()
 
@@ -31,4 +31,11 @@ test('a name nobody has is ignored, never a connection with no tools', () => {
 
 test('every default names a real toolset', () => {
   for (const key of DEFAULT_TOOLSETS) assert.ok(key in TOOLSETS, `${key} is not a toolset`)
+})
+
+test('a toolset left off is not on the connection, and core always is', () => {
+  const mailOnly = parseToolsets('mail')
+  assert.equal(onConnection(mailOnly, 'mail'), true)
+  assert.equal(onConnection(mailOnly, 'admin'), false)
+  assert.equal(onConnection(mailOnly, 'core'), true)
 })

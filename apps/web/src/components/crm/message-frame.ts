@@ -12,3 +12,51 @@ export const openMailLink = (event: MouseEvent) => {
   if (/^https?:/i.test(link.href)) window.open(link.href, '_blank', 'noopener,noreferrer')
   else if (/^mailto:/i.test(link.href)) window.location.href = link.href
 }
+
+/** Strings and escaped characters are matched so that a `/*` inside them, or an
+ *  escaped slash, is not read as a comment. Comments are dropped; the rest is kept. */
+const STRING_ESCAPE_OR_COMMENT = /("(?:\\[\s\S]|[^"\\])*"?|'(?:\\[\s\S]|[^'\\])*'?|\\[\s\S])|\/\*[\s\S]*?(?:\*\/|$)/g
+const CSS_HEX_ESCAPE = /\\([0-9a-f]{1,6})[ \t\n\r\f]?|\\([\s\S])/gi
+const REMOTE_FUNCTION = /(?:url|src|image|image-set)\(/i
+
+/** Whether a CSS value (a style attribute or a style element) can make the browser
+ *  fetch something. Reads it the way CSS does: comments go, escapes are decoded, and
+ *  names are case-insensitive, so `\75rl(`, `UR/**\/L(` and `u\72l(` all count. */
+export const loadsRemotely = (css: string): boolean => {
+  const uncommented = css.replace(STRING_ESCAPE_OR_COMMENT, (_, kept?: string) => kept ?? '')
+  const decoded = uncommented.replace(CSS_HEX_ESCAPE, (_, hex?: string, char?: string) => {
+    if (hex === undefined) return char!
+    const code = parseInt(hex, 16)
+    return String.fromCodePoint(code === 0 || code > 0x10ffff ? 0xfffd : code)
+  })
+  return REMOTE_FUNCTION.test(decoded)
+}
+
+/** Takes every remote load out of stored mail HTML until the reader asks for them.
+ *  The browser's own parser finds the attributes, so a load in any form is caught:
+ *  an image, a responsive source set, a table or cell background, a video poster,
+ *  a style attribute that calls url() or image(), and a style or link element. */
+export const blockRemoteLoads = (html: string): { html: string; blocked: number } => {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  let blocked = 0
+  for (const element of doc.body.querySelectorAll('[src],[srcset],[background],[poster],[style]')) {
+    let hit = false
+    for (const name of ['src', 'srcset', 'background', 'poster']) {
+      if (element.hasAttribute(name)) {
+        element.removeAttribute(name)
+        hit = true
+      }
+    }
+    const style = element.getAttribute('style')
+    if (style !== null && loadsRemotely(style)) {
+      element.removeAttribute('style')
+      hit = true
+    }
+    if (hit) blocked++
+  }
+  for (const element of doc.querySelectorAll('style, link')) {
+    element.remove()
+    blocked++
+  }
+  return { html: doc.body.innerHTML, blocked }
+}

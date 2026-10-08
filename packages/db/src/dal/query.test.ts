@@ -168,6 +168,13 @@ test('valid values and every operator on them compile as before', () => {
   assert.equal(run({ field: 'amount', operator: 'gt', value: '' }).text, '(false)')
 })
 
+test('a boolean filter takes the "true" and "false" the Yes and No picker sends', () => {
+  const run = (value: unknown) =>
+    built(compile([{ conjunction: 'and', conditions: [{ field: 'uttr_pipeline', operator: 'is', value }] }]))
+  assert.deepEqual(run('true').params, [true])
+  assert.deepEqual(run('false').params, [false])
+})
+
 test('@me resolves to the caller and an anonymous caller matches nothing', () => {
   const mine: FilterGroup[] = [
     { conjunction: 'and', conditions: [{ field: 'owner_id', operator: 'is', value: '@me' }] },

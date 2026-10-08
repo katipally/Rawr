@@ -4,7 +4,7 @@ import { auditLog } from '../schema/identity.ts'
 import { activity, activityLink, contact } from '../schema/records.ts'
 import { subscriptionState, subscriptionType } from '../schema/marketing.ts'
 import type { ActivityType } from './activity.ts'
-import type { AccountContext } from './context.ts'
+import { assertCanView, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
 import { withAccount, type Tx } from './index.ts'
 import { claimInbound } from './integrations.ts'
@@ -364,6 +364,28 @@ export const readSegmentContactPage = async (
     }
   })
 }
+
+/** Per segment, how many members a list push would mail: the same `mailable` test
+ *  `readSegmentContactPage` applies, counted in one grouped aggregate over every
+ *  segment's live memberships (M rows, each a primary-key probe on contact and an
+ *  index probe on subscription_state by contact_id, so O(M log N)). listSegments
+ *  already scans the same memberships for its counts. */
+export const countMailableBySegment = async (ctx: AccountContext): Promise<Map<string, number>> =>
+  withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'contacts', 'segments')
+    const rows = await tx.execute<{ segment_id: string; n: number }>(sql`
+      select m.segment_id, count(*)::int as n
+        from segment_membership m
+        join contact c on c.id = m.entity_id
+       where m.exited_at is null
+         and c.deleted_at is null
+         and c.email is not null
+         and not exists (
+           select 1 from subscription_state s
+            where s.contact_id = c.id and s.state = 'unsubscribed')
+       group by m.segment_id`)
+    return new Map(rows.map((row) => [String(row.segment_id), Number(row.n)]))
+  })
 
 /** The provider's own id for this contact, so a sync is incremental rather than a
  *  full re-push and an opt-out reaches the right row at the other end. */

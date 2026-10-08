@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import { listAudit } from '../src/dal/audit.ts'
 import {
@@ -13,9 +14,18 @@ import {
   saveAccount,
 } from '../src/dal/account.ts'
 import type { AccountContext } from '../src/dal/context.ts'
-import { closeAppPool } from '../src/internal/pool.ts'
+import { appDb, closeAppPool } from '../src/internal/pool.ts'
 import { ROLE_TEMPLATES, addMember, copyMemberGrants, listMembers, setMemberGrants } from '../src/dal/members.ts'
-import { membershipsForUser, signInWithGoogle } from '../src/dal/session.ts'
+import {
+  listSessions,
+  membershipsForUser,
+  openSession,
+  revokeOtherSessions,
+  revokeSession,
+  signInWithGoogle,
+  signOutEverywhere,
+  touchSession,
+} from '../src/dal/session.ts'
 import { saveTeam, setTeamMembers } from '../src/dal/teams.ts'
 import { SALES_STAGES } from '../src/registry/core.ts'
 import { SANDBOX, cleanup, residueCounts } from './fixture.ts'
@@ -410,6 +420,72 @@ try {
   await owner`delete from membership where user_id = ${strangerId}`
   await owner`delete from account where google_hosted_domain = ${strangerDomain}`
   await owner`delete from user_account where id = ${strangerId}`
+
+  console.log('\n-- sessions ------------------------------------------------------')
+
+  const sessionUser = (label: string) =>
+    signInWithGoogle({
+      sub: `session-${label}-${Date.now()}`,
+      email: `session-${label}-${Date.now()}@sandbox.test`,
+      name: `Session ${label}`,
+      picture: null,
+      hostedDomain: null,
+      visitorAccount: '',
+      mayOpenAccount: false,
+    })
+  const sessHolder = await sessionUser('holder')
+  const sessOther = await sessionUser('other')
+  const lastSeen = async (id: string): Promise<Date> => (await owner`select last_seen_at from user_session where id = ${id}`)[0]!.last_seen_at
+  const expires = new Date(Date.now() + 12 * 60 * 60 * 1000)
+
+  const first = await openSession(sessHolder, 'Chrome on macOS', expires)
+  const second = await openSession(sessHolder, 'Safari on iPhone', expires)
+  const theirs = await openSession(sessOther, 'Firefox on Linux', expires)
+  const listed = await listSessions(sessHolder)
+  check(
+    listed.length === 2 && listed.every((s) => s.id !== theirs) && listed.some((s) => s.id === first && s.device === 'Chrome on macOS'),
+    'a person lists their own sessions, each with the device it started on',
+  )
+  check(!(await touchSession(sessOther, first)), 'a session answers only to the person it was issued to')
+  check(
+    (await refused(() => appDb.execute(sql`select 1 from user_session`))) !== null,
+    'the app role cannot read the table directly, only through the functions',
+  )
+
+  await owner`update user_session set last_seen_at = now() - interval '10 minutes' where id = ${first}`
+  const aged = await lastSeen(first)
+  check(await touchSession(sessHolder, first), 'a session used after a quiet spell is live')
+  check((await lastSeen(first)).getTime() > aged.getTime(), 'and the use moves its last-seen time on')
+  const justNow = await lastSeen(second)
+  await touchSession(sessHolder, second)
+  check((await lastSeen(second)).getTime() === justNow.getTime(), 'a use inside the window writes nothing')
+
+  check(!(await revokeSession(sessOther, second)), "a person cannot end somebody else's session")
+  check(await revokeSession(sessHolder, second), 'a session can be ended by the person it belongs to')
+  check(!(await revokeSession(sessHolder, second)), 'ending it again finds nothing to end')
+  check(!(await touchSession(sessHolder, second)), 'an ended session is refused on its next request')
+  check((await listSessions(sessHolder)).map((s) => s.id).join() === first, 'and it leaves the list')
+
+  await owner`update user_session set expires_at = now() - interval '1 minute' where id = ${first}`
+  check(!(await touchSession(sessHolder, first)), 'a session past its expiry is refused, even if nothing ended it')
+  check((await listSessions(sessHolder)).length === 0, 'and is not listed')
+  await owner`update user_session set expires_at = ${expires} where id = ${first}`
+
+  const keep = await openSession(sessHolder, 'Chrome on macOS', expires)
+  const spare = await openSession(sessHolder, 'Edge on Windows', expires)
+  await revokeOtherSessions(sessHolder, keep)
+  const left = await listSessions(sessHolder)
+  check(left.length === 1 && left[0]!.id === keep, 'signing out the others keeps this session and ends the rest')
+  check(!(await touchSession(sessHolder, spare)) && (await touchSession(sessHolder, keep)), 'and only the kept one still answers')
+  check((await listSessions(sessOther)).some((s) => s.id === theirs), "and the other person's session is untouched")
+
+  await signOutEverywhere(sessHolder)
+  check(
+    (await listSessions(sessHolder)).length === 0 && !(await touchSession(sessHolder, keep)),
+    'signing out everywhere ends every recorded session',
+  )
+  await owner`delete from user_session where user_id in (${sessHolder}, ${sessOther})`
+  await owner`delete from user_account where id in (${sessHolder}, ${sessOther})`
 
   console.log('\n-- history -----------------------------------------------------')
 

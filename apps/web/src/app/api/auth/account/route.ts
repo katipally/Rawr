@@ -37,6 +37,6 @@ export const POST = async (request: NextRequest): Promise<NextResponse> => {
     return NextResponse.redirect(back, 303)
   }
 
-  await writeSessionCookie(sessionFromMembership(target))
+  await writeSessionCookie(sessionFromMembership(target, session.sessionId))
   return NextResponse.redirect(new URL(next, env.AUTH_URL), 303)
 }

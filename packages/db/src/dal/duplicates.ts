@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { duplicateDismissal } from '../schema/records.ts'
 import type { AccountContext } from './context.ts'
 import { assertCanWrite } from './context.ts'
@@ -296,6 +296,89 @@ export const findDuplicates = async (
     return out
   })
 }
+
+export type SetAsideSide = { id: string; displayName: string; createdAt: Date }
+
+export type SetAsidePair = {
+  keep: SetAsideSide
+  absorb: SetAsideSide
+  /** When somebody set the pair aside. */
+  setAsideAt: Date
+}
+
+/** Pairs set aside by Reject, newest decision first, so a pair rejected by mistake
+ *  can be put back. Same names, dates and keep side as the queue shows them. Gated
+ *  like the queue: a viewer has no business seeing either. */
+export const listDismissedDuplicates = async (
+  ctx: AccountContext,
+  objectKey: 'contact' | 'company',
+  options: { limit?: number } = {},
+): Promise<SetAsidePair[]> => {
+  assertCanWrite(ctx, objectKey)
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 200)
+  const nameOf = (alias: string) =>
+    objectKey === 'contact'
+      ? `trim(coalesce(${alias}."first_name", '') || ' ' || coalesce(${alias}."last_name", ''))`
+      : `${alias}."name"`
+
+  return withAccount(ctx, async (tx) => {
+    const rows = await tx.execute<{
+      left_id: string
+      right_id: string
+      set_aside_at: Date
+      left_name: string | null
+      left_created: Date
+      right_name: string | null
+      right_created: Date
+    }>(sql`
+      select d.left_id::text as left_id, d.right_id::text as right_id, d.at as set_aside_at,
+             ${sql.raw(nameOf('a'))} as left_name, a.created_at as left_created,
+             ${sql.raw(nameOf('b'))} as right_name, b.created_at as right_created
+        from duplicate_dismissal d
+        join ${sql.raw(`"${objectKey}"`)} a on a.id = d.left_id
+        join ${sql.raw(`"${objectKey}"`)} b on b.id = d.right_id
+       where d.entity_type = ${objectKey}
+       order by d.at desc, d.id
+       limit ${limit}`)
+
+    return rows.map((row) => {
+      const left = { id: row.left_id, displayName: row.left_name?.trim() || row.left_id, createdAt: asDate(row.left_created) }
+      const right = { id: row.right_id, displayName: row.right_name?.trim() || row.right_id, createdAt: asDate(row.right_created) }
+      const [keep, absorb] = left.createdAt <= right.createdAt ? [left, right] : [right, left]
+      return { keep, absorb, setAsideAt: asDate(row.set_aside_at) }
+    })
+  })
+}
+
+/** Puts a set-aside pair back in the queue. Removing a row that is not there is a
+ *  no-op, so a second click is harmless. */
+export const putBackDuplicate = async (
+  ctx: AccountContext,
+  objectKey: 'contact' | 'company',
+  pair: { leftId: string; rightId: string },
+): Promise<void> =>
+  mutate(ctx, objectKey, async (tx) => {
+    const [leftId, rightId] = ordered(pair.leftId, pair.rightId)
+    await tx
+      .delete(duplicateDismissal)
+      .where(
+        and(
+          eq(duplicateDismissal.entityType, objectKey),
+          eq(duplicateDismissal.leftId, leftId),
+          eq(duplicateDismissal.rightId, rightId),
+        ),
+      )
+    return {
+      result: undefined,
+      audit: {
+        entity: 'duplicate_dismissal',
+        entityId: leftId,
+        action: 'delete',
+        before: { object: objectKey, notTheSameAs: rightId },
+        after: null,
+      },
+    }
+  })
 
 export type JunkCompany = { id: string; name: string; createdAt: Date; contactCount: number }
 

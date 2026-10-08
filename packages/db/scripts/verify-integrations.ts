@@ -33,6 +33,7 @@ import {
 import { acceptSuggestion, applyEnrichment, approveEnrichment, discardEnrichment, enrichmentQueued, markSource, pendingEnrichment } from '../src/dal/enrichment.ts'
 import { listSuggestions, readFieldSources } from '../src/dal/integrations.ts'
 import {
+  countMailableBySegment,
   ingestMarketingEvent,
   mailableContacts,
   readSegmentContactPage,
@@ -706,6 +707,71 @@ try {
     expect(Boolean(target), 'the opted-out contact fell out of the page entirely')
     expect(target!.mailable === false, 'somebody who opted out is still mailable')
     return 'the row is returned and flagged, so skipped counts without a second scan'
+  })
+
+  await check('a segment counts who a push would mail, not everyone in it', async () => {
+    const marker = `mailcount-${stamp}`
+    await db.execute(sql`
+      insert into contact (account_id, email, first_name)
+      values (${datasaur.id}, ${marker + '-in@example.test'}, ${marker}),
+             (${datasaur.id}, ${marker + '-out@example.test'}, ${marker}),
+             (${datasaur.id}, null, ${marker})`)
+    const [type] = await db.execute<{ id: string }>(
+      sql`select id from subscription_type
+           where account_id = ${datasaur.id} and is_internal = false
+           order by name limit 1`,
+    )
+    expect(Boolean(type), 'the account has no external subscription type')
+    const [optedOut] = await db.execute<{ id: string }>(
+      sql`select id from contact where account_id = ${datasaur.id} and email = ${marker + '-out@example.test'}`,
+    )
+    await db.execute(sql`
+      insert into subscription_state (account_id, contact_id, subscription_type_id, state)
+      values (${datasaur.id}, ${optedOut!.id}, ${type!.id}, 'unsubscribed')
+      on conflict (account_id, contact_id, subscription_type_id)
+        do update set state = 'unsubscribed'`)
+
+    const created = await saveSegment(admin, {
+      objectKey: 'contact',
+      name: `Verify mailable ${stamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'first_name', operator: 'contains', value: marker }] }],
+    })
+    await evaluateSegment(admin, created.id)
+
+    const listed = (await listSegments(admin, 'contact')).find((row) => row.id === created.id)
+    expect(listed?.memberCount === 3, `${listed?.memberCount} members, expected 3`)
+    const mailable = (await countMailableBySegment(admin)).get(created.id) ?? 0
+    let pushed = 0
+    let cursor: string | null = null
+    do {
+      const page = await readSegmentContactPage(admin, created.id, { after: cursor, limit: 100 })
+      pushed += page.rows.filter((row) => row.mailable).length
+      cursor = page.nextCursor
+    } while (cursor)
+    expect(mailable === 1, `the count says ${mailable} will be mailed, expected 1`)
+    expect(pushed === mailable, `the push would mail ${pushed}, the count says ${mailable}`)
+    return 'the opted-out and no-address members are in the count of people, not of mail'
+  })
+
+  await check('a segment’s people count leaves out a deleted member', async () => {
+    const marker = `delcount-${stamp}`
+    await db.execute(sql`
+      insert into contact (account_id, email, first_name)
+      values (${datasaur.id}, ${marker + '-kept@example.test'}, ${marker}),
+             (${datasaur.id}, ${marker + '-gone@example.test'}, ${marker})`)
+    const created = await saveSegment(admin, {
+      objectKey: 'contact',
+      name: `Verify deleted ${stamp}`,
+      filters: [{ conjunction: 'and', conditions: [{ field: 'first_name', operator: 'contains', value: marker }] }],
+    })
+    await evaluateSegment(admin, created.id)
+    await db.execute(sql`
+      update contact set deleted_at = now()
+       where account_id = ${datasaur.id} and email = ${marker + '-gone@example.test'}`)
+
+    const listed = (await listSegments(admin, 'contact')).find((row) => row.id === created.id)
+    expect(listed?.memberCount === 1, `${listed?.memberCount} people, expected 1 after one was deleted`)
+    return 'the people count matches the members page, which never shows a deleted contact'
   })
 
   await check('the provider’s own id is kept for the next sync', async () => {

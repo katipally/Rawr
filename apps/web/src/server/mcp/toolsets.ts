@@ -10,10 +10,10 @@
  *    /api/mcp?toolsets=mail,forms  those, plus core
  *    /api/mcp?toolsets=+reporting  the default set, plus that
  *
- *  This is visibility, never authorization. What a token may do is decided by the
- *  person's role and enforced in Postgres, and an unlisted tool still runs: two
- *  clients on one token would otherwise disagree about which tools exist, and the
- *  disagreement would look exactly like a permission error.
+ *  A group that is left off is neither listed nor callable: a call to one of its
+ *  tools is refused the way a name that does not exist is, so the list and the
+ *  calls agree. This narrows what a connection uses. It is not authorization: what
+ *  a token may do is still decided by the person's role and enforced in Postgres.
  *
  *  Imports nothing. That is load-bearing rather than tidiness: the settings page's
  *  client component reads these labels, and one import of the catalogue would drag
@@ -122,3 +122,7 @@ export const parseToolsets = (raw: string | null | undefined): ReadonlySet<strin
   // other tool takes ids.
   return new Set([...(additive ? DEFAULT_TOOLSETS : []), 'core', ...named])
 }
+
+/** The one answer to "is this tool on this connection?". The list and the call both
+ *  ask it, so they cannot disagree. */
+export const onConnection = (enabled: ReadonlySet<string>, toolset: string): boolean => enabled.has(toolset)

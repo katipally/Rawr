@@ -27,6 +27,8 @@ import {
   MAX_OPTIONS_INPUT,
   dismissDuplicate,
   findDuplicates,
+  listDismissedDuplicates,
+  putBackDuplicate,
   findJunkCompanies,
   getRecord,
   getRegistry,
@@ -304,6 +306,17 @@ export const crmRouter = router({
       .mutation(({ ctx, input }) =>
         call(() => dismissDuplicate(ctx.account, input.object, input)),
       ),
+
+    /** Pairs set aside, so one rejected by mistake can be put back. Gated like the queue. */
+    dismissedDuplicates: protectedProcedure
+      .input(z.object({ object: z.enum(['contact', 'company']), limit: z.number().int().min(1).max(200).optional() }))
+      .query(({ ctx, input }) =>
+        call(() => listDismissedDuplicates(ctx.account, input.object, input.limit ? { limit: input.limit } : {})),
+      ),
+
+    putBackDuplicate: protectedProcedure
+      .input(z.object({ object: z.enum(['contact', 'company']), leftId: z.uuid(), rightId: z.uuid() }))
+      .mutation(({ ctx, input }) => call(() => putBackDuplicate(ctx.account, input.object, input))),
 
     merge: protectedProcedure
       .input(
