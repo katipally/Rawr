@@ -75,7 +75,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
   const document_ =
     html === null || gated === null
       ? null
-      : `<!doctype html><meta charset="utf-8"><base target="_blank">` +
+      : `<!doctype html><meta charset="utf-8">` +
         `<style>html,body{margin:0;font:14px/1.5 system-ui,sans-serif;color:#33475b;word-break:break-word}` +
         `img{max-width:100%;height:auto}blockquote{margin:0 0 0 1em;padding-left:.75em;border-left:2px solid #cbd6e2;color:#516f90}` +
         `a{color:#007d96}table{max-width:100%}</style>` +

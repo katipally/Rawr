@@ -515,9 +515,7 @@ export const bookingPublicPath = (
      *  that posted a form per step. That path went in 75cfaa7 and the page reads
      *  none of the four. */
     confirmed?: string | undefined
-    at?: string | undefined
     r?: string | undefined
-    c?: string | undefined
   } = {},
 ): string => `/b/${accountSlug}/${slug}${query(params)}`
 

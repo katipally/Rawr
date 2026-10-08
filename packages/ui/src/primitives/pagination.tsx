@@ -61,7 +61,6 @@ export const Pagination = ({
         <ol className="flex items-center gap-1">
           {pageNumbers(current, Math.ceil(total / perPage)).map((page, index) =>
             page === 'gap' ? (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a gap has no identity but its place
               <li key={`gap-${index}`} aria-hidden="true" className="px-1 text-secondary">
                 …
               </li>

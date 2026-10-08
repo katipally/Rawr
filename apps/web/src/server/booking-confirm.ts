@@ -30,7 +30,6 @@ export const confirmationBody = (
   confirmationUrl: `${publicBaseUrl}${bookingPublicPath(account, slug, {
     confirmed: '1',
     r: booking.rescheduleToken,
-    c: booking.cancelToken,
   })}`,
   /** A Zoom outage does not fail a booking; it lands here so the embed can say
    *  the link is coming rather than pretending there is one. */

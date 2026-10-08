@@ -12,6 +12,7 @@ import { sortWords } from '~/lib/sort-labels.ts'
 import { replaceParams } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
 import { BulkBar } from './bulk-bar.tsx'
+import { NAME_PARTS } from './column-chooser.ts'
 import type { EditableField } from './field-input.tsx'
 import { EMPTY_VALUE, Value } from './value.tsx'
 import { RecordPreview } from './record-preview.tsx'
@@ -58,10 +59,6 @@ const OVERDUE_FIELDS = new Set(['next_step_date', 'close_date'])
  *  what the page actually asked for. */
 const DEFAULT_PAGE_SIZE = 25
 
-/** HubSpot shows a person and a company as one Name cell with a picture, where
- *  Rawr stores a contact's name as two fields. When the table opens on one of
- *  them the other is folded into it rather than taking a column of its own. */
-const NAME_PARTS = ['first_name', 'last_name']
 const WITH_AVATAR = new Set(['contact', 'company'])
 
 export const RecordTable = ({

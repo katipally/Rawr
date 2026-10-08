@@ -22,8 +22,6 @@ import { api, errorMessage } from '~/lib/rpc.ts'
  *  being offered here. */
 const REFRESH_MS = 60_000
 
-const ASKED = 'rawr.enrichment.asked'
-
 type Pending = { contacts: number; companies: number; total: number }
 
 const describe = ({ contacts, companies }: Pending): string => {
@@ -44,12 +42,7 @@ export const EnrichmentConsent = ({ canWrite }: { canWrite: boolean }) => {
   const load = useCallback(() => {
     api.integrations.pendingEnrichment
       .query()
-      .then((next) => {
-        setPending(next)
-        if (next.total > 0 && sessionStorage.getItem(ASKED) !== '1') {
-          sessionStorage.setItem(ASKED, '1')
-        }
-      })
+      .then(setPending)
       .catch(() => {
         // A failed poll is not worth a message. The next one is a minute away,
         // and nothing is enriched in the meantime either way.

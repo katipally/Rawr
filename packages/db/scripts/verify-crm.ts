@@ -2150,7 +2150,6 @@ try {
     const contacts = groupFor(await readAssociations(admin, { entityType: 'company', entityId: company.id }), 'contact')
     expect(contacts?.records.length === 3, `the rail showed ${contacts?.records.length ?? 0} contacts`)
     expect(contacts!.records.every((row) => !row.isPrimary), 'a company called its contacts primary')
-    expect(contacts!.records.every((row) => row.canUnlink), 'a company could not unlink a contact that holds it as its primary company')
 
     // The badge belongs on the one company a contact points at, which is the half
     // of the pair that has to keep working.

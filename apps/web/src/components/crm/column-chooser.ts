@@ -1,7 +1,7 @@
 /** A person's first and last name are two stored fields that the table shows as
  *  one Name column. The chooser lists them the same way: one row, keyed by
  *  first_name, that adds and removes both. */
-const NAME_PARTS = ['first_name', 'last_name']
+export const NAME_PARTS = ['first_name', 'last_name']
 
 /** The rows the chooser shows for a set of columns. A last name that rides with a
  *  first name is not a row of its own. */

@@ -417,8 +417,7 @@ export const ImportWizard = ({
       </div>
 
 {reviewing ? (
-        <>
-      {preview ? (
+      preview ? (
         <section className="flex min-w-0 flex-col gap-3">
           <dl className="flex flex-wrap gap-x-6 gap-y-1 tabular-nums">
             {[
@@ -517,8 +516,7 @@ export const ImportWizard = ({
         <p role="status" className="text-center text-secondary">
           {busy ? 'Checking the file against the CRM…' : 'The preview could not be made. Go back to the mapping and try again.'}
         </p>
-      )}
-        </>
+      )
       ) : (
         <>
       {previousMapping ? (

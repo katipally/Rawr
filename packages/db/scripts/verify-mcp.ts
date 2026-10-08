@@ -1171,7 +1171,7 @@ try {
   })
   // A delivery that cannot reach the receiver still records its attempt, which is
   // what this checks. A new endpoint has no attempt on it until one is made.
-  let attempted: Awaited<ReturnType<typeof hookRow>> = undefined
+  let attempted: Awaited<ReturnType<typeof hookRow>>
   for (let waited = 0; waited < 45 && !attempted?.lastOkAt && !attempted?.lastErrorAt; waited++) {
     await sleep(1000)
     attempted = await hookRow()

@@ -72,14 +72,12 @@ export const SegmentConditions = ({ fields, filters }: { fields: FilterField[]; 
   return (
     <ol className="flex flex-col gap-2">
       {groups.map((group, index) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: a group has no identity but its place
         <Fragment key={index}>
           {index > 0 ? <li className="text-center text-small font-bold">AND</li> : null}
           <li className="flex flex-col gap-2 rounded-panel border border-line p-2">
             <span className="px-1 font-semibold">Group {index + 1}</span>
             <ul className="flex flex-col gap-1">
               {group.conditions.map((condition, at) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: conditions repeat, their place is the key
                 <Fragment key={at}>
                   {at > 0 ? <li className="px-2 text-small text-secondary">{group.conjunction}</li> : null}
                   <li className="min-w-0 break-words rounded-panel bg-canvas p-2">{describeCondition(fields, condition)}</li>

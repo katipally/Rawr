@@ -107,7 +107,3 @@ export const weeklyHours = (weekly: Ranges): number => {
   }
   return Math.round((minutes / 60) * 10) / 10
 }
-
-/** Days whose hours differ between two maps, an absent day reading as none. */
-export const daysChanged = (a: Ranges, b: Ranges): number =>
-  DAY_GROUPS[0]!.days.filter((day) => JSON.stringify(a[day] ?? []) !== JSON.stringify(b[day] ?? [])).length

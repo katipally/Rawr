@@ -23,7 +23,6 @@ export type Associated = {
   displayName: string
   detail: string | null
   isPrimary: boolean
-  canUnlink: boolean
   /** A contact's address, shown under the name with a copy button. */
   email: string | null
   label: string | null
@@ -337,7 +336,7 @@ export const AssociationRail = ({
                       {row.label ? <Badge tone="neutral">{row.label}</Badge> : null}
                     </span>
 
-                    {canWrite && row.canUnlink ? (
+                    {canWrite ? (
                       <IconButton
                         label={`Unlink ${shortName(row.displayName)}`}
                         icon={<ACTION_ICONS.unlink size={16} />}
@@ -428,8 +427,8 @@ export const AssociationRail = ({
  *  on. The link then opens the plain list and says so, rather than promising
  *  "associated" and showing everything.
  *
- *  Wording, not a filter, because the alternative — putting every linked id in the
- *  query string — is a URL that grows with the data and breaks at some customer's
+ *  Wording, not a filter, because the alternative (putting every linked id in the
+ *  query string) is a URL that grows with the data and breaks at some customer's
  *  proxy rather than in a test. */
 const filterFor = (object: string, recordId: string, objectKey: string): string | undefined =>
   object === 'company' && (objectKey === 'contact' || objectKey === 'deal')

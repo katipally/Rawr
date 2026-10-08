@@ -15,10 +15,6 @@ export type AssociatedRecord = {
    *  or a deal, and the single company it points at. The reverse of that link is
    *  not primary, because a company has no primary contact. A4. */
   isPrimary: boolean
-  /** Every row can be unlinked from here. A company held in a record's own Primary
-   *  company column is cleared on that record, the same write as editing the
-   *  column, and any association row between the two is removed too. */
-  canUnlink: boolean
   /** Only a contact has one. What the record page's Email action opens the
    *  composer on when the record itself has no address. */
   email: string | null
@@ -83,7 +79,6 @@ const toRecord = (object: RegistryObject, row: Row, kind: Kind, label: string | 
   displayName: row.name?.trim() || `Unnamed ${object.nameSingular.toLowerCase()}`,
   detail: row.detail,
   isPrimary: kind === 'primary',
-  canUnlink: true,
   email: row.email ?? null,
   label,
   createdAt: row.created_at === null ? null : new Date(row.created_at).toISOString(),

@@ -157,7 +157,7 @@ test('a huge answer is cut at the cap and the connection dropped', async () => {
   const port = await listen((_req, res) => {
     res.writeHead(200)
     const push = () => {
-      while (res.write(Buffer.alloc(64 * 1024, 97))) continue
+      while (res.write(Buffer.alloc(64 * 1024, 97)));
       res.once('drain', push)
     }
     push()
