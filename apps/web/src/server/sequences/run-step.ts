@@ -5,6 +5,7 @@ import {
   deferRun,
   ingestMessage,
   internalDomainOf,
+  mergeValuesOf,
   nextSendAt,
   recordSend,
   recordSendFailure,
@@ -42,15 +43,15 @@ const SENDERS: Record<string, Sender> = { gmail: gmailSender }
 /** The values a merge field can use. Typed by the key list the editors offer and
  *  the save enforces, so a key that exists in one place and not the other is a
  *  compile error rather than an empty greeting. */
-const mergeValues = (run: ClaimedRun): Record<MergeFieldKey, string | null> => ({
-  first_name: run.contactFirstName,
-  last_name: run.contactLastName,
-  full_name: [run.contactFirstName, run.contactLastName].filter(Boolean).join(' ') || null,
-  email: run.contactEmail,
-  company: run.companyName,
-  sender_email: run.mailboxEmail,
-  sequence: run.sequenceName,
-})
+const mergeValues = (run: ClaimedRun): Record<MergeFieldKey, string | null> =>
+  mergeValuesOf({
+    firstName: run.contactFirstName,
+    lastName: run.contactLastName,
+    email: run.contactEmail,
+    company: run.companyName,
+    senderEmail: run.mailboxEmail,
+    sequenceName: run.sequenceName,
+  })
 
 export const runStep = async (ctx: AccountContext, enrollmentId: string): Promise<RunOutcome> => {
   const outcome = await claimEnrollmentRun(ctx, enrollmentId)

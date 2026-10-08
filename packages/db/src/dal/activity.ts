@@ -24,6 +24,10 @@ export type EmailPayload = {
   direction: 'inbound' | 'outbound'
   /** Who it went to, or came from: the other side of the conversation. */
   counterpart: string[]
+  /** Copied to the message. Absent on rows written before they were kept. */
+  cc?: string[]
+  /** Names of the files that were attached, not the bytes. */
+  attachments?: string[]
   source: 'gmail' | 'sequence'
   sequenceId?: string
   sequenceName?: string

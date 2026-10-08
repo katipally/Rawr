@@ -1,16 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  SEQUENCE_NAME_MAX,
-  capReached,
-  copyName,
-  inWindow,
-  mergeFields,
-  mergeTokenPattern,
-  nextSendAt,
-  renderMergeFields,
-  type SendWindow,
-} from './sequence-rules.ts'
+import { SEQUENCE_NAME_MAX, capReached, copyName, inWindow, mergeFields, mergeTokenPattern, nextSendAt, renderMergeFields, type SendWindow, mergeValuesOf } from './sequence-rules.ts'
 
 /** The arithmetic that decides when somebody's prospect gets an email. Getting it
  *  wrong sends at three in the morning, or on a Sunday, or twice. */
@@ -195,4 +185,21 @@ test('a copy never splits a character outside the basic plane', () => {
   const copy = copyName(longest, new Set([longest]))
   assert.equal(Array.from(copy).length, SEQUENCE_NAME_MAX)
   assert.ok(!/[\uD800-\uDBFF]$/.test(copy))
+})
+
+test('a merge field reads the contact, the company, the sender and the sequence, and full name joins what is there', () => {
+  const values = mergeValuesOf({
+    firstName: 'Ana',
+    lastName: null,
+    email: 'ana@acme.example',
+    company: 'Acme',
+    senderEmail: 'sales@datasaur.ai',
+    sequenceName: 'Q3 outreach',
+  })
+  assert.equal(values.first_name, 'Ana')
+  assert.equal(values.full_name, 'Ana')
+  assert.equal(values.company, 'Acme')
+  assert.equal(values.sender_email, 'sales@datasaur.ai')
+  assert.equal(values.sequence, 'Q3 outreach')
+  assert.equal(mergeValuesOf({ firstName: null, lastName: null, email: null, company: null, senderEmail: null, sequenceName: null }).full_name, null)
 })

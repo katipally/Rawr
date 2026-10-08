@@ -162,3 +162,11 @@ export const objectStream = async (key: string): Promise<ReadableStream<Uint8Arr
   if (!body?.transformToWebStream) throw new Error('Storage returned nothing for that file.')
   return body.transformToWebStream()
 }
+
+/** The whole object in memory, for a file that has to be encoded into a message. */
+export const objectBytes = async (key: string): Promise<Uint8Array> => {
+  const reader = (await objectStream(key)).getReader()
+  const chunks: Uint8Array[] = []
+  for (let next = await reader.read(); !next.done; next = await reader.read()) chunks.push(next.value)
+  return Buffer.concat(chunks)
+}

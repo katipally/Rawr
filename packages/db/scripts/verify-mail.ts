@@ -27,6 +27,8 @@ import {
   type IncomingMessage,
 } from '../src/dal/messages.ts'
 import { createRecord, mergeRecords } from '../src/dal/records.ts'
+import { beginMailAttachment, claimMailAttachments, finishMailAttachments } from '../src/dal/attachments.ts'
+import { contactMergeFields } from '../src/dal/sequences.ts'
 import { acknowledgeThreadPush, changeThread, reconcileThreadFolders, threadPushPlan } from '../src/dal/thread-state.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
 
@@ -564,6 +566,69 @@ try {
 
   const counts = await inboxCounts(sales)
   check(typeof counts.archived === 'number' && typeof counts.trash === 'number' && typeof counts.assignedToMe === 'number', 'the inbox counts carry the folders and the assignee')
+
+  console.log('-- composing ------------------------------------------------------')
+  const composedTo = `compose-${stamp}@partner3.example`
+  const recipient = await createRecord(sales, 'contact', { first_name: 'Compose', last_name: `Check${stamp}`, email: composedTo })
+  const fields = await contactMergeFields(sales, recipient.id)
+  check(fields?.firstName === 'Compose' && fields.email === composedTo, 'a template reads the contact it is going to', JSON.stringify(fields))
+
+  const sentCopy = await ingestMessage(sales, {
+    incoming: incoming({
+      providerThreadId: `mail-c-${stamp}`,
+      providerMessageId: `mail-c-${stamp}`,
+      from: salesUser.email,
+      to: [composedTo],
+      cc: [`copy-${stamp}@partner3.example`],
+      internetMessageId: `<mail-c-${stamp}@datasaur.test>`,
+      attachments: [{ filename: 'terms.pdf', mimeType: 'application/pdf', sizeBytes: 4096, providerAttachmentId: null, inline: false }],
+      hasAttachments: true,
+    }),
+    ownerEmail: salesUser.email,
+    mailboxId: live.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  const [sentRow] = await owner<{ payload: { cc?: string[]; attachments?: string[] } }[]>`
+    select payload from activity where account_id = ${accountId} and payload->>'messageId' = ${sentCopy.stored ? sentCopy.messageId : ''}`
+  check(
+    sentCopy.stored && sentRow?.payload.cc?.includes(`copy-${stamp}@partner3.example`) === true && sentRow.payload.attachments?.[0] === 'terms.pdf',
+    'the timeline entry for a sent email carries its copies and its attachment names',
+    JSON.stringify(sentRow?.payload ?? null),
+  )
+
+  const begun = await beginMailAttachment(sales, { filename: 'terms.pdf', bytes: 1234 })
+  check(begun.storageKey.startsWith(`${accountId}/mail/${salesUser.id}/`), 'a message’s file is filed under its sender, in the account', begun.storageKey)
+  const [claimed] = await claimMailAttachments(sales, [{ storageKey: begun.storageKey, filename: 'terms.pdf', mime: 'application/pdf' }])
+  check(claimed?.bytes === 1234, 'a sent file is sized from its upload row, not from the request')
+  check(
+    (await refused(() => claimMailAttachments(marketing, [{ storageKey: begun.storageKey, filename: 'terms.pdf', mime: 'application/pdf' }]))) !== null,
+    'another person cannot send somebody else’s upload',
+  )
+  check(
+    (await refused(() => claimMailAttachments(sales, [{ storageKey: `other-account/${begun.storageKey.split('/').slice(1).join('/')}`, filename: 'x', mime: '' }]))) === 'That file does not belong to this account.',
+    'a key from another account is refused before the database is asked',
+  )
+  check(
+    (await refused(() => claimMailAttachments(sales, [
+      { storageKey: begun.storageKey, filename: 'terms.pdf', mime: '' },
+      { storageKey: begun.storageKey, filename: 'terms.pdf', mime: '' },
+    ]))) === 'The same file is attached twice.',
+    'the same upload listed twice is refused',
+  )
+  check((await finishMailAttachments(sales, [begun.storageKey])) === 1, 'finishing a message reports the upload it spent')
+  check((await finishMailAttachments(sales, [begun.storageKey])) === 0, 'an upload spent once is not spent again')
+  check(
+    (await refused(() => claimMailAttachments(sales, [{ storageKey: begun.storageKey, filename: 'terms.pdf', mime: '' }]))) !== null,
+    'a spent upload cannot be sent a second time',
+  )
+  const stale = await beginMailAttachment(sales, { filename: 'old.pdf', bytes: 10 })
+  await owner`update attachment_upload set expires_at = now() - interval '1 minute' where storage_key = ${stale.storageKey}`
+  check(
+    (await refused(() => claimMailAttachments(sales, [{ storageKey: stale.storageKey, filename: 'old.pdf', mime: '' }]))) !== null,
+    'an upload whose window has closed is refused',
+  )
+  await finishMailAttachments(sales, [stale.storageKey])
 
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {

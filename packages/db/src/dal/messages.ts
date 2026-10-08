@@ -843,6 +843,8 @@ const storeMessage = async (
       sentAt: incoming.sentAt,
       direction,
       counterpart: direction === 'inbound' ? [lower(incoming.from)] : incoming.to.map(lower),
+      cc: incoming.cc.map(lower),
+      attachments: (incoming.attachments ?? []).filter((file) => !file.inline).map((file) => file.filename),
       contactIds,
       mailboxId: input.mailboxId,
       origin: input.origin,
@@ -923,6 +925,8 @@ const linkThreadActivity = async (
     sentAt: Date
     direction: 'inbound' | 'outbound'
     counterpart: string[]
+    cc: string[]
+    attachments: string[]
     contactIds: string[]
     mailboxId: string | null
     origin?: MessageOrigin | undefined
@@ -933,6 +937,8 @@ const linkThreadActivity = async (
     messageId: input.messageId,
     direction: input.direction,
     counterpart: input.counterpart,
+    ...(input.cc.length > 0 ? { cc: input.cc } : {}),
+    ...(input.attachments.length > 0 ? { attachments: input.attachments } : {}),
     source: input.origin ? 'sequence' : 'gmail',
     ...(input.origin ? { sequenceId: input.origin.sequenceId, sequenceName: input.origin.sequenceName } : {}),
   }
@@ -1769,9 +1775,14 @@ export const attachContactToMail = async (
       direction: 'inbound' | 'outbound'
       from_addr: string | null
       to_addrs: string[]
+      cc_addrs: string[]
+      attachment_names: string[]
       mailbox_id: string | null
     }>(sql`
-      select m.id, m.thread_id, t.subject, m.snippet, m.sent_at, m.direction, m.from_addr, m.to_addrs, m.mailbox_id
+      select m.id, m.thread_id, t.subject, m.snippet, m.sent_at, m.direction, m.from_addr, m.to_addrs, m.cc_addrs,
+             (select coalesce(array_agg(a.filename order by a.filename), '{}') from message_attachment a
+               where a.message_id = m.id and not a.inline) as attachment_names,
+             m.mailbox_id
         from message m join message_thread t on t.id = m.thread_id
        where m.id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})
        order by m.sent_at`)
@@ -1785,6 +1796,8 @@ export const attachContactToMail = async (
         sentAt: row.sent_at instanceof Date ? row.sent_at : new Date(row.sent_at),
         direction: row.direction,
         counterpart: row.direction === 'inbound' ? [row.from_addr ?? address] : row.to_addrs,
+        cc: row.cc_addrs,
+        attachments: row.attachment_names,
         contactIds: [contactId],
         mailboxId: row.mailbox_id,
       })

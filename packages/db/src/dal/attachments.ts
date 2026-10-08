@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, lt } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, lt } from 'drizzle-orm'
 import { randomToken } from '../internal/crypto.ts'
 import { attachment, attachmentUpload } from '../schema/records.ts'
 import type { AccountContext } from './context.ts'
@@ -143,6 +143,71 @@ export const assertCanAttach = (ctx: AccountContext, bytes: number): void => {
       `That file is ${mb} MB. The limit is ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB — link to it instead.`,
     )
   }
+}
+
+/** A file for a message written by hand. Filed under the sender, so the key says
+ *  whose upload it is, and the send can refuse anybody else's. */
+export const beginMailAttachment = async (
+  ctx: AccountContext,
+  input: { filename: string; bytes: number },
+): Promise<{ storageKey: string }> => {
+  if (!ctx.actorId) throw new Error('Sign in to attach a file.')
+  return beginAttachment(ctx, { ...input, entityType: 'mail', entityId: ctx.actorId })
+}
+
+/** The sizes of the uploads a message is sent with, read from the rows and not
+ *  from the request. Refuses a key this person did not begin, one that has
+ *  expired, and one listed twice. */
+export type MailFile = { storageKey: string; filename: string; mime: string }
+
+export const claimMailAttachments = async (
+  ctx: AccountContext,
+  files: MailFile[],
+): Promise<(MailFile & { bytes: number })[]> => {
+  const userId = ctx.actorId
+  if (!userId) throw new Error('Sign in to attach a file.')
+  const keys = files.map((file) => file.storageKey)
+  if (keys.some((key) => !key.startsWith(`${ctx.accountId}/`))) {
+    throw new Error('That file does not belong to this account.')
+  }
+  if (new Set(keys).size !== keys.length) throw new Error('The same file is attached twice.')
+  if (keys.length === 0) return []
+
+  const rows = await withAccount(ctx, (tx) =>
+    tx
+      .select({ storageKey: attachmentUpload.storageKey, bytes: attachmentUpload.bytes })
+      .from(attachmentUpload)
+      .where(
+        and(
+          inArray(attachmentUpload.storageKey, keys),
+          eq(attachmentUpload.userId, userId),
+          gt(attachmentUpload.expiresAt, new Date()),
+        ),
+      ),
+  )
+  const sizes = new Map(rows.map((row) => [row.storageKey, Number(row.bytes)]))
+  return files.map((file) => {
+    const bytes = sizes.get(file.storageKey)
+    if (bytes === undefined) {
+      throw new Error(`${file.filename} was not uploaded, or its upload has expired. Remove it and attach it again.`)
+    }
+    return { ...file, bytes }
+  })
+}
+
+/** Once a message has gone, or a file is taken off the composer, its upload is spent
+ *  and the key cannot be sent again. Returns how many of this person's uploads it was,
+ *  so a caller can tell whether there were any bytes to remove. */
+export const finishMailAttachments = async (ctx: AccountContext, keys: string[]): Promise<number> => {
+  const userId = ctx.actorId
+  if (!userId || keys.length === 0) return 0
+  const gone = await withAccount(ctx, (tx) =>
+    tx
+      .delete(attachmentUpload)
+      .where(and(inArray(attachmentUpload.storageKey, keys), eq(attachmentUpload.userId, userId)))
+      .returning({ storageKey: attachmentUpload.storageKey }),
+  )
+  return gone.length
 }
 
 /** Written after the bytes have landed, never before. */

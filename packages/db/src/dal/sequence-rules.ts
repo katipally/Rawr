@@ -144,6 +144,26 @@ export const MERGE_FIELD_KEYS = [
 
 export type MergeFieldKey = (typeof MERGE_FIELD_KEYS)[number]
 
+/** The values a merge field reads, from what a send knows. Shared by a sequence
+ *  step and by a template put into an email by hand, so `{{company}}` means one
+ *  thing wherever it is written. */
+export const mergeValuesOf = (fields: {
+  firstName: string | null
+  lastName: string | null
+  email: string | null
+  company: string | null
+  senderEmail: string | null
+  sequenceName: string | null
+}): Record<MergeFieldKey, string | null> => ({
+  first_name: fields.firstName,
+  last_name: fields.lastName,
+  full_name: [fields.firstName, fields.lastName].filter(Boolean).join(' ') || null,
+  email: fields.email,
+  company: fields.company,
+  sender_email: fields.senderEmail,
+  sequence: fields.sequenceName,
+})
+
 export const unknownMergeFields = (template: string): string[] =>
   mergeFields(template).filter((key) => !(MERGE_FIELD_KEYS as readonly string[]).includes(key))
 

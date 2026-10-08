@@ -18,7 +18,7 @@ export const gmailSender: Sender = {
 
     const built = buildMessage({
       from: { name: run.mailboxEmail.split('@')[0] ?? 'Rawr', address: run.mailboxEmail },
-      to: run.contactEmail,
+      to: [{ address: run.contactEmail }],
       subject: step.subject,
       text: step.text,
       html: step.html,

@@ -2,6 +2,7 @@ import { parseFragment, serialize, type DefaultTreeAdapterTypes } from 'parse5'
 
 type Node = DefaultTreeAdapterTypes.ChildNode
 type Parent = DefaultTreeAdapterTypes.ParentNode
+type Element = DefaultTreeAdapterTypes.Element
 
 /** Removed with everything inside. Their content is code, styling, a page of its
  *  own, or a form a stranger could use to ask for a password. */
@@ -51,7 +52,7 @@ const safeUrl = (value: string, schemes: readonly string[]): string | null => {
   return schemes.includes(new URL(clean).protocol) ? clean : null
 }
 
-const cleanAttrs = (element: DefaultTreeAdapterTypes.Element): void => {
+const cleanAttrs = (element: Element): void => {
   element.attrs = element.attrs.flatMap((attr) => {
     if (attr.name === 'style') return UNSAFE_CSS.test(attr.value) ? [] : [attr]
     if (attr.name === 'src' && element.tagName !== 'img') return []
@@ -66,13 +67,16 @@ const cleanAttrs = (element: DefaultTreeAdapterTypes.Element): void => {
   })
 }
 
+/** What survives a walk: the elements kept, and what each kept element may carry. */
+type Policy = { tags: ReadonlySet<string>; attrs: (element: Element) => void }
+
 /** Deeper than real mail is laid out. The serialiser recurses per level and
  *  overflows the stack near 3000 levels when measured, so this stays far below it. */
 const MAX_DEPTH = 500
 
 /** Walks with an explicit stack, not recursion, so a deeply nested mail cannot
  *  overflow the call stack. Each node is visited once: O(nodes + attributes). */
-const clean = (root: Parent): void => {
+const clean = (root: Parent, policy: Policy): void => {
   const pending: [Parent, number][] = [[root, 0]]
   for (let next = pending.pop(); next; next = pending.pop()) {
     const [parent, depth] = next
@@ -81,9 +85,9 @@ const clean = (root: Parent): void => {
     for (let child = queue.pop(); child; child = queue.pop()) {
       if (child.nodeName === '#text') kept.push(child)
       else if (!('tagName' in child) || DROPPED.has(child.tagName)) continue
-      else if (KEPT_TAGS.has(child.tagName)) {
+      else if (policy.tags.has(child.tagName)) {
         if (depth < MAX_DEPTH) {
-          cleanAttrs(child)
+          policy.attrs(child)
           kept.push(child)
         }
       } else {
@@ -109,6 +113,73 @@ const clean = (root: Parent): void => {
  *  message-frame.ts). Both stay in place if this is ever relaxed. */
 export const sanitiseHtml = (html: string): string => {
   const fragment = parseFragment(html)
-  clean(fragment)
+  clean(fragment, { tags: KEPT_TAGS, attrs: cleanAttrs })
   return serialize(fragment)
 }
+
+/** What a person can write in the composer: emphasis, lists, paragraphs and links,
+ *  and nothing that styles, positions, embeds or runs. */
+const COMPOSED_TAGS = new Set(['a', 'b', 'blockquote', 'br', 'div', 'em', 'i', 'li', 'ol', 'p', 'strong', 'ul'])
+
+/** A link keeps its address only when it is web or mail, and gets rel="noopener"
+ *  because a link in a sent mail should not hand the reader's page a reference back. */
+const composedAttrs = (element: Element): void => {
+  const href = element.attrs.find((attr) => attr.name === 'href')
+  const url = element.tagName === 'a' && href ? safeUrl(href.value, ['http:', 'https:', 'mailto:']) : null
+  element.attrs = url === null ? [] : [{ name: 'href', value: url }, { name: 'rel', value: 'noopener' }]
+}
+
+/** The HTML of an email a person wrote in the composer, cleaned before it is sent. */
+export const sanitiseComposed = (html: string): string => {
+  const fragment = parseFragment(html)
+  clean(fragment, { tags: COMPOSED_TAGS, attrs: composedAttrs })
+  return serialize(fragment)
+}
+
+const BLOCKS = new Set(['blockquote', 'div', 'p'])
+
+const linked = (element: Element, inner: string): string => {
+  const href = element.attrs.find((attr) => attr.name === 'href')?.value ?? ''
+  const shown = inner.trim()
+  return href === '' || shown === '' || shown === href || `mailto:${shown}` === href ? inner : `${inner} (${href})`
+}
+
+const items = (list: Element): string => {
+  let number = 0
+  return list.childNodes
+    .flatMap((child) => ('tagName' in child && child.tagName === 'li' ? [child] : []))
+    .map((item) => {
+      number += 1
+      const marker = list.tagName === 'ol' ? `${number}. ` : '- '
+      return marker + text(item).trim().replaceAll(/\s*\n\s*/g, ' ')
+    })
+    .join('\n')
+}
+
+const element = (node: Element): string => {
+  if (node.tagName === 'br') return '\n'
+  if (node.tagName === 'ul' || node.tagName === 'ol') return `\n${items(node)}\n`
+  if (node.tagName === 'a') return linked(node, text(node))
+  if (node.tagName === 'blockquote') {
+    return `\n${text(node).trim().split('\n').map((line) => `> ${line}`).join('\n')}\n`
+  }
+  return BLOCKS.has(node.tagName) ? `\n${text(node)}\n` : text(node)
+}
+
+const text = (parent: Parent): string => {
+  let out = ''
+  for (const child of parent.childNodes) {
+    if (child.nodeName === '#text') out += (child as DefaultTreeAdapterTypes.TextNode).value.replaceAll(/\s+/g, ' ')
+    else if ('tagName' in child) out += element(child)
+  }
+  return out
+}
+
+/** The plain-text part of a composed email, read from its cleaned HTML, so the two
+ *  parts say the same thing. Lists keep their markers, a link keeps its address, and
+ *  each block keeps its own line. */
+export const composedText = (html: string): string =>
+  text(parseFragment(html))
+    .replaceAll(/[ \t]+\n/g, '\n')
+    .replaceAll(/\n{3,}/g, '\n\n')
+    .trim()

@@ -1,6 +1,7 @@
 import {
   attachContactToMail,
   addBlocklistEntry,
+  beginMailAttachment,
   changeThread,
   DEV_ACCESS_TOKEN,
   bodyProgress,
@@ -19,9 +20,11 @@ import {
 } from '@rawr/db'
 import { z } from 'zod'
 import { devGmailEnabled } from '~/lib/env.ts'
+import { MAX_MESSAGE_BYTES } from '~/lib/mail-compose.ts'
 import { call } from '../errors.ts'
 import { hydrateMailboxBodies, syncMailbox } from '../gmail.ts'
-import { compose } from '../sequences/compose.ts'
+import { compose, discardMailAttachment, templateForCompose } from '../sequences/compose.ts'
+import { storageConfigured } from '../storage.ts'
 import { protectedProcedure, router } from '../trpc.ts'
 
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -185,19 +188,71 @@ export const mailRouter = router({
   /** One email, by hand, from the caller's own mailbox. Tracked only when it is
    *  addressed to a contact who may be tracked; to a bare address it carries
    *  nothing. Never an unsubscribe footer: this is correspondence, not a
-   *  campaign. */
+   *  campaign. The recipients are read as text here, the same way the composer
+   *  reads them, so a pasted list arrives whole. */
   compose: protectedProcedure
     .input(
-      z.object({
-        mailboxId: z.uuid(),
-        to: z.string().trim().email(),
-        subject: z.string().trim().min(1).max(300),
-        text: z.string().max(100_000),
-        threadId: z.uuid().nullable().optional(),
-        contactId: z.uuid().nullable().optional(),
-      }),
+      z
+        .object({
+          mailboxId: z.uuid(),
+          to: z.string().max(10_000),
+          cc: z.string().max(10_000).default(''),
+          bcc: z.string().max(10_000).default(''),
+          subject: z.string().trim().min(1).max(300),
+          text: z.string().max(100_000).optional(),
+          html: z.string().max(200_000).optional(),
+          threadId: z.uuid().nullable().optional(),
+          contactId: z.uuid().nullable().optional(),
+          attachments: z
+            .array(
+              z.object({
+                storageKey: z.string().min(1).max(500),
+                filename: z.string().trim().min(1).max(255),
+                mime: z.string().max(120),
+              }),
+            )
+            .max(100)
+            .default([]),
+        })
+        .refine((input) => input.text !== undefined || input.html !== undefined, 'Write the message before sending.'),
     )
     .mutation(({ ctx, input }) => call(() => compose(ctx.account, input))),
+
+  /** A saved template, with its merge fields filled from one contact, for the
+   *  composer to put into the message. */
+  templateFor: protectedProcedure
+    .input(z.object({ templateId: z.uuid(), mailboxId: z.uuid(), contactId: z.uuid().nullable().optional() }))
+    .query(({ ctx, input }) =>
+      call(() =>
+        templateForCompose(ctx.account, {
+          templateId: input.templateId,
+          mailboxId: input.mailboxId,
+          contactId: input.contactId ?? null,
+        }),
+      ),
+    ),
+
+  attachments: router({
+    /** Names where a file for a message will be uploaded, and refuses one too big
+     *  for any single file. The bytes then go to /api/attachments/upload with the key. */
+    begin: protectedProcedure
+      .input(
+        z.object({
+          filename: z.string().trim().min(1).max(255),
+          bytes: z.number().int().positive().max(MAX_MESSAGE_BYTES),
+        }),
+      )
+      .mutation(({ ctx, input }) =>
+        call(async () => {
+          if (!storageConfigured) throw new Error('Attachments are not set up for this account yet.')
+          return beginMailAttachment(ctx.account, input)
+        }),
+      ),
+
+    discard: protectedProcedure
+      .input(z.object({ storageKey: z.string().min(1).max(500) }))
+      .mutation(({ ctx, input }) => call(() => discardMailAttachment(ctx.account, input.storageKey))),
+  }),
 
   /** Marks a thread read up to now, for the caller alone. A separate call, so a
    *  background refresh cannot silently clear somebody's unread count. */

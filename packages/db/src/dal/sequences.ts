@@ -2146,6 +2146,48 @@ export const listEmailTemplates = async (ctx: AccountContext): Promise<EmailTemp
       .limit(200)
   })
 
+/** One template, for putting into an email by hand. Same visibility as the list. */
+export const readEmailTemplate = async (ctx: AccountContext, id: string): Promise<EmailTemplateRow | null> =>
+  withAccount(ctx, async (tx) => {
+    assertCanView(ctx, 'sales', 'email templates')
+    const [row] = await tx
+      .select({
+        id: emailTemplate.id,
+        name: emailTemplate.name,
+        subject: emailTemplate.subject,
+        bodyText: emailTemplate.bodyText,
+        authorName: userAccount.name,
+        createdAt: emailTemplate.createdAt,
+        updatedAt: emailTemplate.updatedAt,
+      })
+      .from(emailTemplate)
+      .leftJoin(userAccount, eq(userAccount.id, emailTemplate.createdBy))
+      .where(eq(emailTemplate.id, id))
+      .limit(1)
+    return row ?? null
+  })
+
+/** The contact fields a merge field reads, so a template put into an email to this
+ *  person fills in the same way a sequence step does. */
+export const contactMergeFields = async (
+  ctx: AccountContext,
+  contactId: string,
+): Promise<{ firstName: string | null; lastName: string | null; email: string | null; company: string | null } | null> =>
+  withAccount(ctx, async (tx) => {
+    const [row] = await tx
+      .select({
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        email: contact.email,
+        company: company.name,
+      })
+      .from(contact)
+      .leftJoin(company, eq(company.id, contact.companyId))
+      .where(eq(contact.id, contactId))
+      .limit(1)
+    return row ?? null
+  })
+
 export const saveEmailTemplate = async (
   ctx: AccountContext,
   input: { id?: string | null | undefined; name: string; subject: string; bodyText: string },

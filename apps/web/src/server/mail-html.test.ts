@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { sanitiseHtml } from './mail-html.ts'
+import { composedText, sanitiseComposed, sanitiseHtml } from './mail-html.ts'
 
 /** Every spelling a browser would read as a javascript: or vbscript: link. Each one
  *  must lose its href; the words inside the link must stay. */
@@ -177,4 +177,59 @@ test('svg use, image and feImage references to remote files never reach the stor
     '<svg><use href="https://t.example/x.svg#a"/><image xlink:href="//t.example/p.gif"/><filter><feImage href="https://t.example/f.png"/></filter></svg><p>x</p>',
   )
   assert.equal(cleaned, '<p>x</p>')
+})
+
+test('the composer keeps what it can write: emphasis, lists, paragraphs and links', () => {
+  const kept = sanitiseComposed('<p>Hi <b>there</b> <i>x</i> <em>y</em> <strong>z</strong></p><ul><li>one</li></ul><ol><li>two</li></ol><blockquote>q</blockquote><div>d</div><br>')
+  for (const tag of ['<p>', '<b>', '<i>', '<em>', '<strong>', '<ul>', '<ol>', '<li>', '<blockquote>', '<div>', '<br>']) {
+    assert.equal(kept.includes(tag), true, tag)
+  }
+})
+
+test('a script, an event handler and a style do not survive the composer', () => {
+  const cleaned = sanitiseComposed('<p onclick="x()" style="color:red">hi</p><script>alert(1)</script><img src=x onerror=alert(1)>')
+  assert.equal(cleaned.includes('<script'), false)
+  assert.equal(cleaned.includes('onerror'), false)
+  assert.equal(cleaned.includes('onclick'), false)
+  assert.equal(cleaned.includes('style='), false)
+  assert.equal(cleaned.includes('<img'), false)
+  assert.equal(cleaned.includes('hi'), true)
+})
+
+test('a link keeps web and mail addresses, gains rel=noopener, and loses anything else', () => {
+  const web = sanitiseComposed('<a href="https://datasaur.ai/x" target="_blank">site</a>')
+  assert.equal(web, '<a href="https://datasaur.ai/x" rel="noopener">site</a>')
+  assert.equal(sanitiseComposed('<a href="mailto:ana@acme.example">ana</a>').includes('href="mailto:ana@acme.example"'), true)
+  for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'vbscript:x', '#top', '//evil.example']) {
+    const out = sanitiseComposed(`<a href="${bad}">words</a>`)
+    assert.equal(out.includes('href'), false, bad)
+    assert.equal(out.includes('words'), true, bad)
+  }
+})
+
+test('an unknown element is unwrapped, so its text stays and its tag goes', () => {
+  assert.equal(sanitiseComposed('<section><h1>Title</h1></section>'), 'Title')
+})
+
+test('the plain-text part keeps list markers, link addresses and line breaks', () => {
+  const html = sanitiseComposed(
+    '<p>Hello <b>Ana</b>,</p><ul><li>first</li><li>second <a href="https://datasaur.ai">here</a></li></ul><ol><li>one</li><li>two</li></ol><p>Thanks<br>Bo</p>',
+  )
+  assert.equal(
+    composedText(html),
+    'Hello Ana,\n\n- first\n- second here (https://datasaur.ai)\n\n1. one\n2. two\n\nThanks\nBo',
+  )
+})
+
+test('a link whose text is its own address is not repeated after it', () => {
+  assert.equal(composedText(sanitiseComposed('<a href="mailto:ana@acme.example">ana@acme.example</a>')), 'ana@acme.example')
+})
+
+test('a quote is marked on every line, and a blank paragraph does not pile up lines', () => {
+  assert.equal(composedText(sanitiseComposed('<blockquote>one<br>two</blockquote><p></p><p></p><p>end</p>')), '> one\n> two\n\nend')
+})
+
+test('a very deep composed message is cut at the depth limit, without overflowing the stack', () => {
+  const deep = `${'<div>'.repeat(5000)}x${'</div>'.repeat(5000)}`
+  assert.equal(composedText(sanitiseComposed(deep)), '')
 })
