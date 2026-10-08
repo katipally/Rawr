@@ -1,6 +1,6 @@
-import { and, asc, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm'
-import { task, taskQueue, type TaskPriority, type TaskType } from '../schema/records.ts'
-import { userAccount } from '../schema/identity.ts'
+import { and, asc, eq, gt, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm'
+import { company, contact, deal, task, taskQueue, type TaskPriority, type TaskType } from '../schema/records.ts'
+import { membership, userAccount } from '../schema/identity.ts'
 import { linksForContacts, recordActivity, type EntityRef } from './activity.ts'
 import { assertCanView, isAdmin, type AccountContext } from './context.ts'
 import { refreshEmailEngagement } from './engagement.ts'
@@ -152,12 +152,39 @@ const tellAssignee = async (
   })
 }
 
+const ownedTable = (entityType: string) => {
+  if (entityType === 'contact') return contact
+  if (entityType === 'company') return company
+  if (entityType === 'deal') return deal
+  return null
+}
+
+/** Who works a record: its owner while they are still a member, otherwise nobody.
+ *  Only the three core objects have an owner, so any other object gets nobody. */
+export const ownerForTask = async (ctx: AccountContext, entityType: string, entityId: string): Promise<string | null> => {
+  const table = ownedTable(entityType)
+  if (!table) return null
+  return withAccount(ctx, async (tx) => {
+    const [row] = await tx
+      .select({ ownerId: table.ownerId })
+      .from(table)
+      .innerJoin(
+        membership,
+        and(eq(membership.userId, table.ownerId), eq(membership.accountId, table.accountId), ne(membership.state, 'deactivated')),
+      )
+      .where(eq(table.id, entityId))
+      .limit(1)
+    return row?.ownerId ?? null
+  })
+}
+
+/** An omitted assignee is the person asking; an explicit null leaves the task with nobody. */
 export const createTask = async (ctx: AccountContext, input: NewTask): Promise<{ id: string }> =>
   mutate(ctx, 'task', async (tx) => {
     const title = input.title.trim()
     if (!title) throw new Error('A task needs a title.')
 
-    const assigneeId = input.assigneeId ?? ctx.actorId
+    const assigneeId = input.assigneeId === undefined ? ctx.actorId : input.assigneeId
     const [row] = await tx
       .insert(task)
       .values({

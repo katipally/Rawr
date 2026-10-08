@@ -7,6 +7,7 @@ import { IndexHeader } from '~/components/crm/index-header.tsx'
 import type { TaskType } from '~/components/crm/task-labels.ts'
 import { TasksTable } from '~/components/crm/tasks-table.tsx'
 import { objectView, recordPath, taskQueuesPath, tasksPath, type TaskView } from '~/lib/links.ts'
+import { assigneeFilterUsers } from '~/lib/pickable-users.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, viewerContext } from '~/server/session.ts'
 import { TaskFilters } from './task-filters.tsx'
@@ -87,6 +88,7 @@ const TasksPage = async ({
   // answer: a queue, a type or "assigned to me" is how somebody gets past it.
   const capped = tasks.length === TASK_LIST_CAP
   const writable = canWrite(contextFrom(session), 'task')
+  const filtering = Boolean(q || type || queue || assignee || mine)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -98,7 +100,7 @@ const TasksPage = async ({
           { key: 'task', label: 'Tasks', href: tasksPath(account) },
         ]}
         add={writable ? [{ label: 'Create task', href: at({}) + (at({}).includes('?') ? '&new=1' : '?new=1') }] : []}
-        addLabel="Add tasks"
+        addLabel="Add task"
         more={[{ key: 'queues', label: 'Manage queues', href: taskQueuesPath(account, at({})) }]}
       />
 
@@ -126,7 +128,7 @@ const TasksPage = async ({
       <TaskFilters
         account={account}
         params={kept}
-        assignees={lookups.users}
+        assignees={assigneeFilterUsers(lookups.users, ctx.actorId)}
         queues={queues}
       />
 
@@ -141,12 +143,13 @@ const TasksPage = async ({
         <TasksTable
           account={account}
           rows={rows}
-          assignees={lookups.users}
+          people={lookups.users}
           queues={queues}
+          view={view.key}
           {...(queue && queue !== 'none' ? { queueId: queue } : {})}
           canWrite={writable}
-          emptyTitle={q || type || queue || assignee ? 'No tasks match the filter' : view.empty}
-          filtered={Boolean(q || type || queue || assignee)}
+          emptyTitle={filtering ? 'No tasks match the filter' : view.empty}
+          filtered={filtering}
           openCreate={search.new === '1'}
         />
       </div>

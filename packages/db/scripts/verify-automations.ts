@@ -2,7 +2,8 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as s from '../src/schema/index.ts'
-import type { AccountContext } from '../src/dal/context.ts'
+import { systemContext, type AccountContext } from '../src/dal/context.ts'
+import { createTask, deleteTask, listTasks, ownerForTask } from '../src/dal/tasks.ts'
 import {
   armedScans,
   claimAutomationRun,
@@ -410,6 +411,54 @@ try {
     )
     expect(message.includes('"Send an email" only works on a contact'), message)
     return message
+  })
+
+  await check('an automation task goes to the record owner while they are a member, on the event path and the scan path alike', async () => {
+    const memberId = async (name: string, state: 'active' | 'deactivated'): Promise<string> => {
+      const [row] = await owner<{ id: string }[]>`
+        select u.id from membership m join user_account u on u.id = m.user_id
+        where m.account_id = ${sandbox.id} and u.name = ${name} and m.state = ${state}`
+      if (!row) throw new Error(`the sandbox has no ${state} member called ${name}. Run pnpm db:seed first.`)
+      return row.id
+    }
+    const sales = await memberId('Sales', 'active')
+    const former = await memberId('Former', 'deactivated')
+    const assignedOn = async (ctx: AccountContext, entityType: string, entityId: string): Promise<{ assigneeId: string | null; entityId: string | null; entityName: string | null }> => {
+      const assigneeId = await ownerForTask(ctx, entityType, entityId)
+      const { id } = await createTask(ctx, { title: `Owner rule ${stamp}`, assigneeId, entity: { entityType, entityId } })
+      const [row] = (await listTasks(admin, { entity: { entityType, entityId } })).filter((task) => task.id === id)
+      await deleteTask(admin, id)
+      if (!row) throw new Error('the task did not come back')
+      return row
+    }
+    const dealOwnedBy = async (ownerId: string | null): Promise<string> =>
+      (await createRecord(admin, 'deal', { name: `Owner rule ${stamp}`, owner_id: ownerId })).id
+    const cases = [
+      { what: 'an active owner gets the task', entityId: await dealOwnedBy(sales), expected: sales },
+      { what: 'a deactivated owner leaves it unassigned', entityId: await dealOwnedBy(former), expected: null },
+      { what: 'a record with no owner leaves it unassigned', entityId: await dealOwnedBy(null), expected: null },
+    ]
+    for (const ctx of [admin, systemContext(sandbox.id)]) {
+      for (const { what, entityId, expected } of cases) {
+        const row = await assignedOn(ctx, 'deal', entityId)
+        expect(row.assigneeId === expected, `${what}: assigned ${row.assigneeId}, expected ${expected}`)
+      }
+    }
+    expect(
+      (await assignedOn(admin, 'widget', cases[0]!.entityId)).assigneeId === null,
+      'an object with no owner field was given someone',
+    )
+    const contact = await createRecord(admin, 'contact', {
+      email: `owner-${stamp}@sandbox.test`,
+      first_name: `Owned${stamp}`,
+      last_name: 'Contact',
+      owner_id: sales,
+    })
+    const onContact = await assignedOn(admin, 'contact', contact.id)
+    expect(onContact.assigneeId === sales, `a contact owner got ${onContact.assigneeId}`)
+    expect(onContact.entityId === contact.id, 'the task lost the record it hangs on')
+    expect(onContact.entityName?.includes(`Owned${stamp}`) === true, `the task names "${onContact.entityName}"`)
+    return 'owner on both paths; deactivated, none and custom object unassigned; record name kept'
   })
 
   await check('an email step names a template and a mailbox', async () => {

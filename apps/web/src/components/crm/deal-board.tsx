@@ -17,6 +17,7 @@ import type { TableColumn } from './record-table.tsx'
 import { ScoreRing } from './score-ring.tsx'
 import { TaskForm } from './task-form.tsx'
 import { useFormat } from '~/components/zone.tsx'
+import { pickableUsers } from '~/lib/pickable-users.ts'
 import { useQueryClient } from '@tanstack/react-query'
 
 export type BoardCard = {
@@ -152,7 +153,9 @@ export const DealBoard = ({ account, columns, query, groupByKey, canWrite, previ
       .then(([crm, queues]) => {
         if (!live) return
         setLookups({
-          assignees: crm.users.map((user) => ({ id: user.id, label: user.name || user.email })),
+          assignees: pickableUsers(
+            crm.users.map((user) => ({ id: user.id, label: user.name || user.email, deactivated: user.state === 'deactivated' })),
+          ),
           queues: queues.map((queue) => ({ id: queue.id, name: queue.name })),
         })
       })

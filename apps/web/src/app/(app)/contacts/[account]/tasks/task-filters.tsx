@@ -1,7 +1,7 @@
 'use client'
 
 import { Badge, TextInput, cn } from '@rawr/ui'
-import { Search, SlidersHorizontal } from 'lucide-react'
+import { Search, SlidersHorizontal, X } from 'lucide-react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { FilterChip as Chip, ghostFilter as ghost, type FilterOption as Option } from '~/components/filter-chip.tsx'
@@ -50,7 +50,7 @@ export const TaskFilters = ({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const cleared = { mine: undefined, assignee: undefined, queue: undefined, type: undefined }
+  const cleared = { mine: undefined, assignee: undefined, queue: undefined, type: undefined, q: undefined }
   const active = [params.mine || params.assignee, params.type, params.queue].filter(Boolean).length
 
   const assigneeOptions: Option[] = [
@@ -94,7 +94,7 @@ export const TaskFilters = ({
             defaultValue={params.q ?? ''}
             aria-label="Search tasks"
             placeholder="Search ( / )"
-            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4"
+            className="h-control min-h-0 rounded-pill border-line-strong bg-surface py-1 pr-10 pl-4 [&::-webkit-search-cancel-button]:appearance-none"
           />
           <button
             type="submit"
@@ -103,6 +103,15 @@ export const TaskFilters = ({
           >
             <Search aria-hidden="true" className="size-4" />
           </button>
+          {params.q ? (
+            <Link
+              href={at({ q: undefined })}
+              aria-label="Clear the search"
+              className="absolute top-1/2 right-7 grid size-6 -translate-y-1/2 place-items-center rounded-pill text-body no-underline hover:bg-fill"
+            >
+              <X aria-hidden="true" className="size-4" />
+            </Link>
+          ) : null}
         </form>
         <button
           type="button"

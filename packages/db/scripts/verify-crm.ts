@@ -1812,6 +1812,18 @@ try {
     return 'the second save named the change it would have overwritten'
   })
 
+  await check('a task with no assignee is the person asking, and an explicit null is nobody', async () => {
+    const mine = await createTask(sales, { title: 'Assign default' })
+    const nobody = await createTask(sales, { title: 'Assign nobody', assigneeId: null })
+    const rows = await listTasks(sales, {})
+    const assigneeOf = (id: string) => rows.find((task) => task.id === id)?.assigneeId
+    expect(assigneeOf(mine.id) === sales.actorId, `the default went to ${assigneeOf(mine.id)}`)
+    expect(assigneeOf(nobody.id) === null, `the explicit null went to ${assigneeOf(nobody.id)}`)
+    await deleteTask(sales, mine.id)
+    await deleteTask(sales, nobody.id)
+    return 'default is the actor, null is unassigned'
+  })
+
   await check('a task edited from a copy somebody else has since changed is refused', async () => {
     const { id } = await createTask(admin, { title: 'D11 task' } as never)
     const [row] = (await listTasks(admin, {})).filter((task) => task.id === id)

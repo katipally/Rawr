@@ -745,7 +745,9 @@ export const crmRouter = router({
           entity: entityRef.nullish(),
         }),
       )
-      .mutation(({ ctx, input }) => call(() => createTask(ctx.account, input))),
+      .mutation(({ ctx, input }) =>
+        call(() => createTask(ctx.account, { ...input, assigneeId: input.assigneeId ?? ctx.account.actorId })),
+      ),
 
     update: protectedProcedure
       .input(

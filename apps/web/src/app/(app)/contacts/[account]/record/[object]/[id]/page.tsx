@@ -51,6 +51,7 @@ import { WebsiteActivity } from '~/components/crm/website-activity.tsx'
 import { Timeline } from '~/components/crm/timeline.tsx'
 import { EMPTY_VALUE, Value } from '~/components/crm/value.tsx'
 import { ScoreRing } from '~/components/crm/score-ring.tsx'
+import { pickableUsers } from '~/lib/pickable-users.ts'
 import { objectView, recordPath, safeFrom } from '~/lib/links.ts'
 import { CUSTOM_KEY_FIELDS, RECORD_COLUMNS, SECTIONS } from '~/lib/record-layout.ts'
 import { loadCrmContext, toEditableFields } from '~/server/crm.ts'
@@ -196,7 +197,7 @@ const RecordPage = async ({
   // because the tab counts what is there rather than what is showing.
   const timelineTotal = Object.values(counts).reduce((sum, n) => sum + n, 0)
 
-  const fields = toEditableFields(object, lookups, { includeReadOnly: true })
+  const fields = toEditableFields(object, lookups, { includeReadOnly: true, values: record.values })
   // The core three have a hand-made layout, because which fields belong beside
   // each other on a contact is a judgement nobody can derive. A custom object
   // has no such layout and needs none: its fields are in the order the admin put
@@ -731,7 +732,7 @@ const RecordPage = async ({
           object={objectParam}
           recordId={id}
           canWrite={canWrite}
-          assignees={lookups.users}
+          assignees={pickableUsers(lookups.users)}
           queues={queues}
         />
     </div>

@@ -14,6 +14,7 @@ import { notFound } from 'next/navigation'
 import type { EditableField } from '~/components/crm/field-input.tsx'
 import type { FilterField } from '~/components/crm/filter-builder.tsx'
 import type { TableColumn } from '~/components/crm/record-table.tsx'
+import { pickableUsers } from '~/lib/pickable-users.ts'
 
 /** Turns the registry into the shapes the surfaces render. Every list, board and
  *  record page goes through here, so none of them can invent a column the registry
@@ -142,11 +143,15 @@ const IDENTITY: Record<string, string[]> = {
 export const toEditableFields = (
   object: RegistryObject,
   lookups: Lookups,
-  { includeReadOnly = false } = {},
+  { includeReadOnly = false, values = {} }: { includeReadOnly?: boolean; values?: Record<string, unknown> } = {},
 ): EditableField[] => {
   const identity = IDENTITY[object.key] ?? (object.labelFieldKey ? [object.labelFieldKey] : [])
   return object.fields.flatMap((field) => {
-    const choices = choicesFor(field, lookups)
+    const stored = values[field.key]
+    const choices =
+      field.type === 'user'
+        ? pickableUsers(lookups.users, typeof stored === 'string' ? stored : null)
+        : choicesFor(field, lookups)
     const pickObject = PICK_OBJECT[field.key]
     // A relation with nothing to pick from cannot be given a value, so it is shown read-only.
     const unpickable = field.type === 'relation' && !choices && !pickObject

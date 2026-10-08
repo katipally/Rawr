@@ -38,9 +38,11 @@ const CalendarsScreen = async ({
 
   // Everyone in the account, not only those with a grant: the interesting row is
   // the person who has not connected one.
+  // A deactivated member keeps a row only while a calendar is still connected for
+  // them, so an admin can disconnect it; nobody new is offered a connection.
   const people =
     sessionIsAdmin(session)
-      ? lookups.users
+      ? lookups.users.filter((member) => !member.deactivated || byUser.has(member.id))
       : lookups.users.filter((member) => member.id === session.userId)
 
   return (

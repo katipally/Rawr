@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { tasksPath } from '~/lib/links.ts'
+import { queueDeleteCopy } from '~/lib/task-copy.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useFormat } from '~/components/zone.tsx'
 
@@ -209,11 +210,7 @@ export const QueueManager = ({ account, queues, canWrite }: QueueManagerProps) =
           </>
         }
       >
-        <p>
-          The {fmt.number(removing?.openCount ?? 0)} open{' '}
-          {removing?.openCount === 1 ? 'task' : 'tasks'} in it go back to no queue. Nothing is deleted
-          but the list itself.
-        </p>
+        <p>{queueDeleteCopy(removing?.openCount ?? 0, fmt.number)}</p>
       </Modal>
     </div>
   )

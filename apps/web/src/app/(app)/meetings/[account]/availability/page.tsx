@@ -3,6 +3,7 @@ import { MeetingsTabs } from '../tabs.tsx'
 import { listGrants, pagesHostedBy, readSchedule } from '@rawr/db'
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { pickableUsers } from '~/lib/pickable-users.ts'
 import { availabilityPath, calendarsPath } from '~/lib/links.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession, sessionIsAdmin, sessionIsReadOnly } from '~/server/session.ts'
@@ -42,6 +43,7 @@ const AvailabilityScreen = async ({
   ])
 
   const person = lookups.users.find((member) => member.id === subject)
+  const pickable = pickableUsers(lookups.users, subject)
   const grant = grants.find((row) => row.userId === subject)
 
   return (
@@ -64,12 +66,12 @@ const AvailabilityScreen = async ({
         </Alert>
       ) : null}
 
-      {sessionIsAdmin(session) && lookups.users.length > 1 ? (
+      {sessionIsAdmin(session) && pickable.length > 1 ? (
         <FilterRow
           className="mb-4"
           label="Whose hours"
           lead="Looking at"
-          items={lookups.users.map((member) => ({
+          items={pickable.map((member) => ({
             key: member.id,
             label: member.label,
             href: availabilityPath(account, member.id === session.userId ? {} : { user: member.id }),

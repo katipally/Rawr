@@ -8,7 +8,9 @@ import { useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { useNavigation } from '~/components/navigation.tsx'
 import { usePagedRows } from '~/components/paged.tsx'
-import { recordPath, tasksPath } from '~/lib/links.ts'
+import { recordPath, tasksPath, type TaskView } from '~/lib/links.ts'
+import { pickableUsers, type PickablePerson } from '~/lib/pickable-users.ts'
+import { emptyTaskHint } from '~/lib/task-copy.ts'
 import { api, errorMessage } from '~/lib/rpc.ts'
 import { useUrlParam } from '~/lib/url-params.ts'
 import { useOrigin } from '~/lib/use-origin.ts'
@@ -20,8 +22,11 @@ import { useFormat } from '~/components/zone.tsx'
 export type TasksTableProps = {
   account: string
   rows: TaskRow[]
-  assignees: { id: string; label: string }[]
+  /** Every member, deactivated ones included; a picker offers only what pickableUsers allows. */
+  people: PickablePerson[]
   queues: { id: string; name: string }[]
+  /** The tab being looked at, which decides what an empty list says. */
+  view: TaskView
   /** The queue being looked at, so a task created here lands in it. */
   queueId?: string | undefined
   canWrite: boolean
@@ -48,13 +53,14 @@ const PRIORITY_TONE: Record<TaskRow['priority'], string> = {
 
 /** HubSpot's tasks index: a table with the done checkbox in the first column,
  *  the record the task hangs on one click away, and the count in the footer.
- *  The "Add tasks" button on the header links here with ?new=1, so the create
+ *  The "Add task" button on the header links here with ?new=1, so the create
  *  dialog lives once, next to the table it adds to. */
 export const TasksTable = ({
   account,
   rows,
-  assignees,
+  people,
   queues,
+  view,
   queueId,
   canWrite,
   emptyTitle,
@@ -81,6 +87,7 @@ export const TasksTable = ({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulk, setBulk] = useState<'assign' | 'edit' | 'delete' | null>(null)
   const { page, pager } = usePagedRows(rows, 'task')
+  const hint = emptyTaskHint({ filtered, view, canWrite })
   // Read against the rows on screen, so a tick on a task a refresh took away
   // does not count or get acted on.
   const ticked = rows.filter((row) => selected.has(row.id))
@@ -211,7 +218,10 @@ export const TasksTable = ({
         canWrite ? (
           <Select
             aria-label={`Queue for “${row.title}”`}
+            title={row.queueName ?? undefined}
             value={row.queueId ?? ''}
+            className="truncate"
+
             disabled={busy}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) =>
@@ -329,17 +339,7 @@ export const TasksTable = ({
           <div className="flex flex-1 flex-col justify-center">
             <EmptyState
               title={emptyTitle}
-              {...(filtered
-                ? {
-                    description:
-                      'Widen the search, pick a different type, or clear the filter to see the rest of the tasks.',
-                  }
-                : canWrite
-                  ? {
-                      description:
-                        'Add one with the button above. Overdue tasks are what the Monday list is built from.',
-                    }
-                  : {})}
+              {...(hint ? { description: hint } : {})}
             />
           </div>
         }
@@ -354,7 +354,7 @@ export const TasksTable = ({
         <TaskForm
           panel={{ title: 'Create Task', onClose: closeCreate, onAnother: () => router.refresh() }}
           account={account}
-          assignees={assignees}
+          assignees={pickableUsers(people)}
           queues={queues}
           defaultQueueId={queueId}
           onSaved={closeCreate}
@@ -391,7 +391,7 @@ export const TasksTable = ({
       {bulk === 'assign' ? (
         <BulkAssign
           count={ticked.length}
-          assignees={assignees}
+          people={people}
           busy={busy}
           onClose={() => setBulk(null)}
           onApply={(assigneeId) =>
@@ -423,7 +423,7 @@ export const TasksTable = ({
               Cancel
             </Button>
             <Button variant="destructive" busy={busy} onClick={() => void runBulk((row) => api.crm.tasks.remove.mutate({ id: row.id }), 'Tasks deleted.')}>
-              Delete
+              {ticked.length === 1 ? 'Delete task' : 'Delete tasks'}
             </Button>
           </>
         }
@@ -435,7 +435,7 @@ export const TasksTable = ({
           key={editing.id}
           panel={{ title: 'Edit Task', onClose: () => setEditing(null) }}
           account={account}
-          assignees={assignees}
+          assignees={pickableUsers(people, editing.assigneeId)}
           queues={queues}
           task={editing}
           onSaved={() => {
@@ -450,18 +450,19 @@ export const TasksTable = ({
 
 const BulkAssign = ({
   count,
-  assignees,
+  people,
   busy,
   onClose,
   onApply,
 }: {
   count: number
-  assignees: { id: string; label: string }[]
+  people: PickablePerson[]
   busy: boolean
   onClose: () => void
   onApply: (assigneeId: string) => void
 }) => {
-  const [assigneeId, setAssigneeId] = useState(assignees[0]?.id ?? '')
+  // Starts blank: a silent first pick would assign every ticked task to whoever sorts first.
+  const [assigneeId, setAssigneeId] = useState('')
   return (
     <Modal
       open
@@ -482,7 +483,8 @@ const BulkAssign = ({
     >
       <Field id="bulk-assignee" label="Assigned to">
         <Select id="bulk-assignee" value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}>
-          {assignees.map((person) => (
+          <option value="">Choose someone</option>
+          {pickableUsers(people).map((person) => (
             <option key={person.id} value={person.id}>
               {person.label}
             </option>

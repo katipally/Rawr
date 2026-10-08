@@ -15,6 +15,7 @@ import {
   openAutomationRun,
   openScannedRun,
   openSecret,
+  ownerForTask,
   readAutomation,
   parkAutomationRun,
   readMailbox,
@@ -120,6 +121,7 @@ const runAction = async (
       await createTask(ctx, {
         title,
         dueDate: due,
+        assigneeId: await ownerForTask(ctx, event.objectKey, event.entityId),
         entity: { entityType: event.objectKey, entityId: event.entityId },
       })
       return `created "${title}"`
