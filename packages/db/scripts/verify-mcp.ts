@@ -264,15 +264,15 @@ try {
 
   // The deal Trevor names out loud, plus two that share a word, which is the case
   // resolution has to refuse rather than guess at.
+  const pipelineId = (
+    await scoped<{ id: string }>(admin, sql`select id from pipeline order by position, id limit 1`)
+  )[0]!.id
   const stage = (
     await scoped<{ id: string; name: string }>(
       admin,
-      sql`select s.id, s.name from pipeline_stage s order by s.position limit 1`,
+      sql`select s.id, s.name from pipeline_stage s where s.pipeline_id = ${pipelineId} order by s.position, s.id limit 1`,
     )
   )[0]!
-  const pipelineId = (
-    await scoped<{ id: string }>(admin, sql`select id from pipeline order by position limit 1`)
-  )[0]!.id
 
   const newDeal = async (name: string): Promise<string> => {
     const record = await createRecord(sales, 'deal', {
