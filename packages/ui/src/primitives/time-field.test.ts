@@ -29,17 +29,28 @@ test('a step that does not divide the day still stays inside it', () => {
 test('a stored time is read as minutes only when it is a clock time', () => {
   assert.equal(minutesOf('09:30'), 570)
   assert.equal(minutesOf('23:59'), 1439)
-  assert.equal(minutesOf('24:00'), null)
-  assert.equal(minutesOf('9:30'), null)
+  assert.equal(minutesOf('24:00'), 1440)
+  assert.equal(minutesOf('24:01'), null)
+  assert.equal(minutesOf('9:30'), 570)
   assert.equal(minutesOf(''), null)
 })
 
 test('a clock time reads in the locale, and anything else is shown as stored', () => {
-  const us = clockLabel('09:30', 'en-US').replaceAll(/\s/g, '')
-  assert.equal(us, '9:30AM')
+  const squash = (label: string) => label.replaceAll(/\s/g, '')
+  assert.equal(squash(clockLabel('09:30', 'en-US')), '9:30AM')
+  assert.equal(squash(clockLabel('14:05', 'en-US')), '2:05PM')
+  assert.equal(squash(clockLabel('9:30', 'en-US')), '9:30AM')
+  assert.equal(squash(clockLabel('00:00', 'en-US')), '12:00AM')
+  assert.equal(squash(clockLabel('12:00', 'en-US')), '12:00PM')
+  assert.equal(squash(clockLabel('24:00', 'en-US')), '12:00AM')
+  assert.equal(clockLabel('09:30', 'de-DE'), '9:30')
   assert.equal(clockLabel('14:05', 'de-DE'), '14:05')
-  assert.equal(clockLabel('24:00', 'en-US'), '24:00')
+  assert.equal(clockLabel('9:30', 'de-DE'), '9:30')
+  assert.equal(clockLabel('24:00', 'de-DE'), '0:00')
+  assert.equal(clockLabel('12:00', 'de-DE'), '12:00')
   assert.equal(clockLabel('', 'en-US'), '')
+  assert.equal(clockLabel('noon', 'en-US'), 'noon')
+  assert.equal(clockLabel('24:30', 'en-US'), '24:30')
 })
 
 test('typed times read with or without a colon, and with or without a half of the day', () => {

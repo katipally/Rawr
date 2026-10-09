@@ -4,21 +4,20 @@
 
 /** Values are 24-hour 'HH:MM' strings, the shape the schedule and sequence rows
  *  already store. */
-const CLOCK = /^(\d{2}):(\d{2})$/
+const CLOCK = /^(\d{1,2}):(\d{2})$/
 const TYPED = /^(\d{1,2})(?::?(\d{2}))?(am|pm|a|p)?$/
 
 const pad = (value: number): string => String(value).padStart(2, '0')
 
 const clock = (minutes: number): string => `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`
 
-/** Minutes after midnight for a stored 'HH:MM', or null for anything else, 24:00
- *  included, so a value outside the clock is shown as it was stored. */
+/** Minutes after midnight for a stored 'HH:MM', or null for anything else. 24:00 is
+ *  1440, the end of the day, which the Date formatter reads as midnight. */
 export const minutesOf = (value: string): number | null => {
   const match = CLOCK.exec(value)
   if (!match) return null
-  const hours = Number(match[1])
-  const minutes = Number(match[2])
-  return hours < 24 && minutes < 60 ? hours * 60 + minutes : null
+  const total = Number(match[1]) * 60 + Number(match[2])
+  return Number(match[2]) < 60 && total <= 1440 ? total : null
 }
 
 /** Every step of the day as 'HH:MM', in order. A 15-minute step is 96 entries. */

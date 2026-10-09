@@ -2,7 +2,7 @@
 
 import type { Schedule } from '@rawr/db'
 import { scheduleProblem, windowProblem } from '@rawr/db/slots'
-import { Button, Field, IconButton, Select, TextInput, TimeField, useToast } from '@rawr/ui'
+import { Button, clockLabel, Field, IconButton, Select, TextInput, TimeField, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useId, useMemo, useState } from 'react'
@@ -25,15 +25,6 @@ import { DAY_GROUPS, toWeekly, toWindows, weeklyHours, windowsChanged, type DayG
 const FORM_ID = 'weekly-hours'
 
 const newKey = () => crypto.randomUUID()
-
-/** A clock time in the schedule's own zone, written the way the account reads
- *  clocks. The rows are wall-clock rules, so this reads UTC rather than the viewer's zone. */
-const clock = (hhmm: string, locale: string): string => {
-  const [hours = 0, minutes = 0] = hhmm.split(':').map(Number)
-  return new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' }).format(
-    Date.UTC(2000, 0, 1, hours, minutes),
-  )
-}
 
 /** Node and the browser ship different ICU data, so this list differs between the
  *  two sides of a render. Read on the client only, after mount. */
@@ -274,7 +265,7 @@ export const ScheduleEditor = ({
                 <span className="text-secondary">
                   {override.isUnavailable
                     ? 'Unavailable all day'
-                    : override.blocks.map(([from, to]) => `${clock(from, fmt.locale)} to ${clock(to, fmt.locale)}`).join(', ')}
+                    : override.blocks.map(([from, to]) => `${clockLabel(from, fmt.locale)} to ${clockLabel(to, fmt.locale)}`).join(', ')}
                   {override.note ? ` · ${override.note}` : ''}
                 </span>
                 <IconButton
