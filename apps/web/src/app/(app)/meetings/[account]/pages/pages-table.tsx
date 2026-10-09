@@ -117,7 +117,7 @@ export const PagesTable = ({
     setPending(row.id)
     try {
       await api.booking.setPageActive.mutate({ id: row.id, isActive })
-      toast('success', isActive ? `“${row.name}” is taking bookings.` : `“${row.name}” is off.`)
+      toast('success', isActive ? `“${row.name}” is taking bookings.` : `“${row.name}” is not taking bookings.`)
       router.refresh()
     } catch (cause) {
       toast('error', errorMessage(cause))
@@ -200,11 +200,10 @@ export const PagesTable = ({
     },
     {
       key: 'status',
-      header: 'Status',
-      width: 120,
+      header: 'Taking bookings',
+      width: 240,
       render: (row) => {
         const mayToggle = viewer.isAdmin || row.ownerId === viewer.id
-        if (!mayToggle) return row.isActive ? 'On' : <Badge tone="neutral">Off</Badge>
         // Publishing with nobody to meet is refused by the data access layer,
         // so the reason is said here rather than thrown after the click.
         const blocked = !row.isActive && row.hostCount === 0
@@ -213,15 +212,18 @@ export const PagesTable = ({
         // Said here, where the switch is, not only on the availability screen.
         const noHours = row.hostCount > 0 && row.hostsWithHours === 0
         return (
-          <span className="flex items-center gap-2">
-            <Switch
-              label={row.isActive ? `Turn “${row.name}” off` : `Turn “${row.name}” on`}
-              hideLabel
-              checked={row.isActive}
-              disabled={pending === row.id || blocked}
-              title={blocked ? 'Add an active host before this page can take bookings.' : undefined}
-              onChange={(event) => void setActive(row, event.target.checked)}
-            />
+          <span className="flex flex-wrap items-center gap-2">
+            {mayToggle ? (
+              <Switch
+                label={`Taking bookings: “${row.name}”`}
+                hideLabel
+                checked={row.isActive}
+                disabled={pending === row.id || blocked}
+                title={blocked ? 'Add an active host before this page can take bookings.' : undefined}
+                onChange={(event) => void setActive(row, event.target.checked)}
+              />
+            ) : null}
+            {row.isActive ? <Badge tone="ok">Taking bookings</Badge> : <Badge tone="neutral">Not taking bookings</Badge>}
             {noHours ? (
               <Link href={availabilityPath(account)} title="No host on this page has working hours, so it offers no times.">
                 <Badge tone="warn">No hours</Badge>
