@@ -5,7 +5,7 @@ import { scheduleProblem, windowProblem } from '@rawr/db/slots'
 import { Button, Field, IconButton, Select, TextInput, TimeField, useToast } from '@rawr/ui'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { ACTION_ICONS } from '~/components/icons.ts'
 import { SaveBar } from '~/components/save-bar.tsx'
 import { todayIn } from '~/lib/format.ts'
@@ -65,6 +65,9 @@ export const ScheduleEditor = ({
   const router = useRouter()
   const fmt = useFormat()
   const zone = useZone()
+  /** Row ids come from the list position, not the row key: the keys are random, so
+   *  the server and the first client render would disagree on every time field's id. */
+  const rowIds = useId()
   /** The last hours the server confirmed. Windows keep their keys across edits, so
    *  a change is counted per window rather than per day. */
   const [saved, setSaved] = useState(() => ({
@@ -185,7 +188,7 @@ export const ScheduleEditor = ({
           <h2 className="font-semibold">Availability window</h2>
           {rows.length === 0 ? <p className="text-secondary">Not working any day, so nothing is offered.</p> : null}
           <ul className="flex min-w-0 flex-col gap-2">
-            {rows.map((row) => {
+            {rows.map((row, index) => {
               const label = DAY_GROUPS.find((group) => group.value === row.days)?.label ?? ''
               return (
                 <li key={row.key} className="flex min-w-0 flex-wrap items-center gap-2">
@@ -204,7 +207,7 @@ export const ScheduleEditor = ({
                   </Select>
                   <span>from</span>
                   <TimeField
-                    id={`row-${row.key}-from`}
+                    id={`${rowIds}-${index}-from`}
                     aria-label={`${label} start`}
                     locale={fmt.locale}
                     value={row.from}
@@ -214,7 +217,7 @@ export const ScheduleEditor = ({
                   />
                   <span>to</span>
                   <TimeField
-                    id={`row-${row.key}-to`}
+                    id={`${rowIds}-${index}-to`}
                     aria-label={`${label} end`}
                     locale={fmt.locale}
                     value={row.to}
