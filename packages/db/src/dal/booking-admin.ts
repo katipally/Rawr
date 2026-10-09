@@ -170,7 +170,9 @@ export type SaveBookingPage = {
   descriptionTpl: string
   companyFallback: string
   questions: unknown
-  isActive: boolean
+  /** Left undefined on an update, the page keeps the flag it has. The list switch
+   *  writes the same column, so a form saved from before the switch must not undo it. */
+  isActive?: boolean | undefined
   redirectUrl?: string | null | undefined
   confirmationCopy?: string | null | undefined
   /** Shared pages only. Left undefined the host list is untouched. `isRequired`
@@ -277,6 +279,8 @@ export const saveBookingPage = async (
       }
     }
 
+    const isActive = input.isActive ?? before?.is_active ?? true
+
     const hosts =
       input.kind === 'one_on_one' && ownerId
         ? [{ userId: ownerId, weight: 1 }]
@@ -291,12 +295,12 @@ export const saveBookingPage = async (
                  where tm.team_id = t.id and m.state <> 'deactivated') as seated
           from team t where t.id = ${input.teamId}`)
       if (!team) throw new Error('That team is not in this account.')
-      if (input.isActive && Number(team.seated) === 0) {
+      if (isActive && Number(team.seated) === 0) {
         throw new Error('Nobody in this team can take new work yet, so the page cannot be published. Add someone to the team or leave the page off.')
       }
     }
 
-    if (input.isActive && hosts !== null && hosts.length === 0 && !input.teamId) {
+    if (isActive && hosts !== null && hosts.length === 0 && !input.teamId) {
       throw new Error('A booking page with no hosts cannot be published. Add a host or leave it off.')
     }
 
@@ -320,7 +324,7 @@ export const saveBookingPage = async (
         ${input.bufferAfterMinutes}, ${input.minNoticeMinutes}, ${input.maxHorizonDays},
         ${input.granularityMinutes}, ${input.location}, ${input.locationDetail ?? null},
         ${input.titleTpl}, ${input.descriptionTpl}, ${input.companyFallback},
-        ${JSON.stringify(questions)}::jsonb, ${input.isActive}, ${redirectUrl},
+        ${JSON.stringify(questions)}::jsonb, ${isActive}, ${redirectUrl},
         ${input.confirmationCopy ?? null}, ${input.confirmationEnabled ?? true},
         ${blankToNull(input.confirmationSubject)}, ${blankToNull(input.confirmationBody)},
         ${blankToNull(input.reminderSubject)}, ${blankToNull(input.reminderBody)})
@@ -355,7 +359,7 @@ export const saveBookingPage = async (
         entityId: row.id,
         action: input.id ? 'update' : 'create',
         before,
-        after: { slug: input.slug, name: input.name, kind: input.kind, isActive: input.isActive, teamId: input.teamId ?? null },
+        after: { slug: input.slug, name: input.name, kind: input.kind, isActive, teamId: input.teamId ?? null },
       },
     }
   })
@@ -364,13 +368,14 @@ export const saveBookingPage = async (
 const readPageForAudit = async (
   tx: Tx,
   id: string,
-): Promise<{ owner_id: string | null; kind: BookingKind; slug: string; name: string } | null> => {
+): Promise<{ owner_id: string | null; kind: BookingKind; slug: string; name: string; is_active: boolean } | null> => {
   const [row] = await tx.execute<{
     owner_id: string | null
     kind: BookingKind
     slug: string
     name: string
-  }>(sql`select owner_id, kind, slug, name from booking_page where id = ${id} limit 1`)
+    is_active: boolean
+  }>(sql`select owner_id, kind, slug, name, is_active from booking_page where id = ${id} limit 1`)
   return row ?? null
 }
 

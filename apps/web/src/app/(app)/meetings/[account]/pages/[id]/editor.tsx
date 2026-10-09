@@ -19,7 +19,7 @@ import {
 import { ChevronDown, ChevronLeft, ExternalLink } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   BOOKING_MAIL_TOKENS,
   DEFAULT_CONFIRMATION_BODY,
@@ -225,6 +225,13 @@ export const PageEditor = ({
   const [leaving, setLeaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // The list switch can change the flag while this form is open. A save that
+  // leaves the flag alone then reloads the server's value, which this follows.
+  useEffect(() => {
+    setForm((current) => ({ ...current, isActive: page.isActive }))
+    setSaved((current) => ({ ...current, form: { ...current.form, isActive: page.isActive } }))
+  }, [page.isActive])
+
   const draft: Draft = { form, questions, hosts: hostRows, reminders }
   const changes = countChanges(draft, saved)
 
@@ -284,7 +291,9 @@ export const PageEditor = ({
         descriptionTpl: form.descriptionTpl,
         companyFallback: form.companyFallback,
         questions,
-        isActive: form.isActive,
+        // Only when this form changed it: the list switch writes the same flag, and
+        // an unchanged value here would put back whatever the form loaded with.
+        ...(form.isActive === saved.form.isActive ? {} : { isActive: form.isActive }),
         redirectUrl: form.redirectUrl,
         confirmationCopy: form.confirmationCopy,
         confirmationEnabled: form.confirmationEnabled,

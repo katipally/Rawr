@@ -207,7 +207,7 @@ const PAGE_SHAPE = {
  *  address it books with ends in one of these, and every page it creates is named
  *  here, so the cleanup is exact rather than a truncate. */
 const TEST_DOMAINS = ['acme-booking.test', 'race-booking.test']
-const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this', 'reminded-page', 'team-desk']
+const TEST_PAGES = ['nobody-home', 'phone-page', 'trevor-personal', 'sales-made-this', 'reminded-page', 'team-desk', 'flag-kept']
 const TEST_TEAM = 'Booking rotation (verify)'
 
 const cleanUp = async (ctx: AccountContext): Promise<void> => {
@@ -1452,6 +1452,44 @@ try {
     'existing meetings are not cancelled by unpublishing',
   )
   await setPageActive(datasaur, page.bookingPageId, true)
+
+  // -----------------------------------------------------------------------
+  section('the taking-bookings flag is written only when a save names it')
+
+  const flagPage = {
+    ...PAGE_SHAPE,
+    kind: 'one_on_one' as const,
+    slug: 'flag-kept',
+    name: 'Flag kept',
+    location: 'zoom' as const,
+    titleTpl: 'Meeting',
+    descriptionTpl: '',
+    companyFallback: 'a new team',
+    questions: [],
+  }
+  const flagged = await saveBookingPage(datasaur, flagPage)
+  check(
+    'a create that names no flag starts taking bookings',
+    (await readBookingPage(datasaur, flagged))?.isActive === true,
+  )
+
+  await setPageActive(datasaur, flagged, false)
+  await saveBookingPage(datasaur, { ...flagPage, id: flagged, name: 'Flag kept, edited' })
+  const keptOff = await readBookingPage(datasaur, flagged)
+  check(
+    'an edit that names no flag leaves a page the list just switched off',
+    keptOff?.isActive === false && keptOff.name === 'Flag kept, edited',
+  )
+
+  await saveBookingPage(datasaur, { ...flagPage, id: flagged, isActive: true })
+  await saveBookingPage(datasaur, { ...flagPage, id: flagged, name: 'Flag kept, again' })
+  check(
+    'and an edit that names no flag leaves a page that is on, on',
+    (await readBookingPage(datasaur, flagged))?.isActive === true,
+  )
+
+  await saveBookingPage(datasaur, { ...flagPage, id: flagged, isActive: false })
+  check('naming the flag false takes the page off', (await readBookingPage(datasaur, flagged))?.isActive === false)
 
   // -----------------------------------------------------------------------
   section('roles')

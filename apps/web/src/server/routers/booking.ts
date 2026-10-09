@@ -83,7 +83,7 @@ export const bookingRouter = router({
         descriptionTpl: z.string().max(2000),
         companyFallback: z.string().min(1).max(200),
         questions: z.array(questionSchema),
-        isActive: z.boolean(),
+        isActive: z.boolean().optional(),
         redirectUrl: z.string().max(2000).nullish(),
         confirmationCopy: z.string().max(2000).nullish(),
         confirmationEnabled: z.boolean().optional(),
