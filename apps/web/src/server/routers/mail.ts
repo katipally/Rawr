@@ -2,6 +2,7 @@ import {
   attachContactToMail,
   addBlocklistEntry,
   beginMailAttachment,
+  canWrite,
   changeThread,
   DEV_ACCESS_TOKEN,
   bodyProgress,
@@ -18,9 +19,10 @@ import {
   setMailboxVisibility,
   threadsForContact,
 } from '@rawr/db'
+import { TRPCError } from '@trpc/server'
 import { z } from 'zod'
 import { devGmailEnabled } from '~/lib/env.ts'
-import { MAX_MESSAGE_BYTES } from '~/lib/mail-compose.ts'
+import { MAX_MESSAGE_BYTES, SEND_REFUSED } from '~/lib/mail-compose.ts'
 import { call } from '../errors.ts'
 import { hydrateMailboxBodies, syncMailbox } from '../gmail.ts'
 import { compose, discardMailAttachment, templateForCompose } from '../sequences/compose.ts'
@@ -216,7 +218,10 @@ export const mailRouter = router({
         })
         .refine((input) => input.text !== undefined || input.html !== undefined, 'Write the message before sending.'),
     )
-    .mutation(({ ctx, input }) => call(() => compose(ctx.account, input))),
+    .mutation(({ ctx, input }) => {
+      if (!canWrite(ctx.account, 'contact')) throw new TRPCError({ code: 'FORBIDDEN', message: SEND_REFUSED })
+      return call(() => compose(ctx.account, input))
+    }),
 
   /** A saved template, with its merge fields filled from one contact, for the
    *  composer to put into the message. */

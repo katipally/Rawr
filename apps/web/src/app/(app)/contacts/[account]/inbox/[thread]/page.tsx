@@ -100,7 +100,7 @@ const ThreadPage = async ({
             backHref={backHref}
             canWrite={canWrite}
           />
-          {replyTo ? (
+          {replyTo && canWrite ? (
             <ReplyButton
               account={account}
               threadId={threadId}

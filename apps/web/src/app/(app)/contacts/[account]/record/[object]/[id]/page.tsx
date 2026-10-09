@@ -1,6 +1,7 @@
 import {
   ACTIVITY_GROUPS,
   canView,
+  canWrite as roleCanWrite,
   enrichmentQueued,
   getRecord,
   getRegistry,
@@ -59,6 +60,7 @@ import { apolloContactUrl } from '~/server/integrations/apollo.ts'
 import { ENRICHABLE } from '~/server/integrations/index.ts'
 import { storageConfigured } from '~/server/storage.ts'
 import { inSentence } from '~/lib/label-case.ts'
+import { SEND_REFUSED } from '~/lib/mail-compose.ts'
 import { railInitial } from '~/lib/rail-initial.ts'
 import { contextFrom, readSession, sessionIsAdmin } from '~/server/session.ts'
 import { getFormat } from '~/server/format.ts'
@@ -120,6 +122,7 @@ const RecordPage = async ({
   const activeTab = tab === 'activities' || tab === 'activity' ? 'activities' : 'overview'
 
   const ctx = contextFrom(session)
+  const canSend = roleCanWrite(ctx, 'contact')
   // A timeline entry, an association, a task and a file all name an object key,
   // and that is text rather than an enum of three, so every panel below works
   // the same whether the object is one Rawr ships or one an admin invented.
@@ -175,7 +178,9 @@ const RecordPage = async ({
   const via = email || objectParam === 'contact' ? null : (groupFor(rail, 'contact')?.records.find((row) => row.email) ?? null)
   const composeOn = (target: string, targetId: string) =>
     recordPath(account, target, targetId, { tab: 'activities', compose: '1' })
-  const emailAction = email
+  const emailAction = !canSend
+    ? { href: null, title: SEND_REFUSED }
+    : email
     ? { href: composeOn(objectParam, id), title: `Email ${email}` }
     : via
       ? { href: composeOn('contact', via.id), title: `Email ${via.displayName}` }
@@ -571,7 +576,7 @@ const RecordPage = async ({
               {backLabel}
             </Link>
             <RecordActions
-              startCompose={compose === '1'}
+              startCompose={canSend && compose === '1'}
               account={account}
               object={objectParam}
               objectLabel={object.nameSingular}
