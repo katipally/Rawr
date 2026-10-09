@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 import type { AccountContext } from '@rawr/db'
-import { authorisedAddress, authorised, collectHistory, devFetcher, grantedModifying, htmlToText, isTransient, parseAddresses, RevokedError, ScopeShortfall, sendMail, type Fetcher } from './gmail.ts'
+import { authorisedAddress, authorised, collectHistory, devFetcher, grantedModifying, htmlToText, isTransient, parseAddresses, RevokedError, ScopeShortfall, sendMail, toIncoming, type Fetcher } from './gmail.ts'
 
 /** The two things standing between a stranger's mail and this app: what we read
  *  out of the headers, and what we refuse to keep out of the body. */
@@ -19,6 +19,33 @@ test('a comma inside a quoted display name is not a separator', () => {
 
 test('anything without an at sign is dropped rather than stored as an address', () => {
   assert.deepEqual(parseAddresses('undisclosed-recipients:;'), [])
+})
+
+const withHeaders = (headers: Record<string, string>) => ({
+  id: 'm1',
+  threadId: 't1',
+  internalDate: '1700000000000',
+  payload: { headers: [{ name: 'From', value: 'Ana <ana@datasaur.ai>' }, ...Object.entries(headers).map(([name, value]) => ({ name, value }))] },
+})
+
+test('the Bcc and Reply-To headers are read the way To and Cc are', () => {
+  const incoming = toIncoming(
+    withHeaders({ Bcc: '"Smith, Trevor" <trevor@datasaur.ai>, ivan@datasaur.ai', 'Reply-To': 'Sales <Sales@Datasaur.ai>' }),
+  )
+  assert.deepEqual(incoming?.bcc, ['trevor@datasaur.ai', 'ivan@datasaur.ai'])
+  assert.deepEqual(incoming?.replyTo, ['sales@datasaur.ai'])
+})
+
+test('a message with no Bcc or Reply-To header has empty lists, not missing ones', () => {
+  const incoming = toIncoming(withHeaders({}))
+  assert.deepEqual(incoming?.bcc, [])
+  assert.deepEqual(incoming?.replyTo, [])
+})
+
+test('a malformed Bcc or Reply-To value is dropped without throwing', () => {
+  const incoming = toIncoming(withHeaders({ Bcc: '<<<>>>, ,;;; not an address', 'Reply-To': '"unclosed, <' }))
+  assert.deepEqual(incoming?.bcc, [])
+  assert.deepEqual(incoming?.replyTo, [])
 })
 
 test('flattening to text keeps the words and the line breaks', () => {

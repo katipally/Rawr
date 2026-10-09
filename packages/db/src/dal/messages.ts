@@ -438,6 +438,8 @@ export type IncomingMessage = {
   from: string
   to: string[]
   cc: string[]
+  bcc?: string[] | undefined
+  replyTo?: string[] | undefined
   sentAt: Date
   snippet: string | null
   /** RFC 5322 threading headers. Absent on a row read before B3, which is why
@@ -743,6 +745,8 @@ const storeMessage = async (
       fromAddr: lower(incoming.from),
       toAddrs: incoming.to.map(lower),
       ccAddrs: incoming.cc.map(lower),
+      bccAddrs: (incoming.bcc ?? []).map(lower),
+      replyToAddrs: (incoming.replyTo ?? []).map(lower),
       sentAt: incoming.sentAt,
       snippet: incoming.snippet,
       internetMessageId: incoming.internetMessageId ?? null,
@@ -992,6 +996,8 @@ export type ThreadMessage = {
   fromAddr: string | null
   toAddrs: string[]
   ccAddrs: string[]
+  bccAddrs: string[]
+  replyToAddrs: string[]
   sentAt: Date
   snippet: string | null
   hasAttachments: boolean
@@ -1099,6 +1105,8 @@ export const readThread = async (
         fromAddr: message.fromAddr,
         toAddrs: message.toAddrs,
         ccAddrs: message.ccAddrs,
+        bccAddrs: message.bccAddrs,
+        replyToAddrs: message.replyToAddrs,
         sentAt: message.sentAt,
         snippet: message.snippet,
         hasAttachments: message.hasAttachments,

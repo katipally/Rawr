@@ -131,6 +131,8 @@ export const message = pgTable(
     fromAddr: text('from_addr'),
     toAddrs: text('to_addrs').array().notNull().default([]),
     ccAddrs: text('cc_addrs').array().notNull().default([]),
+    bccAddrs: text('bcc_addrs').array().notNull().default([]),
+    replyToAddrs: text('reply_to_addrs').array().notNull().default([]),
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull(),
     snippet: text('snippet'),
     /** RFC 5322 threading. What a reply is matched against, and what a sequence

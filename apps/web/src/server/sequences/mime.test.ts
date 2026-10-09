@@ -220,6 +220,27 @@ test('a text-only message with copies still has no attachment structure', () => 
   assert.equal(raw.includes('Cc: c@acme.example'), true)
 })
 
+test('a reply-to is written only when there is one, and lists every address', () => {
+  assert.equal(decode(build().raw).includes('Reply-To:'), false)
+  const raw = decode(build({ replyTo: [{ address: 'a@x.example' }, { name: 'Bo', address: 'b@x.example' }] }).raw)
+  assert.equal(raw.includes('Reply-To: a@x.example,\r\n Bo <b@x.example>\r\n'), true)
+})
+
+test('a reply-to display name with non-ASCII letters is encoded like a To name', () => {
+  const raw = decode(build({ replyTo: [{ name: 'Zoë Ö', address: 'zoe@x.example' }] }).raw)
+  assert.equal(raw.includes(`Reply-To: =?UTF-8?B?${Buffer.from('Zoë Ö', 'utf8').toString('base64')}?= <zoe@x.example>`), true)
+})
+
+test('a reply-to address cannot inject a header line, and the send is refused', () => {
+  assert.throws(() => build({ replyTo: [{ address: 'x@y.z\r\nBcc: evil@h.example' }] }), /mail header/)
+  assert.throws(() => build({ to: [{ address: 'x@y.z\r\nBcc: evil@h.example' }] }), /mail header/)
+})
+
+test('a reply-to name cannot inject a header line', () => {
+  const raw = decode(build({ replyTo: [{ name: 'Sales\r\nBcc: evil@h.example', address: 'sales@x.example' }] }).raw)
+  assert.equal(raw.includes('\r\nBcc:'), false)
+})
+
 test('an emoji in the text survives the quoted-printable encoding whole', () => {
   assert.equal(quotedPrintable('👋'), '=F0=9F=91=8B')
   assert.equal(quotedPrintable('ok 👋'), 'ok =F0=9F=91=8B')

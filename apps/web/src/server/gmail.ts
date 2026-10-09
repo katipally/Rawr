@@ -305,7 +305,7 @@ const attachmentsOf = (payload: GmailPayload | undefined, into: IncomingAttachme
  *  In-Reply-To will carry and what a match compares against. */
 const messageIds = (raw: string): string[] => raw.match(/<[^>]+>/g) ?? []
 
-const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
+export const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
   const headers = raw.payload?.headers ?? []
   const from = parseAddresses(headerValue(headers, 'From'))[0]
   if (!raw.id || !raw.threadId || !from) return null
@@ -325,6 +325,8 @@ const toIncoming = (raw: GmailMessage): IncomingMessage | null => {
     from,
     to: parseAddresses(headerValue(headers, 'To')),
     cc: parseAddresses(headerValue(headers, 'Cc')),
+    bcc: parseAddresses(headerValue(headers, 'Bcc')),
+    replyTo: parseAddresses(headerValue(headers, 'Reply-To')),
     sentAt: new Date(Number(raw.internalDate ?? Date.now())),
     snippet: raw.snippet ?? null,
     internetMessageId: messageIds(headerValue(headers, 'Message-ID'))[0] ?? null,

@@ -21,6 +21,8 @@ export type BuildInput = {
   /** Gmail takes the Bcc header to deliver to these people and removes it from the copy
    *  each recipient receives, so writing it here does not show it to anyone else. */
   bcc?: Recipient[] | undefined
+  /** Where a reply goes when it is not the sender. */
+  replyTo?: Recipient[] | undefined
   subject: string
   text: string
   html: string | null
@@ -77,6 +79,8 @@ export const encodeHeader = (value: string): string => {
 /** A display name with a comma or a quote in it has to be quoted, or the address
  *  parses as two recipients. */
 export const addressHeader = (name: string, address: string): string => {
+  // An address is written as it is, so a CR or LF in it would start a header of its own.
+  if (/[\r\n\s<>,;"]/.test(address)) throw new Error('A recipient address has a character a mail header cannot carry.')
   if (!name.trim()) return address
   const encoded = encodeHeader(name)
   return /[",:;<>@]/.test(encoded) ? `"${encoded.replaceAll('"', '\\"')}" <${address}>` : `${encoded} <${address}>`
@@ -264,11 +268,13 @@ export const buildMessage = (input: BuildInput): BuiltMessage => {
 
   const cc = input.cc ?? []
   const bcc = input.bcc ?? []
+  const replyTo = input.replyTo ?? []
   const headers = [
     `From: ${addressHeader(input.from.name, input.from.address)}`,
     `To: ${addressList(input.to)}`,
     ...(cc.length > 0 ? [`Cc: ${addressList(cc)}`] : []),
     ...(bcc.length > 0 ? [`Bcc: ${addressList(bcc)}`] : []),
+    ...(replyTo.length > 0 ? [`Reply-To: ${addressList(replyTo)}`] : []),
     `Subject: ${encodeHeader(input.subject)}`,
     `Message-ID: ${id}`,
     `Date: ${new Date().toUTCString()}`,
