@@ -2553,9 +2553,10 @@ try {
     await recordAttachment(admin, { ...input, storageKey: again.storageKey, mime: 'application/pdf' })
     expect((await beganUploadBytes(admin, again.storageKey)) === null, 'a filed key still accepted bytes')
 
-    // The sweep on begin removed the expired row, so the table does not grow without bound.
+    // An expired row stays for the attachment sweep, which removes its bytes with it.
     const [left] = await owner`select count(*)::int as n from attachment_upload where storage_key = ${storageKey}`
-    expect(left?.n === 0, 'the expired row was never swept')
+    expect(left?.n === 1, 'the expired row was removed before its bytes')
+    await owner`delete from attachment_upload where storage_key = ${storageKey}`
     const listed = await listAttachments(admin, { entityType: 'deal', entityId: dealId })
     for (const row of listed.filter((r) => r.filename === 'Begun.pdf')) await removeAttachment(admin, row.id)
     return 'begun, by that person, before it expires, until it is filed'

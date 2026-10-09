@@ -4,6 +4,7 @@ import { SCHEDULE_OVERRIDES } from './env.ts'
 import { owner, recordJobFailure } from './db.ts'
 import { ensureQueue } from './queue-policy.ts'
 import { automationJobs, dispatchAutomations, scanAutomationRules } from './jobs/automations.ts'
+import { sweepAttachments } from './jobs/attachments.ts'
 import { bookingReminderJobs, dispatchBookingReminders } from './jobs/booking-reminders.ts'
 import { bulkJobs, dispatchBulk } from './jobs/bulk.ts'
 import { checkIntegrations } from './jobs/check-integrations.ts'
@@ -42,6 +43,7 @@ const JOBS: Job[] = [
   ...sequenceJobs,
   ...automationJobs,
   ...enrichmentJobs,
+  sweepAttachments,
   checkIntegrations,
   syncApollo,
 ]
@@ -167,6 +169,9 @@ await every(dispatchAutomations, '* * * * *')
 // same day a no-op. Ten past, so it does not queue behind the top-of-hour segment
 // evaluation.
 await every(scanAutomationRules, '10 * * * *')
+// Hourly. An upload nobody filed is kept a day past its window (see ABANDONED_AFTER_MS),
+// so an hour is a small bound on how long its bytes outlive that.
+await every(sweepAttachments, '0 * * * *')
 // F6 §1. Every half hour, so a credential revoked at the provider turns the health
 // red within one cycle rather than the next time somebody opens Settings.
 await every(checkIntegrations, '*/30 * * * *')

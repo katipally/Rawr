@@ -487,7 +487,7 @@ export const attachmentUpload = pgTable(
   },
   (t) => [
     uniqueIndex('attachment_upload_key_idx').on(t.accountId, t.storageKey),
-    /** What the sweep in `beginAttachment` filters on. */
+    /** What the attachment sweep filters on. */
     index('attachment_upload_expiry_idx').on(t.expiresAt),
     index('attachment_upload_user_id_idx').on(t.userId),
   ],

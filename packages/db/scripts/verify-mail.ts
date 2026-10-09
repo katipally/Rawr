@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import postgres from 'postgres'
 import type { AccountContext } from '../src/dal/context.ts'
@@ -27,7 +28,8 @@ import {
   type IncomingMessage,
 } from '../src/dal/messages.ts'
 import { createRecord, mergeRecords } from '../src/dal/records.ts'
-import { beginMailAttachment, claimMailAttachments, finishMailAttachments } from '../src/dal/attachments.ts'
+import { beginMailAttachment, claimMailAttachments, finishMailAttachments, sweepAbandonedUploads } from '../src/dal/attachments.ts'
+import { systemContext } from '../src/dal/context.ts'
 import { contactMergeFields } from '../src/dal/sequences.ts'
 import { acknowledgeThreadPush, changeThread, reconcileThreadFolders, threadPushPlan } from '../src/dal/thread-state.ts'
 import { SANDBOX, cleanup } from './fixture.ts'
@@ -57,6 +59,19 @@ const refused = async (fn: () => Promise<unknown>): Promise<string | null> => {
 }
 
 const stamp = Date.now()
+
+/** Stands in for the bucket. Every removal is recorded, and a key listed in
+ *  `failing` is refused the way a storage outage refuses it. */
+const fakeStorage = (failing = new Set<string>()) => {
+  const removed: string[] = []
+  return {
+    removed,
+    remove: async (storageKey: string): Promise<void> => {
+      if (failing.has(storageKey)) throw new Error('storage is unavailable')
+      removed.push(storageKey)
+    },
+  }
+}
 
 try {
   const [ws] = await owner`select id from account where slug = ${SANDBOX.slug}`
@@ -634,8 +649,10 @@ try {
     ]))) === 'The same file is attached twice.',
     'the same upload listed twice is refused',
   )
-  check((await finishMailAttachments(sales, [begun.storageKey])) === 1, 'finishing a message reports the upload it spent')
-  check((await finishMailAttachments(sales, [begun.storageKey])) === 0, 'an upload spent once is not spent again')
+  const spendStorage = fakeStorage()
+  check((await finishMailAttachments(sales, [begun.storageKey], spendStorage.remove)).removed === 1, 'finishing a message reports the upload it spent')
+  check(spendStorage.removed[0] === begun.storageKey, 'finishing a message removes its bytes')
+  check((await finishMailAttachments(sales, [begun.storageKey], spendStorage.remove)).removed === 0, 'an upload spent once is not spent again')
   check(
     (await refused(() => claimMailAttachments(sales, [{ storageKey: begun.storageKey, filename: 'terms.pdf', mime: '' }]))) !== null,
     'a spent upload cannot be sent a second time',
@@ -646,7 +663,41 @@ try {
     (await refused(() => claimMailAttachments(sales, [{ storageKey: stale.storageKey, filename: 'old.pdf', mime: '' }]))) !== null,
     'an upload whose window has closed is refused',
   )
-  await finishMailAttachments(sales, [stale.storageKey])
+  await finishMailAttachments(sales, [stale.storageKey], fakeStorage().remove)
+
+  // The attachment sweep. An upload whose window closed a day ago is abandoned: its bytes
+  // and its row go. Fresh and already-sent uploads are not touched.
+  const abandoned = await beginMailAttachment(sales, { filename: 'abandoned.pdf', bytes: 10 })
+  const fresh = await beginMailAttachment(sales, { filename: 'fresh.pdf', bytes: 10 })
+  const sent = await beginMailAttachment(sales, { filename: 'sent.pdf', bytes: 10 })
+  await owner`update attachment_upload set expires_at = now() - interval '25 hours' where storage_key in (${abandoned.storageKey}, ${sent.storageKey})`
+  await finishMailAttachments(sales, [sent.storageKey], fakeStorage().remove)
+  const rowsFor = async (key: string) => (await owner`select count(*)::int as n from attachment_upload where storage_key = ${key}`)[0]?.n
+
+  const sweepStorage = fakeStorage()
+  const swept = await sweepAbandonedUploads(sales, sweepStorage.remove)
+  check(sweepStorage.removed.includes(abandoned.storageKey), 'an abandoned upload has its bytes removed by the sweep', JSON.stringify(swept.failed))
+  check((await rowsFor(abandoned.storageKey)) === 0, 'an abandoned upload loses its row once its bytes are gone')
+  check(!sweepStorage.removed.includes(fresh.storageKey) && (await rowsFor(fresh.storageKey)) === 1, 'an upload whose window is still open is kept')
+  check(!sweepStorage.removed.includes(sent.storageKey), 'an upload already sent is not removed a second time by the sweep')
+  check(
+    (await sweepAbandonedUploads(sales, sweepStorage.remove)).removed === 0,
+    'a second sweep finds nothing left to do',
+  )
+
+  const flaky = await beginMailAttachment(sales, { filename: 'flaky.pdf', bytes: 10 })
+  await owner`update attachment_upload set expires_at = now() - interval '25 hours' where storage_key = ${flaky.storageKey}`
+  const down = await sweepAbandonedUploads(sales, fakeStorage(new Set([flaky.storageKey])).remove)
+  check(
+    down.failed.length === 1 && down.failed[0]?.storageKey === flaky.storageKey && (await rowsFor(flaky.storageKey)) === 1,
+    'a storage failure keeps the row for the next sweep',
+  )
+  const elsewhere = fakeStorage()
+  await sweepAbandonedUploads(systemContext(randomUUID()), elsewhere.remove)
+  check(!elsewhere.removed.includes(flaky.storageKey) && (await rowsFor(flaky.storageKey)) === 1, 'a sweep for another account does not touch this account’s uploads')
+  const retried = await sweepAbandonedUploads(sales, sweepStorage.remove)
+  check(retried.failed.length === 0 && (await rowsFor(flaky.storageKey)) === 0, 'the next sweep removes the upload that failed before')
+  await owner`delete from attachment_upload where storage_key = ${fresh.storageKey}`
 
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {

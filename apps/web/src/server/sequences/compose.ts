@@ -145,12 +145,11 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   })
 
   // The bytes are in Gmail's Sent copy now, and the uploads are spent. Neither is
-  // needed again, so both go, and a failure to remove the bytes costs only storage.
-  await finishMailAttachments(ctx, files.map((file) => file.storageKey))
-  for (const file of files) {
-    await removeObject(file.storageKey).catch((cause) =>
-      logError({ msg: 'a sent attachment could not be removed from storage', error: describe(cause) }),
-    )
+  // needed again, so both go. A file that could not be removed keeps its row, and
+  // the attachment sweep removes it later.
+  const spent = await finishMailAttachments(ctx, files.map((file) => file.storageKey), removeObject)
+  for (const failure of spent.failed) {
+    logError({ msg: 'a sent attachment could not be removed from storage', error: describe(failure.error) })
   }
 
   // The mail is out, and Gmail takes no idempotency key: an error from here on
@@ -259,7 +258,10 @@ export const templateForCompose = async (
  *  began is removed, so a key cannot be used to delete somebody else's bytes. */
 export const discardMailAttachment = async (ctx: AccountContext, storageKey: string): Promise<void> => {
   if (!storageKey.startsWith(`${ctx.accountId}/`)) throw new Error('That file does not belong to this account.')
-  if ((await finishMailAttachments(ctx, [storageKey])) > 0) await removeObject(storageKey)
+  const spent = await finishMailAttachments(ctx, [storageKey], removeObject)
+  for (const failure of spent.failed) {
+    logError({ msg: 'a discarded attachment could not be removed from storage', error: describe(failure.error) })
+  }
 }
 
 /** The threading headers of the newest message in a conversation. */

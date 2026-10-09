@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, inArray, lt } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, lte, type SQL } from 'drizzle-orm'
 import { randomToken } from '../internal/crypto.ts'
 import { attachment, attachmentUpload } from '../schema/records.ts'
 import type { AccountContext } from './context.ts'
@@ -60,11 +60,25 @@ export const storageKeyFor = (
  *  filed stops being writable the same hour. */
 const UPLOAD_WINDOW_MS = 60 * 60 * 1000
 
+/** How long after its window closes an unfiled upload keeps its bytes. The
+ *  upload endpoint checks the window when a PUT starts, not when it ends, so a
+ *  large file can land after the window closed. A day clears that with room to
+ *  spare, and costs only the storage of an upload nobody sent. */
+export const ABANDONED_AFTER_MS = 24 * 60 * 60 * 1000
+
+/** A row whose window closed at or before this is abandoned. The sweep's SQL
+ *  compares against the same value. */
+export const abandonedBefore = (now: Date): Date => new Date(now.getTime() - ABANDONED_AFTER_MS)
+
+/** Rows one pass touches. A backlog past this waits for the next hourly pass,
+ *  which keeps a single transaction and a single round of storage calls small. */
+const SPEND_BATCH = 500
+
 /** Names where the bytes will go, and records that this person may send them
  *  there. Everything refusable is refused here, before a byte moves.
  *
- *  Expired rows are swept on the way in, so the table stays the size of one
- *  hour's uploads without a job to clear it. */
+ *  Expired rows stay until the attachment sweep, which removes their bytes as
+ *  well as the row. */
 export const beginAttachment = async (
   ctx: AccountContext,
   input: { entityType: EntityType; entityId: string; filename: string; bytes: number },
@@ -74,7 +88,6 @@ export const beginAttachment = async (
   const userId = ctx.actorId
   const storageKey = storageKeyFor(ctx, input)
   await withAccount(ctx, async (tx) => {
-    await tx.delete(attachmentUpload).where(lt(attachmentUpload.expiresAt, new Date()))
     await tx.insert(attachmentUpload).values({
       accountId: ctx.accountId,
       userId,
@@ -195,20 +208,68 @@ export const claimMailAttachments = async (
   })
 }
 
-/** Once a message has gone, or a file is taken off the composer, its upload is spent
- *  and the key cannot be sent again. Returns how many of this person's uploads it was,
- *  so a caller can tell whether there were any bytes to remove. */
-export const finishMailAttachments = async (ctx: AccountContext, keys: string[]): Promise<number> => {
-  const userId = ctx.actorId
-  if (!userId || keys.length === 0) return 0
-  const gone = await withAccount(ctx, (tx) =>
+type Spent = { removed: number; failed: { storageKey: string; error: unknown }[] }
+
+/** Removes the bytes first and the row second, for each upload the where clause
+ *  matches. A failed removal keeps its row, so the sweep finds it on a later pass,
+ *  and the other uploads in the batch are not held up by it. */
+const spendUploads = async (
+  ctx: AccountContext,
+  where: SQL | undefined,
+  removeBytes: (storageKey: string) => Promise<void>,
+): Promise<Spent> => {
+  const rows = await withAccount(ctx, (tx) =>
     tx
-      .delete(attachmentUpload)
-      .where(and(inArray(attachmentUpload.storageKey, keys), eq(attachmentUpload.userId, userId)))
-      .returning({ storageKey: attachmentUpload.storageKey }),
+      .select({ storageKey: attachmentUpload.storageKey })
+      .from(attachmentUpload)
+      .where(and(eq(attachmentUpload.accountId, ctx.accountId), where))
+      .limit(SPEND_BATCH),
   )
-  return gone.length
+  const removed: string[] = []
+  const failed: { storageKey: string; error: unknown }[] = []
+  for (const { storageKey } of rows) {
+    try {
+      await removeBytes(storageKey)
+      removed.push(storageKey)
+    } catch (error) {
+      failed.push({ storageKey, error })
+    }
+  }
+  if (removed.length > 0) {
+    await withAccount(ctx, (tx) =>
+      tx
+        .delete(attachmentUpload)
+        .where(and(eq(attachmentUpload.accountId, ctx.accountId), inArray(attachmentUpload.storageKey, removed))),
+    )
+  }
+  return { removed: removed.length, failed }
 }
+
+/** Once a message has gone, or a file is taken off the composer, its upload is spent
+ *  and the key cannot be sent again. Only this person's uploads are touched, so a
+ *  key cannot be used to delete somebody else's bytes. */
+export const finishMailAttachments = async (
+  ctx: AccountContext,
+  keys: string[],
+  removeBytes: (storageKey: string) => Promise<void>,
+): Promise<Spent> => {
+  const userId = ctx.actorId
+  if (!userId || keys.length === 0) return { removed: 0, failed: [] }
+  return spendUploads(
+    ctx,
+    and(inArray(attachmentUpload.storageKey, keys), eq(attachmentUpload.userId, userId)),
+    removeBytes,
+  )
+}
+
+/** The attachment sweep, for one account: every upload whose window closed long
+ *  enough ago that it will never be sent. Uploads that were filed or sent have no
+ *  row left, so they cannot be swept. */
+export const sweepAbandonedUploads = (
+  ctx: AccountContext,
+  removeBytes: (storageKey: string) => Promise<void>,
+): Promise<Spent> =>
+  spendUploads(ctx, lte(attachmentUpload.expiresAt, abandonedBefore(new Date())), removeBytes)
 
 /** Written after the bytes have landed, never before. */
 export const recordAttachment = async (
