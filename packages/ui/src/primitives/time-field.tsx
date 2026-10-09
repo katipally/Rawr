@@ -3,7 +3,15 @@
 import { type KeyboardEvent, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from './field.tsx'
 import { Popover } from './popover.tsx'
-import { clockLabel, committedOnBlur, parseClock, suggestedTimes } from './time-field.ts'
+import {
+  clockLabel,
+  closedField,
+  narrow,
+  stepTimeField,
+  suggestedTimes,
+  type TimeFieldEvent,
+  type TimeFieldState,
+} from './time-field.ts'
 
 /** Every quarter hour is offered: most meetings and send windows start on one. */
 const STEP_MINUTES = 15
@@ -24,9 +32,6 @@ export type TimeFieldProps = {
 
 const TIMES = suggestedTimes(STEP_MINUTES)
 
-/** Spaces and case dropped, so "9:30 am" and "9:30AM" are the same search. */
-const squash = (text: string): string => text.toLowerCase().replaceAll(/\s+/g, '')
-
 /** A time you can type or pick. Typing reads what you mean and the list narrows
  *  under it; the arrow keys walk the list and Enter takes the highlight. Leaving
  *  the field with text that is not a time puts back the time it had. */
@@ -41,70 +46,37 @@ export const TimeField = ({
   ...described
 }: TimeFieldProps) => {
   const listId = `${id}-list`
-  const [open, setOpen] = useState(false)
-  /** What is typed, or null while the field shows the stored time. */
-  const [typed, setTyped] = useState<string | null>(null)
-  /** The row the arrow keys are on. Only the keyboard moves it. */
-  const [active, setActive] = useState(-1)
-  /** The row under the mouse. It lights up the list but is never a choice. */
-  const [hover, setHover] = useState(-1)
-  /** Whether the arrow keys moved the highlight since the list last opened or typed. */
-  const [touched, setTouched] = useState(false)
+  const [field, setField] = useState<TimeFieldState>(closedField)
   const box = useRef<HTMLDivElement>(null)
   const highlighted = useRef<HTMLDivElement>(null)
-  const lit = hover >= 0 ? hover : active
+  const lit = field.hover >= 0 ? field.hover : field.highlight
 
   const options = useMemo(() => TIMES.map((time) => ({ value: time, label: clockLabel(time, locale) })), [locale])
-  const shown = useMemo(() => {
-    if (!typed) return options
-    const query = squash(typed)
-    return options.filter((option) => squash(option.label).includes(query) || option.value.includes(query))
-  }, [options, typed])
+  const shown = useMemo(() => narrow(options, field.typed), [options, field.typed])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the highlight follows the list it is in
   useLayoutEffect(() => {
-    if (open) highlighted.current?.scrollIntoView({ block: 'nearest' })
-  }, [open, lit])
+    if (field.open) highlighted.current?.scrollIntoView({ block: 'nearest' })
+  }, [field.open, lit])
 
-  const openList = () => {
-    setOpen(true)
-    setActive(options.findIndex((option) => option.value === value))
+  const dispatch = (event: TimeFieldEvent) => {
+    const step = stepTimeField(field, event, value, options)
+    setField(step.state)
+    if (step.emit !== null) onChange(step.emit)
   }
-
-  const close = () => {
-    setOpen(false)
-    setTouched(false)
-  }
-
-  /** null keeps the stored time; '' clears it; text that is not a time keeps it. */
-  const commit = (text: string | null) => {
-    setTyped(null)
-    close()
-    if (text === null) return
-    const next = text.trim() === '' ? '' : parseClock(text)
-    if (next !== null && next !== value) onChange(next)
-  }
-
-  /** Enter and leaving the field settle the same way, so Tab is blur. */
-  const settle = () => commit(committedOnBlur(typed, shown[active]?.value, touched, value))
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
-      setTouched(true)
-      setHover(-1)
-      if (!open) {
-        openList()
-        return
-      }
-      const step = event.key === 'ArrowDown' ? 1 : -1
-      setActive((at) => (shown.length === 0 ? -1 : (at + step + shown.length) % shown.length))
+      dispatch({ type: 'arrow', step: event.key === 'ArrowDown' ? 1 : -1 })
     } else if (event.key === 'Enter') {
       event.preventDefault()
-      settle()
-    } else if (event.key === 'Escape' && open) {
+      dispatch({ type: 'settle' })
+    } else if (event.key === 'Escape' && field.open) {
       event.preventDefault()
-      commit(null)
+      // Stops the popover's own Escape listener, which would act on the field as it was before this reset.
+      event.stopPropagation()
+      dispatch({ type: 'escape' })
     }
   }
 
@@ -114,29 +86,23 @@ export const TimeField = ({
         id={id}
         className={className}
         role="combobox"
-        aria-expanded={open}
+        aria-expanded={field.open}
         aria-controls={listId}
         aria-autocomplete="list"
-        aria-activedescendant={open && shown[active] ? `${id}-option-${shown[active].value}` : undefined}
+        aria-activedescendant={field.open && shown[field.highlight] ? `${id}-option-${shown[field.highlight]?.value}` : undefined}
         aria-label={ariaLabel}
         autoComplete="off"
         disabled={disabled}
-        value={typed ?? clockLabel(value, locale)}
-        onChange={(event) => {
-          setTyped(event.target.value)
-          setOpen(true)
-          setActive(0)
-          setHover(-1)
-          setTouched(false)
-        }}
-        onClick={openList}
-        onBlur={settle}
+        value={field.typed ?? clockLabel(value, locale)}
+        onChange={(event) => dispatch({ type: 'text', text: event.target.value })}
+        onClick={() => dispatch({ type: 'open' })}
+        onBlur={() => dispatch({ type: 'settle' })}
         onKeyDown={onKeyDown}
         {...described}
       />
       <Popover
-        open={open && !disabled}
-        onClose={close}
+        open={field.open && !disabled}
+        onClose={() => dispatch({ type: 'dismiss' })}
         anchorRef={box}
         autoFocus={false}
         side="bottom"
@@ -159,10 +125,10 @@ export const TimeField = ({
               // Mouse down, not click: the field must not blur before the pick lands.
               onMouseDown={(event) => {
                 event.preventDefault()
-                commit(option.value)
+                dispatch({ type: 'pick', value: option.value })
               }}
-              onMouseEnter={() => setHover(index)}
-              onMouseLeave={() => setHover(-1)}
+              onMouseEnter={() => dispatch({ type: 'hoverEnter', index })}
+              onMouseLeave={() => dispatch({ type: 'hoverLeave' })}
               className={index === lit ? 'cursor-pointer bg-fill-hover px-3 py-1.5' : 'cursor-pointer px-3 py-1.5'}
             >
               {option.label}

@@ -59,18 +59,93 @@ export const parseClock = (typed: string): string | null => {
   return clock(hours * 60 + minutes)
 }
 
-/** The value a field keeps when it loses focus. A suggestion wins only when the user
- *  moved onto it with the arrow keys, since a row passed over by the mouse or left
- *  highlighted by typing is not a choice. Otherwise the typed text is kept if it is
- *  a time, and anything else reverts to the last value. */
-export const committedOnBlur = (
-  typed: string | null,
-  suggestion: string | undefined,
-  touched: boolean,
-  last: string,
-): string => {
-  if (touched && suggestion !== undefined) return suggestion
-  if (typed === null) return last
-  if (typed.trim() === '') return ''
-  return parseClock(typed) ?? last
+/** A row the list can pick: its stored 'HH:MM' and how it reads in the viewer's locale. */
+export type TimeRow = { value: string; label: string }
+
+/** Spaces and case dropped, so "9:30 am" and "9:30AM" are the same search. */
+const squash = (text: string): string => text.toLowerCase().replaceAll(/\s+/g, '')
+
+/** The rows the typed text leaves in the list. Nothing typed keeps every row. */
+export const narrow = (rows: TimeRow[], typed: string | null): TimeRow[] => {
+  if (!typed) return rows
+  const query = squash(typed)
+  return rows.filter((row) => squash(row.label).includes(query) || row.value.includes(query))
+}
+
+export type TimeFieldState = {
+  /** What is typed, or null while the field shows the stored time. */
+  typed: string | null
+  open: boolean
+  /** The row the arrow keys are on, or -1. */
+  highlight: number
+  /** The row under the pointer, or -1. It lights a row and nothing else. */
+  hover: number
+  /** Whether an arrow key moved the highlight since the list opened or the text last changed. */
+  touched: boolean
+}
+
+export const closedField: TimeFieldState = { typed: null, open: false, highlight: -1, hover: -1, touched: false }
+
+export type TimeFieldEvent =
+  | { type: 'open' }
+  | { type: 'text'; text: string }
+  | { type: 'arrow'; step: 1 | -1 }
+  | { type: 'hoverEnter'; index: number }
+  | { type: 'hoverLeave' }
+  | { type: 'pick'; value: string }
+  | { type: 'settle' }
+  | { type: 'escape' }
+  | { type: 'dismiss' }
+
+export type TimeFieldStep = { state: TimeFieldState; emit: string | null }
+
+/** What leaving the field keeps. Only an arrow-moved row beats the typed text, and
+ *  text that is not a time falls back to the stored value. */
+const settledValue = (state: TimeFieldState, shown: TimeRow[], value: string): string => {
+  const row = shown[state.highlight]
+  if (state.touched && row) return row.value
+  if (state.typed === null) return value
+  if (state.typed.trim() === '') return ''
+  return parseClock(state.typed) ?? value
+}
+
+/** The whole field as one transition. Only pick and settle can change the stored
+ *  time; typing and the arrow keys move the list, and hover moves nothing but its
+ *  own row light, so a row the pointer rests on can never become the value. */
+export const stepTimeField = (
+  state: TimeFieldState,
+  event: TimeFieldEvent,
+  value: string,
+  rows: TimeRow[],
+): TimeFieldStep => {
+  const shown = narrow(rows, state.typed)
+  const valueAt = shown.findIndex((row) => row.value === value)
+  const rest = (next: TimeFieldState): TimeFieldStep => ({ state: next, emit: null })
+  switch (event.type) {
+    case 'open':
+      return rest({ ...state, open: true, highlight: valueAt })
+    case 'text':
+      return rest({ typed: event.text, open: true, highlight: 0, hover: -1, touched: false })
+    case 'arrow': {
+      if (!state.open) return rest({ ...state, open: true, highlight: valueAt, hover: -1, touched: true })
+      const count = shown.length
+      const from = state.highlight < 0 ? (event.step > 0 ? -1 : count) : state.highlight
+      const highlight = count === 0 ? -1 : (from + event.step + count) % count
+      return rest({ ...state, highlight, hover: -1, touched: true })
+    }
+    case 'hoverEnter':
+      return rest({ ...state, hover: event.index })
+    case 'hoverLeave':
+      return rest({ ...state, hover: -1 })
+    case 'pick':
+      return { state: closedField, emit: event.value === value ? null : event.value }
+    case 'settle': {
+      const next = settledValue(state, shown, value)
+      return { state: closedField, emit: next === value ? null : next }
+    }
+    case 'escape':
+      return rest(closedField)
+    case 'dismiss':
+      return rest({ ...state, open: false, hover: -1, touched: false })
+  }
 }
