@@ -70,6 +70,7 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
   const mounted = useMounted()
   const gated = useMemo(() => (html === null || !mounted ? null : blockRemoteLoads(html)), [html, mounted])
   const hasRemote = gated !== null && gated.blocked > 0
+  const replyTo = message.replyToAddrs.filter((address) => address !== message.fromAddr)
 
   // Remote loads are stripped from the markup until asked for. Doing it on the
   // parsed document, not by pattern, is what catches every form a load can take;
@@ -130,6 +131,12 @@ export const MessageView = ({ message }: { message: ThreadMessage }) => {
       </header>
       {message.ccAddrs.length > 0 ? (
         <p className="break-all text-small text-secondary">cc {message.ccAddrs.join(', ')}</p>
+      ) : null}
+      {message.bccAddrs.length > 0 ? (
+        <p className="break-all text-small text-secondary">bcc {message.bccAddrs.join(', ')}</p>
+      ) : null}
+      {replyTo.length > 0 ? (
+        <p className="break-all text-small text-secondary">reply-to {replyTo.join(', ')}</p>
       ) : null}
 
       {message.bodyState === 'pending' ? (

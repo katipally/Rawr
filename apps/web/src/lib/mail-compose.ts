@@ -9,6 +9,10 @@ export const MAX_RECIPIENTS = 100
 /** Gmail's own limit on what one message may carry. */
 export const MAX_MESSAGE_BYTES = 25 * 1024 * 1024
 
+/** Sending from a mailbox takes contacts edit, the same grant as archive. The router
+ *  refuses with this and the replies and record actions show it as their reason. */
+export const SEND_REFUSED = 'You can read the Inbox but not send from it. Ask someone with edit access to Contacts.'
+
 const MAX_ADDRESS_LENGTH = 254
 const MAX_NAME_LENGTH = 200
 const MAX_LINK_LENGTH = 2000
@@ -128,17 +132,24 @@ const dedupe = (addresses: string[]): string[] => {
   })
 }
 
-/** Reply all. To is whoever wrote the newest inbound mail, or, when the newest mail
- *  is one of ours, whoever it went to. Cc is everyone else on it. Our own addresses
- *  are never written back to ourselves. `from` is null for an outbound message.
- *  Reply-To is not kept on the message, so the sender is the address replied to. */
-export const replyAllRecipients = (
-  original: { from: string | null; to: string[]; cc: string[] },
-  own: string[],
-): { to: string[]; cc: string[] } => {
+type Original = { from: string | null; to: string[]; cc: string[]; replyTo?: string[] }
+
+/** Who a reply to `original` goes to. For inbound mail that is its Reply-To when it
+ *  names anyone besides us, else the sender. For our own mail it is whoever it went
+ *  to. `from` is null for an outbound message. */
+export const replyRecipients = (original: Original, own: string[]): string[] => {
   const mine = new Set(own.map((address) => address.toLowerCase()))
   const free = (addresses: string[]): string[] => dedupe(addresses.filter((address) => !mine.has(address.toLowerCase())))
-  const to = free(original.from ? [original.from] : original.to)
+  const replyTo = original.from ? free(original.replyTo ?? []) : []
+  return replyTo.length > 0 ? replyTo : free(original.from ? [original.from] : original.to)
+}
+
+/** Reply all. The reply target from `replyRecipients`, and Cc is everyone else on
+ *  the mail. Our own addresses are never written back to ourselves. */
+export const replyAllRecipients = (original: Original, own: string[]): { to: string[]; cc: string[] } => {
+  const mine = new Set(own.map((address) => address.toLowerCase()))
+  const free = (addresses: string[]): string[] => dedupe(addresses.filter((address) => !mine.has(address.toLowerCase())))
+  const to = replyRecipients(original, own)
   const taken = new Set(to.map((address) => address.toLowerCase()))
   const others = free([...(original.from ? original.to : []), ...original.cc])
   return { to, cc: others.filter((address) => !taken.has(address.toLowerCase())) }

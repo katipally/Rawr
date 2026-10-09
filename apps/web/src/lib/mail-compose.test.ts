@@ -8,6 +8,7 @@ import {
   normaliseAddress,
   readRecipients,
   replyAllRecipients,
+  replyRecipients,
 } from './mail-compose.ts'
 
 const fields = (to: string, cc = '', bcc = '') => ({ to, cc, bcc })
@@ -121,6 +122,57 @@ test('reply all to our own mail goes back to whoever it was sent to', () => {
 test('reply all never repeats the sender in Cc', () => {
   const result = replyAllRecipients({ from: 'ana@acme.example', to: ['ana@acme.example'], cc: [] }, [])
   assert.deepEqual(result, { to: ['ana@acme.example'], cc: [] })
+})
+
+test('a reply goes to the sender when the mail has no Reply-To', () => {
+  assert.deepEqual(replyRecipients({ from: 'Client@Acme.example', to: ['sales@datasaur.ai'], cc: [] }, ['sales@datasaur.ai']), [
+    'Client@Acme.example',
+  ])
+  assert.deepEqual(replyRecipients({ from: 'Client@Acme.example', to: [], cc: [], replyTo: [] }, []), ['Client@Acme.example'])
+})
+
+test('a reply goes to the Reply-To in place of the sender', () => {
+  const original = { from: 'noreply@acme.example', to: ['sales@datasaur.ai'], cc: [], replyTo: ['deals@acme.example'] }
+  assert.deepEqual(replyRecipients(original, ['sales@datasaur.ai']), ['deals@acme.example'])
+  assert.deepEqual(replyAllRecipients(original, ['sales@datasaur.ai']), { to: ['deals@acme.example'], cc: [] })
+})
+
+test('a Reply-To equal to the sender changes nothing', () => {
+  const original = { from: 'Ana@Acme.example', to: ['sales@datasaur.ai'], cc: ['bo@acme.example'], replyTo: ['ana@acme.example'] }
+  assert.deepEqual(replyRecipients(original, ['sales@datasaur.ai']), ['ana@acme.example'])
+  assert.deepEqual(replyAllRecipients(original, ['sales@datasaur.ai']), { to: ['ana@acme.example'], cc: ['bo@acme.example'] })
+})
+
+test('every address in a multi-address Reply-To is replied to, and reply all keeps the rest on Cc', () => {
+  const original = {
+    from: 'noreply@acme.example',
+    to: ['sales@datasaur.ai', 'ana@acme.example'],
+    cc: ['bo@acme.example'],
+    replyTo: ['deals@acme.example', 'legal@acme.example'],
+  }
+  assert.deepEqual(replyRecipients(original, ['sales@datasaur.ai']), ['deals@acme.example', 'legal@acme.example'])
+  assert.deepEqual(replyAllRecipients(original, ['sales@datasaur.ai']), {
+    to: ['deals@acme.example', 'legal@acme.example'],
+    cc: ['ana@acme.example', 'bo@acme.example'],
+  })
+})
+
+test('a Reply-To repeated in a different case is written once', () => {
+  const original = { from: 'noreply@acme.example', to: [], cc: [], replyTo: ['Deals@Acme.example', 'deals@acme.example'] }
+  assert.deepEqual(replyRecipients(original, []), ['Deals@Acme.example'])
+  assert.deepEqual(replyAllRecipients({ ...original, to: ['DEALS@acme.example'] }, []), { to: ['Deals@Acme.example'], cc: [] })
+})
+
+test('our own address in Reply-To is never replied to, and an all-own Reply-To falls back to the sender', () => {
+  const original = { from: 'Client@Acme.example', to: ['sales@datasaur.ai'], cc: [], replyTo: ['SALES@datasaur.ai'] }
+  assert.deepEqual(replyRecipients(original, ['sales@datasaur.ai']), ['Client@Acme.example'])
+  const mixed = { ...original, replyTo: ['sales@datasaur.ai', 'deals@acme.example'] }
+  assert.deepEqual(replyRecipients(mixed, ['sales@datasaur.ai']), ['deals@acme.example'])
+})
+
+test('Reply-To does not change a reply to our own mail', () => {
+  const original = { from: null, to: ['ana@acme.example'], cc: [], replyTo: ['deals@acme.example'] }
+  assert.deepEqual(replyRecipients(original, ['sales@datasaur.ai']), ['ana@acme.example'])
 })
 
 test('the size limit names the limit and the total to one decimal, rounded up', () => {
