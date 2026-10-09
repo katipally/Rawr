@@ -3,6 +3,7 @@
 import { Button, IconButton, TextInput, cn } from '@rawr/ui'
 import { Bold, Italic, Link2, List, ListOrdered } from 'lucide-react'
 import { type ClipboardEvent, type KeyboardEvent, type Ref, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { boldPressed } from '~/lib/bold-mark.ts'
 import { linkTarget } from '~/lib/mail-compose.ts'
 
 /** The body of an email, written with the marks put in for you.
@@ -31,6 +32,13 @@ const selectionIn = (node: HTMLElement): Range | null => {
   const selection = window.getSelection()
   if (!selection || selection.rangeCount === 0 || !node.contains(selection.anchorNode)) return null
   return selection.getRangeAt(0).cloneRange()
+}
+
+const boldAt = (root: HTMLElement, caret: Range | null): HTMLElement | null => {
+  const node = caret?.startContainer
+  const element = node instanceof Element ? node : node?.parentElement
+  const bold = element?.closest<HTMLElement>('b, strong') ?? null
+  return bold && root.contains(bold) ? bold : null
 }
 
 const endOf = (node: HTMLElement): Range => {
@@ -83,11 +91,12 @@ export const RichEditor = ({
   /** Reads the marks at the caret. selectionchange does not fire when a command changes
    *  the text but not the selection, so every command and edit reads them too. */
   const refreshMarks = useCallback(() => {
-    const caret = surface.current && selectionIn(surface.current)
-    if (!caret) return
+    const node = surface.current
+    const caret = node && selectionIn(node)
+    if (!node || !caret) return
     lastCaret.current = caret
     setMarks({
-      bold: document.queryCommandState('bold'),
+      bold: boldPressed(document.queryCommandState('bold'), boldAt(node, caret) !== null),
       italic: document.queryCommandState('italic'),
       insertUnorderedList: document.queryCommandState('insertUnorderedList'),
       insertOrderedList: document.queryCommandState('insertOrderedList'),
@@ -119,8 +128,12 @@ export const RichEditor = ({
   }
 
   const run = (command: Command) => {
-    if (!returnTo()) return
-    document.execCommand(command)
+    const node = returnTo()
+    if (!node) return
+    const bold = command === 'bold' ? boldAt(node, selectionIn(node)) : null
+    // A bold run the browser reports as not bold would be bolded again, so it is unwrapped.
+    if (bold && !document.queryCommandState('bold')) bold.replaceWith(...bold.childNodes)
+    else document.execCommand(command)
     emit()
   }
 
@@ -295,6 +308,8 @@ export const RichEditor = ({
         onPaste={onPaste}
         className={cn(
           'min-h-40 max-h-[50dvh] overflow-y-auto rounded-hs border border-line bg-fill px-3 py-2 text-body break-words outline-none',
+          // Preflight sets b and strong to "bolder", which is 400 under the 300 body weight: Chrome reads that as not bold.
+          '[&_b]:font-bold [&_strong]:font-bold',
           'focus:border-line-interactive focus:bg-surface empty:before:pointer-events-none empty:before:text-secondary empty:before:content-[attr(data-placeholder)]',
           disabled && 'cursor-not-allowed border-dashed bg-transparent text-secondary',
         )}
