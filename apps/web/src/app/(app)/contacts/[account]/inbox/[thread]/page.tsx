@@ -6,7 +6,7 @@ import { notFound, redirect } from 'next/navigation'
 import { MessageView } from '~/components/crm/message-view.tsx'
 import { googleConfigured } from '~/lib/env.ts'
 import { inboxPath, mailboxesPath, recordPath } from '~/lib/links.ts'
-import { replyAllRecipients } from '~/lib/mail-compose.ts'
+import { replyAllRecipients, replyRecipients } from '~/lib/mail-compose.ts'
 import { pickableUsers } from '~/lib/pickable-users.ts'
 import { readLookups } from '~/server/crm.ts'
 import { contextFrom, readSession } from '~/server/session.ts'
@@ -58,20 +58,20 @@ const ThreadPage = async ({
     }
   }
 
-  // Who a reply goes to: whoever sent the newest inbound message, falling back to
-  // whoever the newest outbound one was addressed to.
+  // Who a reply goes to, judged from the newest message: its Reply-To when it names
+  // anyone, else its sender, or for our own message whoever it was addressed to.
   const newest = found.messages[found.messages.length - 1]
-  const replyTo =
-    newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : (newest?.toAddrs[0] ?? null)
-  const everyone = replyAllRecipients(
-    {
-      from: newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : null,
-      to: newest?.toAddrs ?? [],
-      cc: newest?.ccAddrs ?? [],
-    },
-    mailboxes.map((box) => box.email),
-  )
-  const replyPerson = replyTo ? (byEmail.get(replyTo.toLowerCase())?.id ?? null) : null
+  const original = {
+    from: newest?.direction === 'inbound' ? (newest.fromAddr ?? null) : null,
+    to: newest?.toAddrs ?? [],
+    cc: newest?.ccAddrs ?? [],
+    replyTo: newest?.replyToAddrs ?? [],
+  }
+  const mailboxEmails = mailboxes.map((box) => box.email)
+  const replyTargets = replyRecipients(original, mailboxEmails)
+  const everyone = replyAllRecipients(original, mailboxEmails)
+  // The person a template fills in for is looked up by the first reply address only.
+  const replyPerson = replyTargets[0] ? (byEmail.get(replyTargets[0].toLowerCase())?.id ?? null) : null
 
   return (
     <InboxFrame account={account} session={session} filters={filters} selected={threadId}>
@@ -100,12 +100,12 @@ const ThreadPage = async ({
             backHref={backHref}
             canWrite={canWrite}
           />
-          {replyTo && canWrite ? (
+          {replyTargets.length > 0 && canWrite ? (
             <ReplyButton
               account={account}
               threadId={threadId}
               subject={found.thread.subject}
-              sender={replyTo}
+              to={replyTargets.join(', ')}
               everyone={{ to: everyone.to.join(', '), cc: everyone.cc.join(', ') }}
               personId={replyPerson}
             />

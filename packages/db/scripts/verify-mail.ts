@@ -699,12 +699,102 @@ try {
   check(retried.failed.length === 0 && (await rowsFor(flaky.storageKey)) === 0, 'the next sweep removes the upload that failed before')
   await owner`delete from attachment_upload where storage_key = ${fresh.storageKey}`
 
+  console.log('-- bcc and reply-to --------------------------------------------------')
+
+  // The sales mailbox above was disconnected, so these checks write through a fresh one.
+  const copyBox = await saveMailbox(sales, {
+    userId: salesUser.id,
+    email: salesUser.email,
+    accessToken: `access-copies-${stamp}`,
+    refreshToken: `refresh-copies-${stamp}`,
+    accessTokenExpiresAt: null,
+  })
+
+  const copiesThread = `mail-rt-${stamp}`
+  const copied = incoming({
+    providerThreadId: copiesThread,
+    providerMessageId: `mail-rt-m1-${stamp}`,
+    internetMessageId: `<mail-rt-m1-${stamp}@partner1.example>`,
+    snippet: 'with copies',
+    sentAt: new Date(Date.now() - 60_000),
+    bcc: ['Hidden.Copy@Partner1.example'],
+    replyTo: ['Desk@Partner1.example', 'Ops@PARTNER1.example'],
+  })
+  const storedCopied = await ingestMessage(sales, {
+    incoming: copied,
+    ownerEmail: salesUser.email,
+    mailboxId: copyBox.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  check(storedCopied.stored, 'a message with bcc and reply-to is stored')
+  const rtThread = storedCopied.stored ? storedCopied.threadId : ''
+
+  const columns = async (providerMessageId: string) =>
+    owner`select bcc_addrs, reply_to_addrs from message where provider_message_id = ${providerMessageId}`
+  const [copiedRow] = await columns(`mail-rt-m1-${stamp}`)
+  check(
+    JSON.stringify(copiedRow?.bcc_addrs) === JSON.stringify([`hidden.copy@partner1.example`]) &&
+      JSON.stringify(copiedRow?.reply_to_addrs) === JSON.stringify([`desk@partner1.example`, `ops@partner1.example`]),
+    'bcc and reply-to are stored lowercased, in the order they were given',
+    `${JSON.stringify(copiedRow)}`,
+  )
+
+  await ingestMessage(sales, {
+    incoming: incoming({
+      providerThreadId: copiesThread,
+      providerMessageId: `mail-rt-m2-${stamp}`,
+      internetMessageId: `<mail-rt-m2-${stamp}@partner1.example>`,
+      snippet: 'no copies',
+      sentAt: new Date(),
+    }),
+    ownerEmail: salesUser.email,
+    mailboxId: copyBox.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  const [plainRow] = await columns(`mail-rt-m2-${stamp}`)
+  check(
+    JSON.stringify(plainRow?.bcc_addrs) === '[]' && JSON.stringify(plainRow?.reply_to_addrs) === '[]',
+    'a message ingested without bcc or reply-to is stored with empty lists',
+    `${JSON.stringify(plainRow)}`,
+  )
+
+  await ingestMessage(sales, {
+    incoming: { ...copied, bcc: ['someone.new@partner1.example'], replyTo: ['other@partner1.example'] },
+    ownerEmail: salesUser.email,
+    mailboxId: copyBox.id,
+    internalDomain,
+    blocked: new Set(),
+  })
+  const [rerun] = await columns(`mail-rt-m1-${stamp}`)
+  const copies = await owner`select count(*)::int as n from message where provider_message_id = ${`mail-rt-m1-${stamp}`}`
+  check(
+    copies[0]?.n === 1 && JSON.stringify(rerun?.bcc_addrs) === JSON.stringify(copiedRow?.bcc_addrs) && JSON.stringify(rerun?.reply_to_addrs) === JSON.stringify(copiedRow?.reply_to_addrs),
+    're-ingesting the same message keeps the bcc and reply-to it was first stored with',
+    `${JSON.stringify(rerun)} rows ${copies[0]?.n ?? 0}`,
+  )
+
+  const copiedThread = await readThread(sales, rtThread)
+  const withCopies = copiedThread?.messages.find((message) => message.snippet === 'with copies')
+  const withoutCopies = copiedThread?.messages.find((message) => message.snippet === 'no copies')
+  check(
+    JSON.stringify(withCopies?.bccAddrs) === JSON.stringify([`hidden.copy@partner1.example`]) &&
+      JSON.stringify(withCopies?.replyToAddrs) === JSON.stringify([`desk@partner1.example`, `ops@partner1.example`]),
+    'readThread returns bccAddrs and replyToAddrs on each message',
+    `${JSON.stringify(withCopies?.bccAddrs)} ${JSON.stringify(withCopies?.replyToAddrs)}`,
+  )
+  check(
+    withoutCopies?.bccAddrs.length === 0 && withoutCopies?.replyToAddrs.length === 0,
+    'and reads an empty list for a message that had neither',
+  )
+
   // Everything this script made goes with it.
   await withAccount(admin, async (tx) => {
     await tx.execute(sql`delete from message_thread where provider_thread_id like ${`mail-%${stamp}`}`)
   })
   await owner`delete from message_thread where provider_thread_id like ${`mail-%-${stamp}`}`
-  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id}, ${returningBox.id}, ${live.id})`
+  await owner`delete from mailbox where id in (${box.id}, ${brokenBox.id}, ${returningBox.id}, ${live.id}, ${copyBox.id})`
   await owner`delete from contact where account_id = ${accountId} and email like ${`body-${stamp}%`}`
   await owner`delete from contact where account_id = ${accountId} and email = ${returning}`
   await owner`delete from contact where account_id = ${accountId} and email like ${`%${stamp}%`}`

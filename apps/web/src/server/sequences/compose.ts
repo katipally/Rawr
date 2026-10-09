@@ -45,6 +45,7 @@ export type ComposeInput = {
   to: string
   cc?: string | undefined
   bcc?: string | undefined
+  replyTo?: string | undefined
   subject: string
   /** Plain text, for a caller with no HTML to give. The text part is this, as written,
    *  and the HTML part is the same words under the Markdown the app renders. */
@@ -78,9 +79,9 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   }
   if (input.subject.trim() === '') throw new Error('An email needs a subject.')
 
-  const people = readRecipients({ to: input.to, cc: input.cc ?? '', bcc: input.bcc ?? '' })
+  const people = readRecipients({ to: input.to, cc: input.cc ?? '', bcc: input.bcc ?? '', replyTo: input.replyTo ?? '' })
   if (!people.ok) throw new Error(people.error)
-  const { to, cc, bcc } = people.value
+  const { to, cc, bcc, replyTo } = people.value
 
   // What the composer wrote is cleaned here. Plain text carries no HTML unless the
   // mail is tracked, which is how every caller that sends plain text has always had it.
@@ -127,6 +128,7 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
     to,
     cc,
     bcc,
+    replyTo,
     subject: input.subject,
     text,
     html,
@@ -157,8 +159,8 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
   // best effort, and the next sync stores the copy if this could not.
   //
   // Stored the way an incoming message is, so it is on the record and in the
-  // inbox now rather than whenever the next sync happens to run. Bcc is not kept:
-  // the message has no place for it, and the sender's own Sent copy in Gmail has it.
+  // inbox now rather than whenever the next sync happens to run. Bcc and Reply-To
+  // are kept as they were sent, the same as an incoming message keeps them.
   const stored = sent.id
     ? await ingestMessage(ctx, {
         incoming: {
@@ -168,6 +170,8 @@ export const compose = async (ctx: AccountContext, input: ComposeInput): Promise
           from: box.email,
           to: to.map(address),
           cc: cc.map(address),
+          bcc: bcc.map(address),
+          replyTo: replyTo.map(address),
           sentAt: new Date(),
           snippet: text.slice(0, 200),
           internetMessageId: built.internetMessageId,

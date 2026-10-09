@@ -62,8 +62,10 @@ export const ComposeDialog = ({
   const [to, setTo] = useState(initialTo)
   const [cc, setCc] = useState(initialCc)
   const [bcc, setBcc] = useState('')
+  const [replyTo, setReplyTo] = useState('')
   const [showCc, setShowCc] = useState(initialCc !== '')
   const [showBcc, setShowBcc] = useState(false)
+  const [showReplyTo, setShowReplyTo] = useState(false)
   const [subject, setSubject] = useState(initialSubject ?? '')
   const [html, setHtml] = useState('')
   const [checked, setChecked] = useState(false)
@@ -75,15 +77,17 @@ export const ComposeDialog = ({
     account,
     'email',
     threadId ?? contactId ?? undefined,
-    { subject, html, to, cc, bcc },
+    { subject, html, to, cc, bcc, replyTo },
     (draft) => {
       setSubject(draft.subject)
       setHtml(draft.html ?? '')
       setTo(draft.to ?? '')
       setCc(draft.cc ?? '')
       setBcc(draft.bcc ?? '')
+      setReplyTo(draft.replyTo ?? '')
       setShowCc((draft.cc ?? '') !== '')
       setShowBcc((draft.bcc ?? '') !== '')
+      setShowReplyTo((draft.replyTo ?? '') !== '')
     },
   )
 
@@ -116,7 +120,7 @@ export const ComposeDialog = ({
   }, [])
 
   const sendable = (mailboxes ?? []).filter((box) => box.canSend && box.state !== 'revoked')
-  const people = useMemo(() => readRecipients({ to, cc, bcc }), [to, cc, bcc])
+  const people = useMemo(() => readRecipients({ to, cc, bcc, replyTo }), [to, cc, bcc, replyTo])
   const hasWords = useMemo(() => wordsIn(html) !== '', [html])
 
   /** Shown after a field is left or Send is pressed, not on every keystroke, so
@@ -163,6 +167,7 @@ export const ComposeDialog = ({
         to,
         cc,
         bcc,
+        replyTo,
         subject: subject.trim(),
         html,
         threadId: threadId ?? null,
@@ -258,6 +263,11 @@ export const ComposeDialog = ({
                 Bcc
               </button>
             )}
+            {showReplyTo ? null : (
+              <button type="button" className="text-link hover:underline" onClick={() => setShowReplyTo(true)}>
+                Reply-To
+              </button>
+            )}
           </div>
 
           {showCc ? (
@@ -279,6 +289,19 @@ export const ComposeDialog = ({
                 id="compose-bcc"
                 value={bcc}
                 onChange={(event) => setBcc(event.target.value)}
+                onBlur={() => setChecked(true)}
+                onKeyDown={noSubmit}
+                autoComplete="off"
+              />
+            </Field>
+          ) : null}
+
+          {showReplyTo ? (
+            <Field label="Reply-To" id="compose-reply-to" error={problem('replyTo')}>
+              <TextInput
+                id="compose-reply-to"
+                value={replyTo}
+                onChange={(event) => setReplyTo(event.target.value)}
                 onBlur={() => setChecked(true)}
                 onKeyDown={noSubmit}
                 autoComplete="off"

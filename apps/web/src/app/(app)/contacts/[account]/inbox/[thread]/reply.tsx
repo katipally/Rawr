@@ -13,19 +13,19 @@ export const ReplyButton = ({
   account,
   threadId,
   subject,
-  sender,
+  to,
   everyone,
   personId,
 }: {
   account: string
   threadId: string
   subject: string | null
-  sender: string
+  to: string
   everyone: { to: string; cc: string }
   personId: string | null
 }) => {
   const [mode, setMode] = useState<'sender' | 'all' | null>(null)
-  const recipients = mode === 'all' ? everyone : { to: sender, cc: '' }
+  const recipients = mode === 'all' ? everyone : { to, cc: '' }
 
   return (
     <>

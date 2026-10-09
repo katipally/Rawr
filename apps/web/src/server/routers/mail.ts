@@ -200,6 +200,7 @@ export const mailRouter = router({
           to: z.string().max(10_000),
           cc: z.string().max(10_000).default(''),
           bcc: z.string().max(10_000).default(''),
+          replyTo: z.string().max(10_000).default(''),
           subject: z.string().trim().min(1).max(300),
           text: z.string().max(100_000).optional(),
           html: z.string().max(200_000).optional(),

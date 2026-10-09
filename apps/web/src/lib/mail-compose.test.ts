@@ -11,7 +11,7 @@ import {
   replyRecipients,
 } from './mail-compose.ts'
 
-const fields = (to: string, cc = '', bcc = '') => ({ to, cc, bcc })
+const fields = (to: string, cc = '', bcc = '', replyTo = '') => ({ to, cc, bcc, replyTo })
 
 test('a bare address is lowercased and kept as the whole address', () => {
   assert.equal(normaliseAddress('Priya.Shah@Acme.Example'), 'priya.shah@acme.example')
@@ -79,6 +79,42 @@ test('an address listed twice goes out once, kept where it first appears', () =>
   assert.deepEqual(result.value.to.map((recipient) => recipient.address), ['ana@acme.example', 'bo@acme.example'])
   assert.deepEqual(result.value.cc, [])
   assert.deepEqual(result.value.bcc, [])
+})
+
+test('a Reply-To reads as one or more addresses, and an empty one is fine', () => {
+  const result = readRecipients(fields('ana@acme.example', '', '', 'Desk <Desk@Acme.example>, bo@acme.example'))
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(result.value.replyTo, [
+    { name: 'Desk', address: 'desk@acme.example' },
+    { name: '', address: 'bo@acme.example' },
+  ])
+  assert.equal(readRecipients(fields('ana@acme.example', '', '', '   ')).ok, true)
+})
+
+test('a bad Reply-To address names the Reply-To field', () => {
+  const result = readRecipients(fields('ana@acme.example', '', '', 'desk at acme'))
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.equal(result.field, 'replyTo')
+  assert.equal(result.error, 'That is not an email address: desk at acme')
+})
+
+test('a Reply-To with a line break in an address is refused before it can start a header', () => {
+  const result = readRecipients(fields('ana@acme.example', '', '', 'desk@acme.example\r\nBcc: x@evil.example'))
+  assert.equal(result.ok, false)
+  if (result.ok) return
+  assert.equal(result.field, 'replyTo')
+})
+
+test('a Reply-To shares no repeats with To, Cc or Bcc, and is not counted as a recipient', () => {
+  const result = readRecipients(fields('ana@acme.example', 'bo@acme.example', '', 'ana@acme.example, ana@acme.example'))
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(result.value.to.map((recipient) => recipient.address), ['ana@acme.example'])
+  assert.deepEqual(result.value.replyTo.map((recipient) => recipient.address), ['ana@acme.example'])
+  const replyOnly = Array.from({ length: MAX_RECIPIENTS + 1 }, (_, index) => `r${index}@acme.example`).join(', ')
+  assert.equal(readRecipients(fields('ana@acme.example', '', '', replyOnly)).ok, true)
 })
 
 test('more recipients than the limit are refused, and the message names the limit and the count', () => {

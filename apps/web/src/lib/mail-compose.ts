@@ -19,9 +19,9 @@ const MAX_LINK_LENGTH = 2000
 
 export type Recipient = { name: string; address: string }
 
-export type RecipientFields = { to: string; cc: string; bcc: string }
+export type RecipientFields = { to: string; cc: string; bcc: string; replyTo: string }
 
-export type Recipients = { to: Recipient[]; cc: Recipient[]; bcc: Recipient[] }
+export type Recipients = { to: Recipient[]; cc: Recipient[]; bcc: Recipient[]; replyTo: Recipient[] }
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; field: keyof RecipientFields | null; error: string }
 
@@ -92,19 +92,25 @@ const parseField = (field: keyof RecipientFields, raw: string): Parsed<Recipient
 
 /** Each address once across the whole message, the first place it appears winning:
  *  someone on To and on Cc is written as To, and someone on Bcc who is already
- *  visible is not sent a second copy. */
+ *  visible is not sent a second copy. Reply-To is a header, not a recipient, so it
+ *  only drops its own repeats. */
 export const withoutRepeats = (recipients: Recipients): Recipients => {
   const seen = new Set<string>()
-  const keep = (list: Recipient[]): Recipient[] =>
+  const keep = (list: Recipient[], seenBy: Set<string>): Recipient[] =>
     list.filter((recipient) => {
-      if (seen.has(recipient.address)) return false
-      seen.add(recipient.address)
+      if (seenBy.has(recipient.address)) return false
+      seenBy.add(recipient.address)
       return true
     })
-  return { to: keep(recipients.to), cc: keep(recipients.cc), bcc: keep(recipients.bcc) }
+  return {
+    to: keep(recipients.to, seen),
+    cc: keep(recipients.cc, seen),
+    bcc: keep(recipients.bcc, seen),
+    replyTo: keep(recipients.replyTo, new Set()),
+  }
 }
 
-/** What the three fields mean as people, or the first thing wrong with them. */
+/** What the four fields mean as people, or the first thing wrong with them. */
 export const readRecipients = (fields: RecipientFields): Parsed<Recipients> => {
   if (fields.to.trim() === '') return { ok: false, field: 'to', error: 'Add someone to send it to.' }
   const to = parseField('to', fields.to)
@@ -113,8 +119,10 @@ export const readRecipients = (fields: RecipientFields): Parsed<Recipients> => {
   if (!cc.ok) return cc
   const bcc = parseField('bcc', fields.bcc)
   if (!bcc.ok) return bcc
+  const replyTo = parseField('replyTo', fields.replyTo)
+  if (!replyTo.ok) return replyTo
 
-  const recipients = withoutRepeats({ to: to.value, cc: cc.value, bcc: bcc.value })
+  const recipients = withoutRepeats({ to: to.value, cc: cc.value, bcc: bcc.value, replyTo: replyTo.value })
   const count = recipients.to.length + recipients.cc.length + recipients.bcc.length
   if (count > MAX_RECIPIENTS) {
     return { ok: false, field: null, error: `A message can have at most ${MAX_RECIPIENTS} recipients. This one has ${count}.` }
