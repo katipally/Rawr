@@ -87,6 +87,11 @@ test('blur never commits a suggestion the user only passed over', () => {
   assert.equal(committedOnBlur(null, '07:30', false, '09:00'), '09:00')
 })
 
+test('tab and enter keep a typed time over a row the arrow keys never reached', () => {
+  assert.equal(committedOnBlur('14:30', '09:15', false, '09:00'), '14:30')
+  assert.equal(committedOnBlur(null, '09:15', false, '09:00'), '09:00')
+})
+
 test('blur commits the highlighted suggestion only after the arrow keys moved onto it', () => {
   assert.equal(committedOnBlur('25:00', '07:30', true, '09:00'), '07:30')
   assert.equal(committedOnBlur(null, '06:00', true, '09:00'), '06:00')

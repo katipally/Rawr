@@ -44,11 +44,15 @@ export const TimeField = ({
   const [open, setOpen] = useState(false)
   /** What is typed, or null while the field shows the stored time. */
   const [typed, setTyped] = useState<string | null>(null)
+  /** The row the arrow keys are on. Only the keyboard moves it. */
   const [active, setActive] = useState(-1)
+  /** The row under the mouse. It lights up the list but is never a choice. */
+  const [hover, setHover] = useState(-1)
   /** Whether the arrow keys moved the highlight since the list last opened or typed. */
   const [touched, setTouched] = useState(false)
   const box = useRef<HTMLDivElement>(null)
   const highlighted = useRef<HTMLDivElement>(null)
+  const lit = hover >= 0 ? hover : active
 
   const options = useMemo(() => TIMES.map((time) => ({ value: time, label: clockLabel(time, locale) })), [locale])
   const shown = useMemo(() => {
@@ -60,7 +64,7 @@ export const TimeField = ({
   // biome-ignore lint/correctness/useExhaustiveDependencies: the highlight follows the list it is in
   useLayoutEffect(() => {
     if (open) highlighted.current?.scrollIntoView({ block: 'nearest' })
-  }, [open, active])
+  }, [open, lit])
 
   const openList = () => {
     setOpen(true)
@@ -81,10 +85,14 @@ export const TimeField = ({
     if (next !== null && next !== value) onChange(next)
   }
 
+  /** Enter and leaving the field settle the same way, so Tab is blur. */
+  const settle = () => commit(committedOnBlur(typed, shown[active]?.value, touched, value))
+
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       setTouched(true)
+      setHover(-1)
       if (!open) {
         openList()
         return
@@ -93,9 +101,7 @@ export const TimeField = ({
       setActive((at) => (shown.length === 0 ? -1 : (at + step + shown.length) % shown.length))
     } else if (event.key === 'Enter') {
       event.preventDefault()
-      const pick = open ? shown[active]?.value : undefined
-      const typedIsTime = typed !== null && (typed.trim() === '' || parseClock(typed) !== null)
-      commit(typedIsTime ? typed : (pick ?? typed))
+      settle()
     } else if (event.key === 'Escape' && open) {
       event.preventDefault()
       commit(null)
@@ -120,10 +126,11 @@ export const TimeField = ({
           setTyped(event.target.value)
           setOpen(true)
           setActive(0)
+          setHover(-1)
           setTouched(false)
         }}
         onClick={openList}
-        onBlur={() => commit(committedOnBlur(typed, shown[active]?.value, touched, value))}
+        onBlur={settle}
         onKeyDown={onKeyDown}
         {...described}
       />
@@ -144,7 +151,7 @@ export const TimeField = ({
           {shown.map((option, index) => (
             <div
               key={option.value}
-              ref={index === active ? highlighted : null}
+              ref={index === lit ? highlighted : null}
               id={`${id}-option-${option.value}`}
               role="option"
               tabIndex={-1}
@@ -154,8 +161,9 @@ export const TimeField = ({
                 event.preventDefault()
                 commit(option.value)
               }}
-              onMouseEnter={() => setActive(index)}
-              className={index === active ? 'cursor-pointer bg-fill-hover px-3 py-1.5' : 'cursor-pointer px-3 py-1.5'}
+              onMouseEnter={() => setHover(index)}
+              onMouseLeave={() => setHover(-1)}
+              className={index === lit ? 'cursor-pointer bg-fill-hover px-3 py-1.5' : 'cursor-pointer px-3 py-1.5'}
             >
               {option.label}
             </div>
